@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { failWhy, sourceLines } from '@/routes/wishlist/-video.helpers';
+
 /**
  * The stuck-row diagnostics, EXECUTED.
  *
@@ -11,25 +13,22 @@ import { describe, expect, it } from 'vitest';
  * finds it and the quality profile refuses them all — three different problems
  * with three different answers, collapsed into one number.
  *
- * The drain now stores what each source actually did. These run the real
- * readers out of video-wishlist.js against those snapshots.
+ * The drain now stores what each source actually did. The wishlist is React now;
+ * these run its readers (the port of the vanilla failWhy / sourceLines, checked
+ * line for line against the frozen originals in -video.helpers.differential).
  */
 
-const SRC = readFileSync(resolve(process.cwd(), 'static/video/video-wishlist.js'), 'utf8');
+const API = readFileSync(resolve(process.cwd(), 'src/routes/wishlist/-video.api.ts'), 'utf8');
+const SHEETS = readFileSync(
+  resolve(process.cwd(), 'src/routes/wishlist/-ui/video-sheets.tsx'),
+  'utf8',
+);
 
-/** Pull the two diagnostic functions out of the IIFE and make them callable. */
-function readers(): {
-  failWhy: (row: unknown, fails: number) => string;
-  sourceLines: (row: unknown) => string[];
-} {
-  const from = SRC.indexOf('    function failWhy(row, fails) {');
-  const to = SRC.indexOf('\n    function statusPill(');
-  expect(from, 'failWhy is gone from video-wishlist.js').toBeGreaterThan(-1);
-  expect(to).toBeGreaterThan(from);
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  return new Function(`${SRC.slice(from, to)}\n return { failWhy, sourceLines };`)() as ReturnType<
-    typeof readers
-  >;
+function readers() {
+  return { failWhy, sourceLines } as {
+    failWhy: (row: unknown, fails: number) => string;
+    sourceLines: (row: unknown) => string[];
+  };
 }
 
 const SNAP = {
@@ -126,8 +125,8 @@ describe('the tooltip a stuck row shows', () => {
 
 describe('retry with all sources action', () => {
   it('wires a dedicated retry button and endpoint for failing rows', () => {
-    expect(SRC).toContain('data-vwsh-retry');
-    expect(SRC).toContain('/api/video/wishlist/retry');
-    expect(SRC).toContain('Retry with all sources');
+    expect(API).toContain("'video/wishlist/retry'");
+    expect(SHEETS).toContain('Retry with all sources');
+    expect(SHEETS).toContain('actions.retry(target)');
   });
 });

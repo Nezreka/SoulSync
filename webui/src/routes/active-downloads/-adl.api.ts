@@ -60,6 +60,22 @@ export async function fetchTaskDetail(taskId: string): Promise<AdlTaskDetail | n
   }
 }
 
+/**
+ * How many downloads the history holds, for the header's History button.
+ * One row asked for, only the total read. null on any failure: the button
+ * just shows no number.
+ */
+export async function fetchMusicHistoryCount(): Promise<number | null> {
+  try {
+    const data = await readJson<{ success?: boolean; total?: number }>(
+      apiClient.get('library/history', { searchParams: { type: 'download', limit: 1 } }),
+    );
+    return data?.success && typeof data.total === 'number' ? data.total : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Completed batches for the history rail — 7 days, 50 max, as the vanilla asked. */
 export async function fetchBatchHistory(): Promise<AdlBatchHistoryEntry[]> {
   try {

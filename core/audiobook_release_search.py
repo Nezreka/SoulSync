@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import math
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -127,9 +128,31 @@ def normalize_text(text: Optional[str]) -> str:
     """
     if not text:
         return ""
-    lowered = str(text).lower()
+    lowered = _fold_accents(str(text).lower())
     lowered = re.sub(r"[._\-\[\]\(\)\{\}/\\|:;,'\"!?*+]", " ", lowered)
+    # "043Nixensommer" and "Folge14" are two words glued by a release name that
+    # used no separator. Split only when three or more letters sit next to the
+    # digits, so "mp3", "m4b" and "h264" stay whole.
+    lowered = re.sub(r"(?<=\d)(?=[a-z]{3})", " ", lowered)
+    lowered = re.sub(r"(?<=[a-z]{3})(?=\d)", " ", lowered)
     return re.sub(r"\s+", " ", lowered).strip()
+
+
+_UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
+
+
+def _fold_accents(text: str) -> str:
+    """German umlauts and eszett to their two-letter forms, other accents dropped.
+
+    The token pattern only knows ``a-z0-9``, so an unfolded "Fußballstar" used
+    to fall apart into "fu" and "ballstar" and could never match the release
+    that spells it "Fussballstar". Release names routinely write the ASCII
+    forms (Parfuem, Fussball), so the catalogue's spelling is folded the same
+    way and both sides meet.
+    """
+    text = text.translate(_UMLAUTS)
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
 
 def significant_tokens(text: Optional[str]) -> List[str]:
@@ -328,7 +351,8 @@ def abridgement_verdict(release_title: Optional[str], wanted_format: Optional[st
 
 
 def title_relevance(release_title: Optional[str], book_title: Optional[str],
-                    authors: Optional[Sequence[str]] = None) -> float:
+                    authors: Optional[Sequence[str]] = None,
+                    series: Optional[Sequence[Any]] = None) -> float:
     """How much of the book's identity appears in a release title, 0.0-1.0.
 
     Scored on the BOOK's words being present in the release, not the other way
@@ -337,7 +361,11 @@ def title_relevance(release_title: Optional[str], book_title: Optional[str],
     rank a clean upload below a bare one.
 
     The author counts for a quarter of the score. It is what separates the real
-    book from a same-named one, but plenty of legitimate uploads omit it.
+    book from a same-named one, but plenty of legitimate uploads omit it. A
+    series release ("Die drei Ausrufezeichen - Folge 43 - Nixensommer") names
+    the series instead of the authors, so the series name counts as the same
+    kind of evidence, but only once the book's own title is at least half
+    present: the series name alone must never make another volume look right.
     """
     wanted = significant_tokens(book_title)
     if not wanted:
@@ -350,9 +378,13 @@ def title_relevance(release_title: Optional[str], book_title: Optional[str],
     score = hits / len(wanted)
 
     author_tokens = [t for name in (authors or []) for t in significant_tokens(name)]
+    author_score = 0.0
     if author_tokens:
         author_hits = sum(1 for token in author_tokens if token in haystack)
         author_score = author_hits / len(author_tokens)
+    if score >= 0.5:
+        author_score = max(author_score, _series_name_score(series, haystack, set(wanted)))
+    if author_tokens or author_score:
         if len(wanted) == 1:
             # Single-word book titles (e.g. "Infortunio") have a high risk of false
             # collisions with track names or unrelated albums. Require the author to match
@@ -361,6 +393,24 @@ def title_relevance(release_title: Optional[str], book_title: Optional[str],
         else:
             score = (score * 0.75) + (author_score * 0.25)
     return round(min(1.0, score), 4)
+
+
+def _series_name_score(series: Optional[Sequence[Any]], haystack: set,
+                       title_tokens: set) -> float:
+    """1.0 when the words of some series name that are NOT in the book title are all in the release.
+
+    A series name that is part of the book's own title vouches for nothing: in
+    "Harry Potter and the Chamber of Secrets" the words "harry potter" are in
+    every volume's release, so counting them would let the wrong volume clear
+    the relevance floor. Only words the title does not already contain can be
+    evidence ("Die drei !!!" for "Nixensommer").
+    """
+    for item in series or []:
+        name = item.get("title") if isinstance(item, dict) else item
+        tokens = [t for t in significant_tokens(str(name or "")) if t not in title_tokens]
+        if tokens and all(token in haystack for token in tokens):
+            return 1.0
+    return 0.0
 
 
 # What an audiobook's size actually MEANS, given its runtime. Audible's own
@@ -820,6 +870,7 @@ def score_release(
 
     relevance = title_relevance(
         release.title, book.get("title"), book.get("author_names"),
+        book.get("series"),
     )
     release.relevance = relevance
     score = relevance * 100.0

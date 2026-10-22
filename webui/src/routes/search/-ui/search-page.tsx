@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { Skeleton } from '@/components/primitives';
 import { profileAsksFirst } from '@/platform/shell/download-rights';
 
 import type { BasicSource } from '../-basic.types';
@@ -469,7 +470,7 @@ export function SearchPage() {
               <div className={styles.state} id="enhanced-loading" role="status">
                 <div className={styles.skeletons} aria-hidden="true">
                   {[0, 1, 2, 3, 4].map((i) => (
-                    <span
+                    <Skeleton
                       key={i}
                       className={`${styles.skel}${i < 2 ? ` ${styles.skelRound}` : ''}`}
                     />

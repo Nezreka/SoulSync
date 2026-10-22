@@ -20,6 +20,7 @@ import re
 import sqlite3
 import tempfile
 import textwrap
+import threading
 
 import pytest
 from flask import Flask, g
@@ -296,6 +297,13 @@ def _concrete(rule):
     return re.sub(r'<[^>]+>', '1', rule.rule)
 
 
+@pytest.mark.parametrize('method,path,ok', [
+    ('POST', '/mcp', True), ('GET', '/mcp', False), ('POST', '/mcp/', False),
+    ('POST', '/mcpx', False), ('POST', '/api/mcp', False), ('DELETE', '/mcp', False)])
+def test_the_mcp_exception_is_exactly_post_mcp(method, path, ok):
+    assert auth.read_key_reaches_mcp(method, path) is ok
+
+
 def test_every_route_a_read_key_should_not_reach_answers_403(client, keys):
     """Walk the whole route table. Anything outside the allowlist, and every
     non-GET, must be refused for scope before a view runs (so none of this
@@ -309,6 +317,8 @@ def test_every_route_a_read_key_should_not_reach_answers_403(client, keys):
             checked += 1
             if read_key_may_access(method, path):
                 continue
+            if auth.read_key_reaches_mcp(method, path):
+                continue  # api/mcp.py narrows it to read tools, tests/test_mcp.py
             resp = client.open(path, method=method, headers=READ, json={})
             assert _refused_for_scope(resp), f'{method} {rule.rule} reached a view with a read key ({resp.status_code})'
             refused += 1
@@ -412,11 +422,24 @@ def test_reachable_gets_write_nothing_when_run(client, keys, monkeypatch):
     reads handler bodies; this catches a helper that writes underneath."""
     real_connect = sqlite3.connect
     writes: list[str] = []
+    # open the databases first. when another test file moved DATABASE_PATH at
+    # import, the first GET would otherwise build a fresh one and the schema
+    # setup would read as that GET writing
+    from api.video import get_video_db
+    from database.music_database import get_database
+    get_database()
+    get_video_db()
+    # the test client runs a request on this thread. background workers
+    # (listening stats cache, credits backfill) keep writing on theirs and
+    # used to get blamed on whatever GET was in flight
+    test_thread = threading.get_ident()
 
     def authorizer(action, arg1, arg2, dbname, source):
         # SQLite builds its own temp tables for some sorts and joins; that is
         # not a write to the data
         if arg1 and str(arg1).startswith('sqlite_temp'):
+            return sqlite3.SQLITE_OK
+        if threading.get_ident() != test_thread:
             return sqlite3.SQLITE_OK
         if action in _SQLITE_WRITES:
             writes.append(f'{action} {arg1}')

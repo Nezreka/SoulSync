@@ -1,13 +1,15 @@
-**SoulSync 3.5.7 is out** :musical_note:
+**SoulSync 3.5.9 is out** :musical_note:
 
-Beatport charts are real playlists now. Every chart opens to be identified instead of downloading as a fake "Various Artists" compilation, tracks match by ISRC, mirrored charts refresh and can join the pipeline, and you can save a dated snapshot of a chart. Beatport is also an enrichment source for BPM, key, label and catalog number.
+SoulSync can now answer as Lidarr, so Singarr and MusicSeerr 1.x can request albums from it (thanks @Topaze77 for the request). There's also an MCP endpoint so an AI client can drive SoulSync. Both are off until you turn them on in Settings > Advanced.
 
-Playlist sync gives Spotify tracks your primary source misses a second pass by their own Spotify id instead of turning them into Wing It, every track of a mirrored playlist shows where it stands, and a stale cached match can't pin the wrong song (thanks @kevin2xk). Scheduled auto-sync regenerates Discovery Shuffle (thanks @Bloopser), and failed Navidrome writes are reported properly (thanks @zikasak).
+First-run setup is rebuilt as a guided flow that finds your servers on the network, checks every part before it finishes, and can pick up where you left off.
 
-New automatic album completion finishes incomplete albums in your library (thanks @kiwijar). Chosen spoken-word artists can route to the audiobook library (thanks @SimpleSimonLA).
+You can now choose what new Plex sign-ups start with (music, movies and TV, or both, plus a request limit), members can open the video Requests page, and anime can have its own library folder (thanks @PapaBearDoes).
 
-Video wishlist episodes find releases named by TVDB's episode numbering, and stop rejecting shows with a year in the name. There's a new video stats API endpoint (thanks @hilburn).
+The Downloads page is rebuilt for music and video: status on the art, one action per row, and a detail sheet that explains what happened. The Wishlist groups artists by what's stuck with a side panel that says why, and the video wishlist now lives on the same page.
 
-Importing albums you already own no longer fails every track: they count as already in library (thanks SeadogsBooty). Plex paths resolve when a folder differs only by case.
+Fixes: AcoustID judges files by their real length and the duration tolerance setting is easier to find (thanks @QT3496), YouTube Music tracks match on their real title and artist (thanks @andreamassaro9), and the GPU stops pegging during downloads (thanks @OlivierMartinez). Review deletes blacklist the source and append drops old wrong matches (thanks @kevin2xk), redownloads stop leaving duplicate rows (thanks @glebosotov), and collections stop wishlisting movies nobody asked for (thanks @hilburn). Plus audiobook matching fixes (thanks @SimpleSimonLA), dead file findings that close (thanks @splitsec2) and empty usenet folders cleaned up.
+
+Under the hood: the CSS token system and shared UI primitives (thanks @Thundernerd).
 
 Full notes on GitHub.

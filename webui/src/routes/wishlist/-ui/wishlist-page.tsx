@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { useRoutedArtists } from '@/features/audiobook-routes/audiobook-routes.queries';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
+import { ActionMenu } from '@/routes/artist-detail/-ui/action-menu';
 import { clearAudiobookWishlist } from '@/routes/audiobooks/-audiobooks.api';
 
 import type {
@@ -13,6 +14,7 @@ import type {
   WishlistBulkAction,
 } from '../-wishlist.types';
 
+import { isVideoMedia } from '../-video.types';
 import {
   bulkWishlistActionChunked,
   removeWishlistAlbum,
@@ -31,9 +33,13 @@ import {
   groupWishlistArtists,
   parseWishlistTrack,
   trackCountLabel,
+  wishlistZones,
 } from '../-wishlist.helpers';
 import { useLiveWishlist } from '../-wishlist.live';
 import { Route } from '../route';
+import { NebulaStage, NebulaZone } from './nebula-parts';
+import { VideoWishlist } from './video-wishlist';
+import { WishlistArtistSheet } from './wishlist-artist-sheet';
 import { WishlistAudiobooks } from './wishlist-audiobooks';
 import { WishlistList } from './wishlist-list';
 import { WishlistOrb } from './wishlist-orb';
@@ -54,9 +60,40 @@ function groupTrackIds(group: WishlistArtistGroup): string[] {
   );
 }
 
+/**
+ * One wishlist page for both sides. Music and audiobooks are the music side's
+ * tabs; movies, TV and YouTube are the video side's (the video sidebar hands
+ * /video-wishlist off to here). Both render on the same grammar: hero, command
+ * bar, zones by what's wrong, and the side panel.
+ */
 export function WishlistPage() {
-  useReactPageShell('wishlist');
+  const search = Route.useSearch();
+  // the video tabs ask for the video wishlist's permission, not the music one
+  useReactPageShell('wishlist', isVideoMedia(search.media) ? `?media=${search.media}` : undefined);
+  const { profileId } = useProfile();
+  const navigate = useNavigate({ from: Route.fullPath });
 
+  if (isVideoMedia(search.media)) {
+    return (
+      <div className="page-shell wlp wlp--video">
+        <VideoWishlist
+          profileId={profileId}
+          media={search.media}
+          query={search.q}
+          failing={search.failing}
+          onMedia={(media) =>
+            void navigate({ search: (prev) => ({ ...prev, media, q: '', failing: false }) })
+          }
+          onQuery={(q) => void navigate({ search: (prev) => ({ ...prev, q }), replace: true })}
+          onFailing={(failing) => void navigate({ search: (prev) => ({ ...prev, failing }) })}
+        />
+      </div>
+    );
+  }
+  return <MusicWishlistPage />;
+}
+
+function MusicWishlistPage() {
   const { profileId } = useProfile();
   const search = Route.useSearch();
   const media = search.media;
@@ -172,6 +209,12 @@ export function WishlistPage() {
     // 'busiest' is the helper's native order.
     return list;
   }, [visibleGroups, nebulaSort]);
+
+  // the field splits by what's wrong; the sort still orders inside each zone.
+  const nebulaZones = useMemo(() => wishlistZones(nebulaGroups), [nebulaGroups]);
+  // the open artist, if it's still on screen. a filter or a removal that takes
+  // it away closes the panel by itself.
+  const sheetGroup = nebulaGroups.find((group) => group.name === expandedArtist) ?? null;
 
   const failingIds = useMemo(
     () =>
@@ -295,6 +338,11 @@ export function WishlistPage() {
   /** New: clear the retry backoff on every stuck track at once. */
   const onRetryAllFailing = () => {
     if (failingIds.length > 0) bulkAction.mutate({ action: 'retry', ids: failingIds });
+  };
+
+  /** clear the backoff on just these tracks: one zone, or one artist. */
+  const onRetryIds = (ids: string[]) => {
+    if (ids.length > 0) bulkAction.mutate({ action: 'retry', ids });
   };
 
   /** New: drop a whole artist from the wishlist with a single confirm.
@@ -628,29 +676,44 @@ export function WishlistPage() {
                   </button>
                 </div>
                 {/* All three open modals owned by downloads.js and shared with the
-                    wishlist hero button, so they are invoked rather than reimplemented. */}
-                <button
-                  type="button"
-                  className="wlp-btn"
-                  title="Tracks you removed or cancelled — auto-skipped until they expire. Un-ignore to allow auto-download again."
-                  onClick={() => window.openWishlistIgnoreModal?.()}
-                >
-                  Ignored
-                </button>
-                <button
-                  type="button"
-                  className="wlp-btn"
-                  onClick={() => window.cleanupWishlistOverview?.()}
-                >
-                  Cleanup
-                </button>
-                <button
-                  type="button"
-                  className="wlp-btn wlp-btn--danger"
-                  onClick={() => window.clearEntireWishlist?.()}
-                >
-                  Clear All
-                </button>
+                    wishlist hero button, so they are invoked rather than reimplemented.
+                    they fold into one menu: rare jobs, and one of them wipes the list. */}
+                <ActionMenu
+                  className="wlp-menu"
+                  items={[
+                    {
+                      key: 'ignored',
+                      label: 'Ignored',
+                      title:
+                        'Tracks you removed or cancelled — auto-skipped until they expire. Un-ignore to allow auto-download again.',
+                      onSelect: () => window.openWishlistIgnoreModal?.(),
+                    },
+                    {
+                      key: 'cleanup',
+                      label: 'Cleanup',
+                      title: 'Drop wanted tracks you already own',
+                      onSelect: () => window.cleanupWishlistOverview?.(),
+                    },
+                    {
+                      key: 'clear',
+                      label: 'Clear All',
+                      danger: true,
+                      onSelect: () => window.clearEntireWishlist?.(),
+                    },
+                  ]}
+                  trigger={(props) => (
+                    <button
+                      type="button"
+                      className="wlp-btn wlp-more"
+                      title="Ignored, cleanup, clear all"
+                      aria-label="More wishlist actions"
+                      {...props}
+                      ref={props.ref as (el: HTMLButtonElement | null) => void}
+                    >
+                      ⋯
+                    </button>
+                  )}
+                />
                 <button
                   type="button"
                   className="wlp-btn wlp-btn--primary"
@@ -670,40 +733,81 @@ export function WishlistPage() {
                   onGrabArtist={onGrabArtist}
                   onBulkAction={(action, ids) => bulkAction.mutateAsync({ action, ids })}
                   bulkBusy={bulkAction.isPending}
+                  zoned
+                  onRetryIds={onRetryIds}
                 />
               ) : (
-                <div className="wl-nebula">
-                  <div className={`wl-nebula-field${processing ? ' nebula-processing' : ''}`}>
-                    {nebulaGroups.length === 0 ? (
-                      <div className="wl-nebula-empty">
-                        Nothing matches — clear the filter to see the whole hunt.
-                      </div>
-                    ) : (
-                      nebulaGroups.map((group, index) => (
-                        <WishlistOrb
-                          key={group.name}
-                          group={group}
-                          index={index}
-                          artistImages={artistImages}
-                          currentCycle={currentCycle}
-                          processing={processing}
-                          expanded={expandedArtist === group.name}
-                          onToggleExpand={() =>
-                            setExpandedArtist((current) =>
-                              current === group.name ? null : group.name,
-                            )
-                          }
-                          onRemoveAlbum={(albumName) => void onRemoveAlbum(albumName)}
-                          onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
-                          onGrabArtist={() => onGrabArtist(group)}
-                          onGrabAlbum={onGrabAlbum}
-                          onRemoveArtist={() => void onRemoveArtist(group)}
-                          actionBusy={bulkAction.isPending}
-                        />
-                      ))
-                    )}
-                  </div>
-                </div>
+                <NebulaStage
+                  sheetOpen={sheetGroup !== null}
+                  field={
+                    <div
+                      className={`wl-nebula-field wlp-field${processing ? ' nebula-processing' : ''}`}
+                    >
+                      {nebulaGroups.length === 0 ? (
+                        <div className="wl-nebula-empty">
+                          Nothing matches — clear the filter to see the whole hunt.
+                        </div>
+                      ) : (
+                        nebulaZones.map((zone) => (
+                          <NebulaZone
+                            key={zone.kind}
+                            kind={zone.kind}
+                            title={zone.title}
+                            sub={zone.sub}
+                            action={
+                              zone.stuckIds.length > 0
+                                ? {
+                                    label:
+                                      zone.stuckIds.length === 1
+                                        ? 'Retry now'
+                                        : `Retry all ${zone.stuckIds.length}`,
+                                    title:
+                                      'Clear the retry backoff so the next pass tries these again',
+                                    disabled: bulkAction.isPending,
+                                    onClick: () => onRetryIds(zone.stuckIds),
+                                  }
+                                : null
+                            }
+                          >
+                            {zone.groups.map((group) => (
+                              <WishlistOrb
+                                key={group.name}
+                                group={group}
+                                index={nebulaGroups.indexOf(group)}
+                                artistImages={artistImages}
+                                currentCycle={currentCycle}
+                                processing={processing}
+                                expanded={expandedArtist === group.name}
+                                onToggleExpand={() =>
+                                  setExpandedArtist((current) =>
+                                    current === group.name ? null : group.name,
+                                  )
+                                }
+                              />
+                            ))}
+                          </NebulaZone>
+                        ))
+                      )}
+                    </div>
+                  }
+                  sheet={
+                    sheetGroup ? (
+                      <WishlistArtistSheet
+                        key={sheetGroup.name}
+                        group={sheetGroup}
+                        artistImages={artistImages}
+                        onClose={() => setExpandedArtist(null)}
+                        onGrabArtist={() => onGrabArtist(sheetGroup)}
+                        onGrabAlbum={onGrabAlbum}
+                        onRetry={onRetryIds}
+                        onRemoveAlbum={(albumName) => void onRemoveAlbum(albumName)}
+                        onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
+                        onRemoveArtist={() => void onRemoveArtist(sheetGroup)}
+                        actionBusy={bulkAction.isPending}
+                      />
+                    ) : null
+                  }
+                />
               )}
             </>
           )}

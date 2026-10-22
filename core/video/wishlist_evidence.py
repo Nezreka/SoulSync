@@ -208,6 +208,47 @@ def is_waiting(summary: Any) -> bool:
     return isinstance(summary, dict) and summary.get("kind") == AWAITING
 
 
+# What the wishlist page groups a stuck row under. Coarser than the refusal
+# kinds above: the page asks "what do I do about it", not "which rule fired".
+TROUBLE_UNSEARCHABLE = "unsearchable"   # no source could search at all
+TROUBLE_NOTFOUND = "notfound"           # searched, nothing that was this item
+TROUBLE_AWAITING = "awaiting"           # the title is out there, this instalment isn't yet
+TROUBLE_REFUSED = "refused"             # this item was found, a rule of yours turned it down
+
+_TROUBLE_OF_KIND = {NOT_FOUND: TROUBLE_NOTFOUND, IDENTITY: TROUBLE_NOTFOUND,
+                    AWAITING: TROUBLE_AWAITING}
+
+
+def row_trouble(snapshot: Any) -> Optional[str]:
+    """Which kind of stuck a row is, read off its last search's per-source receipt.
+
+    None when the receipt can't say: no snapshot (the row hasn't searched since
+    receipts were added), a source that DID accept something (then it isn't
+    stuck on availability), or results with no samples to judge (old receipts).
+    Guessing there would file a row under a cause it doesn't have. Pure.
+    """
+    sources = snapshot.get("sources") if isinstance(snapshot, dict) else None
+    if not isinstance(sources, dict) or not sources:
+        return None
+    outcomes = [s for s in sources.values() if isinstance(s, dict)]
+    ran = [s for s in outcomes if s.get("ran")]
+    if not ran:
+        return TROUBLE_UNSEARCHABLE if outcomes else None
+    if any(int(s.get("accepted") or 0) > 0 for s in ran):
+        return None
+    if sum(int(s.get("results") or 0) for s in ran) == 0:
+        return TROUBLE_NOTFOUND
+    samples = [x for s in ran for x in (s.get("samples") or []) if isinstance(x, dict)]
+    if not samples:
+        return None
+    summary = summarize_search(samples)
+    kind = (summary or {}).get("kind")
+    if kind is None:
+        return None
+    return _TROUBLE_OF_KIND.get(kind, TROUBLE_REFUSED)
+
+
 __all__ = ["classify_refusal", "summarize_refusals", "summarize_search", "refusal_line",
-           "is_actionable", "is_waiting", "IDENTITY", "QUALITY", "SWARM", "SIZE",
-           "BLOCKED", "OTHER", "NOT_FOUND", "AWAITING"]
+           "is_actionable", "is_waiting", "row_trouble", "IDENTITY", "QUALITY", "SWARM",
+           "SIZE", "BLOCKED", "OTHER", "NOT_FOUND", "AWAITING", "TROUBLE_UNSEARCHABLE",
+           "TROUBLE_NOTFOUND", "TROUBLE_AWAITING", "TROUBLE_REFUSED"]

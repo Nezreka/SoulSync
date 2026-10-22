@@ -350,6 +350,10 @@ def validated_playlist_write(method):
                 _active_write.reset(token)
             if not success:
                 return False
+            if method.__name__ == 'append_to_playlist':
+                # old wrong matches the append took off on purpose (#1801)
+                expected -= {str(r) for r in
+                             getattr(client, '_last_append_removed', None) or ()}
             playlist_id = bound.arguments.get('playlist_id')
             if not playlist_id:
                 playlists = client.get_playlists_by_name(name)

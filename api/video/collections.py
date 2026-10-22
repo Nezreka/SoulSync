@@ -132,15 +132,21 @@ def register_routes(bp):
         db = get_video_db()
         # Drop our definition + ledger; the server collection is left in place
         # (the user can remove it) — we never auto-delete server objects.
+        from core.video.collections.sync import forget_fed
         db.delete_collection_sync(cid)
+        forget_fed(db, cid)
         return jsonify({"ok": db.delete_collection_definition(cid)})
 
     @bp.route("/collections/<int:cid>/duplicate", methods=["POST"])
     def collections_duplicate(cid):
         from . import get_video_db
-        nid = get_video_db().duplicate_collection_definition(cid)
+        db = get_video_db()
+        nid = db.duplicate_collection_definition(cid)
         if nid is None:
             return jsonify({"ok": False, "error": "Could not duplicate"}), 500
+        copy = db.get_collection_definition(nid) or {}
+        if not copy.get("poster_url"):     # a hand-set url stays, generated art re-renders
+            _generate_posters_async([nid])
         return jsonify({"ok": True, "id": nid})
 
     @bp.route("/collections/fields", methods=["GET"])
@@ -227,7 +233,7 @@ def register_routes(bp):
             from core.video.collections.list_sources import build_list_fetcher
             db = get_video_db()
             r = apply_pack(db, pack, mt, keys,
-                           wishlist_missing=bool(d.get("wishlist_missing", True)),
+                           wishlist_missing=bool(d.get("wishlist_missing", False)),
                            fetcher=build_list_fetcher(db))
             _generate_posters_async([c["id"] for c in r["created"]])
             return jsonify({"ok": True, "created": r["created"], "skipped": r["skipped"]})
@@ -405,7 +411,8 @@ def register_routes(bp):
             missing = [m for m in missing if int(m["tmdb_id"]) in want]
         # Explicit action: force the acquire gate open for this run only.
         # Movies → wishlist rows; shows → watchlist FOLLOWS (ended shows skip).
-        added = wishlist_missing_members(db, dict(c, wishlist_missing=True), missing)
+        added = wishlist_missing_members(db, dict(c, wishlist_missing=True), missing,
+                                         refeed=True)
         return jsonify({"ok": True, "added": added,
                         "unit": "shows followed" if (c.get("media_type") == "show") else "movies"})
 
@@ -488,7 +495,9 @@ def register_routes(bp):
                 definition=row.get("definition") if isinstance(row.get("definition"), dict) else {},
                 summary=row.get("summary"), sort_order=row.get("sort_order") or "release",
                 sync_mode="append" if row.get("sync_mode") == "append" else "sync",
-                pinned=bool(row.get("pinned")), wishlist_missing=bool(row.get("wishlist_missing")),
+                # always lands off. a shared export shouldn't start downloading
+                # someone else's list on your box, turn it on per collection (#1807).
+                pinned=bool(row.get("pinned")), wishlist_missing=False,
                 enabled=True,
                 window_start=_clean_md(row.get("window_start")),
                 window_end=_clean_md(row.get("window_end")),

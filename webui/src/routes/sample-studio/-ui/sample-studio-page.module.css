@@ -88,33 +88,6 @@
   border-color: #f5b942;
 }
 
-.filterRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.filterPill {
-  background: var(--white-a05);
-  border: 1px solid var(--white-a10);
-  color: #b9b6ae;
-  border-radius: var(--radius-pill);
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.filterPill[data-active='true'] {
-  background: rgba(245, 185, 66, 0.15);
-  border-color: #f5b942;
-  color: #f5b942;
-}
-
-.filterPill:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 /* Library filters: three compact selects on one line instead of three
    wrapping rows of pills (~200px of chrome above the track list). */
 .filterSelects {
@@ -278,24 +251,6 @@
 .shimmer {
   height: 52px;
   margin: 8px 14px;
-  border-radius: var(--radius-md);
-  background: linear-gradient(
-    90deg,
-    var(--white-a04) 25%,
-    var(--white-a09) 50%,
-    var(--white-a04) 75%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.4s infinite;
-}
-
-@keyframes shimmer {
-  from {
-    background-position: 200% 0;
-  }
-  to {
-    background-position: -200% 0;
-  }
 }
 
 .emptyHint {
@@ -811,7 +766,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 80;
+  z-index: var(--z-modal);
 }
 
 .dialog {

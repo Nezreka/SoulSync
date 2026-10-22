@@ -53,7 +53,7 @@ SPLIT_MODULES = [
 ]
 
 # Other JS files that exist in static/ but are NOT part of the split
-NON_SPLIT_JS = {"setup-wizard.js", "docs.js", "helper.js", "particles.js", "worker-orbs.js",
+NON_SPLIT_JS = {"docs.js", "helper.js", "particles.js", "worker-orbs.js",
                 "enrichment-manager.js",
                 "config-migration.js", "video/video-service-status.js"}
 

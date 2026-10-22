@@ -1,0 +1,69 @@
+/* The source-ref prompt, in the export picker's chrome. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.popup {
+  width: 420px;
+  max-width: 92vw;
+  background: linear-gradient(135deg, rgba(26, 26, 30, 0.98), rgba(18, 18, 22, 0.99));
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
+  border-radius: 18px;
+  padding: 22px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin-bottom: 4px;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--white-a55);
+  margin-bottom: 14px;
+}
+
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--white-a12);
+  background: var(--white-a05);
+  color: var(--text-1);
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.cancel {
+  background: none;
+  border: none;
+  color: var(--white-a50);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.save {
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--text-1);
+  cursor: pointer;
+  font-size: 13px;
+}

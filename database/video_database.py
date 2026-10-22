@@ -4689,8 +4689,13 @@ class VideoDatabase:
             conn.close()
 
         try:
-            key = "movies_path" if kind == "movie" else "tv_path"
-            out["target_dir"] = self.get_setting(key) or None
+            if kind == "movie":
+                out["target_dir"] = self.get_setting("movies_path") or None
+            else:
+                from core.video.download_pipeline import tv_root_for
+                out["target_dir"] = tv_root_for(
+                    self.effective_series_type(tmdb_id=tmdb_id),
+                    self.get_setting("tv_path"), self.get_setting("anime_path")) or None
         except Exception:   # noqa: BLE001 - a diagnostic must never raise
             out["target_dir"] = None
         return out
@@ -5270,16 +5275,24 @@ class VideoDatabase:
             conn.close()
 
     def duplicate_collection_definition(self, definition_id: int) -> int | None:
+        from core.video.collections.poster_gen import is_generated_ref
         src = self.get_collection_definition(definition_id)
         if not src:
             return None
+        # a generated poster url points at the SOURCE's file, the copy can't push
+        # it and never got its own. drop it so the copy renders fresh art.
+        poster = src.get("poster_url")
+        if is_generated_ref(poster):
+            poster = None
         return self.create_collection_definition(
             (src.get("name") or "Untitled") + " (copy)",
             kind=src.get("kind", "smart"), media_type=src.get("media_type", "movie"),
-            definition=src.get("definition") or {}, poster_url=src.get("poster_url"),
+            definition=src.get("definition") or {}, poster_url=poster,
             summary=src.get("summary"), sort_order=src.get("sort_order", "release"),
             sync_mode=src.get("sync_mode", "sync"), pinned=bool(src.get("pinned")),
-            wishlist_missing=bool(src.get("wishlist_missing")), enabled=bool(src.get("enabled")))
+            wishlist_missing=bool(src.get("wishlist_missing")), enabled=bool(src.get("enabled")),
+            window_start=src.get("window_start"), window_end=src.get("window_end"),
+            collection_mode=src.get("collection_mode"))
 
     def resolve_smart_members(self, media_type: str, definition: dict) -> list:
         """Owned library items matching a smart definition's rules. Raises
@@ -8542,6 +8555,47 @@ class VideoDatabase:
         except sqlite3.Error:
             logger.exception("set_show_series_type failed")
             return False
+        finally:
+            conn.close()
+
+    def effective_series_type(self, tmdb_id=None, library_id=None) -> str:
+        """A show's EFFECTIVE series type: 'standard' | 'daily' | 'anime'.
+
+        Same rule the episode wishlist uses (``episode_wishlist_to_download``):
+        a type set by hand on any of the show's library rows wins; with none set,
+        a show tagged with the Anime genre counts as anime; otherwise standard.
+        Looked up by TMDB id, or by a library show id (resolved to its TMDB id so
+        sibling rows from other servers count too). 'standard' when the show is
+        unknown or the lookup fails -- never raises."""
+        conn = self._get_connection()
+        try:
+            tmdb = tmdb_id
+            if tmdb in (None, "") and library_id not in (None, ""):
+                row = conn.execute("SELECT tmdb_id FROM shows WHERE id=?",
+                                   (int(library_id),)).fetchone()
+                tmdb = row["tmdb_id"] if row else None
+                if tmdb in (None, ""):
+                    # a library row with no TMDB id: judge that row alone
+                    row = conn.execute(
+                        "SELECT COALESCE(s.series_type, (SELECT 'anime' FROM show_genres sg "
+                        "  JOIN genres g ON g.id = sg.genre_id WHERE sg.show_id = s.id "
+                        "  AND lower(g.name) = 'anime' LIMIT 1)) AS st "
+                        "FROM shows s WHERE s.id=?", (int(library_id),)).fetchone()
+                    st = str((row["st"] if row else "") or "").strip().lower()
+                    return st if st in ("daily", "anime") else "standard"
+            if tmdb in (None, ""):
+                return "standard"
+            row = conn.execute(
+                "SELECT COALESCE((SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = ?), "
+                "  (SELECT 'anime' FROM shows s JOIN show_genres sg ON sg.show_id = s.id "
+                "   JOIN genres g ON g.id = sg.genre_id WHERE s.tmdb_id = ? "
+                "   AND lower(g.name) = 'anime' LIMIT 1)) AS st",
+                (int(tmdb), int(tmdb))).fetchone()
+            st = str((row["st"] if row else "") or "").strip().lower()
+            return st if st in ("daily", "anime") else "standard"
+        except (sqlite3.Error, ValueError, TypeError):
+            logger.exception("effective_series_type failed")
+            return "standard"
         finally:
             conn.close()
 

@@ -197,4 +197,58 @@ describe('MirroredTab — Request Lists Scope and Partitioning', () => {
     expect(items.some((t) => t?.includes('Copy to Request Lists'))).toBe(true);
     expect(items.some((t) => t?.includes('Convert'))).toBe(false);
   });
+
+  // auto-remove deletes songs from the user's real spotify playlist, so
+  // turning it on asks first, and a no leaves the setting alone
+  async function openAutoRemoveItem(autoRemove: boolean, confirmAnswer: boolean) {
+    stubFetch();
+    const lists = SAMPLE_PLAYLISTS.map((p) =>
+      p.id === 3 ? { ...p, auto_remove_fulfilled: autoRemove } : p,
+    );
+    responder = (url) => {
+      if (url.includes('/api/mirrored-playlists') && !url.includes('request-list-settings'))
+        return lists;
+      if (url.includes('/api/automations')) return [];
+      return { success: true };
+    };
+    const confirm = vi.fn(async () => confirmAnswer);
+    (window as { showConfirmDialog?: unknown }).showConfirmDialog = confirm;
+    window.showToast = vi.fn();
+
+    render(<Harness scope="requests" />);
+    await waitFor(() => {
+      expect(screen.getByText('Friend Request Box')).toBeDefined();
+    });
+    fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
+    const item = [...document.querySelectorAll('.pl-menu-item')].find((el) =>
+      el.textContent?.includes('Auto-remove fulfilled'),
+    ) as HTMLElement;
+    fireEvent.click(item);
+    return confirm;
+  }
+
+  const patches = () => calls.filter((c) => c.url.includes('request-list-settings'));
+
+  it('turning auto-remove on asks first and a no sends nothing', async () => {
+    const confirm = await openAutoRemoveItem(false, false);
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    expect(patches()).toHaveLength(0);
+    delete (window as { showConfirmDialog?: unknown }).showConfirmDialog;
+  });
+
+  it('turning auto-remove on after a yes saves it', async () => {
+    const confirm = await openAutoRemoveItem(false, true);
+    await waitFor(() => expect(patches()).toHaveLength(1));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(patches()[0]!.body).toEqual({ auto_remove_fulfilled: true });
+    delete (window as { showConfirmDialog?: unknown }).showConfirmDialog;
+  });
+
+  it('turning auto-remove off does not ask', async () => {
+    const confirm = await openAutoRemoveItem(true, false);
+    await waitFor(() => expect(patches()).toHaveLength(1));
+    expect(confirm).not.toHaveBeenCalled();
+    expect(patches()[0]!.body).toEqual({ auto_remove_fulfilled: false });
+    delete (window as { showConfirmDialog?: unknown }).showConfirmDialog;
+  });
 });

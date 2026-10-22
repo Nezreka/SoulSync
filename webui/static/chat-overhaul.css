@@ -1327,12 +1327,6 @@
 .chat-file-name {
     flex: 1;
     min-width: 0;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.88);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .chat-audio-badge {
@@ -4747,17 +4741,6 @@
     -webkit-backdrop-filter: blur(12px);
 }
 
-.chat-react-full-picker {
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 0;
-    width: 350px;
-    max-width: calc(100vw - 32px);
-    height: 380px;
-    max-height: 400px;
-    z-index: 110;
-}
-
 /* Discord-Style Message Hover Floating Action Bar */
 .chat-line {
     position: relative;
@@ -5129,14 +5112,6 @@
 .chat-react-chip--anim {
     display: inline-flex;
     align-items: center;
-}
-
-/* ── Inline file card lead text (for non-SoulSync attachment messages) ── */
-.chat-file-lead {
-    margin-bottom: 5px;
-    font-size: 13.5px;
-    line-height: 1.45;
-    color: var(--white-a90);
 }
 
 /* ── Direct P2P Share & Wanted Handshake Modals ── */

@@ -7,14 +7,18 @@
  * vanilla's; Cancel and Escape are its `nextRef === null` return.
  *
  * The chrome is the export picker's — that overlay is the only modal shape the
- * mirrored tab has, and a prompt has no styling of its own to transcribe.
+ * mirrored tab has, and a prompt has no styling of its own to transcribe. It
+ * sits on DialogFrame, which brings the focus trap, Escape and outside press.
  */
 
 import { useState } from 'react';
 
+import { DialogFrame } from '@/components/dialog';
+
 import type { MirroredPlaylistRow } from '../-sync.mirrored';
 
 import { SOURCE_REF_REQUIRED, sourceRefLabel, sourceRefPrompt } from '../-sync.pipeline';
+import styles from './source-ref-modal.module.css';
 
 export interface SourceRefModalProps {
   row: MirroredPlaylistRow;
@@ -38,89 +42,35 @@ export function SourceRefModal({ row, currentRef, onClose, onSubmit }: SourceRef
   };
 
   return (
-    <div
+    <DialogFrame
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      viewportClassName={styles.overlay}
+      className={styles.popup}
       id="mirrored-source-ref-modal"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 10000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'rgba(0,0,0,0.6)',
-        backdropFilter: 'blur(4px)',
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      aria-label={sourceRefPrompt(row.source, row.name ?? '')}
     >
-      <div
-        style={{
-          width: 420,
-          maxWidth: '92vw',
-          background: 'linear-gradient(135deg,rgba(26,26,30,0.98),rgba(18,18,22,0.99))',
-          border: '1px solid rgba(var(--accent-rgb),0.25)',
-          borderRadius: 18,
-          padding: 22,
-          boxShadow: '0 18px 50px rgba(0,0,0,0.55)',
+      <div className={styles.title}>{sourceRefPrompt(row.source, row.name ?? '')}</div>
+      <div className={styles.hint}>The {sourceRefLabel(row.source)} this mirror re-syncs from.</div>
+      <input
+        className={`mirrored-source-ref-input ${styles.input}`}
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') submit();
         }}
-      >
-        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4 }}>
-          {sourceRefPrompt(row.source, row.name ?? '')}
-        </div>
-        <div style={{ fontSize: 13, color: 'var(--white-a55)', marginBottom: 14 }}>
-          The {sourceRefLabel(row.source)} this mirror re-syncs from.
-        </div>
-        <input
-          className="mirrored-source-ref-input"
-          autoFocus
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit();
-            if (e.key === 'Escape') onClose();
-          }}
-          style={{
-            width: '100%',
-            padding: '10px 12px',
-            borderRadius: 10,
-            border: '1px solid var(--white-a12)',
-            background: 'var(--white-a05)',
-            color: 'var(--text-1)',
-            fontSize: 13,
-          }}
-        />
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--white-a50)',
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            style={{
-              padding: '8px 16px',
-              borderRadius: 10,
-              border: '1px solid rgba(var(--accent-rgb),0.35)',
-              background: 'rgba(var(--accent-rgb),0.12)',
-              color: 'var(--text-1)',
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-          >
-            Save
-          </button>
-        </div>
+      />
+      <div className={styles.actions}>
+        <button type="button" className={styles.cancel} onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className={styles.save} onClick={submit}>
+          Save
+        </button>
       </div>
-    </div>
+    </DialogFrame>
   );
 }

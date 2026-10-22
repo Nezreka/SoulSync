@@ -546,6 +546,11 @@ def _sync_single_mirrored_playlist(
     # ("turn it off and syncs skip the wishlist step").
     organize_by_playlist = bool(pl.get('organize_by_playlist'))
     skip_add = config.get('skip_wishlist_add')
+    if skip_add is None and pl.get('is_request_list'):
+        # wishlisting what's missing is the whole job of a request list, so
+        # the global "skip the wishlist step" toggle doesn't switch it off.
+        # an explicit skip (the post-download re-sync) still wins
+        skip_add = False
     if skip_add is None:
         _cm_get = getattr(getattr(deps, 'config_manager', None), 'get', None)
         skip_add = callable(_cm_get) and not _cm_get('playlist_sync.wishlist_missing_tracks', True)

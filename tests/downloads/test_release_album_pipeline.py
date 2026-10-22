@@ -100,7 +100,7 @@ def album_environment(tmp_path, monkeypatch):
         def quick_check_available(self):
             return True, "test fingerprint backend"
 
-        def verify_audio_file(self, path, title, artist, context):
+        def verify_audio_file(self, path, title, artist, context, **_kwargs):
             assert artist == ARTIST
             return outcomes[title], f"fingerprint diagnostic for {title}"
 

@@ -401,9 +401,14 @@ the standard page object. Each artist includes full metadata: ids, artwork
 URLs, genres (array of strings), summary/style/mood/label, \`server_source\`,
 ISO-8601 \`created_at\`/\`updated_at\`, cross-install \`soul_id\`, external
 provider IDs (\`musicbrainz_id\`, \`spotify_artist_id\`, \`itunes_artist_id\`,
-\`audiodb_id\`, \`deezer_id\`, \`tidal_id\`, \`qobuz_id\`, \`genius_id\`), per-provider
+\`audiodb_id\`, \`deezer_id\`, \`tidal_id\`, \`qobuz_id\`, \`genius_id\`, \`discogs_id\`,
+\`amazon_id\`, \`jiosaavn_id\`), per-provider
 match statuses and last-attempted timestamps, Last.fm stats, and Genius
-metadata. Enriched queries may also add \`album_count\`, \`track_count\`,
+metadata. Artists also carry \`aliases\` (array of alternate names),
+Discogs enrichment (\`discogs_bio\`, plus \`discogs_members\` and \`discogs_urls\`
+as arrays), \`soul_id_path\` (how the \`soul_id\` was derived: \`canonical\`,
+\`album\`, or \`name\`), and the \`art_locked\`/\`genres_locked\` flags (boolean
+or null). Enriched queries may also add \`album_count\`, \`track_count\`,
 \`is_watched\`, and \`image_url\`.
 
 \`\`\`json
@@ -412,7 +417,7 @@ metadata. Enriched queries may also add \`album_count\`, \`track_count\`,
   "data": {
     "artists": [
       {
-        "id": 42,
+        "id": "42",
         "name": "Miles Davis",
         "thumb_url": "https://image-cdn.example/abc123.jpg",
         "banner_url": null,
@@ -468,7 +473,7 @@ album list embedded.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| \`artist_id\` | int | Yes | SoulSync artist ID |
+| \`artist_id\` | string | Yes | SoulSync artist ID. IDs are text: usually numeric, but standalone libraries may use opaque IDs containing \`::soulsync\`. Pass the \`id\` value verbatim from a list or lookup response |
 
 **Query parameters**
 
@@ -486,8 +491,8 @@ album list embedded.
 {
   "success": true,
   "data": {
-    "artist": { "id": 42, "name": "Miles Davis", "...": "..." },
-    "albums": [ { "id": 7, "title": "Kind of Blue", "year": 1959, "...": "..." } ]
+    "artist": { "id": "42", "name": "Miles Davis", "...": "..." },
+    "albums": [ { "id": "7", "title": "Kind of Blue", "year": 1959, "...": "..." } ]
   },
   "error": null,
   "pagination": null
@@ -498,7 +503,6 @@ album list embedded.
 
 | Code | Status | When |
 |------|--------|------|
-| \`BAD_REQUEST\` | 400 | \`artist_id\` is not an integer |
 | \`NOT_FOUND\` | 404 | No artist with that ID |
 | \`LIBRARY_ERROR\` | 500 | Database or unexpected failure |
 
@@ -520,7 +524,7 @@ every album is returned in one response.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| \`artist_id\` | int | Yes | SoulSync artist ID |
+| \`artist_id\` | string | Yes | SoulSync artist ID (text; may be opaque, see the artist detail endpoint) |
 
 **Query parameters**
 
@@ -537,7 +541,6 @@ every album is returned in one response.
 
 | Code | Status | When |
 |------|--------|------|
-| \`BAD_REQUEST\` | 400 | \`artist_id\` is not an integer |
 | \`LIBRARY_ERROR\` | 500 | Database or unexpected failure |
 
 **Notes**
@@ -565,7 +568,7 @@ pagination.
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | \`search\` | string | No | \`""\` | Substring filter on album title |
-| \`artist_id\` | int | No | — | Filter to one artist's albums |
+| \`artist_id\` | string | No | — | Filter to one artist's albums (text ID; may be opaque). An empty value means no filter |
 | \`year\` | int | No | — | Filter by release year |
 | \`page\` | int | No | \`1\` | Page number (minimum 1; invalid values fall back to 1) |
 | \`limit\` | int | No | \`50\` | Results per page (1–200; clamped to 200; invalid values fall back to 50) |
@@ -580,8 +583,17 @@ the standard page object. Each album includes \`id\`, \`artist_id\`, \`title\`,
 \`server_source\`, ISO-8601 \`created_at\`/\`updated_at\`, \`upc\`, \`copyright\`,
 cross-install \`soul_id\`, external provider IDs (\`musicbrainz_release_id\`,
 \`spotify_album_id\`, \`itunes_album_id\`, \`audiodb_id\`, \`deezer_id\`, \`tidal_id\`,
-\`qobuz_id\`), per-provider match statuses and last-attempted timestamps, and
-Last.fm stats.
+\`qobuz_id\`, \`discogs_id\`, \`amazon_id\`, \`jiosaavn_id\`, \`bandcamp_id\`),
+per-provider match statuses and last-attempted timestamps, and
+Last.fm stats. Albums also carry a full \`release_date\` (when known) next to
+\`year\`, Discogs release data (\`discogs_genres\` and \`discogs_styles\` as
+arrays, \`discogs_label\`, \`discogs_catno\`, \`discogs_country\`,
+\`discogs_rating\`, \`discogs_rating_count\`), Bandcamp data (\`bandcamp_url\`,
+\`bandcamp_tags\` as an array, \`bandcamp_label\`), the canonical-release
+selection (\`canonical_source\`, \`canonical_album_id\`, \`canonical_score\`,
+\`canonical_resolved_at\`, \`canonical_locked\`, plus \`api_track_count\` and
+\`canonical_track_count\` alongside the observed \`track_count\`), and the
+\`art_locked\`/\`genres_locked\`/\`metadata_locked\` flags (boolean or null).
 
 \`\`\`json
 {
@@ -589,8 +601,8 @@ Last.fm stats.
   "data": {
     "albums": [
       {
-        "id": 7,
-        "artist_id": 42,
+        "id": "7",
+        "artist_id": "42",
         "title": "Kind of Blue",
         "year": 1959,
         "thumb_url": "https://image-cdn.example/abc123.jpg",
@@ -617,7 +629,7 @@ Last.fm stats.
 
 | Code | Status | When |
 |------|--------|------|
-| \`BAD_REQUEST\` | 400 | \`artist_id\` or \`year\` is not an integer |
+| \`BAD_REQUEST\` | 400 | \`year\` is not an integer |
 | \`LIBRARY_ERROR\` | 500 | Database or unexpected failure |
 
 **Example**
@@ -638,7 +650,7 @@ list embedded.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| \`album_id\` | int | Yes | SoulSync album ID |
+| \`album_id\` | string | Yes | SoulSync album ID (text; may be opaque, see the artist detail endpoint) |
 
 **Query parameters**
 
@@ -657,7 +669,6 @@ list embedded.
 
 | Code | Status | When |
 |------|--------|------|
-| \`BAD_REQUEST\` | 400 | \`album_id\` is not an integer |
 | \`NOT_FOUND\` | 404 | No album with that ID |
 | \`LIBRARY_ERROR\` | 500 | Database or unexpected failure |
 
@@ -679,7 +690,7 @@ every track is returned in one response.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| \`album_id\` | int | Yes | SoulSync album ID |
+| \`album_id\` | string | Yes | SoulSync album ID (text; may be opaque, see the artist detail endpoint) |
 
 **Query parameters**
 
@@ -696,16 +707,23 @@ every track is returned in one response.
 ISO-8601 \`created_at\`/\`updated_at\`, \`isrc\`, \`copyright\`, cross-install
 \`soul_id\` and \`album_soul_id\`, external provider IDs
 (\`musicbrainz_recording_id\`, \`spotify_track_id\`, \`itunes_track_id\`,
-\`audiodb_id\`, \`deezer_id\`, \`tidal_id\`, \`qobuz_id\`, \`genius_id\`),
+\`audiodb_id\`, \`deezer_id\`, \`tidal_id\`, \`qobuz_id\`, \`genius_id\`,
+\`amazon_id\`, \`jiosaavn_id\`, \`bandcamp_id\`),
 per-provider match statuses and last-attempted timestamps, Last.fm stats,
-and Genius metadata. Joined queries may also add \`artist_name\` and
+and Genius metadata. Tracks also carry \`disc_number\`, a per-track \`year\`,
+\`track_artist\` (the performer credit, e.g. on compilations),
+\`recording_disambiguation\` (the MusicBrainz recording comment that
+distinguishes versions, such as live or acoustic), \`server_path\` (the path
+the media server reported) alongside \`file_path\` (SoulSync's local path),
+\`file_size\` in bytes, Bandcamp data (\`bandcamp_url\`, \`bandcamp_tags\`,
+\`bandcamp_label\`), and the \`metadata_locked\` flag (boolean or null).
+Joined queries may also add \`artist_name\` and
 \`album_title\`. \`pagination\` is \`null\`.
 
 **Errors**
 
 | Code | Status | When |
 |------|--------|------|
-| \`BAD_REQUEST\` | 400 | \`album_id\` is not an integer |
 | \`LIBRARY_ERROR\` | 500 | Database or unexpected failure |
 
 **Notes**
@@ -729,7 +747,7 @@ Get a single track by its SoulSync ID, with full metadata.
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| \`track_id\` | int | Yes | SoulSync track ID |
+| \`track_id\` | string | Yes | SoulSync track ID (text; may be opaque, see the artist detail endpoint) |
 
 **Query parameters**
 
@@ -747,7 +765,6 @@ Get a single track by its SoulSync ID, with full metadata.
 
 | Code | Status | When |
 |------|--------|------|
-| \`BAD_REQUEST\` | 400 | \`track_id\` is not an integer |
 | \`NOT_FOUND\` | 404 | No track with that ID |
 | \`LIBRARY_ERROR\` | 500 | Database or unexpected failure |
 
@@ -872,7 +889,7 @@ echoes the requested type. \`pagination\` is \`null\`.
 {
   "success": true,
   "data": {
-    "items": [ { "id": 99, "title": "New Release", "year": 2026, "...": "..." } ],
+    "items": [ { "id": "99", "title": "New Release", "year": 2026, "...": "..." } ],
     "type": "albums"
   },
   "error": null,
@@ -907,7 +924,7 @@ SoulSync record. All three parameters are required.
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | \`type\` | string | Yes | — | \`"artist"\`, \`"album"\`, or \`"track"\` (singular) |
-| \`provider\` | string | Yes | — | \`"spotify"\`, \`"musicbrainz"\`, \`"itunes"\`, \`"deezer"\`, \`"audiodb"\`, \`"tidal"\`, \`"qobuz"\`, or \`"genius"\` |
+| \`provider\` | string | Yes | — | \`"spotify"\`, \`"musicbrainz"\`, \`"itunes"\`, \`"deezer"\`, \`"audiodb"\`, \`"tidal"\`, \`"qobuz"\`, \`"genius"\`, \`"discogs"\`, \`"amazon"\`, \`"jiosaavn"\`, or \`"bandcamp"\` |
 | \`id\` | string | Yes | — | The external ID value |
 | \`fields\` | string | No | — | Comma-separated field names to keep in the returned object |
 
@@ -921,7 +938,7 @@ as the corresponding list endpoints. \`pagination\` is \`null\`.
 {
   "success": true,
   "data": {
-    "album": { "id": 7, "title": "Kind of Blue", "year": 1959, "spotify_album_id": "...", "...": "..." }
+    "album": { "id": "7", "title": "Kind of Blue", "year": 1959, "spotify_album_id": "...", "...": "..." }
   },
   "error": null,
   "pagination": null
@@ -932,7 +949,7 @@ as the corresponding list endpoints. \`pagination\` is \`null\`.
 
 | Code | Status | When |
 |------|--------|------|
-| \`BAD_REQUEST\` | 400 | Missing \`type\`, \`provider\`, or \`id\`; unknown \`type\`; unknown \`provider\`; or \`provider=genius\` with \`type=album\` (Genius IDs are not stored for albums) |
+| \`BAD_REQUEST\` | 400 | Missing \`type\`, \`provider\`, or \`id\`; unknown \`type\`; unknown \`provider\`; or an unsupported provider/type combination: \`provider=genius\` with \`type=album\` (Genius IDs are not stored for albums), \`provider=bandcamp\` with \`type=artist\` (Bandcamp IDs are not stored for artists), or \`provider=discogs\` with \`type=track\` (Discogs IDs are not stored for tracks) |
 | \`NOT_FOUND\` | 404 | No library entity matches that provider ID |
 | \`LIBRARY_ERROR\` | 500 | Database or unexpected failure |
 
@@ -4769,6 +4786,85 @@ Both answer \`{"success": true, "updated": <n>}\`.
 
 - System automations cannot be deleted or duplicated — both answer \`403\`.
 - Live run progress also streams over the \`automation:progress\` real-time event (see [Real-time Events](#api-websocket)); \`GET /api/automations/progress\` is the pollable equivalent, keyed by automation id.
+`
+        },
+        {
+            id: 'api-mcp',
+            title: 'MCP for AI Clients',
+            lede: 'Let Claude and other AI apps search, check your library and download through SoulSync.',
+            body: `
+# MCP for AI clients
+
+SoulSync can act as an MCP server, so an AI app like Claude can search for music, check what you already own, and download things for you.
+
+## Turn it on
+
+Go to **Settings > Advanced > SoulSync API > MCP for AI Clients** and tick **Answer MCP requests at /mcp**. While it's off, \`/mcp\` answers \`404\`.
+
+## Connect a client
+
+Add \`http://<host>:8008/mcp\` as a remote (streamable HTTP) MCP server and send a SoulSync API key as a Bearer token. For Claude Code:
+
+\`\`\`bash
+claude mcp add --transport http soulsync http://localhost:8008/mcp --header "Authorization: Bearer sk_..."
+\`\`\`
+
+Both protocol styles work: \`2026-07-28\` (no handshake) and \`2025-03-26\` through \`2025-11-25\` (initialize first). Requests from a browser page on another site are refused, so a key that leaks into a web page can't be used from there.
+
+## What a key can do
+
+Every tool call runs as the matching \`/api/v1\` request with your key, so the usual rules apply: the same scope checks, the same profile, and the same 60 requests a minute.
+
+- An **admin** key gets all 35 tools.
+- A **read** key only gets the tools that look things up. A write tool still answers \`403\` if one is ever called with a read key.
+- Settings, API keys, profiles, cancel-all and blocklist clears are never tools, whatever the key.
+
+## Tools
+
+| Group | Tools |
+|-------|-------|
+| Status | \`get_server_status\`, \`get_recent_activity\`, \`get_library_stats\` |
+| Your library | \`search_library_artists\`, \`get_library_artist\`, \`list_artist_albums\`, \`search_library_albums\`, \`get_album_tracks\`, \`search_library_tracks\`, \`recently_added\`, \`recently_played\` |
+| Queues | \`list_wishlist\`, \`list_watchlist\`, \`list_downloads\`, \`list_playlists\`, \`get_request_status\` |
+| Discovery | \`recent_releases\`, \`similar_artists\` |
+| Video | \`video_search\`, \`video_library\`, \`video_wishlist\`, \`video_downloads\`, \`video_calendar\` |
+| Getting music | \`search_music\`, \`find_album\`, \`request_album\`, \`request_track\`, \`process_wishlist\`, \`remove_from_wishlist\`, \`watch_artist\`, \`unwatch_artist\`, \`scan_watchlist\`, \`cancel_download\` |
+| Getting video | \`video_wishlist_add\`, \`video_follow\` |
+
+To get a whole album, the client calls \`find_album\` with "Artist - Album" and then \`request_album\` with the id it returns. Every track goes on the wishlist and tracks you already own are skipped. For one track, \`request_track\` takes "Artist - Title".
+`
+        },
+        {
+            id: 'api-lidarr',
+            title: 'Lidarr Compatible API',
+            lede: 'Let request apps that only speak Lidarr send their album requests to SoulSync.',
+            body: `
+# Lidarr compatible API
+
+Some request apps only know how to talk to Lidarr. SoulSync can answer as Lidarr, so those apps send their album requests to SoulSync instead. Built for **Singarr** and **MusicSeerr 1.x**. MusicSeerr 2.0 and newer dropped Lidarr support, so it can't connect.
+
+## Turn it on
+
+Go to **Settings > Advanced > SoulSync API > Lidarr Compatible API**:
+
+1. Tick **Answer as Lidarr at /lidarr**. While it's off, every \`/lidarr\` route answers \`404\`.
+2. Pick **Requests go to profile**. Requested albums land on that profile's wishlist.
+
+## Connect the app
+
+In the request app, set the Lidarr URL to \`http://<host>:8008/lidarr\` and paste a SoulSync **admin** API key as the Lidarr API key. A read key gets \`401\`. The app talks to \`/lidarr/api/v1\` like it would to a real Lidarr.
+
+## What happens
+
+- Artist and album lookups come from MusicBrainz.
+- When the app asks for an album to be searched (on add, or with an album or artist search), every track of that album goes on the profile's wishlist and downloads like any other wishlist item. Tracks you already own are skipped.
+- If the profile can't download on its own, every request waits for approval on the **Requests** page first.
+- The app's "do we have it" view checks your SoulSync library.
+- Deleting an artist or album in the app only removes it from SoulSync's Lidarr list. Files on disk are never touched.
+
+## Supported routes
+
+All under \`/lidarr/api/v1\`: \`system/status\`, \`qualityprofile\`, \`metadataprofile\`, \`rootfolder\`, \`tag\`, \`artist\` (list, lookup, add, edit, editor, delete), \`album\` (list, lookup, add, edit, monitor, delete), \`track\`, \`trackfile\`, \`command\` (\`AlbumSearch\`, \`ArtistSearch\`, \`RefreshArtist\`; other commands are accepted and do nothing), \`queue\`, \`history\` and \`wanted/missing\`.
 `
         },
         {

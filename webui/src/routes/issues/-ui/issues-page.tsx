@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Select, TextInput } from '@/components/form';
 import { PageHeader } from '@/components/page-header';
-import { Show } from '@/components/primitives';
+import { EmptyState, Show, Spinner } from '@/components/primitives';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type {
@@ -47,6 +47,7 @@ import {
 } from '../-issues.types';
 import { Route } from '../route';
 import { IssueDetailModal } from './issue-detail-modal';
+import statusStyles from './issue-status.module.css';
 import styles from './issues-page.module.css';
 
 export function IssuesPage() {
@@ -535,7 +536,7 @@ function IssueBoardList({
     if (issuesLoading) {
       return (
         <div className={styles.issuesLoading}>
-          <div className={styles.issuesSpinner} />
+          <Spinner size={20} tone="soft" />
           Loading issues...
         </div>
       );
@@ -543,26 +544,20 @@ function IssueBoardList({
 
     if (issuesError) {
       return (
-        <div className={styles.issuesEmpty}>
-          <div className={styles.issuesEmptyTitle}>Failed to load issues</div>
-          <div className={styles.issuesEmptyText}>
-            {issuesError instanceof Error ? issuesError.message : 'Unknown error'}
-          </div>
-        </div>
+        <EmptyState
+          title="Failed to load issues"
+          description={issuesError instanceof Error ? issuesError.message : 'Unknown error'}
+        />
       );
     }
 
     if (issues.length === 0) {
       return (
-        <div className={styles.issuesEmpty}>
-          <div className={styles.issuesEmptyIcon} aria-hidden="true">
-            🔍
-          </div>
-          <div className={styles.issuesEmptyTitle}>No issues found</div>
-          <div className={styles.issuesEmptyText}>
-            {filtered ? 'Try adjusting your filters' : 'No issues have been reported yet'}
-          </div>
-        </div>
+        <EmptyState
+          icon="🔍"
+          title="No issues found"
+          description={filtered ? 'Try adjusting your filters' : 'No issues have been reported yet'}
+        />
       );
     }
 
@@ -656,9 +651,11 @@ function IssueBoardCard({
         </div>
       </div>
       <div className={styles.issueCardRight}>
-        <span className={`${styles.issueStatusBadge} ${statusClassName}`}>{statusMeta.label}</span>
+        <span className={`${statusStyles.issueStatusBadge} ${statusClassName}`}>
+          {statusMeta.label}
+        </span>
         <span
-          className={`${styles.issuePriorityDot} ${priorityClass}`}
+          className={`${statusStyles.issuePriorityDot} ${priorityClass}`}
           title={`${issue.priority} priority`}
         />
       </div>
@@ -675,16 +672,16 @@ const EMPTY_ISSUE_COUNTS: IssueCounts = {
 };
 
 const ISSUE_STATUS_CLASS_NAMES: Record<IssueRecord['status'], string> = {
-  open: styles.issueStatusOpen,
-  in_progress: styles.issueStatusProgress,
-  resolved: styles.issueStatusResolved,
-  dismissed: styles.issueStatusDismissed,
+  open: statusStyles.issueStatusOpen,
+  in_progress: statusStyles.issueStatusProgress,
+  resolved: statusStyles.issueStatusResolved,
+  dismissed: statusStyles.issueStatusDismissed,
 };
 
 const ISSUE_PRIORITY_CLASS_NAMES: Record<IssuePriority, string> = {
-  high: styles.issuePriorityHigh,
-  low: styles.issuePriorityLow,
-  normal: styles.issuePriorityNormal,
+  high: statusStyles.issuePriorityHigh,
+  low: statusStyles.issuePriorityLow,
+  normal: statusStyles.issuePriorityNormal,
 };
 
 function getIssueStatusFilterLabel(status: IssuesSearch['status']): string {
@@ -693,11 +690,11 @@ function getIssueStatusFilterLabel(status: IssuesSearch['status']): string {
 }
 
 function getIssueStatusClassName(status: IssueRecord['status']): string {
-  return ISSUE_STATUS_CLASS_NAMES[status] || styles.issueStatusOpen;
+  return ISSUE_STATUS_CLASS_NAMES[status] || statusStyles.issueStatusOpen;
 }
 
 function getIssuePriorityClassName(priority: IssuePriority): string {
-  return ISSUE_PRIORITY_CLASS_NAMES[priority] || styles.issuePriorityNormal;
+  return ISSUE_PRIORITY_CLASS_NAMES[priority] || statusStyles.issuePriorityNormal;
 }
 
 const ISSUE_CATEGORY_FILTER_GROUPS = [

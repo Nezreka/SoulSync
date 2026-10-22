@@ -848,17 +848,36 @@
         page.appendChild(list);
 
         var foot = h('div', 'vce-picker-foot');
-        var wl = null;
+        var wl = null, wlNote = null;
         if (pack.entries.some(function (e) { return e.wishlist_capable; })) {
-            // Default ON only where the missing set is bounded (complete-the-series
-            // packs). A chart/theme can be 200+ missing titles — that's opt-in.
-            var wlDefault = (pack.id === 'franchises' || pack.id === 'universes');
+            // always opt-in. this used to start ticked for franchises/universes and
+            // people got 90 movies they never asked for overnight (#1807).
             var wlText = pack.media_type === 'show'
                 ? 'Watchlist the shows I\'m missing (follow them)'
                 : 'Wishlist the movies I\'m missing';
-            foot.innerHTML = '<label class="vce-wl"><input type="checkbox"' + (wlDefault ? ' checked' : '') + ' data-wl> ' +
-                wlText + '</label>';
+            foot.innerHTML = '<label class="vce-wl"><input type="checkbox" data-wl> ' +
+                wlText + '</label><span class="vce-wl-note" data-wl-note hidden></span>';
             wl = foot.querySelector('[data-wl]');
+            wlNote = foot.querySelector('[data-wl-note]');
+            wl.addEventListener('change', paintWlNote);
+        }
+
+        // what ticking the box actually costs, so nobody finds out from the wishlist.
+        function paintWlNote() {
+            if (!wl || !wlNote) return;
+            if (!wl.checked) { wlNote.hidden = true; return; }
+            var known = 0, unknown = false;
+            pack.entries.forEach(function (e) {
+                if (!picked[e.key] || !e.wishlist_capable) return;
+                if (e.of_total != null && e.count != null) known += Math.max(0, e.of_total - e.count);
+                else unknown = true;
+            });
+            var noun = pack.media_type === 'show' ? 'shows' : 'movies';
+            var what = known ? (known + (unknown ? '+' : '') + ' ' + noun) : ('every missing ' + noun.slice(0, -1));
+            wlNote.textContent = pack.media_type === 'show'
+                ? 'Follows ' + what + ' you don\'t have and grabs their new episodes.'
+                : 'Downloads ' + what + ' you don\'t own, and keeps adding new ones as these lists grow.';
+            wlNote.hidden = false;
         }
         foot.appendChild(h('div', 'vce-foot-spacer'));
         var createBtn = h('button', 'vce-btn vce-btn--primary', 'Create');
@@ -920,6 +939,7 @@
             if (sum) sum.textContent = n ? (n + ' selected · ' + total + ' owned items') : 'Nothing selected';
             createBtn.disabled = !n;
             createBtn.textContent = n ? ('Create ' + n + ' collection' + (n === 1 ? '' : 's')) : 'Create';
+            paintWlNote();
         }
         paintEntries();
     }

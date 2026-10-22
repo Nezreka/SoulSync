@@ -1,5 +1,54 @@
 # UI reuse and consistency implementation
 
+## Dev refresh and configurable-defaults assessment — 2026-10-22
+
+Fetched and merged `upstream/dev` at `d66f604c1` (170 incoming commits) into the
+feature branch from `96ceafec9`. Resolved two shared-component conflicts:
+`DialogFrame` retains the shared-modal marker alongside upstream's custom
+viewport, accessible label and popup ID support; badges retain their deliberate
+semantic contrast/icon spacing alongside upstream's new loading/empty-state
+primitives. Fixed one incoming wishlist type declaration's formatting. No new
+preferences were implemented or deployed in this refresh.
+
+Verification: **764 backend tests**, **112 focused UI tests**, and **69 pinned
+browser/visual checks** passed. Screenshot baselines were not updated. UI check
+finished with zero errors and 488 warnings; production build and the local
+conflict-resolution whitespace check passed. This is integration coverage of
+Review and the affected shared code, not a full test of every incoming feature.
+
+The user's next direction is customizable library defaults. Proposed approach,
+pending implementation agreement:
+
+- Separate release/audio identity from preferred metadata representation,
+  filename rendering, folder layout and acquisition intent. A formatting
+  preference must not manufacture evidence for a different recording/edition.
+- Existing settings already cover reconciliation numbering/source/album titles,
+  path templates, automatic disambiguation, artist credits, original dates and
+  preservation. Resolve these through one shared policy instead of introducing
+  competing queue-only settings. The current digital numbering setting also
+  influences release ranking; separate those responsibilities.
+- Preserve canonical source disc/track positions and derive an absolute position
+  from the full selected tracklist, including missing slots. Let tag numbering,
+  filename numbering and disc folders be chosen independently. Custom export of
+  an absolute position must not be presented as universally supported by players.
+- Preserve supported release/remaster detail in metadata while independently
+  controlling whether it appears in title tags, filenames and album folders.
+  Distinguish edition descriptions from live/remix/acoustic recording identity.
+- Resolve library defaults with album overrides and explicit saved field choices;
+  snapshot relevant policy inputs into proposals/signed apply. Preference changes
+  regenerate affected proposals, preserve valid explicit decisions and never
+  silently apply files. Reuse raw catalogue/audio evidence for presentation-only
+  changes. Review, imports, tag writing and organization must converge on the same
+  policy so repeat scans do not undo one another.
+- A supported convention covered by an explicit default can become ready without
+  repeated per-album confirmation. Whole-album eligibility remains required.
+  Numbering approval must still disclose its actual scope: preferences do not
+  excuse approving unrelated artist/identifier edits under a numbering label.
+- Start with numbering, title/filename qualifier handling and release preferences;
+  integrate existing date, credit and preservation controls. Validate mixed edits,
+  partial/multidisc albums, conflicting versions, stale plans, codec round trips,
+  naming collisions and apply-then-rescan stability before broadening defaults.
+
 ## Reverification against the original assessment — 2026-10-20
 
 Baseline: `e80e4a1da`; deployed application `336c7cf68c1e`. Recovered the full

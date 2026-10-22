@@ -209,56 +209,63 @@ def test_wishlist_page_episode_annotations_roll_up(client, db):
 
 
 # ---------------------------------------------------------------------------
-# Frontend contracts (video-wishlist.js + index.html)
+# Frontend contracts (the React wishlist's video tabs)
 # ---------------------------------------------------------------------------
 
 from pathlib import Path as _P
 
 _ROOT = _P(__file__).resolve().parent.parent
-_WSH_JS = (_ROOT / "webui" / "static" / "video" / "video-wishlist.js").read_text(encoding="utf-8")
-_INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-_CSS = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
+_WLD = _ROOT / "webui" / "src" / "routes" / "wishlist"
+_HELPERS = (_WLD / "-video.helpers.ts").read_text(encoding="utf-8")
+_API = (_WLD / "-video.api.ts").read_text(encoding="utf-8")
+_ACTIONS = (_WLD / "-video.use-actions.ts").read_text(encoding="utf-8")
+_PAGE = (_WLD / "-ui" / "video-wishlist.tsx").read_text(encoding="utf-8")
+_SHEETS = (_WLD / "-ui" / "video-sheets.tsx").read_text(encoding="utf-8")
+_CSS = (_ROOT / "webui" / "static" / "wishlist-premier.css").read_text(encoding="utf-8")
 
 
 def test_js_status_pill_tells_the_truth():
-    fn = _WSH_JS.split("function liveStatus")[1].split("function statusPill")[0]
+    fn = _HELPERS.split("export function liveStatus")[1].split("export function sourceLines")[0]
     assert "it.downloading" in fn and "it.upgrade_from" in fn
-    assert "monitored:" in _WSH_JS and "upgrade:" in _WSH_JS     # new STATUS entries
-    # movie card + episode card both derive from reality
-    assert _WSH_JS.count("liveStatus(") >= 3
+    assert "monitored:" in _HELPERS and "upgrade:" in _HELPERS     # the STATUS entries
+    # the movie panel and the episode row both derive from reality
+    assert "liveStatus(movie)" in _SHEETS and "liveStatus(ep, show.muted)" in _SHEETS
 
 
 def test_js_search_now_buttons_on_all_three_levels():
-    assert "huntBtn('movie'" in _WSH_JS
-    assert 'data-vwsh-hunt="episode"' in _WSH_JS
-    assert 'data-vwsh-hunt="season"' in _WSH_JS
-    assert "'/api/video/wishlist/search'" in _WSH_JS
-    # hunt click handled before remove in the grid delegation
-    grid = _WSH_JS.split("function onGridClick")[1]
-    assert grid.index("data-vwsh-hunt") < grid.index("data-vwsh-rm")
+    # movie, season and episode each have their own Search, aimed at that scope
+    assert "const target: VideoActionTarget = { scope: 'movie', tmdb_id: movie.tmdb_id };" in _SHEETS
+    assert "scope: 'season'," in _SHEETS and "scope: 'episode'," in _SHEETS
+    assert _SHEETS.count("actions.searchNow(") >= 4      # movie, show, season, episode
+    assert "apiClient.post('video/wishlist/search', { json: target })" in _API
 
 
 def test_js_search_all_button_wired_and_scoped():
-    assert "data-vwsh-searchall" in _INDEX
-    assert "'/api/video/wishlist/search-all'" in _WSH_JS
+    assert "apiClient.post('video/wishlist/search-all')" in _API
     # The button used to be HIDDEN on the YouTube tab ("it has its own drain").
     # Searching genuinely means nothing there - the video IS the release - but
     # hiding it left that tab with no bulk action at all, and once a video could
     # be waiting out a retry backoff the only override was clicking every row.
     # Same button, different verb: it searches on the TMDB tabs and downloads on
     # YouTube, through the drain's own enqueue path.
-    assert "sa.hidden = !has" in _WSH_JS
-    assert "'/api/video/wishlist/youtube/download-all'" in _WSH_JS
-    assert "Download all waiting" in _WSH_JS
-    assert ".vwsh-searchall[hidden] { display: none; }" in _CSS
+    assert "{media === 'youtube' ? 'Download all waiting' : 'Search all missing'}" in _PAGE
+    assert "apiClient.post('video/wishlist/youtube/download-all')" in _API
+    bulk = _ACTIONS[_ACTIONS.index("const bulk = () =>"):_ACTIONS.index("const removed = async")]
+    assert bulk.index("downloadAllYoutubeWaiting()") < bulk.index("searchAllVideoMissing()")
+    # shown only when the tab has something in it
+    assert "{tabHasItems ? (" in _PAGE
 
 
 def test_css_covers_new_states_and_touch():
-    assert ".vwsh-st--upgrade" in _CSS and ".vwsh-st--monitored" in _CSS
-    assert ".vwsh-ep-dot--upgrade" in _CSS
-    # search buttons must stay reachable on touch (no hover)
-    assert ("@media (hover: none) { .vwsh-movie-art .vwsh-hunt, .vwsh-nebula .vwsh-epc-hunt, "
-            ".vwsh-nebula .vwsh-szn-hunt { opacity: 1; } }") in _CSS
+    # the pill wears its state: stuck (amber), downloading (accent), done (quiet)
+    for cls in (".wlp-sheet-pill.is-stuck", ".wlp-sheet-pill.is-live", ".wlp-sheet-pill.is-done"):
+        assert cls in _CSS, cls
+    # search buttons are always visible (no hover reveal), and the hover-only
+    # remove button shows on touch
+    assert "opacity: 0" not in _CSS[_CSS.index(".wlp-sheet-chip {"):_CSS.index(".wlp-sheet-chip:hover")]
+    touch = _CSS[_CSS.index("@media (hover: none) {"):]
+    touch = touch[:touch.index("}")]
+    assert ".wlp-sheet-x" in touch and "opacity: 1" in touch
 
 
 def test_search_now_reports_missing_target_before_dispatch(client, db, monkeypatch):

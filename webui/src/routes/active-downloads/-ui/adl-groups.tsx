@@ -10,10 +10,11 @@ import {
   isTerminalPhase,
   phaseDisplay,
   progressSegments,
-  statLine,
 } from '../-adl.batch';
 import { batchColorIndex, batchEta, statusClass } from '../-adl.helpers';
+import { dayKey, dayLabel, parseStamp } from '../-dl.format';
 import { AdlRow } from './adl-row';
+import { DlAvatar, DlButton, DlIcon, DlMore } from './dl-parts';
 
 function queueOrder(row: AdlDownload): number {
   return typeof row.batch_position === 'number' ? row.batch_position : Number.MAX_SAFE_INTEGER;
@@ -23,20 +24,9 @@ function sortByBatchPosition(rows: AdlDownload[]): AdlDownload[] {
   return [...rows].sort((a, b) => queueOrder(a) - queueOrder(b) || a.timestamp - b.timestamp);
 }
 
-function PhaseIcon({ icon }: { icon: 'spinner' | 'check' | 'hourglass' | null }) {
-  if (icon === 'spinner') return <span className="adl-spinner" style={{ marginRight: '4px' }} />;
-  if (icon === 'check')
-    return <span style={{ color: 'var(--success)', marginRight: '4px' }}>✓</span>;
-  if (icon === 'hourglass') return <span style={{ marginRight: '4px', opacity: 0.6 }}>⏳</span>;
-  return null;
-}
-
 /**
- * The group thumbnail: the first track's artwork, or the batch's initial.
- *
- * The vanilla built the fallback as an `onerror` string with nested escaped
- * quotes — fragile enough that a name containing a quote could break it. Here
- * a failed load just flips state.
+ * The group's cover: the first track's artwork, or the batch's initial on a
+ * tint of its batch colour. a failed load just flips state.
  */
 export function BatchThumb({
   batch,
@@ -51,22 +41,36 @@ export function BatchThumb({
   const initial = (batch.batch_name || 'D')[0];
 
   if (artwork && !failed) {
-    return <img className="adl-group-thumb" src={artwork} alt="" onError={() => setFailed(true)} />;
+    return <img className="dlc-gart" src={artwork} alt="" onError={() => setFailed(true)} />;
   }
   return (
     <div
-      className="adl-group-thumb adl-group-thumb-fallback"
+      className="dlc-gart dlc-gart-empty"
       style={
         colorIdx >= 0
           ? {
               background: `rgba(var(--batch-color-${colorIdx}), 0.15)`,
-              color: `rgba(var(--batch-color-${colorIdx}), 0.7)`,
+              color: `rgba(var(--batch-color-${colorIdx}), 0.8)`,
             }
-          : { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.55)' }
+          : undefined
       }
     >
-      {/* The image fallback keeps the raw initial; the no-art one upper-cases. */}
-      {artwork ? initial : initial.toUpperCase()}
+      {initial.toUpperCase()}
+    </div>
+  );
+}
+
+/**
+ * A playlist batch has no one cover: show four of its covers as a 2x2 tile,
+ * the way a playlist looks everywhere else. Null when there aren't four.
+ */
+function CoverMosaic({ covers }: { covers: string[] }) {
+  if (covers.length < 4) return null;
+  return (
+    <div className="dlc-gart dlc-mosaic" aria-hidden="true">
+      {covers.slice(0, 4).map((src) => (
+        <img key={src} src={src} alt="" loading="lazy" />
+      ))}
     </div>
   );
 }
@@ -86,33 +90,33 @@ function BucketFold({
   onToggle: () => void;
 }) {
   return (
-    <button type="button" className={`adl-bucket-fold${open ? ' open' : ''}`} onClick={onToggle}>
-      <span className="adl-bucket-fold-chevron" aria-hidden="true">
-        <svg
-          width="11"
-          height="11"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.4"
-        >
-          <polyline points="9 18 15 12 9 6" />
-        </svg>
+    <button
+      type="button"
+      className={`dlc-fold${open ? ' dlc-fold-open' : ''}`}
+      aria-expanded={open}
+      onClick={onToggle}
+    >
+      <span className="dlc-fold-chev" aria-hidden="true">
+        {DlIcon.fold}
       </span>
       {count} {noun}
-      {!open && preview ? (
-        <span className="adl-bucket-fold-preview"> · next: {preview}</span>
-      ) : null}
+      {!open && preview ? <span className="dlc-fold-preview"> · next: {preview}</span> : null}
     </button>
   );
 }
 
+interface RowHandlers {
+  onCancelRow: (dl: AdlDownload) => void | Promise<void>;
+  onDownloadNext: (dl: AdlDownload) => void | Promise<void>;
+  numbered: boolean;
+  canInspect: boolean;
+}
+
 /**
  * What a mid-flight batch actually shows: the rows that are MOVING and the
- * rows that BROKE, in full. The queue and the done pile are facts, not
- * events — they fold to one line each. This is what turned a 12-track sync
- * from a screen and a half of rows into five lines (Boulder, Aug 27:
- * "so much scrolling").
+ * rows that BROKE, in full. the queue and the done pile are facts, not
+ * events, so they fold to one line each. that's what turned a 12-track sync
+ * from a screen and a half of rows into five lines.
  */
 function BucketedRows({
   rows,
@@ -120,26 +124,33 @@ function BucketedRows({
   onToggleBucket,
   onCancelRow,
   onDownloadNext,
-}: {
+  numbered,
+  canInspect,
+}: RowHandlers & {
   rows: AdlDownload[];
   openBuckets: ReadonlySet<string>;
   onToggleBucket: (key: string) => void;
-  onCancelRow: (dl: AdlDownload) => void | Promise<void>;
-  onDownloadNext: (dl: AdlDownload) => void | Promise<void>;
 }) {
   const inFlight = rows.filter((dl) => statusClass(dl.status) === 'active');
   const broken = rows.filter((dl) => ['failed', 'cancelled'].includes(statusClass(dl.status)));
   const queued = sortByBatchPosition(rows.filter((dl) => statusClass(dl.status) === 'queued'));
-  const done = rows.filter((dl) => statusClass(dl.status) === 'completed');
+  const done = sortByBatchPosition(rows.filter((dl) => statusClass(dl.status) === 'completed'));
+  const row = (dl: AdlDownload, next?: boolean) => (
+    <AdlRow
+      key={dl.task_id}
+      dl={dl}
+      compact
+      numbered={numbered}
+      canInspect={canInspect}
+      onCancel={onCancelRow}
+      onDownloadNext={next ? onDownloadNext : undefined}
+    />
+  );
 
   return (
     <>
-      {inFlight.map((dl) => (
-        <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />
-      ))}
-      {broken.map((dl) => (
-        <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />
-      ))}
+      {inFlight.map((dl) => row(dl))}
+      {broken.map((dl) => row(dl))}
       {queued.length > 0 ? (
         <>
           <BucketFold
@@ -149,17 +160,7 @@ function BucketedRows({
             open={openBuckets.has('queued')}
             onToggle={() => onToggleBucket('queued')}
           />
-          {openBuckets.has('queued')
-            ? queued.map((dl) => (
-                <AdlRow
-                  key={dl.task_id}
-                  dl={dl}
-                  compact
-                  onCancel={onCancelRow}
-                  onDownloadNext={onDownloadNext}
-                />
-              ))
-            : null}
+          {openBuckets.has('queued') ? queued.map((dl) => row(dl, true)) : null}
         </>
       ) : null}
       {done.length > 0 ? (
@@ -170,24 +171,44 @@ function BucketedRows({
             open={openBuckets.has('done')}
             onToggle={() => onToggleBucket('done')}
           />
-          {openBuckets.has('done')
-            ? done.map((dl) => <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />)
-            : null}
+          {openBuckets.has('done') ? done.map((dl) => row(dl)) : null}
         </>
       ) : null}
     </>
   );
 }
 
+/** "Audiobook" / "From wishlist" / "Album · from Discover". */
+function groupEyebrow(batch: AdlBatch, isAlbum: boolean): string {
+  const kind =
+    batch.batch_type === 'audiobook' || batch.playlist_id === 'audiobooks'
+      ? 'Audiobook'
+      : batch.batch_type === 'music_video'
+        ? 'Music videos'
+        : batch.batch_type === 'client_match'
+          ? 'Client import'
+          : batch.album_bundle || isAlbum
+            ? 'Album'
+            : 'Tracks';
+  const from = batch.source_page ? `from ${batch.source_page.replace(/_/g, ' ')}` : '';
+  return [kind, from].filter(Boolean).join(' · ');
+}
+
+/** one value when every row agrees on it, else ''. */
+function shared(rows: AdlDownload[], pick: (dl: AdlDownload) => string): string {
+  const first = rows.length ? pick(rows[0]) : '';
+  return first && rows.every((dl) => pick(dl) === first) ? first : '';
+}
+
 export interface AdlGroupProps {
   batch: AdlBatch;
   /** The batch's rows AFTER the page's status filter. */
   rows: AdlDownload[];
-  /** The batch's FULL row set — artwork lookup and the trimmed count. */
+  /** The batch's FULL row set: artwork lookup and the trimmed count. */
   allBatchRows: AdlDownload[];
   /**
    * When true, queued and done rows fold into one-line summaries and only
-   * in-flight + failed rows render in full. Off under a status filter (the
+   * in-flight + failed rows render in full. off under a status filter (the
    * chip asked for exactly those rows) and under a batch filter (the user
    * asked for the whole batch).
    */
@@ -204,13 +225,12 @@ export interface AdlGroupProps {
 }
 
 /**
- * One batch as a list group: the old side-panel card promoted to a full-width
- * header, with the batch's real download rows under it instead of the panel's
- * micro track rows.
+ * One batch: a header with the cover, what it is, where it's at, and its
+ * rows underneath. an album batch reads like a tracklist.
  *
- * Open state lives here: live batches start open, terminal ones start folded.
- * The override survives the 2s poll because the component stays mounted, and
- * deliberately resets when the batch leaves the list.
+ * Open state lives here: live batches start open, terminal ones start
+ * folded. the override survives the 2s poll because the component stays
+ * mounted, and resets when the batch leaves the list.
  */
 export function AdlGroup({
   batch,
@@ -243,177 +263,130 @@ export function AdlGroup({
   const colorIdx = batchColorIndex(batch.batch_id);
   const phase = phaseDisplay(batch);
   const segments = progressSegments(batch);
-  const stats = statLine(batch);
   const eta = batchEta(batch, samples, Date.now());
   const active = isBatchActive(batch);
   const canDownloadBatchNext = !terminal && (batch.queued || 0) > 0;
   const orderedRows =
-    rows.length > 0 && rows.every((dl) => statusClass(dl.status) === 'queued')
+    rows.length > 0 && rows.every((dl) => statusClass(dl.status) !== 'active')
       ? sortByBatchPosition(rows)
       : rows;
 
   const art = allBatchRows.find((t) => t.artwork)?.artwork ?? null;
+  const covers = [...new Set(allBatchRows.map((t) => t.artwork).filter(Boolean))];
+  const album = shared(allBatchRows, (dl) => dl.album);
+  const artist = shared(allBatchRows, (dl) => dl.artist);
+  const artistImage = artist ? allBatchRows.find((dl) => dl.artist_image)?.artist_image : undefined;
+  // one album across every row: number the rows like a tracklist
+  const audiobook = batch.batch_type === 'audiobook' || batch.playlist_id === 'audiobooks';
+  const numbered = Boolean(album) && allBatchRows.length > 1 && !audiobook;
+  // the inspector searches music sources, so only music batches get it
+  const canInspect = !audiobook && !batch.batch_type;
 
-  const classes = ['adl-group', `phase-${batch.phase}`];
-  if (open) classes.push('open');
-  if (active) classes.push('active-glow');
-  if (filtered) classes.push('filtered');
-
-  // Rows hidden by the status filter still exist — say so instead of letting
+  // Rows hidden by the status filter still exist. say so instead of letting
   // a filtered group read as a smaller batch than it is.
   const trimmed = allBatchRows.length - rows.length;
 
+  const toggle = () => setOpenOverride(!open);
+  const menu = [
+    ...(canDownloadBatchNext
+      ? [
+          {
+            key: 'next',
+            label: 'Download this batch next',
+            onSelect: () => void onDownloadBatchNext(batch),
+          },
+        ]
+      : []),
+    {
+      key: 'filter',
+      label: filtered ? 'Show all downloads' : 'Show only this batch',
+      onSelect: onFilter,
+    },
+    // a finished batch has nothing left to cancel
+    ...(!terminal
+      ? [{ key: 'cancel', label: 'Cancel batch', danger: true, onSelect: onCancel }]
+      : []),
+  ];
+
   return (
     <div
-      className={classes.join(' ')}
+      className={`dlc-list dlc-group phase-${batch.phase}${open ? ' dlc-group-open' : ''}${active ? ' dlc-group-live' : ''}${filtered ? ' dlc-group-filtered' : ''}`}
       style={opacity < 1 ? { opacity } : undefined}
       data-batch-id={batch.batch_id}
     >
-      {/* the album art, blurred to a wash behind the card — the page owns
-          real artwork, so the chrome doesn't have to invent color */}
-      {art ? (
-        <div className="adl-group-backdrop" style={{ backgroundImage: `url(${art})` }} />
-      ) : null}
       <div
-        className="adl-group-header"
+        className="dlc-ghead"
         role="button"
         tabIndex={0}
-        title={open ? 'Collapse this batch' : 'Expand this batch'}
-        onClick={() => setOpenOverride(!open)}
+        aria-expanded={open}
+        onClick={toggle}
         onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            setOpenOverride(!open);
+            toggle();
           }
         }}
       >
-        {colorIdx >= 0 ? (
-          <div
-            className="adl-group-rail"
-            style={{ background: `rgba(var(--batch-color-${colorIdx}), 0.6)` }}
-          />
-        ) : null}
-        <BatchThumb batch={batch} artwork={art} colorIdx={colorIdx} />
-        <div className="adl-group-info">
-          <div className="adl-group-name-line">
-            <span
-              className="adl-group-name"
-              title="Open download modal"
-              onClick={(event) => {
-                event.stopPropagation();
-                onOpenModal();
-              }}
-            >
-              {batch.batch_name || 'Download'}
+        {/* the album art, blurred to a wash behind the header */}
+        {art ? <div className="dlc-wash" style={{ backgroundImage: `url(${art})` }} /> : null}
+        <div className="dlc-gart-wrap">
+          {!album && covers.length >= 4 ? (
+            <CoverMosaic covers={covers} />
+          ) : (
+            // no cover anywhere: the artist's photo stands in for it
+            <BatchThumb batch={batch} artwork={art || artistImage || null} colorIdx={colorIdx} />
+          )}
+          {/* one artist across the batch: their photo sits on the cover's corner */}
+          {art && artistImage ? (
+            <span className="dlc-gart-badge">
+              <DlAvatar src={artistImage} size="md" />
             </span>
-            {batch.source_page ? (
-              <span className="adl-group-source">{batch.source_page}</span>
+          ) : null}
+        </div>
+        <div className="dlc-main">
+          <div className="dlc-eyebrow">{groupEyebrow(batch, Boolean(album))}</div>
+          <div className="dlc-gtitle">{batch.batch_name || 'Download'}</div>
+          <div className="dlc-gsub">
+            {artist && artist !== batch.batch_name ? (
+              // the photo already sits on the cover's corner, so just the name here
+              <span>{artist}</span>
             ) : null}
-          </div>
-          <div className="adl-group-phase">
-            <PhaseIcon icon={phase.icon} />
-            {phase.text}
-            {eta ? <span className="adl-group-eta"> · {eta}</span> : null}
+            <span className="dlc-gphase">
+              {phase.icon === 'spinner' ? (
+                <span className="dlc-spin dlc-spin-sm" aria-hidden="true" />
+              ) : null}
+              {phase.text}
+            </span>
+            {batch.failed ? <span className="dlc-gbad">{batch.failed} failed</span> : null}
+            {eta ? <span>{eta}</span> : null}
           </div>
         </div>
-        {stats ? <span className="adl-group-stats">{stats}</span> : null}
-        <div className="adl-group-actions">
-          <button
-            type="button"
-            className={`adl-group-act adl-group-filter${filtered ? ' active' : ''}`}
-            title={filtered ? 'Show all downloads' : 'Show only this batch'}
-            onClick={(event) => {
-              event.stopPropagation();
-              onFilter();
-            }}
+        <div className="dlc-gside">
+          <DlButton title="Open the download window for this batch" onClick={onOpenModal}>
+            Open
+          </DlButton>
+          <DlMore items={menu} label="Batch actions" />
+          <span
+            className={`dlc-icon-btn dlc-chev${open ? ' dlc-chev-open' : ''}`}
+            aria-hidden="true"
           >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-            </svg>
-          </button>
-          {canDownloadBatchNext ? (
-            <button
-              type="button"
-              className="adl-group-act adl-group-next"
-              title="Download this batch next"
-              onClick={(event) => {
-                event.stopPropagation();
-                void onDownloadBatchNext(batch);
-              }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M5 12h14" />
-                <path d="m13 6 6 6-6 6" />
-                <path d="M5 5v14" />
-              </svg>
-            </button>
-          ) : null}
-          {/* A finished batch has nothing left to cancel. */}
-          {!terminal ? (
-            <button
-              type="button"
-              className="adl-group-act adl-group-cancel"
-              title="Cancel batch"
-              onClick={(event) => {
-                event.stopPropagation();
-                onCancel();
-              }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
-            </button>
-          ) : null}
-          <span className={`adl-group-chevron${open ? ' open' : ''}`} aria-hidden="true">
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
+            {DlIcon.chevron}
           </span>
         </div>
       </div>
 
-      <div className="adl-group-segbar">
-        <div className="adl-batch-seg seg-done" style={{ width: `${segments.done}%` }} />
-        <div className="adl-batch-seg seg-fail" style={{ width: `${segments.failed}%` }} />
-        <div
-          className={`adl-batch-seg seg-active${active ? ' shimmer' : ''}`}
+      <div className="dlc-gbar" aria-hidden="true">
+        <i className="dlc-gbar-done" style={{ width: `${segments.done}%` }} />
+        <i className="dlc-gbar-fail" style={{ width: `${segments.failed}%` }} />
+        <i
+          className={`dlc-gbar-active${active ? ' dlc-shimmer' : ''}`}
           style={{ width: `${segments.active}%` }}
         />
       </div>
 
       {open ? (
-        <div className="adl-group-rows">
+        <div className="dlc-group-rows">
           {bucketed ? (
             <BucketedRows
               rows={rows}
@@ -421,6 +394,8 @@ export function AdlGroup({
               onToggleBucket={toggleBucket}
               onCancelRow={onCancelRow}
               onDownloadNext={onDownloadNext}
+              numbered={numbered}
+              canInspect={canInspect}
             />
           ) : (
             orderedRows.map((dl) => (
@@ -428,23 +403,25 @@ export function AdlGroup({
                 key={dl.task_id}
                 dl={dl}
                 compact
+                numbered={numbered}
+                canInspect={canInspect}
                 onCancel={onCancelRow}
                 onDownloadNext={onDownloadNext}
               />
             ))
           )}
           {rows.length === 0 && batch.phase === 'album_downloading' ? (
-            <div className="adl-group-note">
+            <div className="dlc-note">
               Downloading one release first. Track matching starts after staging.
             </div>
           ) : null}
           {rows.length === 0 && batch.phase !== 'album_downloading' ? (
-            <div className="adl-group-note">
+            <div className="dlc-note">
               {trimmed > 0 ? 'No tracks match the current filter.' : 'No tracks loaded.'}
             </div>
           ) : null}
           {rows.length > 0 && trimmed > 0 ? (
-            <div className="adl-group-note">{trimmed} more hidden by the current filter.</div>
+            <div className="dlc-note">{trimmed} more hidden by the current filter.</div>
           ) : null}
         </div>
       ) : null}
@@ -454,6 +431,9 @@ export function AdlGroup({
 
 /** How many "earlier" items (rows or album folds) show before the fold. */
 export const EARLIER_FOLD = 12;
+
+/** Album runs this short start open; longer ones fold to their header. */
+const EARLIER_OPEN_MAX = 3;
 
 /** "12 done" / "10 done · 2 failed" for one folded album line. */
 function earlierAlbumSummary(rows: AdlDownload[]): string {
@@ -466,17 +446,70 @@ function earlierAlbumSummary(rows: AdlDownload[]): string {
 }
 
 type EarlierItem =
-  | { kind: 'row'; row: AdlDownload }
-  | { kind: 'album'; key: string; name: string; artist: string; rows: AdlDownload[] };
+  | { kind: 'row'; row: AdlDownload; day: number | null }
+  | {
+      kind: 'album';
+      key: string;
+      name: string;
+      artist: string;
+      rows: AdlDownload[];
+      day: number | null;
+    };
+
+/** when a settled row finished: history rows carry created_at, live ones a status stamp. */
+function finishedAt(dl: AdlDownload): number | null {
+  return dl.is_persistent_history ? parseStamp(dl.created_at) : parseStamp(dl.timestamp);
+}
+
+/** One album run inside a day: a small header, its rows under it. */
+function EarlierAlbum({
+  item,
+  onCancelRow,
+}: {
+  item: Extract<EarlierItem, { kind: 'album' }>;
+  onCancelRow: (dl: AdlDownload) => void | Promise<void>;
+}) {
+  const [open, setOpen] = useState(item.rows.length <= EARLIER_OPEN_MAX);
+  const podcast = item.rows.every((dl) => dl.event_type === 'podcast');
+  const art = item.rows.find((dl) => dl.artwork)?.artwork;
+  return (
+    <div className="dlc-sub-group">
+      <button
+        type="button"
+        className={'dlc-sub-head'}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="dlc-fold-chev" aria-hidden="true">
+          {DlIcon.fold}
+        </span>
+        {art ? <img className="dlc-sub-art" src={art} alt="" /> : null}
+        <span className="dlc-sub-text">
+          {podcast ? <span className="dlc-eyebrow">Podcast</span> : null}
+          <span className="dlc-sub-name">{item.name}</span>
+          {item.artist ? (
+            <span className="dlc-sub-artist">
+              <DlAvatar src={item.rows.find((dl) => dl.artist_image)?.artist_image} />
+              {item.artist}
+            </span>
+          ) : null}
+        </span>
+        <span className="dlc-sub-summary">{earlierAlbumSummary(item.rows)}</span>
+      </button>
+      {open
+        ? item.rows.map((dl) => <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />)
+        : null}
+    </div>
+  );
+}
 
 /**
  * Rows with no live batch: aged-out history plus anything batchless.
  *
- * Two folds keep this tail short. Same-album history runs collapse to one
- * line each — Boulder's real install had twelve identical Romance (Deluxe
- * Edition) rows stacked full height (Aug 27 screenshot). And past
- * EARLIER_FOLD items the whole section folds, because this is where
- * 300-row payloads live.
+ * Grouped by day, newest first, with real times. same-album runs collapse
+ * under one header (twelve identical Romance (Deluxe Edition) rows stacked
+ * full height was the Aug 27 complaint), and past EARLIER_FOLD items the
+ * rest folds, because this is where 300-row payloads live.
  */
 export function AdlEarlierGroup({
   rows,
@@ -486,18 +519,9 @@ export function AdlEarlierGroup({
   onCancelRow: (dl: AdlDownload) => void | Promise<void>;
 }) {
   const [showAll, setShowAll] = useState(false);
-  const [openAlbums, setOpenAlbums] = useState<ReadonlySet<string>>(new Set());
   if (rows.length === 0) return null;
 
-  const toggleAlbum = (name: string) =>
-    setOpenAlbums((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-
-  // a batchless row that is still moving is not history — it stays a plain
+  // a batchless row that is still moving is not history. it stays a plain
   // row on top and never hides inside an album fold
   const live = rows.filter((dl) => ['active', 'queued'].includes(statusClass(dl.status)));
   const settled = rows.filter((dl) => !['active', 'queued'].includes(statusClass(dl.status)));
@@ -505,17 +529,18 @@ export function AdlEarlierGroup({
   const grouped: EarlierItem[] = [];
   const byKey = new Map<string, Extract<EarlierItem, { kind: 'album' }>>();
   for (const row of settled) {
-    // group by the ALBUM, not the batch name — history rows carry the
-    // download source as their batch name, and "Soulseek · 45 done" says
-    // nothing. the album run is the unit a human recognizes.
-    const key = row.album ? `${row.artist}|${row.album}` : '';
+    const day = finishedAt(row);
+    // group by the ALBUM on the same day, not the batch name. history rows
+    // carry the download source as their batch name, and "Soulseek · 45
+    // done" says nothing. the album run is the unit a human recognizes.
+    const key = row.album ? `${dayKey(day)}|${row.artist}|${row.album}` : '';
     if (!key) {
-      grouped.push({ kind: 'row', row });
+      grouped.push({ kind: 'row', row, day });
       continue;
     }
     let album = byKey.get(key);
     if (!album) {
-      album = { kind: 'album', key, name: row.album, artist: row.artist || '', rows: [] };
+      album = { kind: 'album', key, name: row.album, artist: row.artist || '', rows: [], day };
       byKey.set(key, album);
       grouped.push(album);
     }
@@ -523,57 +548,51 @@ export function AdlEarlierGroup({
   }
   // an album of one is just a row
   const items: EarlierItem[] = grouped.map((item) =>
-    item.kind === 'album' && item.rows.length === 1 ? { kind: 'row', row: item.rows[0] } : item,
+    item.kind === 'album' && item.rows.length === 1
+      ? { kind: 'row', row: item.rows[0], day: item.day }
+      : item,
   );
 
   const shown = showAll ? items : items.slice(0, EARLIER_FOLD);
   const hidden = items.length - shown.length;
 
+  const now = Date.now();
+  const days: { key: string; label: string; items: EarlierItem[] }[] = [];
+  for (const item of shown) {
+    const key = dayKey(item.day) || 'earlier';
+    let bucket = days[days.length - 1];
+    if (!bucket || bucket.key !== key) {
+      bucket = { key, label: dayLabel(item.day, now), items: [] };
+      days.push(bucket);
+    }
+    bucket.items.push(item);
+  }
+
   return (
-    <div className="adl-earlier">
-      <div className="adl-section-header">Earlier ({rows.length})</div>
-      {live.map((dl) => (
-        <AdlRow key={dl.task_id} dl={dl} onCancel={onCancelRow} />
-      ))}
-      {shown.map((item) =>
-        item.kind === 'row' ? (
-          <AdlRow key={item.row.task_id} dl={item.row} onCancel={onCancelRow} />
-        ) : (
-          <div className="adl-earlier-album" key={item.key}>
-            <button
-              type="button"
-              className={`adl-earlier-album-header${openAlbums.has(item.key) ? ' open' : ''}`}
-              onClick={() => toggleAlbum(item.key)}
-            >
-              <span className="adl-bucket-fold-chevron" aria-hidden="true">
-                <svg
-                  width="11"
-                  height="11"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                >
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              </span>
-              {item.rows[0].artwork ? (
-                <img className="adl-earlier-album-thumb" src={item.rows[0].artwork} alt="" />
-              ) : null}
-              <span className="adl-earlier-album-name">{item.name}</span>
-              {item.artist ? <span className="adl-earlier-album-artist">{item.artist}</span> : null}
-              <span className="adl-earlier-album-summary">{earlierAlbumSummary(item.rows)}</span>
-            </button>
-            {openAlbums.has(item.key)
-              ? item.rows.map((dl) => (
-                  <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />
-                ))
-              : null}
+    <div className="dlc-earlier">
+      {live.length ? (
+        <div className="dlc-list">
+          {live.map((dl) => (
+            <AdlRow key={dl.task_id} dl={dl} onCancel={onCancelRow} />
+          ))}
+        </div>
+      ) : null}
+      {days.map((bucket) => (
+        <section key={bucket.key} className="dlc-day">
+          <h3 className="dlc-section-label">{bucket.label}</h3>
+          <div className="dlc-list">
+            {bucket.items.map((item) =>
+              item.kind === 'row' ? (
+                <AdlRow key={item.row.task_id} dl={item.row} onCancel={onCancelRow} />
+              ) : (
+                <EarlierAlbum key={item.key} item={item} onCancelRow={onCancelRow} />
+              ),
+            )}
           </div>
-        ),
-      )}
+        </section>
+      ))}
       {hidden > 0 || showAll ? (
-        <button type="button" className="adl-earlier-more" onClick={() => setShowAll((v) => !v)}>
+        <button type="button" className="dlc-more-link" onClick={() => setShowAll((v) => !v)}>
           {showAll ? 'Show fewer' : `Show ${hidden} more`}
         </button>
       ) : null}
@@ -723,7 +742,7 @@ export interface AdlGroupedListProps {
 
 /**
  * The Downloads view: batches as groups, then the batchless tail, then the
- * recent-history fold. One rendering of the truth — this replaces both the
+ * recent-history fold. One rendering of the truth. this replaces both the
  * old flat list AND the 366px side panel.
  */
 export function AdlGroupedList({
@@ -755,7 +774,7 @@ export function AdlGroupedList({
 
   if (batches.length === 0 && rows.length === 0) {
     return (
-      <div className="adl-list adl-group-grid" id="adl-list">
+      <div className="adl-list dlc-stack" id="adl-list">
         <AdlDownloadsEmpty onNavigate={onNavigate} />
         <AdlRecentHistory history={history} onOpenFullHistory={onOpenFullHistory} />
       </div>
@@ -763,7 +782,7 @@ export function AdlGroupedList({
   }
 
   return (
-    <div className="adl-list adl-group-grid" id="adl-list">
+    <div className="adl-list dlc-stack" id="adl-list">
       {shownBatches.map((batch) => (
         <AdlGroup
           key={batch.batch_id}

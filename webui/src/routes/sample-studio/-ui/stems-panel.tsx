@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { Spinner } from '@/components/primitives';
+
 import { requestStems, stemAudioUrl, studioStemsStatusQueryOptions } from '../-sample-studio.api';
 import { STEM_LABEL, type StemName, type StemsInfo, type TrackId } from '../-sample-studio.types';
 import { PlayIcon, StopIcon } from './icons';
@@ -213,7 +215,7 @@ export default function StemsPanel({ trackId, activeStem, onSelectStem }: StemsP
 
         {busy && (
           <div className={styles.progress} role="status" aria-live="polite">
-            <div className={styles.spinner} aria-hidden="true" />
+            <Spinner className={styles.spinner} />
             <span>{message}. This takes a few minutes, keep editing meanwhile.</span>
           </div>
         )}

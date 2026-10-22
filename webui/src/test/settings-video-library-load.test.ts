@@ -16,6 +16,7 @@ function setup() {
                 download_path: '/downloads',
                 movies_path: '/movies',
                 tv_path: '/tv',
+                anime_path: '/anime',
                 movies_additional_paths: ['/movies2'],
                 tv_additional_paths: ['/tv2'],
                 youtube_path: '/youtube',
@@ -88,4 +89,18 @@ it('loads, edits, adds and removes additional video library paths', async () => 
   (doc.querySelector('#video-movies-additional-paths button') as HTMLButtonElement).click();
   body = JSON.parse(calls.at(-1)![1].body as string);
   expect(body.movies_additional_paths).toEqual(['/movies3']);
+});
+
+it('loads the optional anime folder and saves it on change', async () => {
+  const { doc, fetcher, show } = setup();
+  show();
+  const anime = doc.getElementById('video-anime-path') as HTMLInputElement;
+  await waitFor(() => expect(anime.disabled).toBe(false));
+  expect(anime.value).toBe('/anime');
+  anime.value = '/media/anime';
+  anime.dispatchEvent(new Event('change'));
+  const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+  const body = JSON.parse(calls.at(-1)![1].body as string);
+  expect(body.anime_path).toBe('/media/anime');
+  expect(body.tv_path).toBe('/tv');
 });

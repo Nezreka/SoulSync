@@ -11,7 +11,7 @@ import threading
 import time
 from functools import lru_cache
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Union
 from dataclasses import dataclass
 from pathlib import Path
 from utils.logging_config import get_logger
@@ -414,6 +414,12 @@ def mirrored_cover_from_match(extra_data: dict) -> str:
                     return image
     return ''
 
+
+
+def _register_py_lower(conn) -> None:
+    """sqlite's LOWER() only folds ascii, so "MARCØS" never equals "marcøs".
+    python's lower() does. register it per connection for the name lookups."""
+    conn.create_function("PY_LOWER", 1, lambda v: v.lower() if isinstance(v, str) else v, deterministic=True)
 
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
@@ -1952,6 +1958,12 @@ class MusicDatabase:
                 _ensure_client_matches(cursor)
             except Exception as e:
                 logger.error(f"client_music_matches schema init failed: {e}")
+            # artists and albums added through the lidarr compatible api
+            try:
+                from core.lidarr_compat.store import ensure_schema as _ensure_lidarr_compat
+                _ensure_lidarr_compat(cursor)
+            except Exception as e:
+                logger.error(f"lidarr_compat schema init failed: {e}")
             self._requeue_similar_artists_rematch(cursor)
             self._purge_beatport_positional_matches(cursor)
             self._normalize_genres_to_json(cursor)
@@ -2982,7 +2994,7 @@ class MusicDatabase:
             cursor.execute("""
                 UPDATE mirrored_playlists
                 SET upstream_playlist_id = CASE
-                    WHEN source_playlist_id LIKE '%_req_%' THEN
+                    WHEN instr(source_playlist_id, '_req_') > 0 THEN
                         substr(source_playlist_id, 1, instr(source_playlist_id, '_req_') - 1)
                     ELSE source_playlist_id
                 END
@@ -10239,13 +10251,20 @@ class MusicDatabase:
                 # Find duplicate artist groups (same name + server_source + library
                 # owner, different IDs). two profiles' own copies of one artist are
                 # two rows on purpose (#1199), never a duplicate to merge.
-                cursor.execute("""
-                    SELECT name, server_source, GROUP_CONCAT(id) as ids, COUNT(*) as cnt
-                    FROM artists
-                    GROUP BY name, server_source, owner_profile_id
-                    HAVING cnt > 1
-                """)
-                duplicate_groups = cursor.fetchall()
+                # #1797: names compare with dashes folded, so alt-J spelled with
+                # a U+2010 hyphen groups with the ascii one. grouped in python,
+                # sqlite can't fold them.
+                from core.text.normalize import fold_dashes
+                cursor.execute("SELECT id, name, server_source, owner_profile_id FROM artists")
+                groups = {}
+                for r in cursor.fetchall():
+                    key = (fold_dashes(r['name']), r['server_source'], r['owner_profile_id'])
+                    groups.setdefault(key, []).append(r)
+                duplicate_groups = [
+                    {'name': members[0]['name'], 'server_source': members[0]['server_source'],
+                     'ids': [m['id'] for m in members]}
+                    for members in groups.values() if len(members) > 1
+                ]
 
                 if not duplicate_groups:
                     logger.debug("No duplicate artists found")
@@ -10263,11 +10282,14 @@ class MusicDatabase:
                     'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
                     'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
                 ]
+                provider_id_cols = ['musicbrainz_id', 'spotify_artist_id', 'itunes_artist_id',
+                                    'audiodb_id', 'deezer_id', 'jiosaavn_id', 'genius_id',
+                                    'tidal_id', 'qobuz_id', 'discogs_id', 'amazon_id']
 
                 for group in duplicate_groups:
                     artist_name = group['name']
                     server_source = group['server_source']
-                    ids = group['ids'].split(',')
+                    ids = group['ids']
 
                     logger.info(f"Merging duplicate artist '{artist_name}' ({server_source}): IDs {ids}")
 
@@ -10289,6 +10311,9 @@ class MusicDatabase:
                                 best_score = score
                                 best_id = aid
 
+                    cursor.execute("SELECT * FROM artists WHERE id = ?", (best_id,))
+                    keeper = cursor.fetchone()
+
                     # Merge enrichment data from all duplicates into the keeper
                     for aid in ids:
                         if aid == best_id:
@@ -10297,6 +10322,17 @@ class MusicDatabase:
                         donor = cursor.fetchone()
                         if not donor:
                             continue
+
+                        # a different spelling only merges when no provider id
+                        # disagrees: two artists can share a folded name
+                        if keeper and donor['name'] != keeper['name']:
+                            clash = next((col for col in provider_id_cols
+                                          if _row_value(donor, col) and _row_value(keeper, col)
+                                          and str(_row_value(donor, col)) != str(_row_value(keeper, col))), None)
+                            if clash:
+                                logger.info(f"   Not merging '{donor['name']}' ID {aid} into "
+                                            f"'{keeper['name']}' {best_id}: {clash} differs")
+                                continue
 
                         # Fill NULL enrichment columns on keeper from this duplicate
                         set_parts = []
@@ -20174,7 +20210,21 @@ class MusicDatabase:
                         a.qobuz_id,
                         a.soul_id,
                         a.amazon_id,
-                        a.server_source
+                        a.server_source,
+                        a.aliases,
+                        a.soul_id_path,
+                        a.discogs_bio,
+                        a.discogs_members,
+                        a.discogs_urls,
+                        a.jiosaavn_id,
+                        a.discogs_match_status,
+                        a.discogs_last_attempted,
+                        a.amazon_match_status,
+                        a.amazon_last_attempted,
+                        a.jiosaavn_match_status,
+                        a.jiosaavn_last_attempted,
+                        a.art_locked,
+                        a.genres_locked
                     FROM artists a
                     WHERE {where_clause}
                         AND a.id = (SELECT MIN(a2.id) FROM artists a2
@@ -20307,6 +20357,20 @@ class MusicDatabase:
                         'qobuz_id': row['qobuz_id'],
                         'soul_id': row['soul_id'],
                         'amazon_id': row['amazon_id'],
+                        'aliases': row['aliases'],
+                        'soul_id_path': row['soul_id_path'],
+                        'discogs_bio': row['discogs_bio'],
+                        'discogs_members': row['discogs_members'],
+                        'discogs_urls': row['discogs_urls'],
+                        'jiosaavn_id': row['jiosaavn_id'],
+                        'discogs_match_status': row['discogs_match_status'],
+                        'discogs_last_attempted': row['discogs_last_attempted'],
+                        'amazon_match_status': row['amazon_match_status'],
+                        'amazon_last_attempted': row['amazon_last_attempted'],
+                        'jiosaavn_match_status': row['jiosaavn_match_status'],
+                        'jiosaavn_last_attempted': row['jiosaavn_last_attempted'],
+                        'art_locked': row['art_locked'],
+                        'genres_locked': row['genres_locked'],
                         'album_count': counts_map.get(row['id'], (0, 0))[0],
                         'track_count': counts_map.get(row['id'], (0, 0))[1],
                         'upgradable_count': upgradable_map.get(row['id'], 0),
@@ -22886,7 +22950,7 @@ class MusicDatabase:
 
     # ── Full-row API query methods (return dicts, not dataclasses) ────────
 
-    def api_get_artist(self, artist_id: int) -> Optional[Dict[str, Any]]:
+    def api_get_artist(self, artist_id: Union[int, str]) -> Optional[Dict[str, Any]]:
         """Get artist by ID with ALL columns as a dict."""
         try:
             conn = self._get_connection()
@@ -22898,7 +22962,7 @@ class MusicDatabase:
             logger.error(f"API: Error getting artist {artist_id}: {e}")
             return None
 
-    def api_get_album(self, album_id: int) -> Optional[Dict[str, Any]]:
+    def api_get_album(self, album_id: Union[int, str]) -> Optional[Dict[str, Any]]:
         """Get album by ID with ALL columns as a dict."""
         try:
             conn = self._get_connection()
@@ -22910,7 +22974,7 @@ class MusicDatabase:
             logger.error(f"API: Error getting album {album_id}: {e}")
             return None
 
-    def api_get_track(self, track_id: int) -> Optional[Dict[str, Any]]:
+    def api_get_track(self, track_id: Union[int, str]) -> Optional[Dict[str, Any]]:
         """Get track by ID with ALL columns as a dict, plus artist_name and album_title."""
         try:
             conn = self._get_connection()
@@ -22928,7 +22992,7 @@ class MusicDatabase:
             logger.error(f"API: Error getting track {track_id}: {e}")
             return None
 
-    def api_get_albums_by_artist(self, artist_id: int) -> List[Dict[str, Any]]:
+    def api_get_albums_by_artist(self, artist_id: Union[int, str]) -> List[Dict[str, Any]]:
         """Get all albums for an artist with ALL columns."""
         try:
             conn = self._get_connection()
@@ -22942,7 +23006,7 @@ class MusicDatabase:
             logger.error(f"API: Error getting albums for artist {artist_id}: {e}")
             return []
 
-    def api_get_tracks_by_album(self, album_id: int) -> List[Dict[str, Any]]:
+    def api_get_tracks_by_album(self, album_id: Union[int, str]) -> List[Dict[str, Any]]:
         """Get all tracks for an album with ALL columns, plus artist_name."""
         try:
             conn = self._get_connection()
@@ -22986,7 +23050,10 @@ class MusicDatabase:
         Args:
             table: 'artists', 'albums', or 'tracks'
             provider: 'spotify', 'musicbrainz', 'itunes', 'deezer', 'audiodb',
-                      'tidal', 'qobuz', 'genius' (genius: artists/tracks only)
+                      'tidal', 'qobuz', 'genius', 'discogs', 'amazon',
+                      'jiosaavn', 'bandcamp' (genius: artists/tracks only;
+                      bandcamp: albums/tracks only; discogs: artists/albums
+                      only — tracks carry no Discogs ID)
         """
         column_map = {
             "artists": {
@@ -22998,6 +23065,9 @@ class MusicDatabase:
                 "tidal": "tidal_id",
                 "qobuz": "qobuz_id",
                 "genius": "genius_id",
+                "discogs": "discogs_id",
+                "amazon": "amazon_id",
+                "jiosaavn": "jiosaavn_id",
             },
             "albums": {
                 "spotify": "spotify_album_id",
@@ -23007,6 +23077,10 @@ class MusicDatabase:
                 "audiodb": "audiodb_id",
                 "tidal": "tidal_id",
                 "qobuz": "qobuz_id",
+                "discogs": "discogs_id",
+                "amazon": "amazon_id",
+                "jiosaavn": "jiosaavn_id",
+                "bandcamp": "bandcamp_id",
             },
             "tracks": {
                 "spotify": "spotify_track_id",
@@ -23017,6 +23091,13 @@ class MusicDatabase:
                 "tidal": "tidal_id",
                 "qobuz": "qobuz_id",
                 "genius": "genius_id",
+                # No "discogs" entry: tracks have no discogs_id column
+                # (Discogs enrichment is artist/album level), so a discogs
+                # track lookup answers not-found instead of erroring on a
+                # missing column.
+                "amazon": "amazon_id",
+                "jiosaavn": "jiosaavn_id",
+                "bandcamp": "bandcamp_id",
             },
         }
         if table not in column_map or provider not in column_map[table]:
@@ -24162,6 +24243,63 @@ class MusicDatabase:
             logger.error("Error counting unverified library history: %s", e)
             return 0
 
+    def get_artist_thumbs_by_names(self, lower_names) -> list[tuple]:
+        """(lowercased name, thumb url) for artists the downloads page names.
+
+        library artists first, then watched artists for anyone not in the
+        library yet. lowercased on both sides because a download's artist
+        string and the media server's can differ only in case.
+        """
+        names = [n for n in dict.fromkeys(lower_names or []) if n]
+        if not names:
+            return []
+        out = []
+        try:
+            conn = self._get_connection()
+            _register_py_lower(conn)
+            cursor = conn.cursor()
+            for i in range(0, len(names), 500):
+                chunk = names[i:i + 500]
+                marks = ",".join("?" * len(chunk))
+                cursor.execute(f"""
+                    SELECT PY_LOWER(name), thumb_url FROM artists
+                    WHERE PY_LOWER(name) IN ({marks}) AND thumb_url IS NOT NULL AND thumb_url != ''
+                """, chunk)
+                out.extend((r[0], r[1]) for r in cursor.fetchall())
+                cursor.execute(f"""
+                    SELECT PY_LOWER(artist_name), image_url FROM watchlist_artists
+                    WHERE PY_LOWER(artist_name) IN ({marks}) AND image_url IS NOT NULL AND image_url != ''
+                """, chunk)
+                out.extend((r[0], r[1]) for r in cursor.fetchall())
+        except Exception as e:
+            logger.debug("artist thumb lookup failed: %s", e)
+        return out
+
+    def get_album_thumbs_by_titles(self, lower_titles) -> list[tuple]:
+        """(lowercased artist, lowercased album, thumb url) for album titles the
+        downloads page names. the caller matches the artist, so two albums
+        called "Greatest Hits" don't swap covers."""
+        titles = [t for t in dict.fromkeys(lower_titles or []) if t]
+        if not titles:
+            return []
+        out = []
+        try:
+            conn = self._get_connection()
+            _register_py_lower(conn)
+            cursor = conn.cursor()
+            for i in range(0, len(titles), 500):
+                chunk = titles[i:i + 500]
+                marks = ",".join("?" * len(chunk))
+                cursor.execute(f"""
+                    SELECT PY_LOWER(ar.name), PY_LOWER(al.title), al.thumb_url
+                    FROM albums al JOIN artists ar ON ar.id = al.artist_id
+                    WHERE PY_LOWER(al.title) IN ({marks}) AND al.thumb_url IS NOT NULL AND al.thumb_url != ''
+                """, chunk)
+                out.extend((r[0], r[1], r[2]) for r in cursor.fetchall())
+        except Exception as e:
+            logger.debug("album thumb lookup failed: %s", e)
+        return out
+
     def get_library_history_unverified(self, exclude_download_sources=()) -> list[dict]:
         """Return every library_history row that still needs human confirmation.
 
@@ -24838,7 +24976,7 @@ class MusicDatabase:
                 return out
         return []
 
-    def api_list_albums(self, search: str = "", artist_id: int = None,
+    def api_list_albums(self, search: str = "", artist_id: Union[int, str] = None,
                         year: int = None, page: int = 1, limit: int = 50) -> Dict[str, Any]:
         """List/search albums with pagination, returning full rows."""
         try:
@@ -25536,7 +25674,9 @@ class MusicDatabase:
             image_url=mirror.get('image_url'),
             quality_profile_id=mirror.get('quality_profile_id'),
             is_request_list=1,
-            auto_remove_fulfilled=1 if original_source in ('spotify', 'spotify_public') else 0,
+            # off until the user turns it on: it deletes tracks from their real
+            # spotify playlist, and a fuzzy match can be the wrong song
+            auto_remove_fulfilled=0,
             upstream_playlist_id=upstream_id,
         )
 

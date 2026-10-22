@@ -482,6 +482,36 @@ def record_failed_attempt(wishlist_service, track_data, failure_reason, profile_
         return False
 
 
+def record_failed_attempts_for_tracks(wishlist_service, tracks, failure_reason, profile_id,
+                                      *, logger=logger) -> int:
+    """Stamp one failed attempt on every track of a batch that failed as a whole.
+
+    A terminal album-bundle failure (e.g. a Usenet release SABnzbd aborts)
+    ends the batch before any per-track task exists, so
+    ``add_failed_tracks_to_wishlist`` never sees these tracks and never calls
+    ``record_failed_attempt``. They keep ``retry_count = 0`` and
+    ``last_attempted = NULL``, which the retry backoff reads as "never tried":
+    the same dead release is fetched again on every wishlist cycle.
+
+    Tracks that are not on the wishlist update no row, so this is safe for
+    any batch. Best-effort, returns the number of tracks it stamped.
+    """
+    stamped = 0
+    for track in tracks or []:
+        if not isinstance(track, dict):
+            continue
+        sp_id = track.get('id') or track.get('spotify_track_id')
+        if not sp_id:
+            continue
+        try:
+            if record_failed_attempt(
+                    wishlist_service, {**track, 'id': sp_id}, failure_reason, profile_id):
+                stamped += 1
+        except Exception:
+            logger.debug("attempt stamp failed for %s", sp_id, exc_info=True)
+    return stamped
+
+
 def recover_uncaptured_failed_tracks(
     batch: Dict[str, Any],
     download_tasks: Dict[str, Dict[str, Any]],

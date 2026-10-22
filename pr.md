@@ -1,55 +1,73 @@
-# soulsync 3.5.7: `dev` → `main`
+# soulsync 3.5.9: `dev` → `main`
 
-beatport charts become real playlists, playlist sync gets a second pass for tracks it couldn't match, albums can complete themselves, spoken-word artists can route to the audiobook library, and video wishlist episodes finally find their releases. scope: everything on dev since 3.5.6.
+soulsync can answer as lidarr and as an mcp server now, first-run setup is rebuilt as a guided flow, the downloads page and the wishlist are rebuilt on both sides, you can choose what new sign-ups start with, anime gets its own library folder, and a stack of matching, library and video fixes. scope: everything on dev since 3.5.8.
 
-## beatport
+## api
 
-- every chart opens as a playlist to identify. the top 10s, top 100s, genre lists and dj charts all went straight to the download modal as a "Various Artists" compilation named after the chart, never matched to a metadata source. that's where the "Hype Top 10" albums came from (thanks maV on discord). now every list opens through beatport discovery: identify, sync, download.
-- beatport tracks are identified by isrc first, and chart tracks get real ids. old positional matches are purged.
-- mirrored beatport lists refresh and join the pipeline. a mirror was keyed by a random hash, so refresh skipped it and a mirrored chart froze the day it was made. now new tracks come in, dropped ones go out, and live lists can go on the auto-sync board.
-- save a dated snapshot of a chart. "save snapshot" keeps today's list as its own mirror ("Hype Top 10 · 2026-10-16") that never refreshes but still syncs and downloads.
-- beatport as an enrichment source. a new last step in tagging looks the track up by isrc and writes the label's own bpm, key, label and catalog number. only for tracks that look electronic unless "look up every track" is on.
-- four browse sections were empty. they read the page json now.
+- lidarr compatible api. singarr and musicseerr 1.x only talk to lidarr, so point their lidarr url at `http://<host>:8008/lidarr` with an admin api key and they run against soulsync. requested albums land on the wishlist of the profile picked in settings, through the same add the album modal uses, and a profile without download rights means every request waits for approval. off until turned on in settings > advanced > soulsync api (thanks @Topaze77 for the request) (#1799).
+- mcp endpoint at `/mcp`, so an ai client can drive soulsync. 35 tools, almost all one `/api/v1` call each, replayed with the caller's own key, so scopes, gates and rate limits are the rest api's. settings, keys, profiles and blocklist clears are not tools. also off until turned on.
 
-## playlist sync
+## sign-ups
 
-- a stale cached match can no longer pin the wrong song. the wrong song drops off on the next sync, no manual fix needed (thanks @kevin2xk) (#1721, #1722).
-- a spotify track the primary source misses gets a second pass. tracks deezer couldn't match on a spotify playlist used to become wing it. now they're looked up by their own spotify id first, so they download and land on the playlist like the rest (thanks @kevin2xk) (#1721).
-- every track of a mirrored playlist says where it stands. the playlist card shows "N need a match" and the playlist view shows the state of each track (#1721).
-- scheduled auto-sync regenerates discovery shuffle mirrors instead of rechecking the saved one, so new tracks actually download and reach the remote playlist (thanks @Bloopser) (#1724, #1725).
-- a refused navidrome playlist write no longer reads as 0% synced, a failed sync drops the smart-skip fingerprint so the next run retries, and personalized pipelines report failed syncs too (thanks @zikasak) (#1726).
-- mirrored playlists stop hanging on load. the count query scanned several id columns at once on big libraries; it runs one query per provider now (thanks @zikasak) (#1698).
+- choose what new sign-ups start with. settings > security has a new sign-ups block: the side a profile made by plex sign-in starts on (music, movies and tv, or both) and an optional request limit. nothing set means exactly what sign-up made before (thanks @PapaBearDoes) (#1818).
+- members can open video requests. a request-only profile could file a request from a card but never open the page to see or withdraw it. it follows the music rule now: admins see it, and so does anyone without download rights (thanks @PapaBearDoes) (#1819).
 
-## automatic album completion
+## first-run setup
 
-- new automation that finishes incomplete albums in your library, with cooldowns and retries so the same album isn't hammered (thanks @kiwijar) (#1711).
-- follow-up: albums that kept failing sat in cooldown and took every slot each run. max albums now caps what gets queued, and the cooldown claim runs off the downloads lock.
+- the setup wizard is rebuilt as a guided react flow. it looks around first (docker or not, and plex, jellyfin, navidrome, slskd, prowlarr, qbittorrent and sabnzbd on the network), then walks admin and unlock, media server with plex pin sign-in, folders checked live, ordered download sources and a quality preset, accounts, movies and tv, artists to follow and a playlist to mirror.
+- nothing saves until the last step, which saves and then checks every part for real. finish later picks up where it stopped, and the dashboard shows a "finish setting up" checklist.
 
-## audiobooks
+## downloads page
 
-- route chosen artists to the audiobook library. children's audio plays and other spoken word only show up in the music search and landed in the music library. an opt-in per-artist route sends their downloads to the audiobook folder, with a web ui to add, remove and move existing albums (thanks @SimpleSimonLA) (#1714).
+- rebuilt for music and video on one row grammar. status lives on the art (a ring while it downloads, a spinner while it searches, play once it's done), one visible action per row with the rest in ⋯, and clicking a row opens a sheet that says what happened step by step, with asked for vs got.
+- album batches read like a tracklist, playlist batches get a cover mosaic, history is grouped by day, and failed music tracks open the candidate inspector from the row.
+- rows get their artist photo and cover from the library when the task didn't carry one, and a video that's downloading actually reads as downloading instead of a lone "0%".
 
-## video
+## wishlist
 
-- releases named by the scene's episode numbering match. the wishlist numbers episodes the tmdb way and scene releases use tvdb's, and for many shows they disagree (60 Minutes S59E25 is tvdb S58E48), so every release read as the wrong episode. episodes are now mapped to their tvdb number by air date.
-- wished episodes stop throwing away the releases they find. an episode's "year" was its air year, so "Dark.Matter.2024.S02E08" was "wrong year (2024, wanted 2026)". it's the show's year now, and year-titled shows like Big Brother (2023) stop failing the title check.
-- video stats api: `GET /api/v1/video/stats` for library, database and download counts, plus a status filter on video downloads (thanks @hilburn) (#1723).
-- dashboard download tiles read the live queue instead of a table nothing writes, and the episodes tile counts files you have, not missing rows.
+- the music nebula groups artists by what's wrong, worst first: downloaded then rejected, no match found, download keeps failing, still hunting. each zone has a retry that only touches its own tracks, and clicking an artist opens a panel beside the field that says why in plain words ("only ~30s of 3:54 actually played") with grab, retry and open artist.
+- the video wishlist moved onto the same page: movies, tv and youtube tabs with the same hero, zones and side panel. every action it had is still there.
 
-## imports
+## matching
 
-- an album you already own no longer fails every track. the library check can't always prove a track is the same one, so it lets it through, and the import found your copy already in place and kept it. auto-import then called that a failure, so whole albums landed in needs attention. those tracks now count as already in library, and the manual import page stops calling them imported (thanks SeadogsBooty on discord).
-- the auto-import scan log says how many staging folders are already handled, so it no longer reads like the same folders are re-imported every minute.
+- acoustid judges a file by its real length. pyacoustid dropped the duration acoustid sends, so every duration guard read nothing. with lengths in hand, a remix filed under the plain title or a different length cut stops failing a correct file, and a match that's a wildly different length stops passing (thanks @QT3496) (#1804).
+- duration quarantines name the duration tolerance setting so you can actually find it, and the help text says how auto behaves (thanks @QT3496) (#1805).
+- youtube music results get scored on their own title and artist. the matcher read `videoId||title` like a soulseek path, so the id swamped the title and the artist was never found, and an exact match like sugar by maroon 5 got rejected (thanks @andreamassaro9) (#1817).
+- k/da and other slashed names stop getting skipped as "by other artists". names compare case and punctuation blind, and a slash only splits inside each credit (thanks chung man on discord).
+
+## sync and review
+
+- append drops an old wrong match once the right track is on the playlist, so the el puffin "seville" from a broken sync stops sitting next to the right one. navidrome only for now (thanks @kevin2xk) (#1801).
+- deleting a wrong download in review blacklists its source, so the next sync doesn't pull the exact same file again (thanks @kevin2xk) (#1801).
 
 ## library
 
-- plex paths resolve when a folder differs only by case. after "Bring Me the Horizon" became "Bring Me The Horizon", every exact check missed on a case-sensitive mount.
+- redownload with "delete old file" no longer leaves two library rows when the new file lands at a different path. the original row gets repointed instead (thanks @glebosotov) (#1810).
+- alt-J and friends stop splitting into two artists when one source uses a unicode hyphen (thanks @glebosotov) (#1797).
+- batch tag writing only downloads covers for the tracks it actually writes (thanks @glebosotov) (#1798).
+- dead file findings close once the track is gone or the file is back, and fix refuses one whose file is on disk (thanks @splitsec2) (#1802, #1803).
+
+## video
+
+- collections stop wishlisting things nobody asked for. the franchise and universe presets started with "wishlist the movies i'm missing" ticked, and a removed movie came straight back on the nightly sync. the box starts off now, says how many titles it'll grab, and each collection feeds a movie to the wishlist once (thanks @hilburn) (#1807).
+- an optional anime library folder. episodes of anime-type shows (set by hand, or tagged with the anime genre) import there instead of the tv folder, and scans, renames and subtitles cover it. empty means off (thanks @PapaBearDoes) (#1820).
+- a usenet grab's empty release folder is removed after import (thanks @PapaBearDoes) (#1815).
+
+## audiobooks
+
+- german release names match: eszett and umlauts fold, numbers glued to titles split, and series words count as evidence when they're not already in the title (thanks @SimpleSimonLA) (#1796).
+- an mp3 whose header understates its length is measured from its bytes, so a complete 71 minute book stops reading as 7 minutes (thanks @SimpleSimonLA) (#1800).
+- a terminal album bundle failure stamps its tracks, so the wishlist stops refetching the same dead release every cycle (thanks @SimpleSimonLA) (#1795).
+
+## performance
+
+- the gpu stops pegging while a sync or wishlist download runs. the download modal stacked four blurs and the browser redid all of them every frame the rows pulse, but three sat on near-opaque surfaces and never showed. those are gone with no visible change, about half the gpu in that modal, and the wishlist hero lost one the same way (thanks @OlivierMartinez) (#1816).
 
 ## under the hood
 
-- the auto sync, now playing and settings css generations are folded into one (thanks @Thundernerd) (#1702).
-- issues page filter navigation is deduplicated (thanks @AnonymousMorris) (#1728).
+- the css token system is filled in across the legacy sheets, exact literals swapped for tokens, declarations a later copy always overrides are dropped, and six latent css bugs are fixed (thanks @Thundernerd) (#1792, #1793, #1809, #1811, #1812).
+- react modules share Spinner, Skeleton and EmptyState primitives, and hand-rolled overlays moved onto DialogFrame (thanks @Thundernerd) (#1794, #1808, #1813).
 
 ## validation
 
-- every fix shipped with regression tests and green neighboring suites, and the import fix was negative-checked (break it, watch the tests fail).
+- every fix shipped with regression tests, the matching and blur guards were negative-checked against the old code, the gpu fix was pixel-diffed and measured in real chromium on a real gpu, and the downloads, wishlist and onboarding rebuilds ran through chromium end to end.

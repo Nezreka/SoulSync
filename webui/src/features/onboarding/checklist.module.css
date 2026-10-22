@@ -1,0 +1,184 @@
+/* the dashboard's "finish setting up" card. sits with the dashboard's own
+   cards, so it borrows their radius and surface instead of the setup flow's */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #fafafa;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.ring {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.ring span {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #121214;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.titles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.titles h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.titles p {
+  margin: 0;
+  font-size: 13px;
+  color: #a1a1aa;
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: #8b8b93;
+  cursor: pointer;
+}
+
+.close:hover {
+  color: #fafafa;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.items {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+}
+
+.item + .item {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tick {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1.5px solid #52525b;
+  border-radius: 50%;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+}
+
+.tick:hover:not(:disabled) {
+  border-color: #a1a1aa;
+}
+
+.item[data-done] .tick {
+  border-color: transparent;
+  background: rgb(var(--accent-rgb));
+  color: #05140b;
+  cursor: default;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.itemTitle {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.item[data-done] .itemTitle {
+  color: #71717a;
+  text-decoration: line-through;
+}
+
+.itemDesc {
+  font-size: 13px;
+  color: #8b8b93;
+}
+
+.action {
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: transparent;
+  color: #fafafa;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.action:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.tick:focus-visible,
+.action:focus-visible,
+.close:focus-visible {
+  outline: 2px solid rgb(var(--accent-rgb));
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .card {
+    padding: 18px 16px;
+  }
+
+  .item {
+    flex-wrap: wrap;
+  }
+
+  .action {
+    margin-left: 36px;
+  }
+}

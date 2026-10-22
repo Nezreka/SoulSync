@@ -1,10 +1,7 @@
 /**
  * The video downloads Review pane: the browsable recycle bin (restore /
- * purge) + the release blocklist inline.
- *
- * A React port of the review half of
- * webui/static/video/video-downloads-tabs.js, reusing the same .adl-* markup
- * vocabulary so the existing CSS applies unchanged.
+ * purge) + the release blocklist inline, on the same rows as the music
+ * Review view (dl-parts).
  */
 
 import { useCallback, useState } from 'react';
@@ -28,6 +25,8 @@ import {
   vdlFmtAge,
   vdlFmtBytes,
 } from '../-vdl.helpers';
+import { BinStrip } from './adl-review';
+import { DlButton, DlFileBadge, DlGlyph, DlMore, DlSegmented, fileExt } from './dl-parts';
 
 const toast = (message: string, type: string) => window.showToast?.(message, type);
 
@@ -93,6 +92,11 @@ export function useVdlReview(): VdlReviewController {
   };
 }
 
+/** "MKV" from a bin entry's name. */
+function binExt(name: string): string {
+  return fileExt(vdlBinDisplayName(name), name);
+}
+
 function RecycleRows({
   bin,
   onRestore,
@@ -103,48 +107,56 @@ function RecycleRows({
   onPurge: (trashDir: string | null | undefined, name: string) => void;
 }) {
   const items = bin.items || [];
-
+  const total = items.reduce((n, e) => n + (Number(e.size) || 0), 0);
   return (
     <>
-      <div className="adl-review-explainer">
-        files removed by upgrades, retention and dismissed imports land here instead of dying
-        {bin.recycle_enabled === false
-          ? ' — recycling is currently OFF in organization settings, deletes are permanent'
-          : ''}
-        . restore puts a file back exactly where it was; entries older than the tracker restore into
-        _restored for a rescan. auto-purge after {bin.keep_days ?? 7} days.
-      </div>
+      <BinStrip
+        size={vdlFmtBytes(total) || '0 B'}
+        count={items.length}
+        line={`Files removed by upgrades, retention and dismissed imports land here first. Restore puts one back where it was; anything older than the tracker restores into _restored. Kept for ${bin.keep_days ?? 7} days.`}
+        warn={
+          bin.recycle_enabled === false
+            ? 'Recycling is off in organization settings, so deletes are permanent right now.'
+            : undefined
+        }
+      />
       {items.length === 0 ? (
-        <div className="adl-empty">the bin is empty</div>
+        <div className="dlc-empty-line">The bin is empty.</div>
       ) : (
-        <div className="adl-list">
+        <div className="dlc-list">
           {items.map((e, i) => (
-            <div className="adl-row adl-row-completed" key={`${e.trash_dir}:${e.name}:${i}`}>
-              <div className="adl-row-info">
-                <div className="adl-row-title">{vdlBinDisplayName(e.name)}</div>
-                <div className="adl-row-meta">
-                  {e.original_path || 'original location unknown — restores into _restored'}
+            <div className="dlc-row dlc-row-completed" key={`${e.trash_dir}:${e.name}:${i}`}>
+              <DlFileBadge ext={binExt(e.name)} />
+              <div className="dlc-main">
+                <div className="dlc-title">{vdlBinDisplayName(e.name)}</div>
+                <div className="dlc-sub dlc-mono">
+                  {e.original_path || 'original location unknown, restores into _restored'}
                 </div>
-                {e.reason ? <div className="adl-row-batch">{e.reason}</div> : null}
               </div>
-              <span className="adl-quality-chip">{vdlFmtBytes(e.size) || '—'}</span>
-              <span className="verif-time">{vdlFmtAge(e.age_seconds)}</span>
-              <button
-                type="button"
-                className="verif-act verif-act-ok verif-act-labeled"
-                title="Put this file back"
-                onClick={() => onRestore(e.trash_dir, e.name)}
-              >
-                ↩<span className="verif-act-label">Restore</span>
-              </button>
-              <button
-                type="button"
-                className="verif-act verif-act-del verif-act-labeled"
-                title="Delete permanently"
-                onClick={() => onPurge(e.trash_dir, e.name)}
-              >
-                🗑<span className="verif-act-label">Delete</span>
-              </button>
+              <div className="dlc-meta">
+                {e.reason ? <span className="dlc-tag">{e.reason}</span> : null}
+                <span>{vdlFmtBytes(e.size) || '—'}</span>
+                <span className="dlc-when">{vdlFmtAge(e.age_seconds)}</span>
+              </div>
+              <div className="dlc-acts">
+                <DlButton
+                  primary
+                  title="Put this file back"
+                  onClick={() => onRestore(e.trash_dir, e.name)}
+                >
+                  Restore
+                </DlButton>
+                <DlMore
+                  items={[
+                    {
+                      key: 'purge',
+                      label: 'Delete forever',
+                      danger: true,
+                      onSelect: () => onPurge(e.trash_dir, e.name),
+                    },
+                  ]}
+                />
+              </div>
             </div>
           ))}
         </div>
@@ -152,6 +164,36 @@ function RecycleRows({
     </>
   );
 }
+
+const BlockIcon = (
+  <svg
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    aria-hidden="true"
+  >
+    <circle cx="12" cy="12" r="9" />
+    <line x1="5.6" y1="5.6" x2="18.4" y2="18.4" />
+  </svg>
+);
+const UploaderBlockIcon = (
+  <svg
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    aria-hidden="true"
+  >
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 21c1-4 4.5-6 8-6s7 2 8 6" />
+    <line x1="3" y1="3" x2="21" y2="21" />
+  </svg>
+);
 
 function BlocklistRows({
   blocklist,
@@ -162,45 +204,51 @@ function BlocklistRows({
 }) {
   return (
     <>
-      <div className="adl-review-explainer">
-        exact releases (and blocked uploaders) the search will never pick again. remove one to make
-        it eligible.
-      </div>
+      <p className="dlc-explain">
+        <b>Releases and uploaders the search will never pick again.</b> Unblock one to make it
+        eligible.
+      </p>
       {blocklist.length === 0 ? (
-        <div className="adl-empty">nothing blocked</div>
+        <div className="dlc-empty-line">Nothing blocked.</div>
       ) : (
-        <div className="adl-list">
+        <div className="dlc-list">
           {blocklist.map((b) => {
             const what = vdlBlockWhat(b);
             const sxe = vdlBlockSxe(b);
+            const uploader = !b.filename;
             return (
-              <div className="adl-row adl-row-failed" key={b.id}>
-                <div className="adl-row-info">
-                  <div className="adl-row-title">
+              <div className="dlc-row dlc-row-failed" key={b.id}>
+                <DlGlyph tone="bad">{uploader ? UploaderBlockIcon : BlockIcon}</DlGlyph>
+                <div className="dlc-main">
+                  <div className={`dlc-title${uploader ? '' : ' dlc-mono dlc-title-mono'}`}>
                     {what}
                     {sxe ? ` ${sxe}` : ''}
-                    {!b.filename ? (
-                      <span
-                        className="adl-quality-chip"
-                        title="Every file from this uploader is skipped"
-                      >
-                        whole uploader
-                      </span>
-                    ) : null}
                   </div>
-                  <div className="adl-row-meta">
-                    {[b.title, b.username].filter(Boolean).join(' · ')}
+                  <div className="dlc-sub">
+                    {[
+                      b.title,
+                      uploader ? 'every file from this uploader is skipped' : b.username,
+                      b.reason,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
                   </div>
-                  {b.reason ? <div className="adl-row-error">{b.reason}</div> : null}
                 </div>
-                <button
-                  type="button"
-                  className="verif-act verif-act-labeled"
-                  title="Allow this release again"
-                  onClick={() => onUnblock(b.id)}
-                >
-                  ✕<span className="verif-act-label">Unblock</span>
-                </button>
+                <div className="dlc-meta">
+                  <span
+                    className={`dlc-tag${uploader ? ' dlc-tag-bad' : ''}`}
+                    title={
+                      uploader ? 'Every file from this uploader is skipped' : 'This exact release'
+                    }
+                  >
+                    {uploader ? 'Whole uploader' : 'Release'}
+                  </span>
+                </div>
+                <div className="dlc-acts">
+                  <DlButton title="Allow this release again" onClick={() => onUnblock(b.id)}>
+                    Unblock
+                  </DlButton>
+                </div>
               </div>
             );
           })}
@@ -287,56 +335,45 @@ export function VdlReviewPane({
     onChanged();
   };
 
+  const binMenu =
+    sub === 'recycle' && binN > 0
+      ? [
+          { key: 'restore', label: `Restore all (${binN})`, onSelect: () => void onRestoreAll() },
+          { key: 'empty', label: 'Empty bin', danger: true, onSelect: () => void onEmpty() },
+        ]
+      : sub === 'blocklist' && review.blocklist.length > 0
+        ? [
+            {
+              key: 'clear',
+              label: 'Clear blocklist',
+              danger: true,
+              onSelect: () => void onClearBlocklist(),
+            },
+          ]
+        : [];
+
   return (
-    <div data-vdl-pane="review">
-      <div className="adl-batch-filter-banner">
-        <button
-          type="button"
-          className={`adl-pill${sub === 'recycle' ? ' active' : ''}`}
-          onClick={() => setSub('recycle')}
-        >
-          🗑 Recycle bin ({binN})
-        </button>
-        <button
-          type="button"
-          className={`adl-pill${sub === 'blocklist' ? ' active' : ''}`}
-          onClick={() => setSub('blocklist')}
-        >
-          🚫 Blocklist ({review.blocklist.length})
-        </button>
-        <span className="verif-banner-spacer" />
-        {sub === 'recycle' && binN > 0 ? (
-          <>
-            <button
-              type="button"
-              className="adl-filter-banner-clear"
-              onClick={() => void onRestoreAll()}
-            >
-              ↩ Restore all
-            </button>
-            <button
-              type="button"
-              className="adl-filter-banner-clear verif-bulk-danger"
-              onClick={() => void onEmpty()}
-            >
-              🗑 Empty bin
-            </button>
-          </>
-        ) : null}
-        {sub === 'blocklist' && review.blocklist.length > 0 ? (
-          <button
-            type="button"
-            className="adl-filter-banner-clear verif-bulk-danger"
-            onClick={() => void onClearBlocklist()}
-          >
-            Clear all
-          </button>
-        ) : null}
+    <div data-vdl-pane="review" className="dlc-stack">
+      <div className="dlc-subbar">
+        <DlSegmented
+          label="Review"
+          value={sub}
+          onChange={(v) => setSub(v as VdlReviewSub)}
+          segments={[
+            { value: 'recycle', label: 'Recycle bin', count: binN },
+            { value: 'blocklist', label: 'Blocklist', count: review.blocklist.length },
+          ]}
+        />
+        <div className="dlc-subbar-side">
+          <span className="dlh-more">
+            <DlMore items={binMenu} label="Review actions" />
+          </span>
+        </div>
       </div>
 
       {review.binError && sub === 'recycle' ? (
-        <div className="adl-client-empty adl-client-empty-error">
-          couldn&apos;t load the recycle bin — {review.binError}
+        <div className="dlc-empty-line dlc-empty-error">
+          Couldn&apos;t load the recycle bin: {review.binError}
         </div>
       ) : null}
 
@@ -348,7 +385,7 @@ export function VdlReviewPane({
             onPurge={(t, n) => void onPurge(t, n)}
           />
         ) : (
-          <div className="adl-section-header">Loading…</div>
+          <div className="dlc-loading">Loading…</div>
         )
       ) : (
         <BlocklistRows blocklist={review.blocklist} onUnblock={(id) => void onUnblock(id)} />

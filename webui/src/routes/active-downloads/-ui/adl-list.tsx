@@ -1,9 +1,5 @@
 import { batchColorIndex } from '../-adl.helpers';
 
-/** The line shown when there is nothing to list. */
-export const ADL_EMPTY_TEXT =
-  'No downloads yet. Start one from Search, Sync, Discover, or Library.';
-
 /**
  * The "showing one batch" strip above the list.
  *

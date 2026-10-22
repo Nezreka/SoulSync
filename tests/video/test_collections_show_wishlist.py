@@ -92,7 +92,7 @@ def test_dispatcher_routes_by_media_type(db, monkeypatch):
     monkeypatch.setattr("core.video.collections.sync.watchlist_missing_shows",
                         lambda dbb, d, m, **kw: calls.append("show") or 1)
     monkeypatch.setattr("core.video.collections.sync.wishlist_missing_movies",
-                        lambda dbb, d, m: calls.append("movie") or 1)
+                        lambda dbb, d, m, **kw: calls.append("movie") or 1)
     wishlist_missing_members(db, {"media_type": "show"}, [])
     wishlist_missing_members(db, {"media_type": "movie"}, [])
     wishlist_missing_members(db, {}, [])

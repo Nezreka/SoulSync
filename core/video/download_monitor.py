@@ -157,6 +157,65 @@ def _reclaim_source(path) -> None:
                     os.path.basename(str(path)), e)
 
 
+def _reclaim_job_dir(path) -> str:
+    """Remove a usenet job's own download folder once its import is persisted
+    and nothing is left in it (best-effort, never raises). Returns what
+    happened: 'removed', 'kept' (files left in it), or 'skipped'.
+
+    The importer removes the video file but used to leave its release folder,
+    so every grab left one empty folder in the client's completed folder.
+    Only EMPTY folders go (``os.rmdir``), deepest first, inside the job folder:
+    anything still there -- an nfo, a sample, a file that failed to import --
+    keeps the folder for the user. A configured root (the download folder, a
+    library folder) is never removed, even when empty."""
+    if not path:
+        return "skipped"
+    root = os.path.abspath(str(path))
+    try:
+        if not os.path.isdir(root) or os.path.islink(root) or root in _protected_roots():
+            return "skipped"
+        for dirpath, _dirnames, _filenames in os.walk(root, topdown=False, followlinks=False):
+            if os.path.islink(dirpath) or os.listdir(dirpath):
+                continue
+            os.rmdir(dirpath)
+        if not os.path.exists(root):
+            logger.info("video import: removed emptied download folder %s", os.path.basename(root))
+            return "removed"
+        left = []
+        for _dirpath, _dirnames, filenames in os.walk(root, followlinks=False):
+            left.extend(filenames)
+        logger.info("video import: kept download folder %s (%d file(s) left in it)",
+                    os.path.basename(root), len(left))
+        return "kept"
+    except OSError as e:
+        logger.info("video import: couldn't remove download folder %s (%s)",
+                    os.path.basename(root), e)
+        return "skipped"
+
+
+def _protected_roots() -> set:
+    """Folders a cleanup must never remove: the download folder and the video
+    library folders. Best-effort."""
+    roots = set()
+    try:
+        from core.settings import config_manager
+        dl_dir = str(config_manager.get("soulseek.download_path", "") or "")
+        if dl_dir:
+            roots.add(os.path.abspath(dl_dir))
+    except Exception:   # noqa: BLE001
+        pass
+    try:
+        from api.video import get_video_db
+        db = get_video_db()
+        for key in ("movies_path", "tv_path", "youtube_path", "transfer_path"):
+            v = db.get_setting(key)
+            if v:
+                roots.add(os.path.abspath(str(v)))
+    except Exception:   # noqa: BLE001
+        pass
+    return roots
+
+
 _TEMP_PATTERNS = (
     # "<name>.tmp.<8 hex>" — the importer's atomic-copy temp name
     re.compile(r"\.tmp\.[0-9a-f]{8}$"),
@@ -175,7 +234,7 @@ def _sweep_import_temps(db) -> int:
     files older than an hour are touched — an in-flight transfer is never that idle.
     Returns the count removed. Best-effort; never raises."""
     roots = set()
-    for key in ("movies_path", "tv_path", "youtube_path", "transfer_path"):
+    for key in ("movies_path", "tv_path", "anime_path", "youtube_path", "transfer_path"):
         try:
             v = db.get_setting(key)
         except Exception:   # noqa: BLE001
@@ -1498,6 +1557,7 @@ def _tick(db) -> None:
             # 'importing' row that aged into a misleading 'failed'.
             if upd.get("status") == "completed":
                 _reclaim_source(upd.get("_cleanup_source"))
+                _reclaim_job_dir(upd.get("_cleanup_dir"))
         except Exception:
             logger.exception("video download %s: failed to persist update", dl.get("id"))
     for k in [k for k in _misses if k not in live_ids]:

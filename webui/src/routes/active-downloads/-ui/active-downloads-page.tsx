@@ -11,10 +11,11 @@ import {
   clearCompleted,
   downloadBatchNext,
   downloadTaskNext,
+  fetchMusicHistoryCount,
   setDeletedRetention,
 } from '../-adl.api';
 import { batchSummary, isTerminalPhase } from '../-adl.batch';
-import { formatSpeed, verificationHistoryId, unverifiedKey } from '../-adl.helpers';
+import { verificationHistoryId, unverifiedKey } from '../-adl.helpers';
 import { useAdlDownloads } from '../-adl.use-downloads';
 import { groupQuarantine, useAdlVerification } from '../-adl.use-verification';
 import {
@@ -41,17 +42,20 @@ import {
   unverifiedDelete,
   unverifiedPlay,
 } from '../-adl.verif-actions';
+import { musicChipCounts, musicLive, musicQuiet } from '../-dl.header-data';
 import { AdlClientsTab } from './adl-clients';
 import { AdlGroupedList } from './adl-groups';
 import { AdlHeader } from './adl-header';
-import { ADL_EMPTY_TEXT, BatchFilterBanner } from './adl-list';
+import { BatchFilterBanner } from './adl-list';
 import {
   AdlDeletedList,
   AdlQuarantineList,
   AdlReviewBanner,
   AdlReviewExplainer,
+  AdlReviewSelectionBar,
   AdlUnverifiedRow,
 } from './adl-review';
+import { useReportActive } from './dl-header';
 
 const toast = (message: string, type: string) => window.showToast?.(message, type);
 
@@ -86,6 +90,16 @@ export function ActiveDownloadsPage() {
   });
 
   const { state, visible, counts, hasRunningWork } = downloads;
+  // the Music | Video switch shows this side's live count
+  useReportActive('music', counts.active);
+  const [historyCount, setHistoryCount] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void fetchMusicHistoryCount().then((n) => alive && setHistoryCount(n));
+    return () => {
+      alive = false;
+    };
+  }, []);
   const reviewing = state.filter === 'unverified';
 
   const refresh = useCallback(() => void downloads.refresh(), [downloads]);
@@ -352,8 +366,17 @@ export function ActiveDownloadsPage() {
                 ? (verification.state.summary?.total ?? null)
                 : (verification.state.summary?.quarantine ?? null)
             }
-            speedText={formatSpeed(liveSpeed)}
-            etaText={summary?.eta ?? ''}
+            chipCounts={musicChipCounts(state.downloads)}
+            live={musicLive(
+              state.downloads,
+              activeBatches,
+              liveSpeed,
+              // "~4m left" reads as "about 4m left" in a sentence
+              (summary?.eta ?? '').replace(/^~/, 'about '),
+            )}
+            quiet={musicQuiet(state.downloads, Date.now())}
+            historyCount={historyCount}
+            onOpenHistory={() => window.openLibraryHistoryModal?.()}
             onFilter={downloads.setFilter}
             onCancelAll={() => void onCancelAll()}
             onClearCompleted={() => void onClearCompleted()}
@@ -387,25 +410,12 @@ export function ActiveDownloadsPage() {
                     : null
               }
               onSubView={verification.setSubView}
-              selectedCount={selectedIds.length}
               onApproveAll={() =>
                 void approveAllUnverified(reviewableHistoryIds(state.downloads), refresh)
               }
               onCleanOrphans={() => void cleanOrphans(refresh)}
               onDeleteAll={() =>
                 void deleteAllUnverified(reviewableHistoryIds(state.downloads), refresh)
-              }
-              onApproveSelected={() =>
-                void approveAllUnverified(selectedIds, () => {
-                  clearChecked();
-                  refresh();
-                })
-              }
-              onDeleteSelected={() =>
-                void deleteAllUnverified(selectedIds, () => {
-                  clearChecked();
-                  refresh();
-                })
               }
               onQuarantineApproveAll={async () => {
                 if (approveAllBusyRef.current) return;
@@ -448,7 +458,7 @@ export function ActiveDownloadsPage() {
           {showClients ? (
             <AdlClientsTab />
           ) : showDeleted ? (
-            <div className="adl-list" id="adl-list">
+            <div className="adl-list dlc-stack" id="adl-list">
               <AdlDeletedList
                 entries={deletedEntries}
                 totalSize={verification.state.deleted?.total_size ?? 0}
@@ -459,17 +469,17 @@ export function ActiveDownloadsPage() {
               />
             </div>
           ) : showQuarantine ? (
-            <div className="adl-list" id="adl-list">
+            <div className="adl-list dlc-stack" id="adl-list">
               {verification.state.quarantineError ? (
                 <div className="adl-client-empty adl-client-empty-error">
                   couldn't load the quarantine list — {verification.state.quarantineError}
                 </div>
               ) : null}
               {!verification.state.quarantineLoaded ? (
-                <div className="adl-section-header">Loading quarantine…</div>
+                <div className="dlc-loading">Loading quarantine…</div>
               ) : quarantineGroups.length === 0 ? (
-                <div className="adl-empty" id="adl-empty">
-                  {ADL_EMPTY_TEXT}
+                <div className="dlc-empty-line" id="adl-empty">
+                  Nothing in quarantine. Every download passed its checks.
                 </div>
               ) : (
                 <>
@@ -490,10 +500,10 @@ export function ActiveDownloadsPage() {
                     }
                   />
                   {quarantineHasMore ? (
-                    <div className="adl-section-header">
+                    <div>
                       <button
                         type="button"
-                        className="adl-filter-banner-clear"
+                        className="dlc-more-link"
                         onClick={() => void verification.loadMoreQuarantine()}
                       >
                         Show more ({verification.state.quarantine.length} of{' '}
@@ -505,38 +515,56 @@ export function ActiveDownloadsPage() {
               )}
             </div>
           ) : reviewing ? (
-            <div className="adl-list" id="adl-list">
+            <div className="adl-list dlc-stack" id="adl-list">
               {visible.length === 0 ? (
-                <div className="adl-empty" id="adl-empty">
-                  {ADL_EMPTY_TEXT}
+                <div className="dlc-empty-line" id="adl-empty">
+                  Nothing waiting. Every import was confirmed.
                 </div>
               ) : (
                 <>
-                  {visible.slice(0, unverifiedRenderLimit).map((dl) => {
-                    const historyId = verificationHistoryId(dl);
-                    return (
-                      <AdlUnverifiedRow
-                        key={unverifiedKey(dl)}
-                        dl={dl}
-                        open={verification.state.openUnverified.has(unverifiedKey(dl))}
-                        onToggle={() => verification.toggleUnverified(unverifiedKey(dl))}
-                        handlers={unverifiedHandlers(dl)}
-                        selected={historyId ? checkedUnverified.has(historyId) : false}
-                        onSelect={historyId ? () => toggleChecked(historyId) : undefined}
-                      />
-                    );
-                  })}
+                  <div className="dlc-list">
+                    {visible.slice(0, unverifiedRenderLimit).map((dl) => {
+                      const historyId = verificationHistoryId(dl);
+                      return (
+                        <AdlUnverifiedRow
+                          key={unverifiedKey(dl)}
+                          dl={dl}
+                          open={verification.state.openUnverified.has(unverifiedKey(dl))}
+                          onToggle={() => verification.toggleUnverified(unverifiedKey(dl))}
+                          handlers={unverifiedHandlers(dl)}
+                          selected={historyId ? checkedUnverified.has(historyId) : false}
+                          onSelect={historyId ? () => toggleChecked(historyId) : undefined}
+                        />
+                      );
+                    })}
+                  </div>
                   {visible.length > unverifiedRenderLimit ? (
-                    <div className="adl-section-header">
+                    <div>
                       <button
                         type="button"
-                        className="adl-filter-banner-clear"
+                        className="dlc-more-link"
                         onClick={() => setUnverifiedRenderLimit((n) => n + UNVERIFIED_RENDER_STEP)}
                       >
                         Show more ({visible.length - unverifiedRenderLimit} remaining)
                       </button>
                     </div>
                   ) : null}
+                  <AdlReviewSelectionBar
+                    count={selectedIds.length}
+                    onApprove={() =>
+                      void approveAllUnverified(selectedIds, () => {
+                        clearChecked();
+                        refresh();
+                      })
+                    }
+                    onDelete={() =>
+                      void deleteAllUnverified(selectedIds, () => {
+                        clearChecked();
+                        refresh();
+                      })
+                    }
+                    onClear={clearChecked}
+                  />
                 </>
               )}
             </div>

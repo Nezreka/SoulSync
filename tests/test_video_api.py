@@ -705,7 +705,8 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
     try:
         # Defaults: empty folders, soulseek mode. Shared input + per-type libraries.
         assert client.get("/api/video/downloads/config").get_json() == {
-            "download_path": "", "movies_path": "", "tv_path": "", "youtube_path": "",
+            "download_path": "", "movies_path": "", "tv_path": "", "anime_path": "",
+            "youtube_path": "",
             "download_mode": "soulseek", "hybrid_order": ["soulseek"],
             # seeding lifecycle (arr-parity P5) rides the same config payload
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
@@ -718,7 +719,7 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
                           "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"]})
         assert client.get("/api/video/downloads/config").get_json() == {
             "download_path": "/mnt/v/dl", "movies_path": "/media/movies",   # trimmed
-            "tv_path": "/media/tv", "youtube_path": "/media/yt",
+            "tv_path": "/media/tv", "anime_path": "", "youtube_path": "/media/yt",
             "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"],
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
             "seed_mode": "soulsync", "seed_overrides": {},

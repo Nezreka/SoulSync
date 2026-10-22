@@ -1,137 +1,238 @@
 import { useRef, useState } from 'react';
 
+import { openDownloadTaskInspector } from '@/features/downloads/inspector-modal';
+
 import type { AdlDownload, AdlTaskDetail } from '../-adl.types';
+import type { DlFact } from './dl-parts';
 
 import { fetchTaskDetail } from '../-adl.api';
 import {
-  batchColorIndex,
+  formatBytes,
   formatSpeed,
   liveDetailLines,
-  qualityChipTitle,
-  showQualityChip,
   statusClass,
   statusLabel,
-  verificationBadge,
+  verificationHistoryId,
 } from '../-adl.helpers';
-
-/** Album art, or the empty placeholder that keeps the row's grid aligned. */
-export function RowArt({ artwork }: { artwork: string }) {
-  if (!artwork) return <div className="adl-row-art adl-row-art-empty" />;
-  return (
-    <img
-      className="adl-row-art"
-      src={artwork}
-      alt=""
-      // Art URLs go stale (a source rotates them, a file moves). Hiding the
-      // broken image keeps the row readable instead of showing a torn icon.
-      onError={(event) => {
-        event.currentTarget.style.display = 'none';
-      }}
-    />
-  );
-}
+import { unverifiedAudit, unverifiedPlay } from '../-adl.verif-actions';
+import {
+  clockTime,
+  formatTag,
+  isHighQuality,
+  musicJourney,
+  parseStamp,
+  transferEta,
+} from '../-dl.format';
+import {
+  DlAvatar,
+  DlButton,
+  DlIcon,
+  DlLead,
+  DlMore,
+  DlSheet,
+  DlShield,
+  copyText,
+} from './dl-parts';
 
 /**
- * The retry chip.
+ * The retry tag.
  *
- * Only while a row is still in flight — a finished row's retry count is
- * history, not status. The shield is appended when the retry was triggered by
- * AcoustID, because that means the previous candidate was quarantined rather
- * than merely failing to download.
+ * Only while a row is still in flight. a finished row's retry count is
+ * history, not status. acoustid-triggered retries say so, because that means
+ * the last candidate got quarantined, not just dropped.
  */
-function RetryChip({ dl }: { dl: AdlDownload }) {
+function RetryTag({ dl }: { dl: AdlDownload }) {
   const cls = statusClass(dl.status);
   if (!dl.retry_info || (cls !== 'active' && cls !== 'queued')) return null;
-
-  const acoustidTriggered = ['acoustid', 'acoustid_unverified'].includes(
-    String(dl.retry_trigger ?? ''),
-  );
+  const acoustid = ['acoustid', 'acoustid_unverified'].includes(String(dl.retry_trigger ?? ''));
   const because = dl.retry_trigger
-    ? acoustidTriggered
-      ? ' — previous candidate quarantined (AcoustID)'
-      : ` — previous candidate triggered by ${dl.retry_trigger}`
+    ? acoustid
+      ? ', previous candidate quarantined (AcoustID)'
+      : `, previous candidate triggered by ${dl.retry_trigger}`
     : '';
-
   return (
-    <>
-      {' '}
-      <span
-        className="adl-retry-info"
-        title={`Retry engine: trying the next-best candidate (attempt ${dl.retry_info}${because})`}
-      >
-        🔁 retry {dl.retry_info}
-        {acoustidTriggered ? ' 🛡' : ''}
-      </span>
-    </>
+    <span
+      className="dlc-tag dlc-tag-retry adl-retry-info"
+      title={`Retry engine: trying the next-best candidate (attempt ${dl.retry_info}${because})`}
+    >
+      Retry {dl.retry_info}
+      {acoustid ? ' · AcoustID' : ''}
+    </span>
+  );
+}
+
+/** The AcoustID shield on a finished row, or nothing. */
+function VerifShield({ dl }: { dl: AdlDownload }) {
+  if (dl.status !== 'completed') return null;
+  switch (dl.verification_status) {
+    case 'verified':
+      return (
+        <DlShield kind="ok" title="AcoustID verified: the fingerprint matches the expected track" />
+      );
+    case 'human_verified':
+      return (
+        <DlShield kind="human" title="You verified this one. The AcoustID scanner skips it." />
+      );
+    case 'unverified':
+      return (
+        <DlShield
+          kind="warn"
+          title="Imported, but AcoustID couldn't confirm it. It's waiting in Review."
+        />
+      );
+    case 'force_imported':
+      return (
+        <DlShield
+          kind="warn"
+          title="Force-imported as the best available copy after repeated mismatches"
+        />
+      );
+    default:
+      return null;
+  }
+}
+
+/** the row's second line, picked by what the row is doing right now. */
+function subLine(
+  dl: AdlDownload,
+  compact: boolean,
+): { text: string; tone?: 'bad' | 'live'; who?: boolean } {
+  const d = dl.live_detail;
+  const cls = statusClass(dl.status);
+  const who = [dl.artist, compact ? '' : dl.album].filter(Boolean).join(' · ');
+  if (cls === 'failed' || cls === 'cancelled') {
+    return {
+      text:
+        dl.error ||
+        (dl.status === 'not_found' ? 'Nothing matched on any source' : statusLabel(dl.status).text),
+      tone: 'bad',
+    };
+  }
+  if (dl.status === 'searching') {
+    const bits = [d?.source ? `Searching ${d.source}` : 'Searching'];
+    if (d?.query_count) bits.push(`query ${(d.query_index ?? 0) + 1} of ${d.query_count}`);
+    if (d?.results != null) bits.push(`${d.results} result${d.results === 1 ? '' : 's'}`);
+    return { text: bits.join(' · '), tone: 'live' };
+  }
+  if (dl.status === 'downloading') {
+    const source = dl.download_source || d?.source || '';
+    const isPeer = /soulseek/i.test(source) && d?.username;
+    const bits = [
+      source,
+      isPeer ? `from ${d?.username}` : '',
+      d?.picked?.quality?.toUpperCase() || '',
+      d?.size ? formatBytes(d.size) : '',
+    ];
+    const line = bits.filter(Boolean).join(' · ');
+    return line ? { text: line, tone: 'live' } : { text: who, who: true };
+  }
+  if (dl.status === 'post_processing')
+    return { text: 'Checking the file and importing it', tone: 'live' };
+  return { text: who, who: true };
+}
+
+/**
+ * The top of the open sheet: the cover big, the artist with their photo, the
+ * album under it. what the row is, before what happened to it.
+ */
+function MusicHero({ dl, detail }: { dl: AdlDownload; detail: AdlTaskDetail | null }) {
+  const [deadCover, setDeadCover] = useState<string | null>(null);
+  const cover = dl.artwork || detail?.thumb_url || '';
+  const showCover = Boolean(cover) && deadCover !== cover;
+  const podcast = dl.event_type === 'podcast';
+  const position =
+    dl.batch_total > 1 && dl.batch_position
+      ? `Track ${dl.batch_position} of ${dl.batch_total}`
+      : '';
+  const tag = dl.status === 'completed' ? formatTag(dl.quality || detail?.quality) : '';
+  return (
+    <div className="dlc-hero dlc-mhero">
+      {showCover ? (
+        <div className="dlc-hero-wash" style={{ backgroundImage: `url('${cover}')` }} />
+      ) : null}
+      {showCover ? (
+        <img className="dlc-mhero-cover" src={cover} alt="" onError={() => setDeadCover(cover)} />
+      ) : dl.artist_image ? (
+        <img className="dlc-mhero-cover dlc-mhero-cover-round" src={dl.artist_image} alt="" />
+      ) : (
+        <div className="dlc-mhero-cover dlc-art-empty">
+          {(dl.title || '?').charAt(0).toUpperCase()}
+        </div>
+      )}
+      <div className="dlc-hero-body">
+        <div className="dlc-eyebrow">{podcast ? 'Podcast episode' : position || 'Track'}</div>
+        <div className="dlc-hero-title">{dl.title || 'Unknown Track'}</div>
+        {dl.artist ? (
+          <div className="dlc-mhero-artist">
+            <DlAvatar src={dl.artist_image} size="md" />
+            <span>{dl.artist}</span>
+          </div>
+        ) : null}
+        {dl.album || tag ? (
+          <div className="dlc-hero-line">
+            {dl.album}
+            {tag ? (
+              <span className={`dlc-tag${isHighQuality(tag) ? ' dlc-tag-hq' : ''}`}>{tag}</span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
 /**
- * The expanded detail panel (#1156).
- *
- * In-flight rows render the live narration straight off the 2s payload —
- * where it's searching, what it found, who it's pulling from. Terminal rows
- * render the fetched task detail (history-merged source/quality/AcoustID/
- * file), and history rows render the fields they already carry.
+ * The expanded sheet's facts. every value is something the row or the
+ * fetched detail actually carries. nothing is guessed.
  */
-function RowDetailPanel({
-  dl,
-  detail,
-  terminal,
-}: {
-  dl: AdlDownload;
-  detail: AdlTaskDetail | null;
-  terminal: boolean;
-}) {
-  let lines: Array<[string, string]>;
-  if (!terminal) {
-    lines = liveDetailLines(dl);
-    if (!lines.length) {
-      return <div className="verif-quar-details">Waiting for the engine's next update…</div>;
-    }
-  } else if (detail) {
-    lines = (
-      [
-        ['Source', dl.download_source || detail.source],
-        ['Quality', detail.quality || dl.quality],
-        ['AcoustID', detail.acoustid_result],
-        ['File', detail.file_path],
-        ['Reason', detail.status_kind === 'completed' ? '' : detail.reason],
-        [
-          'Expected',
-          detail.expected?.title
-            ? `${detail.expected.artist ? `${detail.expected.artist} — ` : ''}${detail.expected.title}`
-            : '',
-        ],
-        [
-          'Downloaded',
-          detail.downloaded?.title
-            ? `${detail.downloaded.artist ? `${detail.downloaded.artist} — ` : ''}${detail.downloaded.title}`
-            : '',
-        ],
-      ] as Array<[string, string]>
-    ).filter(([, value]) => Boolean(value));
-  } else if (dl.is_persistent_history) {
-    lines = (
-      [
-        ['Source', dl.download_source || dl.batch_name],
-        ['Quality', dl.quality],
-        ['File', dl.file_path || ''],
-        ['Downloaded', dl.created_at || ''],
-      ] as Array<[string, string]>
-    ).filter(([, value]) => Boolean(value));
-  } else {
-    return <div className="verif-quar-details">Loading details…</div>;
+function sheetFacts(dl: AdlDownload, detail: AdlTaskDetail | null, compact: boolean): DlFact[] {
+  const d = dl.live_detail;
+  const cls = statusClass(dl.status);
+  // in flight: the engine's full narration (#1156). query ladder, per-source
+  // counts, peer stats, remote queue, held reasons. every line it sent.
+  const live = cls === 'active' || cls === 'queued' ? liveDetailLines(dl) : [];
+  if (live.length) {
+    const file = d?.filename || '';
+    return live.map(
+      ([label, value]): DlFact =>
+        label === 'File' ? [label, value, { mono: true, copy: file || undefined }] : [label, value],
+    );
   }
-  return (
-    <div className="verif-quar-details">
-      {lines.map(([label, value]) => (
-        <div key={label}>
-          <span className="verif-detail-label">{label}:</span> {value}
-        </div>
-      ))}
-    </div>
-  );
+  const source = dl.download_source || d?.source || detail?.source || '';
+  const peer = d?.username && /soulseek/i.test(source) ? ` · ${d.username}` : '';
+  const position =
+    dl.batch_total > 1 && dl.batch_position
+      ? `track ${dl.batch_position} of ${dl.batch_total}`
+      : '';
+  const file = dl.file_path || detail?.file_path || d?.filename || '';
+  const asked = dl.expected_title || detail?.expected?.title || '';
+  const askedArtist = dl.expected_artist || detail?.expected?.artist || '';
+  const got = detail?.downloaded?.title || dl.title;
+  return [
+    ['Source', source ? `${source}${peer}` : ''],
+    [
+      'Quality',
+      formatTag(dl.quality || detail?.quality) ||
+        (d?.picked?.quality ? d.picked.quality.toUpperCase() : ''),
+    ],
+    ['Size', d?.size ? formatBytes(d.size) : ''],
+    ['Speed', dl.status === 'downloading' ? formatSpeed(d?.speed) : ''],
+    ['AcoustID', dl.acoustid_result || detail?.acoustid_result || ''],
+    [
+      'Batch',
+      compact
+        ? ''
+        : [dl.batch_name !== source ? dl.batch_name : '', position].filter(Boolean).join(' · '),
+    ],
+    // only worth a line when the file we got isn't the one we asked for
+    [
+      'Asked for',
+      asked && asked.toLowerCase() !== String(got || '').toLowerCase()
+        ? [askedArtist, asked].filter(Boolean).join(' · ')
+        : '',
+    ],
+    ['File', file, { mono: true, copy: file || undefined }],
+  ];
 }
 
 export interface AdlRowProps {
@@ -139,47 +240,42 @@ export interface AdlRowProps {
   /**
    * Rendered only for cancellable rows with real cancel coordinates.
    *
-   * May return a promise — the row locks its button until it settles.
+   * May return a promise. the row locks its button until it settles.
    */
   onCancel?: (dl: AdlDownload) => void | Promise<void>;
   /** Rendered only for queued rows; moves the track to the next unstarted slot. */
   onDownloadNext?: (dl: AdlDownload) => void | Promise<void>;
-  /** Set in the unverified view — makes the whole row open the audit trail. */
-  onRowAudit?: (dl: AdlDownload) => void;
-  /** The review action strip, supplied by the unverified view. */
-  actions?: React.ReactNode;
-  /** Group rows: tighter padding, no batch line (the group header carries it). */
+  /** Group rows: no batch line, the group header already says it. */
   compact?: boolean;
+  /** tracklist mode inside an album group: the track number takes the art's place. */
+  numbered?: boolean;
+  /**
+   * Whether a failed row can open the candidate inspector. off for
+   * audiobook / music-video / client batches: the inspector searches music
+   * sources and /download-candidate restarts a music track.
+   */
+  canInspect?: boolean;
 }
 
 export function AdlRow({
   dl,
   onCancel,
   onDownloadNext,
-  onRowAudit,
-  actions,
   compact,
+  numbered,
+  canInspect = true,
 }: AdlRowProps) {
   const cls = statusClass(dl.status);
-  const label = statusLabel(dl.status);
-  const badge = verificationBadge(dl);
   /**
    * Locks the cancel button while its request is in flight.
    *
-   * Two clicks fire two cancels, and the second fails on a task the first
-   * already took — the user sees an error for an action that worked. The
-   * vanilla guarded it with a synchronous `dataset.cancelling` flag plus an
-   * `adl-row-cancel-pending` class.
+   * two clicks fire two cancels, and the second fails on a task the first
+   * already took. `disabled` alone only stops the NEXT event loop turn: two
+   * clicks in the same tick both read stale state. the ref is the part that
+   * is actually synchronous. state drives the class and disabled attribute.
    *
-   * Both halves are needed here and they are not redundant. `disabled` alone
-   * only stops the SECOND event loop turn: two clicks dispatched in the same
-   * tick both run before React re-renders, and both would read the same stale
-   * `false` from state. The ref is the part that is actually synchronous —
-   * it is the direct equivalent of the vanilla's dataset flag. State drives
-   * the class and the disabled attribute, which a ref cannot do.
-   *
-   * Local state is safe here: rows are keyed by task_id, so it survives the
-   * 2s poll re-render rather than resetting.
+   * local state is safe here: rows are keyed by task_id, so it survives the
+   * 2s poll re-render.
    */
   const cancellingRef = useRef(false);
   const [cancelling, setCancelling] = useState(false);
@@ -187,10 +283,9 @@ export function AdlRow({
   const [downloadNextPending, setDownloadNextPending] = useState(false);
 
   /**
-   * Row expansion (#1156). Local state survives the 2s poll because rows are
-   * keyed by task_id. Terminal real-task rows fetch their merged detail once
-   * on first open; history rows and in-flight rows render from what the row
-   * already carries.
+   * Row expansion (#1156). terminal real-task rows fetch their merged detail
+   * once on first open; history rows and in-flight rows render from what the
+   * row already carries.
    */
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<AdlTaskDetail | null>(null);
@@ -206,19 +301,10 @@ export function AdlRow({
     }
   };
 
-  const meta = [dl.artist, dl.album].filter(Boolean).join(' · ');
-  // "3 of 19" — only meaningful for a real multi-track batch.
-  // batch_position, NEVER track_index: that one is an identity, not an
-  // ordinal, and rendering it printed "Track 4930 of 2" (#1183). no
-  // position from the server -> no label, rather than a wrong one.
-  const position =
-    dl.batch_total > 1 && dl.batch_position ? `${dl.batch_position} of ${dl.batch_total}` : '';
-  const colorIdx = batchColorIndex(dl.batch_id);
-
   /**
-   * Cancel needs (playlist_id, track_index), not task_id — and a terminal row
-   * has nothing to cancel. `track_index` is checked against undefined rather
-   * than falsiness because 0 is a valid index.
+   * Cancel needs (playlist_id, track_index), not task_id. a terminal row has
+   * nothing to cancel. track_index is checked against undefined because 0
+   * is a valid index.
    */
   const cancellable =
     (cls === 'active' || cls === 'queued') &&
@@ -226,194 +312,246 @@ export function AdlRow({
     dl.track_index !== undefined;
   const canDownloadNext =
     ['pending', 'queued'].includes(String(dl.status)) && !dl.is_persistent_history;
+  // a live failed task is still in memory, so the inspector can search for
+  // it and /download-candidate can restart it. history rows can't.
+  const canSearch =
+    canInspect &&
+    (dl.status === 'failed' || dl.status === 'not_found') &&
+    !dl.is_persistent_history;
+  const historyId = dl.status === 'completed' ? verificationHistoryId(dl) : null;
+  const file = dl.file_path || detail?.file_path || '';
 
-  // The one signal a downloads page owes you: the bar rides the row's bottom
-  // edge, and the speed comes from the live narration when the engine has it.
-  const downloading = dl.status === 'downloading' && (dl.progress || 0) > 0;
+  const downloading = dl.status === 'downloading';
+  const pct = Math.round(dl.progress || 0);
   const speed = downloading ? formatSpeed(dl.live_detail?.speed) : '';
+  const eta = downloading ? transferEta(dl) : '';
+  const sub = subLine(dl, Boolean(compact));
+  const tag = dl.status === 'completed' ? formatTag(dl.quality) : '';
+  const when =
+    dl.status === 'completed'
+      ? clockTime(dl.is_persistent_history ? parseStamp(dl.created_at) : parseStamp(dl.timestamp))
+      : '';
+  const label = statusLabel(dl.status).text;
+
+  const play = historyId ? () => void unverifiedPlay(dl, historyId) : undefined;
+  const search = canSearch
+    ? () =>
+        openDownloadTaskInspector(dl.task_id, {
+          name: dl.title,
+          artist: dl.artist,
+          album: dl.album,
+        })
+    : undefined;
+
+  const cancel = () => {
+    if (!onCancel || cancellingRef.current) return;
+    cancellingRef.current = true;
+    setCancelling(true);
+    void (async () => {
+      try {
+        await onCancel(dl);
+      } catch {
+        // the handler owns the toast. the row just keeps a rejection from
+        // escaping or leaving the button stuck disabled.
+      } finally {
+        cancellingRef.current = false;
+        setCancelling(false);
+      }
+    })();
+  };
+
+  const menu = [
+    ...(play ? [{ key: 'play', label: 'Play', onSelect: play }] : []),
+    ...(historyId
+      ? [
+          {
+            key: 'audit',
+            label: 'Download details',
+            onSelect: () => void unverifiedAudit(historyId),
+          },
+        ]
+      : []),
+    ...(file
+      ? [{ key: 'copy', label: 'Copy file path', onSelect: () => copyText(file, 'Path copied') }]
+      : []),
+  ];
 
   return (
-    <div
-      className={`adl-row adl-row-${cls}${compact ? ' adl-row-compact' : ''}`}
-      data-task-id={dl.task_id}
-      data-batch-id={dl.batch_id || ''}
-      {...(onRowAudit
-        ? {
-            onClick: () => onRowAudit(dl),
-            style: { cursor: 'pointer' },
-            title: 'Click to show download details (audit trail, embedded tags, lyrics)',
+    <>
+      <div
+        className={`dlc-row dlc-row-${cls}${compact ? ' dlc-row-compact' : ''}${open ? ' dlc-row-open' : ''}`}
+        data-task-id={dl.task_id}
+        data-batch-id={dl.batch_id || ''}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={toggleOpen}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggleOpen();
           }
-        : {
-            onClick: toggleOpen,
-            style: { cursor: 'pointer' },
-            title: open
-              ? 'Click to hide details'
-              : 'Click to show details (source, search progress, file, quality)',
-          })}
-    >
-      {colorIdx >= 0 ? (
-        <div
-          className="adl-row-batch-color"
-          style={{ background: `rgba(var(--batch-color-${colorIdx}),0.6)` }}
+        }}
+      >
+        <DlLead
+          art={numbered ? null : dl.artwork}
+          number={numbered ? (dl.batch_position ?? '·') : null}
+          progress={downloading ? dl.progress || 0 : null}
+          busy={dl.status === 'searching' || dl.status === 'post_processing'}
+          failed={cls === 'failed'}
+          onPlay={play}
+          avatar={dl.artist_image}
+          fallback={(dl.title || '?').charAt(0).toUpperCase()}
         />
-      ) : null}
 
-      <RowArt artwork={dl.artwork} />
+        <div className="dlc-main">
+          <div className="dlc-title">{dl.title || 'Unknown Track'}</div>
+          {sub.text ? (
+            <div className={`dlc-sub${sub.tone ? ` dlc-sub-${sub.tone}` : ''}`}>
+              {sub.who ? <DlAvatar src={dl.artist_image} /> : null}
+              {sub.text}
+            </div>
+          ) : null}
+        </div>
 
-      <div className="adl-row-info">
-        <div className="adl-row-title">{dl.title || 'Unknown Track'}</div>
-        {meta ? <div className="adl-row-meta">{meta}</div> : null}
-        {/* Inside a group the header already says which batch this is. */}
-        {!compact && (dl.batch_name || dl.download_source) ? (
-          <div className="adl-row-batch">
-            {dl.batch_name}
-            {position ? ` · Track ${position}` : ''}
-            {/* #1156: live rows finally name their source; history rows
-                already carry it as batch_name, so don't repeat it */}
-            {dl.download_source && dl.download_source !== dl.batch_name
-              ? `${dl.batch_name ? ' · ' : ''}${dl.download_source}`
-              : ''}
+        <div className="dlc-meta">
+          <RetryTag dl={dl} />
+          {downloading ? (
+            <>
+              <span className="dlc-state dlc-state-active">{pct > 0 ? `${pct}%` : label}</span>
+              {speed ? <span className="dlc-speed">{speed}</span> : null}
+              {eta ? <span>{eta}</span> : null}
+            </>
+          ) : dl.status === 'completed' ? (
+            <>
+              {tag ? (
+                <span
+                  className={`dlc-tag${isHighQuality(tag) ? ' dlc-tag-hq' : ''}`}
+                  title="Audio quality of the downloaded file (read from the file itself)"
+                >
+                  {tag}
+                </span>
+              ) : null}
+              {dl.download_source && !compact ? <span>{dl.download_source}</span> : null}
+              <VerifShield dl={dl} />
+              {when ? <span className="dlc-when">{when}</span> : null}
+            </>
+          ) : sub.tone === 'bad' && dl.error ? null : (
+            // a failed row's red line already says what broke. don't say "Failed" twice
+            <span className={`dlc-state dlc-state-${dl.status === 'searching' ? 'search' : cls}`}>
+              {label}
+            </span>
+          )}
+        </div>
+
+        <div className="dlc-acts">
+          {search ? (
+            <DlButton
+              primary
+              icon={DlIcon.search}
+              title="See what every source has and pick one"
+              onClick={search}
+            >
+              Search
+            </DlButton>
+          ) : null}
+          {canDownloadNext && onDownloadNext ? (
+            <button
+              type="button"
+              className={`dlc-icon-btn dlc-hover dlc-next${downloadNextPending ? ' dlc-pending' : ''}`}
+              title="Download this track next"
+              aria-label="Download track next"
+              disabled={downloadNextPending}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (downloadNextRef.current) return;
+                downloadNextRef.current = true;
+                setDownloadNextPending(true);
+                void (async () => {
+                  try {
+                    await onDownloadNext(dl);
+                  } catch {
+                    // the page handler owns the toast
+                  } finally {
+                    downloadNextRef.current = false;
+                    setDownloadNextPending(false);
+                  }
+                })();
+              }}
+            >
+              {DlIcon.next}
+            </button>
+          ) : null}
+          {cancellable && onCancel ? (
+            <button
+              type="button"
+              className={`dlc-icon-btn dlc-hover dlc-cancel${cancelling ? ' dlc-pending' : ''}`}
+              title="Cancel this download"
+              aria-label="Cancel download"
+              disabled={cancelling}
+              onClick={(event) => {
+                event.stopPropagation();
+                cancel();
+              }}
+            >
+              {DlIcon.x}
+            </button>
+          ) : null}
+          {!search ? <DlMore items={menu} /> : null}
+        </div>
+
+        {downloading && pct > 0 ? (
+          <div className="dlc-rowbar" aria-hidden="true">
+            <i style={{ width: `${pct}%` }} />
           </div>
         ) : null}
-        {dl.error ? <div className="adl-row-error">{dl.error}</div> : null}
-        {open && !onRowAudit ? (
-          <RowDetailPanel dl={dl} detail={detail} terminal={terminal} />
-        ) : null}
       </div>
 
-      <div className={`adl-row-status ${cls}`}>
-        <span className={`adl-status-dot ${cls}`} />
-        {label.spinner ? <span className="adl-spinner" /> : null}
-        {label.text}
-        {downloading ? ` ${Math.round(dl.progress || 0)}%` : ''}
-        {speed ? <span className="adl-row-speed">{speed}</span> : null}
-        {badge ? (
-          <>
-            {' '}
-            <span className={badge.className} title={badge.title}>
-              {badge.glyph}
-            </span>
-          </>
-        ) : null}
-        {showQualityChip(dl) ? (
-          <>
-            {' '}
-            <span className="adl-quality-chip" title={qualityChipTitle()}>
-              {dl.quality}
-            </span>
-          </>
-        ) : null}
-        <RetryChip dl={dl} />
-      </div>
-
-      {/* the expandable rows never said so — a chevron is the affordance */}
-      {!onRowAudit ? (
-        <span className={`adl-row-chevron${open ? ' open' : ''}`} aria-hidden="true">
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </span>
+      {open ? (
+        <DlSheet
+          hero={<MusicHero dl={dl} detail={detail} />}
+          stepsTitle={
+            cls === 'failed' || cls === 'cancelled'
+              ? 'What happened'
+              : terminal
+                ? 'Journey'
+                : 'Progress'
+          }
+          // a finished live task renders from the row first, then fills in
+          // once its merged detail lands
+          steps={musicJourney(dl, detail, Date.now())}
+          factsTitle="Details"
+          facts={sheetFacts(dl, detail, Boolean(compact))}
+          actions={
+            play || search || historyId || (cancellable && onCancel) ? (
+              <>
+                {play ? (
+                  <DlButton primary icon={DlIcon.play} onClick={play}>
+                    Play
+                  </DlButton>
+                ) : null}
+                {search ? (
+                  <DlButton primary icon={DlIcon.search} onClick={search}>
+                    Search manually
+                  </DlButton>
+                ) : null}
+                {historyId ? (
+                  <DlButton onClick={() => void unverifiedAudit(historyId)}>
+                    Download details
+                  </DlButton>
+                ) : null}
+                <span className="dlc-spacer" />
+                {cancellable && onCancel ? (
+                  <DlButton disabled={cancelling} onClick={cancel}>
+                    Cancel download
+                  </DlButton>
+                ) : null}
+              </>
+            ) : null
+          }
+        />
       ) : null}
-
-      {actions}
-
-      {canDownloadNext && onDownloadNext ? (
-        <button
-          type="button"
-          className={`adl-row-next${downloadNextPending ? ' adl-row-next-pending' : ''}`}
-          title="Download this track next"
-          aria-label="Download track next"
-          disabled={downloadNextPending}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (downloadNextRef.current) return;
-            downloadNextRef.current = true;
-            setDownloadNextPending(true);
-            void (async () => {
-              try {
-                await onDownloadNext(dl);
-              } catch {
-                // The page handler owns the toast; keep the row from leaking a rejection.
-              } finally {
-                downloadNextRef.current = false;
-                setDownloadNextPending(false);
-              }
-            })();
-          }}
-        >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M5 12h14" />
-            <path d="m13 6 6 6-6 6" />
-            <path d="M5 5v14" />
-          </svg>
-        </button>
-      ) : null}
-      {cancellable && onCancel ? (
-        <button
-          type="button"
-          className={`adl-row-cancel${cancelling ? ' adl-row-cancel-pending' : ''}`}
-          title="Cancel this download"
-          aria-label="Cancel download"
-          disabled={cancelling}
-          onClick={(event) => {
-            // The row itself may be an audit trigger in the review view.
-            event.stopPropagation();
-            if (cancellingRef.current) return;
-            cancellingRef.current = true;
-            setCancelling(true);
-            void (async () => {
-              try {
-                await onCancel(dl);
-              } catch {
-                // The handler owns error reporting — it toasts. All the row
-                // has to do is make sure a rejection cannot escape as an
-                // unhandled rejection or leave the button stuck disabled.
-              } finally {
-                // On success the row is usually refetched away and this never
-                // runs; when it stays, the button has to become usable again.
-                cancellingRef.current = false;
-                setCancelling(false);
-              }
-            })();
-          }}
-        >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      ) : null}
-
-      {downloading ? (
-        <div className="adl-row-progress" aria-hidden="true">
-          <div className="adl-row-progress-fill" style={{ width: `${dl.progress || 0}%` }} />
-        </div>
-      ) : null}
-    </div>
+    </>
   );
 }

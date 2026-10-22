@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AdlDeletedEntry, AdlDownload, AdlQuarantineEntry } from '../-adl.types';
 import type { ReviewActionHandlers } from './adl-review';
@@ -8,19 +8,14 @@ import {
   AdlDeletedRow,
   AdlQuarantineList,
   AdlQuarantineRow,
-  quarantineSummary,
   AdlReviewBanner,
+  AdlReviewExplainer,
+  AdlReviewSelectionBar,
   AdlUnverifiedRow,
+  quarantineSummary,
 } from './adl-review';
 
-afterEach(() => {
-  cleanup();
-  delete window.formatHistoryTime;
-});
-
-beforeEach(() => {
-  window.formatHistoryTime = () => '5h ago';
-});
+afterEach(cleanup);
 
 const handlers = (): ReviewActionHandlers => ({
   onPlay: vi.fn(),
@@ -29,6 +24,8 @@ const handlers = (): ReviewActionHandlers => ({
   onApprove: vi.fn(),
   onDelete: vi.fn(),
 });
+
+const stamp = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
 
 const dl = (over: Partial<AdlDownload> = {}): AdlDownload =>
   ({
@@ -51,7 +48,7 @@ const dl = (over: Partial<AdlDownload> = {}): AdlDownload =>
     priority: 0,
     quality: 'FLAC',
     is_persistent_history: true,
-    created_at: '2026-07-30T07:00:00Z',
+    created_at: stamp(5 * 60_000),
     ...over,
   }) as AdlDownload;
 
@@ -59,12 +56,12 @@ const entry = (over: Partial<AdlQuarantineEntry> = {}): AdlQuarantineEntry =>
   ({
     id: 'q1',
     filename: 'bad.quarantined',
-    original_filename: 'bad.flac',
+    original_filename: '03 Xtal.flac',
     reason: 'duration mismatch',
     expected_track: 'Xtal',
     expected_artist: 'Aphex Twin',
     group_key: 'g1',
-    timestamp: '2026-07-30T10:00:00Z',
+    timestamp: stamp(60_000),
     size_bytes: 1000,
     has_full_context: true,
     trigger: 'integrity',
@@ -75,18 +72,22 @@ const entry = (over: Partial<AdlQuarantineEntry> = {}): AdlQuarantineEntry =>
     ...over,
   }) as AdlQuarantineEntry;
 
+const rowEl = (c: HTMLElement) => c.querySelector('.dlc-row') as HTMLElement;
+const openMenu = (c: HTMLElement) => fireEvent.click(c.querySelector('.dlc-more') as HTMLElement);
+
 describe('AdlUnverifiedRow', () => {
-  it('renders the reason badge, quality chip and time', () => {
+  it('tags the reason, the quality and when', () => {
     const { container } = render(
       <AdlUnverifiedRow dl={dl()} open={false} onToggle={vi.fn()} handlers={handlers()} />,
     );
-    expect(container.querySelector('.verif-rb-unv')?.textContent).toBe('ACOUSTID UNCONFIRMED');
-    expect(container.querySelector('.adl-quality-chip')?.textContent).toBe('FLAC');
-    expect(container.querySelector('.verif-time')?.textContent).toBe('5h ago');
+    const tags = [...container.querySelectorAll('.dlc-tag')].map((t) => t.textContent);
+    expect(tags).toEqual(['Not confirmed', 'FLAC']);
+    expect(container.querySelector('.dlc-tag-warn')).not.toBeNull();
+    expect(container.querySelector('.dlc-when')?.textContent).toBe('5m ago');
   });
 
   it('omits the time when the row has no timestamp', () => {
-    // Live task rows carry no created_at; an empty span would be noise.
+    // live task rows carry no created_at; an empty span would be noise
     const { container } = render(
       <AdlUnverifiedRow
         dl={dl({ created_at: undefined })}
@@ -95,10 +96,10 @@ describe('AdlUnverifiedRow', () => {
         handlers={handlers()}
       />,
     );
-    expect(container.querySelector('.verif-time')).toBeNull();
+    expect(container.querySelector('.dlc-when')).toBeNull();
   });
 
-  it('shows FORCE-IMPORTED for a force-imported row', () => {
+  it('marks a force-imported row differently from an unconfirmed one', () => {
     const { container } = render(
       <AdlUnverifiedRow
         dl={dl({ verification_status: 'force_imported' })}
@@ -107,112 +108,136 @@ describe('AdlUnverifiedRow', () => {
         handlers={handlers()}
       />,
     );
-    expect(container.querySelector('.verif-rb-force')?.textContent).toBe('FORCE-IMPORTED');
+    expect(container.querySelector('.dlc-tag-info')?.textContent).toBe('Force-imported');
   });
 
-  it('hides the detail panel until opened', () => {
+  it('opens the sheet only when open, with why it is here', () => {
     const closed = render(
       <AdlUnverifiedRow dl={dl()} open={false} onToggle={vi.fn()} handlers={handlers()} />,
     );
-    expect(
-      (closed.container.querySelector('.verif-quar-details') as HTMLElement).style.display,
-    ).toBe('none');
+    expect(closed.container.querySelector('.dlc-sheet')).toBeNull();
     cleanup();
     const open = render(
       <AdlUnverifiedRow dl={dl()} open onToggle={vi.fn()} handlers={handlers()} />,
     );
-    expect((open.container.querySelector('.verif-quar-details') as HTMLElement).style.display).toBe(
-      '',
+    expect(open.container.querySelector('.dlc-step-warn')?.textContent).toContain(
+      "AcoustID couldn't confirm it",
     );
   });
 
-  it('shows File and Downloaded only for a persistent-history row', () => {
-    // Live task rows carry neither field — the two server builders differ.
+  it('shows the file only for a persistent-history row', () => {
     const withFile = render(
       <AdlUnverifiedRow
-        dl={dl({ file_path: '/music/x.flac', created_at: '2026-07-30' })}
+        dl={dl({ file_path: '/music/x.flac' })}
         open
         onToggle={vi.fn()}
         handlers={handlers()}
       />,
     );
-    expect(withFile.container.textContent).toContain('/music/x.flac');
-    expect(withFile.container.textContent).toContain('Downloaded:');
-
+    expect(withFile.container.querySelector('.dlc-facts')?.textContent).toContain('/music/x.flac');
     cleanup();
     const live = render(
       <AdlUnverifiedRow
-        dl={dl({ file_path: undefined, created_at: undefined })}
+        dl={dl({ file_path: undefined })}
         open
         onToggle={vi.fn()}
         handlers={handlers()}
       />,
     );
-    expect(live.container.textContent).not.toContain('File:');
-    expect(live.container.textContent).not.toContain('Downloaded:');
+    expect(live.container.querySelector('.dlc-facts')?.textContent ?? '').not.toContain('File');
   });
 
-  it('explains force-imported and unverified differently', () => {
-    const forced = render(
+  it('puts what we asked for beside what we got, the difference lit', () => {
+    const { container } = render(
       <AdlUnverifiedRow
-        dl={dl({ verification_status: 'force_imported' })}
+        dl={dl({
+          title: 'Chun-Li Theme',
+          expected_title: 'Chun-Li: Woman of Vengeance',
+          expected_artist: 'Aphex Twin',
+        })}
         open
         onToggle={vi.fn()}
         handlers={handlers()}
       />,
     );
-    expect(forced.container.textContent).toContain('retry budget was exhausted');
-    cleanup();
-    const unv = render(
-      <AdlUnverifiedRow dl={dl()} open onToggle={vi.fn()} handlers={handlers()} />,
-    );
-    expect(unv.container.textContent).toContain('could not hard-confirm');
+    const diffs = [...container.querySelectorAll('.dlc-compare-diff')].map((d) => d.textContent);
+    expect(diffs).toEqual(['Chun-Li Theme']);
   });
 
-  it('toggles on a row click but not on an action click', () => {
+  it('toggles on a row click, never on an action click', () => {
     const onToggle = vi.fn();
     const acts = handlers();
     const { container } = render(
       <AdlUnverifiedRow dl={dl()} open={false} onToggle={onToggle} handlers={acts} />,
     );
-    fireEvent.click(container.querySelector('.adl-row') as HTMLElement);
+    fireEvent.click(rowEl(container));
     expect(onToggle).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(container.querySelector('.verif-act-play') as HTMLElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(acts.onApprove).toHaveBeenCalled();
+    fireEvent.click(container.querySelector('.dlc-play') as HTMLElement);
     expect(acts.onPlay).toHaveBeenCalled();
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it('renders no action buttons without a history id to act on', () => {
-    const { container } = render(
-      <AdlUnverifiedRow dl={dl()} open={false} onToggle={vi.fn()} handlers={null} />,
-    );
-    expect(container.querySelectorAll('.verif-act')).toHaveLength(0);
-    // The row still renders — it is informational, not missing.
-    expect(container.querySelector('.adl-row-title')?.textContent).toBe('Xtal');
-  });
-
-  it('shows a busy glyph while a comparison runs', () => {
+  it('keeps delete in the menu, marked dangerous', () => {
     const acts = handlers();
-    acts.onCompare = (setBusy) => setBusy(true);
     const { container } = render(
       <AdlUnverifiedRow dl={dl()} open={false} onToggle={vi.fn()} handlers={acts} />,
     );
-    const compare = container.querySelectorAll('.verif-act')[1] as HTMLButtonElement;
-    expect(compare.textContent).toBe('⇆');
+    openMenu(container);
+    const del = screen.getByRole('menuitem', { name: 'Delete file' });
+    expect(del.className).toContain('danger');
+    fireEvent.click(del);
+    expect(acts.onDelete).toHaveBeenCalled();
+  });
+
+  it('renders no actions without a history id to act on', () => {
+    const { container } = render(
+      <AdlUnverifiedRow dl={dl()} open={false} onToggle={vi.fn()} handlers={null} />,
+    );
+    expect(container.querySelector('.dlc-acts button')).toBeNull();
+    // the row still renders: it is informational, not missing
+    expect(container.querySelector('.dlc-title')?.textContent).toBe('Xtal');
+  });
+
+  it('locks compare while the search runs', () => {
+    const acts = handlers();
+    acts.onCompare = (setBusy) => setBusy(true);
+    render(<AdlUnverifiedRow dl={dl()} open onToggle={vi.fn()} handlers={acts} />);
+    const compare = screen.getByRole('button', { name: 'Compare with a stream' });
     fireEvent.click(compare);
-    expect(compare.textContent).toBe('…');
-    expect(compare.disabled).toBe(true);
+    const busy = screen.getByRole('button', { name: 'Finding a stream…' }) as HTMLButtonElement;
+    expect(busy.disabled).toBe(true);
+  });
+
+  it('selects from the art corner without opening the row', () => {
+    const onSelect = vi.fn();
+    const onToggle = vi.fn();
+    const { container } = render(
+      <AdlUnverifiedRow
+        dl={dl()}
+        open={false}
+        onToggle={onToggle}
+        handlers={handlers()}
+        selected
+        onSelect={onSelect}
+      />,
+    );
+    const box = container.querySelector('.dlc-check') as HTMLElement;
+    expect(box.getAttribute('aria-checked')).toBe('true');
+    expect(rowEl(container).className).toContain('dlc-row-sel');
+    fireEvent.click(box);
+    expect(onSelect).toHaveBeenCalled();
+    expect(onToggle).not.toHaveBeenCalled();
   });
 });
 
 describe('AdlQuarantineRow', () => {
-  it('labels the trigger, falling back to QUARANTINED', () => {
+  it('names the trigger in words, falling back to Quarantined', () => {
     const { container } = render(
       <AdlQuarantineRow entry={entry()} open={false} onToggle={vi.fn()} handlers={handlers()} />,
     );
-    expect(container.querySelector('.verif-rb-int')?.textContent).toBe('DURATION / INTEGRITY');
-
+    expect(container.querySelector('.dlc-tag-bad')?.textContent).toBe('Failed integrity check');
     cleanup();
     const unknown = render(
       <AdlQuarantineRow
@@ -222,14 +247,16 @@ describe('AdlQuarantineRow', () => {
         handlers={handlers()}
       />,
     );
-    expect(unknown.container.querySelector('.verif-reason-badge')?.textContent).toBe('QUARANTINED');
+    expect(unknown.container.querySelector('.dlc-tag-bad')?.textContent).toBe('Quarantined');
   });
 
-  it('collapses a peer name to Soulseek but keeps a service name', () => {
+  it('names the uploader for a Soulseek file and the service otherwise', () => {
     const peer = render(
       <AdlQuarantineRow entry={entry()} open={false} onToggle={vi.fn()} handlers={handlers()} />,
     );
-    expect(peer.container.querySelector('.adl-row-batch')?.textContent).toBe('Soulseek');
+    expect(peer.container.querySelector('.dlc-sub')?.textContent).toBe(
+      'Aphex Twin · Soulseek · from somepeer',
+    );
     cleanup();
     const service = render(
       <AdlQuarantineRow
@@ -239,20 +266,18 @@ describe('AdlQuarantineRow', () => {
         handlers={handlers()}
       />,
     );
-    expect(service.container.querySelector('.adl-row-batch')?.textContent).toBe('Tidal');
+    expect(service.container.querySelector('.dlc-sub')?.textContent).toBe('Aphex Twin · Tidal');
   });
 
-  it('offers Approve with full context and Recover without it', () => {
-    const full = render(
-      <AdlQuarantineRow entry={entry()} open={false} onToggle={vi.fn()} handlers={handlers()} />,
-    );
-    const approve = full.container.querySelector('.verif-act-ok') as HTMLElement;
-    // labeled since the redesign: glyph + the word
-    expect(approve.textContent).toBe('✔Approve');
-    expect(approve.getAttribute('title')).toContain('re-import this exact file');
-
+  it('leads with Approve with full context, Recover without', () => {
+    const acts = handlers();
+    render(<AdlQuarantineRow entry={entry()} open={false} onToggle={vi.fn()} handlers={acts} />);
+    const approve = screen.getByRole('button', { name: 'Approve' });
+    expect(approve.getAttribute('title')).toContain('exact file');
+    fireEvent.click(approve);
+    expect(acts.onApprove).toHaveBeenCalled();
     cleanup();
-    const legacy = render(
+    render(
       <AdlQuarantineRow
         entry={entry({ has_full_context: false })}
         open={false}
@@ -260,23 +285,69 @@ describe('AdlQuarantineRow', () => {
         handlers={handlers()}
       />,
     );
-    const recover = legacy.container.querySelector('.verif-act-ok') as HTMLElement;
-    expect(recover.textContent).toBe('⤴Recover');
-    expect(recover.getAttribute('title')).toContain('Recover to Staging');
+    expect(screen.getByRole('button', { name: 'Recover' }).getAttribute('title')).toContain(
+      'Recover to Staging',
+    );
   });
 
-  it('says so when the sidecar has no details', () => {
+  it('leads with Delete when the track is already in the library, and says why', () => {
+    const acts = handlers();
+    const owned = entry({
+      library_status: 'present',
+      library_match: {
+        album: 'SAW',
+        filename: 'Xtal.flac',
+        quality: 'FLAC 16-bit',
+        verification_status: 'human_verified',
+      },
+    });
     const { container } = render(
+      <AdlQuarantineRow entry={owned} open onToggle={vi.fn()} handlers={acts} />,
+    );
+    expect(container.querySelector('.dlc-owned')?.getAttribute('title')).toBe(
+      'SAW · FLAC 16-bit · human verified',
+    );
+    expect(container.querySelector('.dlc-callout')?.textContent).toContain(
+      'You already have this track.',
+    );
+    fireEvent.click(container.querySelector('.dlc-acts .dlc-btn-primary') as HTMLElement);
+    expect(acts.onDelete).toHaveBeenCalled();
+    // approving is still there, just not first
+    expect(screen.getAllByRole('button', { name: 'Approve anyway' }).length).toBeGreaterThan(0);
+  });
+
+  it('marks an extra track from an album import, and explains the library check', () => {
+    const { container, rerender } = render(
       <AdlQuarantineRow
-        entry={entry({ reason: '', source_username: '', source_filename: '', timestamp: '' })}
+        entry={entry({ album_extra: { album: 'SAW', download_source: 'usenet' } })}
         open
         onToggle={vi.fn()}
         handlers={handlers()}
       />,
     );
-    expect(container.querySelector('.verif-quar-details')?.textContent).toBe(
-      'No further details in the sidecar.',
+    const tag = [...container.querySelectorAll('.dlc-tag')].find(
+      (t) => t.textContent === 'Album extra',
     );
+    expect(tag?.getAttribute('title')).toContain('Usenet album import');
+    rerender(
+      <AdlQuarantineRow
+        entry={entry({ library_status: 'unknown' })}
+        open
+        onToggle={vi.fn()}
+        handlers={handlers()}
+      />,
+    );
+    expect(container.querySelector('.dlc-facts')?.textContent).toContain(
+      'Library check unavailable',
+    );
+  });
+
+  it('compares the expected title with the file name, minus number and extension', () => {
+    const { container } = render(
+      <AdlQuarantineRow entry={entry()} open onToggle={vi.fn()} handlers={handlers()} />,
+    );
+    // "03 Xtal.flac" is the same track as "Xtal": nothing lit
+    expect(container.querySelector('.dlc-compare-diff')).toBeNull();
   });
 });
 
@@ -293,92 +364,45 @@ describe('AdlQuarantineList grouping', () => {
     const { container } = render(
       <AdlQuarantineList {...listProps} groups={[{ key: 'g1', members: [entry()] }]} />,
     );
-    expect(container.querySelectorAll('.verif-quar-row')).toHaveLength(1);
-    expect(container.querySelector('.verif-quar-alt-btn')).toBeNull();
+    expect(container.querySelectorAll('[data-quarantine-id]')).toHaveLength(1);
+    expect(container.querySelector('.dlc-qhead')).toBeNull();
   });
 
-  it('folds alternatives behind a toggle', () => {
-    // Six rejected candidates for one track should cost one row, not six.
-    const members = [entry(), entry({ id: 'q2' }), entry({ id: 'q3' })];
+  it('folds several attempts under one header that says how many and why', () => {
+    // six rejected candidates for one track should cost one line, not six
+    const members = [entry(), entry({ id: 'q2', trigger: 'acoustid' }), entry({ id: 'q3' })];
     const { container } = render(
       <AdlQuarantineList {...listProps} groups={[{ key: 'g1', members }]} />,
     );
-    // the count sits by the track name now, the old grey "▾ 2 more" on the
-    // far right got missed (7 files showing as 2 rows read as a bug)
-    const button = container.querySelector('.verif-quar-attempts') as HTMLElement;
-    expect(button.textContent).toBe('3 attempts ▾');
-    expect(button.closest('.verif-quar-title-row')).not.toBeNull();
-    expect(container.querySelector('.verif-quar-alt-members')?.className).not.toContain('vqg-open');
-  });
-
-  it('does not render collapsed group members', () => {
-    const members = [entry(), entry({ id: 'q2' }), entry({ id: 'q3' })];
-    const { container } = render(
-      <AdlQuarantineList {...listProps} groups={[{ key: 'g1', members }]} />,
+    const head = container.querySelector('.dlc-qhead') as HTMLElement;
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(head.querySelector('.dlc-attempts')?.textContent).toBe('3 attempts');
+    expect(head.querySelector('.dlc-sub')?.textContent).toBe(
+      'Aphex Twin · Failed integrity check, AcoustID mismatch',
     );
-    expect(container.querySelectorAll('.verif-quar-row')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-quarantine-id]')).toHaveLength(0);
   });
 
-  it('opens the alternatives when the group is expanded', () => {
+  it('opens the attempts when the group is expanded', () => {
+    const onToggleGroup = vi.fn();
     const members = [entry(), entry({ id: 'q2' })];
     const { container } = render(
       <AdlQuarantineList
         {...listProps}
+        onToggleGroup={onToggleGroup}
         openGroups={new Set(['g1'])}
         groups={[{ key: 'g1', members }]}
       />,
     );
-    expect(container.querySelector('.verif-quar-attempts')?.textContent).toBe('2 attempts ▴');
-    expect(container.querySelector('.verif-quar-alt-heading')?.textContent).toBe(
-      'Other attempt at this track',
-    );
-    expect(container.querySelector('.verif-quar-alt-members')?.className).toContain('vqg-open');
+    expect(container.querySelectorAll('[data-quarantine-id]')).toHaveLength(2);
+    fireEvent.click(container.querySelector('.dlc-qhead') as HTMLElement);
+    expect(onToggleGroup).toHaveBeenCalledWith('g1');
   });
 
-  it('labels group counts as loaded-only when the list is partial', () => {
-    const members = [entry(), entry({ id: 'q2' }), entry({ id: 'q3' })];
-    const { container } = render(
-      <AdlQuarantineList
-        {...listProps}
-        partial
-        onDeleteGroup={vi.fn()}
-        groups={[{ key: 'g1', members }]}
-      />,
-    );
-    expect(container.querySelector('.verif-quar-alt-heading')?.textContent).toBe(
-      'Other 2 attempts loaded',
-    );
-    const attemptsBtn = container.querySelector('.verif-quar-attempts') as HTMLElement;
-    expect(attemptsBtn.textContent).toBe('3+ attempts ▾');
-    expect(attemptsBtn.getAttribute('title')).toMatch(
-      /^At least 3 downloads tried to be this track \(the list is paged\)\./,
-    );
-    const del = container.querySelector('.verif-quar-alt-del') as HTMLElement;
-    expect(del.textContent).toBe('Delete all candidates for this track');
-    expect(del.getAttribute('title')).toBe(
-      'Permanently delete every quarantined candidate for this track (the server resolves the full group, including entries not loaded yet)',
-    );
-  });
-
-  it('singularises the partial group heading', () => {
-    const members = [entry(), entry({ id: 'q2' })];
-    const { container } = render(
-      <AdlQuarantineList
-        {...listProps}
-        partial
-        onDeleteGroup={vi.fn()}
-        groups={[{ key: 'g1', members }]}
-      />,
-    );
-    expect(container.querySelector('.verif-quar-alt-heading')?.textContent).toBe(
-      'Other 1 attempt loaded',
-    );
-  });
-
-  it('passes a null count to onDeleteGroup when the list is partial', () => {
+  it('labels group counts as a floor when the list is partial, and deletes by group', () => {
     const onDeleteGroup = vi.fn();
-    const members = [entry(), entry({ id: 'q2' })];
-    const { container } = render(
+    const members = [entry(), entry({ id: 'q2' }), entry({ id: 'q3' })];
+    render(
       <AdlQuarantineList
         {...listProps}
         partial
@@ -386,39 +410,31 @@ describe('AdlQuarantineList grouping', () => {
         groups={[{ key: 'g1', members }]}
       />,
     );
-    fireEvent.click(container.querySelector('.verif-quar-alt-del') as HTMLElement);
+    expect(screen.getByText('3+ attempts').getAttribute('title')).toBe(
+      'At least 3 downloads tried to be this track (the list is paged)',
+    );
+    const del = screen.getByRole('button', { name: 'Delete all attempts' });
+    expect(del.getAttribute('title')).toContain('including ones not loaded yet');
+    fireEvent.click(del);
+    // the server resolves the full group, so the count is unknown here
     expect(onDeleteGroup).toHaveBeenCalledWith(members[0], null);
   });
 
-  it('keeps total wording for group counts when the list is not partial', () => {
+  it('gives a total when the list is whole, without toggling the group', () => {
+    const onDeleteGroup = vi.fn();
+    const onToggleGroup = vi.fn();
     const members = [entry(), entry({ id: 'q2' }), entry({ id: 'q3' })];
-    const { container } = render(
+    render(
       <AdlQuarantineList
         {...listProps}
-        onDeleteGroup={vi.fn()}
+        onToggleGroup={onToggleGroup}
+        onDeleteGroup={onDeleteGroup}
         groups={[{ key: 'g1', members }]}
       />,
     );
-    expect(container.querySelector('.verif-quar-alt-heading')?.textContent).toBe(
-      'Other 2 attempts at this track',
-    );
-    const del = container.querySelector('.verif-quar-alt-del') as HTMLElement;
-    expect(del.textContent).toBe('Delete all 3');
-    expect(del.getAttribute('title')).toBe(
-      'Permanently delete all 3 quarantined candidates for this track',
-    );
-  });
-
-  it('singularises the alternatives tooltip', () => {
-    const { container } = render(
-      <AdlQuarantineList
-        {...listProps}
-        groups={[{ key: 'g1', members: [entry(), entry({ id: 'q2' })] }]}
-      />,
-    );
-    expect(container.querySelector('.verif-quar-attempts')?.getAttribute('title')).toBe(
-      '2 downloads tried to be this track. Show the other one',
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Delete all 3' }));
+    expect(onDeleteGroup).toHaveBeenCalledWith(members[0], 3);
+    expect(onToggleGroup).not.toHaveBeenCalled();
   });
 });
 
@@ -436,39 +452,38 @@ describe('AdlReviewBanner', () => {
     onQuarantineApproveAll: vi.fn(),
     onQuarantineClearAll: vi.fn(),
     deletedCount: 4,
-    selectedCount: 0,
-    onApproveSelected: vi.fn(),
-    onDeleteSelected: vi.fn(),
     onRestoreAllDeleted: vi.fn(),
     onEmptyDeleted: vi.fn(),
   };
+  const segs = (c: HTMLElement) =>
+    [...c.querySelectorAll('.dlc-seg-btn')].map((p) => p.textContent);
+  const menuItems = (c: HTMLElement) => {
+    const more = c.querySelector('.dlc-more');
+    if (!more) return [];
+    fireEvent.click(more);
+    return screen.getAllByRole('menuitem').map((m) => m.textContent);
+  };
 
-  it('shows all three pills with counts', () => {
+  it('shows the three sub-views with counts', () => {
     const { container } = render(<AdlReviewBanner {...props} />);
-    const pills = [...container.querySelectorAll('.adl-pill')].map((p) => p.textContent);
-    const counts = [...container.querySelectorAll('.adl-review-seg-count')].map(
-      (c) => c.textContent,
-    );
-    expect(pills).toEqual(['Unverified3', 'Quarantine2', 'Deleted4']);
-    expect(counts).toEqual(['3', '2', '4']);
+    expect(segs(container)).toEqual(['Unverified3', 'Quarantine2', 'Deleted4']);
   });
 
-  it('hides the unverified pill when no such queue can exist', () => {
+  it('hides Unverified when no such queue can exist', () => {
     const { container } = render(<AdlReviewBanner {...props} acoustidEnabled={false} />);
-    const pills = [...container.querySelectorAll('.adl-pill')].map((p) => p.textContent);
-    // the deleted bin exists regardless of acoustid - only unverified hides
-    expect(pills).toEqual(['Quarantine2', 'Deleted4']);
+    // the deleted bin exists regardless of acoustid; only unverified hides
+    expect(segs(container)).toEqual(['Quarantine2', 'Deleted4']);
   });
 
-  it('shows the deleted pill with no count until the bin has been loaded', () => {
-    const { container } = render(<AdlReviewBanner {...props} deletedCount={null} />);
-    const pills = [...container.querySelectorAll('.adl-pill')].map((p) => p.textContent);
-    expect(pills[2]).toBe('Deleted');
+  it('holds back a count until it is known', () => {
+    // showing 0 before the fetch lands would read as "none quarantined"
+    const { container } = render(
+      <AdlReviewBanner {...props} quarantineLoaded={false} deletedCount={null} />,
+    );
+    expect(segs(container)).toEqual(['Unverified3', 'Quarantine', 'Deleted']);
   });
 
   it('says tracks AND files over the quarantine list, so 7 over two rows adds up', () => {
-    // boulder, sept 30: "Quarantine (7)" over two rows looked like 5 were
-    // missing. they were grouped under their track.
     const { container } = render(
       <AdlReviewBanner
         {...props}
@@ -477,7 +492,7 @@ describe('AdlReviewBanner', () => {
         quarantineTrackCount={2}
       />,
     );
-    expect(container.querySelector('.adl-review-summary')?.textContent).toBe('2 tracks · 7 files');
+    expect(container.querySelector('.dlc-subbar-note')?.textContent).toBe('2 tracks · 7 files');
   });
 
   it('keeps the summary to files when nothing is grouped', () => {
@@ -486,67 +501,79 @@ describe('AdlReviewBanner', () => {
     expect(quarantineSummary(1, 4)).toBe('1 track · 4 files');
   });
 
-  it('omits the quarantine count until it is actually known', () => {
-    // Showing (0) before the fetch lands would read as "none quarantined".
-    const { container } = render(<AdlReviewBanner {...props} quarantineLoaded={false} />);
-    expect(container.querySelectorAll('.adl-pill')[1].textContent).toBe('Quarantine');
-  });
-
-  it('offers Clean orphaned only in the unverified view', () => {
+  it('offers Clean orphaned only for unverified files', () => {
     const unv = render(<AdlReviewBanner {...props} />);
-    expect(unv.container.textContent).toContain('🧹 Clean orphaned');
-    expect(unv.container.textContent).toContain('🗑 Delete all');
-
+    expect(menuItems(unv.container)).toEqual([
+      'Approve all (3)',
+      'Clean orphaned entries',
+      'Delete all',
+    ]);
     cleanup();
-    // A quarantined file IS the file — it cannot be orphaned.
+    // a quarantined file IS the file. it can't be orphaned
     const quar = render(<AdlReviewBanner {...props} subView="quarantine" />);
-    expect(quar.container.textContent).not.toContain('Clean orphaned');
-    expect(quar.container.textContent).toContain('🗑 Clear all');
+    expect(menuItems(quar.container)).toEqual(['Approve all (2)', 'Delete all']);
   });
 
-  it('narrows the bulk buttons to the selection when rows are checked', () => {
-    const onApproveSelected = vi.fn();
-    const { container } = render(
-      <AdlReviewBanner {...props} selectedCount={2} onApproveSelected={onApproveSelected} />,
-    );
-    expect(container.textContent).toContain('✔ Approve selected (2)');
-    expect(container.textContent).toContain('🗑 Delete selected (2)');
-    expect(container.textContent).not.toContain('Approve all');
-    fireEvent.click(
-      [...container.querySelectorAll('.adl-filter-banner-clear')].find((b) =>
-        b.textContent?.includes('Approve selected'),
-      ) as HTMLElement,
-    );
-    expect(onApproveSelected).toHaveBeenCalled();
-  });
-
-  it('hides bulk buttons over an empty view — a promise the click cannot keep', () => {
+  it('has no bulk menu over an empty view, a promise the click cannot keep', () => {
     const unv = render(<AdlReviewBanner {...props} unverifiedCount={0} />);
-    expect(unv.container.textContent).not.toContain('Approve all');
-    cleanup();
-    const quar = render(<AdlReviewBanner {...props} subView="quarantine" quarantineCount={0} />);
-    expect(quar.container.textContent).not.toContain('Approve all');
+    expect(unv.container.querySelector('.dlc-more')).toBeNull();
     cleanup();
     const del = render(<AdlReviewBanner {...props} subView="deleted" deletedCount={0} />);
-    expect(del.container.textContent).not.toContain('Empty bin');
+    expect(del.container.querySelector('.dlc-more')).toBeNull();
   });
 
-  it('routes each bulk button to its own handler', () => {
+  it('routes each bulk action to its own handler', () => {
     const onApproveAll = vi.fn();
     const onDeleteAll = vi.fn();
     const { container } = render(
       <AdlReviewBanner {...props} onApproveAll={onApproveAll} onDeleteAll={onDeleteAll} />,
     );
-    const buttons = [...container.querySelectorAll('.adl-filter-banner-clear')];
-    fireEvent.click(buttons[0]);
-    fireEvent.click(buttons[2]);
+    fireEvent.click(container.querySelector('.dlc-more') as HTMLElement);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Approve all (3)' }));
+    fireEvent.click(container.querySelector('.dlc-more') as HTMLElement);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete all' }));
     expect(onApproveAll).toHaveBeenCalled();
     expect(onDeleteAll).toHaveBeenCalled();
   });
 });
 
-describe('AdlDeletedRow source labels', () => {
-  const entry = (source: string | null): AdlDeletedEntry => ({
+describe('selection and explainers', () => {
+  it('floats the selected rows actions, and only with a selection', () => {
+    const onApprove = vi.fn();
+    const { container, rerender } = render(
+      <AdlReviewSelectionBar
+        count={0}
+        onApprove={onApprove}
+        onDelete={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+    expect(container.querySelector('.dlc-selbar')).toBeNull();
+    rerender(
+      <AdlReviewSelectionBar
+        count={2}
+        onApprove={onApprove}
+        onDelete={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+    expect(container.querySelector('.dlc-selbar-n')?.textContent).toBe('2 selected');
+    fireEvent.click(screen.getByRole('button', { name: 'Approve 2' }));
+    expect(onApprove).toHaveBeenCalled();
+  });
+
+  it('says what each view is, plainly, every time', () => {
+    const { container, rerender } = render(<AdlReviewExplainer subView="unverified" />);
+    expect(container.textContent).toContain("Imported, but AcoustID couldn't confirm them.");
+    rerender(<AdlReviewExplainer subView="quarantine" />);
+    expect(container.textContent).toContain('never imported');
+    rerender(<AdlReviewExplainer subView="deleted" />);
+    expect(container.textContent).toContain('Restore puts a file back');
+  });
+});
+
+describe('AdlDeletedRow', () => {
+  const del = (source: string | null): AdlDeletedEntry => ({
     id: 'd1',
     name: '01-02 New Pammy.flac',
     rel: 'album_bundle_orphans/b_stalled/01-02 New Pammy.flac',
@@ -555,88 +582,38 @@ describe('AdlDeletedRow source labels', () => {
     source,
     original_path: '/app/storage/album_bundle_staging/b_stalled/01-02 New Pammy.flac',
   });
-  const handlers = { onRestore: vi.fn(), onPurge: vi.fn() };
+  const rowHandlers = () => ({ onRestore: vi.fn(), onPurge: vi.fn() });
 
   it('names a rescued album bundle so it is not an unexplained file (#1210)', () => {
     const { container } = render(
-      <AdlDeletedRow entry={entry('album_bundle_orphan')} handlers={handlers} />,
+      <AdlDeletedRow entry={del('album_bundle_orphan')} handlers={rowHandlers()} />,
     );
-    expect(container.textContent).toContain('Stalled album download');
+    expect(container.querySelector('.dlc-tag')?.textContent).toBe('Stalled album download');
   });
 
-  it('still names the two older sources', () => {
-    const { container } = render(<AdlDeletedRow entry={entry('repair')} handlers={handlers} />);
-    expect(container.textContent).toContain('Repair tool');
+  it('still names the older sources, and says nothing for an unknown one', () => {
+    const { container, rerender } = render(
+      <AdlDeletedRow entry={del('repair')} handlers={rowHandlers()} />,
+    );
+    expect(container.querySelector('.dlc-tag')?.textContent).toBe('Repair tool');
+    rerender(<AdlDeletedRow entry={del('duplicate-cleaner')} handlers={rowHandlers()} />);
+    expect(container.querySelector('.dlc-tag')?.textContent).toBe('Duplicate cleaner');
+    rerender(<AdlDeletedRow entry={del(null)} handlers={rowHandlers()} />);
+    expect(container.querySelector('.dlc-tag')).toBeNull();
+  });
+
+  it('restores with one click and keeps delete-forever in the menu', () => {
+    const h = rowHandlers();
+    const { container } = render(<AdlDeletedRow entry={del(null)} handlers={h} />);
+    expect(container.querySelector('.dlc-file')?.textContent).toBe('FLAC');
+    expect(container.querySelector('.dlc-when')?.textContent).toBe('age unknown');
+    openMenu(container);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete forever' }));
+    expect(h.onPurge).toHaveBeenCalled();
     cleanup();
-    const dupe = render(<AdlDeletedRow entry={entry('duplicate-cleaner')} handlers={handlers} />);
-    expect(dupe.container.textContent).toContain('Duplicate cleaner');
-  });
-
-  it('says nothing rather than guessing for an unknown source', () => {
-    const { container } = render(<AdlDeletedRow entry={entry(null)} handlers={handlers} />);
-    expect(container.querySelector('.adl-row-batch')).toBeNull();
-  });
-});
-
-describe('quarantine presence and album origin', () => {
-  it('shows a compact library icon with the existing copy details', () => {
-    const { getByRole, container } = render(
-      <AdlQuarantineRow
-        entry={entry({
-          library_status: 'present',
-          library_match: {
-            album: 'SAW',
-            filename: 'Xtal.flac',
-            quality: 'FLAC 16-bit',
-            verification_status: 'human_verified',
-          },
-        })}
-        open={false}
-        onToggle={vi.fn()}
-        handlers={handlers()}
-      />,
-    );
-    const icon = getByRole('img', { name: /already in library/i });
-    expect(icon.getAttribute('title')).toContain('SAW');
-    expect(icon.getAttribute('title')).toContain('FLAC 16-bit');
-    expect(icon.getAttribute('title')).toContain('human verified');
-    expect(icon.closest('.verif-quar-title-row')).not.toBeNull();
-    expect(container.querySelector('.verif-presence-icons')?.textContent).toBe('');
-  });
-
-  it('marks only additional album imports and includes the download source', () => {
-    const { getByRole } = render(
-      <AdlQuarantineRow
-        entry={entry({ album_extra: { album: 'SAW', download_source: 'usenet' } })}
-        open={false}
-        onToggle={vi.fn()}
-        handlers={handlers()}
-      />,
-    );
-    expect(
-      getByRole('img', { name: /additional.*Usenet album import/i }).getAttribute('title'),
-    ).toContain('SAW');
-  });
-
-  it('adds no icons for ordinary missing tracks and explains unknown in details', () => {
-    const { queryByRole, rerender, getByText } = render(
-      <AdlQuarantineRow
-        entry={entry({ library_status: 'missing', album_extra: null })}
-        open={true}
-        onToggle={vi.fn()}
-        handlers={handlers()}
-      />,
-    );
-    expect(queryByRole('img', { name: /already in library|additional track/i })).toBeNull();
-    getByText('No matching library copy found');
-    rerender(
-      <AdlQuarantineRow
-        entry={entry({ library_status: 'unknown' })}
-        open={true}
-        onToggle={vi.fn()}
-        handlers={handlers()}
-      />,
-    );
-    getByText('Library check unavailable');
+    const h2 = rowHandlers();
+    render(<AdlDeletedRow entry={del(null)} handlers={h2} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    expect(h2.onRestore).toHaveBeenCalled();
   });
 });

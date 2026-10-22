@@ -587,7 +587,10 @@ def _check_audio_integrity_tier1(
                    f"(drift {drift_s:.1f}s > tolerance {effective_tolerance_s:.1f}s) — "
                    + ("runs longer than expected — likely a different version/master or wrong file"
                       if runs_long
-                      else "likely truncated download or wrong file matched"),
+                      else "likely truncated download or wrong file matched")
+                   # name the setting so a user with good files knows the knob exists (#1805)
+                   + ". If it's the right song, raise Duration tolerance in "
+                     "Settings > Library > Post-Processing",
             checks=checks,
         )
 

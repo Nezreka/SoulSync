@@ -1,5 +1,6 @@
 import asyncio
 import contextvars
+import re
 import threading
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
@@ -129,6 +130,27 @@ _sync_is_request_list: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "sync_is_request_list", default=False)
 _sync_auto_remove_fulfilled: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "sync_auto_remove_fulfilled", default=False)
+
+# the sync ids a mirrored playlist syncs under. bare digits don't count: a
+# deezer playlist id is all digits and would land on a random mirror
+_MIRROR_SYNC_ID_RE = re.compile(r'^(?:auto_mirror_|mirrored_|youtube_mirrored_)(\d+)$')
+
+
+def _request_list_row(playlist_id) -> Optional[Dict[str, Any]]:
+    """the mirror behind a sync id when it's a request list, else None.
+
+    the row is the truth. every entry point used to pass the flag along by
+    hand, and one that forgot built a server playlist for a request list."""
+    m = _MIRROR_SYNC_ID_RE.match(str(playlist_id or '').strip())
+    if not m:
+        return None
+    try:
+        from database.music_database import MusicDatabase
+        row = MusicDatabase().get_mirrored_playlist(int(m.group(1)))
+    except Exception as e:  # noqa: BLE001 - no row means a normal sync
+        logger.debug("request list lookup for %s failed: %s", playlist_id, e)
+        return None
+    return row if row and row.get('is_request_list') else None
 
 
 def client_for_profile(profile_id, client, server):
@@ -607,6 +629,10 @@ class PlaylistSyncService:
             is_request_list = _sync_is_request_list.get()
         if auto_remove_fulfilled is None:
             auto_remove_fulfilled = _sync_auto_remove_fulfilled.get()
+        request_row = await asyncio.to_thread(_request_list_row, getattr(playlist, 'id', None))
+        if request_row:
+            is_request_list = True
+            auto_remove_fulfilled = bool(request_row.get('auto_remove_fulfilled'))
         # Check if THIS specific playlist is already syncing
         syncing = getattr(self, 'syncing_playlists', None)
         if syncing is None:
@@ -746,9 +772,12 @@ class PlaylistSyncService:
                     f"{'Request list' if is_request_list else 'Standalone'} playlist sync '{playlist.name}': "
                     f"{len(matched_tracks)} in library, {unmatched_count} missing"
                 )
-                if is_request_list and auto_remove_fulfilled and matched_tracks and self.spotify_client:
+                if is_request_list and auto_remove_fulfilled and matched_tracks and request_row:
+                    # db reads and spotify calls: off the shared loop
                     try:
-                        self._handle_request_list_spotify_removal(playlist, matched_tracks, profile_id)
+                        await asyncio.to_thread(
+                            self._handle_request_list_spotify_removal,
+                            request_row, matched_tracks, profile_id)
                     except Exception as rm_err:
                         logger.warning(f"Failed to auto-remove fulfilled tracks from Spotify: {rm_err}")
             else:
@@ -878,6 +907,17 @@ class PlaylistSyncService:
                         {'playlist_id': server_playlist_id}
                         if server_type == 'navidrome' else {}
                     )
+                    # what each source track matched, so append can drop an
+                    # old wrong match the right track replaced (#1801)
+                    _append_kw = (
+                        {'source_hints': [
+                            (getattr(r.spotify_track, 'name', ''),
+                             [_artist_name(a) for a in
+                              (getattr(r.spotify_track, 'artists', None) or [])],
+                             str(getattr(r.plex_track, 'ratingKey', '') or ''))
+                            for r in matched_tracks if r.plex_track is not None]}
+                        if server_type == 'navidrome' else {}
+                    )
                     def _dispatch_write():
                         # The guard's drop record is read back in this same
                         # thread, under the write lock, so a concurrent
@@ -886,7 +926,8 @@ class PlaylistSyncService:
                         with _playlist_write_lock(server_type):
                             if sync_mode == 'append':
                                 ok = media_client.append_to_playlist(
-                                    playlist.name, plex_tracks, **_navidrome_id_kw)
+                                    playlist.name, plex_tracks, **_navidrome_id_kw,
+                                    **_append_kw)
                             elif sync_mode == 'reconcile':
                                 ok = self._reconcile_or_replace(
                                     media_client, playlist.name, plex_tracks,
@@ -1703,47 +1744,77 @@ class PlaylistSyncService:
             logger.error(f"Error generating library comparison: {e}")
             return {"error": str(e)}
 
-    def _handle_request_list_spotify_removal(self, playlist, matched_tracks, profile_id):
-        """Delete fulfilled tracks from the upstream Spotify playlist if collaborative/owned."""
-        from core.playlists.source_refs import extract_mirrored_pk, _parse_spotify_ref, _SPOTIFY_ID_RE
+    def _handle_request_list_spotify_removal(self, pl_row, matched_tracks, profile_id):
+        """Delete fulfilled tracks from the request list's upstream Spotify playlist.
+
+        only a track the library holds under the SAME spotify id counts as
+        fulfilled. the sync matcher is fuzzy, and a wrong match here deletes
+        the wrong song from the user's real playlist. a track the library
+        hasn't been enriched with a spotify id for yet just waits for a later
+        sync."""
+        from core.playlists.source_refs import _parse_spotify_ref, _SPOTIFY_ID_RE
         from database.music_database import MusicDatabase
         try:
-            db = MusicDatabase()
-            pk = extract_mirrored_pk(getattr(playlist, 'id', None))
-            pl_row = db.get_mirrored_playlist(pk, profile_id=profile_id) if pk else None
-
-            source = (pl_row.get('source') if pl_row else '') or ''
+            source = pl_row.get('source') or ''
             if source not in ('spotify', 'spotify_public'):
                 return
 
             spotify_playlist_id = None
-            if pl_row:
-                upstream = pl_row.get('upstream_playlist_id')
-                if upstream and _SPOTIFY_ID_RE.match(str(upstream)):
-                    spotify_playlist_id = str(upstream)
-                elif source == 'spotify' and _SPOTIFY_ID_RE.match(str(pl_row.get('source_playlist_id') or '')):
-                    spotify_playlist_id = str(pl_row.get('source_playlist_id'))
-                else:
-                    desc = pl_row.get('description') or ''
-                    parsed = _parse_spotify_ref(desc)
-                    if parsed and parsed.get('type') == 'playlist':
-                        spotify_playlist_id = parsed.get('id')
-
+            upstream = pl_row.get('upstream_playlist_id')
+            if upstream and _SPOTIFY_ID_RE.match(str(upstream)):
+                spotify_playlist_id = str(upstream)
+            else:
+                parsed = _parse_spotify_ref(pl_row.get('description') or '')
+                if parsed and parsed.get('type') == 'playlist':
+                    spotify_playlist_id = parsed.get('id')
             if not spotify_playlist_id:
                 logger.debug("Could not resolve Spotify playlist ID for request list removal")
                 return
 
+            db = MusicDatabase()
             spotify_track_ids = []
+            skipped = 0
             for r in matched_tracks:
                 t = r.spotify_track
-                tid = getattr(t, 'source_track_id', None) or getattr(t, 'id', None)
-                if tid and not str(tid).startswith('file:') and _SPOTIFY_ID_RE.match(str(tid)):
-                    spotify_track_ids.append(str(tid))
+                # the playlist's own id is what spotify knows the entry by
+                tid = str(getattr(t, 'source_track_id', None) or getattr(t, 'id', None) or '')
+                if not _SPOTIFY_ID_RE.match(tid):
+                    continue
+                lib_id = getattr(r.plex_track, 'ratingKey', None) or getattr(r.plex_track, 'id', None)
+                held = _library_spotify_id(db, lib_id)
+                if held and held in {tid, str(getattr(t, 'id', '') or '')}:
+                    spotify_track_ids.append(tid)
+                else:
+                    skipped += 1
 
+            if skipped:
+                logger.info(f"Request list auto-removal: kept {skipped} track(s) not matched by spotify id")
             if not spotify_track_ids:
                 return
 
+            from core.metadata.registry import get_spotify_client_for_profile
+            client = get_spotify_client_for_profile(profile_id) or self.spotify_client
+            if client is None:
+                return
             logger.info(f"Request list auto-removal: removing {len(spotify_track_ids)} fulfilled tracks from Spotify playlist {spotify_playlist_id}")
-            self.spotify_client.remove_playlist_tracks(spotify_playlist_id, spotify_track_ids)
+            res = client.remove_playlist_tracks(spotify_playlist_id, spotify_track_ids)
+            if isinstance(res, dict) and not res.get('success', True):
+                logger.warning(f"Request list auto-removal failed: {res.get('error')}")
         except Exception as e:
             logger.warning(f"Error during request list Spotify track removal: {e}")
+
+
+def _library_spotify_id(db, library_track_id) -> Optional[str]:
+    """the spotify id a library track is stored under, or None."""
+    if library_track_id in (None, ''):
+        return None
+    try:
+        with db._get_connection() as conn:
+            row = conn.execute(
+                "SELECT spotify_track_id FROM tracks WHERE id = ?", (str(library_track_id),)
+            ).fetchone()
+    except Exception as e:  # noqa: BLE001 - no proof means keep the track
+        logger.debug("library spotify id lookup for %s failed: %s", library_track_id, e)
+        return None
+    value = row[0] if row else None
+    return str(value) if value else None

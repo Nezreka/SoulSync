@@ -30,6 +30,12 @@ from urllib.parse import urlencode
 
 import requests
 
+from core.security.signup_defaults import (  # noqa: F401 - SIGNUP_* re-exported for callers
+    SIGNUP_HOME_PAGE,
+    SIGNUP_PAGES,
+    SignupAccess,
+    create_signup_profile,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("security.plex_signin")
@@ -39,13 +45,6 @@ PLEX_AUTH_URL = "https://app.plex.tv/auth#?"
 PRODUCT = "SoulSync"
 TIMEOUT = 10
 
-
-# what a profile made by plex sign-in can open. sign-in is an open invite to
-# everyone the admin shares plex with, so it starts on finding and asking
-# for music, never the machinery (sync, automations, import, downloads,
-# tools). the admin widens it per person in profile management
-SIGNUP_PAGES = ['discover', 'search', 'library', 'artist-detail', 'wishlist', 'stats', 'help', 'issues']
-SIGNUP_HOME_PAGE = 'discover'
 
 _cid_lock = threading.Lock()
 # find-or-create a profile is one step: two tabs (or a double click) finishing
@@ -135,10 +134,14 @@ def sign_in(
     *,
     allow_create: bool,
     default_can_download: bool,
+    access: Optional[SignupAccess] = None,
 ) -> SignInResult:
-    """map a signed-in plex account to a soulsync profile (see module doc)"""
+    """map a signed-in plex account to a soulsync profile (see module doc).
+    `access` is what a new profile starts with (signup_defaults.signup_access);
+    without one, the shipped default"""
     with _sign_in_lock:
-        return _sign_in(db, account, allow_create=allow_create, default_can_download=default_can_download)
+        return _sign_in(db, account, allow_create=allow_create, default_can_download=default_can_download,
+                        access=access or SignupAccess())
 
 
 def _admin_profile_id(db) -> Optional[int]:
@@ -148,7 +151,8 @@ def _admin_profile_id(db) -> Optional[int]:
     return 1 if p.get("is_admin") else None
 
 
-def _sign_in(db, account: PlexAccount, *, allow_create: bool, default_can_download: bool) -> SignInResult:
+def _sign_in(db, account: PlexAccount, *, allow_create: bool, default_can_download: bool,
+             access: SignupAccess) -> SignInResult:
     if not account.server_token:
         return SignInResult(error="That Plex account doesn't have access to this server")
 
@@ -178,7 +182,7 @@ def _sign_in(db, account: PlexAccount, *, allow_create: bool, default_can_downlo
     if not allow_create:
         return SignInResult(error="Your Plex account isn't linked to a SoulSync profile yet. Ask your admin.")
 
-    profile_id = _create_profile(db, account.username, can_download=default_can_download)
+    profile_id = _create_profile(db, account.username, can_download=default_can_download, access=access)
     if profile_id is None:
         return SignInResult(error="Couldn't create a profile for your Plex account")
     db.set_profile_plex_account(profile_id, account.id)
@@ -230,15 +234,16 @@ def profile_name_for(username: str) -> str:
     return cleaned or "Plex user"
 
 
-def _create_profile(db, username: str, *, can_download: bool) -> Optional[int]:
+def _create_profile(db, username: str, *, can_download: bool,
+                    access: Optional[SignupAccess] = None) -> Optional[int]:
     """a profile named after the plex user; a taken name gets a number"""
+    access = access or SignupAccess()
     base = profile_name_for(username)
     for n in range(0, 50):
         name = base if n == 0 else f"{base} {n + 1}"
         if db.get_profile_by_name(name):
             continue
-        pid = db.create_profile(name, can_download=can_download,
-                                allowed_pages=list(SIGNUP_PAGES), home_page=SIGNUP_HOME_PAGE)
+        pid = create_signup_profile(db, name, access, can_download=can_download)
         if pid:
             return pid
     return None

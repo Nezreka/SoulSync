@@ -18,13 +18,16 @@
  * `ServerCompareEditor` had no mount site anywhere before this file.
  */
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { takeSetupPlaylistLink } from '@/features/onboarding/handoff';
 
 import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
 import type { SyncTabId } from '../-sync.shell';
 
 import { metadataSourceLabel } from '../-sync.modal-core';
 import { normalizeSyncTab } from '../-sync.shell';
+import { DETECTED_SOURCE_TAB_IDS, detectPlaylistUrl, isDetected } from '../-sync.url-detect';
 import { useAutoSync, useAutoSyncActions } from '../-sync.use-autosync';
 import { useSyncHistory } from '../-sync.use-history';
 import { useSyncPage } from '../-sync.use-page';
@@ -100,6 +103,16 @@ export function SyncPage() {
   const clearPending = useCallback(() => {
     setPending(null);
   }, []);
+
+  // a playlist link pasted during first-run setup lands here, routed exactly
+  // like the Add playlist sheet would. SyncShell registers openTab in its own
+  // effect, which runs before this one.
+  useEffect(() => {
+    const url = takeSetupPlaylistLink();
+    if (!url) return;
+    const detection = detectPlaylistUrl(url);
+    if (isDetected(detection)) routeAdd(DETECTED_SOURCE_TAB_IDS[detection.source], url);
+  }, [routeAdd]);
 
   /**
    * The mirrored tab's detail-modal opener.

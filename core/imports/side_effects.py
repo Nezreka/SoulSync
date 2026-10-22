@@ -954,6 +954,36 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
 
             cursor.execute("SELECT id FROM tracks WHERE file_path = ?", (final_path,))
             existing_track = cursor.fetchone()
+            # #1810: a redownload replaces a library row. if the new file
+            # landed at a different path (even just different casing) there
+            # is no row here yet, and inserting one left two rows on the
+            # replacement once the redownload hook repointed the original.
+            # repoint the original instead so it keeps its id and playlists.
+            replaced_track_id = track_info.get("_redownload_library_track_id")
+            if not existing_track and replaced_track_id:
+                cursor.execute(
+                    "SELECT id FROM tracks WHERE id = ? AND server_source = 'soulsync'",
+                    (replaced_track_id,),
+                )
+                existing_track = cursor.fetchone()
+                if existing_track:
+                    cursor.execute(
+                        "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP "
+                        "WHERE id = ?",
+                        (final_path, existing_track[0]),
+                    )
+                    logger.info("[SoulSync Library] Redownload repointed track %s to %s",
+                                existing_track[0], final_path)
+            if (existing_track and replaced_track_id
+                    and str(existing_track[0]) == str(replaced_track_id)):
+                # the file on disk is new, so its facts are too. 0/None means
+                # unknown here and never overwrites a real value.
+                cursor.execute(
+                    "UPDATE tracks SET duration = COALESCE(NULLIF(?, 0), duration), "
+                    "bitrate = COALESCE(NULLIF(?, 0), bitrate), "
+                    "file_size = COALESCE(?, file_size) WHERE id = ?",
+                    (duration_ms, bitrate, file_size, existing_track[0]),
+                )
             if not existing_track:
                 base_values = (
                         track_id,

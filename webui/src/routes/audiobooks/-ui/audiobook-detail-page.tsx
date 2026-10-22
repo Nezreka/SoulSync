@@ -1,6 +1,8 @@
 import { Link, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 
+import { EmptyState, Skeleton } from '@/components/primitives';
+
 import type { AudiobookItem } from '../-audiobooks.types';
 
 import {
@@ -91,7 +93,7 @@ export function AudiobookDetailPage() {
     return (
       <div className={styles.detailPage}>
         <AudiobookBackButton />
-        <div className={styles.detailSkeleton} />
+        <Skeleton className={styles.detailSkeleton} />
       </div>
     );
   }
@@ -100,13 +102,15 @@ export function AudiobookDetailPage() {
     return (
       <div className={styles.detailPage}>
         <AudiobookBackButton />
-        <div className={styles.emptyState}>
-          <h3>Not found</h3>
-          <p>The catalogue has nothing for {asin}.</p>
+        <EmptyState
+          className={styles.emptyState}
+          title="Not found"
+          description={<>The catalogue has nothing for {asin}.</>}
+        >
           <Link to="/audiobooks" className={styles.heroSecondary}>
             Back to audiobooks
           </Link>
-        </div>
+        </EmptyState>
       </div>
     );
   }

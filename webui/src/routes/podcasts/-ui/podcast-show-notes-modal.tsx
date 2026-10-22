@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 
+import { Spinner } from '@/components/primitives';
+
 import type { PodcastDownloadItem, PodcastEpisodeItem } from '../-podcasts.types';
 
 import styles from './podcasts-page.module.css';
@@ -147,7 +149,7 @@ export function PodcastShowNotesModal({
                   </>
                 ) : isDownloading ? (
                   <>
-                    <span className={styles.smallSpinner} /> <span>Downloading…</span>
+                    <Spinner size={13} tone="light" /> <span>Downloading…</span>
                   </>
                 ) : (
                   <>

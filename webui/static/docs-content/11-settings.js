@@ -109,6 +109,7 @@ These live on other tabs, not Downloads:
 ## Verification & enhancement
 
 - **AcoustID verification** — fingerprints each download and quarantines files that don't match the expected track
+- **Duration tolerance** (Post-Processing > Core Features): how far a file's length can drift from the expected length before it's quarantined. **0 = auto**: 3s short (5s for tracks over 10 minutes) or 15s long. Raise it if good files keep landing in quarantine for being a few seconds off, which is common with CD rips (pregaps, trimmed silence) and alternate masters. A set value applies both ways, so anything under 15 also tightens the long side. Max 60
 
 ## Organization
 
@@ -149,7 +150,12 @@ Accent color, theme, visualizer effects, and interface controls. Changes apply i
 
 ## REST API keys
 
-Generate API keys for external integrations. Keys are **not** scoped — every key carries full admin rights, so guard them like passwords and revoke any you no longer use. Keys are shown once at creation. See the API docs for endpoint details.
+Generate API keys for external integrations. A key is either **admin** (full rights, the default) or **read** (can look, can't change anything). Guard admin keys like passwords and revoke any you no longer use. Keys are shown once at creation. See the API docs for endpoint details.
+
+The same section has two switches, both off by default:
+
+- **MCP for AI Clients** answers at \`/mcp\`, so Claude and other AI apps can drive SoulSync with one of these keys. See [MCP for AI clients](#api-mcp).
+- **Lidarr Compatible API** answers at \`/lidarr\`, so request apps that only speak Lidarr can use SoulSync. Pick which profile's wishlist their requests land on. See [Lidarr compatible API](#api-lidarr).
 
 ## Log level
 

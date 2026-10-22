@@ -10,8 +10,15 @@ import type {
   WishlistBulkResponse,
 } from '../-wishlist.types';
 
-import { trackCountLabel } from '../-wishlist.helpers';
+import {
+  describeTrouble,
+  shortStamp,
+  trackCountLabel,
+  wishlistZones,
+  type WishlistZone,
+} from '../-wishlist.helpers';
 import { openWishlistInspector } from '../../../features/downloads/inspector-modal';
+import { NebulaZoneHead } from './nebula-parts';
 
 /**
  * The dense LIST view — the nebula's operational twin (Boulder: "alternative
@@ -119,8 +126,16 @@ function TrackRow({
             ? `${track.failing ? '⚠ ' : ''}${track.retry} tries`
             : 'waiting'}
       </span>
-      <span className="wl-list-last" title={track.lastTried || undefined}>
-        {track.lastTried || '—'}
+      {/* why it's stuck, then when it was last tried. the raw reason and
+          stamp stay on hover for anyone chasing a bug. */}
+      <span
+        className="wl-list-last"
+        title={[track.failReason, track.lastTried].filter(Boolean).join('\n') || undefined}
+      >
+        {track.failing ? (
+          <span className="wl-list-why">{describeTrouble(track).headline}</span>
+        ) : null}
+        <span className="wl-list-when">{shortStamp(track.lastTried) || '—'}</span>
       </span>
       <span className="wl-list-track-actions">
         <button
@@ -160,6 +175,8 @@ export function WishlistList({
   onBulkAction,
   bulkBusy = false,
   onGrabArtist,
+  zoned = false,
+  onRetryIds,
 }: {
   /** Keyed by LOWERCASED artist name — buildArtistImageMap's contract. */
   artistImages: Map<string, string>;
@@ -174,9 +191,25 @@ export function WishlistList({
   bulkBusy?: boolean;
   /** Queue every wanted track by the artist, right now. */
   onGrabArtist?: (group: WishlistArtistGroup) => void;
+  /** split the artists into the nebula's trouble zones, sort applying inside each. */
+  zoned?: boolean;
+  /** a zone's retry button: clear the backoff on its stuck tracks. */
+  onRetryIds?: (ids: string[]) => void;
 }) {
   const [sort, setSort] = useState<WishlistListSort>('failing');
-  const sorted = useMemo(() => sortGroups(groups, sort), [groups, sort]);
+  const zones = useMemo<WishlistZone[] | null>(
+    () => (zoned ? wishlistZones(sortGroups(groups, sort)) : null),
+    [zoned, groups, sort],
+  );
+  // render order. zoned, the zones decide it; the sort orders inside each.
+  const sorted = useMemo(
+    () => (zones ? zones.flatMap((zone) => zone.groups) : sortGroups(groups, sort)),
+    [zones, groups, sort],
+  );
+  const zoneStarts = useMemo(
+    () => new Map((zones ?? []).map((zone) => [zone.groups[0]?.name, zone])),
+    [zones],
+  );
   // Artists whose downloads are filed as audiobooks; one lookup for the whole list.
   const audiobookArtists = useRoutedArtists(groups.map((group) => group.name));
   // Collapsed by default: the page opens as a compact artist INDEX (name,
@@ -351,6 +384,13 @@ export function WishlistList({
           removing a whole album is the ✕ on its album cell. */}
       {sorted.map((group) => (
         <div className="wl-list-section" key={group.name}>
+          {zoneStarts.has(group.name) ? (
+            <ListZoneHead
+              zone={zoneStarts.get(group.name)!}
+              onRetryIds={onRetryIds}
+              busy={bulkBusy}
+            />
+          ) : null}
           <div
             className="wl-list-sep"
             role="button"
@@ -436,5 +476,34 @@ export function WishlistList({
         </div>
       ))}
     </div>
+  );
+}
+
+function ListZoneHead({
+  zone,
+  onRetryIds,
+  busy,
+}: {
+  zone: WishlistZone;
+  onRetryIds?: (ids: string[]) => void;
+  busy: boolean;
+}) {
+  return (
+    <NebulaZoneHead
+      kind={zone.kind}
+      title={zone.title}
+      sub={zone.sub}
+      className="wl-list-zone"
+      action={
+        onRetryIds && zone.stuckIds.length > 0
+          ? {
+              label: zone.stuckIds.length === 1 ? 'Retry now' : `Retry all ${zone.stuckIds.length}`,
+              title: 'Clear the retry backoff so the next pass tries these again',
+              disabled: busy,
+              onClick: () => onRetryIds(zone.stuckIds),
+            }
+          : null
+      }
+    />
   );
 }

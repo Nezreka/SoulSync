@@ -1312,6 +1312,7 @@ class SpotifyClient:
             _detect_and_set_rate_limit(e, "create_or_update_playlist")
             return {"success": False, "error": msg}
 
+    @rate_limited
     def remove_playlist_tracks(self, playlist_id: str, track_ids: List[str]) -> Dict[str, Any]:
         """Remove specific tracks from a Spotify playlist by track IDs or URIs.
 

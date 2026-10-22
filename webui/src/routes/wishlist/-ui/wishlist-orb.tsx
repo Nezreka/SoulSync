@@ -1,21 +1,14 @@
-import { useRef, useState } from 'react';
-
-import type {
-  ParsedWishlistTrack,
-  WishlistAlbumGroup,
-  WishlistArtistGroup,
-} from '../-wishlist.types';
+import type { WishlistArtistGroup } from '../-wishlist.types';
 
 import {
   artistHue,
-  failingTitle,
-  orbAnimationDelay,
   orbImage,
+  orbMeta,
   orbRingCovers,
   orbSizeClass,
   trackCountLabel,
 } from '../-wishlist.helpers';
-import { openWishlistInspector } from '../../../features/downloads/inspector-modal';
+import { NebulaOrb } from './nebula-parts';
 
 interface Props {
   group: WishlistArtistGroup;
@@ -24,21 +17,15 @@ interface Props {
   currentCycle: string;
   /** A wishlist run is in flight; the orb shows its working state. */
   processing: boolean;
+  /** this artist's sheet is open beside the field. */
   expanded: boolean;
   onToggleExpand: () => void;
-  onRemoveAlbum: (albumName: string) => void;
-  onRemoveTrack: (trackId: string) => void;
-  /** Queue every wanted track by this artist, right now. */
-  onGrabArtist?: () => void;
-  /** Queue one album's tracks without touching the rest of the artist. */
-  onGrabAlbum?: (album: WishlistAlbumGroup) => void;
-  /** Drop the whole artist from the wishlist (confirms first). */
-  onRemoveArtist?: () => void;
-  /** A bulk action is in flight — the grab buttons stand down. */
-  actionBusy?: boolean;
 }
 
-/** One artist orb plus its expanded album fan / singles orbit. */
+/**
+ * one artist orb. the detail lives in WishlistArtistSheet, opened beside the
+ * field, so opening an orb never shoves the others around.
+ */
 export function WishlistOrb({
   group,
   index,
@@ -47,302 +34,27 @@ export function WishlistOrb({
   processing,
   expanded,
   onToggleExpand,
-  onRemoveAlbum,
-  onRemoveTrack,
-  onGrabArtist = () => {},
-  onGrabAlbum = () => {},
-  onRemoveArtist = () => {},
-  actionBusy = false,
 }: Props) {
-  // Which album tile is open. Local to this orb: the vanilla handler collapsed
-  // tiles within `.wl-album-fan`, i.e. per artist, not globally.
-  const [openAlbum, setOpenAlbum] = useState<string | null>(null);
-
-  // Mount the heavy expanded subtree only once this orb has actually been
-  // opened. `expanded` was only a CSS class, so EVERY orb mounted its whole
-  // album fan and every track row up front — a 400-track wishlist rendered
-  // the entire tracklist on first paint and re-reconciled it on each poll
-  // settle (perf sweep, Aug 2026). Latched (a ref survives re-renders), so
-  // closing keeps the DOM: the collapse animation and re-opens stay instant.
-  const everExpandedRef = useRef(expanded);
-  if (expanded) everExpandedRef.current = true;
-
-  // the entrance plays once. a poll refetch can reorder orbs, and moving a node
-  // restarts its css animations, so without this every moved orb blinked out
-  // and faded back in while a wishlist run was going.
-  const [entered, setEntered] = useState(false);
-
-  const image = orbImage(group, artistImages);
-  const ringCovers = orbRingCovers(group);
-  const hasAlbums = group.albums.length > 0;
-  const pulse = hasAlbums && currentCycle === 'albums';
-
   return (
-    <div
-      className={`wl-orb-group${expanded ? ' expanded' : ''}${processing ? ' orb-processing' : ''}${entered ? ' wl-orb-entered' : ''}`}
-      data-artist={group.name}
-      data-failing={group.failingCount}
-      style={entered ? undefined : { animationDelay: `${orbAnimationDelay(index)}ms` }}
-      onAnimationEnd={(event) => {
-        if (event.target === event.currentTarget && event.animationName === 'orbEntrance') {
-          setEntered(true);
-        }
-      }}
-    >
-      <div className="wl-orb-tooltip">
-        {group.name}
-        <br />
-        <span>{trackCountLabel(group.total)}</span>
-      </div>
-
-      <div
-        className={`wl-orb ${orbSizeClass(group.total)}${pulse ? ' orb-pulse' : ''}`}
-        style={{ ['--orb-hue' as string]: artistHue(group.name) }}
-        onClick={onToggleExpand}
-      >
-        <div className="wl-orb-glow" />
-        {image ? (
-          <img className="wl-orb-img" src={image} alt="" />
-        ) : (
-          <div className="wl-orb-initials">{group.name.substring(0, 2).toUpperCase()}</div>
-        )}
-        <div className="wl-orb-ring" />
-
-        {ringCovers.length > 0 ? (
-          <div className="wl-orb-art-ring">
-            {ringCovers.map((url, i) => (
-              <img
-                key={`${url}-${i}`}
-                className="wl-art-ring-item"
-                src={url}
-                alt=""
-                style={{ ['--ring-angle' as string]: `${(360 / ringCovers.length) * i}deg` }}
-              />
-            ))}
-          </div>
-        ) : null}
-      </div>
-
-      {/* The label is a SIBLING of .wl-orb, not a child, so its click cannot
-          reach the expand handler — stopPropagation here is belt-and-braces,
-          carried over from the vanilla markup where it was equally redundant.
-          Kept so a future nesting change cannot silently start toggling. */}
-      <div
-        className="wl-orb-label"
-        title="View artist"
-        onClick={(event) => {
-          event.stopPropagation();
-          window._navigateToArtistFromWishlist?.(group.name);
-        }}
-      >
-        {group.name}
-      </div>
-      <div className="wl-orb-meta">
-        {trackCountLabel(group.total)}
-        {group.failingCount > 0 ? (
-          <>
-            {' · '}
-            <span
-              className="wl-orb-meta-failing"
-              title={`${group.failingCount} track${
-                group.failingCount !== 1 ? 's' : ''
-              } repeatedly failing to download`}
-            >
-              ⚠ {group.failingCount} failing
-            </span>
-          </>
-        ) : null}
-      </div>
-
-      <div className="wl-orb-expanded">
-        {/* Fan header: the artist-level actions the wishlist always needed —
-            grab everything now, or drop the artist, without checkbox duty. */}
-        <div className="wlp-fan-head">
-          <span className="wlp-fan-artist">{group.name}</span>
-          <span className="wlp-fan-count">{trackCountLabel(group.total)}</span>
-          <span className="wlp-fan-spacer" aria-hidden="true" />
-          <button
-            type="button"
-            className="wlp-btn wlp-btn--sm wlp-btn--primary"
-            disabled={actionBusy}
-            title={`Download all ${trackCountLabel(group.total)} by ${group.name} now`}
-            aria-label={`Download all tracks by ${group.name} now`}
-            onClick={(event) => {
-              event.stopPropagation();
-              onGrabArtist();
-            }}
-          >
-            <span aria-hidden="true">⬇ </span>Grab all
-          </button>
-          <button
-            type="button"
-            className="wlp-btn wlp-btn--sm wlp-btn--danger"
-            title={`Remove ${group.name} from the wishlist`}
-            aria-label={`Remove ${group.name} from the wishlist`}
-            onClick={(event) => {
-              event.stopPropagation();
-              onRemoveArtist();
-            }}
-          >
-            Remove artist
-          </button>
-        </div>
-        {everExpandedRef.current && hasAlbums ? (
-          <div className="wl-album-fan">
-            {group.albums.map((album) => (
-              <div
-                key={album.name}
-                className={`wl-album-tile${openAlbum === album.name ? ' tile-expanded' : ''}`}
-                data-album={album.name}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setOpenAlbum((current) => (current === album.name ? null : album.name));
-                }}
-              >
-                <div className="wl-album-tile-art">
-                  {album.image ? (
-                    <img src={album.image} alt="" />
-                  ) : (
-                    <div className="wl-album-tile-fallback">💿</div>
-                  )}
-                </div>
-                <div className="wl-album-tile-info">
-                  <div className="wl-album-tile-name">{album.name}</div>
-                  <div className="wl-album-tile-count">{trackCountLabel(album.tracks.length)}</div>
-                </div>
-                <span className="wl-album-tile-badge">{album.tracks.length}</span>
-                <button
-                  type="button"
-                  className="wlp-tile-grab"
-                  disabled={actionBusy}
-                  title={`Download "${album.name}" now`}
-                  aria-label={`Download album ${album.name} now`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onGrabAlbum(album);
-                  }}
-                >
-                  <span aria-hidden="true">⬇</span>
-                </button>
-                <button
-                  type="button"
-                  className="wl-album-tile-remove"
-                  title="Remove album"
-                  aria-label={`Remove album ${album.name}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onRemoveAlbum(album.name);
-                  }}
-                >
-                  ✕
-                </button>
-
-                <div className="wl-tile-tracks">
-                  {album.tracks.map((track) => (
-                    <TileTrack
-                      key={track.id || track.track}
-                      track={track}
-                      onRemove={() => onRemoveTrack(track.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {everExpandedRef.current && group.singles.length > 0 ? (
-          <div className="wl-singles-orbit">
-            {group.singles.map((single) => (
-              <div
-                key={single.id || single.track}
-                className={`wl-single-moon${single.failing ? ' wl-moon-failing' : ''}`}
-                data-track-id={single.id}
-                title={single.failing ? failingTitle(single) : undefined}
-              >
-                {single.image ? (
-                  <img src={single.image} alt="" />
-                ) : (
-                  <span className="wl-moon-fallback">⭐</span>
-                )}
-                {single.failing ? <span className="wl-moon-failing-badge">⚠</span> : null}
-                <div className="wl-moon-label">{single.track}</div>
-                <button
-                  type="button"
-                  className="wl-moon-search-btn"
-                  title="Interactive Search — pick a source yourself"
-                  aria-label={`Interactive Search for ${single.track}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openWishlistInspector({
-                      id: single.id,
-                      name: single.track,
-                      artist: single.artist,
-                      album: single.album,
-                    });
-                  }}
-                >
-                  🔍
-                </button>
-                <button
-                  type="button"
-                  className="wl-moon-remove-btn"
-                  title="Remove"
-                  aria-label={`Remove ${single.track}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onRemoveTrack(single.id);
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function TileTrack({ track, onRemove }: { track: ParsedWishlistTrack; onRemove: () => void }) {
-  return (
-    <div className={`wl-tile-track${track.failing ? ' wl-track-failing' : ''}`}>
-      <span className="wl-tile-track-name">{track.track}</span>
-      {track.failing ? (
-        <span className="wl-failing-badge" title={failingTitle(track)}>
-          ⚠ {track.retry}
-        </span>
-      ) : null}
-      <button
-        type="button"
-        className="wl-tile-track-search"
-        title="Interactive Search — pick a source yourself"
-        aria-label={`Interactive Search for ${track.track}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          openWishlistInspector({
-            id: track.id,
-            name: track.track,
-            artist: track.artist,
-            album: track.album,
-          });
-        }}
-      >
-        🔍
-      </button>
-      <button
-        type="button"
-        className="wl-tile-track-remove"
-        title="Remove track"
-        aria-label={`Remove ${track.track}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          onRemove();
-        }}
-      >
-        ✕
-      </button>
-    </div>
+    <NebulaOrb
+      name={group.name}
+      image={orbImage(group, artistImages)}
+      initials={group.name.substring(0, 2).toUpperCase()}
+      hue={artistHue(group.name)}
+      sizeClass={orbSizeClass(group.total)}
+      meta={orbMeta(group)}
+      stuck={group.failingCount > 0}
+      failingCount={group.failingCount}
+      expanded={expanded}
+      processing={processing}
+      pulse={group.albums.length > 0 && currentCycle === 'albums'}
+      ringCovers={orbRingCovers(group)}
+      index={index}
+      data={{ artist: group.name }}
+      tooltipSub={trackCountLabel(group.total)}
+      onToggle={onToggleExpand}
+      onOpen={() => window._navigateToArtistFromWishlist?.(group.name)}
+      openTitle="View artist"
+    />
   );
 }

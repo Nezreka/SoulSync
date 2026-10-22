@@ -177,7 +177,11 @@ describe('liveDetailLines', () => {
 // ── the row expansion ───────────────────────────────────────────────────────
 
 describe('AdlRow expansion (#1156)', () => {
-  it('an in-flight row expands to the live narration on click', () => {
+  const rowEl = (c: HTMLElement) => c.querySelector('.dlc-row') as HTMLElement;
+  const facts = (c: HTMLElement) =>
+    (c.querySelector('.dlc-facts') as HTMLElement).textContent ?? '';
+
+  it('an in-flight row expands to the full live narration on click', () => {
     const { container } = render(
       <AdlRow
         dl={row({
@@ -186,25 +190,46 @@ describe('AdlRow expansion (#1156)', () => {
         })}
       />,
     );
-    expect(container.querySelector('.verif-quar-details')).toBeNull();
-    fireEvent.click(container.querySelector('.adl-row') as HTMLElement);
-    const panel = container.querySelector('.verif-quar-details') as HTMLElement;
-    expect(panel.textContent).toContain('soulseek');
-    expect(panel.textContent).toContain('"xo" (1/3)');
+    expect(container.querySelector('.dlc-sheet')).toBeNull();
+    fireEvent.click(rowEl(container));
+    expect(facts(container)).toContain('soulseek');
+    expect(facts(container)).toContain('"xo" (1/3)');
+    // the steps say where it's at
+    expect(container.querySelector('.dlc-step-now')?.textContent).toContain('query 1 of 3');
     // second click collapses
-    fireEvent.click(container.querySelector('.adl-row') as HTMLElement);
-    expect(container.querySelector('.verif-quar-details')).toBeNull();
+    fireEvent.click(rowEl(container));
+    expect(container.querySelector('.dlc-sheet')).toBeNull();
+  });
+
+  it('keeps a held audiobook import and its reason on screen', () => {
+    const { container } = render(
+      <AdlRow
+        dl={row({
+          status: 'importing',
+          live_detail: {
+            source: 'Audiobook (soulseek)',
+            release_title: 'Fantastic Beasts',
+            held_reason: 'Only 98 of 114 minutes present',
+          },
+        })}
+      />,
+    );
+    fireEvent.click(rowEl(container));
+    expect(container.querySelector('.dlc-step-warn')?.textContent).toContain(
+      'Only 98 of 114 minutes present',
+    );
+    expect(facts(container)).toContain('Fantastic Beasts');
   });
 
   it('a completed row fetches and renders the merged detail', async () => {
     const { container } = render(<AdlRow dl={row({ status: 'completed' })} />);
     await act(async () => {
-      fireEvent.click(container.querySelector('.adl-row') as HTMLElement);
+      fireEvent.click(rowEl(container));
     });
     await waitFor(() => {
-      const panel = container.querySelector('.verif-quar-details') as HTMLElement;
-      expect(panel.textContent).toContain('FLAC 16bit/44.1kHz');
-      expect(panel.textContent).toContain('/music/xtal.flac');
+      expect(facts(container)).toContain('FLAC 16bit/44.1kHz');
+      expect(facts(container)).toContain('/music/xtal.flac');
+      expect(facts(container)).toContain('match');
     });
   });
 
@@ -222,24 +247,26 @@ describe('AdlRow expansion (#1156)', () => {
         })}
       />,
     );
-    fireEvent.click(container.querySelector('.adl-row') as HTMLElement);
-    const panel = container.querySelector('.verif-quar-details') as HTMLElement;
-    expect(panel.textContent).toContain('Tidal');
-    expect(panel.textContent).toContain('/music/a.flac');
+    fireEvent.click(rowEl(container));
+    expect(facts(container)).toContain('Tidal');
+    expect(facts(container)).toContain('/music/a.flac');
+    expect(container.querySelector('.dlc-step-done')?.textContent).toContain(
+      'Downloaded from Tidal',
+    );
   });
 
-  it('a live row shows its source label on the batch line (#1156 gap)', () => {
+  it('a live row names its source (#1156 gap)', () => {
     const { container } = render(
       <AdlRow dl={row({ status: 'completed', batch_name: 'My PL', download_source: 'YouTube' })} />,
     );
-    const line = container.querySelector('.adl-row-batch') as HTMLElement;
-    expect(line.textContent).toBe('My PL · YouTube');
+    expect(container.querySelector('.dlc-meta')?.textContent).toContain('YouTube');
   });
 
-  it('a history row does not repeat its source (batch_name IS the source)', () => {
+  it('a history row does not repeat its source as its batch', () => {
     const { container } = render(
       <AdlRow
         dl={row({
+          task_id: 'history-3',
           status: 'completed',
           is_persistent_history: true,
           batch_name: 'Tidal',
@@ -247,17 +274,49 @@ describe('AdlRow expansion (#1156)', () => {
         })}
       />,
     );
-    const line = container.querySelector('.adl-row-batch') as HTMLElement;
-    expect(line.textContent).toBe('Tidal');
+    fireEvent.click(rowEl(container));
+    expect(facts(container).match(/Tidal/g)).toHaveLength(1);
+  });
+
+  it('shows what we asked for only when it differs from what we got', () => {
+    const { container } = render(
+      <AdlRow
+        dl={row({
+          task_id: 'history-4',
+          status: 'completed',
+          is_persistent_history: true,
+          title: 'XO (Live)',
+          expected_title: 'XO',
+          expected_artist: 'John Mayer',
+        })}
+      />,
+    );
+    fireEvent.click(rowEl(container));
+    expect(facts(container)).toContain('John Mayer · XO');
+    cleanup();
+    const same = render(
+      <AdlRow
+        dl={row({
+          task_id: 'history-5',
+          status: 'completed',
+          is_persistent_history: true,
+          expected_title: 'xtal',
+        })}
+      />,
+    );
+    fireEvent.click(rowEl(same.container));
+    expect(same.container.querySelector('.dlc-facts')?.textContent ?? '').not.toContain(
+      'Asked for',
+    );
   });
 
   it('the cancel button still cancels without toggling the row open', async () => {
     const onCancel = vi.fn();
     const { container } = render(<AdlRow dl={row()} onCancel={onCancel} />);
     await act(async () => {
-      fireEvent.click(container.querySelector('.adl-row-cancel') as HTMLElement);
+      fireEvent.click(container.querySelector('.dlc-cancel') as HTMLElement);
     });
     expect(onCancel).toHaveBeenCalled();
-    expect(container.querySelector('.verif-quar-details')).toBeNull();
+    expect(container.querySelector('.dlc-sheet')).toBeNull();
   });
 });

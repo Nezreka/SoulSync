@@ -201,30 +201,41 @@ def test_junk_is_never_actionable():
 
 # ── it has to reach the page ─────────────────────────────────────────────────
 
-def _wishlist_js() -> str:
+# The page is React now: webui/src/routes/wishlist. failWhy is the vanilla one,
+# ported, and checked line for line against the frozen original in
+# -video.helpers.differential.test.ts.
+def _helpers_ts() -> str:
     from pathlib import Path
-    return Path("webui/static/video/video-wishlist.js").read_text(encoding="utf-8")
+    return Path("webui/src/routes/wishlist/-video.helpers.ts").read_text(encoding="utf-8")
+
+
+def _sheets_tsx() -> str:
+    from pathlib import Path
+    return Path("webui/src/routes/wishlist/-ui/video-sheets.tsx").read_text(encoding="utf-8")
+
+
+def _fail_why_body() -> str:
+    ts = _helpers_ts()
+    return ts[ts.index("export function failWhy("):ts.index("export function isFailingItem(")]
 
 
 def test_both_card_shapes_share_one_explanation():
-    """Movies and episodes render from different functions; two copies of this
+    """Movies and episodes render from different components; two copies of this
     would drift, and the episode one is the shape Boulder's three stuck rows are."""
-    js = _wishlist_js()
-    assert js.count("function failWhy(") == 1
-    assert js.count("esc(failWhy(") == 2, "movie card AND episode row"
+    assert _helpers_ts().count("export function failWhy(") == 1
+    sheets = _sheets_tsx()
+    assert "failWhy(movie," in sheets, "the movie panel"
+    assert "failWhy(ep, fails)" in sheets, "the episode row"
 
 
 def test_the_chip_shows_the_stored_reason_when_there_is_one():
-    js = _wishlist_js()
-    fn = js[js.index("function failWhy("):js.index("function statusPill(")]
-    assert "row.last_refusal" in fn
+    assert "row.last_refusal" in _fail_why_body()
 
 
 def test_it_still_says_something_useful_with_no_receipt():
     """Rows that have not searched since the upgrade have no receipt yet — the
     chip must not go blank for them."""
-    js = _wishlist_js()
-    fn = js[js.index("function failWhy("):js.index("function statusPill(")]
+    fn = _fail_why_body()
     assert "searches without a grab" in fn
     assert "try Search now" in fn, "keep the old advice as the fallback"
 

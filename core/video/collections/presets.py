@@ -426,7 +426,9 @@ def _remote_entry(key, name, count, summary, definition, pack, mt) -> Dict[str, 
                definition=definition, pack=pack, wishlist_capable=True)
     if count is None:
         e["count"] = None            # fetch failed/offline — resolves on sync
-        e["suggested"] = pack in ("charts", "universes")
+        # only charts. a universe we couldn't count might be one you own nothing
+        # from, pre-ticking it is how the MCU landed on libraries with no marvel.
+        e["suggested"] = pack == "charts"
     else:
         e["of_total"] = count[1]
         if pack == "charts":
@@ -586,7 +588,7 @@ def list_packs(db, media_type: str, fetcher=None) -> List[Dict[str, Any]]:
 
 
 def apply_pack(db, pack_id: str, media_type: str, keys, *,
-               wishlist_missing: bool = True, fetcher=None) -> Dict[str, Any]:
+               wishlist_missing: bool = False, fetcher=None) -> Dict[str, Any]:
     """Create collection definitions for the selected entry keys. Existing names
     are skipped (idempotent — re-applying a pack never duplicates). List-kind
     entries (franchises/charts/seasonal/stories) get ``wishlist_missing`` per the

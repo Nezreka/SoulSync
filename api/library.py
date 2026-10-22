@@ -59,17 +59,17 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            artist = db.api_get_artist(int(artist_id))
+            # IDs are TEXT in the DB: numeric-string IDs from existing clients
+            # and opaque '...::soulsync' IDs both resolve by exact match.
+            artist = db.api_get_artist(artist_id)
             if not artist:
                 return api_error("NOT_FOUND", f"Artist {artist_id} not found.", 404)
 
-            albums = db.api_get_albums_by_artist(int(artist_id))
+            albums = db.api_get_albums_by_artist(artist_id)
             return api_success({
                 "artist": serialize_artist(artist, fields),
                 "albums": [serialize_album(a, fields) for a in albums],
             })
-        except ValueError:
-            return api_error("BAD_REQUEST", "artist_id must be an integer.", 400)
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -80,10 +80,8 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            albums = db.api_get_albums_by_artist(int(artist_id))
+            albums = db.api_get_albums_by_artist(artist_id)
             return api_success({"albums": [serialize_album(a, fields) for a in albums]})
-        except ValueError:
-            return api_error("BAD_REQUEST", "artist_id must be an integer.", 400)
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -98,10 +96,12 @@ def register_routes(bp):
         artist_id = request.args.get("artist_id")
         year = request.args.get("year")
 
-        try:
-            artist_id_int = int(artist_id) if artist_id else None
-        except ValueError:
-            return api_error("BAD_REQUEST", "artist_id must be an integer.", 400)
+        # artist_id is a TEXT id (numeric string or opaque '...::soulsync');
+        # it filters by exact match, so it passes through unconverted. An
+        # empty/blank value means "no filter", as it did when the old int()
+        # conversion treated it as falsy.
+        if artist_id is not None:
+            artist_id = artist_id.strip() or None
         try:
             year_int = int(year) if year else None
         except ValueError:
@@ -111,7 +111,7 @@ def register_routes(bp):
             db = get_database()
             result = db.api_list_albums(
                 search=search,
-                artist_id=artist_id_int,
+                artist_id=artist_id,
                 year=year_int,
                 page=page,
                 limit=limit,
@@ -133,17 +133,15 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            album = db.api_get_album(int(album_id))
+            album = db.api_get_album(album_id)
             if not album:
                 return api_error("NOT_FOUND", f"Album {album_id} not found.", 404)
 
-            tracks = db.api_get_tracks_by_album(int(album_id))
+            tracks = db.api_get_tracks_by_album(album_id)
             return api_success({
                 "album": serialize_album(album, fields),
                 "tracks": [serialize_track(t, fields) for t in tracks],
             })
-        except ValueError:
-            return api_error("BAD_REQUEST", "album_id must be an integer.", 400)
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -154,10 +152,8 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            tracks = db.api_get_tracks_by_album(int(album_id))
+            tracks = db.api_get_tracks_by_album(album_id)
             return api_success({"tracks": [serialize_track(t, fields) for t in tracks]})
-        except ValueError:
-            return api_error("BAD_REQUEST", "album_id must be an integer.", 400)
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -168,13 +164,11 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            track = db.api_get_track(int(track_id))
+            track = db.api_get_track(track_id)
             if not track:
                 return api_error("NOT_FOUND", f"Track {track_id} not found.", 404)
 
             return api_success({"track": serialize_track(track, fields)})
-        except ValueError:
-            return api_error("BAD_REQUEST", "track_id must be an integer.", 400)
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -409,7 +403,7 @@ def register_routes(bp):
 
         Query params:
             type: 'artist', 'album', or 'track' (required)
-            provider: 'spotify', 'musicbrainz', 'itunes', 'deezer', 'audiodb', 'tidal', 'qobuz', 'genius' (required)
+            provider: 'spotify', 'musicbrainz', 'itunes', 'deezer', 'audiodb', 'tidal', 'qobuz', 'genius', 'discogs', 'amazon', 'jiosaavn', 'bandcamp' (required)
             id: the external ID value (required)
         """
         entity_type = request.args.get("type")
@@ -425,12 +419,18 @@ def register_routes(bp):
         if not table:
             return api_error("BAD_REQUEST", "type must be 'artist', 'album', or 'track'.", 400)
 
-        # genius only exists on artists and tracks, not albums
-        valid_providers = ("spotify", "musicbrainz", "itunes", "deezer", "audiodb", "tidal", "qobuz", "genius")
+        # genius only exists on artists and tracks, not albums;
+        # bandcamp only exists on albums and tracks, not artists;
+        # discogs only exists on artists and albums, not tracks
+        valid_providers = ("spotify", "musicbrainz", "itunes", "deezer", "audiodb", "tidal", "qobuz", "genius", "discogs", "amazon", "jiosaavn", "bandcamp")
         if provider not in valid_providers:
             return api_error("BAD_REQUEST", f"provider must be one of: {', '.join(valid_providers)}.", 400)
         if provider == "genius" and entity_type == "album":
             return api_error("BAD_REQUEST", "Genius IDs are not available for albums. Use artist or track.", 400)
+        if provider == "bandcamp" and entity_type == "artist":
+            return api_error("BAD_REQUEST", "Bandcamp IDs are not available for artists. Use album or track.", 400)
+        if provider == "discogs" and entity_type == "track":
+            return api_error("BAD_REQUEST", "Discogs IDs are not available for tracks. Use artist or album.", 400)
 
         try:
             db = get_database()
