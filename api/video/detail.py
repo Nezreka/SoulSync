@@ -16,6 +16,51 @@ logger = get_logger("video_api.detail")
 
 
 def register_routes(bp):
+    @bp.route("/detail/tmdb/show/<int:tmdb_id>/series-type", methods=["GET"])
+    def video_tmdb_show_series_type(tmdb_id):
+        """The folder-routing type of a show, for the show page's Type chip and
+        the approve sheet: {owned, series_type, source, anime_folder}.
+
+        A show in a library reports its library's answer (source 'library').
+        A show in no library reports its stored hint ('hint-user' / 'hint-tmdb'),
+        or nothing yet. ``?suggest=1`` from an admin, with an anime folder set,
+        asks TMDB once and stores the suggestion first (the approve sheet)."""
+        from flask import g
+
+        from . import get_video_db
+        db = get_video_db()
+        anime_folder = bool(db.get_setting("anime_path"))
+        if db.owns_show(tmdb_id):
+            return jsonify({"owned": True, "series_type": db.routing_series_type(tmdb_id=tmdb_id),
+                            "source": "library", "anime_folder": anime_folder})
+        hint = db.show_type_hint(tmdb_id)
+        is_admin = bool(getattr(g, "is_admin", getattr(g, "profile_id", 1) == 1))
+        if not hint and anime_folder and is_admin and request.args.get("suggest") in ("1", "true"):
+            from core.video.anime_hint import ensure_show_type_hint
+            ensure_show_type_hint(db, tmdb_id)
+            hint = db.show_type_hint(tmdb_id)
+        return jsonify({"owned": False,
+                        "series_type": (hint or {}).get("series_type") or "standard",
+                        "source": ("hint-" + hint["source"]) if hint else None,
+                        "anime_folder": anime_folder})
+
+    @bp.route("/detail/tmdb/show/<int:tmdb_id>/series-type", methods=["PUT"])
+    def video_tmdb_show_series_type_set(tmdb_id):
+        """Set the type of a show in NO library yet (admin; the path's
+        '/series-type' suffix is admin-gated for writes). Body {series_type}.
+        A show already in a library is set in its Manage panel instead (409)."""
+        from . import get_video_db
+        db = get_video_db()
+        st = str((request.get_json(silent=True) or {}).get("series_type") or "").strip().lower()
+        if st not in ("standard", "daily", "anime"):
+            return jsonify({"success": False, "error": "series_type must be standard|daily|anime"}), 400
+        if db.owns_show(tmdb_id):
+            return jsonify({"success": False,
+                            "error": "This show is in your library: set its type in Manage."}), 409
+        if not db.set_show_type_hint(tmdb_id, st, source="user"):
+            return jsonify({"success": False, "error": "Could not save."}), 500
+        return jsonify({"success": True, "series_type": st, "source": "hint-user"})
+
     @bp.route("/monitor", methods=["POST"])
     def video_set_monitor():
         from . import get_video_db
