@@ -118,17 +118,6 @@ def run_detection(server_type):
             logger.debug("jellyfin probe %s: %s", ip, e)
         return None
 
-    def test_music_assistant_server(ip, port=None):
-        """Music Assistant answers GET /info without a token."""
-        port = port or default_port('music_assistant')
-        try:
-            response = requests.get(f"http://{ip}:{port}/info", timeout=2)
-            if response.status_code == 200 and 'server_version' in response.text:
-                return f"http://{ip}:{port}"
-        except Exception as e:
-            logger.debug(f"Music Assistant probe {ip}:{port} failed: {e}")
-        return None
-
     def test_slskd_server(ip, port=None):
         port = port or default_port('slskd')
         """Test if a slskd server is running at the given IP and port"""
@@ -186,7 +175,6 @@ def run_detection(server_type):
             'plex': test_plex_server,
             'jellyfin': test_jellyfin_server,
             'navidrome': test_navidrome_server,
-            'music_assistant': test_music_assistant_server,
             'slskd': test_slskd_server
         }
         

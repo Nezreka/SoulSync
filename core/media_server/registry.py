@@ -31,7 +31,6 @@ from core.media_server.contract import MediaServerClient
 # registry uses them (some integration tests inject mock modules into
 # sys.modules at collection time; lazy import would bind to the mock).
 from core.jellyfin_client import JellyfinClient
-from core.music_assistant_client import MusicAssistantClient
 from core.navidrome_client import NavidromeClient
 from core.plex_client import PlexClient
 from core.soulsync_client import SoulSyncClient
@@ -153,7 +152,6 @@ def build_default_registry() -> MediaServerRegistry:
         'plex': PlexClient,
         'jellyfin': JellyfinClient,
         'navidrome': NavidromeClient,
-        'music_assistant': MusicAssistantClient,
         'soulsync': SoulSyncClient,
     }
     for descriptor in specs.iter_descriptors():

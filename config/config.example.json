@@ -31,12 +31,6 @@
     "password": "",
     "auto_detect": true
   },
-  "music_assistant": {
-    "base_url": "",
-    "token": "",
-    "source_instance": "",
-    "auto_detect": true
-  },
   "download_source": {
     "max_mb_per_minute": 0
   },
