@@ -51,6 +51,9 @@ _ALLOWED_GET = frozenset({
     '/api/setup/status',
     '/api/auth/recovery-question',
     '/api/auth/plex/available',      # sign in with plex: show the button or not
+    '/api/auth/oidc/available',      # sign in with oidc: show the button, last error
+    '/api/auth/oidc/start',          # sign in with oidc: off to the provider
+    '/api/auth/oidc/callback',       # sign in with oidc: back from the provider
 })
 
 _ALLOWED_POST = frozenset({
