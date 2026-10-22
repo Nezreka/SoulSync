@@ -472,3 +472,27 @@ def test_resolve_follows_a_live_id_filed_for_the_same_local_file(tmp_path):
         c.commit()
     songs = {'live': {'id': 'live', 'title': 'Song', 'path': '/srv/x/y/z.flac'}}
     assert resolve_tracks([SimpleNamespace(ratingKey='old')], songs, db)[0].ratingKey == 'live'
+
+
+@pytest.mark.parametrize('second,expected', [
+    (None, False),          # one mapped row for the file: nothing to repair
+    ('active', True),       # the sync filed the reissued id beside the old one
+    ('deleted', False),     # a retired file row is not a second copy
+])
+def test_the_post_scan_precheck_reads_the_catalogue(second, expected):
+    """The repair runs only when two Navidrome-mapped catalogue tracks share one
+    live file. Upstream's pre-check reads the legacy `tracks` table, which a
+    fresh Library v2 install does not have, so it lives on the mappings here."""
+    from core.library.navidrome_identity import has_same_path_duplicates
+
+    db = _old_db()
+    conn = db._get_connection()
+    if second:
+        conn.execute("INSERT INTO lib2_tracks(id,title,duration,server_source,server_id)"
+                     " VALUES(2,'Song',180000,'navidrome','new')")
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,file_state) VALUES(2,'/song',?)",
+                     (second,))
+        conn.execute("INSERT INTO lib2_media_server_mappings"
+                     "(entity_type,entity_id,server_source,server_id)"
+                     " VALUES('track',2,'navidrome','new')")
+    assert has_same_path_duplicates(db) is expected
