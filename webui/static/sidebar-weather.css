@@ -366,12 +366,12 @@ html[data-sidebar="collapsed"] .sidebar-holiday {
 .holiday-turkey-left {
     position: relative;
 }
+.holiday-turkey-right { animation: holiday-face-right 28s infinite steps(1, end); }
 .holiday-turkey-left {
     position: absolute;
     inset: auto 0 0 0;
+    animation: holiday-face-left 28s infinite steps(1, end);
 }
-.holiday-turkey-right { animation: holiday-face-right 28s infinite steps(1, end); }
-.holiday-turkey-left { animation: holiday-face-left 28s infinite steps(1, end); }
 @keyframes holiday-strut {
     0%, 6% { left: 0; }
     38%, 50% { left: calc(100% - 36px); }
