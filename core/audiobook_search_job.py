@@ -91,7 +91,7 @@ def _run_search(job_id: str, book: Dict[str, Any], narrator_mode: str, limit: in
             try:
                 for step in iter_prowlarr_releases(
                     book, limit=limit, min_relevance=min_relevance,
-                    narrator_mode=narrator_mode,
+                    narrator_mode=narrator_mode, raise_on_outage=True,
                 ):
                     collected = list(step["releases"])
                     republish(f"Searching indexers — {step['query']}")

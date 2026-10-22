@@ -468,6 +468,41 @@ def test_a_failing_indexer_does_not_raise():
     assert search_releases(BOOK, prowlarr_client=Boom()) == []
 
 
+def test_an_indexer_outage_is_not_an_empty_shelf_for_the_wishlist():
+    """Prowlarr answers HTTP 400 to every search while it holds an indexer back.
+    search_all_sources must raise, or the wishlist logs 'No releases found' and
+    counts an attempt for a book nobody looked for."""
+    from core.audiobook_release_search import search_all_sources
+
+    class Boom(_StubProwlarr):
+        async def search(self, query, categories=None, limit=None, **kwargs):
+            raise RuntimeError("Prowlarr returned HTTP 400")
+
+    with patch("core.audiobook_release_search.configured_chain", return_value=["usenet"]):
+        with pytest.raises(RuntimeError, match="HTTP 400"):
+            search_all_sources(BOOK, prowlarr_client=Boom())
+
+
+def test_a_real_empty_answer_is_still_an_empty_shelf():
+    from core.audiobook_release_search import search_all_sources
+
+    with patch("core.audiobook_release_search.configured_chain", return_value=["usenet"]):
+        assert search_all_sources(BOOK, prowlarr_client=_StubProwlarr([[]])) == []
+
+
+def test_one_answered_query_is_enough_to_not_raise():
+    class Flaky(_StubProwlarr):
+        calls = 0
+
+        async def search(self, query, categories=None, limit=None, **kwargs):
+            Flaky.calls += 1
+            if Flaky.calls == 1:
+                raise RuntimeError("blip")
+            return []
+
+    assert search_releases(BOOK, prowlarr_client=Flaky(), raise_on_outage=True) == []
+
+
 def test_a_book_with_no_title_never_searches():
     stub = _StubProwlarr()
     assert search_releases({"title": ""}, prowlarr_client=stub) == []
