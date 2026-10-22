@@ -1099,6 +1099,8 @@ class RepairWorker:
             self.retire_vanished_findings(job_id)
             if job_id == 'orphan_file_detector':
                 self.retire_tracked_orphan_findings()
+            elif job_id == 'dead_file_cleaner':
+                self.retire_resolved_dead_file_findings()
 
         duration = time.time() - start_time
 
@@ -2000,6 +2002,63 @@ class RepairWorker:
             logger.error("Could not reconcile tracked orphan findings: %s", e, exc_info=True)
             return 0
 
+    def retire_resolved_dead_file_findings(self) -> int:
+        """Close pending dead_file findings that no longer describe a dead file.
+
+        `retire_vanished_findings` skips `dead_file` because the absence is the
+        finding. That left two kinds of finding that nothing ever closed: the
+        track's row was deleted after the scan (a duplicate clean-up, a library
+        refresh, a Fix on another finding), or the file is back or was never
+        really gone (a re-download, a moved mount, a fixed path mapping).
+        Either way the finding stayed pending with a Fix that deletes a row or
+        re-downloads a track that is fine.
+
+        Both tests are positive evidence: the row is not in `tracks`, or the
+        resolver the Dead File Cleaner itself flags with now finds the file. A
+        library this process cannot see proves neither, so it retires nothing.
+        Returns the number retired.
+        """
+        conn = None
+        retired = 0
+        try:
+            conn = self.db._get_connection()
+            rows = conn.execute(
+                "SELECT id, entity_id, file_path FROM repair_findings "
+                "WHERE job_id = 'dead_file_cleaner' AND finding_type = 'dead_file' "
+                "AND status = 'pending'"
+            ).fetchall()
+            download_folder = None
+            if self._config_manager:
+                download_folder = self._config_manager.get('soulseek.download_path', '')
+            done = []
+            for finding_id, entity_id, file_path in (tuple(r) for r in rows):
+                if entity_id and conn.execute(
+                        "SELECT 1 FROM tracks WHERE id = ?", (entity_id,)).fetchone() is None:
+                    done.append(finding_id)
+                    continue
+                if file_path and _resolve_file_path(
+                        file_path, self.transfer_folder, download_folder,
+                        config_manager=self._config_manager):
+                    done.append(finding_id)
+            for finding_id in done:
+                conn.execute(
+                    "UPDATE repair_findings SET status = 'resolved', "
+                    "user_action = 'obsolete', resolved_at = CURRENT_TIMESTAMP, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'",
+                    (finding_id,),
+                )
+                retired += 1
+            if retired:
+                conn.commit()
+                logger.info("[dead_file_cleaner] Retired %d dead-file finding(s) whose "
+                            "track is gone or whose file is back", retired)
+        except Exception as e:
+            logger.debug("Dead-file retire sweep skipped: %s", e)
+        finally:
+            if conn:
+                conn.close()
+        return retired
+
     def resolve_finding(self, finding_id: int, action: str = None) -> bool:
         """Resolve a finding with an optional action."""
         conn = None
@@ -2840,6 +2899,17 @@ class RepairWorker:
            'remove' — just remove the dead DB entry without re-downloading
         """
         fix_action = details.get('_fix_action', 'redownload')
+
+        # A finding is a snapshot. If the file is on disk now, Fix would delete
+        # a row or re-download a track that is fine, so say so instead.
+        download_folder = (self._config_manager.get('soulseek.download_path', '')
+                           if self._config_manager else None)
+        if file_path and _resolve_file_path(
+                file_path, self.transfer_folder, download_folder,
+                config_manager=self._config_manager):
+            return {'success': False,
+                    'error': 'The file is on disk now, so this finding is out of date. '
+                             'Nothing was changed; dismiss it or rescan.'}
 
         # Simple removal — just delete the dead track record
         if fix_action == 'remove':

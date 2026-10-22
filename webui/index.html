@@ -102,7 +102,6 @@
     <!-- Automations navigation overhaul — sidebar + overview + library; loaded
          after the redesign so it wins where they meet (see file header). -->
     <link rel="stylesheet" href="{{ url_for('static', filename='automations-overhaul.css', v=static_v) }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-side.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-overlay-editor.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-collection-editor.css', v=static_v) }}">
@@ -116,6 +115,9 @@
     <!-- Dashboard premier redesign — pure reskin of the music dashboard hero,
          rails and right column; orb strip and library-card markup untouched. -->
     <link rel="stylesheet" href="{{ url_for('static', filename='dashboard-premier.css', v=static_v) }}">
+    <!-- Downloads page cards (music + video): rows, group headers and the
+         detail sheet. only dlc-* selectors inside. -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='downloads-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='profiles.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='docs.css', v=static_v) }}">
     <!-- Sidebar weather: time/temp/condition line, forecast popover, particle
@@ -157,14 +159,6 @@
 
 <body
     class="{% if initial_reduce_effects %}reduce-effects {% endif %}{% if initial_max_performance %}max-performance{% endif %}">
-    <!-- Setup Wizard Overlay -->
-    <div id="setup-wizard-overlay" class="setup-wizard-overlay" style="display: none;">
-        <div class="setup-wizard-container">
-            <div class="setup-stepper" id="setup-wizard-stepper"></div>
-            <div id="setup-wizard-content"></div>
-        </div>
-    </div>
-
     <!-- Launch PIN Lock Screen -->
     <div id="launch-pin-overlay" class="launch-pin-overlay" style="display: none;">
         <div class="launch-pin-container" id="launch-pin-container">
@@ -2162,92 +2156,8 @@
                         <div class="vreq-list" data-vreq-list></div>
                     </div>
                 </section>
-                <!-- Wishlist (nav page): movies + wanted episodes, split by a
-                     Movies/TV tab. TV groups show -> season -> episode. Built by
-                     video/video-wishlist.js, styled by .vwsh-* in video-side.css. -->
-                <section class="video-subpage" data-video-subpage="video-wishlist" hidden>
-                    <div class="vwsh-page">
-                        <div class="vwsh-head">
-                            <div class="vwsh-head-glow" aria-hidden="true"></div>
-                            <div class="vwsh-head-row">
-                                <div class="vwsh-head-titles">
-                                    <h1 class="vwsh-title">Wishlist</h1>
-                                    <p class="vwsh-sub" data-vwsh-sub>Movies &amp; episodes you want to grab</p>
-                                </div>
-                                <div class="vwsh-tabs" role="tablist">
-                                    <button class="vwsh-tab vwsh-tab--on" type="button" role="tab"
-                                        data-vwsh-tab="movie">
-                                        Movies <span class="vwsh-tab-n" data-vwsh-count-movie>0</span>
-                                    </button>
-                                    <button class="vwsh-tab" type="button" role="tab" data-vwsh-tab="show">
-                                        TV <span class="vwsh-tab-n" data-vwsh-count-show>0</span>
-                                    </button>
-                                    <button class="vwsh-tab" type="button" role="tab" data-vwsh-tab="youtube">
-                                        YouTube <span class="vwsh-tab-n" data-vwsh-count-youtube>0</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="vwsh-toolbar">
-                            <div class="vwsh-search">
-                                <svg class="vwsh-search-ic" width="16" height="16" viewBox="0 0 24 24" fill="none"
-                                    stroke="currentColor" stroke-width="2">
-                                    <circle cx="11" cy="11" r="7" />
-                                    <path d="M21 21l-4.3-4.3" />
-                                </svg>
-                                <input type="text" class="vwsh-search-input" data-vwsh-search
-                                    placeholder="Search wishlist&hellip;" autocomplete="off" spellcheck="false">
-                            </div>
-                            <select class="vwsh-sort" data-vwsh-sort aria-label="Sort">
-                                <option value="added">Recently added</option>
-                                <option value="oldest">Oldest first</option>
-                                <option value="wanted">Most wanted</option>
-                                <option value="title">A&ndash;Z</option>
-                            </select>
-                            <button class="vwsh-failing-filter" type="button" data-vwsh-failing hidden
-                                title="Show only items that keep failing to download — the fix-it hub: auto search, manual search or remove each one">
-                                &#9888; Failing <span class="vwsh-failing-n" data-vwsh-failing-n></span>
-                            </button>
-                            <button class="vwsh-searchall" type="button" data-vwsh-searchall hidden
-                                title="Search every eligible wishlist item now instead of waiting for the hourly automation">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                                    <circle cx="11" cy="11" r="7" />
-                                    <path d="M21 21l-4.3-4.3" />
-                                </svg>
-                                Search all missing
-                            </button>
-                            <button class="vwsh-clear" type="button" data-vwsh-clear hidden>
-                                <svg class="vwsh-clear-ic" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                                    stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                    stroke-linejoin="round">
-                                    <path d="M3 6h18" />
-                                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                                </svg>
-                                Clear all
-                            </button>
-                        </div>
-                        <div class="vwsh-body">
-                            <div class="vwsh-loading hidden" data-vwsh-loading>
-                                <div class="loading-spinner"></div>
-                                <div class="loading-text">Loading wishlist&hellip;</div>
-                            </div>
-                            <div class="vwsh-grid" data-vwsh-grid></div>
-                            <div class="vwsh-state hidden" data-vwsh-empty>
-                                <div class="vwsh-state-ic">&#128229;</div>
-                                <div class="vwsh-state-title" data-vwsh-empty-title>Your wishlist is empty</div>
-                                <div class="vwsh-state-sub">Add a movie or episodes from any title&rsquo;s get button
-                                    &mdash; they queue up here to grab.</div>
-                            </div>
-                            <div class="vwsh-pagination hidden" data-vwsh-pagination>
-                                <button class="vwsh-page-btn" type="button" data-vwsh-prev>&lsaquo; Prev</button>
-                                <span class="vwsh-page-info" data-vwsh-pageinfo></span>
-                                <button class="vwsh-page-btn" type="button" data-vwsh-next>Next &rsaquo;</button>
-                            </div>
-                        </div>
-                    </div>
-                </section>
+                <!-- Wishlist: no subpage. It is the React /wishlist page on its
+                     Movies / TV / YouTube tabs (gotoUnifiedWishlist in video-side.js). -->
                 <!-- Import page — downloads that finished but couldn't be auto-placed
                      (sample / wrong episode / not-an-upgrade / corrupt). Resolve each by
                      hand: pick the right title (library-first → TMDB) and place, or
@@ -7255,6 +7165,14 @@
                                                     <label>📺 TV Shows Library:</label>
                                                     <input type="text" id="video-tv-path" placeholder="/media/tv">
                                                 </div>
+                                                <div class="form-group">
+                                                    <label>🍥 Anime Library (optional):</label>
+                                                    <input type="text" id="video-anime-path" placeholder="/media/anime">
+                                                    <div class="setting-help-text">New episodes of anime shows
+                                                        (series type Anime, or tagged with the Anime genre) go here
+                                                        instead of the TV folder. Leave empty to keep anime with TV.
+                                                    </div>
+                                                </div>
                                                 <div class="setting-help-text">
                                                     Movies and TV folders above are the destinations for new downloads.
                                                     Add extra libraries below for existing collections on other drives.
@@ -8688,10 +8606,12 @@
                                                         <small class="settings-hint setting-help-body" hidden>Maximum
                                                             drift between the file's actual length and the metadata
                                                             source's expected length before the file is quarantined.
-                                                            <strong>0 = auto</strong> (3s normal, 5s for tracks
-                                                            &gt;10min). Raise this if tracks routinely quarantine for
-                                                            being a few seconds off (live recordings, alternate
-                                                            masterings, etc). Capped at 60s.</small>
+                                                            <strong>0 = auto</strong>: files can run 3s short (5s for
+                                                            tracks &gt;10min) or 15s long. Raise this if tracks
+                                                            routinely quarantine for being a few seconds off (live
+                                                            recordings, alternate masterings, CD pregaps). A set value
+                                                            applies both ways, so anything under 15 also tightens the
+                                                            long side. Capped at 60s.</small>
                                                     </div>
                                                 </div>
 
@@ -9678,8 +9598,8 @@
                                                         with access to your Plex server signs in with their Plex account
                                                         (SoulSync never sees their password), and their playlists sync to
                                                         their own Plex account. The server's owner signs in as the admin.
-                                                        New Plex profiles start with Discover, Search, Library, Wishlist,
-                                                        Stats, Help and Issues; widen them per person under Profiles.
+                                                        New Plex profiles start with what New sign-ups below sets;
+                                                        widen them per person under Profiles.
                                                         Needs Plex as a media server and internet access to plex.tv.
                                                     </div>
                                                     <label class="toggle-label" style="margin-top: 8px;">
@@ -9691,6 +9611,40 @@
                                                         <input type="checkbox" id="security-plex-signin-can-download">
                                                         <span>New Plex profiles can download (off: request-only)</span>
                                                     </label>
+                                                </div>
+
+                                                <div class="form-group" id="security-signup-defaults">
+                                                    <label for="security-signup-sides">New sign-ups start on</label>
+                                                    <select id="security-signup-sides" class="form-select">
+                                                        <option value="music">Music</option>
+                                                        <option value="video">Movies &amp; TV</option>
+                                                        <option value="both">Music and Movies &amp; TV</option>
+                                                    </select>
+                                                    <div class="setting-help-text">
+                                                        What a profile made by sign-in can open. Music: Discover, Search,
+                                                        Library, Wishlist and Stats. Movies &amp; TV: Discover, Search and
+                                                        Library on the video side. Request-only profiles also get Requests.
+                                                        Help and Issues are always there; widen anyone further under
+                                                        Profiles.
+                                                    </div>
+                                                </div>
+
+                                                <div class="form-group" id="security-signup-request-limit-row">
+                                                    <label for="security-signup-request-limit">Request limit for new
+                                                        sign-ups</label>
+                                                    <div style="display: flex; gap: 8px; align-items: center;">
+                                                        <input type="number" id="security-signup-request-limit" min="0"
+                                                            max="1000" value="0" style="width: 6em;">
+                                                        <span class="settings-unit">requests every</span>
+                                                        <input type="number" id="security-signup-request-limit-days" min="1"
+                                                            max="365" value="7" style="width: 5em;">
+                                                        <span class="settings-unit">days</span>
+                                                    </div>
+                                                    <div class="setting-help-text">
+                                                        0 means no limit. A request is one movie, show, album or track.
+                                                        Applies to profiles made after you save; change existing ones
+                                                        under Profiles.
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -10103,6 +10057,58 @@
                                                     the Automation Hub.
                                                 </div>
                                             </div>
+
+                                            <!-- MCP for AI clients -->
+                                            <div class="api-service-frame" style="margin-top: 16px;">
+                                                <h4 class="service-title" style="color: #64ffda;">MCP for AI
+                                                    Clients</h4>
+                                                <div class="setting-help-text"
+                                                    style="margin-bottom: 10px; color: #888; font-size: 12px;">
+                                                    Lets Claude and other AI apps search, check your library and
+                                                    download through SoulSync. Add
+                                                    <code>http://&lt;host&gt;:8008/mcp</code> as an MCP server and
+                                                    send an API key from above as a Bearer token. A read-only key
+                                                    can look but not change anything. Settings, keys and profiles
+                                                    are never reachable.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="mcp-enabled">
+                                                        Answer MCP requests at /mcp
+                                                    </label>
+                                                </div>
+                                            </div>
+
+                                            <!-- Lidarr compatible API (#1799) -->
+                                            <div class="api-service-frame" style="margin-top: 16px;">
+                                                <h4 class="service-title" style="color: #64ffda;">Lidarr Compatible
+                                                    API</h4>
+                                                <div class="setting-help-text"
+                                                    style="margin-bottom: 10px; color: #888; font-size: 12px;">
+                                                    Lets request apps that only talk to Lidarr (Singarr, MusicSeerr
+                                                    1.x) use SoulSync instead. In the app, set the Lidarr URL to
+                                                    <code>http://&lt;host&gt;:8008/lidarr</code> and paste an
+                                                    <strong>Admin</strong> API key from above. Albums it asks for
+                                                    go on the wishlist of the profile below.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="lidarr-compat-enabled">
+                                                        Answer as Lidarr at /lidarr
+                                                    </label>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Requests go to profile:</label>
+                                                    <select id="lidarr-compat-profile">
+                                                        <option value="1">Loading...</option>
+                                                    </select>
+                                                    <div class="setting-help-text"
+                                                        style="margin-top: 4px; color: #888; font-size: 12px;">
+                                                        Pick a profile without download rights and every request
+                                                        waits for approval on the Requests page first.
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div><!-- end SoulSync API body -->
 
@@ -10311,6 +10317,37 @@
                                             <div class="form-group">
                                                 <label>Status:</label>
                                                 <span id="sw-preview-status" class="readonly-field">Live weather</span>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="ob-preview-step">Setup preview:</label>
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                                    <select id="ob-preview-step" aria-label="Start at">
+                                                        <option value="welcome">Start at Welcome</option>
+                                                        <option value="account">Your account</option>
+                                                        <option value="purpose">What it's for</option>
+                                                        <option value="server">Media server</option>
+                                                        <option value="folders">Folders</option>
+                                                        <option value="sources">Download sources</option>
+                                                        <option value="metadata">Metadata and accounts</option>
+                                                        <option value="video">Movies and TV</option>
+                                                        <option value="library">Make it yours</option>
+                                                        <option value="ready">Ready</option>
+                                                    </select>
+                                                    <select id="ob-preview-env" aria-label="Pretend environment">
+                                                        <option value="real">Detect for real</option>
+                                                        <option value="docker">Pretend Docker</option>
+                                                        <option value="bare">Pretend bare metal</option>
+                                                        <option value="empty">Pretend nothing found</option>
+                                                    </select>
+                                                    <button class="test-button" id="ob-preview-open" type="button">Open preview</button>
+                                                </div>
+                                                <div class="help-text">
+                                                    Runs the real first-run setup over the app. Nothing is saved:
+                                                    settings, the profile, follows and sign-ins stay in the preview
+                                                    and are thrown away when you close it. Connection checks still
+                                                    talk to the real services, read only. A Preview tag stays in the
+                                                    corner the whole time.
+                                                </div>
                                             </div>
                                         </div>
                                     </div><!-- end Developer body -->
@@ -12627,7 +12664,6 @@
     <script src="{{ url_for('static', filename='scrollbar-fade.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js', v=static_v) }}"></script>
     {{ vite_assets('body')|safe }}
-    <script src="{{ url_for('static', filename='setup-wizard.js', v=static_v) }}"></script>
     <!-- Split modules (was: script.js) — core.js must load first, init.js before shell-bridge.js -->
     <script src="{{ url_for('static', filename='core.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='shared-helpers.js', v=static_v) }}"></script>

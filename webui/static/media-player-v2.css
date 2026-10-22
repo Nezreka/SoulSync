@@ -26,8 +26,8 @@
         #10111a !important;
     border: 1px solid var(--white-a09);
     box-shadow:
-        0 40px 120px rgba(0, 0, 0, 0.65),
-        0 0 0 1px rgba(0, 0, 0, 0.4),
+        0 40px 120px var(--black-a65),
+        0 0 0 1px var(--black-a40),
         0 0 90px rgba(90, 120, 255, 0.08);
 }
 
@@ -52,7 +52,7 @@
     z-index: 1;
     pointer-events: none;
     background:
-        radial-gradient(120% 105% at 50% 45%, transparent 52%, rgba(0, 0, 0, 0.55) 100%);
+        radial-gradient(120% 105% at 50% 45%, transparent 52%, var(--black-a55) 100%);
 }
 
 /* The close button is excluded: it is absolutely positioned chrome
@@ -117,9 +117,9 @@
     width: min(100%, 340px) !important;
     height: auto !important;
     aspect-ratio: 1;
-    border-radius: 18px;
+    border-radius: var(--radius-sheet);
     box-shadow:
-        0 24px 70px rgba(0, 0, 0, 0.55),
+        0 24px 70px var(--black-a55),
         0 0 60px rgba(var(--np-ambient-r, 60), var(--np-ambient-g, 120), var(--np-ambient-b, 255), 0.22);
 }
 
@@ -203,7 +203,7 @@
     border-bottom: 2px solid transparent;
     margin-bottom: -3px;
     white-space: nowrap;
-    transition: color 0.15s ease;
+    transition: color var(--dur-fast) ease;
 }
 
 .np-v2-tab:hover { color: #fff; }
@@ -324,7 +324,7 @@
     width: 100%;
     background: none;
     border: none;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     padding: 7px 9px;
     cursor: pointer;
     text-align: left;
@@ -537,7 +537,7 @@
     border-radius: var(--radius-circle);
     background: #fff;
     border: none;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 1px 4px var(--black-a50);
 }
 
 .np-v2-range::-moz-range-thumb {
@@ -546,7 +546,7 @@
     border-radius: var(--radius-circle);
     background: #fff;
     border: none;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 1px 4px var(--black-a50);
 }
 
 .np-v2-range-val {
@@ -583,7 +583,7 @@
     cursor: pointer;
     background: var(--white-a14);
     border-radius: var(--radius-pill);
-    transition: background 0.18s ease;
+    transition: background var(--dur-quick) ease;
 }
 
 .np-v2-slider::before {
@@ -595,7 +595,7 @@
     top: 3px;
     background: #fff;
     border-radius: var(--radius-circle);
-    transition: transform 0.18s ease;
+    transition: transform var(--dur-quick) ease;
 }
 
 .np-v2-switch input:checked + .np-v2-slider {
@@ -854,7 +854,7 @@
     z-index: 1;
     pointer-events: none;
     background:
-        linear-gradient(to bottom, rgba(0, 0, 0, 0.50), transparent 24%, transparent 58%, rgba(0, 0, 0, 0.62));
+        linear-gradient(to bottom, var(--black-a50), transparent 24%, transparent 58%, rgba(0, 0, 0, 0.62));
 }
 
 /* Collapse the stage/panel grid — the right column becomes the overlay */
@@ -908,11 +908,11 @@
 
 /* Transport buttons float over the visuals */
 .np-modal.npv2-visuals-on .np-controls-row button {
-    filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.6));
+    filter: drop-shadow(0 2px 10px var(--black-a60));
 }
 .np-modal.npv2-visuals-on .np-progress-section,
 .np-modal.npv2-visuals-on .np-util-row {
-    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
+    text-shadow: 0 1px 8px var(--black-a70);
 }
 
 /* ---- Visuals header: track identity + theme switcher (top) ---- */
@@ -934,7 +934,7 @@
     padding: 10px;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 8px 30px var(--black-a50);
 }
 
 /* Out-specificity the app's generic `.np-modal > *` stacking rule so the
@@ -972,7 +972,7 @@
     border-left: 1px solid var(--white-a12);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
-    box-shadow: -18px 0 50px rgba(0, 0, 0, 0.55);
+    box-shadow: -18px 0 50px var(--black-a55);
 }
 
 #np-modal-overlay .np-modal:not(.npv2-visuals-on) > #np-v2-visuals-sidepanel {
@@ -1063,11 +1063,11 @@
     min-width: 88px;
     background: rgba(8, 10, 18, 0.94);
     border: 1px solid var(--white-a14);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     padding: 6px;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 10px 34px var(--black-a55);
 }
 
 .np-v2-speed-item {
@@ -1127,14 +1127,14 @@
     font-weight: 800;
     letter-spacing: 0.01em;
     color: #fff;
-    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.75);
+    text-shadow: 0 2px 18px var(--black-a75);
     line-height: 1.15;
 }
 #np-v2-visuals-artist {
     margin: 4px 0 0;
     font-size: 1.05rem;
     color: rgba(255, 255, 255, 0.82);
-    text-shadow: 0 1px 10px rgba(0, 0, 0, 0.75);
+    text-shadow: 0 1px 10px var(--black-a75);
 }
 #np-v2-visuals-theme-switch {
     display: flex;
@@ -1151,7 +1151,7 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--white-a90);
-    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
+    text-shadow: 0 1px 8px var(--black-a80);
 }
 .np-v2-visuals-arrow {
     width: 34px;
@@ -1163,7 +1163,7 @@
     font-size: 1rem;
     cursor: pointer;
     backdrop-filter: blur(8px);
-    transition: background 0.15s ease, transform 0.15s ease;
+    transition: background var(--dur-fast) ease, transform var(--dur-fast) ease;
 }
 .np-v2-visuals-arrow:hover {
     background: var(--white-a18);
@@ -1190,7 +1190,7 @@
     line-height: 1;
     cursor: pointer;
     backdrop-filter: blur(8px);
-    transition: background 0.15s ease, transform 0.15s ease;
+    transition: background var(--dur-fast) ease, transform var(--dur-fast) ease;
 }
 #np-v2-visuals-exit:hover {
     background: var(--white-a20);

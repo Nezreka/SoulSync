@@ -3406,6 +3406,11 @@ async function loadSettingsData() {
         document.getElementById('write-multi-artist').checked = settings.metadata_enhancement?.tags?.write_multi_artist || false;
         document.getElementById('feat-in-title').checked = settings.metadata_enhancement?.tags?.feat_in_title || false;
         document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
+        const _lcOn = document.getElementById('lidarr-compat-enabled');
+        if (_lcOn) _lcOn.checked = settings.lidarr_compat?.enabled === true;
+        loadLidarrCompatProfiles(settings.lidarr_compat?.profile_id ?? 1);
+        const _mcpOn = document.getElementById('mcp-enabled');
+        if (_mcpOn) _mcpOn.checked = settings.mcp?.enabled === true;
         const _wlTtl = document.getElementById('wishlist-ignore-ttl');
         if (_wlTtl) _wlTtl.value = settings.wishlist?.ignore_ttl_days ?? 30;
         const _wlWingIt = document.getElementById('wishlist-wing-it-guesses');
@@ -3637,6 +3642,15 @@ async function loadSettingsData() {
             if (plexCreate) plexCreate.checked = settings.security?.plex_signin_auto_create !== false;
             const plexDl = document.getElementById('security-plex-signin-can-download');
             if (plexDl) plexDl.checked = settings.security?.plex_signin_default_can_download || false;
+            const signupSides = document.getElementById('security-signup-sides');
+            if (signupSides) {
+                const sides = settings.security?.signup_sides;
+                signupSides.value = ['music', 'video', 'both'].includes(sides) ? sides : 'music';
+            }
+            const signupLimit = document.getElementById('security-signup-request-limit');
+            if (signupLimit) signupLimit.value = settings.security?.signup_request_limit ?? 0;
+            const signupDays = document.getElementById('security-signup-request-limit-days');
+            if (signupDays) signupDays.value = settings.security?.signup_request_limit_days ?? 7;
 
             // Check if admin has a PIN set
             const profilesRes = await fetch('/api/profiles');
@@ -6599,6 +6613,13 @@ async function saveSettings(quiet = false) {
                 sample_path: document.getElementById('template-sample-path').value
             }
         },
+        mcp: {
+            enabled: _cfgBool('mcp-enabled'),
+        },
+        lidarr_compat: {
+            enabled: _cfgBool('lidarr-compat-enabled'),
+            profile_id: _cfgInt('lidarr-compat-profile', _lidarrCompatProfileId),
+        },
         wishlist: {
             allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked,
             ignore_ttl_days: Math.max(1, Math.min(365,
@@ -6783,6 +6804,9 @@ async function saveSettings(quiet = false) {
             plex_signin: _cfgBool('security-plex-signin'),
             plex_signin_auto_create: _cfgBool('security-plex-signin-auto-create'),
             plex_signin_default_can_download: _cfgBool('security-plex-signin-can-download'),
+            signup_sides: _cfgStr('security-signup-sides', { fallback: 'music' }),
+            signup_request_limit: _cfgInt('security-signup-request-limit', 0),
+            signup_request_limit_days: _cfgInt('security-signup-request-limit-days', 7),
         }
     };
 
@@ -7011,6 +7035,29 @@ async function clearQuarantine() {
 }
 
 // ======================== API Key Management ========================
+
+// the saved profile, so a save before the list loads keeps it
+let _lidarrCompatProfileId = 1;
+
+async function loadLidarrCompatProfiles(selectedId) {
+    _lidarrCompatProfileId = parseInt(selectedId, 10) || 1;
+    const select = document.getElementById('lidarr-compat-profile');
+    if (!select) return;
+    try {
+        const response = await fetch('/api/profiles');
+        const data = await response.json();
+        const profiles = data.profiles || [];
+        if (!profiles.length) return;
+        select.innerHTML = profiles.map(p => {
+            const note = p.can_download === false ? ' (needs approval)' : '';
+            return `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name || 'Profile ' + p.id)}${note}</option>`;
+        }).join('');
+        select.value = String(_lidarrCompatProfileId);
+        if (select.value !== String(_lidarrCompatProfileId)) select.value = '1';
+    } catch (e) {
+        console.debug('lidarr profile list failed', e);
+    }
+}
 
 async function loadApiKeys() {
     const container = document.getElementById('api-keys-list');

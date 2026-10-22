@@ -185,6 +185,6 @@ def test_deleting_a_wrong_file_in_review_drops_its_library_row(db, tmp_path, mon
     view = ver.delete_verification_item.__wrapped__
     with Flask(__name__).app_context():
         resp = view(7)
-    assert resp.get_json() == {'success': True, 'file_deleted': True}
+    assert resp.get_json() == {'success': True, 'file_deleted': True, 'blacklisted': False}
     assert not f.exists()
     assert _row_ids(db) == ['keep']

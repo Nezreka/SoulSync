@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 
+import { DialogFrame } from '@/components/dialog';
+
 import type {
   RenderFx,
   StashEntry,
@@ -84,14 +86,6 @@ export function SaveDialog({
     }
   }, [open, track.id, track.title, start]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    if (open) window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
   if (!open) return null;
 
   const addTag = () => {
@@ -157,134 +151,133 @@ export function SaveDialog({
   if (renderBits.length > 0) fxBits.push(...renderBits);
 
   return (
-    <div className={styles.dialogOverlay} onClick={onClose}>
-      <div
-        className={styles.dialog}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Save chop"
-      >
-        <h3 className={styles.dialogTitle}>Save chop</h3>
+    <DialogFrame
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      viewportClassName={styles.dialogOverlay}
+      className={styles.dialog}
+      aria-label="Save chop"
+    >
+      <h3 className={styles.dialogTitle}>Save chop</h3>
 
-        <label className={styles.dialogField}>
-          <span>Name</span>
+      <label className={styles.dialogField}>
+        <span>Name</span>
+        <input
+          type="text"
+          value={name}
+          maxLength={120}
+          onChange={(e) => setName(e.target.value)}
+          className={styles.dialogInput}
+        />
+      </label>
+
+      <div className={styles.dialogField}>
+        <span>Tags</span>
+        <div className={styles.tagRow}>
+          {tags.map((t) => (
+            <span key={t} className={styles.tagChip}>
+              {t}
+              <button
+                type="button"
+                onClick={() => setTags(tags.filter((x) => x !== t))}
+                aria-label={`Remove tag ${t}`}
+              >
+                ×
+              </button>
+            </span>
+          ))}
           <input
             type="text"
-            value={name}
-            maxLength={120}
-            onChange={(e) => setName(e.target.value)}
-            className={styles.dialogInput}
+            value={tagInput}
+            placeholder="add a tag…"
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addTag();
+              }
+            }}
+            className={styles.tagInput}
           />
-        </label>
-
-        <div className={styles.dialogField}>
-          <span>Tags</span>
-          <div className={styles.tagRow}>
-            {tags.map((t) => (
-              <span key={t} className={styles.tagChip}>
-                {t}
-                <button
-                  type="button"
-                  onClick={() => setTags(tags.filter((x) => x !== t))}
-                  aria-label={`Remove tag ${t}`}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-            <input
-              type="text"
-              value={tagInput}
-              placeholder="add a tag…"
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  addTag();
-                }
-              }}
-              className={styles.tagInput}
-            />
-          </div>
         </div>
-
-        <label className={styles.dialogField}>
-          <span>Format</span>
-          <select
-            value={format}
-            onChange={(e) => setFormat(e.target.value as StashFormat)}
-            className={styles.dialogInput}
-          >
-            {FORMATS.map((f) => (
-              <option key={f} value={f}>
-                {STASH_FORMAT_LABEL[f]}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className={styles.dialogField}>
-          <span>Folder</span>
-          <select
-            value={selectedFolder ?? ''}
-            onChange={(e) => setFolder(e.target.value || null)}
-            className={styles.dialogInput}
-            disabled={foldersQuery.isLoading || folders.length === 0}
-            title="Which sample folder this chop is saved to (Settings → Library → Folders → Sample Studio Folders)"
-          >
-            {foldersQuery.isLoading && <option value="">Loading folders…</option>}
-            {!foldersQuery.isLoading && folders.length === 0 && (
-              <option value="">Default folder</option>
-            )}
-            {folders.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className={styles.statusLine}>
-          {track.title || 'Untitled'} · {formatTime(start)} → {formatTime(end)} (
-          {formatTime(Math.max(0, end - start))})
-          {fxBits.length > 0 ? ` · ${fxBits.join(' · ')}` : ''}
-        </div>
-
-        {error && (
-          <div className={styles.statusLine} data-tone="warn">
-            {error}
-          </div>
-        )}
-
-        <div className={styles.dialogActions}>
-          <button
-            type="button"
-            className={styles.transportBtn}
-            onClick={audition}
-            disabled={auditioning}
-          >
-            <SpeakerIcon size={14} />
-            {auditioning ? 'Rendering…' : 'Audition'}
-          </button>
-          <span style={{ flex: 1 }} />
-          <button type="button" className={styles.transportBtn} onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className={styles.transportBtn}
-            data-on={true}
-            onClick={save}
-            disabled={saving || !name.trim()}
-          >
-            <SaveIcon size={14} />
-            {saving ? 'Saving…' : 'Save to stash'}
-          </button>
-        </div>
-
-        {auditionUrl && <audio ref={audioRef} src={auditionUrl} preload="auto" />}
       </div>
-    </div>
+
+      <label className={styles.dialogField}>
+        <span>Format</span>
+        <select
+          value={format}
+          onChange={(e) => setFormat(e.target.value as StashFormat)}
+          className={styles.dialogInput}
+        >
+          {FORMATS.map((f) => (
+            <option key={f} value={f}>
+              {STASH_FORMAT_LABEL[f]}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className={styles.dialogField}>
+        <span>Folder</span>
+        <select
+          value={selectedFolder ?? ''}
+          onChange={(e) => setFolder(e.target.value || null)}
+          className={styles.dialogInput}
+          disabled={foldersQuery.isLoading || folders.length === 0}
+          title="Which sample folder this chop is saved to (Settings → Library → Folders → Sample Studio Folders)"
+        >
+          {foldersQuery.isLoading && <option value="">Loading folders…</option>}
+          {!foldersQuery.isLoading && folders.length === 0 && (
+            <option value="">Default folder</option>
+          )}
+          {folders.map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className={styles.statusLine}>
+        {track.title || 'Untitled'} · {formatTime(start)} → {formatTime(end)} (
+        {formatTime(Math.max(0, end - start))}){fxBits.length > 0 ? ` · ${fxBits.join(' · ')}` : ''}
+      </div>
+
+      {error && (
+        <div className={styles.statusLine} data-tone="warn">
+          {error}
+        </div>
+      )}
+
+      <div className={styles.dialogActions}>
+        <button
+          type="button"
+          className={styles.transportBtn}
+          onClick={audition}
+          disabled={auditioning}
+        >
+          <SpeakerIcon size={14} />
+          {auditioning ? 'Rendering…' : 'Audition'}
+        </button>
+        <span style={{ flex: 1 }} />
+        <button type="button" className={styles.transportBtn} onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className={styles.transportBtn}
+          data-on={true}
+          onClick={save}
+          disabled={saving || !name.trim()}
+        >
+          <SaveIcon size={14} />
+          {saving ? 'Saving…' : 'Save to stash'}
+        </button>
+      </div>
+
+      {auditionUrl && <audio ref={audioRef} src={auditionUrl} preload="auto" />}
+    </DialogFrame>
   );
 }

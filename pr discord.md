@@ -1,13 +1,15 @@
-**SoulSync 3.5.8 is out** :musical_note:
+**SoulSync 3.5.9 is out** :musical_note:
 
-Request Lists are a new tab on the Sync page for playlists that only download. Copy any playlist there and syncing it grabs what's missing without building a playlist on your media server. Spotify lists can opt in to removing tracks you now own from the Spotify playlist, and only ID-matched tracks are ever removed.
+SoulSync can now answer as Lidarr, so Singarr and MusicSeerr 1.x can request albums from it (thanks @Topaze77 for the request). There's also an MCP endpoint so an AI client can drive SoulSync. Both are off until you turn them on in Settings > Advanced.
 
-Playlists now re-sync on their own once their downloads land and the database update runs, so new tracks reach your server playlist right away. The Sync Playlist automation can also sync every mirrored playlist at once.
+First-run setup is rebuilt as a guided flow that finds your servers on the network, checks every part before it finishes, and can pick up where you left off.
 
-The dashboard shows your Discover quick mixes, chat uploads get a preview step with captions and inline players, and audiobooks fire automation triggers like Import Complete (thanks @SimpleSimonLA).
+You can now choose what new Plex sign-ups start with (music, movies and TV, or both, plus a request limit), members can open the video Requests page, and anime can have its own library folder (thanks @PapaBearDoes).
 
-Fixes: members stop getting banned by CrowdSec on their first visit, and deleting a profile no longer strands its browsers (thanks @PapaBearDoes). Downloads > Review stops freezing on a big queue, and artist letter folders stop scattering (thanks @QT3496). "No track picked" imports use the file's own tags (thanks @edy80), re-identify fixes and lost tracks come back (thanks @kevin2xk), and the watchlist opens the right artist (thanks @splitsec2).
+The Downloads page is rebuilt for music and video: status on the art, one action per row, and a detail sheet that explains what happened. The Wishlist groups artists by what's stuck with a side panel that says why, and the video wishlist now lives on the same page.
 
-Under the hood: one descriptor per media server (thanks @splitsec2), about 12,000 lines of dead CSS gone (thanks @Thundernerd) and the replaced vanilla pages retired (thanks @AnonymousMorris).
+Fixes: AcoustID judges files by their real length and the duration tolerance setting is easier to find (thanks @QT3496), YouTube Music tracks match on their real title and artist (thanks @andreamassaro9), and the GPU stops pegging during downloads (thanks @OlivierMartinez). Review deletes blacklist the source and append drops old wrong matches (thanks @kevin2xk), redownloads stop leaving duplicate rows (thanks @glebosotov), and collections stop wishlisting movies nobody asked for (thanks @hilburn). Plus audiobook matching fixes (thanks @SimpleSimonLA), dead file findings that close (thanks @splitsec2) and empty usenet folders cleaned up.
+
+Under the hood: the CSS token system and shared UI primitives (thanks @Thundernerd).
 
 Full notes on GitHub.

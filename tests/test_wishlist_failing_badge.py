@@ -23,8 +23,14 @@ _WL = _ROOT / "webui" / "src" / "routes" / "wishlist"
 _HELPERS = (_WL / "-wishlist.helpers.ts").read_text(encoding="utf-8", errors="replace")
 _TYPES = (_WL / "-wishlist.types.ts").read_text(encoding="utf-8", errors="replace")
 _ORB = (_WL / "-ui" / "wishlist-orb.tsx").read_text(encoding="utf-8", errors="replace")
+# the orb itself (one for music and video) lives in the shared parts
+_PARTS = (_WL / "-ui" / "nebula-parts.tsx").read_text(encoding="utf-8", errors="replace")
+# the artist detail moved out of the orb into a panel beside the nebula
+_SHEET = (_WL / "-ui" / "wishlist-artist-sheet.tsx").read_text(encoding="utf-8", errors="replace")
 _PAGE = (_WL / "-ui" / "wishlist-page.tsx").read_text(encoding="utf-8", errors="replace")
 _CSS = (_ROOT / "webui" / "static" / "style.css").read_text(encoding="utf-8", errors="replace")
+_PREMIER = (_ROOT / "webui" / "static" / "wishlist-premier.css").read_text(
+    encoding="utf-8", errors="replace")
 
 
 def test_parser_carries_the_retry_data():
@@ -36,12 +42,15 @@ def test_parser_carries_the_retry_data():
     assert "export const WL_FAILING_ATTEMPTS = 3" in _TYPES
 
 
-def test_failing_marks_reach_all_three_surfaces():
-    # album tile track rows, singles moons, and the orb meta rollup
-    assert "wl-failing-badge" in _ORB
-    assert "wl-moon-failing" in _ORB
-    assert "wl-orb-meta-failing" in _ORB
-    assert "data-failing={group.failingCount}" in _ORB
+def test_failing_marks_reach_every_surface():
+    # the orb meta rollup, the panel header, and each track row in the panel
+    # (album tracks and singles share one row component)
+    assert "failingCount={group.failingCount}" in _ORB
+    assert "stuck={group.failingCount > 0}" in _ORB
+    assert "data-failing={failingCount}" in _PARTS
+    assert "wl-orb-meta--stuck" in _PARTS
+    assert "wlp-sheet-stuck" in _SHEET
+    assert "wlp-sheet-pill${track.failing ? ' is-stuck'" in _SHEET
 
 
 def test_failing_rollup_counts_albums_and_singles():
@@ -58,10 +67,10 @@ def test_failing_filter_chip_is_wired():
 
 
 def test_css_covers_every_class():
-    for cls in (".wl-failing-badge", ".wl-moon-failing", ".wl-orb-meta-failing",
-                ".wl-failing-filter.active", ".wl-track-failing",
-                ".wl-tile-track-search", ".wl-moon-search-btn"):
-        assert cls in _CSS, f"missing CSS for {cls}"
+    assert ".wl-failing-filter.active" in _CSS
+    for cls in (".wl-orb-meta--stuck", ".wlp-sheet-stuck", ".wlp-sheet-pill.is-stuck",
+                ".wlp-sheet-track.is-stuck", ".wlp-sheet-chip"):
+        assert cls in _PREMIER, f"missing CSS for {cls}"
 
 
 # ── phase 2: manual-search jump ───────────────────────────────────────────────
@@ -82,13 +91,17 @@ def test_manual_search_opens_the_file_inspector():
     assert "_searchWishlistTrackManually" not in api
 
 
-def test_both_track_surfaces_get_the_search_button():
-    assert "wl-tile-track-search" in _ORB
-    assert "wl-moon-search-btn" in _ORB
-    # both open the inspector with the row id, the track and the artist
-    assert _ORB.count("openWishlistInspector({") == 2
-    assert _ORB.count("name: single.track") + _ORB.count("name: track.track") == 2
-    assert _ORB.count("artist: single.artist") + _ORB.count("artist: track.artist") == 2
+def test_every_track_row_gets_the_search_button():
+    # album tracks and singles render through one SheetTrack, so one call
+    # covers both, with the row id, the track and the artist
+    assert _SHEET.count("openWishlistInspector({") == 1
+    assert "aria-label={`Interactive Search for ${track.track}`}" in _SHEET
+    fn = _SHEET[_SHEET.index("openWishlistInspector({"):]
+    fn = fn[:fn.index("})")]
+    for field in ("id: track.id", "name: track.track", "artist: track.artist", "album: track.album"):
+        assert field in fn
+    # and both sections actually use it
+    assert _SHEET.count("<SheetTrack") == 2
 
 
 # ── deliberately dropped when the page moved to React ────────────────────────

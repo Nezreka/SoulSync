@@ -276,11 +276,44 @@ def approve_verification_item(history_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _blacklist_rejected_source(db, row, on_disk):
+    """blacklist the source a rejected file came from (#1801). best effort:
+    a failed blacklist never stops the delete. the provenance lookup is by
+    exact path only, its basename fallback could hand back another song."""
+    try:
+        from core.downloads.review_reject import rejected_source
+        provenance = None
+        for path in dict.fromkeys(p for p in (row.get('file_path'), on_disk) if p):
+            with db._get_connection() as conn:
+                hit = conn.execute(
+                    "SELECT source_username, source_filename FROM track_downloads "
+                    "WHERE file_path = ? ORDER BY id DESC LIMIT 1", (path,)).fetchone()
+            if hit:
+                provenance = dict(hit)
+                break
+        source = rejected_source(row, provenance)
+        if not source:
+            logger.info("[Verification] No download source to blacklist for %r", row.get('title'))
+            return False
+        db.add_to_blacklist(
+            track_title=row.get('title') or '',
+            track_artist=row.get('artist_name') or '',
+            blocked_filename=source[1],
+            blocked_username=source[0],
+            reason='review_rejected')
+        logger.info("[Verification] Blacklisted rejected source %s / %s", source[0], source[1])
+        return True
+    except Exception as e:  # noqa: BLE001 - the delete still goes ahead
+        logger.warning("[Verification] Blacklisting the rejected source failed: %s", e)
+        return False
+
+
 @bp.route('/api/verification/<int:history_id>/delete', methods=['POST'])
 @admin_only
 def delete_verification_item(history_id):
     """User decided the file is wrong: delete it from disk and drop the
-    history row and its tracks row.
+    history row and its tracks row. the source it came from is blacklisted,
+    so the next search for this track skips that file (#1801).
     Admin-only: it removes a file from disk + the library."""
     try:
         db = get_database()
@@ -288,6 +321,7 @@ def delete_verification_item(history_id):
         if not row:
             return jsonify({"success": False, "error": "History entry not found"}), 404
         on_disk = _resolve_history_audio_path(row)
+        blacklisted = _blacklist_rejected_source(db, row, on_disk)
         file_deleted = False
         if on_disk and os.path.exists(on_disk):
             os.remove(on_disk)
@@ -298,7 +332,8 @@ def delete_verification_item(history_id):
             # file that was gone and it never went back on the wishlist (#1754)
             db.delete_track_by_file_path(on_disk)
         db.delete_library_history_rows([history_id])
-        return jsonify({"success": True, "file_deleted": file_deleted})
+        return jsonify({"success": True, "file_deleted": file_deleted,
+                        "blacklisted": blacklisted})
     except Exception as e:
         logger.error(f"[Verification] Delete failed for {history_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

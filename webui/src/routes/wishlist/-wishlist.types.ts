@@ -27,7 +27,12 @@ export const wishlistSearchSchema = z.object({
    * value the page had before audiobooks arrived, so an existing bookmark or a
    * link with no `media` lands exactly where it always did.
    */
-  media: z.enum(['music', 'audiobooks']).default('music').catch('music'),
+  // movies / tv / youtube: the video wishlist, reached from the video sidebar
+  // (video-side.js hands /video-wishlist off to this page with one of these).
+  media: z
+    .enum(['music', 'audiobooks', 'movies', 'tv', 'youtube'])
+    .default('music')
+    .catch('music'),
 });
 
 export type WishlistSearch = z.infer<typeof wishlistSearchSchema>;

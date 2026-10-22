@@ -85,9 +85,20 @@ The system automation runs every 30 minutes, picking up wishlist items and attem
 
 Use the **Process Wishlist** automation action to trigger processing on demand, with options for all items, albums only, or singles only.
 
+## What's stuck, and why
+
+The **Nebula** view groups artists by what's keeping their tracks off the shelf, worst first:
+
+- **Downloaded, then rejected** — a file came in but was thrown out: a preview clip or broken download, the wrong song by fingerprint, or a file that couldn't be saved
+- **No match found** — none of your sources had it yet
+- **Download keeps failing** — anything else that has failed three times or more
+- **Still hunting** — waiting its turn, nothing wrong yet
+
+Each group has a **Retry** button that clears the backoff on just those tracks. Click an orb to open the artist panel beside the field: it says in plain words why the track failed, how many tries it has had and when, and gives you **Grab now**, **Retry now**, and a **Search** button per track to pick a source yourself. The **List** view uses the same groups.
+
 ## Cleanup
 
-The **Cleanup Wishlist** action removes duplicates (the same track added multiple times) and items you already own in your library.
+The **Cleanup Wishlist** action removes duplicates (the same track added multiple times) and items you already own in your library. It lives in the **⋯** menu next to Download Wishlist, with **Ignored** and **Clear All**.
 
 > [!NOTE]
 > Each wishlist item tracks its source (watchlist scan, playlist sync, manual), retry attempts, and the last error message. There is no status column — a wishlist row is deleted once its download completes.

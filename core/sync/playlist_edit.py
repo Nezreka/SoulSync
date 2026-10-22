@@ -137,6 +137,70 @@ def plan_playlist_append(
     return out
 
 
+def _artist_keys(value) -> List[str]:
+    from core.text.normalize import normalize_key
+    names = value if isinstance(value, (list, tuple)) else [value]
+    return [k for k in (normalize_key(str(n or '')) for n in names) if k]
+
+
+def _shares_artist(source_keys, entry_keys) -> bool:
+    # substring both ways: "El Puffin; Brendan Mills" holds "El Puffin".
+    # a loose overlap only keeps more, never drops more
+    entry_joined = ''.join(entry_keys)
+    source_joined = ''.join(source_keys)
+    return (any(s in entry_joined for s in source_keys)
+            or any(e in source_joined for e in entry_keys))
+
+
+def plan_append_superseded(current_entries, source_hints, desired_ids) -> List[str]:
+    """Which entries an append should drop because they were a wrong match
+    that the right track has since replaced (#1801).
+
+    append never removes, so a track an older broken sync put on the
+    playlist stays there forever, next to the right one. kevin2xk's
+    "Seville" by El Puffin sat in the playlist for a Sami Kaur "Seville"
+    through #1715, #1721 and #1754.
+
+    an entry goes only when all of these hold:
+    - it is not something this sync wants on the playlist
+    - its title is the same as a source track's title
+    - that source track is matched to a different id that is on the playlist
+    - none of its artists line up with that source track's artists
+
+    anything else is left alone, so a track the user added by hand stays.
+    an entry with no artist to compare stays too.
+
+    ``current_entries``: ``(id, title, artist)`` per playlist entry, artist a
+    string or a list of names. ``source_hints``: ``(title, artists, matched_id)``
+    per matched source track. Returns ids, each once, in playlist order.
+    """
+    from core.text.normalize import normalize_key
+    desired = {str(d) for d in desired_ids if str(d)}
+    by_title: dict = {}
+    for title, artists, matched_id in source_hints or ():
+        tkey = normalize_key(str(title or ''))
+        mid = str(matched_id or '')
+        if not tkey or mid not in desired:
+            continue
+        by_title.setdefault(tkey, []).append((_artist_keys(artists or []), mid))
+
+    out: List[str] = []
+    for entry_id, title, artist in current_entries or ():
+        eid = str(entry_id or '')
+        if not eid or eid in desired or eid in out:
+            continue
+        hits = by_title.get(normalize_key(str(title or '')))
+        if not hits:
+            continue
+        entry_keys = _artist_keys(artist)
+        if not entry_keys:
+            continue
+        if any(source_keys and mid != eid and not _shares_artist(source_keys, entry_keys)
+               for source_keys, mid in hits):
+            out.append(eid)
+    return out
+
+
 def plan_align_rewrite(current_ids, matched_ids, keep_extras: bool = False):
     """Plan the ordered server-track id list to rewrite a playlist as, to align its
     ORDER to the source. Pure — no I/O, no metadata. Used only by the "Align

@@ -62,6 +62,16 @@ class NavidromeAlbum(MediaAlbum):
             artist_id=navidrome_data.get('artistId', ''),
         )
 
+def _entry_artist_names(raw: Dict[str, Any]) -> List[str]:
+    """Artist names on a subsonic song: the opensubsonic ``artists`` list
+    plus the plain ``artist`` string."""
+    names = [a.get('name') for a in (raw.get('artists') or [])
+             if isinstance(a, dict) and a.get('name')]
+    if raw.get('artist'):
+        names.append(str(raw['artist']))
+    return names
+
+
 class NavidromeTrack(MediaTrack):
     """Subsonic song. Shape owned by ``core.media_server.items``."""
     server = 'navidrome'
@@ -187,6 +197,8 @@ class NavidromeClient(MediaServerBase):
         # describes the latest write that got that far; on a per-user
         # view the record lives on the view, the object its caller holds.
         self._last_validated_write_skipped: list = []
+        # ids an append took off as old wrong matches (#1801), read by the guard
+        self._last_append_removed: list = []
 
     def set_progress_callback(self, callback):
         """Set callback function for progress updates"""
@@ -1631,7 +1643,8 @@ class NavidromeClient(MediaServerBase):
 
     @validated_playlist_write
     def append_to_playlist(self, playlist_name: str, tracks, *,
-                           playlist_id: Optional[str] = None) -> bool:
+                           playlist_id: Optional[str] = None,
+                           source_hints=None) -> bool:
         """Append tracks to an existing playlist (creates it if missing).
 
         Differs from `update_playlist`: never deletes existing tracks,
@@ -1643,7 +1656,13 @@ class NavidromeClient(MediaServerBase):
         `playlist_id`, when given and still on the server, is written to
         directly (#1289 item 6: follow the mirrored playlist's stored server
         ID silently across server-side renames). Falls back to the legacy
-        name-match when absent or stale."""
+        name-match when absent or stale.
+
+        `source_hints`, ``(title, artists, matched_id)`` per matched source
+        track, lets the append drop an old wrong match that the right track
+        has replaced (#1801, see plan_append_superseded). The ids it drops
+        land on ``_last_append_removed`` for the write guard's readback."""
+        self._last_append_removed = []
         if not self.ensure_connection():
             return False
 
@@ -1667,9 +1686,10 @@ class NavidromeClient(MediaServerBase):
             # defines `ratingKey`, so the existing-ids set was ALWAYS empty and
             # every sync re-appended the whole matched list (every track N
             # times). Same bug as the Jellyfin append; dedupe on ratingKey.
+            existing_tracks = self.get_playlist_tracks(primary.id)
             existing_ids = {
                 str(getattr(t, 'ratingKey', '') or '')
-                for t in self.get_playlist_tracks(primary.id)
+                for t in existing_tracks
             } - {''}
 
             desired_ids = []
@@ -1684,10 +1704,15 @@ class NavidromeClient(MediaServerBase):
                 if tid:
                     desired_ids.append(tid)
 
-            from core.sync.playlist_edit import plan_playlist_append
+            from core.sync.playlist_edit import plan_append_superseded, plan_playlist_append
             new_track_ids = plan_playlist_append(existing_ids, desired_ids)
+            superseded = plan_append_superseded(
+                [(getattr(t, 'ratingKey', ''), getattr(t, 'title', ''),
+                  _entry_artist_names(getattr(t, 'raw', None) or {}))
+                 for t in existing_tracks],
+                source_hints, desired_ids)
 
-            if not new_track_ids:
+            if not new_track_ids and not superseded:
                 logger.info(
                     f"Navidrome append: no new tracks to add to '{playlist_name}' "
                     f"(all matched tracks already present)"
@@ -1696,10 +1721,17 @@ class NavidromeClient(MediaServerBase):
 
             # Subsonic updatePlaylist: `songIdToAdd` accepts repeated values
             # (requests serializes list values as repeated query/form params).
-            params = {
-                'playlistId': primary.id,
-                'songIdToAdd': new_track_ids,
-            }
+            params = {'playlistId': primary.id}
+            if new_track_ids:
+                params['songIdToAdd'] = new_track_ids
+            if superseded:
+                drop = set(superseded)
+                # indices into the current list, descending, same as reconcile
+                params['songIndexToRemove'] = sorted(
+                    (i for i, t in enumerate(existing_tracks)
+                     if str(getattr(t, 'ratingKey', '') or '') in drop),
+                    reverse=True,
+                )
             response = self._make_request('updatePlaylist', params)
             if response and response.get('status') == 'ok':
                 logger.info(
@@ -1707,6 +1739,16 @@ class NavidromeClient(MediaServerBase):
                     f"'{playlist_name}' (skipped {len(tracks) - len(new_track_ids)} "
                     f"already present)"
                 )
+                if superseded:
+                    self._last_append_removed = list(superseded)
+                    logger.info(
+                        "Navidrome append: removed %d old wrong match(es) from '%s' "
+                        "that the right track replaced: %s",
+                        len(superseded), playlist_name, ", ".join(
+                            f"'{getattr(t, 'title', '')}' by "
+                            f"'{', '.join(_entry_artist_names(getattr(t, 'raw', None) or {}))}'"
+                            for t in existing_tracks
+                            if str(getattr(t, 'ratingKey', '')) in drop)[:500])
                 return True
             logger.error(
                 f"Failed to append to Navidrome playlist '{playlist_name}'"

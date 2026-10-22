@@ -16,6 +16,18 @@ export function vdlType(kind: string | null | undefined): 'movie' | 'tv' | 'yout
   return k === 'youtube' ? 'youtube' : k === 'movie' ? 'movie' : 'tv';
 }
 
+/**
+ * The row's real type. a YouTube video grabbed from the download panel is
+ * saved with kind 'movie' (the grab form's default), so kind alone called it
+ * a movie and its card offered "Open movie". the source says youtube.
+ */
+export function vdlRowType(
+  d: Pick<VdlDownload, 'kind' | 'media_source' | 'source'>,
+): 'movie' | 'tv' | 'youtube' {
+  if (d.media_source === 'youtube' || d.source === 'youtube') return 'youtube';
+  return vdlType(d.kind);
+}
+
 export const VDL_KIND_ICON: Record<string, string> = {
   movie: '🎬',
   show: '📺',
@@ -226,7 +238,7 @@ export function vdlFmtBytes(bytes: number | null | undefined): string {
  * a TMDB id there) — the drawer renders the download facts without it.
  */
 export function vdlMetaURL(d: VdlDownload): string | null {
-  const t = vdlType(d.kind);
+  const t = vdlRowType(d);
   if (t === 'youtube')
     return `/api/video/downloads/yt-meta/${encodeURIComponent(String(d.media_id))}`;
   if (d.media_source === 'library') return null;

@@ -39,6 +39,13 @@ def library_roots(db, kind=None):
         primary = db.get_setting(key)
         if primary:
             roots.append(str(primary))
+        if item == "episode":
+            # the optional anime folder is a TV library too (new episodes of
+            # anime-type shows import there); normalize_paths dedupes it if it
+            # is also listed as an additional TV library
+            anime = db.get_setting("anime_path")
+            if anime:
+                roots.append(str(anime))
         if item != "youtube":
             roots.extend(additional_paths(db, key.replace("_path", "_additional_paths")))
     return normalize_paths(roots)

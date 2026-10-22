@@ -45,6 +45,15 @@ export interface VdlDownload {
   filename?: string | null;
   /** true when this row IS the season pack (the batch head). */
   is_pack?: boolean | null;
+  /** utc "YYYY-MM-DD HH:MM:SS" stamps off the row. */
+  created_at?: string | null;
+  completed_at?: string | null;
+  /** when progress last moved (the stall clock). */
+  progress_at?: string | null;
+  /** JSON list of backup releases left to fall back on. */
+  candidates?: string | unknown[] | null;
+  /** JSON list of release files already tried. */
+  tried_files?: string | unknown[] | null;
 }
 
 /** Lazy TMDB detail for an expanded card (GET /api/video/downloads/meta/…). */

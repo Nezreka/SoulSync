@@ -2097,6 +2097,9 @@ function updateProfileIndicator() {
         const page = btn.getAttribute('data-video-page');
         if (page === 'video-help' || page === 'video-issues') { btn.style.display = ''; return; }
         if (VIDEO_ADMIN_ONLY.includes(page)) { btn.style.display = currentProfile.is_admin ? '' : 'none'; return; }
+        // requests: admins answer them, profiles without download rights make
+        // them. same rule as the music side's requests, not a page toggle
+        if (page === 'video-requests') { btn.style.display = (currentProfile.is_admin || !canDownload()) ? '' : 'none'; return; }
         if (currentProfile.id === 1) { btn.style.display = ''; return; }
         const ap = currentProfile.allowed_pages;
         btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
@@ -2137,6 +2140,24 @@ function profileAllowedSides() {
     if (!currentProfile || currentProfile.is_admin || currentProfile.id === 1) return 'both';
     const s = currentProfile.allowed_sides;
     return (s === 'video' || s === 'both') ? s : 'music';
+}
+
+// A shared React page that shows the VIDEO side's view of itself under
+// ?media=... is gated by that video page's permission (and the video side
+// being on), not the music page's. /wishlist?media=tv is the video wishlist.
+const SHARED_VIDEO_VIEWS = {
+    wishlist: { media: ['movies', 'tv', 'youtube'], videoPage: 'video-wishlist' },
+};
+
+function isPageAccessAllowed(pageId, search) {
+    const view = SHARED_VIDEO_VIEWS[pageId];
+    let media = null;
+    if (view) {
+        try { media = new URLSearchParams(search || '').get('media'); } catch (e) { media = null; }
+    }
+    if (!view || view.media.indexOf(media) === -1) return isPageAllowed(pageId);
+    if (profileAllowedSides() === 'music') return false;
+    return isPageAllowed(view.videoPage);
 }
 
 // =====================
@@ -4076,19 +4097,36 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
     }
 
-    if (showWizard && typeof openSetupWizard === 'function') {
+    if (showWizard && await _setupFlowReady()) {
         window._onSetupWizardComplete = function () {
             _continueAppInit();
         };
         // the wizard runs before any profile is picked, let its calls through
         window.SoulSyncProfileGate?.setProfile(null);
         window.SoulSyncProfileGate?.open();
-        openSetupWizard();
+        window.openSetupWizard();
         return; // Defer init until wizard closes
     }
 
     _continueAppInit();
 });
+
+// the setup flow is a react module (webui/src/features/onboarding). module
+// scripts normally run before this handler, but in dev the bundle comes from
+// vite and can land later, so wait a moment for it to announce itself.
+function _setupFlowReady() {
+    if (typeof window.openSetupWizard === 'function') return Promise.resolve(true);
+    return new Promise((resolve) => {
+        const done = (ok) => {
+            window.removeEventListener('soulsync:onboarding-ready', onReady);
+            clearTimeout(timer);
+            resolve(ok);
+        };
+        const onReady = () => done(typeof window.openSetupWizard === 'function');
+        const timer = setTimeout(() => done(typeof window.openSetupWizard === 'function'), 8000);
+        window.addEventListener('soulsync:onboarding-ready', onReady);
+    });
+}
 
 async function _continueAppInit() {
     // Check profiles first — may show picker instead of app
@@ -5082,7 +5120,8 @@ async function loadInitialData() {
         // Navigate to user's home page (or dashboard for admin)
         const homePage = getProfileHomePage();
         const urlPage = _getPageFromPath();
-        let targetPage = (urlPage && urlPage !== 'dashboard' && isPageAllowed(urlPage))
+        // media-aware: /wishlist?media=tv is the video wishlist, gated by that page
+        let targetPage = (urlPage && urlPage !== 'dashboard' && isPageAccessAllowed(urlPage, window.location.search))
             ? urlPage
             : homePage;
 
@@ -5103,7 +5142,7 @@ async function loadInitialData() {
         // answers the question startup was already asking, so adopt it.
         if ((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname) !== initialPath) {
             const redirectedPage = _getPageFromPath();
-            if (redirectedPage && isPageAllowed(redirectedPage)) {
+            if (redirectedPage && isPageAccessAllowed(redirectedPage, window.location.search)) {
                 targetPage = redirectedPage;
             }
         }

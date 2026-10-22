@@ -10,6 +10,8 @@ import type { ShellProfileContext, ShellRouteDefinition, ShellPageId } from './b
 declare global {
   interface Window {
     showToast?: (message: string, type?: string, durationOrContext?: number | string) => void;
+    /** core.js: the latest server-side active music download count from the status push. */
+    __soulsyncMusicActiveDownloads?: number;
     /** core.js: repaints the music Requests nav badge (admin: waiting, member: news). */
     refreshMusicRequestsBadge?: () => void;
     /** core.js: after a wishlist add, tells a profile that asks first it went out as a
@@ -662,6 +664,17 @@ declare global {
     SoulSyncVideo?: {
       openDetail?: (args: { kind: string; id: number | string; source?: string }) => void;
     };
+    /** video-download-view.js: the shared release-picker modal (manual search). */
+    VideoDownload?: {
+      manualSearch?: (opts: {
+        title: string;
+        scope: 'movie' | 'season' | 'episode' | 'series';
+        season?: number | null;
+        episode?: number | null;
+        year?: number | string | null;
+        poster?: string | null;
+      }) => void;
+    };
     /** video-side.js: flip the shell chrome music <-> video (does NOT navigate). */
     _switchAppSide?: (side: 'music' | 'video', opts?: { force?: boolean }) => void;
     /** unified downloads page: true while any video download is active.
@@ -716,7 +729,8 @@ declare global {
     };
     SoulSyncWebShellBridge?: {
       getCurrentProfileContext: () => ShellProfileContext | null;
-      isPageAllowed: (pageId: ShellPageId) => boolean;
+      /** search makes it media-aware: /wishlist?media=tv asks for video-wishlist. */
+      isPageAllowed: (pageId: ShellPageId, search?: string) => boolean;
       getProfileHomePage: () => ShellPageId;
       resolveLegacyPath: (pathname: string) => ShellPageId | null;
       setActivePageChrome: (pageId: ShellPageId) => void;

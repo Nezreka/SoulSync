@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.5.8"
+_SOULSYNC_BASE_VERSION = "3.5.9"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -4363,7 +4363,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'mcp']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -4749,8 +4749,13 @@ def setup_status_endpoint():
 @app.route('/api/setup/complete', methods=['POST'])
 def setup_complete_endpoint():
     """Mark first-run setup as completed."""
+    data = request.get_json(silent=True) or {}
+    purposes = data.get('purposes')
     config_manager.set('setup.completed', True)
     config_manager.set('setup.in_progress', False)
+    # what setup was told soulsync is for, the dashboard checklist reads it
+    if isinstance(purposes, list):
+        config_manager.set('setup.purposes', [str(p) for p in purposes][:10])
     return jsonify({"success": True})
 
 @app.route('/api/test-connection', methods=['POST'])
@@ -9958,19 +9963,10 @@ def write_tracks_tags_batch():
 
                 written_tracks = []  # Track dicts that were successfully written (for server sync)
 
-                # Pre-download cover art once per unique album URL
+                # cover art downloads once per unique url, but only when a track
+                # under it actually gets written. #1798: fetching up front pulled
+                # every cover even when the whole batch was then skipped.
                 cover_cache = {}  # url → (bytes, mime) or None
-                if embed_cover:
-                    unique_urls = set()
-                    for td in rows:
-                        thumb = td.get('album_thumb_url') or td.get('artist_thumb_url')
-                        if thumb and thumb.startswith('http'):
-                            unique_urls.add(thumb)
-                    if unique_urls:
-                        with _write_tags_batch_lock:
-                            _write_tags_batch_state['current_track'] = f'Downloading cover art ({len(unique_urls)} album{"s" if len(unique_urls) != 1 else ""})...'
-                        for url in unique_urls:
-                            cover_cache[url] = download_cover_art(url)
 
                 for track_data in rows:
                     file_path = track_data.get('file_path')
@@ -9998,13 +9994,6 @@ def write_tracks_tags_batch():
 
                     db_data = _build_library_tag_db_data(track_data, album_genres)
 
-                    # Get pre-downloaded cover art for this track's album
-                    art_data = None
-                    if embed_cover:
-                        thumb = track_data.get('album_thumb_url') or track_data.get('artist_thumb_url')
-                        if thumb and thumb.startswith('http'):
-                            art_data = cover_cache.get(thumb)
-
                     # #1052 — only touch files that actually differ. Uses the SAME
                     # build_tag_diff the preview does, so the write matches exactly
                     # what the "N will change / M unchanged" preview showed. A
@@ -10023,6 +10012,14 @@ def write_tracks_tags_batch():
                     except Exception:
                         logger.debug("tag diff pre-check failed for %s; writing anyway",
                                      resolved_path, exc_info=True)
+
+                    art_data = None
+                    if embed_cover:
+                        thumb = track_data.get('album_thumb_url') or track_data.get('artist_thumb_url')
+                        if thumb and thumb.startswith('http'):
+                            if thumb not in cover_cache:
+                                cover_cache[thumb] = download_cover_art(thumb)
+                            art_data = cover_cache[thumb]
 
                     file_lock = get_file_lock(resolved_path)
                     with file_lock:
@@ -17022,6 +17019,14 @@ def get_active_processes():
 
 # Status payload helpers live in core/downloads/status.py.
 from core.downloads import status as _downloads_status
+from core.downloads import row_art as _row_art
+
+# one per process so its name cache outlives each 2s poll
+_row_art_lookup = _row_art.RowArtLookup(
+    query_artists=lambda names: get_database().get_artist_thumbs_by_names(names),
+    query_albums=lambda titles: get_database().get_album_thumbs_by_titles(titles),
+    normalize=fix_artist_image_url,
+)
 
 
 def _build_status_deps():
@@ -17053,6 +17058,7 @@ def _build_status_deps():
         get_unverified_download_history=lambda: get_database().get_library_history_unverified(
             exclude_download_sources=('acoustid_scan',),
         ),
+        attach_row_art=lambda items: _row_art.attach_row_art(items, _row_art_lookup),
     )
 
 
@@ -23484,6 +23490,12 @@ from api.media_servers import configure as _configure_media_servers_api, create_
 _configure_media_servers_api(config_manager_=config_manager, engine_getter=lambda: media_server_engine)
 app.register_blueprint(_create_media_servers_blueprint())
 
+# First-run setup flow: discovery, folder checks, save-free connection probes.
+from api.onboarding import configure as _configure_onboarding_api, create_blueprint as _create_onboarding_blueprint
+_configure_onboarding_api(config_manager_=config_manager, get_database_=get_database,
+                          docker_resolve_url=lambda url: docker_resolve_url(url))
+app.register_blueprint(_create_onboarding_blueprint())
+
 # Quality profiles / auto-import watcher / metadata-cache browser - three
 # self-contained clusters lifted to their own api/ modules.
 from api.quality_profiles import configure as _cfg_qp, create_blueprint as _bp_qp
@@ -23780,6 +23792,18 @@ def _start_music_video_request_download(data):
 from api.music_requests import configure as _cfg_mr, create_blueprint as _bp_mr
 _cfg_mr(get_database=get_database, start_music_video=_start_music_video_request_download)
 app.register_blueprint(_bp_mr())
+
+# lidarr compatible api: lidarr-only request apps (singarr, musicseerr 1.x)
+# can use soulsync as their lidarr (#1799)
+from api.lidarr_compat import configure as _cfg_lc, create_blueprint as _bp_lc
+_cfg_lc(get_database=get_database, config_manager=config_manager)
+app.register_blueprint(_bp_lc())
+
+# mcp: an ai client drives soulsync through /mcp with an api key
+from api.mcp import configure as _cfg_mcp, create_blueprint as _bp_mcp
+_cfg_mcp(get_database=get_database, config_manager=config_manager,
+         version=SOULSYNC_VERSION.split('+')[0])
+app.register_blueprint(_bp_mcp())
 
 # kids profiles: explicit music can't play and drops out of search/tracklists
 from api.content_guard import register as _reg_content_guard

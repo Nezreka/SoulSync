@@ -57,6 +57,31 @@ except ImportError:
     ACOUSTID_AVAILABLE = False
     logger.warning("pyacoustid library not installed - run: pip install pyacoustid")
 
+def parse_lookup_with_duration(data: Dict[str, Any]):
+    """pyacoustid's parse_lookup_result, plus each recording's duration.
+
+    acoustid sends a length (seconds) on every recording, pyacoustid drops it.
+    without it the duration guards had nothing to read and never fired (#1804).
+    yields (score, recording_id, title, artist, duration_or_None).
+    """
+    import acoustid
+    if data.get("status") != "ok":
+        raise acoustid.WebServiceError("status: {}".format(data.get("status")))
+    if "results" not in data:
+        raise acoustid.WebServiceError("results not included")
+    for result in data["results"]:
+        score = result["score"]
+        for recording in result.get("recordings") or []:
+            artists = recording.get("artists")
+            artist_name = "".join(
+                a["name"] + a.get("joinphrase", "") for a in artists
+            ) if artists else None
+            duration = recording.get("duration")
+            if not isinstance(duration, (int, float)) or isinstance(duration, bool) or duration <= 0:
+                duration = None
+            yield score, recording["id"], recording.get("title"), artist_name, duration
+
+
 def _get_fpcalc_download_url() -> Optional[str]:
     """Get the download URL for fpcalc based on current platform."""
     system = platform.system().lower()
@@ -412,7 +437,7 @@ class AcoustIDClient:
                         logger.warning("Rate limited by AcoustID — will retry later: %s", err_msg)
                     return {'status': 'error', 'recordings': [], 'invalid_key': invalid,
                             'error': f'AcoustID API error (code {err_code}): {err_msg}'}
-                match_results = acoustid.parse_lookup_result(raw_response)
+                match_results = parse_lookup_with_duration(raw_response)
             else:
                 match_results = acoustid.match(self.api_key, audio_file, parse=True)
 
@@ -426,6 +451,7 @@ class AcoustIDClient:
                 recording_id = result[1]
                 title = result[2] if len(result) > 2 else None
                 artist = result[3] if len(result) > 3 else None
+                duration = result[4] if len(result) > 4 else None
 
                 logger.debug(f"Got result: score={score}, id={recording_id}, title={title}, artist={artist}")
 
@@ -434,7 +460,8 @@ class AcoustIDClient:
 
                 if recording_id and recording_id not in seen_mbids:
                     seen_mbids.add(recording_id)
-                    recordings.append({'mbid': recording_id, 'title': title, 'artist': artist, 'score': score})
+                    recordings.append({'mbid': recording_id, 'title': title, 'artist': artist,
+                                       'score': score, 'duration': duration})
                     logger.debug(f"Found match: {title} by {artist} (MBID: {recording_id}, score: {score})")
 
             if not recordings:

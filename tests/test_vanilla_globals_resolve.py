@@ -67,7 +67,6 @@ _BASELINE = {
     "downloads.js": 6,
     "init.js": 4,
     "settings.js": 3,
-    "setup-wizard.js": 1,
     "stats-automations.js": 4,
     "wishlist-tools.js": 3,
 }

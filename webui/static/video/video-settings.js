@@ -437,6 +437,7 @@
                 setP('video-download-path', d.download_path);
                 setP('video-movies-path', d.movies_path);
                 setP('video-tv-path', d.tv_path);
+                setP('video-anime-path', d.anime_path);
                 loadVideoPaths('movies', d.movies_additional_paths);
                 loadVideoPaths('tv', d.tv_additional_paths);
                 setP('video-youtube-path', d.youtube_path);
@@ -468,6 +469,7 @@
                 download_path: val('video-download-path'),
                 movies_path: val('video-movies-path'),
                 tv_path: val('video-tv-path'),
+                anime_path: val('video-anime-path'),
                 movies_additional_paths: collectVideoPaths('movies'),
                 tv_additional_paths: collectVideoPaths('tv'),
                 youtube_path: val('video-youtube-path'),
@@ -862,7 +864,7 @@
             });
         }
         // Folder inputs save on change too.
-        ['video-download-path', 'video-movies-path', 'video-tv-path', 'video-youtube-path'].forEach(function (id) {
+        ['video-download-path', 'video-movies-path', 'video-tv-path', 'video-anime-path', 'video-youtube-path'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el && !el._vdWired) { el._vdWired = true; el.addEventListener('change', function () { saveDownloads(true); }); }
         });

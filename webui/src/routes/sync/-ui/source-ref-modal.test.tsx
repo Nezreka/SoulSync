@@ -81,12 +81,18 @@ describe('SourceRefModal', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('the backdrop closes, a click inside does not', () => {
+  it('a press on the backdrop closes, a press inside does not', () => {
     const { onClose } = open();
-    const overlay = document.querySelector('#mirrored-source-ref-modal')!;
-    fireEvent.click(overlay.firstChild as Element);
+    // DialogFrame: the id is on the popup, the backdrop is its viewport.
+    const popup = document.querySelector('#mirrored-source-ref-modal')!;
+    const press = (el: Element) => {
+      fireEvent.pointerDown(el, { button: 0 });
+      fireEvent.mouseDown(el, { button: 0 });
+      fireEvent.click(el, { button: 0 });
+    };
+    press(popup.firstChild as Element);
     expect(onClose).not.toHaveBeenCalled();
-    fireEvent.click(overlay);
+    press(popup.parentElement!);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

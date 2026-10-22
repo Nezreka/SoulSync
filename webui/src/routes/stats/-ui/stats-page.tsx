@@ -15,6 +15,7 @@ import {
 
 import type { ShellBridge } from '@/platform/shell/bridge';
 
+import { DialogFrame } from '@/components/dialog';
 import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/primitives';
 import { useReactPageShell, useShellStatus } from '@/platform/shell/route-controllers';
@@ -1389,92 +1390,92 @@ function StatsListeningDetailModal({
       ? `Showing latest ${formatCompactNumber(tracks.length)} plays`
       : `${formatCompactNumber(total)} ${total === 1 ? 'play' : 'plays'}`;
   return (
-    <div className={styles.statsDetailBackdrop} role="presentation" onMouseDown={onClose}>
-      <div
-        className={styles.statsDetailModal}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Listening details"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className={styles.statsDetailHeader}>
-          <div>
-            <div className={styles.statsDetailEyebrow}>Listening Details</div>
-            <h3>{title}</h3>
-            <p>{summary}</p>
-          </div>
-          <button
-            type="button"
-            className={styles.statsDetailClose}
-            onClick={onClose}
-            aria-label="Close"
-          >
-            x
-          </button>
+    <DialogFrame
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      viewportClassName={styles.statsDetailBackdrop}
+      className={styles.statsDetailModal}
+      aria-label="Listening details"
+    >
+      <div className={styles.statsDetailHeader}>
+        <div>
+          <div className={styles.statsDetailEyebrow}>Listening Details</div>
+          <h3>{title}</h3>
+          <p>{summary}</p>
         </div>
-
-        {error ? <SectionSubtleError message={getErrorMessage(error)} /> : null}
-        {!error && loading ? (
-          <div className={styles.statsDetailLoading}>Loading listening details...</div>
-        ) : null}
-        {!error && !loading && tracks.length === 0 ? (
-          <EmptyListState message="No plays found" />
-        ) : null}
-
-        {!error && tracks.length ? (
-          <div className={styles.statsDetailList}>
-            {tracks.map((track, index) => (
-              <div
-                key={`${track.title}-${track.artist ?? ''}-${track.played_at ?? ''}-${index}`}
-                className={styles.statsDetailRow}
-              >
-                {track.image_url ? (
-                  <img className={styles.statsDetailArt} src={track.image_url} alt="" />
-                ) : (
-                  <div className={styles.statsDetailArtFallback}>{(track.title || '?')[0]}</div>
-                )}
-                <div className={styles.statsDetailTrackMain}>
-                  <div className={styles.statsDetailTrackTitle}>{track.title}</div>
-                  <div className={styles.statsDetailTrackMeta}>
-                    {track.artist_db_id ? (
-                      <ArtistDetailLink
-                        artistId={track.artist_db_id}
-                        className={styles.statsArtistLink}
-                      >
-                        {track.artist || 'Unknown artist'}
-                      </ArtistDetailLink>
-                    ) : (
-                      <span>{track.artist || 'Unknown artist'}</span>
-                    )}
-                    {track.album ? ` · ${track.album}` : ''}
-                  </div>
-                </div>
-                <div className={styles.statsDetailWhen}>
-                  <span>{formatDetailPlayedAt(track.played_at)}</span>
-                  {track.server_source ? (
-                    <span className={styles.statsDetailSource}>{track.server_source}</span>
-                  ) : null}
-                </div>
-                <button
-                  type="button"
-                  className={styles.statsDetailPlay}
-                  onClick={() =>
-                    void onPlay({
-                      title: track.title,
-                      artist: track.artist || '',
-                      album: track.album || '',
-                    })
-                  }
-                  title="Play"
-                >
-                  ▶
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : null}
+        <button
+          type="button"
+          className={styles.statsDetailClose}
+          onClick={onClose}
+          aria-label="Close"
+        >
+          x
+        </button>
       </div>
-    </div>
+
+      {error ? <SectionSubtleError message={getErrorMessage(error)} /> : null}
+      {!error && loading ? (
+        <div className={styles.statsDetailLoading}>Loading listening details...</div>
+      ) : null}
+      {!error && !loading && tracks.length === 0 ? (
+        <EmptyListState message="No plays found" />
+      ) : null}
+
+      {!error && tracks.length ? (
+        <div className={styles.statsDetailList}>
+          {tracks.map((track, index) => (
+            <div
+              key={`${track.title}-${track.artist ?? ''}-${track.played_at ?? ''}-${index}`}
+              className={styles.statsDetailRow}
+            >
+              {track.image_url ? (
+                <img className={styles.statsDetailArt} src={track.image_url} alt="" />
+              ) : (
+                <div className={styles.statsDetailArtFallback}>{(track.title || '?')[0]}</div>
+              )}
+              <div className={styles.statsDetailTrackMain}>
+                <div className={styles.statsDetailTrackTitle}>{track.title}</div>
+                <div className={styles.statsDetailTrackMeta}>
+                  {track.artist_db_id ? (
+                    <ArtistDetailLink
+                      artistId={track.artist_db_id}
+                      className={styles.statsArtistLink}
+                    >
+                      {track.artist || 'Unknown artist'}
+                    </ArtistDetailLink>
+                  ) : (
+                    <span>{track.artist || 'Unknown artist'}</span>
+                  )}
+                  {track.album ? ` · ${track.album}` : ''}
+                </div>
+              </div>
+              <div className={styles.statsDetailWhen}>
+                <span>{formatDetailPlayedAt(track.played_at)}</span>
+                {track.server_source ? (
+                  <span className={styles.statsDetailSource}>{track.server_source}</span>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                className={styles.statsDetailPlay}
+                onClick={() =>
+                  void onPlay({
+                    title: track.title,
+                    artist: track.artist || '',
+                    album: track.album || '',
+                  })
+                }
+                title="Play"
+              >
+                ▶
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </DialogFrame>
   );
 }
 

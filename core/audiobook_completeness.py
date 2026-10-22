@@ -66,11 +66,15 @@ def measure_duration_seconds(path: Path) -> Optional[float]:
     try:
         from mutagen import File as MutagenFile
 
+        from core.audio_length import reliable_length_seconds
+
         audio = MutagenFile(str(path), easy=False)
         length = getattr(getattr(audio, "info", None), "length", None)
         if length is None:
             return None
-        length = float(length)
+        # a CBR MP3 whose Xing/Info header claims a fraction of its real length
+        # must not make a complete book look short
+        length = reliable_length_seconds(audio, path)
         return length if length > 0 else None
     except Exception as exc:                                # noqa: BLE001
         logger.debug("Could not read the duration of %s: %s", path, exc)

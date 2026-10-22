@@ -126,6 +126,77 @@ If omitted, defaults to profile 1 (admin). Profile scoping applies to: watchlist
 
 ---
 
+## MCP for AI clients
+
+SoulSync can act as an MCP server, so an AI app like Claude can search for music, check what you already own, and download things for you.
+
+### Turn it on
+
+Go to **Settings > Advanced > SoulSync API > MCP for AI Clients** and tick **Answer MCP requests at /mcp**. While it's off, `/mcp` answers `404`.
+
+### Connect a client
+
+Add `http://<host>:8008/mcp` as a remote (streamable HTTP) MCP server and send a SoulSync API key as a Bearer token. For Claude Code:
+
+```bash
+claude mcp add --transport http soulsync http://localhost:8008/mcp --header "Authorization: Bearer sk_..."
+```
+
+Both protocol styles work: `2026-07-28` (no handshake) and `2025-03-26` through `2025-11-25` (initialize first). Requests from a browser page on another site are refused, so a key that leaks into a web page can't be used from there.
+
+### What a key can do
+
+Every tool call runs as the matching `/api/v1` request with your key, so the usual rules apply: the same scope checks, the same profile, and the same 60 requests a minute.
+
+- An **admin** key gets all 35 tools.
+- A **read** key only gets the tools that look things up. A write tool still answers `403` if one is ever called with a read key.
+- Settings, API keys, profiles, cancel-all and blocklist clears are never tools, whatever the key.
+
+### Tools
+
+| Group | Tools |
+|-------|-------|
+| Status | `get_server_status`, `get_recent_activity`, `get_library_stats` |
+| Your library | `search_library_artists`, `get_library_artist`, `list_artist_albums`, `search_library_albums`, `get_album_tracks`, `search_library_tracks`, `recently_added`, `recently_played` |
+| Queues | `list_wishlist`, `list_watchlist`, `list_downloads`, `list_playlists`, `get_request_status` |
+| Discovery | `recent_releases`, `similar_artists` |
+| Video | `video_search`, `video_library`, `video_wishlist`, `video_downloads`, `video_calendar` |
+| Getting music | `search_music`, `find_album`, `request_album`, `request_track`, `process_wishlist`, `remove_from_wishlist`, `watch_artist`, `unwatch_artist`, `scan_watchlist`, `cancel_download` |
+| Getting video | `video_wishlist_add`, `video_follow` |
+
+To get a whole album, the client calls `find_album` with "Artist - Album" and then `request_album` with the id it returns. Every track goes on the wishlist and tracks you already own are skipped. For one track, `request_track` takes "Artist - Title".
+
+---
+
+## Lidarr compatible API
+
+Some request apps only know how to talk to Lidarr. SoulSync can answer as Lidarr, so those apps send their album requests to SoulSync instead. Built for **Singarr** and **MusicSeerr 1.x**. MusicSeerr 2.0 and newer dropped Lidarr support, so it can't connect.
+
+### Turn it on
+
+Go to **Settings > Advanced > SoulSync API > Lidarr Compatible API**:
+
+1. Tick **Answer as Lidarr at /lidarr**. While it's off, every `/lidarr` route answers `404`.
+2. Pick **Requests go to profile**. Requested albums land on that profile's wishlist.
+
+### Connect the app
+
+In the request app, set the Lidarr URL to `http://<host>:8008/lidarr` and paste a SoulSync **admin** API key as the Lidarr API key. A read key gets `401`. The app talks to `/lidarr/api/v1` like it would to a real Lidarr.
+
+### What happens
+
+- Artist and album lookups come from MusicBrainz.
+- When the app asks for an album to be searched (on add, or with an album or artist search), every track of that album goes on the profile's wishlist and downloads like any other wishlist item. Tracks you already own are skipped.
+- If the profile can't download on its own, every request waits for approval on the **Requests** page first.
+- The app's "do we have it" view checks your SoulSync library.
+- Deleting an artist or album in the app only removes it from SoulSync's Lidarr list. Files on disk are never touched.
+
+### Supported routes
+
+All under `/lidarr/api/v1`: `system/status`, `qualityprofile`, `metadataprofile`, `rootfolder`, `tag`, `artist` (list, lookup, add, edit, editor, delete), `album` (list, lookup, add, edit, monitor, delete), `track`, `trackfile`, `command` (`AlbumSearch`, `ArtistSearch`, `RefreshArtist`; other commands are accepted and do nothing), `queue`, `history` and `wanted/missing`.
+
+---
+
 ## Endpoints
 
 ### System

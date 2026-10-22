@@ -24,6 +24,8 @@
 
 import { useEffect } from 'react';
 
+import { FinishSetupCard } from '@/features/onboarding/checklist-card';
+
 import { useDashboardHeader } from '../-dash.header';
 import { ActiveDownloadsShell } from './active-downloads-shell';
 import { AlertsBand } from './alerts-band';
@@ -51,6 +53,9 @@ export function DashboardPage() {
       <AlertsBand />
       <div className="dash-layout">
         <div className="dash-main">
+          {/* What setup left for later. Renders nothing once it's all done,
+              dismissed, or for anyone who isn't an admin. */}
+          <FinishSetupCard />
           {/* This week in listening — renders nothing until plays exist. */}
           <WeeklyDigest />
           {/* Only while something is downloading. It stays full width: the

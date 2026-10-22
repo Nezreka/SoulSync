@@ -255,6 +255,20 @@ def test_user_pinned_tolerance_is_symmetric(tmp_path: Path) -> None:
     assert result.checks["effective_tolerance_s"] == pytest.approx(2.0)
 
 
+@pytest.mark.parametrize("file_s,expected_ms", [(5.5, 9000), (30.0, 5000)])
+def test_duration_reject_names_the_tolerance_setting(tmp_path: Path, file_s, expected_ms) -> None:
+    """#1805: the setting already existed but nobody could find it. the
+    quarantine reason is where people look, so it has to point there, for
+    short files and long ones."""
+    f = tmp_path / "off.wav"
+    _write_minimal_wav(f, duration_s=file_s)
+
+    result = file_integrity.check_audio_integrity(str(f), expected_duration_ms=expected_ms)
+
+    assert result.ok is False
+    assert "Duration tolerance in Settings > Library > Post-Processing" in result.reason
+
+
 def test_rejects_wrong_file_substituted(tmp_path: Path) -> None:
     """A 10-second clip masquerading as a 3-minute album track. slskd
     matched on a similar filename but the actual content is a snippet."""

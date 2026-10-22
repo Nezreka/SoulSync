@@ -15,6 +15,7 @@ import type { VdlCardActions } from './vdl-list';
 import { fetchVideoHistoryCount } from '../-vdl.api';
 import { useVideoDownloads } from '../-vdl.use-downloads';
 import { AdlClientsTab } from './adl-clients';
+import { useReportActive } from './dl-header';
 import { VdlHeader } from './vdl-header';
 import { VdlHistoryModal } from './vdl-history';
 import { VdlList } from './vdl-list';
@@ -24,6 +25,8 @@ const toast = (message: string, type: string) => window.showToast?.(message, typ
 
 export function VideoDownloadsView() {
   const dl = useVideoDownloads();
+  // the Music | Video switch shows this side's live count
+  useReportActive('video', dl.counts.active);
   const review = useVdlReview();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyCount, setHistoryCount] = useState<number | null>(null);
@@ -71,6 +74,7 @@ export function VideoDownloadsView() {
             onView={dl.setView}
             filter={dl.filter}
             onFilter={dl.setFilter}
+            downloads={dl.downloads}
             counts={dl.counts}
             liveSpeedBps={dl.liveSpeedBps}
             hasRunningWork={dl.hasRunningWork}

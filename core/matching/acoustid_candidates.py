@@ -141,3 +141,61 @@ def duration_mismatches_strongly(
     drift = abs(float(candidate_seconds) - float(expected_seconds))
     threshold = max(abs_tolerance_s, rel_tolerance * float(expected_seconds))
     return drift > threshold
+
+
+def top_scored_recordings(recordings: Iterable[Dict[str, Any]]) -> list:
+    """The recordings tied on the best fingerprint score.
+
+    one acoustid result carries many recordings that share its score, in
+    musicbrainz order, so [0] is an arbitrary pick among equals (#1132).
+    unscored lists come back whole.
+    """
+    recs = list(recordings or [])
+    scored = [r for r in recs if r.get('score') is not None]
+    if not scored:
+        return recs
+    top = max(r['score'] for r in scored)
+    return [r for r in scored if r['score'] >= top]
+
+
+def recording_seconds(rec: Dict[str, Any]) -> Optional[float]:
+    """A recording's length in seconds, or None when nothing usable is known."""
+    for key in ('duration', 'length'):
+        value = rec.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if value > 0:
+            return float(value)
+    return None
+
+
+def fingerprint_length_contradicts(recordings: Iterable[Dict[str, Any]],
+                                   file_seconds: Optional[float]) -> bool:
+    """True when every top fingerprint match is a wildly different length
+    than the file. that's a hash collision, not a match.
+
+    judged across all the tied top recordings, so one 12-minute live version
+    linked to the same entry can't make an ordinary track look like a
+    collision. unknown lengths prove nothing either way.
+    """
+    if not file_seconds or file_seconds <= 0:
+        return False
+    known = [s for s in (recording_seconds(r) for r in top_scored_recordings(recordings))
+             if s is not None]
+    return bool(known) and all(
+        duration_mismatches_strongly(file_seconds, s) for s in known)
+
+
+def durations_agree(a_seconds: Optional[float], b_seconds: Optional[float],
+                    *, abs_tolerance_s: float = 3.0,
+                    rel_tolerance: float = 0.02) -> bool:
+    """True when two lengths are close enough to be the same cut.
+
+    much tighter than duration_mismatches_strongly. a radio edit and an
+    extended mix are minutes apart, two encodes of one mix are seconds apart.
+    unknown on either side is False, no claim.
+    """
+    if not a_seconds or not b_seconds or a_seconds <= 0 or b_seconds <= 0:
+        return False
+    drift = abs(float(a_seconds) - float(b_seconds))
+    return drift <= max(abs_tolerance_s, rel_tolerance * max(float(a_seconds), float(b_seconds)))

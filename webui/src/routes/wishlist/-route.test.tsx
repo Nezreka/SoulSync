@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -108,9 +108,10 @@ describe('wishlist route', () => {
     // ...whose album fan is NOT mounted until the orb is opened — a
     // 400-track wishlist used to render every track row on first paint
     // (perf sweep, Aug 2026). Expanding mounts the single grouped tile.
-    expect(document.querySelectorAll('.wl-album-tile')).toHaveLength(0);
+    // the artist panel only exists once an orb is opened
+    expect(document.querySelectorAll('.wlp-sheet-album')).toHaveLength(0);
     fireEvent.click(document.querySelector('.wl-orb')!);
-    expect(document.querySelectorAll('.wl-album-tile')).toHaveLength(1);
+    expect(document.querySelectorAll('.wlp-sheet-album')).toHaveLength(1);
     expect(screen.getByText('Album Tracks')).toBeInTheDocument();
     // cycle 'albums' renders as the friendly label
     expect(screen.getByText('Albums/EPs')).toBeInTheDocument();
@@ -124,11 +125,14 @@ describe('wishlist route', () => {
     expect(screen.queryByText('Album Tracks')).not.toBeInTheDocument();
   });
 
-  it('marks an artist as failing once a track hits the threshold', async () => {
+  it('marks an artist as stuck once a track hits the threshold', async () => {
     stubFetch({ albums: [albumRow('Aphex Twin', 'SAW', 'Xtal', 4)] });
     renderRoute();
 
-    await waitFor(() => expect(screen.getByText(/1 failing/)).toBeInTheDocument());
+    // the orb names its tries and files the artist under a trouble zone
+    await waitFor(() => expect(screen.getByText('4 tries')).toBeInTheDocument());
+    expect(document.querySelector('.wl-orb-meta--stuck')).toBeTruthy();
+    expect(document.querySelector('.wlp-zone--hunting')).toBeNull();
   });
 
   it('does not mark failing below the threshold', async () => {
@@ -137,9 +141,11 @@ describe('wishlist route', () => {
 
     await waitFor(() => expect(screen.getAllByText('Aphex Twin').length).toBeGreaterThan(0));
     expect(screen.queryByText(/failing/)).not.toBeInTheDocument();
+    expect(document.querySelector('.wl-orb-meta--stuck')).toBeNull();
+    expect(document.querySelector('.wlp-zone--hunting')).toBeTruthy();
   });
 
-  it('expands one orb at a time and reveals its album fan', async () => {
+  it('opens one artist panel at a time', async () => {
     stubFetch({
       albums: [
         albumRow('Aphex Twin', 'SAW', 'Xtal'),
@@ -154,15 +160,97 @@ describe('wishlist route', () => {
 
     fireEvent.click(orbs()[0].querySelector('.wl-orb')!);
     expect(orbs()[0].classList.contains('expanded')).toBe(true);
+    expect(screen.getByRole('complementary', { name: 'Aphex Twin on the wishlist' })).toBeTruthy();
+    // the nebula lifts above the sticky command bar while a panel floats
+    expect(document.querySelector('.wl-nebula.has-sheet')).toBeTruthy();
 
     // Accordion: opening the second closes the first.
     fireEvent.click(orbs()[1].querySelector('.wl-orb')!);
     expect(orbs()[0].classList.contains('expanded')).toBe(false);
     expect(orbs()[1].classList.contains('expanded')).toBe(true);
 
+    expect(document.querySelectorAll('.wlp-sheet')).toHaveLength(1);
+    expect(
+      screen.getByRole('complementary', { name: 'Boards of Canada on the wishlist' }),
+    ).toBeTruthy();
+
     // Clicking the open one closes it.
     fireEvent.click(orbs()[1].querySelector('.wl-orb')!);
     expect(orbs()[1].classList.contains('expanded')).toBe(false);
+    expect(document.querySelector('.wlp-sheet')).toBeNull();
+    expect(document.querySelector('.wl-nebula.has-sheet')).toBeNull();
+
+    // and the panel's own close button does the same
+    fireEvent.click(orbs()[0].querySelector('.wl-orb')!);
+    fireEvent.click(screen.getByLabelText('Close artist panel'));
+    expect(document.querySelector('.wlp-sheet')).toBeNull();
+    expect(orbs()[0].classList.contains('expanded')).toBe(false);
+
+    // escape closes it, and so does a tap on the backdrop (tablet / phone)
+    fireEvent.click(orbs()[0].querySelector('.wl-orb')!);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.querySelector('.wlp-sheet')).toBeNull();
+    fireEvent.click(orbs()[0].querySelector('.wl-orb')!);
+    fireEvent.click(document.querySelector('.wlp-sheet-scrim')!);
+    expect(document.querySelector('.wlp-sheet')).toBeNull();
+
+    // a hidden dialog the shell keeps in the page (the profile picker is one)
+    // must not swallow escape: that broke it in the real app
+    const parked = document.createElement('div');
+    parked.setAttribute('role', 'dialog');
+    parked.hidden = true;
+    document.body.appendChild(parked);
+    fireEvent.click(orbs()[0].querySelector('.wl-orb')!);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.querySelector('.wlp-sheet')).toBeNull();
+    parked.remove();
+    // nor one parked faded out (the track detail overlay: opacity 0, no pointer events)
+    const faded = document.createElement('div');
+    faded.style.opacity = '0';
+    faded.style.pointerEvents = 'none';
+    faded.innerHTML = '<div role="dialog" aria-modal="true"></div>';
+    document.body.appendChild(faded);
+    fireEvent.click(orbs()[0].querySelector('.wl-orb')!);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.querySelector('.wlp-sheet')).toBeNull();
+    faded.remove();
+
+    // but not while a dialog opened from the panel is the thing being closed
+    fireEvent.click(orbs()[0].querySelector('.wl-orb')!);
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    document.body.appendChild(dialog);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.querySelector('.wlp-sheet')).toBeTruthy();
+    dialog.remove();
+  });
+
+  it('files artists into zones by what went wrong, worst first', async () => {
+    const stuck = (artist: string, reason: string) => ({
+      ...albumRow(artist, `${artist} LP`, 'Song', 4),
+      failure_reason: reason,
+    });
+    stubFetch({
+      albums: [
+        albumRow('Healthy', 'Fine', 'Waiting', 0),
+        stuck('Nomatch', 'No matching track found'),
+        stuck(
+          'Clipped',
+          'File integrity check failed: Incomplete audio: only ~30s actually decodes of a 234s file (13%)',
+        ),
+      ],
+    });
+    renderRoute();
+
+    await waitFor(() => expect(document.querySelectorAll('.wlp-zone')).toHaveLength(3));
+    const zones = [...document.querySelectorAll('.wlp-zone')].map((z) =>
+      z.getAttribute('aria-label'),
+    );
+    expect(zones).toEqual(['Downloaded, then rejected', 'No match found', 'Still hunting']);
+
+    // the panel explains the rejection in words, not the raw log line
+    fireEvent.click(document.querySelector('[data-artist="Clipped"] .wl-orb')!);
+    expect(screen.getByRole('note')).toHaveTextContent('Only ~30s of 3:54 actually played');
   });
 
   it('opening the artist link does not also expand the orb', async () => {
@@ -230,17 +318,9 @@ describe('wishlist route', () => {
     await waitFor(() => expect(document.querySelector('.wl-orb')).toBeTruthy());
     fireEvent.click(document.querySelector('.wl-orb')!);
 
-    const tile = document.querySelector('.wl-album-tile')!;
-    expect(tile.classList.contains('tile-expanded')).toBe(false);
-
     fireEvent.click(screen.getByLabelText('Remove album SAW'));
     await waitFor(() => expect(calls.some((u) => u.includes('remove-album'))).toBe(true));
     expect(window.showConfirmDialog).toHaveBeenCalled();
-    // The remove button sits INSIDE the clickable tile, so it must not also
-    // toggle the tile open — that is what its stopPropagation is for.
-    expect(document.querySelector('.wl-album-tile')!.classList.contains('tile-expanded')).toBe(
-      false,
-    );
 
     // Track removal is deliberately confirm-free, matching the vanilla handler.
     const confirmCallsBefore = (window.showConfirmDialog as ReturnType<typeof vi.fn>).mock.calls
@@ -289,12 +369,12 @@ describe('wishlist route', () => {
     window._nebulaDownload = vi.fn();
     renderRoute();
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Ignored' })).toBeInTheDocument(),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Ignored' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Cleanup' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Clear All' }));
+    // the three rare jobs live behind the ⋯ menu; each pick closes it
+    const more = await screen.findByRole('button', { name: 'More wishlist actions' });
+    for (const name of ['Ignored', 'Cleanup', 'Clear All']) {
+      fireEvent.click(more);
+      fireEvent.click(screen.getByRole('menuitem', { name }));
+    }
     fireEvent.click(screen.getByRole('button', { name: 'Download Wishlist' }));
 
     // These own module-scoped state (activeDownloadProcesses, WishlistModalState),
@@ -587,7 +667,76 @@ describe('wishlist route', () => {
     expect(bulkCalls[0].ids).toEqual(['Aphex Twin-SAW-Xtal']);
   });
 
-  it('grabs a whole artist and a single album from the orb fan', async () => {
+  it('a zone retries only its own stuck tracks, the panel only its artist', async () => {
+    const bulkCalls: { action: string; ids: string[] }[] = [];
+    stubFetch({
+      albums: [
+        { ...albumRow('Lost One', 'A', 'x', 4), failure_reason: 'No matching track found' },
+        { ...albumRow('Lost Two', 'B', 'y', 5), failure_reason: 'No matching track found' },
+        {
+          ...albumRow('Bad File', 'C', 'z', 4),
+          failure_reason: 'AcoustID verification failed: Audio mismatch',
+        },
+        albumRow('Calm', 'D', 'w', 0),
+      ],
+    });
+    const base = globalThis.fetch as unknown as (
+      i: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (i: RequestInfo | URL, init?: RequestInit) => {
+        const url = i instanceof Request ? i.url : String(i);
+        if (url.includes('wishlist/bulk')) {
+          const body = (await (i as Request).json()) as { action: string; track_ids: string[] };
+          bulkCalls.push({ action: body.action, ids: body.track_ids });
+          return res({
+            success: true,
+            results: body.track_ids.map((id) => ({ id, ok: true, message: 'Retrying' })),
+          });
+        }
+        return base(i, init);
+      }),
+    );
+    renderRoute();
+
+    await waitFor(() => expect(screen.getByText('Retry all 2')).toBeInTheDocument());
+    // the healthy zone has nothing to retry
+    expect(document.querySelector('.wlp-zone--hunting .wlp-zone-retry')).toBeNull();
+
+    fireEvent.click(screen.getByText('Retry all 2'));
+    await waitFor(() => expect(bulkCalls).toHaveLength(1));
+    expect(bulkCalls[0]).toEqual({ action: 'retry', ids: ['Lost One-A-x', 'Lost Two-B-y'] });
+
+    fireEvent.click(document.querySelector('[data-artist="Bad File"] .wl-orb')!);
+    const panel = screen.getByRole('complementary', { name: 'Bad File on the wishlist' });
+    fireEvent.click(within(panel).getByText('Retry now'));
+    await waitFor(() => expect(bulkCalls).toHaveLength(2));
+    expect(bulkCalls[1]).toEqual({ action: 'retry', ids: ['Bad File-C-z'] });
+  });
+
+  it('the list view splits into the same zones', async () => {
+    window.localStorage.setItem('wishlistView', 'list');
+    stubFetch({
+      albums: [
+        { ...albumRow('Lost One', 'A', 'x', 4), failure_reason: 'No matching track found' },
+        albumRow('Calm', 'D', 'w', 0),
+      ],
+    });
+    try {
+      renderRoute();
+
+      await waitFor(() => expect(document.querySelectorAll('.wl-list-zone')).toHaveLength(2));
+      expect(
+        [...document.querySelectorAll('.wl-list-zone .wlp-zone-title')].map((z) => z.textContent),
+      ).toEqual(['No match found', 'Still hunting']);
+    } finally {
+      window.localStorage.removeItem('wishlistView');
+    }
+  });
+
+  it('grabs a whole artist and a single album from the artist panel', async () => {
     const bulkCalls: { action: string; ids: string[] }[] = [];
     stubFetch({
       albums: [albumRow('Aphex Twin', 'SAW', 'Xtal'), albumRow('Aphex Twin', 'SAW', 'Ageispolis')],

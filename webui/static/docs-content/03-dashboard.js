@@ -372,6 +372,9 @@ Files that **failed** verification and were **not** imported. Trigger badges: **
 
 Per-row: Play, Compare, Audit, **✔ Approve** (re-imports this exact file into the library, marked human-verified — nothing is renamed), **⤴ Recover** (legacy sidecars without embedded context go back to Staging for manual import), **🗑 Delete** (permanent).
 
+> [!TIP]
+> Lots of **DURATION** quarantines that turn out to be the right song? Raise **Duration tolerance** in Settings > Library > Post-Processing so future downloads with the same small drift go straight through.
+
 ### 🗑 Deleted — the recycle bin
 Files removed by repair tools and the duplicate cleaner land here instead of dying, hidden from media servers. Source chips: "Repair tool", "Duplicate cleaner", "Stalled album download". Per row: **↩ Restore** (back to where it was removed from) or **🗑 Delete permanently**.
 

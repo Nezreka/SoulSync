@@ -58,12 +58,14 @@ describe('AdlDeletedRow', () => {
     expect(container.textContent).toContain('/music/Artist/Album/01 - Song.flac');
     expect(container.textContent).toContain('Duplicate cleaner');
     expect(container.textContent).toContain('12 MB');
-    fireEvent.click(container.querySelector('.verif-act-ok') as HTMLElement);
+    fireEvent.click(container.querySelector('.dlc-acts .dlc-btn-primary') as HTMLElement);
     expect(onRestore).toHaveBeenCalled();
     const { container: c2 } = render(
       <AdlDeletedRow entry={ENTRY} handlers={{ onRestore: vi.fn(), onPurge }} />,
     );
-    fireEvent.click(c2.querySelector('.verif-act-del') as HTMLElement);
+    // delete-forever lives behind ⋯, away from the one-click restore
+    fireEvent.click(c2.querySelector('.dlc-more') as HTMLElement);
+    fireEvent.click(document.querySelector('.lib-menu .danger') as HTMLElement);
     expect(onPurge).toHaveBeenCalled();
   });
 
@@ -89,8 +91,10 @@ describe('AdlDeletedList', () => {
 
   it('shows the empty-bin copy once loaded, retention still reachable', () => {
     const { container } = render(<AdlDeletedList {...base} entries={[]} loaded />);
-    expect(container.textContent).toContain('the bin is empty');
-    expect(container.querySelector('.adl-deleted-retention')).not.toBeNull();
+    expect(container.textContent).toContain('The bin is empty.');
+    expect(
+      container.querySelector('select[aria-label="How long deleted files are kept"]'),
+    ).not.toBeNull();
   });
 
   it('renders a header with count and total size above the rows', () => {
@@ -111,9 +115,14 @@ describe('AdlDeletedList', () => {
     const { container } = render(
       <AdlDeletedList {...base} entries={[ENTRY]} loaded onKeepDays={onKeepDays} />,
     );
-    fireEvent.change(container.querySelector('.adl-deleted-retention') as HTMLElement, {
-      target: { value: '30' },
-    });
+    fireEvent.change(
+      container.querySelector(
+        'select[aria-label="How long deleted files are kept"]',
+      ) as HTMLElement,
+      {
+        target: { value: '30' },
+      },
+    );
     expect(onKeepDays).toHaveBeenCalledWith(30);
   });
 });
@@ -121,12 +130,12 @@ describe('AdlDeletedList', () => {
 describe('AdlReviewExplainer', () => {
   it('answers the question each sub-view raises', () => {
     const unv = render(<AdlReviewExplainer subView="unverified" />);
-    expect(unv.container.textContent).toContain('human-verified');
+    expect(unv.container.textContent).toContain('stops future scans asking');
     const quar = render(<AdlReviewExplainer subView="quarantine" />);
     expect(quar.container.textContent).toContain('never imported');
-    expect(quar.container.textContent).toContain('nothing is renamed');
+    expect(quar.container.textContent).toContain('Nothing is renamed');
     const del = render(<AdlReviewExplainer subView="deleted" />);
-    expect(del.container.textContent).toContain('restore puts one back');
+    expect(del.container.textContent).toContain('Restore puts a file back');
   });
 });
 

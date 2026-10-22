@@ -621,6 +621,16 @@ def _default_target_dir(media_type: str) -> str:
     return db.get_setting("tv_path") or ""
 
 
+def _default_anime_dir() -> str:
+    """The optional anime library folder ('' = off: anime shows use the TV folder).
+    Best-effort: an unreadable setting reads as off, never stalls the drain."""
+    try:
+        from api.video import get_video_db
+        return get_video_db().get_setting("anime_path") or ""
+    except Exception:   # noqa: BLE001 - routing falls back to the TV folder
+        return ""
+
+
 def _extto_hits_for_context(ctx: Dict[str, Any]) -> tuple:
     from core.video.extto_search import extto_search
     from core.video.slskd_search import build_query
@@ -1004,6 +1014,7 @@ def auto_video_process_wishlist(
     fetch_items: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
     active_keys: Optional[Callable[[str], Iterable]] = None,
     target_dir: Optional[Callable[[str], str]] = None,
+    anime_dir: Optional[Callable[[], str]] = None,
     search: Optional[Callable[[Dict[str, Any], str], List[Dict[str, Any]]]] = None,
     enqueue: Optional[Callable[..., bool]] = None,
     record_outcome: Optional[Callable[[Dict[str, Any], str, bool], None]] = None,
@@ -1018,6 +1029,7 @@ def auto_video_process_wishlist(
     fetch_items = fetch_items or _default_fetch_items
     active_keys = active_keys or _default_active_keys
     target_dir = target_dir or _default_target_dir
+    anime_dir = anime_dir or _default_anime_dir
     search = search or _default_search
     enqueue = enqueue or _default_enqueue
     record_outcome = record_outcome or _default_record_outcome
@@ -1044,6 +1056,10 @@ def auto_video_process_wishlist(
     try:
         gen = stop_generation()   # "cancel all" bumps it: stop searching + grabbing
         root = target_dir(media_type)
+        # episodes of anime-type shows go to the anime folder when one is set;
+        # each wished episode already carries its show's effective series_type
+        from core.video.download_pipeline import tv_root_for
+        anime_root = anime_dir() if media_type == 'episode' else ''
         if not root:
             where = 'Movie' if media_type == 'movie' else 'TV'
             deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
@@ -1147,7 +1163,10 @@ def auto_video_process_wishlist(
                         slots_claimed[0] += 1
                 if slot:
                     for cand in usable[:MAX_GRAB_ATTEMPTS]:
-                        out = enqueue_outcome(enqueue(it, cand, cands, media_type, root))
+                        out = enqueue_outcome(enqueue(
+                            it, cand, cands, media_type,
+                            tv_root_for(it.get('series_type'), root, anime_root)
+                            if media_type == 'episode' else root))
                         if out["ok"]:
                             clear_source_refusal(it, media_type, cand)
                             ok = True

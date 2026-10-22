@@ -415,6 +415,12 @@ def mirrored_cover_from_match(extra_data: dict) -> str:
     return ''
 
 
+
+def _register_py_lower(conn) -> None:
+    """sqlite's LOWER() only folds ascii, so "MARCØS" never equals "marcøs".
+    python's lower() does. register it per connection for the name lookups."""
+    conn.create_function("PY_LOWER", 1, lambda v: v.lower() if isinstance(v, str) else v, deterministic=True)
+
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
@@ -1952,6 +1958,12 @@ class MusicDatabase:
                 _ensure_client_matches(cursor)
             except Exception as e:
                 logger.error(f"client_music_matches schema init failed: {e}")
+            # artists and albums added through the lidarr compatible api
+            try:
+                from core.lidarr_compat.store import ensure_schema as _ensure_lidarr_compat
+                _ensure_lidarr_compat(cursor)
+            except Exception as e:
+                logger.error(f"lidarr_compat schema init failed: {e}")
             self._requeue_similar_artists_rematch(cursor)
             self._purge_beatport_positional_matches(cursor)
             self._normalize_genres_to_json(cursor)
@@ -10201,13 +10213,20 @@ class MusicDatabase:
                 # Find duplicate artist groups (same name + server_source + library
                 # owner, different IDs). two profiles' own copies of one artist are
                 # two rows on purpose (#1199), never a duplicate to merge.
-                cursor.execute("""
-                    SELECT name, server_source, GROUP_CONCAT(id) as ids, COUNT(*) as cnt
-                    FROM artists
-                    GROUP BY name, server_source, owner_profile_id
-                    HAVING cnt > 1
-                """)
-                duplicate_groups = cursor.fetchall()
+                # #1797: names compare with dashes folded, so alt-J spelled with
+                # a U+2010 hyphen groups with the ascii one. grouped in python,
+                # sqlite can't fold them.
+                from core.text.normalize import fold_dashes
+                cursor.execute("SELECT id, name, server_source, owner_profile_id FROM artists")
+                groups = {}
+                for r in cursor.fetchall():
+                    key = (fold_dashes(r['name']), r['server_source'], r['owner_profile_id'])
+                    groups.setdefault(key, []).append(r)
+                duplicate_groups = [
+                    {'name': members[0]['name'], 'server_source': members[0]['server_source'],
+                     'ids': [m['id'] for m in members]}
+                    for members in groups.values() if len(members) > 1
+                ]
 
                 if not duplicate_groups:
                     logger.debug("No duplicate artists found")
@@ -10225,11 +10244,14 @@ class MusicDatabase:
                     'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
                     'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
                 ]
+                provider_id_cols = ['musicbrainz_id', 'spotify_artist_id', 'itunes_artist_id',
+                                    'audiodb_id', 'deezer_id', 'jiosaavn_id', 'genius_id',
+                                    'tidal_id', 'qobuz_id', 'discogs_id', 'amazon_id']
 
                 for group in duplicate_groups:
                     artist_name = group['name']
                     server_source = group['server_source']
-                    ids = group['ids'].split(',')
+                    ids = group['ids']
 
                     logger.info(f"Merging duplicate artist '{artist_name}' ({server_source}): IDs {ids}")
 
@@ -10251,6 +10273,9 @@ class MusicDatabase:
                                 best_score = score
                                 best_id = aid
 
+                    cursor.execute("SELECT * FROM artists WHERE id = ?", (best_id,))
+                    keeper = cursor.fetchone()
+
                     # Merge enrichment data from all duplicates into the keeper
                     for aid in ids:
                         if aid == best_id:
@@ -10259,6 +10284,17 @@ class MusicDatabase:
                         donor = cursor.fetchone()
                         if not donor:
                             continue
+
+                        # a different spelling only merges when no provider id
+                        # disagrees: two artists can share a folded name
+                        if keeper and donor['name'] != keeper['name']:
+                            clash = next((col for col in provider_id_cols
+                                          if _row_value(donor, col) and _row_value(keeper, col)
+                                          and str(_row_value(donor, col)) != str(_row_value(keeper, col))), None)
+                            if clash:
+                                logger.info(f"   Not merging '{donor['name']}' ID {aid} into "
+                                            f"'{keeper['name']}' {best_id}: {clash} differs")
+                                continue
 
                         # Fill NULL enrichment columns on keeper from this duplicate
                         set_parts = []
@@ -24166,6 +24202,63 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error counting unverified library history: %s", e)
             return 0
+
+    def get_artist_thumbs_by_names(self, lower_names) -> list[tuple]:
+        """(lowercased name, thumb url) for artists the downloads page names.
+
+        library artists first, then watched artists for anyone not in the
+        library yet. lowercased on both sides because a download's artist
+        string and the media server's can differ only in case.
+        """
+        names = [n for n in dict.fromkeys(lower_names or []) if n]
+        if not names:
+            return []
+        out = []
+        try:
+            conn = self._get_connection()
+            _register_py_lower(conn)
+            cursor = conn.cursor()
+            for i in range(0, len(names), 500):
+                chunk = names[i:i + 500]
+                marks = ",".join("?" * len(chunk))
+                cursor.execute(f"""
+                    SELECT PY_LOWER(name), thumb_url FROM artists
+                    WHERE PY_LOWER(name) IN ({marks}) AND thumb_url IS NOT NULL AND thumb_url != ''
+                """, chunk)
+                out.extend((r[0], r[1]) for r in cursor.fetchall())
+                cursor.execute(f"""
+                    SELECT PY_LOWER(artist_name), image_url FROM watchlist_artists
+                    WHERE PY_LOWER(artist_name) IN ({marks}) AND image_url IS NOT NULL AND image_url != ''
+                """, chunk)
+                out.extend((r[0], r[1]) for r in cursor.fetchall())
+        except Exception as e:
+            logger.debug("artist thumb lookup failed: %s", e)
+        return out
+
+    def get_album_thumbs_by_titles(self, lower_titles) -> list[tuple]:
+        """(lowercased artist, lowercased album, thumb url) for album titles the
+        downloads page names. the caller matches the artist, so two albums
+        called "Greatest Hits" don't swap covers."""
+        titles = [t for t in dict.fromkeys(lower_titles or []) if t]
+        if not titles:
+            return []
+        out = []
+        try:
+            conn = self._get_connection()
+            _register_py_lower(conn)
+            cursor = conn.cursor()
+            for i in range(0, len(titles), 500):
+                chunk = titles[i:i + 500]
+                marks = ",".join("?" * len(chunk))
+                cursor.execute(f"""
+                    SELECT PY_LOWER(ar.name), PY_LOWER(al.title), al.thumb_url
+                    FROM albums al JOIN artists ar ON ar.id = al.artist_id
+                    WHERE PY_LOWER(al.title) IN ({marks}) AND al.thumb_url IS NOT NULL AND al.thumb_url != ''
+                """, chunk)
+                out.extend((r[0], r[1], r[2]) for r in cursor.fetchall())
+        except Exception as e:
+            logger.debug("album thumb lookup failed: %s", e)
+        return out
 
     def get_library_history_unverified(self, exclude_download_sources=()) -> list[dict]:
         """Return every library_history row that still needs human confirmation.

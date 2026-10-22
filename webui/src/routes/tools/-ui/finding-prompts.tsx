@@ -9,10 +9,12 @@
  * `useFindingPrompts` keeps that shape. It hands back the same await-able calls
  * plus one node to render; the node is the currently-open overlay, or null.
  *
- * Styling is transcribed inline from the vanilla rather than moved to CSS. These
- * overlays never had classes of their own beyond `modal-overlay`, so there is
- * nothing in style.css to inherit — writing new classes would be inventing a
- * look rather than porting one.
+ * Each overlay sits on DialogFrame (focus trap, Escape, outside press, scroll
+ * lock); Escape and outside press cancel, like the Cancel button. The overlay
+ * and box chrome lives in finding-prompts.module.css. The content inside is
+ * still styled inline, transcribed from the vanilla: these overlays never had
+ * classes of their own beyond `modal-overlay`, so there is nothing in style.css
+ * to inherit.
  *
  * NOTE for P7: `showWitnessMeDialog`, `MASS_ORPHAN_THRESHOLD` and
  * `_isMassOrphanFix` live in core.js but are called ONLY from the findings
@@ -22,7 +24,10 @@
 
 import type { CSSProperties } from 'react';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import clsx from 'clsx';
+import { useCallback, useRef, useState } from 'react';
+
+import { DialogFrame } from '@/components/dialog';
 
 import type {
   AcoustidFixAction,
@@ -32,24 +37,12 @@ import type {
   QualityFixAction,
 } from '../-tools.types';
 
+import styles from './finding-prompts.module.css';
+
 // ── Transcribed inline styles ────────────────────────────────────────────────
 
-const OVERLAY: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  zIndex: 10000,
-};
-
-const box = (maxWidth: number): CSSProperties => ({
-  background: '#1e1e2e',
-  border: '1px solid rgba(255,255,255,0.1)',
-  borderRadius: '16px',
-  padding: '28px',
-  maxWidth: `${maxWidth}px`,
-  width: '90%',
-  textAlign: 'center',
-});
+/** The box's max-width per prompt, in px. */
+const BOX_WIDTH = { 380: styles.box380, 420: styles.box420, 460: styles.box460 };
 
 const TITLE: CSSProperties = {
   fontSize: '1.1em',
@@ -123,7 +116,7 @@ function PromptOverlay({
   onCancel,
   children,
 }: {
-  maxWidth: number;
+  maxWidth: keyof typeof BOX_WIDTH;
   title: string;
   body: string;
   cancelId: string;
@@ -131,24 +124,24 @@ function PromptOverlay({
   children: React.ReactNode;
 }) {
   return (
-    <div
-      className="modal-overlay"
-      style={OVERLAY}
-      onClick={(event) => {
-        // Only a click on the backdrop itself cancels — the vanilla checks
-        // `e.target === overlay` for exactly this reason.
-        if (event.target === event.currentTarget) onCancel();
+    <DialogFrame
+      open
+      onOpenChange={(next) => {
+        // Only a press on the backdrop itself (or Escape) cancels — the vanilla
+        // checks `e.target === overlay` for exactly this reason.
+        if (!next) onCancel();
       }}
+      viewportClassName={clsx('modal-overlay', styles.overlay)}
+      className={clsx(styles.box, BOX_WIDTH[maxWidth])}
+      aria-label={title}
     >
-      <div style={box(maxWidth)}>
-        <div style={TITLE}>{title}</div>
-        <div style={BODY}>{body}</div>
-        {children}
-        <button id={cancelId} type="button" style={CANCEL} onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </div>
+      <div style={TITLE}>{title}</div>
+      <div style={BODY}>{body}</div>
+      {children}
+      <button id={cancelId} type="button" style={CANCEL} onClick={onCancel}>
+        Cancel
+      </button>
+    </DialogFrame>
   );
 }
 
@@ -442,115 +435,93 @@ function WitnessMeDialog({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const match = text.trim().toLowerCase() === WITNESS_PHRASE;
 
-  useEffect(() => {
-    // The vanilla defers focus by 100ms; React has already committed the node by
-    // the time this effect runs, so it can focus immediately.
-    inputRef.current?.focus();
-  }, []);
-
+  // The vanilla defers focus to the input by 100ms; the dialog focuses it as
+  // soon as it opens.
   return (
-    <div
-      className="confirm-modal-overlay"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.7)',
-        zIndex: 10000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+    <DialogFrame
+      open
+      onOpenChange={(next) => {
+        if (!next) resolve(false);
       }}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) resolve(false);
-      }}
+      viewportClassName={clsx('confirm-modal-overlay', styles.witnessOverlay)}
+      className={styles.witnessBox}
+      initialFocus={inputRef}
+      aria-label="Mass Deletion Warning"
     >
-      <div
+      <h3 style={{ margin: '0 0 8px', color: 'var(--danger)', fontSize: '1.2em' }}>
+        Mass Deletion Warning
+      </h3>
+      <p style={{ margin: '0 0 12px', fontSize: '0.95em', opacity: 0.9 }}>
+        You are about to <strong>permanently delete {orphanCount.toLocaleString()} files</strong>{' '}
+        from your disk.
+      </p>
+      <p style={{ margin: '0 0 12px', fontSize: '0.9em', opacity: 0.75 }}>
+        This many orphans usually means a path mismatch between your database and filesystem — not
+        actual orphan files. A previous user lost their entire library this way.
+      </p>
+      <p style={{ margin: '0 0 6px', fontSize: '0.9em', opacity: 0.9 }}>
+        To confirm you understand the risk, type{' '}
+        <strong style={{ color: 'var(--danger)' }}>witness me</strong> below:
+      </p>
+      <input
+        type="text"
+        id="witness-me-input"
+        ref={inputRef}
+        autoComplete="off"
+        spellCheck={false}
+        placeholder="Type the phrase here..."
+        value={text}
+        onChange={(event) => setText(event.target.value)}
         style={{
-          background: 'var(--bg-secondary)',
-          border: '2px solid var(--danger)',
-          borderRadius: '12px',
-          padding: '28px',
-          maxWidth: '480px',
-          width: '90%',
+          width: '100%',
+          padding: '10px',
+          border: '1px solid var(--white-a30)',
+          borderRadius: '6px',
+          background: 'var(--bg-primary)',
           color: 'var(--text-primary)',
-          fontFamily: 'inherit',
+          fontSize: '1em',
+          margin: '8px 0 16px',
+          boxSizing: 'border-box',
         }}
-      >
-        <h3 style={{ margin: '0 0 8px', color: 'var(--danger)', fontSize: '1.2em' }}>
-          Mass Deletion Warning
-        </h3>
-        <p style={{ margin: '0 0 12px', fontSize: '0.95em', opacity: 0.9 }}>
-          You are about to <strong>permanently delete {orphanCount.toLocaleString()} files</strong>{' '}
-          from your disk.
-        </p>
-        <p style={{ margin: '0 0 12px', fontSize: '0.9em', opacity: 0.75 }}>
-          This many orphans usually means a path mismatch between your database and filesystem — not
-          actual orphan files. A previous user lost their entire library this way.
-        </p>
-        <p style={{ margin: '0 0 6px', fontSize: '0.9em', opacity: 0.9 }}>
-          To confirm you understand the risk, type{' '}
-          <strong style={{ color: 'var(--danger)' }}>witness me</strong> below:
-        </p>
-        <input
-          type="text"
-          id="witness-me-input"
-          ref={inputRef}
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="Type the phrase here..."
-          value={text}
-          onChange={(event) => setText(event.target.value)}
+      />
+      <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+        <button
+          id="witness-cancel"
+          type="button"
+          onClick={() => resolve(false)}
           style={{
-            width: '100%',
-            padding: '10px',
+            padding: '8px 20px',
             border: '1px solid var(--white-a30)',
             borderRadius: '6px',
-            background: 'var(--bg-primary)',
+            background: 'transparent',
             color: 'var(--text-primary)',
-            fontSize: '1em',
-            margin: '8px 0 16px',
-            boxSizing: 'border-box',
+            cursor: 'pointer',
+            fontSize: '0.9em',
           }}
-        />
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-          <button
-            id="witness-cancel"
-            type="button"
-            onClick={() => resolve(false)}
-            style={{
-              padding: '8px 20px',
-              border: '1px solid var(--white-a30)',
-              borderRadius: '6px',
-              background: 'transparent',
-              color: 'var(--text-primary)',
-              cursor: 'pointer',
-              fontSize: '0.9em',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            id="witness-confirm"
-            type="button"
-            disabled={!match}
-            onClick={() => resolve(true)}
-            style={{
-              padding: '8px 20px',
-              border: 'none',
-              borderRadius: '6px',
-              background: match ? 'var(--danger)' : 'var(--white-a30)',
-              color: match ? 'var(--text-1)' : 'var(--text-3)',
-              cursor: match ? 'pointer' : 'not-allowed',
-              fontSize: '0.9em',
-              fontWeight: 600,
-              transition: 'all 0.2s',
-            }}
-          >
-            Delete Files
-          </button>
-        </div>
+        >
+          Cancel
+        </button>
+        <button
+          id="witness-confirm"
+          type="button"
+          disabled={!match}
+          onClick={() => resolve(true)}
+          style={{
+            padding: '8px 20px',
+            border: 'none',
+            borderRadius: '6px',
+            background: match ? 'var(--danger)' : 'var(--white-a30)',
+            color: match ? 'var(--text-1)' : 'var(--text-3)',
+            cursor: match ? 'pointer' : 'not-allowed',
+            fontSize: '0.9em',
+            fontWeight: 600,
+            transition: 'all 0.2s',
+          }}
+        >
+          Delete Files
+        </button>
       </div>
-    </div>
+    </DialogFrame>
   );
 }
 
