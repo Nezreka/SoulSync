@@ -18,6 +18,7 @@ from core.automation.handlers.scan_watchlist_podcasts import auto_scan_watchlist
 from core.automation.handlers.scan_library import auto_scan_library
 from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
 from core.automation.handlers.sync_playlist import auto_sync_playlist
+from core.automation.handlers.sync_downloaded_playlists import auto_sync_downloaded_playlists
 from core.automation.handlers.discover_playlist import auto_discover_playlist
 from core.automation.handlers.playlist_pipeline import auto_playlist_pipeline
 from core.automation.handlers.personalized_pipeline import auto_personalized_pipeline
@@ -152,6 +153,10 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'sync_playlist',
         lambda config: auto_sync_playlist(config, deps),
+    )
+    engine.register_action_handler(
+        'sync_downloaded_playlists',
+        lambda config: auto_sync_downloaded_playlists(config, deps),
     )
     engine.register_action_handler(
         'discover_playlist',

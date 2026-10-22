@@ -12,7 +12,9 @@ Folders:
     so changing it on either side changes both (one physical download dir, simpler
     Docker mounts). We only READ/WRITE that shared key; no music code is touched.
   - OUTPUT (library) folders are video-specific and live in video.db, one per type:
-      ``movies_path`` / ``tv_path`` / ``youtube_path``.
+      ``movies_path`` / ``tv_path`` / ``youtube_path``, plus an optional
+      ``anime_path``: episodes of anime-type shows import there instead of
+      ``tv_path`` when it is set.
   The engine routes a finished download to the library path matching its type. (Legacy
   single video ``transfer_path`` is migrated into ``movies_path`` on first read.)
 
@@ -45,7 +47,33 @@ logger = get_logger("video_api.downloads")
 
 # Video-specific OUTPUT library folders (video.db). The INPUT folder is the shared
 # music key below — not in this list.
-_PATH_KEYS = ("movies_path", "tv_path", "youtube_path")
+_PATH_KEYS = ("movies_path", "tv_path", "anime_path", "youtube_path")
+
+
+def _series_type_for(db, kind, body) -> str | None:
+    """The series type that decides which library FOLDER a TV download is filed
+    in (``routing_series_type``: set by hand, an anime-marked library, or the
+    stored hint for a show not in any library -- never the genre tag). Read from
+    the body's ``media_id``: a TMDB id when ``media_source`` is 'tmdb', else a
+    library show id (the same reading grab-pack's owned check uses). For a TMDB
+    id the show's hint is made sure of first (one TMDB call, only for a show not
+    in any library that has none yet). None for movies or when the show can't
+    be identified, which routes to the TV folder as before."""
+    if str(kind or "").lower() == "movie":
+        return None
+    mid = (body or {}).get("media_id")
+    if mid in (None, ""):
+        return None
+    try:
+        if str((body or {}).get("media_source") or "").lower() == "tmdb":
+            tmdb = int(mid)
+            if db.get_setting("anime_path"):
+                from core.video.anime_hint import ensure_show_type_hint
+                ensure_show_type_hint(db, tmdb)
+            return db.routing_series_type(tmdb_id=tmdb)
+        return db.routing_series_type(library_id=int(mid))
+    except (ValueError, TypeError):
+        return None
 # The shared input/download dir — the SAME config key the music side reads/writes.
 _SHARED_DOWNLOAD_KEY = "soulseek.download_path"
 
@@ -1107,10 +1135,11 @@ def register_routes(bp):
         # 507 took 39.9 seconds to arrive, all of it spent earning a magnet that
         # was then thrown away.
         db = get_video_db()
-        paths = {k: db.get_setting(k) or "" for k in ("movies_path", "tv_path", "youtube_path")}
+        paths = {k: db.get_setting(k) or "" for k in _PATH_KEYS}
         if not paths["movies_path"]:
             paths["movies_path"] = db.get_setting("transfer_path") or ""
-        target = target_dir_for(body.get("kind"), paths)
+        target = target_dir_for(body.get("kind"), paths,
+                                _series_type_for(db, body.get("kind"), body))
         from core.video import disk_guard, organization
         room = disk_guard.check_room(
             target, organization.load(db),
@@ -1255,10 +1284,10 @@ def register_routes(bp):
             return jsonify({"ok": False, "error": "Pick what this download is first."}), 400
 
         db = get_video_db()
-        paths = {k: db.get_setting(k) or "" for k in ("movies_path", "tv_path", "youtube_path")}
+        paths = {k: db.get_setting(k) or "" for k in _PATH_KEYS}
         if not paths["movies_path"]:
             paths["movies_path"] = db.get_setting("transfer_path") or ""
-        target = target_dir_for(kind, paths)
+        target = target_dir_for(kind, paths, _series_type_for(db, kind, body))
         if not target:
             return jsonify({"ok": False, "error": "Set the library folder for this type on Settings → Downloads."}), 400
 
@@ -1360,8 +1389,8 @@ def register_routes(bp):
             return jsonify({"ok": False, "error": "Missing the pack's source info."}), 400
 
         db = get_video_db()
-        paths = {k: db.get_setting(k) or "" for k in ("movies_path", "tv_path", "youtube_path")}
-        target = target_dir_for("show", paths)
+        paths = {k: db.get_setting(k) or "" for k in _PATH_KEYS}
+        target = target_dir_for("show", paths, _series_type_for(db, "show", body))
         from core.video import disk_guard, organization
         room = disk_guard.check_room(target, organization.load(get_video_db()))
         if not room["ok"]:
@@ -1535,7 +1564,7 @@ def register_routes(bp):
         cancel_download(dl.get("username"), dl.get("filename"))   # best-effort; mark regardless
         import time
         db.update_video_download(dl["id"], status="cancelled", error="Cancelled",
-                                 completed_at=time.strftime("%Y-%m-%d %H:%M:%S"))
+                                 completed_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
         return jsonify({"ok": True})
 
     @bp.route("/downloads/retry", methods=["POST"])

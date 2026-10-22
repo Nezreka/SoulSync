@@ -157,6 +157,10 @@
   color: var(--em-faint);
 }
 
+.spinner {
+  flex-shrink: 0;
+}
+
 .field input {
   flex: 1;
   min-width: 0;
@@ -164,22 +168,6 @@
   border: none;
   background: none;
   outline: none;
-}
-
-.spinner {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  border-radius: var(--radius-circle);
-  border: 2px solid var(--white-a15);
-  border-top-color: rgb(var(--accent-rgb));
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .notice {
@@ -192,7 +180,7 @@
 .error {
   margin: 0;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: rgba(248, 113, 113, 0.1);
   color: #fca5a5;
   font-size: 13px;
@@ -210,13 +198,13 @@
   min-width: 0;
   padding: 10px;
   border: 1px solid var(--white-a07);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--em-raised);
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease;
 }
 
 .candidate:hover {
@@ -417,11 +405,5 @@
 
   .note {
     flex-basis: 100%;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spinner {
-    animation-duration: 2s;
   }
 }

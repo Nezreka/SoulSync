@@ -214,7 +214,7 @@ export function SpotifyTab({ selectedIds, onToggleSelect, registerRows }: Accoun
           // 1901 prints the count raw — a zero stays a zero.
           trackCount={open.detail.track_count ?? open.row.track_count ?? 0}
           onClose={() => setOpen(null)}
-          closeBeforeDownload={false}
+          closeBeforeDownload
           onDownloadMissing={() => void window.openDownloadMissingModal?.(String(open.row.id))}
           onSync={() => void window.startPlaylistSync?.(String(open.row.id))}
         />
@@ -248,7 +248,7 @@ export function DeezerArlTab() {
       for (const row of list) {
         const arlId = deezerArlId(row.id);
         try {
-          const status = await fetchAccountSyncStatus(arlId);
+          const status = await fetchAccountSyncStatus(arlId, { probe: true });
           if (status.status === 'syncing') {
             window.updateCardToSyncing?.(arlId, status.progress?.progress ?? 0, status.progress);
             window.startSyncPolling?.(arlId);

@@ -301,14 +301,14 @@ def test_blocklist_api_from_history_row(client):
 # ── frontend contracts ───────────────────────────────────────────────────────
 def test_downloads_page_has_block_button_and_wiring():
     lst = (_VDL_UI / "vdl-list.tsx").read_text(encoding="utf-8")
-    assert "vdpg-row-block" in lst
+    assert "key: 'block'" in lst                     # the row menu's block item
     assert "vdlCanBlock(d)" in lst
     assert "post('video/downloads/blocklist'" in _VDL_API
     # failed rows block-and-retry; import_failed only blocks
     assert "export function vdlCanBlock(" in _VDL_HELPERS
     assert "(d.status === 'failed' || d.status === 'import_failed')" in _VDL_HELPERS
-    assert "'Block this release and retry with another'" in lst
-    assert "'Block this release'" in lst
+    assert "'Block release and retry'" in lst
+    assert "'Block release'" in lst
     # YT rows never show it (no slskd release identity)
     assert "vdlType(d.kind) !== 'youtube'" in _VDL_HELPERS
     assert "Boolean(d.username) &&" in _VDL_HELPERS

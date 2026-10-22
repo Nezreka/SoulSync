@@ -102,7 +102,12 @@ export function needsCompletionStream(payload: ArtistDetailResponse): boolean {
 export interface WatchlistIdentity {
   id: string;
   name: string;
+  /** Provider that owns `id`; set only when the server cannot work that out itself. */
+  source?: string;
 }
+
+/** Providers the watchlist has an id column for (core/watchlist_sources.py). */
+const WATCHLIST_SOURCES = new Set(['spotify', 'itunes', 'deezer', 'discogs', 'musicbrainz']);
 
 /**
  * Which identity the watchlist button acts on.
@@ -110,16 +115,32 @@ export interface WatchlistIdentity {
  * A library artist that has been enriched gets the CANONICAL Spotify identity,
  * because the watchlist is keyed on Spotify ids — otherwise the same artist
  * watched from here and from the Watchlist page would be two different rows.
- * Source artists (Deezer/iTunes/Discogs) have no Spotify id and fall back to
- * whatever id they arrived with.
+ * A library artist without one is sent by library id, which the server turns
+ * into a provider id. Source artists (Deezer/iTunes/Discogs) have no Spotify
+ * id and fall back to whatever id they arrived with, so they also carry the
+ * `source` of the page they were opened on: a bare numeric id is otherwise
+ * filed under the primary metadata source, whichever provider it came from.
  *
  * Returns null when neither half resolves; the vanilla required BOTH before
  * initialising the button.
  */
-export function watchlistIdentity(payload: ArtistDetailResponse): WatchlistIdentity | null {
+export function watchlistIdentity(
+  payload: ArtistDetailResponse,
+  routeSource?: string,
+): WatchlistIdentity | null {
   const spotify = payload.spotify_artist;
   const id = spotify?.spotify_artist_id || payload.artist?.id;
   const name = spotify?.spotify_artist_name || payload.artist?.name;
   if (!id || !name) return null;
-  return { id: String(id), name: String(name) };
+  const source = normalizeSource(routeSource ?? '');
+  const identity: WatchlistIdentity = { id: String(id), name: String(name) };
+  if (
+    !spotify?.spotify_artist_id &&
+    isSourceOnlyArtist(payload) &&
+    source &&
+    WATCHLIST_SOURCES.has(source)
+  ) {
+    identity.source = source;
+  }
+  return identity;
 }

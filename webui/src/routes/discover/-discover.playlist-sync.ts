@@ -238,8 +238,10 @@ export function syncIsActive(status: string | undefined): boolean {
   return status === 'syncing' || status === 'starting';
 }
 
+// probe=1: idle answers 200, not 404. three 404s on every load trip crowdsec
+// probing rules (#1763)
 export function resumeStatusUrl(playlistType: string): string {
-  return `/api/sync/status/${virtualPlaylistId(playlistType)}`;
+  return `/api/sync/status/${virtualPlaylistId(playlistType)}?probe=1`;
 }
 
 /** A failed probe is swallowed (351) — "not active" and "unreachable" look the same. */

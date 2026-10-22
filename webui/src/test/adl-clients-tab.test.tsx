@@ -96,12 +96,14 @@ function mockAll({
 }
 
 function pill(container: HTMLElement, key: string) {
-  return container.querySelector(`[data-client-tab="${key}"]`) as HTMLElement;
+  return container.querySelector(`[data-seg="${key}"]`) as HTMLElement;
 }
 /** pause, resume, remove and cancel live behind each card's ⋯ menu. */
 async function menuItem(title: string, item: string) {
   fireEvent.click(screen.getByRole('button', { name: `More actions for ${title}` }));
-  return screen.findByRole('menuitem', { name: item });
+  // the 1s default ran out on a loaded ci runner (oct 20, "Cancel transfer"),
+  // the menu opens fine locally every time
+  return screen.findByRole('menuitem', { name: item }, { timeout: 5000 });
 }
 
 beforeEach(() => {
@@ -116,14 +118,16 @@ describe('AdlClientsTab', () => {
   it('renders three pills with health dots; soulseek opens first', async () => {
     mockAll();
     const { container } = render(<AdlClientsTab />);
-    await waitFor(() => expect(container.querySelector('.adl-client-dot-ok')).not.toBeNull());
-    expect(container.querySelectorAll('[data-client-tab]')).toHaveLength(3);
+    await waitFor(() => expect(container.querySelector('.dlc-dot-ok')).not.toBeNull());
+    expect(container.querySelectorAll('[aria-label="Download clients"] [data-seg]')).toHaveLength(
+      3,
+    );
     // soulseek is the active tab: its transfer renders, filename basename first
     expect(container.textContent).toContain('song.flac');
     expect(container.textContent).toContain('from peer1');
     // usenet is unconfigured: gray dot, no count
-    expect(pill(container, 'usenet').querySelector('.adl-client-dot-off')).not.toBeNull();
-    expect(pill(container, 'usenet').textContent).not.toContain('(');
+    expect(pill(container, 'usenet').querySelector('.dlc-dot-off')).not.toBeNull();
+    expect(pill(container, 'usenet').querySelector('b')).toBeNull();
   });
 
   it('switching pills swaps the list', async () => {
@@ -141,7 +145,7 @@ describe('AdlClientsTab', () => {
     mockAll();
     const { container } = render(<AdlClientsTab />);
     await waitFor(() => expect(container.textContent).toContain('song.flac'));
-    const fill = container.querySelector('.adl-client-progress-fill') as HTMLElement;
+    const fill = container.querySelector('.dlc-client-row .dlc-rowbar i') as HTMLElement;
     // slskd reports 0-100 already
     expect(fill.style.width).toBe('30%');
     expect(container.textContent).toContain('30%');
@@ -155,10 +159,12 @@ describe('AdlClientsTab', () => {
       ),
     );
     const { container } = render(<AdlClientsTab />);
-    await waitFor(() => expect(container.textContent).toContain("couldn't load"));
+    await waitFor(() =>
+      expect(container.textContent).toContain("Couldn't ask the SoulSync server"),
+    );
     expect(container.textContent).toContain('boom from the bridge');
-    expect(container.textContent).not.toContain('loading…');
-    expect(pill(container, 'soulseek').querySelector('.adl-client-dot-bad')).not.toBeNull();
+    expect(container.textContent).not.toContain('Checking the client');
+    expect(pill(container, 'soulseek').querySelector('.dlc-dot-bad')).not.toBeNull();
   });
 
   it('an http 500 also surfaces instead of spinning', async () => {
@@ -169,7 +175,9 @@ describe('AdlClientsTab', () => {
       ),
     );
     const { container } = render(<AdlClientsTab />);
-    await waitFor(() => expect(container.textContent).toContain("couldn't load"));
+    await waitFor(() =>
+      expect(container.textContent).toContain("Couldn't ask the SoulSync server"),
+    );
   });
 
   it('an unreachable client reports the adapter error', async () => {
@@ -187,7 +195,8 @@ describe('AdlClientsTab', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('connection refused'));
-    expect(container.textContent).toContain('unreachable');
+    expect(container.textContent).toContain("Can't reach the torrent client");
+    expect(pill(container, 'torrent').getAttribute('title')).toBe('unreachable');
   });
 
   it('pause fires the action endpoint for the right torrent', async () => {
@@ -203,7 +212,8 @@ describe('AdlClientsTab', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
-    fireEvent.click(await menuItem('Movie (2026)', 'Pause'));
+    // a download soulsync follows leads with pause/resume
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
     await waitFor(() => expect(body).toBeTruthy());
     expect(body).toEqual({ id: 'HASH1', action: 'pause', delete_files: false });
     expect(toasts[0]).toBe('Pause ok');
@@ -259,17 +269,17 @@ describe('AdlClientsTab', () => {
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
     // collapsed: no detail grid
-    expect(container.querySelector('.adl-client-details')).toBeNull();
-    const card = container.querySelector('.adl-client-card') as HTMLElement;
+    expect(container.querySelector('.dlc-client-sheet')).toBeNull();
+    const card = container.querySelector('.dlc-client-row') as HTMLElement;
     fireEvent.click(card);
-    const details = container.querySelector('.adl-client-details') as HTMLElement;
+    const details = container.querySelector('.dlc-client-sheet') as HTMLElement;
     expect(details).not.toBeNull();
     expect(details.textContent).toContain('Hash');
     expect(details.textContent).toContain('HASH1');
     expect(details.textContent).toContain('Seeders');
     // click again folds it back up
     fireEvent.click(card);
-    expect(container.querySelector('.adl-client-details')).toBeNull();
+    expect(container.querySelector('.dlc-client-sheet')).toBeNull();
   });
 
   it('clicking an action button does not toggle the card', async () => {
@@ -281,16 +291,16 @@ describe('AdlClientsTab', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
-    fireEvent.click(await menuItem('Movie (2026)', 'Pause'));
-    expect(container.querySelector('.adl-client-details')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(container.querySelector('.dlc-client-sheet')).toBeNull();
   });
 
   it('empty detail values are dropped from the grid', async () => {
     mockAll();
     const { container } = render(<AdlClientsTab />);
     await waitFor(() => expect(container.textContent).toContain('song.flac'));
-    fireEvent.click(container.querySelector('.adl-client-card') as HTMLElement);
-    const details = container.querySelector('.adl-client-details') as HTMLElement;
+    fireEvent.click(container.querySelector('.dlc-client-row') as HTMLElement);
+    const details = container.querySelector('.dlc-client-sheet') as HTMLElement;
     // the slskd fixture has no file_path/soulsync - those labels must not render
     expect(details.textContent).toContain('Remote path');
     expect(details.textContent).toContain('Music\\Artist\\song.flac');
@@ -304,9 +314,9 @@ describe('AdlClientsTab', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie (2026)'));
-    const owners = [...container.querySelectorAll('.adl-client-owner')].map((el) => el.textContent);
-    expect(owners).toContain('SoulSync · Movie');
-    expect(owners).toContain('Not in SoulSync');
+    // a followed row wears its tag; a stranger's row wears nothing
+    const owners = [...container.querySelectorAll('.dlc-owner')].map((el) => el.textContent);
+    expect(owners).toEqual(['SoulSync · Movie']);
   });
 });
 
@@ -325,7 +335,7 @@ describe('the toolbar', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie.2026.1080p.mkv'));
-    fireEvent.change(container.querySelector('.adl-client-search') as HTMLElement, {
+    fireEvent.change(container.querySelector('.dlc-search-input') as HTMLElement, {
       target: { value: 'different' },
     });
     expect(container.textContent).toContain('Different.Show.mkv');
@@ -339,12 +349,12 @@ describe('the toolbar', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie.2026.1080p.mkv'));
-    const chips = [...container.querySelectorAll('.adl-client-chip')].map((c) => c.textContent);
-    expect(chips).toContain('downloading (1)');
-    expect(chips).toContain('paused (1)');
-    const pausedChip = [...container.querySelectorAll('.adl-client-chip')].find(
-      (c) => c.textContent === 'paused (1)',
+    const chips = [...container.querySelectorAll('[aria-label="State"] .dlh-chip')].map(
+      (c) => c.textContent,
     );
+    expect(chips).toContain('Downloading1');
+    expect(chips).toContain('Paused1');
+    const pausedChip = container.querySelector('[data-chip="paused"]');
     fireEvent.click(pausedChip as HTMLElement);
     expect(container.textContent).toContain('someone.elses.iso');
     expect(container.textContent).not.toContain('Movie.2026.1080p.mkv');
@@ -356,7 +366,7 @@ describe('the toolbar', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('shown'));
-    expect(container.querySelector('.adl-client-aggregate')?.textContent).toContain('4.8 MB/s');
+    expect(container.querySelector('.dlc-strip-big strong')?.textContent).toContain('4.8 MB/s');
   });
 });
 
@@ -385,11 +395,11 @@ describe('the category filter', () => {
     const picker = screen.getByRole('combobox', { name: 'Category' });
     const options = [...picker.querySelectorAll('option')].map((o) => o.textContent);
     expect(options).toEqual([
-      'all categories',
+      'All categories',
       'ebooks (1)',
       'SoulSync Audiobooks (1)',
       'SoulSync Movies (1)',
-      'no category (1)',
+      'No category (1)',
     ]);
     expect(container.textContent).toContain('4 shown');
   });
@@ -404,10 +414,7 @@ describe('the category filter', () => {
     expect(container.textContent).not.toContain('Movie.2026.1080p.mkv');
     expect(container.textContent).toContain('1 shown');
     // "Not in SoulSync" counts only the chosen category
-    const owners = [...container.querySelectorAll('.adl-client-owner-choice')].map(
-      (b) => b.textContent,
-    );
-    expect(owners).toContain('Not in SoulSync1');
+    expect(screen.getByRole('radio', { name: 'Not in SoulSync1' })).toBeTruthy();
   });
 
   it('pause all respects the category', async () => {
@@ -419,14 +426,12 @@ describe('the category filter', () => {
         return HttpResponse.json({ success: true, done: 1, failed: [] });
       }),
     );
-    const container = await openTorrents();
+    await openTorrents();
     fireEvent.change(screen.getByRole('combobox', { name: 'Category' }), {
       target: { value: 'ebooks' },
     });
-    const pauseAll = [...container.querySelectorAll('button')].find(
-      (b) => b.textContent === '⏸ Pause all',
-    );
-    fireEvent.click(pauseAll as HTMLElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Client actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /^Pause all shown/ }));
     await waitFor(() => expect(body).toBeTruthy());
     expect(body).toEqual({ ids: ['HASH2'], action: 'pause', delete_files: false });
   });
@@ -452,10 +457,8 @@ describe('bulk actions', () => {
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
     await waitFor(() => expect(container.textContent).toContain('Movie.2026.1080p.mkv'));
-    const pauseAll = [...container.querySelectorAll('button')].find(
-      (b) => b.textContent === '⏸ Pause all',
-    );
-    fireEvent.click(pauseAll as HTMLElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Client actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /^Pause all shown/ }));
     await waitFor(() => expect(body).toBeTruthy());
     expect(body).toEqual({ ids: ['HASH1', 'HASH2'], action: 'pause', delete_files: false });
     expect(toasts[0]).toBe('Pause all: 2 ok');
@@ -475,18 +478,16 @@ describe('the add box', () => {
     const { container } = render(<AdlClientsTab />);
     await waitFor(() => expect(pill(container, 'torrent')).not.toBeNull());
     fireEvent.click(pill(container, 'torrent'));
-    // the input folds behind a reveal button since the redesign
-    await waitFor(() => expect(container.querySelector('.adl-client-add-toggle')).not.toBeNull());
-    fireEvent.click(container.querySelector('.adl-client-add-toggle') as HTMLElement);
-    await waitFor(() => expect(container.querySelector('.adl-client-add-input')).not.toBeNull());
-    const input = container.querySelector('.adl-client-add-input') as HTMLInputElement;
+    // the input opens from the Add button
+    fireEvent.click(await screen.findByRole('button', { name: 'Add torrent' }));
+    await waitFor(() => expect(container.querySelector('.dlc-addbox-input')).not.toBeNull());
+    const input = container.querySelector('.dlc-addbox-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'magnet:?xt=urn:btih:abc' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(body).toBeTruthy());
     expect(body).toEqual({ url: 'magnet:?xt=urn:btih:abc' });
-    // success folds the box back to its toggle
-    await waitFor(() => expect(container.querySelector('.adl-client-add-toggle')).not.toBeNull());
-    expect(container.querySelector('.adl-client-add-input')).toBeNull();
+    // success closes the box
+    await waitFor(() => expect(container.querySelector('.dlc-addbox-input')).toBeNull());
     expect(toasts[0]).toBe('Sent to the torrent client');
   });
 });
@@ -496,10 +497,9 @@ describe('slskd extras', () => {
     mockAll({ slskd: SLSKD_WITH_UPLOADS });
     const { container } = render(<AdlClientsTab />);
     await waitFor(() => expect(container.textContent).toContain('song.flac'));
-    const upSwitch = [...container.querySelectorAll('.adl-client-chip')].find((c) =>
-      c.textContent?.includes('uploads (1)'),
-    );
-    fireEvent.click(upSwitch as HTMLElement);
+    const upSwitch = container.querySelector('[data-seg="uploads"]') as HTMLElement;
+    expect(upSwitch.textContent).toBe('Uploads1');
+    fireEvent.click(upSwitch);
     await waitFor(() => expect(container.textContent).toContain('give.flac'));
     expect(container.textContent).toContain('to leecher9');
     // read-only: an upload row has nothing to cancel, so no menu at all
@@ -519,10 +519,8 @@ describe('slskd extras', () => {
     );
     const { container } = render(<AdlClientsTab />);
     await waitFor(() => expect(container.textContent).toContain('song.flac'));
-    const clearBtn = [...container.querySelectorAll('button')].find(
-      (b) => b.textContent === '🧹 Clear completed',
-    );
-    fireEvent.click(clearBtn as HTMLElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Client actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Clear finished transfers' }));
     await waitFor(() => expect(hit).toHaveBeenCalled());
     expect(toasts[0]).toBe('Clear completed ok');
   });
@@ -572,8 +570,8 @@ describe('match & import', () => {
     const { container } = await openTorrents();
     await waitFor(() => expect(container.textContent).toContain('someone.elses.iso'));
     expect(screen.getAllByRole('button', { name: 'Match & import' })).toHaveLength(1);
-    // the one soulsync already follows leads with its details instead
-    expect(screen.getByRole('button', { name: 'Details' })).toBeTruthy();
+    // the one soulsync already follows leads with pause instead
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
   });
 
   it("never prints the client's no-estimate sentinel as a time left", async () => {
@@ -699,16 +697,14 @@ describe('match & import', () => {
   });
 });
 
-describe('card layout guards', () => {
-  // jsdom can't measure layout; these were measured in chromium at 390px
-  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+describe('row layout guards', () => {
+  // jsdom can't measure layout; this was measured in chromium at 400px
+  const css = readFileSync(resolve(process.cwd(), 'static/downloads-premier.css'), 'utf8');
 
-  it('keeps the soulsync chip whole and lets the release name give way', () => {
-    expect(css).toMatch(/\.adl-client-meta \.adl-client-owner \{\s*flex-shrink: 0;/);
-  });
-
-  it('keeps the type tile beside the title on a phone', () => {
-    expect(css).toMatch(/@media \(max-width: 760px\) \{[^@]*?\.adl-client-text \{\s*flex: 1 1 0;/);
+  it('drops the meta under the title on a phone instead of squeezing the title', () => {
+    expect(css).toMatch(
+      /@media \(max-width: 760px\) \{[^@]*?\.dlc-row \.dlc-meta \{\s*grid-column: 2 \/ 4;\s*grid-row: 2;/,
+    );
   });
 });
 
@@ -767,7 +763,7 @@ describe('soulseek and the owner filter', () => {
     const { container } = render(<AdlClientsTab />);
     await waitFor(() => expect(container.textContent).toContain('15 Step'));
     expect(screen.getByRole('radio', { name: /Not in SoulSync\s*3/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole('radio', { name: /^SoulSync\s*1/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /^SoulSync's\s*1/ }));
     expect(container.textContent).not.toContain('15 Step');
     expect(container.textContent).toContain('song.flac');
     fireEvent.click(screen.getByRole('radio', { name: /Not in SoulSync/ }));
@@ -807,7 +803,7 @@ describe('soulseek and the owner filter', () => {
     );
     const { container } = render(<AdlClientsTab />);
     await waitFor(() => expect(container.textContent).toContain('15 Step'));
-    // the soulsync-followed row leads with details, the others with matching
+    // the soulsync-followed row has no match button, the others lead with it
     expect(screen.getAllByRole('button', { name: 'Match & import' })).toHaveLength(3);
     fireEvent.click(screen.getAllByRole('button', { name: 'Match & import' })[0] as HTMLElement);
     fireEvent.click(await screen.findByRole('radio', { name: /In Rainbows\s*Radiohead/ }));

@@ -116,13 +116,13 @@
   width: 100%;
   padding: 14px;
   border: 1px solid var(--white-a07);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--dc-raised);
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 0.15s ease,
-    background 0.15s ease;
+    border-color var(--dur-fast) ease,
+    background var(--dur-fast) ease;
 }
 
 .option:hover {

@@ -309,7 +309,7 @@ def get_active_video_source(*, interactive=False):
     """Source for SCANNING — restricted to the user-mapped Movies/TV libraries.
     An unmapped kind scans nothing (see scan_problem), never every library."""
     sel = _load_selection() or {}
-    return _build_source(sel.get("movies") or None, sel.get("tv") or None, interactive=interactive)
+    return _build_source(sel.get("movies") or None, _tv_pick(sel), interactive=interactive)
 
 
 def _auto_pick_single_libraries(server, libs, sel, db=None):
@@ -343,7 +343,7 @@ def scan_video_source():
                 sel = _auto_pick_single_libraries(src.server_name, src.available_libraries(), sel)
             except Exception:
                 logger.debug("video: library auto-pick failed", exc_info=True)
-    return _build_source(sel.get("movies") or None, sel.get("tv") or None)
+    return _build_source(sel.get("movies") or None, _tv_pick(sel))
 
 
 def normalize_media_type(media_type) -> str:
@@ -441,6 +441,30 @@ def list_video_libraries():
     out = src.available_libraries()
     out["server"] = src.server_name
     return out
+
+
+def _title_list(name) -> list:
+    """A library pick as a list of titles. The picks were one title each; the TV
+    pick can now be several (the main one plus ``tv_more``). ''/None -> [],
+    'X' -> ['X'], a list -> its non-empty titles in order."""
+    if not name:
+        return []
+    if isinstance(name, (list, tuple)):
+        out = []
+        for t in name:
+            t = str(t or "").strip()
+            if t and t not in out:
+                out.append(t)
+        return out
+    return [str(name)]
+
+
+def _tv_pick(sel: dict):
+    """The TV libraries a scan reads: the main pick, then the extra ones.
+    None when nothing is picked (the scan then reads no TV at all)."""
+    sel = sel or {}
+    picks = _title_list([sel.get("tv")] + list(sel.get("tv_more") or []))
+    return picks or None
 
 
 def _wanted_libraries(media_type, movies_lib, tv_lib):
@@ -543,23 +567,25 @@ class PlexVideoSource:
     def _sections(self, kind: str, name=None):
         secs = [s for s in self._server.library.sections() if s.type == kind]
         if name:
-            secs = [s for s in secs if s.title == name]
+            names = _title_list(name)
+            secs = [s for s in secs if s.title in names]
         return secs
 
     def _scan_sections(self, kind: str, name):
         """Sections to SCAN for a kind. UNLIKE _sections, an empty name means
         'this kind isn't mapped' → scan NOTHING (never fall back to all sections).
         Prevents a missing selection from silently pulling every library."""
-        return self._sections(kind, name) if name else []
+        return self._sections(kind, name) if _title_list(name) else []
 
     def scan_problem(self, media_type="all"):
         """why a scan of media_type would read nothing, or None (see Jellyfin's)."""
         wants = _wanted_libraries(media_type, self._movies_lib, self._tv_lib)
-        if not any(name for _, _, name in wants):
+        if not any(_title_list(name) for _, _, name in wants):
             return _no_library_message(wants)
         for label, kind, name in wants:
-            if name and not self._sections(kind, name):
-                return _missing_library_message(label, name, "Plex")
+            for title in _title_list(name):
+                if not self._sections(kind, title):
+                    return _missing_library_message(label, title, "Plex")
         return None
 
     def available_libraries(self) -> dict:
@@ -696,7 +722,9 @@ class PlexVideoSource:
                 items = section.search(sort="addedAt:desc", maxresults=200)
             for sh in items:
                 try:
-                    yield self._show(sh)
+                    d = self._show(sh)
+                    d["library"] = getattr(section, "title", None) or d.get("library")
+                    yield d
                 except Exception:
                     logger.exception("Plex: skipping show %s", getattr(sh, "title", "?"))
 
@@ -833,8 +861,9 @@ class PlexVideoSource:
     def _collection_section(self, kind: str):
         """The library section collections of a kind live in — the mapped one,
         else the first section of that kind."""
-        name = self._movies_lib if kind == "movie" else self._tv_lib
-        secs = self._sections(kind, name) if name else self._sections(kind)
+        names = _title_list(self._movies_lib if kind == "movie" else self._tv_lib)
+        # several TV libraries picked: collections live in the MAIN one (first)
+        secs = self._sections(kind, names[0]) if names else self._sections(kind)
         return secs[0] if secs else None
 
     def _fetch_items(self, ids):
@@ -1227,6 +1256,9 @@ class PlexVideoSource:
             "watched_episodes": int(getattr(sh, "viewedLeafCount", 0) or 0),
             "genres": self._tags(getattr(sh, "genres", None)),
             "seasons": seasons,
+            # the library (section) it lives in -- anime-marked libraries make
+            # their shows anime
+            "library": getattr(sh, "librarySectionTitle", None) or None,
         }
         d.update(_parse_plex_guids(sh))
         return d
@@ -1305,27 +1337,29 @@ class JellyfinVideoSource:
         views = [v for v in resp.get("Items", [])
                  if (v.get("CollectionType") or "mixed").lower() in (collection_type, "mixed")]
         if name:
-            views = [v for v in views if v.get("Name") == name]
+            names = _title_list(name)
+            views = [v for v in views if v.get("Name") in names]
         return views
 
     def _scan_views(self, collection_type: str, name):
         """Views to SCAN. An empty name means this kind isn't mapped → scan NOTHING
         (never fall back to all views), so a missing selection can't pull every
         library. (available_libraries still lists all via _views.)"""
-        return self._views(collection_type, name) if name else []
+        return self._views(collection_type, name) if _title_list(name) else []
 
     def scan_problem(self, media_type="all"):
         """why a scan of media_type would read nothing, or None. an unpicked or
         vanished library used to finish green with 0 items."""
         wants = _wanted_libraries(media_type, self._movies_lib, self._tv_lib)
-        if not any(name for _, _, name in wants):
+        if not any(_title_list(name) for _, _, name in wants):
             return _no_library_message(wants)
         if self._req(f"/Users/{self.uid}/Views") is None:
             return "Couldn't list Jellyfin libraries (%s)" % (
                 getattr(self._c, "last_error", None) or "no response")
         for label, kind, name in wants:
-            if name and not self._views("movies" if kind == "movie" else "tvshows", name):
-                return _missing_library_message(label, name, "Jellyfin")
+            for title in _title_list(name):
+                if not self._views("movies" if kind == "movie" else "tvshows", title):
+                    return _missing_library_message(label, title, "Jellyfin")
         return None
 
     def available_libraries(self) -> dict:
@@ -1853,7 +1887,11 @@ class JellyfinVideoSource:
                 items = self._paged(path, params)
             for it in items:
                 try:
-                    yield self._show(it)
+                    d = self._show(it)
+                    # the library (view) it lives in -- anime-marked libraries
+                    # make their shows anime
+                    d["library"] = view.get("Name") or d.get("library")
+                    yield d
                 except Exception:
                     logger.exception("Jellyfin: skipping show %s", it.get("Name", "?"))
 

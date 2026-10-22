@@ -55,3 +55,25 @@ def normalize_key(text: str) -> str:
     dropped: 'AC/DC' and 'ACDC', 'The   Beatles' and 'the beatles' key the
     same. the search library-check's ownership key, and artists.name_key."""
     return _NON_ALNUM_RE.sub('', normalize_for_comparison(text or ''))
+
+
+# hyphen-shaped characters that mean the same thing as '-' in a name.
+# musicbrainz writes alt-J with a U+2010 hyphen where apple/deezer use ascii
+# (#1797). em dash stays out on purpose, it's usually a separator.
+_DASH_VARIANTS = str.maketrans({
+    '\u2010': '-',  # hyphen
+    '\u2011': '-',  # non-breaking hyphen
+    '\u2012': '-',  # figure dash
+    '\u2013': '-',  # en dash
+    '\u2212': '-',  # minus sign
+    '\ufe63': '-',  # small hyphen-minus
+    '\uff0d': '-',  # fullwidth hyphen-minus
+})
+
+
+def fold_dashes(text: str) -> str:
+    """every hyphen variant becomes an ascii '-', nothing else changes.
+    a grouping key, not a display name: callers keep the original."""
+    if not text:
+        return text or ''
+    return text.translate(_DASH_VARIANTS)

@@ -1,9 +1,8 @@
 /**
  * Pure core for the dashboard's Auto Sync card — the mini, read-and-trigger
- * view of the Auto-Sync schedule board (auto-sync.js). The card reuses the
- * board's own state builder through the window seam
- * (buildAutoSyncScheduleState, auto-sync.js:471) so the schedule semantics
- * live in ONE place; this module only turns that state into rich rows.
+ * view of the Auto-Sync schedule board. The card reuses the native board's
+ * state builder so schedule semantics live in one place; this module only
+ * turns that state into rich rows.
  *
  * The formatters replicate the vanilla labels 1:1 where cited:
  * - intervalLabel     = autoSyncIntervalLabel (auto-sync.js:68)

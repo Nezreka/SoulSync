@@ -621,6 +621,34 @@ def _default_target_dir(media_type: str) -> str:
     return db.get_setting("tv_path") or ""
 
 
+def _default_route_type(item: Dict[str, Any]) -> Optional[str]:
+    """Which folder-routing type a wished episode's show has. The wishlist query
+    already carries it (``route_series_type``); for a show in no library with no
+    stored type yet, TMDB is asked once (core.video.anime_hint). Best-effort."""
+    st = item.get("route_series_type")
+    if st:
+        return st
+    tmdb = item.get("show_tmdb_id")
+    if not tmdb:
+        return None
+    try:
+        from api.video import get_video_db
+        from core.video.anime_hint import ensure_show_type_hint
+        return ensure_show_type_hint(get_video_db(), tmdb)
+    except Exception:   # noqa: BLE001 - routing falls back to the TV folder
+        return None
+
+
+def _default_anime_dir() -> str:
+    """The optional anime library folder ('' = off: anime shows use the TV folder).
+    Best-effort: an unreadable setting reads as off, never stalls the drain."""
+    try:
+        from api.video import get_video_db
+        return get_video_db().get_setting("anime_path") or ""
+    except Exception:   # noqa: BLE001 - routing falls back to the TV folder
+        return ""
+
+
 def _extto_hits_for_context(ctx: Dict[str, Any]) -> tuple:
     from core.video.extto_search import extto_search
     from core.video.slskd_search import build_query
@@ -1004,6 +1032,8 @@ def auto_video_process_wishlist(
     fetch_items: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
     active_keys: Optional[Callable[[str], Iterable]] = None,
     target_dir: Optional[Callable[[str], str]] = None,
+    anime_dir: Optional[Callable[[], str]] = None,
+    route_type: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None,
     search: Optional[Callable[[Dict[str, Any], str], List[Dict[str, Any]]]] = None,
     enqueue: Optional[Callable[..., bool]] = None,
     record_outcome: Optional[Callable[[Dict[str, Any], str, bool], None]] = None,
@@ -1018,6 +1048,8 @@ def auto_video_process_wishlist(
     fetch_items = fetch_items or _default_fetch_items
     active_keys = active_keys or _default_active_keys
     target_dir = target_dir or _default_target_dir
+    anime_dir = anime_dir or _default_anime_dir
+    route_type = route_type or _default_route_type
     search = search or _default_search
     enqueue = enqueue or _default_enqueue
     record_outcome = record_outcome or _default_record_outcome
@@ -1044,6 +1076,10 @@ def auto_video_process_wishlist(
     try:
         gen = stop_generation()   # "cancel all" bumps it: stop searching + grabbing
         root = target_dir(media_type)
+        # episodes of anime-type shows go to the anime folder when one is set;
+        # each wished episode carries its show's routing type (route_series_type)
+        from core.video.download_pipeline import tv_root_for
+        anime_root = anime_dir() if media_type == 'episode' else ''
         if not root:
             where = 'Movie' if media_type == 'movie' else 'TV'
             deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
@@ -1147,7 +1183,14 @@ def auto_video_process_wishlist(
                         slots_claimed[0] += 1
                 if slot:
                     for cand in usable[:MAX_GRAB_ATTEMPTS]:
-                        out = enqueue_outcome(enqueue(it, cand, cands, media_type, root))
+                        # the FOLDER follows route_type (set by hand, an anime-
+                        # marked library, or a not-yet-owned show's hint) --
+                        # never the genre tag, which only shapes the search.
+                        # Only asked when an anime folder is set.
+                        out = enqueue_outcome(enqueue(
+                            it, cand, cands, media_type,
+                            tv_root_for(route_type(it), root, anime_root)
+                            if media_type == 'episode' and anime_root else root))
                         if out["ok"]:
                             clear_source_refusal(it, media_type, cand)
                             ok = True

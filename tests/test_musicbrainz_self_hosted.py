@@ -79,11 +79,35 @@ def test_config_and_environment_precedence(monkeypatch):
     assert client.request_interval == 0.05
 
 
-def test_concurrent_clients_share_pacing(monkeypatch):
-    clock = [100.0]
-    slots = []
+_PACING_THREADS = 'mb-pacing'
+
+
+def _pool_clock(monkeypatch, clock):
+    """Patch mb.time for the pacing pool's threads only.
+
+    Same trap as ``_own_thread_clock``: mb.time is the stdlib time module, so
+    patching sleep catches every thread in the process. CI failed with
+    ``assert 103.9 == 100.9``, something else in the suite slept 3 seconds
+    mid-test and moved the fake clock. This test needs several threads on the
+    clock, so it keys on the pool's thread name instead of one thread.
+    """
+    real_sleep = mb.time.sleep
+    clock_lock = threading.Lock()
+
+    def sleep(delay):
+        if not threading.current_thread().name.startswith(_PACING_THREADS):
+            real_sleep(delay)
+            return
+        with clock_lock:
+            clock[0] += delay
+
     monkeypatch.setattr(mb.time, 'monotonic', lambda: clock[0])
-    monkeypatch.setattr(mb.time, 'sleep', lambda delay: clock.__setitem__(0, clock[0] + delay))
+    monkeypatch.setattr(mb.time, 'sleep', sleep)
+
+
+def _pace_ten_clients(monkeypatch, clock):
+    slots = []
+    _pool_clock(monkeypatch, clock)
     monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', 'http://mirror')
     monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_REQUEST_INTERVAL', '0.1')
     class Session:
@@ -95,9 +119,34 @@ def test_concurrent_clients_share_pacing(monkeypatch):
     clients = [mb.MusicBrainzClient() for _ in range(10)]
     for client in clients:
         client.session = Session()
-    with ThreadPoolExecutor(max_workers=5) as pool:
+    with ThreadPoolExecutor(max_workers=5, thread_name_prefix=_PACING_THREADS) as pool:
         list(pool.map(lambda client: client._get('/artist'), clients))
+    return slots
+
+
+def test_concurrent_clients_share_pacing(monkeypatch):
+    clock = [100.0]
+    slots = _pace_ten_clients(monkeypatch, clock)
     # Virtual time advances exactly once per additional request, across clients.
+    assert clock[0] == pytest.approx(100.9)
+    assert len(slots) == 10
+
+
+def test_pacing_clock_ignores_other_threads(monkeypatch):
+    """An unrelated thread sleeping mid-test must not move the pacing clock."""
+    clock = [100.0]
+    started = threading.Event()
+
+    def unrelated():
+        started.set()
+        mb.time.sleep(0.3)
+
+    _pool_clock(monkeypatch, clock)
+    other = threading.Thread(target=unrelated, name='unrelated-sleeper')
+    other.start()
+    started.wait(5)
+    slots = _pace_ten_clients(monkeypatch, clock)
+    other.join(5)
     assert clock[0] == pytest.approx(100.9)
     assert len(slots) == 10
 

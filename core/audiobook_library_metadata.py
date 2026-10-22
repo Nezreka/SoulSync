@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from core.audio_length import reliable_length_seconds
+
 ASIN_RE = re.compile(r"^[A-Z0-9]{10}$", re.I)
 
 
@@ -84,7 +86,7 @@ def read_metadata(path: Path, files: list[Path], probes=None, include_sidecars=T
             audio = mutagen.File(file)
             if audio is None:
                 continue
-            duration += float(getattr(audio.info, "length", 0) or 0)
+            duration += reliable_length_seconds(audio, file)
             tags = audio.tags or {}
             for key, names in {
                 "title": ("TALB", "album", "\xa9alb"),

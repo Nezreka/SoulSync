@@ -48,6 +48,7 @@ import {
   dismissFindingChecked,
   dismissFindingType,
   fetchBulkFixStatus,
+  findExactArtist,
   fetchCacheHealth,
   fetchFindingCounts,
   fetchFindingGroups,
@@ -56,6 +57,7 @@ import {
   fixFinding,
   reopenFinding,
   reopenFindingsBulk,
+  searchLibraryArtists,
   startBulkFix,
   stopBulkFix,
 } from '../-tools.api';
@@ -90,6 +92,43 @@ import { HealthHero } from './health-hero';
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
+}
+
+/**
+ * A poisoned album holds tracks by many artists, so it can't be re-identified
+ * as one release. Open it in the library instead, where each track has its own
+ * Re-identify (#1567). Findings from before the artist id was stored find the
+ * artist by the album artist's name.
+ */
+export async function openSuspectAlbum(finding: RepairFinding): Promise<void> {
+  const d = (finding.details as Record<string, any>) || {};
+  const router = window.SoulSyncWebRouter;
+  // native findings name the album as `lib2:<id>`; the library route wants the id
+  const albumId =
+    finding.entity_id != null ? String(finding.entity_id).replace(/^lib2:/, '') : null;
+  let artistId = d.artist_id != null && d.artist_id !== '' ? String(d.artist_id) : '';
+  let artistName = String(d.album_artist_name || '');
+  if (!artistId && artistName) {
+    try {
+      const exact = findExactArtist(await searchLibraryArtists(artistName), artistName);
+      if (exact) {
+        artistId = String(exact.id);
+        artistName = exact.name || artistName;
+      }
+    } catch {
+      // falls through to the toast below
+    }
+  }
+  if (!artistId || !router) {
+    toast("Couldn't find this album in your library", 'error');
+    return;
+  }
+  toast('Open each track there and pick Re-identify from its menu', 'info');
+  await router.navigateToPage('artist-detail', {
+    artistId,
+    artistName,
+    focusAlbumId: albumId ?? undefined,
+  });
 }
 
 /** The vanilla's poll interval for a background Fix All run. */
@@ -589,6 +628,10 @@ export function FindingsSurface({
         }
         // 'add_to_wishlist' falls through with no fix_action — the handler
         // already adds to the wishlist by default.
+      }
+      if (type === TYPE_SUSPECT_ALBUM && finding.entity_type === 'album') {
+        await openSuspectAlbum(finding);
+        return;
       }
       if (type === TYPE_SUSPECT_ALBUM) {
         setReidentifyingFinding(finding);

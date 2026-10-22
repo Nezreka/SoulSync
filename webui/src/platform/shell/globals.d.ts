@@ -3,12 +3,15 @@ import type {
   WishlistAlbumWorkflowInput,
 } from '@/platform/workflows/album-workflows';
 import type { IssueDomainBridge } from '@/routes/issues/-issues.types';
+import type { MirroredPipelineState } from '@/routes/sync/-sync.pipeline';
 
 import type { ShellProfileContext, ShellRouteDefinition, ShellPageId } from './bridge';
 
 declare global {
   interface Window {
     showToast?: (message: string, type?: string, durationOrContext?: number | string) => void;
+    /** core.js: the latest server-side active music download count from the status push. */
+    __soulsyncMusicActiveDownloads?: number;
     /** core.js: repaints the music Requests nav badge (admin: waiting, member: news). */
     refreshMusicRequestsBadge?: () => void;
     /** core.js: after a wishlist add, tells a profile that asks first it went out as a
@@ -366,15 +369,16 @@ declare global {
      * it cannot reproduce. See autoSyncFormatTrigger.
      */
     _autoFormatTrigger?: (type: string, config: unknown) => string;
-    /**
-     * downloads.js — runs a mirrored playlist through the pipeline engine.
-     * The engine stays vanilla for this port, so Auto-Sync's 'Run now' calls
-     * across to it (auto-sync.js 2336).
-     */
+    /** Root AutoSyncHost: legacy dialogs delegate to the native pipeline controller. */
     runMirroredPlaylistPipeline?: (
       playlistId: number,
       playlistName: string,
+      skipWishlist?: boolean,
     ) => Promise<void> | void;
+    pollMirroredPipelineStatus?: (playlistId: number, playlistName: string) => void;
+    /** Classic mirrored cards still need their script-scoped state painted. */
+    applyMirroredPipelineState?: (playlistId: number, state: MirroredPipelineState) => void;
+    loadMirroredPlaylists?: () => Promise<void>;
     /**
      * manual-library-match.js — the Library Match tool. Stays vanilla: its
      * file is untouched by the sync flip (index.html header button, 2239).
@@ -666,6 +670,17 @@ declare global {
     SoulSyncVideo?: {
       openDetail?: (args: { kind: string; id: number | string; source?: string }) => void;
     };
+    /** video-download-view.js: the shared release-picker modal (manual search). */
+    VideoDownload?: {
+      manualSearch?: (opts: {
+        title: string;
+        scope: 'movie' | 'season' | 'episode' | 'series';
+        season?: number | null;
+        episode?: number | null;
+        year?: number | string | null;
+        poster?: string | null;
+      }) => void;
+    };
     /** video-side.js: flip the shell chrome music <-> video (does NOT navigate). */
     _switchAppSide?: (side: 'music' | 'video', opts?: { force?: boolean }) => void;
     /** unified downloads page: true while any video download is active.
@@ -729,7 +744,8 @@ declare global {
     };
     SoulSyncWebShellBridge?: {
       getCurrentProfileContext: () => ShellProfileContext | null;
-      isPageAllowed: (pageId: ShellPageId) => boolean;
+      /** search makes it media-aware: /wishlist?media=tv asks for video-wishlist. */
+      isPageAllowed: (pageId: ShellPageId, search?: string) => boolean;
       getProfileHomePage: () => ShellPageId;
       resolveLegacyPath: (pathname: string) => ShellPageId | null;
       setActivePageChrome: (pageId: ShellPageId) => void;
@@ -855,7 +871,7 @@ declare global {
     _socketConnected?: boolean;
     /**
      * P7 seams:
-     * - openAutoSyncScheduleModal (auto-sync.js) — the Quick Actions hero tile
+     * - openAutoSyncScheduleModal (AutoSyncHost) - the dashboard manager
      * - openSyncDetailModal (pages-extra.js) — a sync card's detail modal;
      *   appends to document.body
      * - showLoginScreen / showLaunchPinScreen (init.js) — the unlock screens a
@@ -876,13 +892,6 @@ declare global {
       onStatus: (id: string, data: unknown) => void;
     };
     openAutoSyncScheduleModal?: () => void | Promise<void>;
-    /** auto-sync.js:471 — the schedule board's state builder; the dashboard's
-     *  Auto Sync card reuses it so schedule semantics live in one place. */
-    buildAutoSyncScheduleState?: (
-      playlists: unknown[],
-      automations: unknown[],
-      historyData?: Record<string, unknown>,
-    ) => Record<string, unknown>;
     openSyncDetailModal?: (entryId: number) => void | Promise<void>;
     showLoginScreen?: () => void;
     showLaunchPinScreen?: () => void;

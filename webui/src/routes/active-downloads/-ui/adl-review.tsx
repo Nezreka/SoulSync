@@ -1,23 +1,29 @@
+/**
+ * The music Review view: Unverified, Quarantine and Deleted, on the same row
+ * grammar as Downloads (dl-parts). One clear action per row, everything else
+ * behind ⋯, and a sheet that says why the file is here.
+ */
+
 import { useState } from 'react';
 
 import type { AdlDeletedEntry, AdlDownload, AdlQuarantineEntry, AdlSubView } from '../-adl.types';
 import type { QuarantineGroup } from '../-adl.use-verification';
+import type { DlFact } from './dl-parts';
 
+import { formatBytes, quarantineSourceLabel } from '../-adl.helpers';
+import { formatTag, isHighQuality, musicJourney, parseStamp, relTime } from '../-dl.format';
 import {
-  formatBytes,
-  qualityChipTitle,
-  quarantineSourceLabel,
-  quarantineTrigger,
-  reasonBadge,
-  unverifiedReasonText,
-} from '../-adl.helpers';
-import { RowArt } from './adl-row';
-
-/** Relative time via the shared vanilla formatter; '' when unavailable. */
-function timeAgo(iso: string | undefined): string {
-  if (!iso || typeof window.formatHistoryTime !== 'function') return '';
-  return window.formatHistoryTime(iso);
-}
+  DlAvatar,
+  DlButton,
+  DlFileBadge,
+  DlIcon,
+  DlLead,
+  DlMore,
+  DlSegmented,
+  DlSelectionBar,
+  DlSheet,
+  fileExt,
+} from './dl-parts';
 
 export interface ReviewActionHandlers {
   onPlay: () => void;
@@ -28,88 +34,111 @@ export interface ReviewActionHandlers {
   onDelete: () => void;
 }
 
-/**
- * The five review buttons.
- *
- * Compare owns a busy flag because the search runs server-side and can take
- * seconds — without it the button looks dead and gets clicked again.
- */
-function ReviewButtons({
-  handlers,
-  approveGlyph,
-  approveTitle,
-  playTitle,
-  compareTitle,
-  auditTitle,
-  deleteTitle,
-}: {
-  handlers: ReviewActionHandlers;
-  approveGlyph: string;
-  approveTitle: string;
-  playTitle: string;
-  compareTitle: string;
-  auditTitle: string;
-  deleteTitle: string;
-}) {
-  const [comparing, setComparing] = useState(false);
-  const [busy, setBusy] = useState(false);
+const CheckIcon = (
+  <svg
+    width="11"
+    height="11"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3.5"
+    aria-hidden="true"
+  >
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
 
+/** The select box that sits on a row's art corner. */
+function SelectBox({ selected, onSelect }: { selected: boolean; onSelect: () => void }) {
   return (
-    <>
-      <button
-        type="button"
-        className="verif-act verif-act-play"
-        title={playTitle}
-        onClick={handlers.onPlay}
-      >
-        ▶
-      </button>
-      <button
-        type="button"
-        className="verif-act"
-        title={compareTitle}
-        disabled={comparing}
-        onClick={() => handlers.onCompare(setComparing)}
-      >
-        {comparing ? '…' : '⇆'}
-      </button>
-      <button type="button" className="verif-act" title={auditTitle} onClick={handlers.onAudit}>
-        🔍
-      </button>
-      <button
-        type="button"
-        className="verif-act verif-act-ok verif-act-labeled"
-        title={approveTitle}
-        disabled={busy}
-        onClick={() => {
-          setBusy(true);
-          handlers.onApprove();
-          setBusy(false);
-        }}
-      >
-        {approveGlyph}
-        <span className="verif-act-label">{approveGlyph === '⤴' ? 'Recover' : 'Approve'}</span>
-      </button>
-      <button
-        type="button"
-        className="verif-act verif-act-del verif-act-labeled"
-        title={deleteTitle}
-        onClick={handlers.onDelete}
-      >
-        🗑<span className="verif-act-label">Delete</span>
-      </button>
-    </>
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={selected}
+      aria-label={selected ? 'Deselect' : 'Select'}
+      className={`dlc-check${selected ? ' dlc-check-on' : ''}`}
+      title="Select for bulk approve or delete"
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect();
+      }}
+    >
+      {selected ? CheckIcon : null}
+    </button>
   );
 }
 
-const PLAY_TITLE = 'Play the downloaded file in the media player';
-const COMPARE_TITLE =
-  'Find this track on Soulseek/streaming sources and play it in the media player — compare against your file';
-const AUDIT_TITLE =
-  'Open the full audit trail for this download (lifecycle, embedded tags, lyrics)';
-const APPROVE_TITLE =
-  'Approve: mark as human-verified (tag + DB). The AcoustID scanner will skip it.';
-const DELETE_TITLE = 'Wrong file: delete it from disk and remove this entry';
+/**
+ * Compare runs a server-side search that can take seconds, so the action owns
+ * a busy flag. without it the button looks dead and gets clicked again.
+ */
+function useCompare(handlers: ReviewActionHandlers | null) {
+  const [busy, setBusy] = useState(false);
+  return {
+    busy,
+    run: () => {
+      if (!handlers || busy) return;
+      handlers.onCompare(setBusy);
+    },
+  };
+}
+
+/** Asked for vs got, with the difference lit. Null when there's nothing to compare. */
+function AskedVsGot({
+  asked,
+  got,
+}: {
+  asked: { title?: string; artist?: string };
+  got: { title?: string; artist?: string };
+}) {
+  if (!asked.title) return null;
+  const diff = (a?: string, b?: string) =>
+    Boolean(a && b && a.trim().toLowerCase() !== b.trim().toLowerCase());
+  return (
+    <div className="dlc-compare">
+      <span />
+      <span className="dlc-compare-h">Asked for</span>
+      <span className="dlc-compare-h">Got</span>
+      <span className="dlc-compare-k">Title</span>
+      <span>{asked.title}</span>
+      <span className={diff(asked.title, got.title) ? 'dlc-compare-diff' : undefined}>
+        {got.title || '—'}
+      </span>
+      {asked.artist ? (
+        <>
+          <span className="dlc-compare-k">Artist</span>
+          <span>{asked.artist}</span>
+          <span className={diff(asked.artist, got.artist) ? 'dlc-compare-diff' : undefined}>
+            {got.artist || '—'}
+          </span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Unverified ────────────────────────────────────────────────────────────
+
+/** the reason tag on an unverified row. */
+function unverifiedTag(
+  dl: AdlDownload,
+): { text: string; tone: 'warn' | 'info'; title: string } | null {
+  if (dl.verification_status === 'force_imported') {
+    return {
+      text: 'Force-imported',
+      tone: 'info',
+      title: 'Kept as the best available copy after the retry budget ran out',
+    };
+  }
+  if (dl.verification_status === 'unverified') {
+    return {
+      text: 'Not confirmed',
+      tone: 'warn',
+      title: "AcoustID couldn't confirm it (ambiguous, cross-script, or no fingerprint match)",
+    };
+  }
+  return null;
+}
 
 export function AdlUnverifiedRow({
   dl,
@@ -127,149 +156,164 @@ export function AdlUnverifiedRow({
   selected?: boolean;
   onSelect?: () => void;
 }) {
-  const badge = reasonBadge(dl);
-  const meta = [dl.artist, dl.album].filter(Boolean).join(' · ');
-  const source = dl.batch_source || dl.batch_name || '';
-  const ago = timeAgo(dl.created_at);
+  const compare = useCompare(handlers);
+  const tag = unverifiedTag(dl);
+  const quality = formatTag(dl.quality);
+  const when = relTime(parseStamp(dl.created_at ?? null), Date.now());
+  const who = [dl.artist, dl.album].filter(Boolean).join(' · ');
+  const source = dl.download_source || dl.batch_source || dl.batch_name || '';
+
+  const menu = handlers
+    ? [
+        { key: 'play', label: 'Play my copy', onSelect: handlers.onPlay },
+        {
+          key: 'compare',
+          label: compare.busy ? 'Finding a stream…' : 'Compare with a stream',
+          disabled: compare.busy,
+          onSelect: compare.run,
+        },
+        { key: 'audit', label: 'Download details', onSelect: handlers.onAudit },
+        { key: 'delete', label: 'Delete file', danger: true, onSelect: handlers.onDelete },
+      ]
+    : [];
+
+  const facts: DlFact[] = [
+    ['Source', source],
+    ['Quality', quality],
+    ['AcoustID', dl.acoustid_result || ''],
+    ['File', dl.file_path || '', { mono: true, copy: dl.file_path || undefined }],
+  ];
 
   return (
-    <div
-      className="adl-row adl-row-completed verif-quar-row"
-      data-task-id={dl.task_id || ''}
-      title="Click to show/hide details (why it was flagged, source, quality, file)"
-      onClick={onToggle}
-    >
-      {onSelect ? (
-        <input
-          type="checkbox"
-          className="verif-select"
-          checked={Boolean(selected)}
-          title="Select for bulk approve/delete"
-          onClick={(event) => event.stopPropagation()}
-          onChange={onSelect}
-        />
-      ) : null}
-      <RowArt artwork={dl.artwork} />
-      <div className="adl-row-info">
-        <div className="adl-row-title">{dl.title || 'Unknown Track'}</div>
-        {meta ? <div className="adl-row-meta">{meta}</div> : null}
-        {source ? <div className="adl-row-batch">{source}</div> : null}
-        <div className="verif-quar-details" style={{ display: open ? '' : 'none' }}>
-          <div>
-            <span className="verif-detail-label">Why flagged:</span> {unverifiedReasonText(dl)}
-          </div>
-          {source ? (
-            <div>
-              <span className="verif-detail-label">Download source:</span> {source}
-            </div>
-          ) : null}
-          {dl.quality ? (
-            <div>
-              <span className="verif-detail-label">Quality:</span> {dl.quality}
-            </div>
-          ) : null}
-          {/* Only persistent-history rows carry these two. */}
-          {dl.file_path ? (
-            <div>
-              <span className="verif-detail-label">File:</span> {dl.file_path}
-            </div>
-          ) : null}
-          {dl.created_at ? (
-            <div>
-              <span className="verif-detail-label">Downloaded:</span> {dl.created_at}
+    <>
+      <div
+        className={`dlc-row dlc-row-completed${open ? ' dlc-row-open' : ''}${selected ? ' dlc-row-sel' : ''}`}
+        data-task-id={dl.task_id || ''}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+      >
+        <div className="dlc-lead-wrap">
+          <DlLead
+            art={dl.artwork}
+            avatar={dl.artist_image}
+            onPlay={handlers?.onPlay}
+            fallback={(dl.title || '?').charAt(0).toUpperCase()}
+          />
+          {onSelect ? <SelectBox selected={Boolean(selected)} onSelect={onSelect} /> : null}
+        </div>
+        <div className="dlc-main">
+          <div className="dlc-title">{dl.title || 'Unknown Track'}</div>
+          {who ? (
+            <div className="dlc-sub">
+              <DlAvatar src={dl.artist_image} />
+              {who}
             </div>
           ) : null}
         </div>
+        <div className="dlc-meta">
+          {tag ? (
+            <span className={`dlc-tag dlc-tag-${tag.tone}`} title={tag.title}>
+              {tag.text}
+            </span>
+          ) : null}
+          {quality ? (
+            <span className={`dlc-tag${isHighQuality(quality) ? ' dlc-tag-hq' : ''}`}>
+              {quality}
+            </span>
+          ) : null}
+          {when ? <span className="dlc-when">{when}</span> : null}
+        </div>
+        <div className="dlc-acts">
+          {/* no history id means no endpoint to act on: the row is display-only */}
+          {handlers ? (
+            <>
+              <DlButton primary onClick={handlers.onApprove}>
+                Approve
+              </DlButton>
+              <DlMore items={menu} />
+            </>
+          ) : null}
+        </div>
       </div>
-      <div className="verif-actions" onClick={(event) => event.stopPropagation()}>
-        {/* Static homes: the chips vary per row, so the buttons live in a
-            right-anchored slot that never moves. */}
-        <span className="verif-chips">
-          {badge ? (
-            <span className={badge.className} title={badge.title}>
-              {badge.label}
-            </span>
-          ) : null}
-          {dl.quality ? (
-            <span className="adl-quality-chip" title={qualityChipTitle()}>
-              {dl.quality}
-            </span>
-          ) : null}
-          {ago ? <span className="verif-time">{ago}</span> : null}
-        </span>
-        {/* No history id means no endpoint to act on — the row is display-only. */}
-        {handlers ? (
-          <span className="verif-btns">
-            <ReviewButtons
-              handlers={handlers}
-              approveGlyph="✔"
-              approveTitle={APPROVE_TITLE}
-              playTitle={PLAY_TITLE}
-              compareTitle={COMPARE_TITLE}
-              auditTitle={AUDIT_TITLE}
-              deleteTitle={DELETE_TITLE}
+      {open ? (
+        <DlSheet
+          stepsTitle="Why it's here"
+          steps={musicJourney(dl, null, Date.now())}
+          factsTitle="Asked for vs got"
+          facts={facts}
+          aside={
+            <AskedVsGot
+              asked={{ title: dl.expected_title, artist: dl.expected_artist }}
+              got={{ title: dl.title, artist: dl.artist }}
             />
-          </span>
-        ) : null}
-      </div>
-    </div>
+          }
+          actions={
+            handlers ? (
+              <>
+                <DlButton primary onClick={handlers.onApprove}>
+                  Approve
+                </DlButton>
+                <DlButton icon={DlIcon.play} onClick={handlers.onPlay}>
+                  Play my copy
+                </DlButton>
+                <DlButton disabled={compare.busy} onClick={compare.run}>
+                  {compare.busy ? 'Finding a stream…' : 'Compare with a stream'}
+                </DlButton>
+                <DlButton onClick={handlers.onAudit}>Download details</DlButton>
+                <span className="dlc-spacer" />
+                <DlButton danger onClick={handlers.onDelete}>
+                  Delete file
+                </DlButton>
+              </>
+            ) : null
+          }
+        />
+      ) : null}
+    </>
   );
 }
 
-function quarantineLibraryTitle(entry: AdlQuarantineEntry): string {
-  const match = entry.library_match;
-  return [
-    'Already in library',
-    match?.album,
-    match?.quality,
-    match?.verification_status.replaceAll('_', ' '),
-    match?.filename,
-  ]
+// ── Quarantine ────────────────────────────────────────────────────────────
+
+const TRIGGER_TAGS: Record<string, string> = {
+  integrity: 'Failed integrity check',
+  acoustid: 'AcoustID mismatch',
+  acoustid_unverified: 'Not confirmed',
+  bit_depth: 'Bit depth filter',
+};
+
+function triggerTag(trigger: string | undefined): string {
+  return TRIGGER_TAGS[String(trigger ?? '')] ?? 'Quarantined';
+}
+
+function libraryLine(entry: AdlQuarantineEntry): string {
+  const m = entry.library_match;
+  return [m?.album, m?.quality, m?.verification_status?.replaceAll('_', ' ')]
     .filter(Boolean)
     .join(' · ');
 }
 
-function quarantineAlbumTitle(entry: AdlQuarantineEntry): string {
+function albumOrigin(entry: AdlQuarantineEntry): string {
   const source = entry.album_extra?.download_source.toLowerCase();
-  const label = source === 'usenet' ? 'Usenet ' : source === 'torrent' ? 'Torrent ' : '';
-  return [`Additional track from ${label}album import`, entry.album_extra?.album]
+  const label = source === 'usenet' ? 'Usenet ' : source === 'torrent' ? 'torrent ' : '';
+  return [`An extra track from a ${label}album import`, entry.album_extra?.album]
     .filter(Boolean)
     .join(' · ');
 }
 
-/** Small hints; only actual presence and extra imports add icons. Library
- *  presence decides what to do with the row, so it carries the verified green. */
-function QuarantinePresenceIcons({ entry }: { entry: AdlQuarantineEntry }) {
-  if (entry.library_status !== 'present' && !entry.album_extra) return null;
-  return (
-    <span className="verif-presence-icons">
-      {entry.library_status === 'present' ? (
-        <span
-          className="verif-presence-library"
-          role="img"
-          aria-label={quarantineLibraryTitle(entry)}
-          title={quarantineLibraryTitle(entry)}
-        >
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M2 3v10M6 3v10M10 3l3 10M1 13h13" />
-          </svg>
-        </span>
-      ) : null}
-      {entry.album_extra ? (
-        <span
-          role="img"
-          aria-label={quarantineAlbumTitle(entry)}
-          title={quarantineAlbumTitle(entry)}
-        >
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="8" cy="8" r="6" />
-            <circle cx="8" cy="8" r="1.5" />
-            <path d="M4 8a4 4 0 0 1 4-4" />
-          </svg>
-        </span>
-      ) : null}
-    </span>
-  );
+/** quarantine stamps are local isoformat; Date.parse reads a naive one as local. */
+function quarantineTime(entry: AdlQuarantineEntry): string {
+  const ms = entry.timestamp ? Date.parse(entry.timestamp) : NaN;
+  return Number.isFinite(ms) ? relTime(ms, Date.now()) : '';
 }
 
 export function AdlQuarantineRow({
@@ -277,138 +321,218 @@ export function AdlQuarantineRow({
   open,
   onToggle,
   handlers,
-  altSlot,
-  attempts,
+  inGroup,
 }: {
   entry: AdlQuarantineEntry;
   open: boolean;
   onToggle: () => void;
   handlers: ReviewActionHandlers;
-  altSlot?: React.ReactNode;
-  /** set on the lead row of a group: how many files tried to be this track. */
-  attempts?: { count: number; open: boolean; groupKey: string; onToggle: () => void };
+  /** one of several attempts under a group header: the header already names the track. */
+  inGroup?: boolean;
 }) {
-  const [triggerLabel, triggerClass] = quarantineTrigger(entry.trigger);
-  const title = entry.expected_track || entry.original_filename || entry.filename || 'Unknown file';
-  const meta = [entry.expected_artist, entry.original_filename].filter(Boolean).join(' — ');
-  const sourceLabel = quarantineSourceLabel(entry);
-  const ago = timeAgo(entry.timestamp);
+  const compare = useCompare(handlers);
+  const owned = entry.library_status === 'present';
+  const legacy = !entry.has_full_context;
+  const fileName = entry.original_filename || entry.filename || 'Unknown file';
+  const title = inGroup ? fileName : entry.expected_track || fileName;
+  const source = quarantineSourceLabel(entry);
+  const uploader =
+    entry.source_username && source === 'Soulseek' ? `from ${entry.source_username}` : '';
+  const sub = inGroup
+    ? [source, uploader].filter(Boolean).join(' · ')
+    : [entry.expected_artist, source, uploader].filter(Boolean).join(' · ');
+  const quality = formatTag(entry.quality);
+  const when = quarantineTime(entry);
+  const approveLabel = legacy ? 'Recover' : 'Approve';
+  const approveTitle = legacy
+    ? 'Recover to Staging for a manual import (an older entry without its import context)'
+    : 'Import this exact file into the library, marked human-verified';
 
-  const libraryDetail =
-    entry.library_status === 'present'
-      ? quarantineLibraryTitle(entry)
-      : entry.library_status === 'missing'
-        ? 'No matching library copy found'
-        : entry.library_status === 'unknown'
-          ? 'Library check unavailable'
-          : '';
-  const details = [
-    libraryDetail ? { label: 'Library:', value: libraryDetail } : null,
-    entry.album_extra ? { label: 'Origin:', value: quarantineAlbumTitle(entry) } : null,
-    entry.reason ? { label: 'Reason:', value: entry.reason } : null,
-    entry.source_username ? { label: 'Source uploader:', value: entry.source_username } : null,
-    entry.source_filename
-      ? { label: 'Original Soulseek file:', value: entry.source_filename }
-      : null,
-    entry.timestamp ? { label: 'Quarantined:', value: entry.timestamp } : null,
-  ].filter(Boolean) as { label: string; value: string }[];
+  // the track is already in the library: this copy is a spare, so Delete leads
+  const primary = owned ? (
+    <DlButton primary onClick={handlers.onDelete}>
+      Delete
+    </DlButton>
+  ) : (
+    <DlButton primary title={approveTitle} onClick={handlers.onApprove}>
+      {approveLabel}
+    </DlButton>
+  );
+  const menu = [
+    { key: 'play', label: 'Play it', onSelect: handlers.onPlay },
+    {
+      key: 'compare',
+      label: compare.busy ? 'Finding a stream…' : 'Compare with a stream',
+      disabled: compare.busy,
+      onSelect: compare.run,
+    },
+    { key: 'audit', label: 'Download details', onSelect: handlers.onAudit },
+    owned
+      ? {
+          key: 'approve',
+          label: `${approveLabel} anyway`,
+          title: approveTitle,
+          onSelect: handlers.onApprove,
+        }
+      : { key: 'delete', label: 'Delete file', danger: true, onSelect: handlers.onDelete },
+  ];
+
+  const facts: DlFact[] = [
+    ['Uploader', entry.source_username || ''],
+    ['Original file', entry.source_filename || entry.original_filename || '', { mono: true }],
+    ['Quality', quality],
+    [
+      'Library',
+      owned
+        ? libraryLine(entry) || 'Already in your library'
+        : entry.library_status === 'missing'
+          ? 'No copy in your library'
+          : entry.library_status === 'unknown'
+            ? 'Library check unavailable'
+            : '',
+    ],
+    ['Origin', entry.album_extra ? albumOrigin(entry) : ''],
+    ['Size', entry.size_bytes ? formatBytes(entry.size_bytes) : ''],
+  ];
 
   return (
-    <div
-      className="adl-row adl-row-failed verif-quar-row"
-      data-quarantine-id={entry.id}
-      title="Click to show/hide details (reason, source uploader, original filename)"
-      onClick={onToggle}
-    >
-      <RowArt artwork={entry.thumb_url} />
-      <div className="adl-row-info">
-        <div className="verif-quar-title-row">
-          <div className="adl-row-title">{title}</div>
-          <QuarantinePresenceIcons entry={entry} />
-          {/* right by the name, where you're already reading. the old "▾ 3
-              more" sat grey on the far right and nobody saw it. */}
-          {attempts ? (
-            <button
-              type="button"
-              className={`verif-quar-alt-btn verif-quar-attempts${attempts.open ? ' open' : ''}`}
-              data-group-key={attempts.groupKey}
-              data-alt-count={attempts.count - 1}
-              aria-expanded={attempts.open}
-              title={`${attempts.count} downloads tried to be this track. ${
-                attempts.open ? 'Hide' : 'Show'
-              } the other ${attempts.count === 2 ? 'one' : attempts.count - 1}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                attempts.onToggle();
-              }}
-            >
-              {attempts.count} attempts <span aria-hidden="true">{attempts.open ? '▴' : '▾'}</span>
-            </button>
-          ) : null}
+    <>
+      <div
+        className={`dlc-row dlc-row-failed${open ? ' dlc-row-open' : ''}${inGroup ? ' dlc-row-compact' : ''}`}
+        data-quarantine-id={entry.id}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+      >
+        <div className="dlc-lead-wrap">
+          {entry.thumb_url && !inGroup ? (
+            <DlLead art={entry.thumb_url} onPlay={handlers.onPlay} />
+          ) : (
+            <DlFileBadge
+              ext={fileExt(entry.original_filename, entry.filename, entry.source_filename)}
+            />
+          )}
         </div>
-        {meta ? <div className="adl-row-meta">{meta}</div> : null}
-        {sourceLabel ? <div className="adl-row-batch">{sourceLabel}</div> : null}
-        <div className="verif-quar-details" style={{ display: open ? '' : 'none' }}>
-          {details.length
-            ? details.map((row) => (
-                <div key={row.label}>
-                  <span className="verif-detail-label">{row.label}</span> {row.value}
-                </div>
-              ))
-            : 'No further details in the sidecar.'}
+        <div className="dlc-main">
+          <div className="dlc-title">
+            {title}
+            {owned && !inGroup ? (
+              <span className="dlc-owned" title={libraryLine(entry) || 'Already in your library'}>
+                {DlIcon.check}
+                In your library
+              </span>
+            ) : null}
+          </div>
+          {sub ? <div className="dlc-sub">{sub}</div> : null}
         </div>
-      </div>
-      <div className="verif-actions" onClick={(event) => event.stopPropagation()}>
-        {/* Static homes: the chips vary per row, so the buttons live in a
-            right-anchored slot that never moves. */}
-        <span className="verif-chips">
-          <span className={`verif-reason-badge ${triggerClass}`} title={entry.reason || ''}>
-            {triggerLabel}
-          </span>
-          {entry.quality ? (
-            <span
-              className="adl-quality-chip"
-              title="Audio quality of the quarantined file (read from the file itself)"
-            >
-              {entry.quality}
+        <div className="dlc-meta">
+          {entry.album_extra ? (
+            <span className="dlc-tag" title={albumOrigin(entry)}>
+              Album extra
             </span>
           ) : null}
-          {ago ? <span className="verif-time">{ago}</span> : null}
-        </span>
-        <span className="verif-btns">
-          <ReviewButtons
-            handlers={handlers}
-            // A legacy sidecar has no embedded context to re-import from, so its
-            // only route back is Recover-to-Staging.
-            approveGlyph={entry.has_full_context ? '✔' : '⤴'}
-            approveTitle={
-              entry.has_full_context
-                ? 'Approve: re-import this exact file into the library, marked human-verified'
-                : 'Recover to Staging for a manual import (legacy entry without embedded context)'
-            }
-            playTitle="Play the quarantined file in the media player"
-            compareTitle="Find the expected track on Soulseek/streaming sources and play it in the media player — compare against the quarantined file"
-            auditTitle="Open the audit trail for this quarantined file (details, embedded tags, lyrics)"
-            deleteTitle="Delete the quarantined file permanently"
-          />
-        </span>
+          <span className="dlc-tag dlc-tag-bad" title={entry.reason || ''}>
+            {triggerTag(entry.trigger)}
+          </span>
+          {quality ? <span className="dlc-tag">{quality}</span> : null}
+          {when ? <span className="dlc-when">{when}</span> : null}
+        </div>
+        <div className="dlc-acts">
+          {primary}
+          <DlMore items={menu} />
+        </div>
       </div>
-      <div className="verif-quar-alt-slot" onClick={(event) => event.stopPropagation()}>
-        {altSlot}
-      </div>
-    </div>
+      {open ? (
+        <DlSheet
+          stepsTitle="Why it's here"
+          steps={[
+            {
+              key: 'download',
+              state: 'done',
+              title: source
+                ? `Downloaded from ${source === 'Soulseek' && entry.source_username ? entry.source_username : source}`
+                : 'Downloaded',
+              detail: entry.source_filename || entry.original_filename || undefined,
+            },
+            {
+              key: 'check',
+              state: 'fail',
+              title: triggerTag(entry.trigger),
+              detail: entry.reason || 'It failed its checks, so it was never imported.',
+              time: when,
+            },
+          ]}
+          factsTitle="Details"
+          facts={facts}
+          aside={
+            <>
+              {owned ? (
+                <div className="dlc-callout">
+                  {DlIcon.check}
+                  <div>
+                    <b>You already have this track.</b>
+                    <p>
+                      {libraryLine(entry) ? `${libraryLine(entry)}. ` : ''}Deleting this copy is
+                      safe.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+              <AskedVsGot
+                asked={{ title: entry.expected_track, artist: entry.expected_artist }}
+                // the file name, minus its extension and any leading track number
+                got={{
+                  title: (entry.original_filename || '')
+                    .replace(/\.[a-z0-9]{2,5}$/i, '')
+                    .replace(/^\d{1,3}[\s._-]+/, ''),
+                }}
+              />
+            </>
+          }
+          actions={
+            <>
+              {primary}
+              <DlButton icon={DlIcon.play} onClick={handlers.onPlay}>
+                Play it
+              </DlButton>
+              <DlButton disabled={compare.busy} onClick={compare.run}>
+                {compare.busy ? 'Finding a stream…' : 'Compare with a stream'}
+              </DlButton>
+              <DlButton onClick={handlers.onAudit}>Download details</DlButton>
+              <span className="dlc-spacer" />
+              {owned ? (
+                <DlButton title={approveTitle} onClick={handlers.onApprove}>
+                  {approveLabel} anyway
+                </DlButton>
+              ) : (
+                <DlButton danger onClick={handlers.onDelete}>
+                  Delete file
+                </DlButton>
+              )}
+            </>
+          }
+        />
+      ) : null}
+    </>
   );
 }
 
 /**
- * Quarantine rows, with alternative candidates for the same track folded
- * behind a toggle.
- *
- * The first candidate shows as a normal row; the rest hide until expanded, so
- * a track that produced six rejected candidates takes one row rather than six.
+ * Quarantine rows. A track that several downloads tried to be gets one
+ * header (the track, how many attempts, why they failed, delete them all)
+ * with its attempts folded under it, so six rejected candidates take one line.
  */
 export function AdlQuarantineList({
   groups,
+  partial,
   openDetails,
   openGroups,
   onToggleDetails,
@@ -417,16 +541,18 @@ export function AdlQuarantineList({
   onDeleteGroup,
 }: {
   groups: QuarantineGroup[];
+  /** True when more pages are not loaded yet, so group counts are page-local. */
+  partial?: boolean;
   openDetails: ReadonlySet<string>;
   openGroups: ReadonlySet<string>;
   onToggleDetails: (id: string) => void;
   onToggleGroup: (key: string) => void;
   handlersFor: (entry: AdlQuarantineEntry) => ReviewActionHandlers;
   /** Delete a whole group of candidates at once; absent = per-row deletes only. */
-  onDeleteGroup?: (entry: AdlQuarantineEntry, count: number) => void;
+  onDeleteGroup?: (entry: AdlQuarantineEntry, count: number | null) => void;
 }) {
   return (
-    <>
+    <div className="dlc-list">
       {groups.map((group) => {
         const [first, ...rest] = group.members;
         if (!first) return null;
@@ -441,56 +567,94 @@ export function AdlQuarantineList({
             />
           );
         }
-
         const groupKey = group.key || first.id;
         const isOpen = openGroups.has(groupKey);
+        const n = group.members.length;
+        const owned = group.members.some((m) => m.library_status === 'present');
+        const reasons = [...new Set(group.members.map((m) => triggerTag(m.trigger)))].join(', ');
+        const attemptsText = partial ? `${n}+ attempts` : `${n} attempts`;
         return (
-          <div className="verif-quar-alt-wrapper" key={groupKey}>
-            <AdlQuarantineRow
-              entry={first}
-              open={openDetails.has(first.id)}
-              onToggle={() => onToggleDetails(first.id)}
-              handlers={handlersFor(first)}
-              attempts={{
-                count: group.members.length,
-                open: isOpen,
-                groupKey,
-                onToggle: () => onToggleGroup(groupKey),
+          <div className="dlc-sub-group" key={groupKey}>
+            <div
+              className="dlc-qhead"
+              role="button"
+              tabIndex={0}
+              aria-expanded={isOpen}
+              data-group-key={groupKey}
+              onClick={() => onToggleGroup(groupKey)}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onToggleGroup(groupKey);
+                }
               }}
-              altSlot={
-                // The row's own Delete only takes the one candidate it sits
-                // on. This takes the group (#1208).
-                onDeleteGroup ? (
-                  <button
-                    type="button"
-                    className="verif-quar-alt-btn verif-quar-alt-del"
-                    data-group-key={groupKey}
-                    title={`Permanently delete all ${group.members.length} quarantined candidates for this track`}
-                    onClick={() => onDeleteGroup(first, group.members.length)}
+            >
+              <span className="dlc-fold-chev" aria-hidden="true">
+                {DlIcon.fold}
+              </span>
+              {first.thumb_url ? (
+                <img className="dlc-art dlc-qhead-art" src={first.thumb_url} alt="" />
+              ) : (
+                <DlFileBadge ext={fileExt(first.original_filename, first.filename)} />
+              )}
+              <div className="dlc-main">
+                <div className="dlc-title">
+                  {first.expected_track || first.original_filename || 'Unknown track'}
+                  <span
+                    className="dlc-attempts"
+                    data-alt-count={n - 1}
+                    title={
+                      partial
+                        ? `At least ${n} downloads tried to be this track (the list is paged)`
+                        : `${n} downloads tried to be this track`
+                    }
                   >
-                    Delete all {group.members.length}
-                  </button>
-                ) : null
-              }
-            />
-            <div className={`verif-quar-alt-members${isOpen ? ' vqg-open' : ''}`}>
-              <div className="verif-quar-alt-heading">
-                Other {rest.length === 1 ? 'attempt' : `${rest.length} attempts`} at this track
+                    {attemptsText}
+                  </span>
+                </div>
+                <div className="dlc-sub">
+                  {[first.expected_artist, reasons].filter(Boolean).join(' · ')}
+                </div>
               </div>
-              {rest.map((entry) => (
-                <AdlQuarantineRow
-                  key={entry.id}
-                  entry={entry}
-                  open={openDetails.has(entry.id)}
-                  onToggle={() => onToggleDetails(entry.id)}
-                  handlers={handlersFor(entry)}
-                />
-              ))}
+              <div className="dlc-acts">
+                {owned ? (
+                  <span className="dlc-owned">
+                    {DlIcon.check}
+                    In your library
+                  </span>
+                ) : null}
+                {onDeleteGroup ? (
+                  <DlButton
+                    data-group-key={groupKey}
+                    title={
+                      partial
+                        ? 'Delete every quarantined attempt at this track (the server finds the whole group, including ones not loaded yet)'
+                        : `Delete all ${n} quarantined attempts at this track`
+                    }
+                    onClick={() => onDeleteGroup(first, partial ? null : n)}
+                  >
+                    {partial ? 'Delete all attempts' : `Delete all ${n}`}
+                  </DlButton>
+                ) : null}
+              </div>
             </div>
+            {isOpen
+              ? group.members.map((entry) => (
+                  <AdlQuarantineRow
+                    key={entry.id}
+                    entry={entry}
+                    inGroup
+                    open={openDetails.has(entry.id)}
+                    onToggle={() => onToggleDetails(entry.id)}
+                    handlers={handlersFor(entry)}
+                  />
+                ))
+              : null}
           </div>
         );
       })}
-    </>
+    </div>
   );
 }
 
@@ -501,40 +665,12 @@ export function quarantineSummary(tracks: number, files: number): string {
   return `${tracks} track${tracks === 1 ? '' : 's'} · ${f}`;
 }
 
-function ReviewSegment({
-  active,
-  label,
-  count,
-  title,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  count: number | null;
-  title: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      className={`adl-pill adl-review-seg-btn${active ? ' active' : ''}`}
-      title={title}
-      onClick={onClick}
-    >
-      <span className="adl-review-seg-label">{label}</span>
-      {count == null ? null : <span className="adl-review-seg-count">{count}</span>}
-    </button>
-  );
-}
+// ── the sub-switch + bulk actions ─────────────────────────────────────────
 
 /**
- * The sub-view switcher above the review list.
- *
- * The bulk buttons differ per sub-view because the operations differ: an
- * unverified file can be orphaned (its file deleted elsewhere), a quarantined
- * one cannot — it IS the file.
+ * The sub-view switch above the review list, with the whole-list actions in
+ * its ⋯. checked rows get their own bar at the bottom (AdlReviewSelectionBar)
+ * instead of these buttons changing their labels under you.
  */
 export function AdlReviewBanner({
   subView,
@@ -544,13 +680,10 @@ export function AdlReviewBanner({
   quarantineLoaded,
   quarantineTrackCount = null,
   deletedCount,
-  selectedCount,
   onSubView,
   onApproveAll,
   onCleanOrphans,
   onDeleteAll,
-  onApproveSelected,
-  onDeleteSelected,
   onQuarantineApproveAll,
   onQuarantineClearAll,
   onRestoreAllDeleted,
@@ -564,225 +697,175 @@ export function AdlReviewBanner({
   /** distinct tracks behind the quarantined files, null until the list loads. */
   quarantineTrackCount?: number | null;
   deletedCount: number | null;
-  /** Checked unverified rows; the bulk buttons narrow to these when > 0. */
-  selectedCount: number;
   onSubView: (view: AdlSubView) => void;
   onApproveAll: () => void;
   onCleanOrphans: () => void;
   onDeleteAll: () => void;
-  onApproveSelected: () => void;
-  onDeleteSelected: () => void;
   onQuarantineApproveAll: () => void;
   onQuarantineClearAll: () => void;
   onRestoreAllDeleted: () => void;
   onEmptyDeleted: () => void;
 }) {
-  return (
-    <div className="adl-batch-filter-banner adl-review-bar" id="verif-subview-banner">
-      {/* a real segmented control. the old pills were 12px grey text on a
-          tinted strip, and hard to read. */}
-      <div className="adl-review-seg" role="tablist" aria-label="Review queue">
-        {/* Hidden entirely when no unverified queue can exist. */}
-        {acoustidEnabled ? (
-          <ReviewSegment
-            active={subView === 'unverified'}
-            label="Unverified"
-            count={unverifiedCount}
-            title="Imported files that AcoustID could not hard-confirm"
-            onClick={() => onSubView('unverified')}
-          />
-        ) : null}
-        <ReviewSegment
-          active={subView === 'quarantine'}
-          label="Quarantine"
-          // only once it's known, rather than showing 0
-          count={quarantineLoaded ? quarantineCount : null}
-          title="Files that failed verification and were NOT imported"
-          onClick={() => onSubView('quarantine')}
-        />
-        <ReviewSegment
-          active={subView === 'deleted'}
-          label="Deleted"
-          count={deletedCount}
-          title="Files removed by repair tools and the duplicate cleaner, restorable until purged"
-          onClick={() => onSubView('deleted')}
-        />
-      </div>
-      <span className="verif-banner-spacer" />
-      {/* the pill counts files, the list shows one row per track. say both so
-          "7" next to two rows isn't a puzzle. */}
-      {subView === 'quarantine' && quarantineTrackCount != null && quarantineCount > 0 ? (
-        <span className="adl-review-summary">
-          {quarantineSummary(quarantineTrackCount, quarantineCount)}
-        </span>
-      ) : null}
-      {/* Bulk buttons only when the view has something to act on — a bulk
-          button over an empty list is a promise the click can't keep. */}
-      {subView === 'deleted' ? (
-        (deletedCount ?? 0) > 0 ? (
-          <>
-            <button
-              type="button"
-              className="adl-filter-banner-clear"
-              title="Put every file back exactly where it was removed from"
-              onClick={onRestoreAllDeleted}
-            >
-              ↩ Restore all
-            </button>
-            <button
-              type="button"
-              className="adl-filter-banner-clear verif-bulk-danger"
-              title="Permanently delete everything in the bin"
-              onClick={onEmptyDeleted}
-            >
-              🗑 Empty bin
-            </button>
-          </>
-        ) : null
-      ) : subView === 'quarantine' ? (
-        quarantineCount > 0 ? (
-          <>
-            <button
-              type="button"
-              className="adl-filter-banner-clear"
-              title="Approve + re-import every quarantined file (marked human-verified)"
-              onClick={onQuarantineApproveAll}
-            >
-              ✔ Approve all
-            </button>
-            <button
-              type="button"
-              className="adl-filter-banner-clear verif-bulk-danger"
-              title="Permanently delete every quarantined file"
-              onClick={onQuarantineClearAll}
-            >
-              🗑 Clear all
-            </button>
-          </>
-        ) : null
-      ) : selectedCount > 0 ? (
-        <>
-          <button
-            type="button"
-            className="adl-filter-banner-clear"
-            title="Mark every SELECTED entry as human-verified"
-            onClick={onApproveSelected}
-          >
-            ✔ Approve selected ({selectedCount})
-          </button>
-          <button
-            type="button"
-            className="adl-filter-banner-clear verif-bulk-danger"
-            title="Delete every SELECTED file from disk and remove its entry"
-            onClick={onDeleteSelected}
-          >
-            🗑 Delete selected ({selectedCount})
-          </button>
-        </>
-      ) : unverifiedCount > 0 ? (
-        <>
-          <button
-            type="button"
-            className="adl-filter-banner-clear"
-            title="Mark every listed entry as human-verified"
-            onClick={onApproveAll}
-          >
-            ✔ Approve all
-          </button>
-          <button
-            type="button"
-            className="adl-filter-banner-clear"
-            title="Remove dead entries whose file no longer exists (deleted / replaced). Removes log rows only — never a file."
-            onClick={onCleanOrphans}
-          >
-            🧹 Clean orphaned
-          </button>
-          <button
-            type="button"
-            className="adl-filter-banner-clear verif-bulk-danger"
-            title="Delete every listed file from disk and remove its entry"
-            onClick={onDeleteAll}
-          >
-            🗑 Delete all
-          </button>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-const EXPLAINER_KEY = 'ss-adl-explainer-dismissed';
-
-/**
- * One line under the banner saying what the current sub-view actually IS —
- * uberdude72 and kvkarlsson both asked, so the page now answers.
- *
- * Answers ONCE, though: after "got it" it folds to an ⓘ toggle instead of
- * being a permanent wall of text on every visit. localStorage is a per-viewer
- * convenience here, so a private window simply sees the text again.
- */
-export function AdlReviewExplainer({ subView }: { subView: AdlSubView }) {
-  const [dismissed, setDismissed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(EXPLAINER_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
-
-  const text =
-    subView === 'unverified'
-      ? 'these files imported fine but AcoustID couldn\'t hard-confirm them. approve means "i listened, it\'s the right track" — it marks the file human-verified and nothing flags it again. the other buttons help you check first.'
+  // bulk actions only when the view has something to act on: a bulk button
+  // over an empty list is a promise the click can't keep
+  const menu =
+    subView === 'deleted'
+      ? (deletedCount ?? 0) > 0
+        ? [
+            {
+              key: 'restore',
+              label: `Restore all (${deletedCount})`,
+              onSelect: onRestoreAllDeleted,
+            },
+            { key: 'empty', label: 'Empty bin', danger: true, onSelect: onEmptyDeleted },
+          ]
+        : []
       : subView === 'quarantine'
-        ? 'these files failed verification and were never imported. approve pulls one out and imports it as if it had passed — nothing is renamed. delete removes the bad download for good.'
-        : 'files removed by repair tools and the duplicate cleaner land here instead of dying, hidden from media servers. restore puts one back exactly where it was.';
-
-  if (dismissed) {
-    return (
-      <button
-        type="button"
-        className="adl-review-explainer-toggle"
-        title={text}
-        onClick={() => {
-          try {
-            localStorage.removeItem(EXPLAINER_KEY);
-          } catch {
-            /* per-viewer convenience only */
-          }
-          setDismissed(false);
-        }}
-      >
-        ⓘ what is this view?
-      </button>
-    );
-  }
+        ? quarantineCount > 0
+          ? [
+              {
+                key: 'approve',
+                label: `Approve all (${quarantineCount})`,
+                onSelect: onQuarantineApproveAll,
+              },
+              { key: 'clear', label: 'Delete all', danger: true, onSelect: onQuarantineClearAll },
+            ]
+          : []
+        : unverifiedCount > 0
+          ? [
+              { key: 'approve', label: `Approve all (${unverifiedCount})`, onSelect: onApproveAll },
+              {
+                key: 'orphans',
+                label: 'Clean orphaned entries',
+                title: 'Remove entries whose file no longer exists. Log rows only, never a file.',
+                onSelect: onCleanOrphans,
+              },
+              { key: 'delete', label: 'Delete all', danger: true, onSelect: onDeleteAll },
+            ]
+          : [];
 
   return (
-    <div className="adl-review-explainer" data-subview={subView}>
-      {text}
-      <button
-        type="button"
-        className="adl-filter-banner-clear adl-review-explainer-dismiss"
-        onClick={() => {
-          try {
-            localStorage.setItem(EXPLAINER_KEY, '1');
-          } catch {
-            /* per-viewer convenience only */
-          }
-          setDismissed(true);
-        }}
-      >
-        got it
-      </button>
+    <div className="dlc-subbar" id="verif-subview-banner">
+      <DlSegmented
+        label="Review queue"
+        value={subView}
+        onChange={(v) => onSubView(v as AdlSubView)}
+        segments={[
+          // hidden entirely when no unverified queue can exist
+          ...(acoustidEnabled
+            ? [
+                {
+                  value: 'unverified',
+                  label: 'Unverified',
+                  count: unverifiedCount,
+                  title: "Imported files AcoustID couldn't confirm",
+                },
+              ]
+            : []),
+          {
+            value: 'quarantine',
+            label: 'Quarantine',
+            // only once it's known, rather than showing 0
+            count: quarantineLoaded ? quarantineCount : null,
+            title: 'Files that failed their checks and were never imported',
+          },
+          {
+            value: 'deleted',
+            label: 'Deleted',
+            count: deletedCount,
+            title:
+              'Files removed by repair tools and the duplicate cleaner, restorable until purged',
+          },
+        ]}
+      />
+      <div className="dlc-subbar-side">
+        {/* the count is files, the list is tracks. say both so "7" over two
+            rows isn't a puzzle */}
+        {subView === 'quarantine' && quarantineTrackCount != null && quarantineCount > 0 ? (
+          <span className="dlc-subbar-note">
+            {quarantineSummary(quarantineTrackCount, quarantineCount)}
+          </span>
+        ) : null}
+        <span className="dlh-more">
+          <DlMore items={menu} label="Review actions" />
+        </span>
+      </div>
     </div>
   );
 }
 
-/* ── The deleted-files view (the music recycle bin) ──────────────────────── */
+/** Checked unverified rows: their actions float at the bottom of the list. */
+export function AdlReviewSelectionBar({
+  count,
+  onApprove,
+  onDelete,
+  onClear,
+}: {
+  count: number;
+  onApprove: () => void;
+  onDelete: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <DlSelectionBar count={count} onClear={onClear}>
+      <DlButton primary onClick={onApprove}>
+        Approve {count}
+      </DlButton>
+      <DlButton danger onClick={onDelete}>
+        Delete {count}
+      </DlButton>
+    </DlSelectionBar>
+  );
+}
+
+const EXPLAINERS: Record<AdlSubView, [string, string]> = {
+  unverified: [
+    "Imported, but AcoustID couldn't confirm them.",
+    'Have a listen. Approve keeps the file and stops future scans asking. Delete removes the file.',
+  ],
+  quarantine: [
+    'These failed their checks and were never imported.',
+    'Approve imports one as if it passed. Nothing is renamed. Delete removes the file for good.',
+  ],
+  deleted: [
+    'Removed by repair tools and the duplicate cleaner, hidden from your media server.',
+    'Restore puts a file back exactly where it was.',
+  ],
+};
+
+/** One plain line saying what the current sub-view is. Always there, never a box to dismiss. */
+export function AdlReviewExplainer({ subView }: { subView: AdlSubView }) {
+  const [lead, rest] = EXPLAINERS[subView];
+  return (
+    <p className="dlc-explain" data-subview={subView}>
+      <b>{lead}</b> {rest}
+    </p>
+  );
+}
+
+// ── Deleted (the music recycle bin) ───────────────────────────────────────
 
 export interface DeletedRowHandlers {
   onRestore: () => void;
   onPurge: () => void;
+}
+
+function deletedSource(source: string | null): string | null {
+  switch (source) {
+    case 'repair':
+      return 'Repair tool';
+    case 'duplicate-cleaner':
+      return 'Duplicate cleaner';
+    // an album download that stalled and never reached the library. the
+    // startup sweep used to delete these outright (#1210)
+    case 'album_bundle_orphan':
+      return 'Stalled album download';
+    // corrupt file detector: kept until the re-download replaces it
+    case 'corrupt_audio':
+      return 'Corrupt file (re-downloading)';
+    default:
+      return null;
+  }
 }
 
 export function AdlDeletedRow({
@@ -793,86 +876,67 @@ export function AdlDeletedRow({
   handlers: DeletedRowHandlers;
 }) {
   const [busy, setBusy] = useState(false);
-  const sourceLabel =
-    entry.source === 'repair'
-      ? 'Repair tool'
-      : entry.source === 'duplicate-cleaner'
-        ? 'Duplicate cleaner'
-        : // An album download that stalled and never made it into the library.
-          // The startup sweep used to delete these outright (#1210); it puts
-          // them here now, so they need to say what they are.
-          entry.source === 'album_bundle_orphan'
-          ? 'Stalled album download'
-          : // Corrupt File Detector: kept until the re-download replaces it.
-            entry.source === 'corrupt_audio'
-            ? 'Corrupt file (re-downloading)'
-            : null;
-  const ago = entry.deleted_at ? timeAgo(entry.deleted_at) || entry.deleted_at : 'age unknown';
+  const source = deletedSource(entry.source);
+  const ms = entry.deleted_at ? Date.parse(entry.deleted_at) : NaN;
+  const ago = Number.isFinite(ms) ? relTime(ms, Date.now()) : 'age unknown';
   return (
-    <div className="adl-row adl-row-completed verif-quar-row" data-deleted-id={entry.id}>
-      <div className="adl-row-info">
-        <div className="adl-row-title" title={entry.rel}>
+    <div className="dlc-row dlc-row-completed" data-deleted-id={entry.id}>
+      <DlFileBadge ext={fileExt(entry.name)} />
+      <div className="dlc-main">
+        <div className="dlc-title" title={entry.rel}>
           {entry.name}
         </div>
-        <div className="adl-row-meta" title={`will be restored to ${entry.original_path}`}>
+        <div className="dlc-sub dlc-mono" title={`will be restored to ${entry.original_path}`}>
           {entry.original_path}
         </div>
       </div>
-      <div className="verif-actions">
-        {/* Static homes: the chips vary per row, so the buttons live in a
-            right-anchored slot that never moves. */}
-        <span className="verif-chips">
-          {sourceLabel ? <span className="adl-quality-chip">{sourceLabel}</span> : null}
-          <span className="adl-quality-chip" title="File size">
-            {formatBytes(entry.size) || '—'}
-          </span>
-          <span
-            className="verif-time"
-            title={entry.deleted_at ?? 'deleted before tracking existed'}
-          >
-            {ago}
-          </span>
+      <div className="dlc-meta">
+        {source ? <span className="dlc-tag">{source}</span> : null}
+        <span title="File size">{formatBytes(entry.size) || '—'}</span>
+        <span className="dlc-when" title={entry.deleted_at ?? 'deleted before tracking existed'}>
+          {ago}
         </span>
-        <span className="verif-btns">
-          <button
-            type="button"
-            className="verif-act verif-act-ok"
-            title="Restore this file to where it was removed from"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              handlers.onRestore();
-            }}
-          >
-            ↩
-          </button>
-          <button
-            type="button"
-            className="verif-act verif-act-del"
-            title="Delete this file permanently"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              handlers.onPurge();
-            }}
-          >
-            🗑
-          </button>
-        </span>
+      </div>
+      <div className="dlc-acts">
+        <DlButton
+          primary
+          title="Put this file back where it was removed from"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            handlers.onRestore();
+          }}
+        >
+          Restore
+        </DlButton>
+        <DlMore
+          items={[
+            {
+              key: 'purge',
+              label: 'Delete forever',
+              danger: true,
+              disabled: busy,
+              onSelect: () => {
+                setBusy(true);
+                handlers.onPurge();
+              },
+            },
+          ]}
+        />
       </div>
     </div>
   );
 }
 
 const RETENTION_CHOICES: { value: number; label: string }[] = [
-  { value: 0, label: 'keep forever' },
-  { value: 7, label: 'auto-delete after 7 days' },
-  { value: 14, label: 'auto-delete after 14 days' },
-  { value: 30, label: 'auto-delete after 30 days' },
-  { value: 90, label: 'auto-delete after 90 days' },
+  { value: 0, label: 'Keep forever' },
+  { value: 7, label: 'Keep for 7 days' },
+  { value: 14, label: 'Keep for 14 days' },
+  { value: 30, label: 'Keep for 30 days' },
+  { value: 90, label: 'Keep for 90 days' },
 ];
 
-function RetentionSelect({
+export function RetentionSelect({
   keepDays,
   onKeepDays,
 }: {
@@ -880,21 +944,50 @@ function RetentionSelect({
   onKeepDays: (days: number) => void;
 }) {
   return (
-    <label className="adl-deleted-retention-label">
-      keep deleted files:
-      <select
-        className="adl-deleted-retention"
-        title="Files older than this are purged automatically. Only files deleted after this feature shipped carry an age; older ones are never auto-purged."
-        value={RETENTION_CHOICES.some((c) => c.value === keepDays) ? keepDays : 0}
-        onChange={(event) => onKeepDays(Number(event.target.value))}
-      >
-        {RETENTION_CHOICES.map((c) => (
-          <option key={c.value} value={c.value}>
-            {c.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <select
+      className="dlc-select"
+      aria-label="How long deleted files are kept"
+      title="Files older than this are purged automatically. Files deleted before this feature shipped carry no age and are never auto-purged."
+      value={RETENTION_CHOICES.some((c) => c.value === keepDays) ? keepDays : 0}
+      onChange={(event) => onKeepDays(Number(event.target.value))}
+    >
+      {RETENTION_CHOICES.map((c) => (
+        <option key={c.value} value={c.value}>
+          {c.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** A bin's summary: how much is in it, what it is, how long it's kept. */
+export function BinStrip({
+  size,
+  count,
+  line,
+  control,
+  warn,
+}: {
+  size: string;
+  count: number;
+  line: string;
+  control?: React.ReactNode;
+  warn?: string;
+}) {
+  return (
+    <div className="dlc-strip">
+      <div className="dlc-strip-big">
+        <strong>{size}</strong>
+        <span>
+          {count} file{count === 1 ? '' : 's'}
+        </span>
+      </div>
+      <div className="dlc-strip-line">
+        {line}
+        {warn ? <div className="dlc-strip-warn">{warn}</div> : null}
+      </div>
+      {control ?? <span />}
+    </div>
   );
 }
 
@@ -914,31 +1007,27 @@ export function AdlDeletedList({
   onKeepDays: (days: number) => void;
 }) {
   if (!loaded) {
-    return <div className="adl-section-header">Loading deleted files…</div>;
-  }
-  if (entries.length === 0) {
-    return (
-      <>
-        <div className="adl-empty" id="adl-empty">
-          the bin is empty — files removed by repair tools and the duplicate cleaner land here
-        </div>
-        <div className="adl-section-header adl-deleted-header">
-          <RetentionSelect keepDays={keepDays} onKeepDays={onKeepDays} />
-        </div>
-      </>
-    );
+    return <div className="dlc-loading">Loading deleted files…</div>;
   }
   return (
     <>
-      <div className="adl-section-header adl-deleted-header">
-        <span>
-          {entries.length} file{entries.length === 1 ? '' : 's'} · {formatBytes(totalSize) || '0 B'}
-        </span>
-        <RetentionSelect keepDays={keepDays} onKeepDays={onKeepDays} />
-      </div>
-      {entries.map((entry) => (
-        <AdlDeletedRow key={entry.id} entry={entry} handlers={handlersFor(entry)} />
-      ))}
+      <BinStrip
+        size={formatBytes(totalSize) || '0 B'}
+        count={entries.length}
+        line="Removed by the duplicate cleaner and repair tools, hidden from your media server. Restore puts a file back exactly where it was."
+        control={<RetentionSelect keepDays={keepDays} onKeepDays={onKeepDays} />}
+      />
+      {entries.length === 0 ? (
+        <div className="dlc-empty-line" id="adl-empty">
+          The bin is empty.
+        </div>
+      ) : (
+        <div className="dlc-list">
+          {entries.map((entry) => (
+            <AdlDeletedRow key={entry.id} entry={entry} handlers={handlersFor(entry)} />
+          ))}
+        </div>
+      )}
     </>
   );
 }

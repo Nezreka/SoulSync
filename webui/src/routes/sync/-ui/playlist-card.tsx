@@ -190,7 +190,7 @@ export function playlistCardPrimaryLabel(row: MirroredPlaylistRow): string {
     // with a verb. "Sync & download", not "Sync now" (#1404): three buttons
     // said sync and did three different things. this one does all of it.
     default:
-      return 'Sync & download';
+      return row.is_request_list ? 'Process requests' : 'Sync & download';
   }
 }
 
@@ -321,6 +321,19 @@ export function PlaylistCard({
               aria-label="Organized by playlist"
             >
               📁
+            </span>
+          ) : null}
+          {row.is_request_list ? (
+            <span
+              className="pl-card-badge pl-card-badge--request"
+              title={
+                row.auto_remove_fulfilled
+                  ? 'Request List: server audio download only (no server playlist created). Fulfilled Spotify tracks are automatically removed.'
+                  : 'Request List: server audio download only (no server playlist created).'
+              }
+              aria-label="Request list"
+            >
+              📥{row.auto_remove_fulfilled ? ' ⚡' : ''}
             </span>
           ) : null}
         </div>

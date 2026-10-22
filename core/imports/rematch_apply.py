@@ -15,6 +15,7 @@ naming + hint construction are pure/unit-tested and the actual copy is injectabl
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from typing import Any, Callable, Dict, Optional
 
@@ -32,6 +33,19 @@ def staged_destination(staging_dir: str, real_path: str, library_track_id: Any) 
     safe_stem = sanitize_filename(stem).strip() or "track"
     name = f"{safe_stem} [reid-{library_track_id}]{ext}"
     return os.path.join(staging_dir, name)
+
+
+# the " [reid-<track id>]" tail staged_destination puts on every copy
+_REID_MARKER = re.compile(r" \[reid-[^\]]+\]$")
+
+
+def is_reidentify_copy(path: str) -> bool:
+    """True for a file staged by a re-identify. the scanner keeps each one as
+    its own candidate: copies from one bad album all share its album tag, so
+    grouping by tag bundled them into one candidate and the hint (one file
+    only) never got read (#1567)."""
+    stem = os.path.splitext(os.path.basename(path or ""))[0]
+    return bool(_REID_MARKER.search(stem))
 
 
 def stage_file_for_reidentify(
@@ -87,6 +101,7 @@ def build_reidentify_hint(
 
 __all__ = [
     "staged_destination",
+    "is_reidentify_copy",
     "stage_file_for_reidentify",
     "build_reidentify_hint",
 ]

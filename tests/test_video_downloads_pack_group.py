@@ -113,7 +113,8 @@ def test_cancelling_a_batch_still_cancels_the_pack():
 
 
 def test_the_cancel_button_appears_while_only_the_pack_is_running():
-    assert "{act || packActive ? (" in _LIST
+    # the cancel lives in the group menu now
+    assert "...(act || packActive" in _LIST
 
 
 def test_the_head_alone_keeps_the_group_visible():
@@ -127,7 +128,7 @@ def test_the_tally_counts_episodes_not_the_batch():
     """`done + '/' + total` over members would read 8/9 for a complete season of
     eight — the batch counted as one of its own children."""
     assert "const total = episodes.length;" in _LIST
-    assert "${done}/${total} imported" in _LIST
+    assert "${done} of ${total} imported" in _LIST
 
 
 def test_the_bar_shows_the_packs_own_progress_while_it_downloads():

@@ -51,7 +51,7 @@ describe('forMusicSide', () => {
 });
 
 describe('buildCollections', () => {
-  it('orders smart lenses, then System, then groups by name, then ungrouped', () => {
+  it('orders smart lenses, then operations and maintenance, then groups by name, then ungrouped', () => {
     const rows = [
       auto({ id: 1, group_name: 'Zed' }),
       auto({ id: 2, group_name: 'Alpha' }),
@@ -65,7 +65,8 @@ describe('buildCollections', () => {
       'events',
       'off',
       'guides',
-      'system',
+      'operations',
+      'maintenance',
       'group:Alpha',
       'group:Zed',
       'ungrouped',
@@ -83,7 +84,13 @@ describe('buildCollections', () => {
 
 describe('collectionAutomations', () => {
   const rows = () => [
-    auto({ id: 1, is_system: 1, enabled: 1, trigger_type: 'schedule' }),
+    auto({
+      id: 1,
+      is_system: 1,
+      enabled: 1,
+      trigger_type: 'schedule',
+      action_type: 'process_wishlist',
+    }),
     auto({ id: 2, group_name: 'Nightly', enabled: 1, trigger_type: 'track_downloaded' }),
     auto({ id: 3, group_name: 'Nightly', enabled: 0, trigger_type: 'schedule' }),
     auto({ id: 4, enabled: 1, trigger_type: 'schedule', last_error: 'boom' }),
@@ -114,8 +121,23 @@ describe('collectionAutomations', () => {
     expect(collectionAutomations(rows(), 'off').map((a) => a.id)).toEqual([3]);
   });
 
+  it('operations returns core operational system automations and maintenance returns cleanup/tool automations', () => {
+    const testRows = [
+      auto({ id: 1, is_system: 1, action_type: 'process_wishlist' }),
+      auto({ id: 2, is_system: 1, action_type: 'sync_downloaded_playlists' }),
+      auto({ id: 3, is_system: 1, action_type: 'clean_search_history' }),
+      auto({ id: 4, is_system: 1, action_type: 'run_repair_job', owned_by: 'system:repair_job' }),
+      auto({ id: 5, is_system: 0, action_type: 'process_wishlist' }),
+    ];
+    expect(collectionAutomations(testRows, 'operations').map((a) => a.id)).toEqual([1, 2]);
+    expect(collectionAutomations(testRows, 'maintenance').map((a) => a.id)).toEqual([3, 4]);
+  });
+
   it('system wins over group_name, like the old protected section did', () => {
-    const withSystemGroup = [...rows(), auto({ id: 6, is_system: 1, group_name: 'Nightly' })];
+    const withSystemGroup = [
+      ...rows(),
+      auto({ id: 6, is_system: 1, group_name: 'Nightly', action_type: 'clean_search_history' }),
+    ];
     expect(collectionAutomations(withSystemGroup, 'system').map((a) => a.id)).toEqual([1, 6]);
     expect(collectionAutomations(withSystemGroup, 'group:Nightly').map((a) => a.id)).toEqual([
       2, 3,
@@ -137,6 +159,8 @@ describe('collectionGroupName', () => {
     expect(collectionGroupName('group:My Group 2')).toBe('My Group 2');
     expect(collectionGroupName('all')).toBeNull();
     expect(collectionGroupName('system')).toBeNull();
+    expect(collectionGroupName('operations')).toBeNull();
+    expect(collectionGroupName('maintenance')).toBeNull();
   });
 });
 

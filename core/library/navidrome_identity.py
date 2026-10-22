@@ -163,15 +163,24 @@ _TRACK_BY_SERVER_ID = """
 """
 
 
-def resolve_tracks(tracks, songs, db, skipped=None):
+def resolve_tracks(tracks, songs, db, skipped=None, ambiguous=None):
     """live navidrome tracks for these ids. an id we can't safely resolve is
-    left out and noted in ``skipped`` instead of sinking the whole write (#1715):
-    one deleted song used to block every other track on the playlist. nothing
-    resolving at all still raises."""
+    left out instead of sinking the whole write (#1715): one deleted song
+    used to block every other track on the playlist. nothing resolving at
+    all still raises.
+
+    the left-out ids are split by what the evidence proves (#1754):
+    ``skipped`` gets the ones with NO live candidate at all — the verified
+    complete inventory holds nothing at their stored path or under their
+    file, so the song is gone from the server. ``ambiguous`` gets the ones
+    a rekey might explain but cannot prove (several live candidates, or
+    the one candidate is a different recording): uncertainty, not
+    deletion, and callers must not treat them as missing."""
     from core.navidrome_client import NavidromeTrack
     paths = _by_path(songs)
     resolved = []
     unresolved = []
+    uncertain = []
     for track in tracks:
         sid = str(getattr(track, 'ratingKey', None) or getattr(track, 'id', None)
                   or (track.get('id', '') if isinstance(track, dict) else ''))
@@ -190,15 +199,23 @@ def resolve_tracks(tracks, songs, db, skipped=None):
                     "AND m.server_id<>?",
                     (old['file_path'], sid))] if old.get('file_path') else []
             candidates = _rekey_candidates(same_file, old, paths, songs) if old else []
-            if len(candidates) != 1 or not _same_recording(old, songs[candidates[0]]):
+            if len(candidates) == 1 and _same_recording(old, songs[candidates[0]]):
+                sid = candidates[0]
+            elif not candidates:
                 unresolved.append(sid)
                 continue
-            sid = candidates[0]
+            else:
+                uncertain.append(sid)
+                continue
         resolved.append(NavidromeTrack(songs[sid], None))
-    if unresolved and not resolved:
-        raise IdentityError(f'Cannot safely resolve Navidrome song {unresolved[0]}; playlist left unchanged. Run a library scan.')
+    # extend BEFORE the raise: an all-dead write still has to hand its
+    # drops to the caller (#1754), or those tracks stay "matched" forever
     if skipped is not None:
         skipped.extend(unresolved)
+    if ambiguous is not None:
+        ambiguous.extend(uncertain)
+    if (unresolved or uncertain) and not resolved:
+        raise IdentityError(f'Cannot safely resolve Navidrome song {(unresolved + uncertain)[0]}; playlist left unchanged. Run a library scan.')
     return resolved
 
 
@@ -295,6 +312,38 @@ def repair_rekeyed_tracks(db, songs):
 _active_write = ContextVar('navidrome_validated_write', default=None)
 
 
+def has_same_path_duplicates(db):
+    """Whether any two Navidrome rows share a file path, the only case the
+    rekey repair has work for. The one place that knows which table holds
+    the server's rows: a catalogue with a different layout changes this
+    query and nothing else.
+
+    Library v2: a rekey shows up as two Navidrome-mapped catalogue rows for
+    one file, the sync files the reissued id beside the one it replaced."""
+    with db._get_connection() as conn:
+        return conn.execute("""
+            SELECT 1
+              FROM lib2_media_server_mappings m
+              JOIN lib2_track_files f
+                ON f.track_id = m.entity_id
+               AND COALESCE(f.file_state, 'active') = 'active'
+             WHERE m.entity_type='track' AND m.server_source='navidrome'
+               AND f.path IS NOT NULL AND TRIM(f.path) <> ''
+             GROUP BY f.path
+            HAVING COUNT(DISTINCT m.entity_id) > 1
+             LIMIT 1
+        """).fetchone() is not None
+
+
+def repair_if_needed(db, client):
+    """The post-scan repair as one call: no inventory fetch unless same-path
+    duplicates need investigation, then merge the rekeyed rows. Returns the
+    number of rows merged (0 when nothing was needed)."""
+    if not has_same_path_duplicates(db):
+        return 0
+    return repair_rekeyed_tracks(db, read_inventory(client))
+
+
 def validated_playlist_write(method):
     """Validate once across nested update/create calls; verify server contents."""
     @wraps(method)
@@ -304,6 +353,16 @@ def validated_playlist_write(method):
         bound = signature(method).bind(client, *args, **kwargs)
         name = bound.arguments.get('name', bound.arguments.get('playlist_name'))
         tracks = list(bound.arguments['tracks'])
+        # The caller can read which of its tracks this write had to drop
+        # (server no longer has them) off the client afterwards; reset up
+        # front so a write that never reaches resolution cannot leak a
+        # previous write's drops into a later sync (#1754). ``skipped``
+        # collects the proven-dead ids as resolution finds them — declared
+        # here so the except path can still hand them over when
+        # resolution itself raises (an all-dead write).
+        client._last_validated_write_skipped = []
+        skipped = []
+        ambiguous = []
         from database.music_database import get_database
         from utils.logging_config import get_logger
         logger = get_logger('navidrome_identity')
@@ -336,17 +395,28 @@ def validated_playlist_write(method):
             # Only new or stale IDs require a complete catalogue read.
             songs = (current if wanted <= current.keys()
                      else read_inventory(client, scan_wait=PLAYLIST_WRITE_SCAN_WAIT))
-            skipped = []
-            tracks = resolve_tracks(tracks, songs, get_database(), skipped)
+            tracks = resolve_tracks(tracks, songs, get_database(), skipped, ambiguous)
+            # Hand the proven-dead drops to the caller (#1754): a track
+            # navidrome no longer has is not on the playlist and not in
+            # the library, and the sync layer treats it as missing
+            # (wishlist) instead of counting it as synced. Ambiguous ids
+            # stay log-only: a rekey might explain them, so they are not
+            # evidence of deletion. The log lines stay for diagnosis.
+            client._last_validated_write_skipped = list(skipped)
             expected = {str(t.ratingKey) for t in tracks}
-            if skipped:
-                # a skipped id might be a song navidrome re-keyed, and the new
-                # key could be sitting in this playlist. a write that would drop
-                # anything already there waits until we can tell.
+            if skipped or ambiguous:
+                # an unresolved id might be a song navidrome re-keyed, and
+                # the new key could be sitting in this playlist. a write
+                # that would drop anything already there waits until we
+                # can tell.
                 if method.__name__ != 'append_to_playlist' and set(current) - expected:
-                    raise IdentityError(f'Cannot safely resolve Navidrome song {skipped[0]}; playlist left unchanged. Run a library scan.')
-                logger.warning('Playlist %r: skipped %d track(s) navidrome no longer has (%s)',
-                               name, len(skipped), ', '.join(skipped[:5]))
+                    raise IdentityError(f'Cannot safely resolve Navidrome song {(skipped + ambiguous)[0]}; playlist left unchanged. Run a library scan.')
+                if skipped:
+                    logger.warning('Playlist %r: skipped %d track(s) navidrome no longer has (%s)',
+                                   name, len(skipped), ', '.join(skipped[:5]))
+                if ambiguous:
+                    logger.warning('Playlist %r: left out %d track(s) that could not be safely resolved (%s)',
+                                   name, len(ambiguous), ', '.join(ambiguous[:5]))
             if method.__name__ == 'append_to_playlist':
                 expected.update(current)
             token = _active_write.set(client)
@@ -357,6 +427,10 @@ def validated_playlist_write(method):
                 _active_write.reset(token)
             if not success:
                 return False
+            if method.__name__ == 'append_to_playlist':
+                # old wrong matches the append took off on purpose (#1801)
+                expected -= {str(r) for r in
+                             getattr(client, '_last_append_removed', None) or ()}
             playlist_id = bound.arguments.get('playlist_id')
             if not playlist_id:
                 playlists = client.get_playlists_by_name(name)
@@ -369,6 +443,10 @@ def validated_playlist_write(method):
                 raise IdentityError('Navidrome did not retain the requested playlist tracks; sync is not complete')
             return True
         except Exception as exc:
+            # a write that died during resolution (e.g. every offered
+            # track is gone) still hands over the drops it proved, so
+            # the caller can treat those tracks as missing (#1754)
+            client._last_validated_write_skipped = list(skipped)
             logger.error('Playlist %r not synced: %s', name, exc)
             return False
     return guarded

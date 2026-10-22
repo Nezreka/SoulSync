@@ -119,30 +119,34 @@ def test_clear_endpoint(tmp_path):
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
+# the page is React now (webui/src/routes/wishlist, the Movies / TV / YouTube
+# tabs). video-wishlist.js keeps only the nav badge, which runs on every page.
 _JS = (_ROOT / "webui" / "static" / "video" / "video-wishlist.js").read_text(encoding="utf-8")
-_INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+_WL = _ROOT / "webui" / "src" / "routes" / "wishlist"
+_API = (_WL / "-video.api.ts").read_text(encoding="utf-8")
+_ACTIONS = (_WL / "-video.use-actions.ts").read_text(encoding="utf-8")
+_PAGE = (_WL / "-ui" / "video-wishlist.tsx").read_text(encoding="utf-8")
 
 
 def test_clear_button_wired_for_all_tabs():
-    assert "data-vwsh-clear" in _INDEX
-    assert "function clearAll(" in _JS
-    assert "/api/video/wishlist/clear" in _JS
-    assert "kind: kind" in _JS                       # clears the active tab
-    # shown only when the active tab has items
-    assert "function updateClearBtn(" in _JS
+    assert "apiClient.post('video/wishlist/clear', { json: { kind } })" in _API
+    # clears the ACTIVE tab: movies -> movie, tv -> show, youtube -> youtube
+    assert "clearVideoWishlist(MEDIA_KIND[media])" in _ACTIONS
+    # confirms first, with the old wording
+    assert "Remove ALL ${label} from your wishlist? This can’t be undone." in _ACTIONS
+    # offered only when the active tab has items
+    assert "{tabHasItems ? (" in _PAGE and "key: 'clear'" in _PAGE
 
 
 def test_nav_badge_uses_the_endpoint_total_not_a_partial_sum():
-    # regression: movie/episode and YouTube counts load separately, so neither setter may
-    # compute the nav badge from its partial state (it 'switches' to the TV-only number).
-    # Both must defer to the authoritative /wishlist/counts endpoint via refreshBadge().
-    import re
-    sc = _JS[_JS.index("function setCounts("):_JS.index("function setYtCounts(")]
-    syc = _JS[_JS.index("function setYtCounts("):]
-    syc = syc[:syc.index("function ", 1)]
-    assert "refreshBadge();" in sc and "refreshBadge();" in syc
-    assert "state.counts.movie + state.counts.episode" not in _JS   # old partial-total math gone
-    assert "/api/video/wishlist/counts" in _JS                       # the endpoint is the source
+    # regression: movie/episode and YouTube counts load separately, so nothing may
+    # compute the nav badge from a partial state (it 'switched' to the TV-only number).
+    # The badge reads the authoritative /wishlist/counts total and nothing else.
+    assert "/api/video/wishlist/counts" in _JS
+    assert "updateBadges(d.total)" in _JS
+    assert "state.counts" not in _JS                       # no partial-total state at all
+    # and every change anywhere refreshes it
+    assert "addEventListener('soulsync:video-wishlist-changed', refreshBadge)" in _JS
 
 
 def test_nav_badge_polls_for_server_side_wishlist_changes():

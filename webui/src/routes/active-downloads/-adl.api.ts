@@ -60,6 +60,22 @@ export async function fetchTaskDetail(taskId: string): Promise<AdlTaskDetail | n
   }
 }
 
+/**
+ * How many downloads the history holds, for the header's History button.
+ * One row asked for, only the total read. null on any failure: the button
+ * just shows no number.
+ */
+export async function fetchMusicHistoryCount(): Promise<number | null> {
+  try {
+    const data = await readJson<{ success?: boolean; total?: number }>(
+      apiClient.get('library/history', { searchParams: { type: 'download', limit: 1 } }),
+    );
+    return data?.success && typeof data.total === 'number' ? data.total : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Completed batches for the history rail — 7 days, 50 max, as the vanilla asked. */
 export async function fetchBatchHistory(): Promise<AdlBatchHistoryEntry[]> {
   try {
@@ -114,22 +130,36 @@ export async function fetchReviewQueueSummary(): Promise<AdlReviewSummary | null
   }
 }
 
+/** Page size for the paginated quarantine list. */
+export const QUARANTINE_PAGE_SIZE = 100;
+
 /**
- * The list, or the reason it could not be fetched. Failure must be
- * distinguishable from empty: the server reads one sidecar per entry, so a
- * big quarantine can outlast ky's 10s default - swallowing that into []
- * showed "hundreds in the badge, list empty" (user report, aug 25).
+ * The list (or one page of it), or the reason it could not be fetched.
+ * Failure must be distinguishable from empty: the server reads one sidecar
+ * per entry, so a big quarantine can outlast ky's 10s default - swallowing
+ * that into [] showed "hundreds in the badge, list empty" (user report,
+ * aug 25). When `page` is given the server slices before annotating, so
+ * only that page pays the library-presence cost; `total` is the full
+ * count and falls back to the page length when the server omits it.
  */
-export async function fetchQuarantine(): Promise<
-  { entries: AdlQuarantineEntry[] } | { error: string }
-> {
+export async function fetchQuarantine(page?: {
+  limit: number;
+  offset: number;
+}): Promise<{ entries: AdlQuarantineEntry[]; total: number } | { error: string }> {
   try {
     const data = await readJson<{
       success?: boolean;
       error?: string;
       entries?: AdlQuarantineEntry[];
-    }>(apiClient.get('quarantine/list', { timeout: 60000 }));
-    if (data?.success && Array.isArray(data.entries)) return { entries: data.entries };
+      total?: number;
+    }>(
+      apiClient.get('quarantine/list', {
+        timeout: 60000,
+        ...(page ? { searchParams: { limit: page.limit, offset: page.offset } } : {}),
+      }),
+    );
+    if (data?.success && Array.isArray(data.entries))
+      return { entries: data.entries, total: data.total ?? data.entries.length };
     return { error: data?.error || 'the server said no' };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };

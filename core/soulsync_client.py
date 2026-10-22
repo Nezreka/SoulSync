@@ -13,6 +13,7 @@ import threading
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from core.text.normalize import fold_dashes
 from utils.logging_config import get_logger
 
 logger = get_logger("soulsync_client")
@@ -88,34 +89,36 @@ def _read_tags(file_path: str) -> Dict[str, Any]:
     return result
 
 
-class SoulSyncTrack:
-    """Track object compatible with DatabaseUpdateWorker expectations."""
+from core.media_server.items import MediaAlbum, MediaArtist, MediaTrack
+
+
+class SoulSyncTrack(MediaTrack):
+    """A file on disk read through its tags. Shape owned by ``core.media_server.items``."""
+    server = 'soulsync'
 
     def __init__(self, file_path: str, tags: Dict[str, Any], artist_ref=None, album_ref=None):
+        exists = os.path.exists(file_path)
+        try:
+            file_size = os.path.getsize(file_path) if exists else None
+        except OSError:
+            file_size = None
+        super().__init__(
+            _stable_id(file_path),
+            tags['title'],
+            added_at=datetime.fromtimestamp(os.path.getmtime(file_path)) if exists else datetime.now(),
+            duration_ms=tags['duration_ms'],
+            track_number=tags['track_number'] or None,
+            disc_number=tags['disc_number'] or 1,
+            year=int(tags['year']) if tags['year'] else None,
+            path=file_path,
+            bitrate_kbps=tags['bitrate'],
+            file_size=file_size,
+            suffix=os.path.splitext(file_path)[1].lstrip('.').lower(),
+        )
         self.file_path = file_path
         self._tags = tags
         self._artist_ref = artist_ref
         self._album_ref = album_ref
-
-        self.ratingKey = _stable_id(file_path)
-        self.title = tags['title']
-        self.duration = tags['duration_ms']
-        self.trackNumber = tags['track_number'] or None
-        self.discNumber = tags['disc_number'] or 1
-        self.year = int(tags['year']) if tags['year'] else None
-        self.userRating = None
-        self.addedAt = datetime.fromtimestamp(os.path.getmtime(file_path)) if os.path.exists(file_path) else datetime.now()
-        self.path = file_path
-        self.bitRate = tags['bitrate']
-        self.suffix = os.path.splitext(file_path)[1].lstrip('.').lower()
-        # File size in bytes (powers Library Disk Usage card on Stats).
-        # SoulSync standalone is the only "server" where we can read
-        # size from disk directly — Plex/Jellyfin/Navidrome get theirs
-        # from the API response.
-        try:
-            self.file_size = os.path.getsize(file_path) if os.path.exists(file_path) else None
-        except OSError:
-            self.file_size = None
 
     def artist(self):
         return self._artist_ref
@@ -172,40 +175,37 @@ def _split_by_release(entries: List) -> List:
     return list(groups.items())
 
 
-class SoulSyncAlbum:
-    """Album object compatible with DatabaseUpdateWorker expectations."""
+class SoulSyncAlbum(MediaAlbum):
+    """An album folder's worth of files. Shape owned by ``core.media_server.items``."""
+    server = 'soulsync'
 
     def __init__(self, album_key: str, title: str, year: Optional[int],
                  artist_ref=None, track_list: List[SoulSyncTrack] = None):
-        self.ratingKey = _stable_id(album_key)
-        self.title = title
-        self.year = year
-        self._artist_ref = artist_ref
-        self._tracks = track_list or []
-        self.thumb = None
-        self.addedAt = datetime.now()
-        self.leafCount = len(self._tracks)  # Plex compat: track count
-        self.duration = sum(t.duration for t in self._tracks)  # Total duration in ms
-
-        # Collect genres from track tags
+        tracks = track_list or []
         genre_set = set()
-        for t in self._tracks:
+        for t in tracks:
             if t._tags.get('genre'):
                 genre_set.add(t._tags['genre'])
-        self.genres = list(genre_set)
-
-        # Set addedAt from earliest track
-        if self._tracks:
-            self.addedAt = min(t.addedAt for t in self._tracks)
-
-        # Check for cover art in the album folder
-        if self._tracks:
-            album_dir = os.path.dirname(self._tracks[0].file_path)
+        thumb = None
+        if tracks:
+            album_dir = os.path.dirname(tracks[0].file_path)
             for cover_name in ['cover.jpg', 'cover.png', 'folder.jpg', 'folder.png']:
                 cover_path = os.path.join(album_dir, cover_name)
                 if os.path.isfile(cover_path):
-                    self.thumb = cover_path
+                    thumb = cover_path
                     break
+        super().__init__(
+            _stable_id(album_key),
+            title,
+            added_at=min(t.addedAt for t in tracks) if tracks else datetime.now(),
+            year=year,
+            thumb=thumb,
+            genres=list(genre_set),
+        )
+        self._artist_ref = artist_ref
+        self._tracks = tracks
+        self.leafCount = len(self._tracks)  # Plex compat: track count
+        self.duration = sum(t.duration for t in self._tracks)  # Total duration in ms
 
     def artist(self):
         return self._artist_ref
@@ -214,44 +214,44 @@ class SoulSyncAlbum:
         return self._tracks
 
 
-class SoulSyncArtist:
-    """Artist object compatible with DatabaseUpdateWorker expectations."""
+class SoulSyncArtist(MediaArtist):
+    """An artist folder. Shape owned by ``core.media_server.items``."""
+    server = 'soulsync'
 
     def __init__(self, artist_key: str, title: str, album_list: List[SoulSyncAlbum] = None):
-        self.ratingKey = _stable_id(artist_key)
-        self.title = title
-        self._albums = album_list or []
-        self.genres = []
-        self.summary = ''
-        self.thumb = None
-        self.addedAt = datetime.now()
-
-        # Collect genres from tracks
+        albums = album_list or []
         genre_set = set()
-        for album in self._albums:
+        thumb = None
+        for album in albums:
             for track in album.tracks():
                 if track._tags.get('genre'):
                     genre_set.add(track._tags['genre'])
-        self.genres = list(genre_set)
-
-        # Set addedAt from earliest album
-        if self._albums:
-            self.addedAt = min(a.addedAt for a in self._albums)
-
-        # Use first album's thumb as artist thumb
-        for album in self._albums:
-            if album.thumb:
-                self.thumb = album.thumb
-                break
+            if thumb is None and album.thumb:
+                thumb = album.thumb
+        super().__init__(
+            _stable_id(artist_key),
+            title,
+            added_at=min(a.addedAt for a in albums) if albums else datetime.now(),
+            genres=list(genre_set),
+            summary='',
+            thumb=thumb,
+        )
+        self._albums = albums
 
     def albums(self):
         return self._albums
 
 
-from core.media_server.contract import MediaServerClient
+from core.media_server.base import MediaServerBase
+from core.media_server.contract import Capability
 
 
-class SoulSyncClient(MediaServerClient):
+class SoulSyncClient(MediaServerBase):
+    # Reads the files itself, so a tag write is visible on the next scan.
+    CAPABILITIES = frozenset({
+        Capability.RECENTLY_ADDED, Capability.SCAN_TRIGGER, Capability.TAGS_AUTODETECTED,
+    })
+
     """Filesystem-based media server client for standalone SoulSync operation.
 
     Scans the Transfer folder recursively, reads audio file tags, and
@@ -393,7 +393,9 @@ class SoulSyncClient(MediaServerClient):
                 else:
                     album_name = tags['title'] or 'Unknown Album'
 
-            a_key = artist_name.lower().strip()
+            # #1797: alt-J with a U+2010 hyphen and with ascii is one artist; the first
+            # spelling seen stays the display name
+            a_key = fold_dashes(artist_name).lower().strip()
             al_key = album_name.lower().strip()
 
             if a_key not in artist_map:

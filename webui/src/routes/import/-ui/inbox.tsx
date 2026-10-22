@@ -267,6 +267,8 @@ export function Inbox({
         size: f.size,
         duration_ms: f.duration_ms,
         bitrate: f.bitrate,
+        // "from tags" is a promise: no catalogue lookup on the server (#1772)
+        from_own_tags: true,
       };
     });
     addQueueJob({

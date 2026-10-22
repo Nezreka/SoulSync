@@ -58,7 +58,7 @@ const NO_HANDLERS = {
 
 function renderList(
   groups: QuarantineGroup[],
-  onDeleteGroup?: (entry: AdlQuarantineEntry, count: number) => void,
+  onDeleteGroup?: (entry: AdlQuarantineEntry, count: number | null) => void,
 ) {
   return render(
     <AdlQuarantineList
@@ -92,9 +92,11 @@ describe('the quarantine group row', () => {
       [{ key: 'g', members: [entry('q1'), entry('q2'), entry('q3')] }],
       onDeleteGroup,
     );
-    const button = container.querySelector('.verif-quar-alt-del') as HTMLElement;
-    // 3 attempts, two folded away, but deleting takes all THREE.
-    expect(container.querySelector('.verif-quar-attempts')?.textContent).toContain('3 attempts');
+    const button = [...container.querySelectorAll('.dlc-qhead .dlc-btn')].find((b) =>
+      b.textContent?.startsWith('Delete all'),
+    ) as HTMLElement;
+    // 3 attempts, all folded away, but deleting takes all THREE.
+    expect(container.querySelector('.dlc-attempts')?.textContent).toContain('3 attempts');
     expect(button.textContent).toContain('Delete all 3');
 
     fireEvent.click(button);
@@ -104,14 +106,13 @@ describe('the quarantine group row', () => {
   it('leaves a lone entry alone', () => {
     // One candidate is not a group; it already has a Delete of its own.
     const { container } = renderList([{ key: 'g', members: [entry('q1')] }], vi.fn());
-    expect(container.querySelector('.verif-quar-alt-del')).toBeNull();
-    expect(container.querySelector('.verif-quar-alt-btn')).toBeNull();
+    expect(container.querySelector('.dlc-qhead')).toBeNull();
   });
 
   it('shows no group delete when the page does not wire one', () => {
     const { container } = renderList([{ key: 'g', members: [entry('q1'), entry('q2')] }]);
-    expect(container.querySelector('.verif-quar-alt-del')).toBeNull();
-    expect(container.querySelector('.verif-quar-alt-btn')).not.toBeNull();
+    expect(container.querySelector('.dlc-qhead .dlc-btn')).toBeNull();
+    expect(container.querySelector('.dlc-qhead')).not.toBeNull();
   });
 });
 

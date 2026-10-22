@@ -76,7 +76,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 53   # v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 54   # v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -302,6 +302,10 @@ _COLUMN_MIGRATIONS = [
     # series type (P8, Sonarr parity): standard | daily | anime — drives how the
     # drain QUERIES for episodes (SxxExx vs air date vs absolute number).
     ("shows", "series_type", "TEXT"),
+    # which media-server library the show was scanned from (Plex section /
+    # Jellyfin view title). a library marked anime makes its shows anime
+    # (see effective_series_type); NULL for rows scanned before v54.
+    ("shows", "library_name", "TEXT"),
     # Per-title acquisition overrides (arr-parity P2). JSON lists / a keyword;
     # NULL or empty means "follow the global config", which is the only safe
     # reading of an unset override — an empty allow-list that FILTERED would
@@ -557,6 +561,36 @@ def _dedupe_wishlist_by_media(rows: list, key_fn) -> list:
         seen.setdefault(key_fn(r), r)
     return list(seen.values())
 
+
+
+def _show_type_sql(tmdb_expr: str, *, with_genre: bool) -> str:
+    """SQL for a show's series type, looked up by the TMDB id ``tmdb_expr``.
+
+    In priority order, first non-NULL wins:
+      1. a type set by hand on any of the show's library rows (MAX: a type on
+         ANY server's row wins over a NULL sibling);
+      2. 'anime' when the show sits in a library the admin marked as anime
+         (``<server>.anime_libraries``, a JSON list of library titles);
+      3. for a show in NO library yet: its stored hint (``show_type_hints``),
+         suggested from TMDB when it was followed, or chosen by an admin;
+      4. ``with_genre`` only: 'anime' when the show carries the Anime genre.
+
+    Search passes ``with_genre=True`` (upstream's P8 numbering rule, kept as a
+    last fallback). Routing a download to a library folder passes False: where
+    a show is FILED is the admin's call, and a show filed under TV that TMDB
+    tags Anime stays with TV. NULL means standard."""
+    lib = ("(SELECT 'anime' FROM shows s WHERE s.tmdb_id = {t} AND s.library_name IS NOT NULL "
+           "AND s.library_name IN (SELECT j.value FROM json_each(COALESCE("
+           "(SELECT CASE WHEN json_valid(vs.value) THEN vs.value END FROM video_settings vs "
+           "WHERE vs.key = s.server_source || '.anime_libraries'), '[]')) j) LIMIT 1)")
+    hint = ("(SELECT h.series_type FROM show_type_hints h WHERE h.tmdb_id = {t} "
+            "AND NOT EXISTS (SELECT 1 FROM shows s WHERE s.tmdb_id = {t}))")
+    hand = "(SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = {t})"
+    genre = ("(SELECT 'anime' FROM shows s JOIN show_genres sg ON sg.show_id = s.id "
+             "JOIN genres g ON g.id = sg.genre_id WHERE s.tmdb_id = {t} "
+             "AND lower(g.name) = 'anime' LIMIT 1)")
+    parts = [hand, lib, hint] + ([genre] if with_genre else [])
+    return "COALESCE(" + ", ".join(part.format(t=tmdb_expr) for part in parts) + ")"
 
 class VideoDatabase:
     """Connection + schema manager for the isolated video library DB."""
@@ -3783,14 +3817,29 @@ class VideoDatabase:
 
     # ── library mapping (which server library is Movies / TV) ─────────────────
     def get_library_selection(self, server: str) -> dict:
+        """The picked libraries for ``server``. ``movies`` / ``tv`` are the main
+        picks (one title each, None = never picked, '' = picked none). ``tv_more``
+        lists further TV libraries to scan as well, and ``anime`` the TV
+        libraries whose shows are anime (both lists of titles)."""
         return {
             "movies": self.get_setting(server + ".movies_library"),
             "tv": self.get_setting(server + ".tv_library"),
+            "tv_more": self._json_title_list(self.get_setting(server + ".tv_libraries_more")),
+            "anime": self.anime_libraries(server),
         }
 
-    def set_library_selection(self, server: str, movies, tv) -> None:
+    def set_library_selection(self, server: str, movies, tv, tv_more=None, anime=None) -> None:
+        """Save the picks. ``tv_more`` / ``anime`` are left as they are when not
+        passed (None), so an older caller saving just movies + tv keeps them."""
         self.set_setting(server + ".movies_library", movies or "")
         self.set_setting(server + ".tv_library", tv or "")
+        if tv_more is not None:
+            clean = self._json_title_list(json.dumps(list(tv_more) if isinstance(tv_more, (list, tuple)) else []))
+            main = str(tv or "").strip()
+            self.set_setting(server + ".tv_libraries_more", json.dumps([t for t in clean if t != main]))
+        if anime is not None:
+            clean = self._json_title_list(json.dumps(list(anime) if isinstance(anime, (list, tuple)) else []))
+            self.set_setting(server + ".anime_libraries", json.dumps(clean))
 
     # ── dashboard ─────────────────────────────────────────────────────────────
     def enrichment_coverage(self) -> dict:
@@ -4328,6 +4377,10 @@ class VideoDatabase:
                 "first_air_date": item.get("first_air_date"), "last_air_date": item.get("last_air_date"),
                 "watched_episodes": item.get("watched_episodes"),
                 "poster_url": item.get("poster_url"),
+                # the library the scan read it from (anime-marked libraries make
+                # their shows anime); only written when the source says, so a
+                # re-key lookup that doesn't know keeps the scanned value
+                **({"library_name": item["library"]} if item.get("library") else {}),
             }, {"tvdb_id": item.get("tvdb_id"), "tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
                 preserve_enrichment=preserve_enrichment)
             show_id = conn.execute(
@@ -4689,8 +4742,13 @@ class VideoDatabase:
             conn.close()
 
         try:
-            key = "movies_path" if kind == "movie" else "tv_path"
-            out["target_dir"] = self.get_setting(key) or None
+            if kind == "movie":
+                out["target_dir"] = self.get_setting("movies_path") or None
+            else:
+                from core.video.download_pipeline import tv_root_for
+                out["target_dir"] = tv_root_for(
+                    self.routing_series_type(tmdb_id=tmdb_id),
+                    self.get_setting("tv_path"), self.get_setting("anime_path")) or None
         except Exception:   # noqa: BLE001 - a diagnostic must never raise
             out["target_dir"] = None
         return out
@@ -5270,16 +5328,24 @@ class VideoDatabase:
             conn.close()
 
     def duplicate_collection_definition(self, definition_id: int) -> int | None:
+        from core.video.collections.poster_gen import is_generated_ref
         src = self.get_collection_definition(definition_id)
         if not src:
             return None
+        # a generated poster url points at the SOURCE's file, the copy can't push
+        # it and never got its own. drop it so the copy renders fresh art.
+        poster = src.get("poster_url")
+        if is_generated_ref(poster):
+            poster = None
         return self.create_collection_definition(
             (src.get("name") or "Untitled") + " (copy)",
             kind=src.get("kind", "smart"), media_type=src.get("media_type", "movie"),
-            definition=src.get("definition") or {}, poster_url=src.get("poster_url"),
+            definition=src.get("definition") or {}, poster_url=poster,
             summary=src.get("summary"), sort_order=src.get("sort_order", "release"),
             sync_mode=src.get("sync_mode", "sync"), pinned=bool(src.get("pinned")),
-            wishlist_missing=bool(src.get("wishlist_missing")), enabled=bool(src.get("enabled")))
+            wishlist_missing=bool(src.get("wishlist_missing")), enabled=bool(src.get("enabled")),
+            window_start=src.get("window_start"), window_end=src.get("window_end"),
+            collection_mode=src.get("collection_mode"))
 
     def resolve_smart_members(self, media_type: str, definition: dict) -> list:
         """Owned library items matching a smart definition's rules. Raises
@@ -7799,17 +7865,30 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def tvdb_season_store(self, tvdb_id, season_number, episodes) -> None:
+    def tvdb_season_store(self, tvdb_id, season_number, episodes, fetched_at=None) -> None:
         """cache a TVDB season's [(episode_number, air_date), ...]; an empty list
         is stored too, so a season TVDB doesn't have isn't asked again all week."""
         conn = self._get_connection()
         try:
-            conn.execute(
-                "INSERT INTO tvdb_episode_cache (tvdb_id, season_number, episodes, fetched_at) "
-                "VALUES (?, ?, ?, datetime('now')) ON CONFLICT(tvdb_id, season_number) DO UPDATE SET "
-                "episodes=excluded.episodes, fetched_at=excluded.fetched_at",
-                (int(tvdb_id), int(season_number),
-                 json.dumps([[int(n), d] for n, d in episodes or []])))
+            if fetched_at is not None:
+                if hasattr(fetched_at, "strftime"):
+                    fetched_str = fetched_at.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    fetched_str = str(fetched_at)
+                conn.execute(
+                    "INSERT INTO tvdb_episode_cache (tvdb_id, season_number, episodes, fetched_at) "
+                    "VALUES (?, ?, ?, ?) ON CONFLICT(tvdb_id, season_number) DO UPDATE SET "
+                    "episodes=excluded.episodes, fetched_at=excluded.fetched_at",
+                    (int(tvdb_id), int(season_number),
+                     json.dumps([[int(n), d] for n, d in episodes or []]),
+                     fetched_str))
+            else:
+                conn.execute(
+                    "INSERT INTO tvdb_episode_cache (tvdb_id, season_number, episodes, fetched_at) "
+                    "VALUES (?, ?, ?, datetime('now')) ON CONFLICT(tvdb_id, season_number) DO UPDATE SET "
+                    "episodes=excluded.episodes, fetched_at=excluded.fetched_at",
+                    (int(tvdb_id), int(season_number),
+                     json.dumps([[int(n), d] for n, d in episodes or []])))
             conn.commit()
         finally:
             conn.close()
@@ -7848,12 +7927,14 @@ class VideoDatabase:
                 # series type (P8): daily/anime shows QUERY differently (air date /
                 # absolute number). NULL for shows not in the library = standard.
                 # MAX = a type set on ANY server's row wins over a NULL sibling.
-                "COALESCE((SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id), "
                 # no type set: a show tagged Anime is numbered the anime way
-                # (One Piece S23E1177 is 'One Piece - 1177'). a type set by hand wins.
-                "  (SELECT 'anime' FROM shows s JOIN show_genres sg ON sg.show_id = s.id "
-                "   JOIN genres g ON g.id = sg.genre_id WHERE s.tmdb_id = w.tmdb_id "
-                "   AND lower(g.name) = 'anime' LIMIT 1)) AS series_type, "
+                # (One Piece S23E1177 is 'One Piece - 1177'). a type set by hand
+                # wins, then an anime-marked library, then the hint for a show not
+                # in any library yet (see _show_type_sql).
+                + _show_type_sql("w.tmdb_id", with_genre=True) + " AS series_type, "
+                # where the episode is FILED: the same rule without the genre
+                # fallback (anime library folder routing).
+                + _show_type_sql("w.tmdb_id", with_genre=False) + " AS route_series_type, "
                 # External ids for the indexer search. A tvdbid is what Sonarr hands
                 # Newznab so id-aware indexers resolve the series exactly instead of
                 # matching on a title that scene naming may spell differently. MAX
@@ -7939,12 +8020,14 @@ class VideoDatabase:
                 "  AS owned_resolutions, "
                 "COALESCE(w.quality_profile_id, (SELECT s.quality_profile_id FROM shows s "
                 "  WHERE s.tmdb_id = w.tmdb_id)) AS quality_profile_id, "
-                "COALESCE((SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id), "
                 # no type set: a show tagged Anime is numbered the anime way
-                # (One Piece S23E1177 is 'One Piece - 1177'). a type set by hand wins.
-                "  (SELECT 'anime' FROM shows s JOIN show_genres sg ON sg.show_id = s.id "
-                "   JOIN genres g ON g.id = sg.genre_id WHERE s.tmdb_id = w.tmdb_id "
-                "   AND lower(g.name) = 'anime' LIMIT 1)) AS series_type, "
+                # (One Piece S23E1177 is 'One Piece - 1177'). a type set by hand
+                # wins, then an anime-marked library, then the hint for a show not
+                # in any library yet (see _show_type_sql).
+                + _show_type_sql("w.tmdb_id", with_genre=True) + " AS series_type, "
+                # where the episode is FILED: the same rule without the genre
+                # fallback (anime library folder routing).
+                + _show_type_sql("w.tmdb_id", with_genre=False) + " AS route_series_type, "
                 "(SELECT MAX(s.tvdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS tvdb_id, "
                 "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id, "
                 "(SELECT MIN(COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER))) "
@@ -8531,6 +8614,133 @@ class VideoDatabase:
             return False
         finally:
             conn.close()
+
+    def _series_type_lookup(self, tmdb_id, library_id, *, with_genre: bool) -> str:
+        """Shared body of effective/routing_series_type. Never raises."""
+        conn = self._get_connection()
+        try:
+            tmdb = tmdb_id
+            if tmdb in (None, "") and library_id not in (None, ""):
+                row = conn.execute("SELECT tmdb_id FROM shows WHERE id=?",
+                                   (int(library_id),)).fetchone()
+                tmdb = row["tmdb_id"] if row else None
+                if tmdb in (None, ""):
+                    # a library row with no TMDB id: judge that row alone
+                    # (hand-set type, then its library, then -- search only --
+                    # its genre); there is no hint to read without an id
+                    lib_sql = ("(SELECT 'anime' FROM shows s WHERE s.id = ? AND s.library_name IN "
+                               "(SELECT j.value FROM json_each(COALESCE((SELECT CASE WHEN "
+                               "json_valid(vs.value) THEN vs.value END FROM video_settings vs "
+                               "WHERE vs.key = s.server_source || '.anime_libraries'), '[]')) j))")
+                    genre_sql = ("(SELECT 'anime' FROM show_genres sg JOIN genres g ON g.id = sg.genre_id "
+                                 "WHERE sg.show_id = ? AND lower(g.name) = 'anime' LIMIT 1)")
+                    sql = ("SELECT COALESCE((SELECT series_type FROM shows WHERE id = ?), " + lib_sql
+                           + ((", " + genre_sql) if with_genre else "") + ") AS st")
+                    args = [int(library_id)] * (3 if with_genre else 2)
+                    row = conn.execute(sql, args).fetchone()
+                    st = str((row["st"] if row else "") or "").strip().lower()
+                    return st if st in ("daily", "anime") else "standard"
+            if tmdb in (None, ""):
+                return "standard"
+            row = conn.execute("SELECT " + _show_type_sql("?1", with_genre=with_genre) + " AS st",
+                               (int(tmdb),)).fetchone()
+            st = str((row["st"] if row else "") or "").strip().lower()
+            return st if st in ("daily", "anime") else "standard"
+        except (sqlite3.Error, ValueError, TypeError):
+            logger.exception("series type lookup failed")
+            return "standard"
+        finally:
+            conn.close()
+
+    def effective_series_type(self, tmdb_id=None, library_id=None) -> str:
+        """A show's series type for SEARCH: 'standard' | 'daily' | 'anime'.
+
+        Same rule the episode wishlist uses for ``series_type`` (see
+        ``_show_type_sql``): set by hand, else an anime-marked library, else the
+        hint for a show in no library, else the Anime genre. Looked up by TMDB id
+        or by a library show id (resolved to its TMDB id so sibling rows from
+        other servers count). 'standard' when unknown -- never raises."""
+        return self._series_type_lookup(tmdb_id, library_id, with_genre=True)
+
+    def routing_series_type(self, tmdb_id=None, library_id=None) -> str:
+        """A show's series type for deciding which library FOLDER it is filed in.
+
+        ``effective_series_type`` without the genre fallback: a show the admin
+        filed under TV stays with TV even when TMDB tags it Anime. Same lookup
+        keys and never-raises contract."""
+        return self._series_type_lookup(tmdb_id, library_id, with_genre=False)
+
+    def owns_show(self, tmdb_id) -> bool:
+        """True when any library row carries this TMDB id. Never raises."""
+        conn = self._get_connection()
+        try:
+            return conn.execute("SELECT 1 FROM shows WHERE tmdb_id=? LIMIT 1",
+                                (int(tmdb_id),)).fetchone() is not None
+        except (sqlite3.Error, ValueError, TypeError):
+            return False
+        finally:
+            conn.close()
+
+    def show_type_hint(self, tmdb_id) -> dict | None:
+        """The stored type for a show not in any library: {series_type, source}
+        or None. Never raises."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT series_type, source FROM show_type_hints WHERE tmdb_id=?",
+                               (int(tmdb_id),)).fetchone()
+            return {"series_type": row["series_type"], "source": row["source"]} if row else None
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+        finally:
+            conn.close()
+
+    def set_show_type_hint(self, tmdb_id, series_type, source: str = "user") -> bool:
+        """Store the type of a show not in any library. A TMDB suggestion
+        (source 'tmdb') never replaces a type an admin chose (source 'user')."""
+        st = str(series_type or "").strip().lower()
+        src = "tmdb" if str(source or "").lower() == "tmdb" else "user"
+        if st not in ("standard", "daily", "anime"):
+            return False
+        conn = self._get_connection()
+        try:
+            if src == "tmdb":
+                cur = conn.execute(
+                    "INSERT INTO show_type_hints (tmdb_id, series_type, source) VALUES (?, ?, 'tmdb') "
+                    "ON CONFLICT(tmdb_id) DO UPDATE SET series_type=excluded.series_type, "
+                    "source='tmdb', updated_at=datetime('now') WHERE show_type_hints.source='tmdb'",
+                    (int(tmdb_id), st))
+            else:
+                cur = conn.execute(
+                    "INSERT INTO show_type_hints (tmdb_id, series_type, source) VALUES (?, ?, 'user') "
+                    "ON CONFLICT(tmdb_id) DO UPDATE SET series_type=excluded.series_type, "
+                    "source='user', updated_at=datetime('now')",
+                    (int(tmdb_id), st))
+            conn.commit()
+            return cur.rowcount > 0
+        except (sqlite3.Error, ValueError, TypeError):
+            logger.exception("set_show_type_hint failed")
+            return False
+        finally:
+            conn.close()
+
+    def anime_libraries(self, server: str) -> list:
+        """Titles of the TV libraries on ``server`` marked as anime."""
+        return self._json_title_list(self.get_setting(str(server) + ".anime_libraries"))
+
+    @staticmethod
+    def _json_title_list(raw) -> list:
+        try:
+            v = json.loads(raw) if raw else []
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(v, list):
+            return []
+        out = []
+        for x in v:
+            t = str(x).strip() if isinstance(x, str) else ""
+            if t and t not in out:
+                out.append(t)
+        return out
 
     def episode_absolute_number(self, show_tmdb_id, season_number, episode_number):
         """The episode's ABSOLUTE number (anime numbering, P8): its 1-based position

@@ -12,15 +12,11 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { WishlistArtistGroup } from '../-wishlist.types';
 
 import { WishlistOrb } from './wishlist-orb';
-
-vi.mock('../../../features/downloads/inspector-modal', () => ({
-  openWishlistInspector: vi.fn(),
-}));
 
 afterEach(cleanup);
 
@@ -81,8 +77,6 @@ function renderOrb() {
       processing={false}
       expanded={false}
       onToggleExpand={() => {}}
-      onRemoveAlbum={() => {}}
-      onRemoveTrack={() => {}}
     />,
   );
 }

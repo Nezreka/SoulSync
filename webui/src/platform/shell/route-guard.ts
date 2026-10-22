@@ -19,8 +19,12 @@ import { getShellRouteByPageId } from './route-manifest';
  * for hours once /discover — the test bridge's home page — became a gated
  * React route. Rendering the denied home page is the only loop-free option.
  */
-export function guardPageAccess(bridge: ShellBridge, pageId: ShellPageId): void {
-  if (bridge.isPageAllowed(pageId)) return;
+export function guardPageAccess(bridge: ShellBridge, pageId: ShellPageId, search?: string): void {
+  // search is passed only by pages that show another side's view under
+  // ?media= (the wishlist's video tabs), so the shell can ask THAT page's
+  // permission. every other route keeps the one-argument call.
+  if (search === undefined ? bridge.isPageAllowed(pageId) : bridge.isPageAllowed(pageId, search))
+    return;
 
   const home = getProfileHomePath(bridge);
   if (home === getShellRouteByPageId(pageId)?.path) return;

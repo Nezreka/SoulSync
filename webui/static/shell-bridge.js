@@ -116,7 +116,8 @@ function syncActivePageFromLocation() {
     const targetPage = router?.resolvePageId?.((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname)) || _getPageFromPath((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname));
     if (!targetPage) return;
 
-    if (!isPageAllowed(targetPage)) {
+    // media-aware: Back onto /wishlist?media=tv asks the video wishlist's permission.
+    if (!isPageAccessAllowed(targetPage, window.location.search)) {
         const home = getProfileHomePage();
         if (home !== targetPage) {
             navigateToPage(home, { replace: true });
@@ -177,8 +178,10 @@ window.SoulSyncWebShellBridge = {
             isAdmin: !!currentProfile.is_admin,
         };
     },
-    isPageAllowed(pageId) {
-        return isPageAllowed(pageId);
+    // search (optional) makes it media-aware: /wishlist?media=tv is the video
+    // wishlist and asks for that page's permission. see isPageAccessAllowed.
+    isPageAllowed(pageId, search) {
+        return search === undefined ? isPageAllowed(pageId) : isPageAccessAllowed(pageId, search);
     },
     getProfileHomePage() {
         return getProfileHomePage();

@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
+import type { PipelineRunOptions } from './-sync.api';
 import type { MirroredPipelineState } from './-sync.pipeline';
 
 import { fetchMirroredPipelineStatus, runMirroredPipeline } from './-sync.api';
@@ -34,7 +35,7 @@ import {
 
 export interface PipelineController {
   /** The Auto-Sync button: POST, apply the state, then poll (2467). */
-  run: (playlistId: number, name: string, opts?: { refreshOnly?: boolean }) => Promise<void>;
+  run: (playlistId: number, name: string, opts?: PipelineRunOptions) => Promise<void>;
   /**
    * Restart polling for a row the backend already reports as running, unless
    * a poller for it is live (653-655). Safe to call on every render.
@@ -123,7 +124,7 @@ export function useMirroredPipeline({ onState, reload }: UsePipelineOptions): Pi
   );
 
   const run = useCallback(
-    async (playlistId: number, name: string, opts: { refreshOnly?: boolean } = {}) => {
+    async (playlistId: number, name: string, opts: PipelineRunOptions = {}) => {
       try {
         const data = await runMirroredPipeline(playlistId, opts);
         if (!alive.current) return;

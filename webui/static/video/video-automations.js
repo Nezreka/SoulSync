@@ -57,18 +57,40 @@
         var host = document.querySelector('[data-vauto-list]'); if (!host) return;
         var emptyEl = document.querySelector('[data-vauto-empty]');
         if (emptyEl) emptyEl.style.display = anyAtAll ? 'none' : '';
-        var existing = host.querySelector('#vauto-section-system');
-        if (!sys.length) {
-            if (existing) existing.remove();
-            return;
+        host.querySelectorAll('[data-vauto-system-section]').forEach(function (el) { el.remove(); });
+        var oldLegacy = host.querySelector('#vauto-section-system');
+        if (oldLegacy) oldLegacy.remove();
+        if (!sys.length || typeof window._buildAutomationSection !== 'function') return;
+
+        var maintActions = [
+            'video_run_repair_job', 'run_repair_job',
+            'video_clean_search_history', 'video_clean_completed_downloads',
+            'video_full_cleanup', 'video_backup_database',
+            'video_deep_scan_movies', 'video_deep_scan_tv',
+            'video_clean_plex_images', 'video_clean_youtube_episodes',
+            'video_purge_recycle_bin', 'video_reenrich_stale', 'video_seeding_sweep'
+        ];
+        var isMaint = function (a) {
+            if (a.owned_by === 'system:repair_job') return true;
+            return maintActions.indexOf(a.action_type) !== -1;
+        };
+
+        var opSys = sys.filter(function (a) { return !isMaint(a); });
+        var maintSys = sys.filter(function (a) { return isMaint(a); });
+
+        var frag = document.createDocumentFragment();
+        if (opSys.length) {
+            var sOp = window._buildAutomationSection('vauto-section-operations', 'Operations', opSys, true, { isProtected: true });
+            sOp.setAttribute('data-vauto-system-section', '');
+            _injectOverlayConfig(sOp);
+            frag.appendChild(sOp);
         }
-        if (typeof window._buildAutomationSection !== 'function') return;
-        // exact same section the music page builds for its System group (unique id so
-        // it never clashes with the real music page's #auto-section-system).
-        var section = window._buildAutomationSection('vauto-section-system', 'System', sys, true, { isProtected: true });
-        if (existing) host.replaceChild(section, existing);
-        else host.insertBefore(section, host.firstChild);
-        _injectOverlayConfig(section);
+        if (maintSys.length) {
+            var sMaint = window._buildAutomationSection('vauto-section-maintenance', 'Maintenance', maintSys, true, { isProtected: true });
+            sMaint.setAttribute('data-vauto-system-section', '');
+            frag.appendChild(sMaint);
+        }
+        host.insertBefore(frag, host.firstChild);
     }
 
     // The overlay automation's behaviour is driven by the per-scope overlay

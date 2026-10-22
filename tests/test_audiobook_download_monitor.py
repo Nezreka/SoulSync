@@ -228,6 +228,43 @@ def test_a_completed_download_reaches_the_library(db):
     assert db.is_owned("B1") is True
 
 
+def test_a_completed_download_announces_the_import(db):
+    # "Import Complete" automations fired for music only; a finished book
+    # reached the library silently.
+    _wishlisted(db)
+    db.record_download("d1", "B1", "The Final Empire", "torrent", client_id="hash-1",
+                       book={"asin": "B1", "title": "The Final Empire",
+                             "author_names": ["Brandon Sanderson"]})
+    events = []
+
+    with patch("core.audiobook_download_monitor._get_status",
+               return_value=_status("completed")), \
+         patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path), \
+         patch("core.audiobook_download_monitor._check_complete", side_effect=_whole_book), \
+         patch("core.audiobook_download_monitor._organize",
+               return_value={"ok": True, "path": "/library/Sanderson/Book"}), \
+         patch("core.app_events.publish", side_effect=lambda t, d=None: events.append((t, d))):
+        tick(db=db)
+
+    assert events == [("import_completed", {
+        "track_count": "1", "album_name": "The Final Empire", "artist": "Brandon Sanderson",
+    })]
+
+
+def test_a_failed_download_announces_no_completed_import(db):
+    _wishlisted(db)
+    db.record_download("d1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+    events = []
+
+    with patch("core.audiobook_download_monitor._get_status",
+               return_value=_status("error", error="dead torrent")), \
+         patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path), \
+         patch("core.app_events.publish", side_effect=lambda t, d=None: events.append((t, d))):
+        tick(db=db)
+
+    assert "import_completed" not in [event for event, _ in events]
+
+
 def test_a_failed_download_marks_the_wishlist_row(db):
     # So the wishlist retries it later instead of believing it was handled.
     _wishlisted(db)
@@ -1201,3 +1238,61 @@ def test_the_gate_spots_an_ebook(db, tmp_path):
     empty = tmp_path / "arriving"
     empty.mkdir()
     assert not _check_complete(str(empty), row).get("no_audio")
+
+
+# ---------------------------------------------------------------------------
+# #1833 (SimpleSimonLA): a wrong book far longer than the wanted one sat staged
+# for staging_days with the wishlist row stuck on grabbed. waiting can't make a
+# download shorter, so it fails, the release is blocked, the next one is tried
+# ---------------------------------------------------------------------------
+
+def test_an_overshoot_fails_instead_of_staging():
+    patch_out = process_download(
+        _row(), get_status=lambda s, r: _status("completed"),
+        resolve_path=_identity_path, organize=_ok_organize(),
+        check_complete=lambda s, r: {"complete": False, "overshoot": True, "files": 3,
+                                     "reason": "351 minutes for a 74-minute book"},
+    )
+    assert patch_out["status"] == "failed"
+    assert "351 minutes for a 74-minute book" in patch_out["error"]
+
+
+def test_a_short_book_still_stages():
+    patch_out = process_download(
+        _row(), get_status=lambda s, r: _status("completed"),
+        resolve_path=_identity_path, organize=_ok_organize(),
+        check_complete=_short_book(),
+    )
+    assert patch_out["status"] == "staged"
+
+
+def test_a_wrong_book_overshoot_blocks_the_release_and_tries_the_next(db, fallbacks, tmp_path):
+    # the real gate, the real tick, the real db. "Dangerous Game" wanted at 74
+    # minutes, a different book of the same name at 351 came down
+    db.add_to_wishlist({"asin": "B1", "title": "Dangerous Game",
+                        "author_names": ["Wanted Author"]})
+    db.mark_wishlist_status("B1", "grabbed")
+    db.record_download("d1", "B1", "Dangerous Game", "usenet", client_id="nzo-1",
+                       book=_stored_book(title="Dangerous Game", runtime_minutes=74,
+                                         narrator_names=[]),
+                       release_title="Other Author - Dangerous Game",
+                       release_guid="guid-wrong", indexer="idx")
+    folder = tmp_path / "Other Author - Dangerous Game"
+    folder.mkdir()
+    (folder / "01.mp3").write_bytes(b"x")
+
+    with patch("core.audiobook_download_monitor._get_status",
+               return_value=_status("completed", save_path=str(folder))), \
+         patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path), \
+         patch("core.audiobook_completeness.measure_duration_seconds", return_value=351 * 60.0), \
+         patch("core.audiobook_download_monitor._organize") as organize:
+        summary = tick(db=db)
+
+    organize.assert_not_called()
+    assert summary["staged"] == 0 and summary["failed"] == 1
+    download = db.get_downloads()[0]
+    assert download["status"] == "failed"
+    assert "Wrong release" in download["error"]
+    assert db.get_wishlist_entry("B1")["status"] == STATUS_FAILED
+    assert any("guid-wrong" in key for key in db.blocked_keys())
+    assert len(fallbacks) == 1

@@ -12,9 +12,8 @@
   --wl-text-primary: #f8f9fc;
   --wl-text-secondary: #9ea6b5;
   --wl-text-muted: #6b7280;
-  --wl-shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--line);
-  --wl-shadow-hover: 0 12px 32px -4px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--white-a18), 0 0 24px -6px rgba(var(--accent-rgb), 0.22);
-  --wl-accent-glow: 0 0 18px rgba(var(--accent-rgb), 0.35);
+  --wl-shadow-card: 0 4px 20px -2px var(--black-a40), 0 0 0 1px var(--line);
+  --wl-shadow-hover: 0 12px 32px -4px var(--black-a55), 0 0 0 1px var(--white-a18), 0 0 24px -6px rgba(var(--accent-rgb), 0.22);
 
   position: relative;
   max-width: 1540px;
@@ -109,7 +108,7 @@
   font-size: 13px;
   font-weight: 650;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--dur-base) var(--ease-emphasized);
   text-decoration: none;
   white-space: nowrap;
   position: relative;
@@ -179,10 +178,10 @@
 }
 
 .watchlist-page-container .watchlist-global-settings-active {
-  background: rgba(245, 158, 11, 0.15) !important;
-  border-color: rgba(245, 158, 11, 0.4) !important;
+  background: rgba(var(--warning-strong-rgb), 0.15) !important;
+  border-color: rgba(var(--warning-strong-rgb), 0.4) !important;
   color: #fbbf24 !important;
-  box-shadow: 0 0 14px rgba(245, 158, 11, 0.2);
+  box-shadow: 0 0 14px rgba(var(--warning-strong-rgb), 0.2);
 }
 
 /* --------------------------------------------------------------------------
@@ -194,8 +193,8 @@
   gap: 12px;
   padding: 12px 18px;
   margin-bottom: 20px;
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.04));
-  border: 1px solid rgba(245, 158, 11, 0.25);
+  background: linear-gradient(135deg, rgba(var(--warning-strong-rgb), 0.12), rgba(var(--warning-strong-rgb), 0.04));
+  border: 1px solid rgba(var(--warning-strong-rgb), 0.25);
   border-radius: var(--radius-lg);
   color: #fbbf24;
   font-size: 13px;
@@ -253,7 +252,7 @@
   border-radius: 9999px !important;
   cursor: pointer !important;
   user-select: none !important;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: all var(--dur-quick) var(--ease-emphasized) !important;
   white-space: nowrap !important;
   backdrop-filter: blur(12px) !important;
   flex-shrink: 0 !important;
@@ -307,12 +306,12 @@
 
 /* Tone accents */
 .watchlist-page-container .watchlist-attention-card.is-green .watchlist-attention-value {
-  background: rgba(34, 197, 94, 0.15) !important;
+  background: rgba(var(--success-strong-rgb), 0.15) !important;
   color: #4ade80 !important;
 }
 
 .watchlist-page-container .watchlist-attention-card.is-amber .watchlist-attention-value {
-  background: rgba(245, 158, 11, 0.15) !important;
+  background: rgba(var(--warning-strong-rgb), 0.15) !important;
   color: #fbbf24 !important;
 }
 
@@ -383,12 +382,12 @@
   flex: 1;
   height: 42px;
   padding: 0 16px;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--black-a25);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   color: #ffffff;
   font-size: 14px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color var(--dur-base), box-shadow var(--dur-base);
 }
 
 .watchlist-page-container .watchlist-add-input:focus {
@@ -438,7 +437,7 @@
   border-radius: var(--radius-lg);
   background: var(--wl-surface);
   border: 1px solid var(--line);
-  transition: background 0.15s, border-color 0.15s;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
 }
 
 .watchlist-page-container .watchlist-add-result:hover {
@@ -496,7 +495,7 @@
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-fast) ease;
 }
 
 .watchlist-page-container .watchlist-add-result-action:hover:not(:disabled) {
@@ -555,7 +554,7 @@
   border-radius: var(--radius-lg);
   position: relative;
   overflow: hidden;
-  transition: all 0.15s ease;
+  transition: all var(--dur-fast) ease;
 }
 
 .watchlist-page-container .watchlist-release-card:hover {
@@ -633,7 +632,7 @@
   color: var(--wl-text-primary) !important;
   font-size: 14px !important;
   font-weight: 500 !important;
-  transition: all 0.2s ease !important;
+  transition: all var(--dur-base) ease !important;
   box-sizing: border-box;
 }
 
@@ -659,7 +658,7 @@
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--dur-base) ease;
 }
 
 .watchlist-page-container .watchlist-sort-select:focus {
@@ -712,7 +711,7 @@
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-fast) ease;
 }
 
 .watchlist-page-container .watchlist-batch-remove-btn:hover:not(:disabled) {
@@ -772,7 +771,7 @@
   border-radius: var(--radius-lg) !important;
   box-shadow: var(--wl-shadow-card) !important;
   backdrop-filter: blur(14px) !important;
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: all 0.22s var(--ease-emphasized) !important;
   cursor: pointer;
   position: relative !important;
   overflow: visible !important;
@@ -800,8 +799,8 @@
   min-width: 72px !important;
   border-radius: var(--radius-lg) !important;
   overflow: hidden !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
-  background: rgba(0, 0, 0, 0.3) !important;
+  box-shadow: 0 4px 12px var(--black-a40) !important;
+  background: var(--black-a30) !important;
   position: relative !important;
   flex-shrink: 0;
 }
@@ -810,7 +809,7 @@
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;
-  transition: transform 0.3s ease;
+  transition: transform var(--dur-slow) ease;
 }
 
 .watchlist-page-container .watchlist-artist-card:hover .watchlist-card-image img {
@@ -834,7 +833,7 @@
   left: 10px !important;
   z-index: 10 !important;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-fast) ease;
   cursor: pointer;
 }
 
@@ -864,7 +863,7 @@
   white-space: nowrap !important;
   display: block !important;
   width: 100% !important;
-  transition: color 0.15s ease;
+  transition: color var(--dur-fast) ease;
 }
 
 .watchlist-artists-grid--rows .watchlist-card-name:hover {
@@ -895,7 +894,7 @@
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  transition: all 0.15s ease !important;
+  transition: all var(--dur-fast) ease !important;
 }
 
 .watchlist-row-menu-trigger:hover,
@@ -1002,7 +1001,7 @@
 .watchlist-inspector-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--black-a60);
   backdrop-filter: blur(8px);
   z-index: 1000;
   animation: wlFadeIn 0.2s ease-out;
@@ -1017,7 +1016,7 @@
   max-width: 92vw;
   background: var(--wl-surface-elevated);
   border-left: 1px solid var(--white-a18);
-  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.7);
+  box-shadow: -12px 0 40px var(--black-a70);
   z-index: 1001;
   overflow-y: auto;
   padding: 24px;
@@ -1056,7 +1055,7 @@
   color: var(--wl-text-secondary);
   font-size: 16px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-fast) ease;
 }
 
 .watchlist-inspector-close-btn:hover {
@@ -1080,7 +1079,7 @@
   aspect-ratio: 16 / 10;
   border-radius: var(--radius-lg);
   object-fit: cover;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 6px 20px var(--black-a40);
 }
 
 .watchlist-page-container .watchlist-inspector-hero h3 {
@@ -1178,7 +1177,7 @@
   overflow-y: auto !important;
   -webkit-overflow-scrolling: touch !important;
   transform: translateX(100%);
-  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: transform 0.28s var(--ease-emphasized) !important;
 }
 
 .watchlist-artist-detail-overlay.visible {
@@ -1230,7 +1229,7 @@
   cursor: pointer !important;
   margin-bottom: 20px !important;
   backdrop-filter: blur(16px) !important;
-  transition: all 0.2s ease !important;
+  transition: all var(--dur-base) ease !important;
 }
 
 .watchlist-artist-detail-overlay .watchlist-detail-back:hover {
@@ -1309,14 +1308,7 @@
   font-size: 14px !important;
   font-weight: 700 !important;
   cursor: pointer !important;
-  transition: all 0.2s ease !important;
-}
-
-.watchlist-artist-detail-overlay .watchlist-detail-discography-btn {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.7)) !important;
-  color: #ffffff !important;
-  border: 1px solid var(--white-a20) !important;
-  box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.35) !important;
+  transition: all var(--dur-base) ease !important;
 }
 
 .watchlist-artist-detail-overlay .watchlist-detail-settings-btn {
@@ -1424,7 +1416,7 @@
   .watchlist-page-container .watchlist-card-image .watchlist-card-image-fallback {
     width: 60px !important;
     height: 60px !important;
-    border-radius: 10px !important;
+    border-radius: var(--radius-control) !important;
   }
 
   .watchlist-page-container .watchlist-card-name {
@@ -1444,7 +1436,7 @@
   /* Slide-Over Drawer on Mobile -> Bottom Sheet */
   .watchlist-inspector-backdrop {
     z-index: 10050 !important;
-    background: rgba(0, 0, 0, 0.75) !important;
+    background: var(--black-a75) !important;
     backdrop-filter: blur(16px) !important;
   }
 
@@ -1461,7 +1453,7 @@
     border-radius: 24px 24px 0 0 !important;
     border-left: none !important;
     border-top: 1px solid var(--white-a15) !important;
-    box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.85) !important;
+    box-shadow: 0 -12px 48px var(--black-a85) !important;
     z-index: 10051 !important;
     padding: 16px 18px calc(24px + env(safe-area-inset-bottom, 20px)) !important;
     animation: wlSlideUpMobile 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;

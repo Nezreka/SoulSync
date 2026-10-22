@@ -102,7 +102,6 @@
     <!-- Automations navigation overhaul — sidebar + overview + library; loaded
          after the redesign so it wins where they meet (see file header). -->
     <link rel="stylesheet" href="{{ url_for('static', filename='automations-overhaul.css', v=static_v) }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-side.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-overlay-editor.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-collection-editor.css', v=static_v) }}">
@@ -116,6 +115,9 @@
     <!-- Dashboard premier redesign — pure reskin of the music dashboard hero,
          rails and right column; orb strip and library-card markup untouched. -->
     <link rel="stylesheet" href="{{ url_for('static', filename='dashboard-premier.css', v=static_v) }}">
+    <!-- Downloads page cards (music + video): rows, group headers and the
+         detail sheet. only dlc-* selectors inside. -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='downloads-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='profiles.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='docs.css', v=static_v) }}">
     <!-- Sidebar weather: time/temp/condition line, forecast popover, particle
@@ -138,6 +140,8 @@
         window._workerOrbsEnabled = {{ initial_worker_orbs_enabled | tojson }};
         window._reduceEffectsActive = {{ initial_reduce_effects | tojson }};
         window._maxPerfActive = {{ initial_max_performance | tojson }};
+        // what profile-api-gate.js holds before a profile is picked (#1763)
+        window.SOULSYNC_PROFILE_GATE = {{ profile_gate_rules | tojson }};
         // Side-access flash guard: the profile arrives over fetch, so on a
         // reload the Music↔Video switcher would render for a beat before the
         // single-side hiding kicks in. The last profile-apply cached its sides
@@ -155,14 +159,6 @@
 
 <body
     class="{% if initial_reduce_effects %}reduce-effects {% endif %}{% if initial_max_performance %}max-performance{% endif %}">
-    <!-- Setup Wizard Overlay -->
-    <div id="setup-wizard-overlay" class="setup-wizard-overlay" style="display: none;">
-        <div class="setup-wizard-container">
-            <div class="setup-stepper" id="setup-wizard-stepper"></div>
-            <div id="setup-wizard-content"></div>
-        </div>
-    </div>
-
     <!-- Launch PIN Lock Screen -->
     <div id="launch-pin-overlay" class="launch-pin-overlay" style="display: none;">
         <div class="launch-pin-container" id="launch-pin-container">
@@ -215,6 +211,11 @@
                 <div id="login-plex" class="login-plex" hidden>
                     <span class="login-plex-or">or</span>
                     <button id="login-plex-button" type="button" class="login-plex-button">Sign in with Plex</button>
+                </div>
+                <!-- shown when sign in with oidc is on (webui/src/shell/oidc-signin.ts) -->
+                <div id="login-oidc" class="login-oidc" hidden>
+                    <span class="login-oidc-or">or</span>
+                    <button id="login-oidc-button" type="button" class="login-oidc-button">Sign in with OIDC</button>
                 </div>
                 <p id="login-error" class="launch-pin-error" style="display: none;"></p>
                 <button class="launch-pin-forgot" onclick="showLoginRecovery()">Forgot password?</button>
@@ -2160,92 +2161,8 @@
                         <div class="vreq-list" data-vreq-list></div>
                     </div>
                 </section>
-                <!-- Wishlist (nav page): movies + wanted episodes, split by a
-                     Movies/TV tab. TV groups show -> season -> episode. Built by
-                     video/video-wishlist.js, styled by .vwsh-* in video-side.css. -->
-                <section class="video-subpage" data-video-subpage="video-wishlist" hidden>
-                    <div class="vwsh-page">
-                        <div class="vwsh-head">
-                            <div class="vwsh-head-glow" aria-hidden="true"></div>
-                            <div class="vwsh-head-row">
-                                <div class="vwsh-head-titles">
-                                    <h1 class="vwsh-title">Wishlist</h1>
-                                    <p class="vwsh-sub" data-vwsh-sub>Movies &amp; episodes you want to grab</p>
-                                </div>
-                                <div class="vwsh-tabs" role="tablist">
-                                    <button class="vwsh-tab vwsh-tab--on" type="button" role="tab"
-                                        data-vwsh-tab="movie">
-                                        Movies <span class="vwsh-tab-n" data-vwsh-count-movie>0</span>
-                                    </button>
-                                    <button class="vwsh-tab" type="button" role="tab" data-vwsh-tab="show">
-                                        TV <span class="vwsh-tab-n" data-vwsh-count-show>0</span>
-                                    </button>
-                                    <button class="vwsh-tab" type="button" role="tab" data-vwsh-tab="youtube">
-                                        YouTube <span class="vwsh-tab-n" data-vwsh-count-youtube>0</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="vwsh-toolbar">
-                            <div class="vwsh-search">
-                                <svg class="vwsh-search-ic" width="16" height="16" viewBox="0 0 24 24" fill="none"
-                                    stroke="currentColor" stroke-width="2">
-                                    <circle cx="11" cy="11" r="7" />
-                                    <path d="M21 21l-4.3-4.3" />
-                                </svg>
-                                <input type="text" class="vwsh-search-input" data-vwsh-search
-                                    placeholder="Search wishlist&hellip;" autocomplete="off" spellcheck="false">
-                            </div>
-                            <select class="vwsh-sort" data-vwsh-sort aria-label="Sort">
-                                <option value="added">Recently added</option>
-                                <option value="oldest">Oldest first</option>
-                                <option value="wanted">Most wanted</option>
-                                <option value="title">A&ndash;Z</option>
-                            </select>
-                            <button class="vwsh-failing-filter" type="button" data-vwsh-failing hidden
-                                title="Show only items that keep failing to download — the fix-it hub: auto search, manual search or remove each one">
-                                &#9888; Failing <span class="vwsh-failing-n" data-vwsh-failing-n></span>
-                            </button>
-                            <button class="vwsh-searchall" type="button" data-vwsh-searchall hidden
-                                title="Search every eligible wishlist item now instead of waiting for the hourly automation">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="2" stroke-linecap="round" aria-hidden="true">
-                                    <circle cx="11" cy="11" r="7" />
-                                    <path d="M21 21l-4.3-4.3" />
-                                </svg>
-                                Search all missing
-                            </button>
-                            <button class="vwsh-clear" type="button" data-vwsh-clear hidden>
-                                <svg class="vwsh-clear-ic" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                                    stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                    stroke-linejoin="round">
-                                    <path d="M3 6h18" />
-                                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                                </svg>
-                                Clear all
-                            </button>
-                        </div>
-                        <div class="vwsh-body">
-                            <div class="vwsh-loading hidden" data-vwsh-loading>
-                                <div class="loading-spinner"></div>
-                                <div class="loading-text">Loading wishlist&hellip;</div>
-                            </div>
-                            <div class="vwsh-grid" data-vwsh-grid></div>
-                            <div class="vwsh-state hidden" data-vwsh-empty>
-                                <div class="vwsh-state-ic">&#128229;</div>
-                                <div class="vwsh-state-title" data-vwsh-empty-title>Your wishlist is empty</div>
-                                <div class="vwsh-state-sub">Add a movie or episodes from any title&rsquo;s get button
-                                    &mdash; they queue up here to grab.</div>
-                            </div>
-                            <div class="vwsh-pagination hidden" data-vwsh-pagination>
-                                <button class="vwsh-page-btn" type="button" data-vwsh-prev>&lsaquo; Prev</button>
-                                <span class="vwsh-page-info" data-vwsh-pageinfo></span>
-                                <button class="vwsh-page-btn" type="button" data-vwsh-next>Next &rsaquo;</button>
-                            </div>
-                        </div>
-                    </div>
-                </section>
+                <!-- Wishlist: no subpage. It is the React /wishlist page on its
+                     Movies / TV / YouTube tabs (gotoUnifiedWishlist in video-side.js). -->
                 <!-- Import page — downloads that finished but couldn't be auto-placed
                      (sample / wrong episode / not-an-upgrade / corrupt). Resolve each by
                      hand: pick the right title (library-first → TMDB) and place, or
@@ -4298,8 +4215,18 @@
                                                 <option value="">Loading...</option>
                                             </select>
                                         </div>
+                                        <!-- Every other TV library on the server: tick Scan to read it as
+                                     well, Anime when its shows are anime (their new episodes then go
+                                     to the Anime folder). Filled by video-settings.js. -->
+                                        <div class="form-group video-library-selectors video-library-tv-more"
+                                            data-video-lib-tv-more-row hidden>
+                                            <label>Other TV Libraries:</label>
+                                            <div class="video-library-tv-more-list" data-video-lib-tv-more></div>
+                                        </div>
                                         <div class="setting-help-text video-library-note">
-                                            Which libraries the video side scans. <span data-video-lib-save-status></span>
+                                            Which libraries the video side scans. A library ticked Anime files
+                                            its shows' new episodes in the Anime folder (Settings &gt; Library).
+                                            <span data-video-lib-save-status></span>
                                         </div>
                                     </div>
                                     <!-- Video Library Organization — uses the SAME settings vocabulary as the
@@ -7257,6 +7184,17 @@
                                                     <label>📺 TV Shows Library:</label>
                                                     <input type="text" id="video-tv-path" placeholder="/media/tv">
                                                 </div>
+                                                <div class="form-group">
+                                                    <label>🍥 Anime Library (optional):</label>
+                                                    <input type="text" id="video-anime-path" placeholder="/media/anime">
+                                                    <div class="setting-help-text">New episodes of anime shows go
+                                                        here instead of the TV folder: shows in a TV library ticked Anime
+                                                        (Settings &gt; Connections), shows set to Anime by hand, and shows
+                                                        not in your library yet that TMDB suggests are anime (an admin can
+                                                        change that on the show's page or when approving). Leave empty to
+                                                        keep anime with TV.
+                                                    </div>
+                                                </div>
                                                 <div class="setting-help-text">
                                                     Movies and TV folders above are the destinations for new downloads.
                                                     Add extra libraries below for existing collections on other drives.
@@ -7366,7 +7304,8 @@
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                     <small class="settings-hint setting-help-body" hidden>Variables:
                                                         <code>$albumartist</code>, <code>$artist</code>,
-                                                        <code>$artistletter</code>, <code>$album</code>,
+                                                        <code>$artistletter</code>, <code>$albumartistletter</code>,
+                                                        <code>$album</code>,
                                                         <code>$albumtype</code>, <code>$title</code>,
                                                         <code>$track</code>, <code>$disc</code> (01),
                                                         <code>$discnum</code> (1), <code>$cdnum</code> (CD01),
@@ -7440,7 +7379,8 @@
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                     <small class="settings-hint setting-help-body" hidden>Variables:
                                                         <code>$albumartist</code>, <code>$artist</code>,
-                                                        <code>$artistletter</code>, <code>$title</code>,
+                                                        <code>$artistletter</code>, <code>$albumartistletter</code>,
+                                                        <code>$title</code>,
                                                         <code>$track</code> (01), <code>$album</code>,
                                                         <code>$albumtype</code>, <code>$year</code>,
                                                         <code>$quality</code> (filename only). Use <code>${var}</code>
@@ -8699,10 +8639,12 @@
                                                         <small class="settings-hint setting-help-body" hidden>Maximum
                                                             drift between the file's actual length and the metadata
                                                             source's expected length before the file is quarantined.
-                                                            <strong>0 = auto</strong> (3s normal, 5s for tracks
-                                                            &gt;10min). Raise this if tracks routinely quarantine for
-                                                            being a few seconds off (live recordings, alternate
-                                                            masterings, etc). Capped at 60s.</small>
+                                                            <strong>0 = auto</strong>: files can run 3s short (5s for
+                                                            tracks &gt;10min) or 15s long. Raise this if tracks
+                                                            routinely quarantine for being a few seconds off (live
+                                                            recordings, alternate masterings, CD pregaps). A set value
+                                                            applies both ways, so anything under 15 also tightens the
+                                                            long side. Capped at 60s.</small>
                                                     </div>
                                                 </div>
 
@@ -9689,8 +9631,8 @@
                                                         with access to your Plex server signs in with their Plex account
                                                         (SoulSync never sees their password), and their playlists sync to
                                                         their own Plex account. The server's owner signs in as the admin.
-                                                        New Plex profiles start with Discover, Search, Library, Wishlist,
-                                                        Stats, Help and Issues; widen them per person under Profiles.
+                                                        New Plex profiles start with what New sign-ups below sets;
+                                                        widen them per person under Profiles.
                                                         Needs Plex as a media server and internet access to plex.tv.
                                                     </div>
                                                     <label class="toggle-label" style="margin-top: 8px;">
@@ -9702,6 +9644,143 @@
                                                         <input type="checkbox" id="security-plex-signin-can-download">
                                                         <span>New Plex profiles can download (off: request-only)</span>
                                                     </label>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-oidc-signin"
+                                                            onchange="syncOidcProviderBlock()">
+                                                        <span>Sign in with OIDC</span>
+                                                    </label>
+                                                    <div class="setting-help-text">
+                                                        Adds a sign-in button for your own identity provider (Pocket ID,
+                                                        Authentik, Authelia, Keycloak or any other OpenID Connect
+                                                        provider). SoulSync never sees passwords. Create a client at the
+                                                        provider with this callback URL:
+                                                        <code id="security-oidc-callback-url">/api/auth/oidc/callback</code>.
+                                                        New OIDC profiles start with what New sign-ups below sets.
+                                                        Accounts are matched by the provider's account id, never by email,
+                                                        and nobody becomes an admin from a provider claim: to sign in as
+                                                        the admin, save these settings, then connect your own account
+                                                        at the bottom.
+                                                    </div>
+                                                    <!-- the provider's settings: one nested block inside the toggle's row -->
+                                                    <div class="security-nested security-nested-block" id="security-oidc-provider">
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-issuer">Issuer URL:</label>
+                                                            <input type="text" id="security-oidc-issuer" placeholder="https://id.example.com"
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-client-id">Client ID:</label>
+                                                            <input type="text" id="security-oidc-client-id" autocomplete="off"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-client-secret">Client secret:</label>
+                                                            <input type="password" id="security-oidc-client-secret" autocomplete="new-password"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-button-label">Button label:</label>
+                                                            <input type="text" id="security-oidc-button-label" placeholder="Sign in with OIDC"
+                                                                autocomplete="off" maxlength="40" style="width: 100%;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-icon-url">Icon URL
+                                                                <span style="opacity:0.6">(optional)</span>:</label>
+                                                            <input type="text" id="security-oidc-icon-url" placeholder="https://..."
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Your provider's logo, shown on the sign-in card in My Account
+                                                                (https only). Leave empty for a plain key icon.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-required-group">Required group
+                                                                <span style="opacity:0.6">(optional)</span>:</label>
+                                                            <input type="text" id="security-oidc-required-group" autocomplete="off"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Only accounts in this group get in. Leave empty to let every
+                                                                account at the provider sign in.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-groups-claim">Groups claim:</label>
+                                                            <input type="text" id="security-oidc-groups-claim" placeholder="groups"
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-scopes">Scopes:</label>
+                                                            <input type="text" id="security-oidc-scopes" placeholder="openid profile email"
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Add the scope your provider needs to send groups, if you set a
+                                                                required group (Pocket ID: <code>groups</code>).
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-redirect-uri">Callback URL override
+                                                                <span style="opacity:0.6">(optional)</span>:</label>
+                                                            <input type="text" id="security-oidc-redirect-uri" autocomplete="off"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Only if your reverse proxy doesn't pass the public address through.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label class="toggle-label">
+                                                                <input type="checkbox" id="security-oidc-signin-auto-create" checked>
+                                                                <span>Let new OIDC users sign up (off: only accounts already
+                                                                    connected to a profile can sign in)</span>
+                                                            </label>
+                                                            <label class="toggle-label">
+                                                                <input type="checkbox" id="security-oidc-signin-can-download">
+                                                                <span>New OIDC profiles can download (off: request-only)</span>
+                                                            </label>
+                                                        </div>
+                                                        <!-- the admin's own connection (webui/src/shell/oidc-signin.ts):
+                                                             status, icon and disconnect when connected, else connect -->
+                                                        <div class="form-group security-oidc-admin" id="security-oidc-admin">
+                                                            <button type="button" class="auth-button"
+                                                                onclick="window.location.assign('/api/profiles/me/oidc-connect/start')">Connect
+                                                                my admin account</button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group" id="security-signup-defaults">
+                                                    <label for="security-signup-sides">New sign-ups start on</label>
+                                                    <select id="security-signup-sides" class="form-select">
+                                                        <option value="music">Music</option>
+                                                        <option value="video">Movies &amp; TV</option>
+                                                        <option value="both">Music and Movies &amp; TV</option>
+                                                    </select>
+                                                    <div class="setting-help-text">
+                                                        What a profile made by sign-in can open. Music: Discover, Search,
+                                                        Library, Wishlist and Stats. Movies &amp; TV: Discover, Search and
+                                                        Library on the video side. Request-only profiles also get Requests.
+                                                        Help and Issues are always there; widen anyone further under
+                                                        Profiles.
+                                                    </div>
+                                                </div>
+
+                                                <div class="form-group" id="security-signup-request-limit-row">
+                                                    <label for="security-signup-request-limit">Request limit for new
+                                                        sign-ups</label>
+                                                    <div style="display: flex; gap: 8px; align-items: center;">
+                                                        <input type="number" id="security-signup-request-limit" min="0"
+                                                            max="1000" value="0" style="width: 6em;">
+                                                        <span class="settings-unit">requests every</span>
+                                                        <input type="number" id="security-signup-request-limit-days" min="1"
+                                                            max="365" value="7" style="width: 5em;">
+                                                        <span class="settings-unit">days</span>
+                                                    </div>
+                                                    <div class="setting-help-text">
+                                                        0 means no limit. A request is one movie, show, album or track.
+                                                        Applies to profiles made after you save; change existing ones
+                                                        under Profiles.
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -10114,6 +10193,58 @@
                                                     the Automation Hub.
                                                 </div>
                                             </div>
+
+                                            <!-- MCP for AI clients -->
+                                            <div class="api-service-frame" style="margin-top: 16px;">
+                                                <h4 class="service-title" style="color: #64ffda;">MCP for AI
+                                                    Clients</h4>
+                                                <div class="setting-help-text"
+                                                    style="margin-bottom: 10px; color: #888; font-size: 12px;">
+                                                    Lets Claude and other AI apps search, check your library and
+                                                    download through SoulSync. Add
+                                                    <code>http://&lt;host&gt;:8008/mcp</code> as an MCP server and
+                                                    send an API key from above as a Bearer token. A read-only key
+                                                    can look but not change anything. Settings, keys and profiles
+                                                    are never reachable.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="mcp-enabled">
+                                                        Answer MCP requests at /mcp
+                                                    </label>
+                                                </div>
+                                            </div>
+
+                                            <!-- Lidarr compatible API (#1799) -->
+                                            <div class="api-service-frame" style="margin-top: 16px;">
+                                                <h4 class="service-title" style="color: #64ffda;">Lidarr Compatible
+                                                    API</h4>
+                                                <div class="setting-help-text"
+                                                    style="margin-bottom: 10px; color: #888; font-size: 12px;">
+                                                    Lets request apps that only talk to Lidarr (Singarr, MusicSeerr
+                                                    1.x) use SoulSync instead. In the app, set the Lidarr URL to
+                                                    <code>http://&lt;host&gt;:8008/lidarr</code> and paste an
+                                                    <strong>Admin</strong> API key from above. Albums it asks for
+                                                    go on the wishlist of the profile below.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="lidarr-compat-enabled">
+                                                        Answer as Lidarr at /lidarr
+                                                    </label>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Requests go to profile:</label>
+                                                    <select id="lidarr-compat-profile">
+                                                        <option value="1">Loading...</option>
+                                                    </select>
+                                                    <div class="setting-help-text"
+                                                        style="margin-top: 4px; color: #888; font-size: 12px;">
+                                                        Pick a profile without download rights and every request
+                                                        waits for approval on the Requests page first.
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div><!-- end SoulSync API body -->
 
@@ -10322,6 +10453,37 @@
                                             <div class="form-group">
                                                 <label>Status:</label>
                                                 <span id="sw-preview-status" class="readonly-field">Live weather</span>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="ob-preview-step">Setup preview:</label>
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                                    <select id="ob-preview-step" aria-label="Start at">
+                                                        <option value="welcome">Start at Welcome</option>
+                                                        <option value="account">Your account</option>
+                                                        <option value="purpose">What it's for</option>
+                                                        <option value="server">Media server</option>
+                                                        <option value="folders">Folders</option>
+                                                        <option value="sources">Download sources</option>
+                                                        <option value="metadata">Metadata and accounts</option>
+                                                        <option value="video">Movies and TV</option>
+                                                        <option value="library">Make it yours</option>
+                                                        <option value="ready">Ready</option>
+                                                    </select>
+                                                    <select id="ob-preview-env" aria-label="Pretend environment">
+                                                        <option value="real">Detect for real</option>
+                                                        <option value="docker">Pretend Docker</option>
+                                                        <option value="bare">Pretend bare metal</option>
+                                                        <option value="empty">Pretend nothing found</option>
+                                                    </select>
+                                                    <button class="test-button" id="ob-preview-open" type="button">Open preview</button>
+                                                </div>
+                                                <div class="help-text">
+                                                    Runs the real first-run setup over the app. Nothing is saved:
+                                                    settings, the profile, follows and sign-ins stay in the preview
+                                                    and are thrown away when you close it. Connection checks still
+                                                    talk to the real services, read only. A Preview tag stays in the
+                                                    corner the whole time.
+                                                </div>
                                             </div>
                                         </div>
                                     </div><!-- end Developer body -->
@@ -11167,11 +11329,62 @@
                                     </div>
                                 </div>
                             </div>
-                            <!-- movie night picker: nominate a movie or an episode for
+                            <!-- upload preview & staging modal: preview file with live thumbnail, waveform, and optional comment before sharing -->
+                            <div class="chat-peer-backdrop chat-upload-backdrop" data-chat-upload-backdrop hidden></div>
+                            <div class="chat-upload-modal-overlay" data-chat-upload-modal hidden>
+                                <div class="chat-upload-modal">
+                                    <div class="chat-upload-modal-head">
+                                        <div class="chat-upload-modal-title">
+                                            <span class="chat-upload-modal-icon">📁</span>
+                                            <div>
+                                                <h3 class="chat-upload-modal-heading">Upload &amp; Share File</h3>
+                                                <p class="chat-upload-modal-sub" data-chat-upload-target>Share a file via filepost.dev</p>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="chat-peer-close" data-chat-upload-close title="Cancel (Esc)">&times;</button>
+                                    </div>
+                                    <div class="chat-upload-modal-body">
+                                        <div class="chat-upload-preview-chassis" data-chat-upload-preview-slot></div>
+                                        <div class="chat-upload-meta-strip">
+                                            <div class="chat-upload-meta-info">
+                                                <span class="chat-upload-filename" data-chat-upload-name>filename.ext</span>
+                                                <span class="chat-upload-filesize" data-chat-upload-size>0 KB</span>
+                                            </div>
+                                            <span class="chat-upload-type-badge" data-chat-upload-badge>FILE</span>
+                                        </div>
+                                        <div class="chat-upload-caption-wrap">
+                                            <label class="chat-upload-caption-label" for="chat-upload-caption-input">Add a comment (optional):</label>
+                                            <textarea id="chat-upload-caption-input" class="chat-upload-caption" data-chat-upload-caption placeholder="Add an optional comment or note to accompany this file in chat…" rows="2" maxlength="300"></textarea>
+                                        </div>
+                                        <div class="chat-upload-progress-wrap" data-chat-upload-progress-wrap hidden>
+                                            <div class="chat-upload-progress-bar">
+                                                <div class="chat-upload-progress-fill" data-chat-upload-progress-fill></div>
+                                            </div>
+                                            <div class="chat-upload-progress-text" data-chat-upload-progress-text>Uploading… 0%</div>
+                                        </div>
+                                        <div class="chat-upload-error" data-chat-upload-error hidden></div>
+                                    </div>
+                                    <div class="chat-upload-modal-actions">
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-upload-cancel>Cancel</button>
+                                        <button type="button" class="modal-button modal-button--primary chat-upload-send-btn" data-chat-upload-send>
+                                            <span>⚡ Upload &amp; Share</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- image lightbox / theater modal for viewing shared images in high resolution -->
+                            <div class="chat-lightbox-backdrop" data-chat-lightbox-backdrop hidden>
+                                <div class="chat-lightbox-content" data-chat-lightbox-content>
+                                    <button type="button" class="chat-lightbox-close" data-chat-lightbox-close title="Close (Esc)">&times;</button>
+                                    <img class="chat-lightbox-img" data-chat-lightbox-img src="" alt="Image preview">
+                                    <div class="chat-lightbox-caption" data-chat-lightbox-caption></div>
+                                </div>
+                            </div>
+                            <!-- watch together picker: nominate a movie or an episode for
                                  the room's ballot (TMDB search via the video side) -->
                             <div class="chat-settings-overlay" data-chat-watch-modal hidden>
                                 <div class="chat-settings-modal chat-watch-modal">
-                                    <h3 class="chat-settings-title">🎬 Nominate for movie night</h3>
+                                    <h3 class="chat-settings-title">🎬 Nominate for Watch Together</h3>
                                     <form class="chat-jbx-searchform" data-chat-watch-searchform>
                                         <input class="chat-input" data-chat-watch-searchinput type="text"
                                             maxlength="200"
@@ -11440,7 +11653,7 @@
                                         <span class="chat-toolbar-hint">**bold** · *italic* · `code` ·
                                             ||spoiler||</span>
                                     </div>
-                                    <div class="chat-emoji-pop" data-chat-emoji-pop hidden></div>
+                                    <div class="chat-emoji-pop chat-emoji-picker" data-chat-emoji-pop hidden></div>
                                     <div class="chat-gif-pop chat-attach-pop" data-chat-attach-pop hidden>
                                         <div class="chat-attach-tabs">
                                             <button type="button" class="chat-fmt-btn"
@@ -12577,13 +12790,16 @@
     <!-- fetch-dedupe must load BEFORE the React bundle and every split module,
          so all frameworks share one wire request per identical GET burst. -->
     <script src="{{ url_for('static', filename='fetch-dedupe.js', v=static_v) }}"></script>
+    <!-- profile-api-gate: answers api calls this profile can't have with a local
+         403, so a member's page load doesn't send a burst of 4xx (#1763). after
+         fetch-dedupe so refused calls never reach it. -->
+    <script src="{{ url_for('static', filename='profile-api-gate.js', v=static_v) }}"></script>
     <!-- scrollbar-fade: toggles .is-scrolling on whatever element is scrolling
          so scrollbars.css section 4 can brighten/fade thumbs. Standalone,
          dependency-free, safe to load before every other module. -->
     <script src="{{ url_for('static', filename='scrollbar-fade.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js', v=static_v) }}"></script>
     {{ vite_assets('body')|safe }}
-    <script src="{{ url_for('static', filename='setup-wizard.js', v=static_v) }}"></script>
     <!-- Split modules (was: script.js) — core.js must load first, init.js before shell-bridge.js -->
     <script src="{{ url_for('static', filename='core.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='shared-helpers.js', v=static_v) }}"></script>
@@ -12603,9 +12819,6 @@
          the vanilla discover page, is long gone.) -->
     <script src="{{ url_for('static', filename='dist/shell.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='sync-soulsync-discovery.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
     <!-- Artist Web graph stack (sigma.js): graphology = data model, sigma = WebGL renderer,
          graphology-library = utils incl. forceAtlas2 layout. CDN/UMD (SoulSync is vanilla). -->

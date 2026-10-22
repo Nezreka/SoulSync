@@ -102,6 +102,24 @@ def _annotate_live_state(db, kind, items):
         logger.exception("wishlist live-state annotation failed")
 
 
+def _annotate_trouble(kind, items):
+    """Stamp each movie / episode row with ``trouble``: which kind of stuck its
+    last search was (see core.video.wishlist_evidence.row_trouble), so the page
+    can group by cause without re-implementing the refusal classifier in JS.
+    Best-effort like the live state: a bad receipt must not break the page."""
+    try:
+        from core.video.wishlist_evidence import row_trouble
+        if kind == "movie":
+            rows = items
+        else:
+            rows = [ep for show in items for season in show.get("seasons") or []
+                    for ep in season.get("episodes") or []]
+        for row in rows:
+            row["trouble"] = row_trouble(row.get("search_snapshot"))
+    except Exception:   # noqa: BLE001
+        logger.exception("wishlist trouble annotation failed")
+
+
 def register_routes(bp):
     @bp.route("/wishlist", methods=["GET"])
     def video_wishlist_list():
@@ -118,6 +136,7 @@ def register_routes(bp):
                     page=request.args.get("page", 1), limit=request.args.get("limit", 60),
                     profile_id=_profile())
                 _annotate_live_state(db, kind, res.get("items") or [])
+                _annotate_trouble(kind, res.get("items") or [])
                 from .kids import filter_tmdb_items, video_cap
                 cap = video_cap()
                 if cap is not None:
@@ -283,6 +302,11 @@ def register_routes(bp):
                     poster_url=show.get("poster_url") or None,
                     library_id=show.get("library_id") or None, server_source=srv,
                     profile_id=_profile())
+                if n > 0:
+                    # a show not in any library yet: store its type (TMDB's
+                    # suggestion) so its episodes are filed in the right folder
+                    from core.video.anime_hint import note_show_wanted
+                    note_show_wanted(get_video_db, show["tmdb_id"])
                 return jsonify({"success": n > 0, "added": n,
                                 "counts": db.wishlist_counts(profile_id=_profile())})
 

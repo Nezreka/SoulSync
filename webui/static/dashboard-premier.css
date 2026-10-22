@@ -39,9 +39,9 @@
     font-weight: 700;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: rgba(244, 245, 247, 0.6);
+    color: rgba(var(--text-bright-rgb), 0.6);
     border: 1px solid var(--white-a10);
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--black-a30);
     border-radius: var(--radius-pill);
     padding: 6px 14px 6px 11px;
 }
@@ -61,7 +61,7 @@
     letter-spacing: 0.04em;
     line-height: 1.2;
     text-transform: uppercase;
-    color: rgba(244, 245, 247, 0.52);
+    color: rgba(var(--text-bright-rgb), 0.52);
 }
 #dashboard-page .dash-hero .hello-greeting > span {
     background: none;
@@ -74,7 +74,7 @@
 #dashboard-page .hello-greet-lead {
     display: block;
     font-weight: 600;
-    color: rgba(244, 245, 247, 0.52);
+    color: rgba(var(--text-bright-rgb), 0.52);
     font-size: clamp(14px, 1.5vw, 16px);
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -105,12 +105,8 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 5px;
-    padding: 12px 20px 11px;
     min-width: 118px;
-    border-radius: 14px;
-    border: 1px solid var(--white-a07);
-    background: rgba(0, 0, 0, 0.32);
-    box-shadow: 0 1px 0 var(--white-a05) inset;
+    border-radius: var(--radius-card);
 }
 #dashboard-page .dash-hero-number + .dash-hero-number::before {
     content: none;
@@ -127,7 +123,7 @@
     font-weight: 700;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: rgba(244, 245, 247, 0.42);
+    color: rgba(var(--text-bright-rgb), 0.42);
 }
 #dashboard-page .dash-hero-number-value {
     font-size: 27px;
@@ -147,12 +143,7 @@
     align-items: center;
     flex-wrap: nowrap;
     gap: 12px;
-    padding: 10px 10px 10px 18px;
     border-radius: var(--radius-xl);
-    border: 1px solid var(--white-a09);
-    background: rgba(0, 0, 0, 0.42);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) inset;
-    max-width: 640px;
 }
 #dashboard-page .dash-hero-library .library-status-info {
     order: 1;
@@ -176,7 +167,7 @@
 }
 #dashboard-page .dash-hero-library .library-status-subtitle {
     font-size: 12.5px;
-    color: rgba(244, 245, 247, 0.58);
+    color: rgba(var(--text-bright-rgb), 0.58);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -202,7 +193,7 @@
     border-radius: var(--radius-pill);
     color: rgb(var(--accent-light-rgb));
     background: rgba(var(--accent-rgb), 0.1);
-    transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+    transition: background var(--dur-quick) ease, border-color var(--dur-quick) ease, color var(--dur-quick) ease, transform var(--dur-quick) ease;
 }
 #dashboard-page .dash-hero-library .library-status-btn:hover {
     background: rgba(var(--accent-rgb), 0.2);
@@ -223,8 +214,8 @@
     border-radius: var(--radius-lg);
     border: 1px solid var(--white-a10);
     background: var(--white-a04);
-    color: rgba(244, 245, 247, 0.7);
-    transition: background 0.18s ease, border-color 0.18s ease;
+    color: rgba(var(--text-bright-rgb), 0.7);
+    transition: background var(--dur-quick) ease, border-color var(--dur-quick) ease;
 }
 #dashboard-page .library-status-more:hover {
     background: var(--white-a09);
@@ -262,8 +253,8 @@
     font-size: 13px;
     font-weight: 650;
     letter-spacing: 0.02em;
-    color: rgba(244, 245, 247, 0.85);
-    transition: background 0.18s ease, border-color 0.18s ease;
+    color: rgba(var(--text-bright-rgb), 0.85);
+    transition: background var(--dur-quick) ease, border-color var(--dur-quick) ease;
 }
 #dashboard-page .orb-stage .em-manage-btn:hover {
     background: rgba(var(--accent-rgb), 0.14);
@@ -278,7 +269,7 @@
     font-weight: 700;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: rgba(244, 245, 247, 0.45);
+    color: rgba(var(--text-bright-rgb), 0.45);
     gap: 8px;
 }
 #dashboard-page .orb-stage-dot {
@@ -406,26 +397,28 @@
 
 #dashboard-page .listen-band {
     display: grid;
-    grid-template-columns: 1.55fr 1fr;
+    grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
     gap: 14px;
+    align-items: stretch;
 }
 /* Radio hero: the station deck. */
 #dashboard-page .listen-hero {
     position: relative;
     display: flex;
     align-items: center;
-    gap: 22px;
-    padding: 22px 26px;
+    gap: 18px;
+    padding: 18px 22px;
     border-radius: 20px;
     border: 1px solid var(--white-a09);
     background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.01)),
         linear-gradient(180deg, #0e1512, #090c0a);
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 16px 40px var(--black-a40);
     overflow: hidden;
     text-align: left;
     cursor: pointer;
-    transition: border-color 0.2s ease, transform 0.2s ease;
+    min-width: 0;
+    transition: border-color var(--dur-base) ease, transform var(--dur-base) ease;
 }
 #dashboard-page .listen-hero:hover {
     border-color: rgba(var(--accent-rgb), 0.45);
@@ -435,14 +428,14 @@
 #dashboard-page .listen-vinyl {
     position: relative;
     flex: none;
-    width: 78px;
-    height: 78px;
+    width: 66px;
+    height: 66px;
     border-radius: var(--radius-circle);
     background:
         radial-gradient(circle at 50% 50%, rgb(var(--accent-rgb)) 0 15%, #0a0c0a 15.5% 21%, transparent 21.5%),
         repeating-radial-gradient(circle at 50% 50%, #16191b 0 2px, #0b0d0e 2px 4px);
     box-shadow:
-        0 10px 26px rgba(0, 0, 0, 0.5),
+        0 10px 26px var(--black-a50),
         inset 0 0 0 1px var(--white-a07);
     animation: dash-vinyl-spin 26s linear infinite;
 }
@@ -456,7 +449,7 @@
     transform: translate(-50%, -50%);
     border-radius: var(--radius-circle);
     background: #05070a;
-    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 0 0 3px var(--black-a55);
 }
 @keyframes dash-vinyl-spin {
     to { transform: rotate(360deg); }
@@ -475,7 +468,7 @@
     margin-bottom: 7px;
 }
 #dashboard-page .listen-kicker--muted {
-    color: rgba(244, 245, 247, 0.45);
+    color: rgba(var(--text-bright-rgb), 0.45);
 }
 #dashboard-page .listen-eq {
     display: inline-flex;
@@ -507,33 +500,41 @@
     min-width: 0;
 }
 #dashboard-page .listen-hero-text strong {
-    font-size: 23px;
+    font-size: 20px;
     font-weight: 800;
     letter-spacing: -0.02em;
     color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
 }
 #dashboard-page .listen-hero-text > span:last-child {
-    font-size: 12.5px;
-    color: rgba(244, 245, 247, 0.6);
-    max-width: 46ch;
-    margin-top: 4px;
+    font-size: 12px;
+    color: rgba(var(--text-bright-rgb), 0.6);
+    line-height: 1.35;
+    margin-top: 3px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 /* Transport button: glowing, with a sonar ping. */
 #dashboard-page .listen-hero-play {
     position: relative;
     flex: none;
-    width: 66px;
-    height: 66px;
+    width: 54px;
+    height: 54px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 22px;
-    padding-left: 4px;
+    font-size: 18px;
+    padding-left: 3px;
     border-radius: var(--radius-circle);
     background: rgb(var(--accent-rgb));
     color: #06130b;
-    box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.35);
-    transition: transform 0.18s ease, background 0.18s ease;
+    box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.35);
+    transition: transform var(--dur-quick) ease, background var(--dur-quick) ease;
 }
 #dashboard-page .listen-hero:hover .listen-hero-play {
     background: rgb(var(--accent-light-rgb));
@@ -566,11 +567,11 @@
     background:
         linear-gradient(180deg, var(--white-a04), rgba(255, 255, 255, 0.008)),
         linear-gradient(180deg, #101312, #0a0c0b);
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 16px 40px var(--black-a40);
     text-align: left;
     cursor: pointer;
     overflow: hidden;
-    transition: border-color 0.2s ease, transform 0.2s ease;
+    transition: border-color var(--dur-base) ease, transform var(--dur-base) ease;
 }
 #dashboard-page .listen-tile:hover {
     border-color: var(--white-a18);
@@ -595,7 +596,7 @@
     padding: 7px 2px;
     font-size: 13px;
     font-weight: 600;
-    color: rgba(244, 245, 247, 0.72);
+    color: rgba(var(--text-bright-rgb), 0.72);
     border-top: 1px solid var(--white-a06);
 }
 #dashboard-page .listen-mixrow i {
@@ -619,14 +620,162 @@
     align-items: center;
     justify-content: center;
     font-size: 16px;
-    color: rgba(244, 245, 247, 0.7);
-    transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+    color: rgba(var(--text-bright-rgb), 0.7);
+    transition: background var(--dur-quick) ease, border-color var(--dur-quick) ease, color var(--dur-quick) ease;
 }
 #dashboard-page .listen-tile:hover .listen-tile-arrow {
     background: rgba(var(--accent-rgb), 0.16);
     border-color: rgba(var(--accent-rgb), 0.45);
     color: #fff;
 }
+
+/* ── 3b. DISCOVER MIXES IN DASHBOARD ───────────────────────────────── */
+#dashboard-page .listen-mixes-wrap {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+#dashboard-page .listen-mixes-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    width: 100%;
+}
+
+#dashboard-page .listen-mixes-grid .dsc-quick-tile {
+    height: 64px;
+}
+
+#dashboard-page .listen-mixes-grid .dsc-quick-tile--flow {
+    grid-column: span 2;
+}
+
+/* Skeletons while mixes are loading */
+.dsc-quick-tile--skeleton {
+    background: rgba(255, 255, 255, 0.04);
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.dsc-quick-tile--skeleton .dsc-quick-art {
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: none;
+    animation: dash-pulse-fade 1.6s ease-in-out infinite alternate;
+}
+.dsc-quick-skeleton-bar {
+    width: 55%;
+    height: 12px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.07);
+    animation: dash-pulse-fade 1.6s ease-in-out infinite alternate;
+}
+@keyframes dash-pulse-fade {
+    0% { opacity: 0.4; }
+    100% { opacity: 0.85; }
+}
+
+@media (max-width: 1350px) and (min-width: 1025px) {
+    #dashboard-page .listen-band {
+        grid-template-columns: 310px minmax(0, 1fr);
+        gap: 10px;
+    }
+    #dashboard-page .listen-mixes-grid {
+        gap: 8px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-name {
+        font-size: 0.84rem;
+    }
+    #dashboard-page .listen-hero {
+        padding: 16px 18px;
+        gap: 14px;
+    }
+    #dashboard-page .listen-vinyl {
+        width: 58px;
+        height: 58px;
+    }
+    #dashboard-page .listen-hero-play {
+        width: 48px;
+        height: 48px;
+        font-size: 16px;
+    }
+}
+
+@media (max-width: 1024px) {
+    #dashboard-page .listen-band {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+    #dashboard-page .listen-mixes-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    #dashboard-page .listen-mixes-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile {
+        height: 56px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-art {
+        flex: 0 0 56px;
+        width: 56px;
+        height: 56px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-name {
+        font-size: 0.82rem;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-open {
+        padding-right: 8px;
+        gap: 10px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile:not(.dsc-quick-tile--flow) .dsc-quick-play {
+        display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    #dashboard-page .listen-mixes-grid {
+        gap: 6px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile {
+        height: 52px;
+        border-radius: var(--radius-sm, 8px);
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-art {
+        flex: 0 0 52px;
+        width: 52px;
+        height: 52px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-name {
+        font-size: 0.78rem;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile--flow {
+        padding: 0 50px 0 10px;
+        gap: 10px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-flow-orb {
+        flex: 0 0 32px;
+        width: 32px;
+        height: 32px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile--flow .dsc-quick-name {
+        font-size: 0.86rem;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile--flow .dsc-quick-sub {
+        font-size: 0.72rem;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile--flow .dsc-quick-play {
+        width: 32px;
+        height: 32px;
+        right: 8px;
+    }
+}
+
 /* Motion kill switch for the station deck. */
 body.reduce-effects #dashboard-page .listen-vinyl,
 body.max-performance #dashboard-page .listen-vinyl,
@@ -711,7 +860,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
 }
 #dashboard-page .dash-rail-subtitle {
     font-size: 12.5px;
-    color: rgba(244, 245, 247, 0.48);
+    color: rgba(var(--text-bright-rgb), 0.48);
     line-height: 1.45;
 }
 
@@ -738,13 +887,13 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     font-size: 13px;
     font-weight: 650;
     letter-spacing: 0.02em;
-    color: rgba(244, 245, 247, 0.5);
+    color: rgba(var(--text-bright-rgb), 0.5);
     cursor: pointer;
-    transition: color 0.18s ease, border-color 0.18s ease;
+    transition: color var(--dur-quick) ease, border-color var(--dur-quick) ease;
     text-decoration: none;
 }
 #dashboard-page .dash-band-tab:hover {
-    color: rgba(244, 245, 247, 0.9);
+    color: rgba(var(--text-bright-rgb), 0.9);
 }
 #dashboard-page .dash-band-tab.active {
     background: none;
@@ -793,13 +942,13 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     margin-bottom: 14px;
     flex: none;
     background: var(--white-a05);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 8px 24px var(--black-a35);
 }
 #dashboard-page .dash-rail-card .ya-card-img::after {
     display: none;
 }
 #dashboard-page .dash-rail-card .ya-card-img img {
-    transition: transform 0.3s ease;
+    transition: transform var(--dur-slow) ease;
 }
 #dashboard-page .dash-rail-card:hover .ya-card-img img {
     transform: scale(1.03);
@@ -890,8 +1039,6 @@ body.max-performance #dashboard-page .listen-hero-play::after {
 #dashboard-page .dash-side-card {
     padding: 22px 22px 20px;
     border-radius: var(--radius-xl);
-    border: 1px solid var(--white-a08);
-    background: rgba(0, 0, 0, 0.32);
 }
 #dashboard-page .dash-side-head {
     margin-bottom: 16px;
@@ -907,7 +1054,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     font-weight: 750;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: rgba(244, 245, 247, 0.75);
+    color: rgba(var(--text-bright-rgb), 0.75);
 }
 #dashboard-page .dash-side-link {
     font-size: 12.5px;
@@ -940,7 +1087,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: rgba(244, 245, 247, 0.45);
+    color: rgba(var(--text-bright-rgb), 0.45);
     max-width: none;
 }
 #dashboard-page .dash-sync-bar {
@@ -949,7 +1096,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     background:
         repeating-linear-gradient(90deg, var(--white-a16) 0 1px, transparent 1px 10%),
         var(--white-a06);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4) inset;
+    box-shadow: 0 1px 3px var(--black-a40) inset;
     overflow: hidden;
 }
 #dashboard-page .dash-sync-bar > span {
@@ -972,7 +1119,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     padding: 9px 4px;
     border-radius: 0;
     border-bottom: 1px solid var(--white-a06);
-    transition: background 0.15s ease;
+    transition: background var(--dur-fast) ease;
     align-items: center;
 }
 #dashboard-page .dash-sync-row:last-child {
@@ -984,7 +1131,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
 #dashboard-page .dash-sync-row .syncband-art {
     width: 44px;
     height: 44px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     border: 1px solid var(--white-a10);
 }
 #dashboard-page .dash-sync-name {
@@ -998,8 +1145,8 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     letter-spacing: 0.03em;
     font-variant-numeric: tabular-nums;
     color: #fbbf24;
-    background: rgba(245, 158, 11, 0.12);
-    border: 1px solid rgba(245, 158, 11, 0.32);
+    background: rgba(var(--warning-strong-rgb), 0.12);
+    border: 1px solid rgba(var(--warning-strong-rgb), 0.32);
     border-radius: var(--radius-pill);
     padding: 4px 11px;
     white-space: nowrap;
@@ -1051,7 +1198,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
 }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-last {
     font-size: 11.5px;
-    color: rgba(244, 245, 247, 0.45);
+    color: rgba(var(--text-bright-rgb), 0.45);
 }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-when {
     font-size: 11px;
@@ -1059,7 +1206,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     letter-spacing: 0.04em;
     text-transform: uppercase;
     font-variant-numeric: tabular-nums;
-    color: rgba(244, 245, 247, 0.6);
+    color: rgba(var(--text-bright-rgb), 0.6);
     background: var(--white-a06);
     border: 1px solid var(--white-a09);
     border-radius: var(--radius-pill);
@@ -1110,11 +1257,11 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: rgba(244, 245, 247, 0.5);
+    color: rgba(var(--text-bright-rgb), 0.5);
 }
 #dashboard-page .dash-tiles .dash-tile-sub {
     font-size: 11.5px;
-    color: rgba(244, 245, 247, 0.45);
+    color: rgba(var(--text-bright-rgb), 0.45);
     font-variant-numeric: tabular-nums;
 }
 

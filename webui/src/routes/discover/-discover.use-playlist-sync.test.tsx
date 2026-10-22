@@ -60,10 +60,12 @@ afterEach(() => {
 describe('usePlaylistSync — resume', () => {
   it('resumes ONLY the syncs that answer active, silently skipping the rest', async () => {
     // release_radar mid-sync; weekly 404s; seasonal answers but finished.
+    const probed: string[] = [];
     server.use(
-      http.get('/api/sync/status/discover_release_radar', () =>
-        HttpResponse.json({ status: 'syncing', progress: { total_tracks: 4 } }),
-      ),
+      http.get('/api/sync/status/discover_release_radar', ({ request }) => {
+        probed.push(new URL(request.url).search);
+        return HttpResponse.json({ status: 'syncing', progress: { total_tracks: 4 } });
+      }),
       // res.ok is checked BEFORE the body is read (328) — even a 404 whose
       // body claims 'syncing' must not resume.
       http.get('/api/sync/status/discover_discovery_weekly', () =>
@@ -76,6 +78,8 @@ describe('usePlaylistSync — resume', () => {
     const { result } = mount();
     await act(async () => result.current.resumeActiveSyncs());
     expect(result.current.syncingKeys).toEqual(['release-radar']);
+    // probe=1, so an idle playlist answers 200 instead of a 404 per load (#1763)
+    expect(probed).toEqual(['?probe=1']);
     // 'starting' also counts — it is the FIRST state a sync reports (330).
     server.use(
       http.get('/api/sync/status/discover_discovery_weekly', () =>

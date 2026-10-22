@@ -257,6 +257,23 @@ class TMDBClient:
         self._fill_collection(out)
         return out
 
+    def show_anime_hint(self, tmdb_id):
+        """Does TMDB suggest this TV show is anime? True / False, or None when
+        TMDB can't say (no key, not found). One small call: the show plus its
+        keywords -- the FULL keyword list, unlike the detail payload, which keeps
+        only the first 14. See core.video.anime_hint for the rule."""
+        if not self.api_key or tmdb_id is None:
+            return None
+        import requests
+        r = requests.get(self.BASE + "/tv/" + str(int(tmdb_id)), params={
+            "api_key": self.api_key, "append_to_response": "keywords"}, timeout=15)
+        r.raise_for_status()
+        raw = r.json() or {}
+        if not raw.get("id"):
+            return None
+        from core.video.anime_hint import tmdb_suggests_anime
+        return tmdb_suggests_anime(raw)
+
     def movie_release_dates(self, tmdb_id):
         """TMDB /movie/{id}/release_dates 'results' — per-country release dates by type
         (theatrical / digital / physical). Feeds the 'is it downloadable yet' gate."""

@@ -7,7 +7,6 @@
    ========================================================================== */
 
 .wlp {
-  --wlp-gold: 245, 185, 66;
   --wlp-warn: 255, 176, 32;
   --wlp-danger: 255, 93, 93;
   --wlp-surface: rgba(255, 255, 255, 0.045);
@@ -28,7 +27,7 @@
   height: 560px;
   background:
     radial-gradient(ellipse 60% 55% at 18% 0%, rgba(var(--accent-rgb), 0.16) 0%, transparent 70%),
-    radial-gradient(ellipse 50% 50% at 82% 8%, rgba(var(--wlp-gold), 0.10) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 50% at 82% 8%, rgba(var(--gold-rgb), 0.10) 0%, transparent 70%),
     radial-gradient(ellipse 70% 60% at 50% -10%, rgba(162, 56, 255, 0.07) 0%, transparent 70%);
   filter: blur(50px);
   pointer-events: none;
@@ -45,9 +44,10 @@
   border: 1px solid var(--white-a09);
   background:
     linear-gradient(135deg, rgba(255,255,255,0.055) 0%, rgba(255,255,255,0.015) 55%, rgba(var(--accent-rgb), 0.05) 100%);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35), inset 0 1px 0 var(--white-a07);
+  /* no backdrop-filter on purpose. the hero sits on the flat page background,
+     so the blur never showed (pixel diff under 8/255), but it was the biggest
+     blurred area on the page and the browser redid it every frame (#1816). */
+  box-shadow: 0 24px 60px var(--black-a35), inset 0 1px 0 var(--white-a07);
   overflow: hidden;
 }
 .wlp-hero::after {
@@ -55,7 +55,7 @@
   position: absolute;
   top: -70px; right: -40px;
   width: 340px; height: 340px;
-  background: radial-gradient(circle, rgba(var(--wlp-gold), 0.14) 0%, transparent 65%);
+  background: radial-gradient(circle, rgba(var(--gold-rgb), 0.14) 0%, transparent 65%);
   filter: blur(30px);
   pointer-events: none;
 }
@@ -63,13 +63,13 @@
 .wlp-eyebrow {
   display: inline-flex; align-items: center; gap: 8px;
   font-size: 11px; font-weight: 800; letter-spacing: 0.22em; text-transform: uppercase;
-  color: rgb(var(--wlp-gold));
+  color: rgb(var(--gold-rgb));
   margin-bottom: 10px;
 }
 .wlp-eyebrow::before {
   content: '★';
   font-size: 12px;
-  filter: drop-shadow(0 0 6px rgba(var(--wlp-gold), 0.8));
+  filter: drop-shadow(0 0 6px rgba(var(--gold-rgb), 0.8));
 }
 .wlp-title {
   margin: 0;
@@ -85,7 +85,7 @@
 .wlp-nextrun {
   display: flex; align-items: center; gap: 16px;
   padding: 14px 18px 14px 14px;
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   border: 1px solid var(--white-a09);
   background: rgba(0, 0, 0, 0.28);
   box-shadow: inset 0 1px 0 var(--white-a06);
@@ -149,10 +149,10 @@
 .wlp-stat-label { display: block; margin-top: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--white-a40); }
 .wlp-retry-select {
   margin-top: 2px;
-  background: rgba(0,0,0,0.35);
+  background: var(--black-a35);
   border: 1px solid var(--white-a16);
   color: var(--text-1);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   padding: 6px 10px;
   font-size: 13px; font-weight: 700;
   cursor: pointer;
@@ -168,7 +168,7 @@
   border-radius: var(--radius-xl);
   border: 1px solid rgba(var(--wlp-warn), 0.35);
   background: linear-gradient(120deg, rgba(var(--wlp-warn), 0.10), rgba(var(--wlp-warn), 0.03));
-  box-shadow: 0 8px 28px rgba(0,0,0,0.25);
+  box-shadow: 0 8px 28px var(--black-a25);
   flex-wrap: wrap;
 }
 .wlp-triage-icon {
@@ -192,12 +192,12 @@
   display: flex; align-items: center; gap: 10px;
   padding: 12px 16px;
   margin: 0 -16px 18px;
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   border: 1px solid var(--white-a09);
   background: rgba(12, 15, 22, 0.78);
   backdrop-filter: blur(20px) saturate(1.3);
   -webkit-backdrop-filter: blur(20px) saturate(1.3);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 12px 32px var(--black-a40);
   flex-wrap: wrap;
 }
 .wlp-search {
@@ -214,7 +214,7 @@
   color: var(--text-1);
   font-size: 13.5px;
   box-sizing: border-box;
-  transition: border-color 0.2s var(--ease-emphasized), background 0.2s var(--ease-emphasized), box-shadow 0.2s var(--ease-emphasized);
+  transition: border-color var(--dur-base) var(--ease-emphasized), background var(--dur-base) var(--ease-emphasized), box-shadow var(--dur-base) var(--ease-emphasized);
 }
 .wlp-search input::placeholder { color: var(--white-a40); }
 .wlp-search input:focus {
@@ -239,7 +239,7 @@
   color: var(--text-2);
   font-size: 12.5px; font-weight: 700;
   cursor: pointer; white-space: nowrap;
-  transition: all 0.18s var(--ease-emphasized);
+  transition: all var(--dur-quick) var(--ease-emphasized);
 }
 .wlp-chip:hover { background: var(--surface-3); color: var(--text-1); border-color: var(--white-a16); transform: translateY(-1px); }
 .wlp-chip.active {
@@ -271,13 +271,13 @@
   padding: 7px 14px; border-radius: var(--radius-pill);
   color: var(--white-a40); font-size: 12.5px; font-weight: 700;
   display: inline-flex; align-items: center; gap: 6px;
-  transition: all 0.18s var(--ease-emphasized);
+  transition: all var(--dur-quick) var(--ease-emphasized);
 }
 .wlp-segmented button:hover { color: var(--text-2); }
 .wlp-segmented button[aria-selected="true"] {
   background: var(--white-a12);
   color: var(--text-1);
-  box-shadow: 0 2px 10px rgba(0,0,0,0.35), inset 0 1px 0 var(--white-a12);
+  box-shadow: 0 2px 10px var(--black-a35), inset 0 1px 0 var(--white-a12);
 }
 
 /* Ghost + primary buttons in the command bar */
@@ -287,7 +287,7 @@
   border: 1px solid transparent;
   background: transparent; color: var(--white-a40);
   font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap;
-  transition: all 0.18s var(--ease-emphasized);
+  transition: all var(--dur-quick) var(--ease-emphasized);
 }
 .wlp-btn:hover { background: var(--surface-3); color: var(--text-1); }
 .wlp-btn--danger:hover { background: rgba(var(--wlp-danger), 0.12); color: rgb(var(--wlp-danger)); }
@@ -304,7 +304,7 @@
   box-shadow: 0 10px 26px rgba(var(--accent-rgb), 0.45), inset 0 1px 0 var(--white-a25);
   background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.75));
 }
-.wlp-btn--sm { padding: 7px 12px; font-size: 12px; border-radius: 10px; }
+.wlp-btn--sm { padding: 7px 12px; font-size: 12px; border-radius: var(--radius-control); }
 .wlp-btn:disabled { opacity: 0.45; cursor: default; transform: none; }
 
 /* Sort select */
@@ -326,12 +326,12 @@
   border: none; background: transparent; cursor: pointer;
   padding: 8px 20px; border-radius: var(--radius-pill);
   color: var(--white-a40); font-size: 13px; font-weight: 700;
-  transition: all 0.18s var(--ease-emphasized);
+  transition: all var(--dur-quick) var(--ease-emphasized);
 }
 .wlp-media-tabs button:hover { color: var(--text-2); }
 .wlp-media-tabs button[aria-selected="true"] {
   background: var(--white-a12); color: var(--text-1);
-  box-shadow: 0 2px 10px rgba(0,0,0,0.35), inset 0 1px 0 var(--white-a12);
+  box-shadow: 0 2px 10px var(--black-a35), inset 0 1px 0 var(--white-a12);
 }
 
 /* Music releases filed as audiobooks: listed under the Audiobooks tab. */
@@ -340,162 +340,477 @@
 .wlp-routed-note { margin: 0 0 14px; font-size: 13px; color: var(--white-a40); }
 
 /* ── Nebula field ───────────────────────────────────────────────────── */
-.wlp .wl-nebula-field {
-  gap: 26px 22px;
-  padding: 26px 6px 40px;
-  perspective: 1200px;
+/* the field sits in a stage. opening an artist adds a panel beside it, so
+   the orbs hold still instead of reflowing around an inline box. */
+.wlp-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
 }
 
-/* Orbs: deeper glass, real glow, failing halo */
-.wlp .wl-orb-group { transition: transform 0.25s var(--ease-emphasized); }
+.wlp .wl-nebula-field.wlp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+  padding: 22px 4px 40px;
+}
+
+/* zones: one per kind of trouble, worst first */
+.wlp-zone { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.wlp-zone-head { display: flex; align-items: center; gap: 6px 12px; min-width: 0; flex-wrap: wrap; }
+.wlp-zone-title { margin: 0; font-size: 15px; font-weight: 800; letter-spacing: -0.01em; color: var(--text-1); white-space: nowrap; }
+.wlp-zone-sub { font-size: 12.5px; color: var(--white-a50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.wlp-zone-rule { flex: 1; height: 1px; min-width: 16px; background: var(--white-a07); }
+.wlp-zone--rejected .wlp-zone-title,
+.wlp-zone--notfound .wlp-zone-title,
+.wlp-zone--failed .wlp-zone-title { color: rgb(var(--wlp-warn)); }
+.wlp-zone-retry { flex: none; }
+
+.wlp-zone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 26px 8px;
+}
+
+/* Orbs: deeper glass, real glow */
+.wlp .wl-orb-group { transition: transform var(--dur-moderate) var(--ease-emphasized); min-width: 0; }
+/* style.css still gives an expanded group the video page's inline-box look */
+.wlp .wl-orb-group.expanded { background: none; padding: 0; box-shadow: none; flex-basis: auto; max-width: none; z-index: auto; border-radius: 0; }
 .wlp .wl-orb-group:hover { transform: translateY(-4px); }
 .wlp .wl-orb {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
   border-radius: var(--radius-circle);
   box-shadow:
-    0 18px 44px rgba(0, 0, 0, 0.55),
+    0 18px 44px var(--black-a55),
     0 0 0 1px var(--white-a09),
     0 0 34px -6px hsla(var(--orb-hue, 150), 80%, 55%, 0.45),
     inset 0 2px 10px var(--white-a14),
-    inset 0 -14px 28px rgba(0, 0, 0, 0.5);
-  transition: transform 0.3s var(--wlp-ease-spring), box-shadow 0.3s var(--ease-emphasized);
+    inset 0 -14px 28px var(--black-a50);
+  transition: transform var(--dur-slow) var(--wlp-ease-spring), box-shadow var(--dur-slow) var(--ease-emphasized);
   cursor: pointer;
 }
+.wlp .wl-orb:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.8); outline-offset: 4px; }
 .wlp .wl-orb-group:hover .wl-orb {
   transform: scale(1.06);
   box-shadow:
-    0 26px 60px rgba(0, 0, 0, 0.6),
+    0 26px 60px var(--black-a60),
     0 0 0 1px var(--white-a16),
     0 0 54px -4px hsla(var(--orb-hue, 150), 85%, 58%, 0.65),
     inset 0 2px 12px var(--white-a20),
-    inset 0 -14px 28px rgba(0, 0, 0, 0.5);
+    inset 0 -14px 28px var(--black-a50);
 }
-.wlp .wl-orb-group.expanded .wl-orb {
-  box-shadow:
-    0 22px 54px rgba(0, 0, 0, 0.6),
-    0 0 0 2px rgba(var(--accent-rgb), 0.55),
-    0 0 60px -4px hsla(var(--orb-hue, 150), 85%, 58%, 0.7),
-    inset 0 2px 12px var(--white-a20),
-    inset 0 -14px 28px rgba(0, 0, 0, 0.5);
-}
-/* Failing artists burn amber — visible across the room */
+/* stuck artists get a thin amber edge. the zone already says what's wrong,
+   so no halo shouting from every orb. */
 .wlp .wl-orb-group[data-failing]:not([data-failing="0"]) .wl-orb {
   box-shadow:
-    0 18px 44px rgba(0, 0, 0, 0.55),
-    0 0 0 2px rgba(var(--wlp-warn), 0.65),
-    0 0 44px -4px rgba(var(--wlp-warn), 0.55),
+    0 18px 44px var(--black-a55),
+    0 0 0 2px rgba(var(--wlp-warn), 0.5),
     inset 0 2px 10px var(--white-a14),
-    inset 0 -14px 28px rgba(0, 0, 0, 0.5);
-  /* no pulse: animating box-shadow repaints every failing orb every frame,
-     and a wishlist with dozens of them flickered */
+    inset 0 -14px 28px var(--black-a50);
+}
+/* the open artist: accent ring and glow, ties the orb to its panel */
+.wlp .wl-orb-group.expanded .wl-orb,
+.wlp .wl-orb-group.expanded[data-failing] .wl-orb {
+  transform: scale(1.06);
+  box-shadow:
+    0 22px 54px var(--black-a60),
+    0 0 0 3px rgba(var(--accent-rgb), 0.9),
+    0 0 0 7px rgba(var(--accent-rgb), 0.18),
+    0 0 48px rgba(var(--accent-rgb), 0.45),
+    inset 0 2px 12px var(--white-a20),
+    inset 0 -14px 28px var(--black-a50);
 }
 .wlp .wl-orb-label {
-  font-weight: 800; letter-spacing: -0.01em;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
-  transition: color 0.2s var(--ease-emphasized);
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  max-width: 100%;
+  color: var(--text-1);
+  text-shadow: 0 2px 12px var(--black-a80);
+  transition: color var(--dur-base) var(--ease-emphasized);
 }
 .wlp .wl-orb-group:hover .wl-orb-label { color: #fff; }
-.wlp .wl-orb-meta-failing {
-  color: rgb(var(--wlp-warn));
-  font-weight: 800;
-}
+.wlp .wl-orb-meta { font-size: 12px; color: var(--white-a50); font-variant-numeric: tabular-nums; }
+.wlp .wl-orb-meta--stuck { color: rgba(var(--wlp-warn), 0.9); }
 
-/* Expanded fan: a glass stage, not a dropdown */
-.wlp .wl-orb-expanded { animation: wlp-fan-in 0.35s var(--ease-emphasized); }
-@keyframes wlp-fan-in {
-  from { opacity: 0; transform: translateY(-10px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-.wlp-fan-head {
-  display: flex; align-items: center; gap: 10px;
-  margin: 14px 0 12px; padding: 10px 14px;
-  border-radius: 14px;
+/* ── Artist panel ───────────────────────────────────────────────────── */
+.wlp-sheet {
+  /* default: a drawer floating over the right edge. side by side only on
+     screens wide enough to keep the field usable (see the 1300px query). */
+  position: fixed;
+  top: 12px; right: 12px; bottom: 12px;
+  width: min(420px, calc(100vw - 24px));
+  z-index: 60;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-sheet);
   border: 1px solid var(--white-a09);
-  background: rgba(0, 0, 0, 0.32);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  flex-wrap: wrap;
+  background: #13141b;
+  box-shadow: 0 30px 70px var(--black-a55), inset 0 1px 0 var(--white-a06);
+  animation: wlp-sheet-in 0.32s var(--ease-emphasized);
+  scrollbar-width: thin;
+  scrollbar-color: var(--white-a10) transparent;
 }
-.wlp-fan-head .wlp-fan-artist { font-weight: 800; font-size: 14px; letter-spacing: -0.01em; }
-.wlp-fan-head .wlp-fan-count { color: var(--white-a40); font-size: 12px; font-weight: 600; }
-.wlp-fan-head .wlp-fan-spacer { flex: 1; }
-
-/* Album tiles become proper rows */
-.wlp .wl-album-fan { gap: 10px; }
-.wlp .wl-album-tile {
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--white-a09);
-  background: linear-gradient(135deg, var(--white-a05), rgba(255,255,255,0.015));
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
-  transition: transform 0.22s var(--ease-emphasized), border-color 0.22s var(--ease-emphasized), box-shadow 0.22s var(--ease-emphasized);
-  overflow: hidden;
+@keyframes wlp-sheet-in {
+  from { opacity: 0; transform: translateX(14px); }
+  to { opacity: 1; transform: none; }
 }
-.wlp .wl-album-tile:hover {
-  transform: translateY(-2px);
-  border-color: var(--white-a16);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+.wlp-sheet-backdrop { position: absolute; inset: 0 0 auto 0; height: 190px; overflow: hidden; border-radius: var(--radius-sheet) var(--radius-sheet) 0 0; pointer-events: none; }
+.wlp-sheet-backdrop img {
+  position: absolute; inset: -40px;
+  width: calc(100% + 80px); height: calc(100% + 80px);
+  object-fit: cover;
+  filter: blur(30px) saturate(1.25);
+  opacity: 0.55;
 }
-.wlp .wl-album-tile-art img { border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,0.5); }
-.wlp .wl-album-tile-name { font-weight: 750; letter-spacing: -0.01em; }
-.wlp-tile-grab {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; border-radius: 10px; flex: none;
-  border: 1px solid rgba(var(--accent-rgb), 0.4);
-  background: rgba(var(--accent-rgb), 0.12);
-  color: rgb(var(--accent-rgb));
+.wlp-sheet-backdrop::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(19, 20, 27, 0.15), #13141b 92%); }
+.wlp-sheet-close {
+  position: absolute; top: 14px; right: 14px; z-index: 2;
+  width: 36px; height: 36px;
+  border: 0; border-radius: var(--radius-circle);
+  background: var(--black-a45); color: var(--text-1);
   font-size: 14px; cursor: pointer;
-  opacity: 0; transform: translateX(4px);
-  transition: all 0.2s var(--ease-emphasized);
+  transition: background var(--dur-fast) var(--ease-emphasized);
 }
-.wlp .wl-album-tile:hover .wlp-tile-grab { opacity: 1; transform: none; }
-.wlp-tile-grab:hover { background: rgba(var(--accent-rgb), 0.25); box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.4); }
-.wlp-tile-grab:focus-visible { opacity: 1; transform: none; outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 2px; }
-.wlp .wl-album-tile-remove { opacity: 0; transition: opacity 0.2s var(--ease-emphasized); }
-.wlp .wl-album-tile:hover .wl-album-tile-remove { opacity: 0.75; }
-.wlp .wl-album-tile-remove:hover { opacity: 1; }
+.wlp-sheet-close:hover { background: var(--black-a70); }
+.wlp-sheet > :not(.wlp-sheet-backdrop):not(.wlp-sheet-close) { position: relative; }
 
-/* Tile tracks: cleaner rows, status-first */
-.wlp .wl-tile-track {
-  border-radius: 10px;
-  transition: background 0.15s var(--ease-emphasized);
+.wlp-sheet-head { display: flex; align-items: flex-end; gap: 16px; padding: 96px 24px 0; }
+.wlp-sheet-avatar {
+  width: 88px; height: 88px; flex: none;
+  border-radius: var(--radius-circle);
+  object-fit: cover;
+  border: 4px solid #13141b;
+  box-shadow: 0 12px 30px var(--black-a50);
 }
-.wlp .wl-tile-track:hover { background: var(--white-a05); }
-.wlp .wl-tile-track-search, .wlp .wl-tile-track-remove { opacity: 0; transition: opacity 0.18s var(--ease-emphasized); }
-.wlp .wl-tile-track:hover .wl-tile-track-search, .wlp .wl-tile-track:hover .wl-tile-track-remove { opacity: 0.8; }
-.wlp .wl-tile-track-search:hover, .wlp .wl-tile-track-remove:hover { opacity: 1; }
-.wlp .wl-tile-track-search:focus-visible, .wlp .wl-tile-track-remove:focus-visible { opacity: 1; }
-.wlp .wl-track-failing { background: rgba(var(--wlp-warn), 0.06); }
-.wlp .wl-failing-badge {
-  background: rgba(var(--wlp-warn), 0.14);
-  border: 1px solid rgba(var(--wlp-warn), 0.4);
+.wlp-sheet-avatar--ph {
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--text-1); font-size: 26px; font-weight: 800;
+}
+.wlp-sheet-id { min-width: 0; padding-bottom: 8px; }
+.wlp-sheet-name { margin: 0; font-size: 21px; font-weight: 850; letter-spacing: -0.02em; line-height: 1.2; color: #fff; overflow-wrap: anywhere; }
+.wlp-sheet-meta { margin-top: 4px; font-size: 13px; color: var(--white-a50); }
+.wlp-sheet-stuck { color: rgb(var(--wlp-warn)); }
+
+.wlp-sheet-callout {
+  display: flex; gap: 12px;
+  margin: 18px 24px 0; padding: 14px;
+  border-radius: var(--radius-card);
+  border: 1px solid rgba(var(--wlp-warn), 0.22);
+  background: rgba(var(--wlp-warn), 0.07);
+}
+.wlp-sheet-callout-icon {
+  width: 26px; height: 26px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-circle);
+  background: rgba(var(--wlp-warn), 0.18);
   color: rgb(var(--wlp-warn));
-  font-weight: 800;
+  font-size: 13px; font-weight: 900;
+}
+.wlp-sheet-callout-title { font-size: 14px; font-weight: 750; color: rgb(var(--wlp-warn)); }
+.wlp-sheet-callout-text { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+
+.wlp-sheet-actions { display: flex; gap: 8px; padding: 16px 24px 0; flex-wrap: wrap; }
+.wlp-sheet-actions .wlp-btn { min-height: 42px; justify-content: center; }
+.wlp-sheet-primary { flex: 1 1 140px; }
+.wlp-sheet-ghost { border: 1px solid var(--white-a12); }
+
+.wlp-sheet-body { display: flex; flex-direction: column; gap: 18px; padding: 22px 24px 24px; }
+.wlp-sheet-album { display: flex; flex-direction: column; gap: 4px; }
+.wlp-sheet-album-head { display: flex; align-items: center; gap: 12px; padding-bottom: 6px; }
+.wlp-sheet-cover { width: 52px; height: 52px; flex: none; border-radius: var(--radius-md); object-fit: cover; box-shadow: 0 6px 18px var(--black-a45); }
+.wlp-sheet-cover--ph { display: flex; align-items: center; justify-content: center; background: var(--white-a06); color: var(--white-a40); }
+.wlp-sheet-album-id { flex: 1; min-width: 0; }
+.wlp-sheet-album-name { font-size: 14.5px; font-weight: 750; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wlp-sheet-album-count { margin-top: 2px; font-size: 12px; color: var(--white-a50); }
+.wlp-sheet-label { margin: 0 0 4px; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--white-a50); }
+
+.wlp-sheet-track {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 10px 10px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--white-a03);
+  transition: background var(--dur-fast) var(--ease-emphasized);
+}
+.wlp-sheet-track:hover { background: var(--white-a05); }
+.wlp-sheet-track.is-stuck { background: rgba(var(--wlp-warn), 0.05); }
+.wlp-sheet-track-cover { width: 40px; height: 40px; flex: none; border-radius: var(--radius-sm); object-fit: cover; }
+.wlp-sheet-track-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.wlp-sheet-track-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wlp-sheet-track-name { font-size: 13.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.wlp-sheet-track-why { font-size: 12px; color: var(--white-a50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wlp-sheet-pill {
+  flex: none;
+  padding: 2px 8px;
   border-radius: var(--radius-pill);
-  padding: 2px 9px;
+  font-size: 11px; font-weight: 750;
+  background: var(--white-a07);
+  color: var(--white-a60);
+  font-variant-numeric: tabular-nums;
+}
+.wlp-sheet-pill.is-stuck { background: rgba(var(--wlp-warn), 0.14); color: rgb(var(--wlp-warn)); }
+
+.wlp-sheet-chip {
+  flex: none;
+  height: 32px; padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--white-a10);
+  background: var(--white-a05);
+  color: var(--text-1);
+  font-size: 12.5px; font-weight: 650;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-emphasized), border-color var(--dur-fast) var(--ease-emphasized);
+}
+.wlp-sheet-chip:hover { background: var(--white-a10); border-color: var(--white-a16); }
+.wlp-sheet-chip:disabled { opacity: 0.45; cursor: default; }
+.wlp-sheet-x {
+  flex: none;
+  width: 32px; height: 32px;
+  border: 0; border-radius: 9px;
+  background: none;
+  color: var(--white-a40);
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity var(--dur-fast) var(--ease-emphasized), background var(--dur-fast) var(--ease-emphasized), color var(--dur-fast) var(--ease-emphasized);
+}
+.wlp-sheet-track:hover .wlp-sheet-x, .wlp-sheet-album-head:hover .wlp-sheet-x, .wlp-sheet-x:focus-visible { opacity: 1; }
+.wlp-sheet-x:hover { background: rgba(var(--wlp-danger), 0.14); color: rgb(var(--wlp-danger)); }
+
+.wlp-sheet-remove {
+  align-self: flex-start;
+  margin-top: 4px; padding: 8px 0;
+  border: 0; background: none;
+  color: var(--white-a40);
+  font-size: 12.5px; font-weight: 600;
+  cursor: pointer;
+}
+.wlp-sheet-remove:hover { color: rgb(var(--wlp-danger)); }
+
+/* the command bar's ⋯ menu */
+.wlp-more { min-width: 42px; justify-content: center; font-size: 18px; line-height: 1; }
+
+/* every direct child of .wlp sits in its own z-index:1 layer, so a floating
+   panel inside the nebula would stay under the sticky command bar (z 30).
+   lift the whole nebula while its panel floats. side by side it stays put,
+   or the orbs would scroll over the bar. */
+@media (max-width: 1299px) {
+  .wlp > .wl-nebula.has-sheet { z-index: 70; }
 }
 
-/* Singles orbit */
-.wlp .wl-single-moon { transition: transform 0.22s var(--wlp-ease-spring); }
-.wlp .wl-single-moon:hover { transform: translateY(-4px) scale(1.05); }
-.wlp .wl-moon-failing { box-shadow: 0 0 0 2px rgba(var(--wlp-warn), 0.6), 0 0 22px rgba(var(--wlp-warn), 0.35); }
-.wlp .wl-moon-search-btn, .wlp .wl-moon-remove-btn { opacity: 0; transition: opacity 0.18s var(--ease-emphasized); }
-.wlp .wl-single-moon:hover .wl-moon-search-btn, .wlp .wl-single-moon:hover .wl-moon-remove-btn { opacity: 0.9; }
-.wlp .wl-moon-search-btn:focus-visible, .wlp .wl-moon-remove-btn:focus-visible { opacity: 1; }
+/* dims the field behind a floating panel; a tap on it closes the panel */
+.wlp-sheet-scrim {
+  position: fixed; inset: 0; z-index: 59;
+  background: rgba(0, 0, 0, 0.5);
+  animation: wlp-scrim-in 0.25s ease;
+}
+@keyframes wlp-scrim-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* the sidebar eats 240px above 768px, so 1300px of window leaves ~1000px of
+   page: enough for the field and a 420px panel side by side */
+@media (min-width: 1300px) {
+  .wlp-stage.has-sheet { grid-template-columns: minmax(0, 1fr) 420px; }
+  .wlp-sheet {
+    /* sticks below the sticky command bar (one 70px row at these widths),
+       or the bar would slide over the panel's head on scroll */
+    position: sticky;
+    top: 88px; right: auto; bottom: auto;
+    width: auto;
+    max-height: calc(100vh - 104px);
+    z-index: auto;
+  }
+  .wlp-sheet-scrim { display: none; }
+}
+
+/* phones: a bottom sheet, full width, thumb-reachable */
+@media (max-width: 600px) {
+  .wlp-sheet {
+    /* clears the fixed hamburger (top 16 + 44) */
+    top: 72px; left: 0; right: 0; bottom: 0;
+    width: auto;
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+    border-bottom: none;
+    animation-name: wlp-sheet-up;
+  }
+  .wlp-sheet-body { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+  .wlp-sheet-head { padding: 84px 18px 0; }
+  .wlp-sheet-avatar { width: 72px; height: 72px; }
+  .wlp-sheet-name { font-size: 19px; }
+  .wlp-sheet-callout { margin: 16px 18px 0; }
+  .wlp-sheet-actions { padding: 14px 18px 0; }
+  .wlp-sheet-actions .wlp-btn { flex: 1 1 auto; min-height: 44px; }
+  .wlp-sheet-body { padding-left: 18px; padding-right: 18px; }
+  .wlp-sheet-chip, .wlp-sheet-x { height: 40px; }
+  .wlp-sheet-x { width: 40px; }
+  .wlp-zone-sub { white-space: normal; }
+  .wlp-zone-grid--posters { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 18px 12px; }
+  .wlp-video-ep-detail { padding-left: 8px; }
+  .wlp-video-ep-thumb { flex-basis: 56px; height: 32px; }
+  /* the artist row's Grab all drops to its own line instead of off-screen */
+  .wlp .wl-list-sep { flex-wrap: wrap; row-gap: 6px; }
+}
+@keyframes wlp-sheet-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* touch: nothing can hover, so hover-revealed controls must already show,
+   and the orb tooltip would stick after a tap */
+@media (hover: none) {
+  .wlp .wl-list-track-actions,
+  .wlp-sec-grab,
+  .wlp-sheet-x { opacity: 1; transform: none; }
+  .wlp .wl-orb-tooltip { display: none; }
+  .wlp .wl-orb-group:hover,
+  .wlp .wl-orb-group:hover .wl-orb { transform: none; }
+  .wlp-poster:hover .wlp-poster-art { transform: none; }
+}
+
+/* ── Video tabs (movies · tv · youtube) ─────────────────────────────── */
+/* the same page on its video tabs: same hero, bar, zones and panel. what's
+   below is only what video has and music doesn't. */
+.wlp-media-tabs .wlp-tab-count {
+  margin-left: 7px; padding: 1px 7px; border-radius: var(--radius-pill);
+  background: var(--white-a08); color: var(--white-a60);
+  font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.wlp-media-tabs button[aria-selected="true"] .wlp-tab-count { background: rgba(0, 0, 0, 0.25); color: inherit; }
+
+/* movies: a film is a poster, not an orb */
+.wlp-zone-grid--posters {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 24px 16px;
+}
+.wlp-poster {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  padding: 0; border: 0; background: none; color: inherit; font: inherit;
+  text-align: left; cursor: pointer;
+}
+.wlp-poster-art {
+  position: relative; display: block; aspect-ratio: 2 / 3; overflow: hidden;
+  border-radius: var(--radius-card);
+  background: var(--white-a05);
+  box-shadow: 0 14px 34px var(--black-a50), 0 0 0 1px var(--white-a08);
+  transition: transform var(--dur-moderate) var(--ease-emphasized), box-shadow var(--dur-moderate) var(--ease-emphasized);
+}
+.wlp-poster-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wlp-poster-ph {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 26px; font-weight: 800; color: var(--white-a40);
+}
+.wlp-poster:hover .wlp-poster-art { transform: translateY(-3px); box-shadow: 0 20px 44px var(--black-a60), 0 0 0 1px var(--white-a16); }
+.wlp-poster.is-stuck .wlp-poster-art { box-shadow: 0 14px 34px var(--black-a50), 0 0 0 2px rgba(var(--wlp-warn), 0.5); }
+.wlp-poster.expanded .wlp-poster-art {
+  transform: translateY(-3px);
+  box-shadow: 0 20px 44px var(--black-a60), 0 0 0 3px rgba(var(--accent-rgb), 0.9), 0 0 32px rgba(var(--accent-rgb), 0.4);
+}
+.wlp-poster:focus-visible { outline: none; }
+.wlp-poster:focus-visible .wlp-poster-art { outline: 2px solid rgba(var(--accent-rgb), 0.8); outline-offset: 3px; }
+.wlp-poster-title { font-size: 13.5px; font-weight: 700; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wlp-poster-meta { margin-top: -3px; font-size: 12px; color: var(--white-a50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wlp-poster-meta.is-stuck { color: rgba(var(--wlp-warn), 0.9); }
+
+/* panel bits video needs */
+.wlp-sheet-avatar--poster { width: 76px; height: 114px; border-radius: var(--radius-md); }
+.wlp-sheet-pill.is-live { background: rgba(var(--accent-rgb), 0.16); color: rgb(var(--accent-rgb)); }
+.wlp-sheet-pill.is-done { background: var(--white-a05); color: var(--white-a40); }
+.wlp-sheet-more { font-size: 16px; line-height: 1; }
+.wlp-sheet-about { display: flex; flex-direction: column; gap: 12px; }
+.wlp-sheet-overview {
+  margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-2);
+  display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden;
+}
+.wlp-sheet-disclose {
+  align-self: flex-start; padding: 6px 0; border: 0; background: none;
+  color: rgb(var(--accent-rgb)); font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.wlp-sheet-disclose:hover { text-decoration: underline; }
+.wlp-sheet-remove:disabled { opacity: 0.45; cursor: default; }
+
+/* cast: small round faces, a tap opens the person */
+.wlp-cast { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.wlp-cast-member {
+  flex: 0 0 64px; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer;
+}
+.wlp-cast-img { position: relative; width: 48px; height: 48px; border-radius: var(--radius-circle); overflow: hidden; background: var(--white-a08); }
+.wlp-cast-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.wlp-cast-ini { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: var(--white-a50); }
+.wlp-cast-name { max-width: 64px; font-size: 11px; color: var(--white-a60); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wlp-cast-member:hover .wlp-cast-name { color: var(--text-1); }
+
+/* an episode / video row: a still, the line, and it opens in place */
+.wlp-video-ep { flex-direction: column; align-items: stretch; gap: 0; padding: 6px; }
+.wlp-video-ep-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wlp-video-ep-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
+  padding: 4px; border: 0; border-radius: var(--radius-md); background: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.wlp-video-ep-main:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); }
+.wlp-video-ep-sub { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.wlp-video-ep-sub .wlp-sheet-track-why { min-width: 0; }
+.wlp-video-ep-thumb {
+  flex: 0 0 72px; height: 41px; border-radius: var(--radius-sm); overflow: hidden;
+  background: var(--white-a06);
+}
+.wlp-video-ep-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wlp-video-ep-detail { display: flex; flex-direction: column; gap: 10px; padding: 8px 8px 6px 86px; }
+.wlp-video-eyebrow { font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--white-a50); }
+.wlp-video-note { margin: 0; font-size: 12.5px; color: rgba(var(--wlp-warn), 0.9); }
+.wlp-video-watch { align-self: flex-start; font-size: 13px; font-weight: 700; color: rgb(var(--accent-rgb)); text-decoration: none; }
+.wlp-video-watch:hover { text-decoration: underline; }
+
+/* the diagnostics drawer: what the last search found, per source */
+.wlp-diag {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 12px; border-radius: var(--radius-lg);
+  background: rgba(0, 0, 0, 0.25); border: 1px solid var(--white-a07);
+}
+.wlp-diag--note { font-size: 12.5px; color: var(--white-a50); }
+.wlp-diag-grid { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; }
+.wlp-diag-line { display: contents; }
+.wlp-diag-line dt { font-size: 11.5px; font-weight: 700; color: var(--white-a50); }
+.wlp-diag-line dd { margin: 0; font-size: 12.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.wlp-diag-line.is-gap dd { color: rgba(var(--wlp-warn), 0.9); }
+.wlp-diag-line.is-live dd { color: rgb(var(--accent-rgb)); }
+.wlp-diag-src { display: flex; flex-direction: column; gap: 4px; }
+.wlp-diag-src-head { font-size: 12px; font-weight: 800; color: var(--text-1); }
+.wlp-diag-rel { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--white-a60); }
+.wlp-diag-rel-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wlp-diag-rel-w { flex: none; max-width: 55%; text-align: right; color: var(--white-a50); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wlp-diag-rel.is-ok .wlp-diag-rel-w { color: rgb(var(--accent-rgb)); }
+.wlp-diag-rel.is-none { font-style: italic; color: var(--white-a40); }
+
+/* pages of 60 */
+.wlp-pager { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 8px 0 24px; }
+.wlp-pager-info { font-size: 13px; color: var(--white-a50); font-variant-numeric: tabular-nums; }
 
 /* ── List view ──────────────────────────────────────────────────────── */
 .wlp .wl-list { gap: 0; }
 
 /* Section headers: slimmer, with a grab-all action */
 .wlp .wl-list-sep {
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   border: 1px solid transparent;
   padding: 10px 14px;
-  transition: background 0.18s var(--ease-emphasized), border-color 0.18s var(--ease-emphasized);
+  transition: background var(--dur-quick) var(--ease-emphasized), border-color var(--dur-quick) var(--ease-emphasized);
 }
 .wlp .wl-list-sep:hover { background: var(--wlp-surface); border-color: var(--white-a09); }
 .wlp .wl-list-artist-name { font-weight: 800; letter-spacing: -0.01em; font-size: 14.5px; }
-.wlp .wl-list-avatar { box-shadow: 0 4px 14px rgba(0,0,0,0.45); border: 1px solid var(--white-a12); }
+.wlp .wl-list-avatar { box-shadow: 0 4px 14px var(--black-a45); border: 1px solid var(--white-a12); }
 .wlp .wl-list-failing-badge {
   background: rgba(var(--wlp-warn), 0.13);
   border: 1px solid rgba(var(--wlp-warn), 0.42);
@@ -511,7 +826,7 @@
   color: rgb(var(--accent-rgb));
   font-size: 12px; font-weight: 800; cursor: pointer; white-space: nowrap;
   opacity: 0; transform: translateX(6px);
-  transition: all 0.2s var(--ease-emphasized);
+  transition: all var(--dur-base) var(--ease-emphasized);
 }
 .wlp .wl-list-sep:hover .wlp-sec-grab, .wlp-sec-grab:focus-visible { opacity: 1; transform: none; }
 .wlp-sec-grab:hover { background: rgba(var(--accent-rgb), 0.22); box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.35); }
@@ -521,14 +836,14 @@
   border-radius: var(--radius-lg);
   border: 1px solid transparent;
   border-bottom: 1px solid var(--white-a05);
-  transition: background 0.15s var(--ease-emphasized), border-color 0.15s var(--ease-emphasized), transform 0.15s var(--ease-emphasized);
+  transition: background var(--dur-fast) var(--ease-emphasized), border-color var(--dur-fast) var(--ease-emphasized), transform var(--dur-fast) var(--ease-emphasized);
 }
 .wlp .wl-list-track:hover {
   background: rgba(255, 255, 255, 0.045);
   border-color: var(--white-a07);
 }
 .wlp .wl-list-track--select:hover { border-color: rgba(var(--accent-rgb), 0.3); }
-.wlp .wl-list-cover { border-radius: var(--radius-md); box-shadow: 0 4px 12px rgba(0,0,0,0.45); }
+.wlp .wl-list-cover { border-radius: var(--radius-md); box-shadow: 0 4px 12px var(--black-a45); }
 .wlp .wl-list-track-name { font-weight: 650; letter-spacing: -0.005em; }
 .wlp .wl-list-track-album { color: var(--white-a40); }
 
@@ -560,16 +875,24 @@
   color: rgb(var(--wlp-danger));
 }
 .wlp .wl-list-track--failing { background: rgba(var(--wlp-warn), 0.03); }
-.wlp .wl-list-track-actions { opacity: 0; transition: opacity 0.18s var(--ease-emphasized); }
+.wlp .wl-list-track-actions { opacity: 0; transition: opacity var(--dur-quick) var(--ease-emphasized); }
 .wlp .wl-list-track:hover .wl-list-track-actions { opacity: 1; }
 .wlp .wl-list-track-actions:focus-within { opacity: 1; }
 .wlp .wl-list-btn {
   border-radius: 9px;
   border: 1px solid transparent;
-  transition: all 0.15s var(--ease-emphasized);
+  transition: all var(--dur-fast) var(--ease-emphasized);
 }
 .wlp .wl-list-btn:hover { background: var(--white-a09); border-color: var(--white-a09); }
 .wlp .wl-list-btn--x:hover { background: rgba(var(--wlp-danger), 0.14); color: rgb(var(--wlp-danger)); }
+
+/* why + when, stacked in the last column */
+.wlp .wl-list-last { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wlp .wl-list-why { font-size: 12px; font-weight: 650; color: rgba(var(--wlp-warn), 0.9); overflow: hidden; text-overflow: ellipsis; }
+.wlp .wl-list-when { font-size: 11.5px; color: var(--white-a40); }
+.wlp .wl-list-zone { margin: 26px 0 10px; }
+.wlp .wl-list-section:first-child .wl-list-zone { margin-top: 6px; }
+@media (max-width: 700px) { .wlp .wl-list-last { display: none; } }
 
 /* Sort bar */
 .wlp .wl-list-sortbar { margin: 4px 0 12px; }
@@ -582,19 +905,19 @@
   display: flex; align-items: center; gap: 8px;
   width: fit-content; max-width: calc(100% - 32px);
   margin: 18px auto 0; padding: 10px 12px;
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   border: 1px solid var(--white-a16);
   background: rgba(14, 17, 24, 0.88);
   backdrop-filter: blur(20px) saturate(1.3);
   -webkit-backdrop-filter: blur(20px) saturate(1.3);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55), inset 0 1px 0 var(--white-a08);
-  transition: transform 0.3s var(--wlp-ease-spring), opacity 0.25s var(--ease-emphasized), box-shadow 0.3s var(--ease-emphasized);
+  box-shadow: 0 18px 50px var(--black-a55), inset 0 1px 0 var(--white-a08);
+  transition: transform var(--dur-slow) var(--wlp-ease-spring), opacity var(--dur-moderate) var(--ease-emphasized), box-shadow var(--dur-slow) var(--ease-emphasized);
   flex-wrap: wrap; justify-content: center;
 }
 .wlp .wl-bulkbar:not(.has-selection) { opacity: 0.55; }
 .wlp .wl-bulkbar.has-selection {
   border-color: rgba(var(--accent-rgb), 0.45);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55), 0 0 30px rgba(var(--accent-rgb), 0.18), inset 0 1px 0 var(--white-a08);
+  box-shadow: 0 18px 50px var(--black-a55), 0 0 30px rgba(var(--accent-rgb), 0.18), inset 0 1px 0 var(--white-a08);
   animation: wlp-bar-pop 0.35s var(--wlp-ease-spring);
 }
 @keyframes wlp-bar-pop { from { transform: scale(0.94); } to { transform: scale(1); } }
@@ -619,9 +942,9 @@
   width: 88px; height: 88px; margin: 0 auto 22px;
   border-radius: 28px;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, rgba(var(--wlp-gold), 0.14), rgba(var(--accent-rgb), 0.10));
+  background: linear-gradient(135deg, rgba(var(--gold-rgb), 0.14), rgba(var(--accent-rgb), 0.10));
   border: 1px solid var(--white-a10);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 var(--white-a10);
+  box-shadow: 0 16px 40px var(--black-a40), inset 0 1px 0 var(--white-a10);
   animation: wlp-float 5s ease-in-out infinite;
 }
 @keyframes wlp-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
@@ -637,7 +960,7 @@
   .wlp-nextrun { width: 100%; }
   .wlp-stat { padding: 10px 18px 10px 0; border-left: none; }
   .wlp-cmdbar { margin: 0 -8px 14px; border-radius: var(--radius-xl); }
-  .wlp .wl-nebula-field { gap: 18px 14px; }
+  .wlp-zone-grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 20px 6px; }
 }
 @media (max-width: 560px) {
   .wlp-stats { gap: 4px; }

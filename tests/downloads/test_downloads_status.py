@@ -802,6 +802,37 @@ def test_unified_response_includes_persistent_download_history():
     assert item['is_persistent_history'] is True
 
 
+def test_history_rows_carry_kind_acoustid_and_what_was_asked_for():
+    # the downloads page detail sheet reads these. a podcast row has to say
+    # it's a podcast, and a wrong-file grab has to show what we asked for.
+    deps, _ = _build_deps(
+        persistent_history=lambda limit: [
+            {
+                'id': 7,
+                'event_type': 'podcast',
+                'title': 'Episode',
+                'acoustid_result': 'verified',
+                'source_track_title': 'Asked Title',
+                'source_artist': 'Asked Artist',
+                'created_at': '2026-05-24 12:34:56',
+            },
+            {'id': 8, 'title': 'Bare', 'created_at': '2026-05-24 12:00:00'},
+        ]
+    )
+
+    out = st.build_unified_downloads_response(100, deps)
+
+    rich, bare = out['downloads']
+    assert rich['event_type'] == 'podcast'
+    assert rich['acoustid_result'] == 'verified'
+    assert rich['expected_title'] == 'Asked Title'
+    assert rich['expected_artist'] == 'Asked Artist'
+    # old rows without the columns get empty strings, never None
+    assert bare['event_type'] == ''
+    assert bare['acoustid_result'] == ''
+    assert bare['expected_title'] == ''
+
+
 def test_unified_response_dedupes_history_against_live_task():
     download_tasks['live'] = {
         'track_index': 0,

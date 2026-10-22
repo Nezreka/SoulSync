@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -91,14 +91,16 @@ describe('the active-downloads route', () => {
   });
 
   it('keeps the ids the helper tour points at', async () => {
-    // helper.js targets .adl-container, #adl-filter-pills, #adl-list and
-    // #adl-clear-btn. querySelector returns null for a missing one and the
-    // tour step silently highlights nothing.
+    // helper.js targets .adl-container, #adl-filter-pills, #adl-count,
+    // #adl-list and #adl-actions. querySelector returns null for a missing one
+    // and the tour step silently highlights nothing.
     const { container } = renderRoute();
     await settled();
     expect(container.querySelector('.adl-container')).not.toBeNull();
     expect(container.querySelector('#adl-filter-pills')).not.toBeNull();
     expect(container.querySelector('#adl-list')).not.toBeNull();
+    expect(container.querySelector('#adl-actions')).not.toBeNull();
+    expect(container.querySelector('#adl-count')).not.toBeNull();
   });
 
   it('lists what the server sent', async () => {
@@ -106,10 +108,16 @@ describe('the active-downloads route', () => {
     const { container } = renderRoute();
     await settled();
 
-    await waitFor(() => expect(container.querySelectorAll('.adl-row')).toHaveLength(2));
-    const nums = [...container.querySelectorAll('.adl-stat-num')].map((n) => n.textContent);
-    // active / queued / failed / total
-    expect(nums).toEqual(['1', '0', '0', '2']);
+    await waitFor(() => expect(container.querySelectorAll('.dlc-row')).toHaveLength(2));
+    // the counts live on the filter chips; a zero chip shows no number
+    const chip = (f: string) =>
+      container.querySelector(`#adl-filter-pills [data-filter="${f}"] b`)?.textContent ?? '';
+    expect([chip('all'), chip('active'), chip('queued'), chip('completed')]).toEqual([
+      '2',
+      '1',
+      '',
+      '1',
+    ]);
   });
 
   it('shows the empty state with nothing to list', async () => {
@@ -128,13 +136,13 @@ describe('the active-downloads route', () => {
     });
     const { container } = renderRoute();
     await settled();
-    await waitFor(() => expect(container.querySelectorAll('.adl-row')).toHaveLength(2));
+    await waitFor(() => expect(container.querySelectorAll('.dlc-row')).toHaveLength(2));
 
     const completed = container.querySelector('[data-filter="completed"]') as HTMLElement;
     act(() => completed.click());
 
-    await waitFor(() => expect(container.querySelectorAll('.adl-row')).toHaveLength(1));
-    expect(container.querySelector('.adl-row-title')?.textContent).toBe('Xtal');
+    await waitFor(() => expect(container.querySelectorAll('.dlc-row')).toHaveLength(1));
+    expect(container.querySelector('.dlc-title')?.textContent).toBe('Xtal');
   });
 
   it('renders a batch as a list group with the panel card promoted to its header', async () => {
@@ -157,16 +165,11 @@ describe('the active-downloads route', () => {
     });
     const withBatch = renderRoute();
     await settled();
-    await waitFor(() => expect(withBatch.container.querySelector('.adl-group')).not.toBeNull());
-    expect(withBatch.container.querySelector('.adl-group-name')?.textContent).toBe('My Batch');
-    expect(withBatch.container.querySelector('.adl-group-phase')?.textContent).toContain(
-      '3/10 tracks',
-    );
-    expect(withBatch.container.querySelector('.adl-group-stats')?.textContent).toBe(
-      '3 done · 1 active · 6 queued',
-    );
+    await waitFor(() => expect(withBatch.container.querySelector('.dlc-group')).not.toBeNull());
+    expect(withBatch.container.querySelector('.dlc-gtitle')?.textContent).toBe('My Batch');
+    expect(withBatch.container.querySelector('.dlc-gphase')?.textContent).toContain('3/10 tracks');
     // live batch groups start open, with real rows inside
-    expect(withBatch.container.querySelectorAll('.adl-group-rows .adl-row')).toHaveLength(1);
+    expect(withBatch.container.querySelectorAll('.dlc-group-rows .dlc-row')).toHaveLength(1);
   });
 
   it('shows the review banner and quarantine rows under the ⚠ filter', async () => {
@@ -200,17 +203,17 @@ describe('the active-downloads route', () => {
 
     await waitFor(() => expect(container.querySelector('#verif-subview-banner')).not.toBeNull());
     // Unverified sub-view first.
-    expect(container.querySelector('.verif-rb-unv')?.textContent).toBe('ACOUSTID UNCONFIRMED');
+    expect(container.querySelector('.dlc-tag-warn')?.textContent).toBe('Not confirmed');
 
-    const quarPill = [...container.querySelectorAll('#verif-subview-banner .adl-pill')].find((p) =>
-      p.textContent?.includes('Quarantine'),
+    const quarPill = container.querySelector(
+      '#verif-subview-banner [data-seg="quarantine"]',
     ) as HTMLElement;
     act(() => quarPill.click());
 
     await waitFor(() =>
       expect(container.querySelector('[data-quarantine-id="q1"]')).not.toBeNull(),
     );
-    expect(container.querySelector('.verif-rb-int')?.textContent).toBe('DURATION / INTEGRITY');
+    expect(container.querySelector('.dlc-tag-bad')?.textContent).toBe('Failed integrity check');
   });
 
   it('collapses to quarantine-only when require_verified is on', async () => {
@@ -226,7 +229,7 @@ describe('the active-downloads route', () => {
 
     act(() => (container.querySelector('[data-filter="unverified"]') as HTMLElement).click());
     await waitFor(() => expect(container.querySelector('#verif-subview-banner')).not.toBeNull());
-    const pills = [...container.querySelectorAll('#verif-subview-banner .adl-pill')];
+    const pills = [...container.querySelectorAll('#verif-subview-banner .dlc-seg-btn')];
     // unverified is gone; quarantine and the deleted bin remain
     expect(pills).toHaveLength(2);
     expect(pills[0].textContent).toContain('Quarantine');
@@ -245,28 +248,33 @@ describe('the active-downloads route', () => {
     const { container } = renderRoute();
     await settled();
     await waitFor(() =>
-      expect(
-        container.querySelector('[data-filter="unverified"] .adl-pill-badge')?.textContent,
-      ).toBe('2'),
+      expect(container.querySelector('[data-filter="unverified"] .dlh-badge')?.textContent).toBe(
+        '2',
+      ),
     );
   });
 
-  it('hides Cancel All and Clear Completed when there is nothing to act on', async () => {
+  it('has no action menu when there is nothing to act on', async () => {
     const { container } = renderRoute();
     await settled();
     await waitFor(() => expect(container.querySelector('#adl-empty')).not.toBeNull());
-    expect(container.querySelector('#adl-cancel-all-btn')).toBeNull();
-    expect(container.querySelector('#adl-clear-btn')).toBeNull();
+    expect(container.querySelector('#adl-actions .dlc-more')).toBeNull();
   });
 
-  it('shows both action buttons once there is work and history', async () => {
+  it('puts cancel all and clear finished in the menu once there is work and history', async () => {
     stub({
       downloads: [row({ status: 'queued' }), row({ task_id: 't2', status: 'completed' })],
     });
     const { container } = renderRoute();
     await settled();
-    await waitFor(() => expect(container.querySelector('#adl-cancel-all-btn')).not.toBeNull());
-    expect(container.querySelector('#adl-clear-btn')).not.toBeNull();
+    await waitFor(() => expect(container.querySelector('#adl-actions .dlc-more')).not.toBeNull());
+    fireEvent.click(container.querySelector('#adl-actions .dlc-more') as HTMLElement);
+    expect(document.querySelector('.lib-menu .dlh-act-cancel-all')?.textContent).toContain(
+      'Cancel all (1)',
+    );
+    expect(document.querySelector('.lib-menu .dlh-act-clear')?.textContent).toContain(
+      'Clear finished (1)',
+    );
   });
 
   it('survives every endpoint failing', async () => {

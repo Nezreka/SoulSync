@@ -284,3 +284,23 @@ def test_image_proxy_unwraps_a_nested_proxy_url(client, cache, monkeypatch):
     response = client.get(f"/api/image-proxy?url={quote('http://localhost:1/x', safe='')}")
     assert response.status_code == 200
     assert response.data == BIG
+
+
+def test_failed_cache_serve_redirects_to_original_url(client, cache, monkeypatch):
+    """When a cached image fails to serve or fetch, but its original URL is known,
+    redirect (302) to the original URL instead of returning 404, so CrowdSec/fail2ban
+    doesn't flag it as an attack probe (#1763)."""
+    key = cache.cache_url_for(URL).rsplit('/', 1)[-1]
+    # Simulate fetch/serve failure
+    monkeypatch.setattr(cache, "get", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("disk read failed")))
+
+    response = client.get(f"/api/image-cache/{key}")
+    assert response.status_code == 302
+    assert response.headers['Location'] == URL
+
+
+def test_unknown_cache_key_still_returns_404(client, cache):
+    """A completely unregistered 64-hex key has no original URL to redirect to and answers 404."""
+    unknown_key = "a" * 64
+    response = client.get(f"/api/image-cache/{unknown_key}")
+    assert response.status_code == 404

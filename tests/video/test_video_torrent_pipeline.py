@@ -114,7 +114,8 @@ def test_seed_queued_at_100_percent_imports_not_stuck_downloading():
 def test_queued_below_100_is_still_downloading():
     upd = _proc({"client_ref": "h1", "source": "torrent"}, _St(state="queued", progress=0.5))
     assert upd == {"status": "downloading", "progress": 50.0,
-                   "speed_bps": 0, "eta_seconds": None}   # genuinely mid-download → not done
+                   "speed_bps": 0, "eta_seconds": None,
+                   "_client_queued": True}   # genuinely mid-download → not done
 
 
 def test_content_path_is_preferred_over_save_path_and_name():

@@ -95,6 +95,7 @@ The video side keeps its own library paths, migrated from the legacy single vide
 
 - \`movies_path\` — where finished movie downloads are organized
 - \`tv_path\` — where finished TV downloads are organized
+- \`anime_path\` — optional: where finished episodes of anime-type shows are organized instead of \`tv_path\` (empty = anime goes to \`tv_path\`)
 - \`youtube_path\` — where YouTube channel downloads land
 
 The engine routes each finished download to the library path matching its type. See [Video: Downloads](#video-downloads) for the full pipeline.
@@ -502,6 +503,23 @@ The **Wishlist** is everything the video side wants but doesn't have at the qual
 - **Cutoff-unmet** — titles you own below their profile's cutoff quality
 
 It's the video equivalent of a Sonarr/Radarr "Wanted" queue: the single list the download pipeline works through.
+
+The page has three tabs — **Movies**, **TV** and **YouTube** — and looks and works like the music wishlist. Movies show as posters; shows and channels show as orbs.
+
+## Grouped by what's wrong
+
+Everything is grouped by what's holding it up, worst first:
+
+- **Found, but turned down** — a release that *is* this title came back, and one of your rules (quality tiers, size cap, blocklist) refused it. This is the one you can act on.
+- **Nothing found** — no source had a release that was this title
+- **Couldn't search** — a source isn't set up or is down, so nothing was looked for
+- **Keeps coming back empty** — searched three times or more, with no receipt saying why yet
+- **Not posted yet** — the show is out there, this episode simply isn't yet (a wait, not a fault)
+- **Downloading now**, **Still hunting**, **Upgrading**, **Not out yet**, **Not followed** and **Done** for everything that's fine
+
+A show or channel sits in the group of its worst episode. **⚠ Failing** narrows the page to the stuck ones.
+
+Click a poster or orb and a panel opens beside it (a drawer on a tablet, a bottom sheet on a phone). It says in plain words why the title is stuck, and lists every season and episode with **Search**, a **⋯** menu for **Pick a release** and **Retry with all sources**, and remove. Click an episode to open its synopsis, guest cast and **what the last search found** — every release each source returned and the rule that turned it down.
 `
         },
         {
@@ -972,6 +990,10 @@ Then **sync** them to your server as Plex **Collections** or Jellyfin **BoxSets*
 
 The manager shows you what's *missing* from a collection — and lets you **wishlist the gaps in one click**. You can also import/export collection definitions and **adopt** collections that already exist on the server.
 
+A list collection (franchise, universe, chart, keyword or imported list) can also **wishlist its missing titles on every sync** — the *Wishlist members I don't own* box in the editor, or *Wishlist the movies I'm missing* when creating from a preset pack. It's always off unless you tick it, and the picker tells you how many titles that means before you create anything. Imported collections always land with it off.
+
+Each collection hands a title to the wishlist **once**. Remove it from the wishlist (or delete the movie) and the nightly sync won't add it back; the collection's *wishlist all* button is the way to re-add on purpose. To stop a collection acquiring entirely, untick its wishlist box, untick *Include in daily sync*, or delete it.
+
 > [!WARNING]
 > The Collection Manager is **admin-only** for both reads and writes.
 `
@@ -1326,7 +1348,7 @@ Every video delete lands here first (upgrade replaces, YouTube retention, watche
 
 ## Watch party (watch together)
 
-Movie night runs on what someone can actually play. The chat page's ballot is a deterministic fold over the room's protocol bus — every client sees the same nominations, but **ownership is personal**: each SoulSync checks its own library and renders Play or Grab. "Owned" means a real playable file, not mere library presence.
+Watch Together runs on what someone can actually play. The chat page's ballot is a deterministic fold over the room's protocol bus — every client sees the same nominations, but **ownership is personal**: each SoulSync checks its own library and renders Play or Grab. "Owned" means a real playable file, not mere library presence.
 
 | Method | Path | Purpose | Auth |
 |--------|------|---------|------|

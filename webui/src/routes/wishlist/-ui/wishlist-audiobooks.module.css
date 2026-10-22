@@ -34,22 +34,6 @@
   }
 }
 
-.searchNowSpinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--white-a30);
-  border-top-color: #fff;
-  border-radius: var(--radius-circle);
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .notice {
   margin: 0;
   padding: 12px 18px;
@@ -63,7 +47,7 @@
     rgba(var(--accent-rgb), 0.08) 100%
   );
   border: 1px solid rgba(var(--accent-rgb), 0.35);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 14px var(--black-a15);
   backdrop-filter: blur(10px);
 }
 
@@ -86,8 +70,8 @@
   width: 22px;
   height: 22px;
   transition:
-    background 0.15s ease,
-    color 0.15s ease;
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease;
 }
 
 .searchClear:hover {
@@ -109,13 +93,13 @@
 }
 
 .dotLooking {
-  background: #fbbf24;
-  box-shadow: 0 0 6px rgba(251, 191, 36, 0.6);
+  background: var(--warning);
+  box-shadow: 0 0 6px rgba(var(--warning-rgb), 0.6);
 }
 
 .dotActive {
-  background: #38bdf8;
-  box-shadow: 0 0 6px rgba(56, 189, 248, 0.6);
+  background: var(--info);
+  box-shadow: 0 0 6px rgba(var(--info-rgb), 0.6);
 }
 
 .dotDone {
@@ -124,7 +108,7 @@
 }
 
 .dotFailed {
-  background: #f87171;
+  background: var(--danger-light);
   box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);
 }
 
@@ -136,20 +120,10 @@
 
 .skeleton {
   height: 320px;
-  border-radius: 18px;
-  background: linear-gradient(90deg, var(--white-a03), var(--white-a08), var(--white-a03));
-  background-size: 800px 100%;
-  animation: abShimmer 1.4s linear infinite;
+  border-radius: var(--radius-sheet);
   border: 1px solid var(--white-a06);
-}
-
-@keyframes abShimmer {
-  0% {
-    background-position: -400px 0;
-  }
-  100% {
-    background-position: 400px 0;
-  }
+  --skeleton-base: var(--white-a03);
+  --skeleton-highlight: var(--white-a08);
 }
 
 /* ── Gallery Poster Grid ─────────────────────────────────────────────────── */
@@ -173,16 +147,16 @@
   background: var(--white-a02);
   border: 1px solid var(--white-a05);
   transition:
-    border-color 0.2s ease,
-    background 0.2s ease,
-    box-shadow 0.2s ease,
-    transform 0.2s ease;
+    border-color var(--dur-base) ease,
+    background var(--dur-base) ease,
+    box-shadow var(--dur-base) ease,
+    transform var(--dur-base) ease;
 }
 
 .card:hover {
   background: var(--white-a04);
   border-color: var(--white-a12);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 16px 36px var(--black-a35);
 }
 
 .coverContainer {
@@ -221,10 +195,10 @@
   z-index: 5;
   opacity: 0;
   transition:
-    opacity 0.18s ease,
-    background 0.18s ease,
-    transform 0.18s ease,
-    color 0.18s ease;
+    opacity var(--dur-quick) ease,
+    background var(--dur-quick) ease,
+    transform var(--dur-quick) ease,
+    color var(--dur-quick) ease;
 }
 
 .card:hover .quickRemove,
@@ -239,7 +213,7 @@
 }
 
 .quickRemove:hover {
-  background: rgba(239, 68, 68, 0.95);
+  background: rgba(var(--danger-rgb), 0.95);
   border-color: transparent;
   color: #fff;
   transform: scale(1.12);
@@ -252,25 +226,25 @@
   overflow: hidden;
   background: #15161e;
   border: 1px solid var(--white-a08);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 6px 18px var(--black-a25);
   transition:
-    border-color 0.2s ease,
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
+    border-color var(--dur-base) ease,
+    transform var(--dur-base) ease,
+    box-shadow var(--dur-base) ease;
 }
 
 .card:hover .art {
   border-color: rgba(var(--accent-rgb), 0.55);
   transform: translateY(-3px);
   box-shadow:
-    0 16px 36px rgba(0, 0, 0, 0.45),
+    0 16px 36px var(--black-a45),
     0 0 20px rgba(var(--accent-rgb), 0.15);
 }
 
 .spineSheen {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, var(--white-a15) 0%, rgba(0, 0, 0, 0.4) 3.5%, transparent 9%);
+  background: linear-gradient(90deg, var(--white-a15) 0%, var(--black-a40) 3.5%, transparent 9%);
   pointer-events: none;
   z-index: 2;
 }
@@ -295,9 +269,9 @@
 .scrim {
   position: absolute;
   inset: 0;
-  background: linear-gradient(0deg, rgba(0, 0, 0, 0.6) 0%, transparent 50%);
+  background: linear-gradient(0deg, var(--black-a60) 0%, transparent 50%);
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--dur-base) ease;
   pointer-events: none;
   z-index: 1;
 }
@@ -336,25 +310,25 @@
 
 .badgeActive {
   background: rgba(10, 12, 18, 0.82);
-  border-color: rgba(56, 189, 248, 0.5);
+  border-color: rgba(var(--info-rgb), 0.5);
   color: #7dd3fc;
 }
 
 .badgeActive .badgePulse {
-  background: #38bdf8;
-  box-shadow: 0 0 6px #38bdf8;
+  background: var(--info);
+  box-shadow: 0 0 6px var(--info);
   animation: heroPulse 1.5s infinite;
 }
 
 .badgeSearching {
   background: rgba(10, 12, 18, 0.82);
-  border-color: rgba(251, 191, 36, 0.5);
+  border-color: rgba(var(--warning-rgb), 0.5);
   color: #fde68a;
 }
 
 .badgeSearching .badgePulse {
-  background: #fbbf24;
-  box-shadow: 0 0 6px #fbbf24;
+  background: var(--warning);
+  box-shadow: 0 0 6px var(--warning);
   animation: heroPulse 1.2s infinite;
 }
 
@@ -386,22 +360,22 @@
 
 .badgeDone {
   background: rgba(10, 12, 18, 0.82);
-  border-color: rgba(34, 197, 94, 0.45);
+  border-color: rgba(var(--success-strong-rgb), 0.45);
   color: #86efac;
 }
 
 .badgeDone .badgePulse {
-  background: #22c55e;
+  background: var(--success-strong);
 }
 
 .badgeFailed {
   background: rgba(10, 12, 18, 0.82);
-  border-color: rgba(239, 68, 68, 0.45);
+  border-color: rgba(var(--danger-rgb), 0.45);
   color: #fca5a5;
 }
 
 .badgeFailed .badgePulse {
-  background: #ef4444;
+  background: var(--danger);
 }
 
 .info {
@@ -422,7 +396,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: color 0.15s ease;
+  transition: color var(--dur-fast) ease;
 }
 
 .title:hover {
@@ -452,9 +426,9 @@
   cursor: pointer;
   border: 1px solid transparent;
   transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
 }
 
 .narratorLocked {
@@ -514,7 +488,7 @@
   gap: 6px;
   margin-top: 8px;
   opacity: 0.88;
-  transition: opacity 0.18s ease;
+  transition: opacity var(--dur-quick) ease;
 }
 
 .card:hover .actions,
@@ -542,10 +516,10 @@
   cursor: pointer;
   white-space: nowrap;
   transition:
-    background-color 0.15s ease,
-    color 0.15s ease,
-    border-color 0.15s ease,
-    transform 0.15s ease;
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    transform var(--dur-fast) ease;
 }
 
 .action:hover {
@@ -574,7 +548,7 @@
 }
 
 .actionDanger:hover {
-  background: rgba(239, 68, 68, 0.9);
+  background: rgba(var(--danger-rgb), 0.9);
   border-color: transparent;
   color: #ffffff;
 }
@@ -596,26 +570,26 @@
   justify-content: space-between;
   gap: 16px;
   padding: 10px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--white-a02);
   border: 1px solid var(--white-a06);
   transition:
-    background 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease;
+    background var(--dur-quick) ease,
+    border-color var(--dur-quick) ease,
+    box-shadow var(--dur-quick) ease;
 }
 
 .shelfRow:hover {
   background: rgba(255, 255, 255, 0.045);
   border-color: var(--white-a12);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 8px 24px var(--black-a25);
 }
 
 .shelfThumb {
   position: relative;
   width: 52px;
   height: 52px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   overflow: hidden;
   flex-shrink: 0;
   background: #15161e;

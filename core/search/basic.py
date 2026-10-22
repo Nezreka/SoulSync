@@ -15,6 +15,8 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Mapping, Optional, Sequence
 
+from core.search.warnings import collect as collect_search_warnings
+
 logger = logging.getLogger(__name__)
 # Queries of one entity search asked of a source at the same time.
 _PARALLEL_QUERIES = 4
@@ -118,6 +120,7 @@ def run_basic_search(
     judge: Optional[Callable[[list, list, str], dict]] = None,
     more_queries: Sequence[str] = (),
     track_hint: Optional[Mapping[str, Any]] = None,
+    warnings: Optional[list] = None,
 ) -> list[dict]:
     """Search ``source`` (or the active/first hybrid source) for ``query``.
 
@@ -141,6 +144,10 @@ def run_basic_search(
         side by side, under the song's hint (release sources add its
         artist + album query, core/downloads/track_hint.py); one hit found
         by several queries -- or by several indexers -- shows once.
+    warnings:
+        Optional list the caller passes in. Filled with ``{source, indexer,
+        error}`` for each prowlarr indexer that failed while others answered,
+        so the page can say the results are incomplete (#1831).
     """
     # A pasted SoundCloud link only resolves on the SoundCloud source (its
     # share URL carries the access token; no other source can find an
@@ -178,22 +185,29 @@ def run_basic_search(
             logger.info("basic search: targeting %r for %r", source, query)
             target = client
 
-    def search(q):
-        if track_hint is None:
-            return run_async(target.search(q))
-        from core.downloads.track_hint import track_hint_context
+    noted = []
 
+    def search(q):
         async def hinted():
+            if track_hint is None:
+                return await target.search(q)
+            from core.downloads.track_hint import track_hint_context
             # set inside the coroutine: the shared loop runs it in its own context
             with track_hint_context(dict(track_hint)):
                 return await target.search(q)
-        return run_async(hinted())
+        # prowlarr indexers that failed while others answered (#1831)
+        result, found = run_async(collect_search_warnings(hinted()))
+        noted.extend(found)
+        return result
 
     queries = list(dict.fromkeys([query, *more_queries]))
     if len(queries) == 1:
         tracks, albums = search(query)
     else:
         tracks, albums = _search_all(search, queries)
+    if warnings is not None:
+        # one row per indexer across the queries, latest error wins
+        warnings.extend({(n['source'], n['indexer']): n for n in noted}.values())
 
     verdicts = {}
     if judge is not None:

@@ -69,19 +69,108 @@
 }
 
 .badge[data-tone='success'] {
-  color: #4ade80;
-  background: rgba(74, 222, 128, 0.12);
-  border-color: rgba(74, 222, 128, 0.12);
+  color: var(--success);
+  background: rgba(var(--success-rgb), 0.12);
+  border-color: rgba(var(--success-rgb), 0.12);
 }
 
 .badge[data-tone='warning'] {
-  color: #fbbf24;
-  background: rgba(251, 191, 36, 0.12);
-  border-color: rgba(251, 191, 36, 0.12);
+  color: var(--warning);
+  background: rgba(var(--warning-rgb), 0.12);
+  border-color: rgba(var(--warning-rgb), 0.12);
 }
 
 .badge[data-tone='danger'] {
-  color: #f87171;
+  color: var(--danger-light);
   background: rgba(248, 113, 113, 0.12);
   border-color: rgba(248, 113, 113, 0.12);
+}
+
+/* Spinner, Skeleton and EmptyState defaults sit inside :where() so they carry
+   no specificity: a className passed by the caller always wins, whatever
+   order the stylesheets load in. */
+
+:where(.spinner) {
+  display: inline-block;
+  box-sizing: border-box;
+  width: var(--spinner-size, 16px);
+  height: var(--spinner-size, 16px);
+  border: var(--spinner-ring, 2px) solid var(--white-a15);
+  border-top-color: rgb(var(--accent-rgb));
+  border-radius: var(--radius-circle);
+  /* global(): the shared keyframes in static/tokens.css */
+  animation: global(spin) 0.8s linear infinite;
+}
+
+:where(.spinner[data-tone='soft']) {
+  border-color: var(--white-a10);
+  border-top-color: rgba(var(--accent-light-rgb), 0.7);
+}
+
+:where(.spinner[data-tone='tinted']) {
+  border-color: rgba(var(--accent-rgb), 0.2);
+  border-top-color: rgb(var(--accent-rgb));
+}
+
+:where(.spinner[data-tone='light']) {
+  border-color: var(--white-a30);
+  border-top-color: #fff;
+}
+
+:where(.skeleton) {
+  --skeleton-shimmer: linear-gradient(
+    90deg,
+    var(--skeleton-base, var(--white-a04)) 25%,
+    var(--skeleton-highlight, var(--white-a09)) 50%,
+    var(--skeleton-base, var(--white-a04)) 75%
+  );
+  display: block;
+  border-radius: var(--radius-md);
+  background: var(--skeleton-shimmer);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s linear infinite;
+}
+
+@keyframes skeletonShimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+:where(.emptyState) {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--white-a40);
+}
+
+:where(.emptyStateIcon) {
+  margin-bottom: 12px;
+  font-size: 40px;
+  opacity: 0.5;
+}
+
+:where(.emptyStateTitle) {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--white-a60);
+}
+
+:where(.emptyStateDescription) {
+  margin: 0;
+  font-size: 13px;
+  color: var(--white-a35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(.spinner) {
+    animation-duration: 2s;
+  }
+
+  :where(.skeleton) {
+    animation: none;
+  }
 }

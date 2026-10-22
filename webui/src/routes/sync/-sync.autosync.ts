@@ -5,6 +5,15 @@
  * module is pinned differentially in -sync.autosync.test.ts.
  */
 
+import {
+  humanizeType as autoSyncHumanizeType,
+  parseServerTime as autoSyncParseUTC,
+} from '@/features/automations/format';
+
+import { isLiveBeatportRef } from './-beatport.lists';
+
+export { autoSyncHumanizeType, autoSyncParseUTC };
+
 /* ── Constants (auto-sync.js 12, 106-110) ─────────────────────────────────── */
 
 export const AUTO_SYNC_BUCKETS: readonly number[] = [1, 2, 4, 8, 12, 16, 24, 48, 72, 168];
@@ -266,11 +275,8 @@ export function autoSyncSourceLabel(source: string | null | undefined): string {
  * lists, a genre's lists, or a chart. an old random chart hash and a release
  * (which never changes) don't.
  */
-const BEATPORT_LIVE_REF =
-  /^(?:(?:top|hype)-(?:10|100)|genre:[a-z0-9][a-z0-9-]*:\d+:(?:top|hype)-(?:10|100)|chart:[a-z0-9][a-z0-9-]*:\d+)$/;
-
 export function beatportMirrorRefreshes(playlist: MirroredRow | null | undefined): boolean {
-  return BEATPORT_LIVE_REF.test(String(playlist?.source_playlist_id ?? '').toLowerCase());
+  return isLiveBeatportRef(playlist?.source_playlist_id);
 }
 
 /** a dated snapshot of a beatport list: '<ref>@2026-10-16'. frozen, never refreshes. */
@@ -279,7 +285,7 @@ export function beatportMirrorIsSnapshot(playlist: MirroredRow | null | undefine
   const at = id.lastIndexOf('@');
   if (at < 0 || !/^\d{4}-\d{2}-\d{2}$/.test(id.slice(at + 1))) return false;
   const ref = id.slice(0, at);
-  return BEATPORT_LIVE_REF.test(ref) || /^release:[a-z0-9][a-z0-9-]*:\d+$/.test(ref);
+  return isLiveBeatportRef(ref) || /^release:[a-z0-9][a-z0-9-]*:\d+$/.test(ref);
 }
 
 /**
@@ -826,16 +832,6 @@ export function autoSyncBuildLanes(
 }
 
 /**
- * stats-automations.js 4260-4264, reached from auto-sync.js 1863/2002 as a
- * cross-file global. A bare timestamp is UTC, so it gets a 'Z' appended; one
- * that already carries an offset is parsed as-is.
- */
-export function autoSyncParseUTC(ts: string): number {
-  if (/[Zz]$/.test(ts) || /[+-]\d{2}:\d{2}$/.test(ts)) return new Date(ts).getTime();
-  return new Date(`${ts}Z`).getTime();
-}
-
-/**
  * 1999-2011. 'next in 12m' / '3h' / '2d', or 'due now' once the moment has
  * passed. `now` is a parameter rather than a `Date.now()` call so the label is
  * testable without faking the clock.
@@ -1038,21 +1034,6 @@ export function autoSyncPipelineLatestLog(state: PipelineState | null | undefine
 
 /* ── The read-only Automations panel (1185-1198, 1883-1918) ─────────────── */
 
-/**
- * stats-automations.js 4144-4152. 'deep_scan_library' → 'Deep Scan Library'.
- * The video/music prefix is stripped first.
- */
-export function autoSyncHumanizeType(type: string | null | undefined): string {
-  return (
-    String(type || '')
-      .replace(/^(video|music)_/, '')
-      .split('_')
-      .filter(Boolean)
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(' ') || 'Unknown'
-  );
-}
-
 const TRIGGER_LABELS: Record<string, string> = {
   app_started: 'App Started',
   track_downloaded: 'Track Downloaded',
@@ -1071,6 +1052,16 @@ const TRIGGER_LABELS: Record<string, string> = {
   watchlist_artist_removed: 'Artist Unwatched',
   import_completed: 'Import Complete',
   import_needs_attention: 'Import Needs Attention',
+  audiobook_grab_started: 'Audiobook Grabbed',
+  audiobook_download_failed: 'Audiobook Download Failed',
+  audiobook_import_needs_attention: 'Audiobook Import Held',
+  audiobook_wishlist_item_added: 'Audiobook Wishlist Item Added',
+  audiobook_wishlist_processing_completed: 'Audiobook Wishlist Processed',
+  audiobook_new_release: 'Audiobook New Release Found',
+  audiobook_watchlist_scan_completed: 'Audiobook Watchlist Scan Done',
+  audiobook_author_followed: 'Audiobook Author Followed',
+  audiobook_author_unfollowed: 'Audiobook Author Unfollowed',
+  audiobook_library_scan_completed: 'Audiobook Library Scan Done',
   mirrored_playlist_created: 'Playlist Mirrored',
   quality_scan_completed: 'Quality Scan Done',
   duplicate_scan_completed: 'Duplicate Scan Done',

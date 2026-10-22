@@ -48,19 +48,10 @@ def _norm(name: Any) -> str:
 
 def client_for_profile(server: str, base_client: Any, profile_id: Optional[int]) -> Any:
     """the profile's own server connection, or the shared client when it has none."""
-    from services.sync_service import (
-        jellyfin_client_for_profile,
-        navidrome_client_for_profile,
-        plex_client_for_profile,
-    )
-    pick = {
-        'navidrome': navidrome_client_for_profile,
-        'plex': plex_client_for_profile,
-        'jellyfin': jellyfin_client_for_profile,
-    }.get(server)
-    if pick is None or base_client is None or not profile_id:
+    from services.sync_service import client_for_profile as _resolve
+    if base_client is None or not profile_id:
         return base_client
-    return pick(profile_id, base_client)
+    return _resolve(profile_id, base_client, server)
 
 
 def own_playlist_names(db: Any, profile_id: Optional[int], server: Optional[str] = None) -> Set[str]:

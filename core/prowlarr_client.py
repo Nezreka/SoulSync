@@ -161,6 +161,29 @@ class ProwlarrSearchResult:
     _release_evidence: Optional['ProwlarrSearchResult'] = field(default=None, repr=False)
 
 
+class IndexerFailure(str):
+    """one indexer that failed in a fan-out search.
+
+    still a plain string, so the log lines and the all-failed error read the
+    same as before. the parts ride along for the search page warning (#1831)
+    """
+
+    def __new__(cls, indexer_id: int, error: Any, name: str = "") -> "IndexerFailure":
+        name = str(name or "").strip()
+        text = (f"{name} (indexer {indexer_id}): {error}" if name
+                else f"indexer {indexer_id}: {error}")
+        failure = super().__new__(cls, text)
+        failure.indexer_id = int(indexer_id)
+        failure.indexer_name = name or f"indexer {indexer_id}"
+        failure.error = str(error)
+        return failure
+
+
+# Prefix of the error a bundle plugin reports when the Prowlarr search itself did
+# not complete. Shared so the wishlist can tell it apart from a failed release.
+SEARCH_FAILED_PREFIX = 'Prowlarr search failed'
+
+
 class ProwlarrSearchError(RuntimeError):
     """A Prowlarr search did not complete.
 
@@ -475,10 +498,10 @@ class ProwlarrClient:
             task.add_done_callback(lambda t: t.cancelled() or t.exception())
 
         results: List[ProwlarrSearchResult] = []
-        failures: List[str] = []
+        failed: List[Tuple[int, str]] = []
         for task, indexer_id in tasks.items():
             if task in pending:
-                failures.append(f"indexer {indexer_id}: no answer within {budget}s")
+                failed.append((indexer_id, f"no answer within {budget}s"))
                 continue
             if task.cancelled():
                 # Cancelled from OUTSIDE (shutdown), not by our deadline —
@@ -487,12 +510,28 @@ class ProwlarrClient:
                 raise asyncio.CancelledError()
             error = task.exception()
             if error is not None:
-                failures.append(f"indexer {indexer_id}: {error}")
+                failed.append((indexer_id, str(error)))
                 continue
             results.extend(task.result())
+        # names only when some answered: prowlarr is up then, so the lookup is
+        # cheap. when every indexer failed prowlarr itself may be the problem
+        # and asking it again only adds another wait
+        names: Dict[int, str] = {}
+        if failed and len(failed) < len(ids):
+            names = await run_blocking(self._indexer_names)
+        failures: List[str] = [IndexerFailure(indexer_id, error, names.get(indexer_id, ""))
+                               for indexer_id, error in failed]
         # Outside the per-task deadline on purpose, see _search_sync.
         await run_blocking(self.stamp_indexer_priorities, results)
         return results, failures
+
+    def _indexer_names(self) -> Dict[int, str]:
+        """``{indexer id: name}``, empty when prowlarr can't list them."""
+        try:
+            return {i.id: i.name for i in self._get_indexers_sync() if i.name}
+        except Exception as exc:                        # noqa: BLE001
+            logger.debug("Prowlarr indexer name lookup failed: %s", exc)
+            return {}
 
     def _search_sync(
         self,

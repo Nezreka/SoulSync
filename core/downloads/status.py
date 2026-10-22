@@ -172,6 +172,9 @@ class StatusDeps:
     # entries are never buried by the general history tail cap.
     get_unverified_download_history: Optional[Callable[[], list[dict]]] = None
     get_metadata_states: Optional[Callable] = None
+    # gives rows their artist photo + a library cover when the task had none
+    # (core/downloads/row_art.py). mutates the items in place.
+    attach_row_art: Optional[Callable[[list], None]] = None
 
 
 # _STREAMING_SOURCE_NAMES (imported above): the engine fallback below applies
@@ -884,6 +887,12 @@ def _build_history_download_item(entry: dict) -> dict:
         'verification_status': entry.get('verification_status'),
         'is_persistent_history': True,
         'download_source': source,
+        # the downloads page detail sheet: podcast vs track, what acoustid
+        # said, and what we asked for (so a wrong-file grab shows both)
+        'event_type': entry.get('event_type') or '',
+        'acoustid_result': entry.get('acoustid_result') or '',
+        'expected_title': entry.get('source_track_title') or '',
+        'expected_artist': entry.get('source_artist') or '',
     }
 
 
@@ -1079,6 +1088,12 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
             if album_bundle:
                 summary['album_bundle'] = album_bundle
             batch_summaries.append(summary)
+
+    if deps.attach_row_art is not None:
+        try:
+            deps.attach_row_art(items)
+        except Exception as exc:
+            logger.debug("[Downloads] row art failed: %s", exc)
 
     return {
         'success': True,

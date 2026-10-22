@@ -534,12 +534,12 @@ def test_libraries_endpoint_lists_and_saves(tmp_path, monkeypatch):
         assert [m["title"] for m in data["movies"]] == ["Movies"]
         # one library of each kind and nothing ever picked: they're picked
         # for you, so a fresh install's first scan reads something
-        assert data["selected"] == {"movies": "Movies", "tv": "TV"}
+        assert data["selected"] == {"movies": "Movies", "tv": "TV", "tv_more": [], "anime": []}
 
         # "— None —" for tv is a choice and stays one on the next load
         assert client.post("/api/video/libraries", json={"movies": "Movies", "tv": ""}).status_code == 200
         data2 = client.get("/api/video/libraries").get_json()
-        assert data2["selected"] == {"movies": "Movies", "tv": ""}
+        assert data2["selected"] == {"movies": "Movies", "tv": "", "tv_more": [], "anime": []}
     finally:
         videoapi._video_db = None
 
@@ -705,7 +705,8 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
     try:
         # Defaults: empty folders, soulseek mode. Shared input + per-type libraries.
         assert client.get("/api/video/downloads/config").get_json() == {
-            "download_path": "", "movies_path": "", "tv_path": "", "youtube_path": "",
+            "download_path": "", "movies_path": "", "tv_path": "", "anime_path": "",
+            "youtube_path": "",
             "download_mode": "soulseek", "hybrid_order": ["soulseek"],
             # seeding lifecycle (arr-parity P5) rides the same config payload
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
@@ -718,7 +719,7 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
                           "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"]})
         assert client.get("/api/video/downloads/config").get_json() == {
             "download_path": "/mnt/v/dl", "movies_path": "/media/movies",   # trimmed
-            "tv_path": "/media/tv", "youtube_path": "/media/yt",
+            "tv_path": "/media/tv", "anime_path": "", "youtube_path": "/media/yt",
             "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"],
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
             "seed_mode": "soulsync", "seed_overrides": {},

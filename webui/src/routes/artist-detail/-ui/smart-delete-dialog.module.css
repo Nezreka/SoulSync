@@ -1,0 +1,7 @@
+/* Sits on the shared .modal-overlay (style.css), which already fixes, centres
+   and blurs it. This dialog keeps a plain black scrim instead of that grey one,
+   and stays centred on phones, where mobile.css top-aligns .modal-overlay. */
+.overlay {
+  align-items: center;
+  background: var(--black-a70);
+}

@@ -446,6 +446,56 @@ class LifecycleDeps:
 # is_music_batch helper
 # ---------------------------------------------------------------------------
 
+# a finished batch is dropped this long after anyone last looked at it.
+# counting from completion alone pulled tasks out from under a user still
+# picking candidates for the not-found rows in an open modal.
+TERMINAL_BATCH_GRACE_SECONDS = 300
+
+
+def stamp_batches_watched(batch_ids, now: Optional[float] = None) -> None:
+    """mark batches as on screen right now. caller holds tasks_lock.
+
+    a wishlist run is split into sibling batches but the modal polls one id,
+    so the stamp covers every sibling of the same run."""
+    now = time.time() if now is None else now
+    wanted = {b for b in (batch_ids or ()) if b in download_batches}
+    if not wanted:
+        return
+    run_ids = {download_batches[b].get('wishlist_run_id') for b in wanted} - {None}
+    for bid, batch in download_batches.items():
+        if bid in wanted or (run_ids and batch.get('wishlist_run_id') in run_ids):
+            batch['_watched_at'] = now
+
+
+_IN_FLIGHT_TASK_STATES = ('searching', 'downloading', 'queued', 'post_processing')
+
+
+def batch_has_in_flight_tasks(batch: dict) -> bool:
+    """a finished batch can still be moving: a manual candidate pick on one of
+    its not-found rows restarts that task. caller holds tasks_lock.
+
+    tasks already counted done (_completed_task_ids) don't hold it, same as the
+    healer's active count, so a zombie status can't pin a batch forever."""
+    done = batch.get('_completed_task_ids') or set()
+    for tid in batch.get('queue') or ():
+        task = download_tasks.get(tid)
+        if task and tid not in done and task.get('status') in _IN_FLIGHT_TASK_STATES:
+            return True
+    return False
+
+
+def terminal_batch_is_stale(batch: dict, now: float) -> bool:
+    """true once a finished batch has gone unwatched for the grace window
+    and nothing in it is still downloading."""
+    completed = batch.get('completion_time')
+    if not completed:
+        return False
+    if batch_has_in_flight_tasks(batch):
+        return False
+    last_seen = max(completed, batch.get('_watched_at') or 0)
+    return now - last_seen > TERMINAL_BATCH_GRACE_SECONDS
+
+
 def is_music_batch(batch_id: str, batch: Optional[dict] = None) -> bool:
     """Determine if a batch belongs to the music download pipeline.
 
@@ -721,6 +771,46 @@ def _other_music_batches_pending(batch_id: str) -> bool:
     return False
 
 
+def _credit_name(value) -> str:
+    """A name out of a dict-or-string artist/album value."""
+    if isinstance(value, dict):
+        value = value.get('name')
+    return str(value).strip() if value else ''
+
+
+def _batch_event_credits(batch: dict, queue: list) -> dict:
+    """artist / title / album for the batch_complete event.
+
+    An album batch carries its artist and album in the batch's own contexts.
+    The wishlist's catch-all batches ("Wishlist (Auto - Albums)", singles and
+    residual tracks) carry neither, so the notification could not say what
+    arrived. Fall back to the tracks that actually finished: one artist is
+    named, several read "A, B +2", and title / album are filled only when
+    exactly one track finished (a list of titles would not fit a notification).
+    CALLED UNDER tasks_lock.
+    """
+    artist = _credit_name(batch.get('artist_context'))
+    album = _credit_name(batch.get('album_context'))
+    title = ''
+
+    done = [download_tasks[tid].get('track_info') or {} for tid in queue
+            if tid in download_tasks and download_tasks[tid].get('status') == 'completed']
+    if len(done) == 1:
+        title = _credit_name(done[0].get('name'))
+        album = album or _credit_name(done[0].get('album'))
+    if not artist and done:
+        names = []
+        for info in done:
+            artists = info.get('artists')
+            first = artists[0] if isinstance(artists, list) and artists else info.get('artist')
+            name = _credit_name(first)
+            if name and name not in names:
+                names.append(name)
+        if names:
+            artist = ', '.join(names[:2]) + (f' +{len(names) - 2}' if len(names) > 2 else '')
+    return {'artist': artist, 'title': title, 'album': album}
+
+
 def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
                          queue: list, finished_count: int, tag: str) -> dict:
     """Flip a finished batch to 'complete' and do the bookkeeping that has to
@@ -760,8 +850,12 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
         _scan_owed = more_pending
         try:
             if deps.automation_engine:
+                _credits = _batch_event_credits(batch, queue)
                 deps.automation_engine.emit('batch_complete', {
                     'playlist_name': playlist_name,
+                    'artist': _credits['artist'],
+                    'title': _credits['title'],
+                    'album': _credits['album'],
                     'total_tracks': str(len(queue)),
                     'completed_tracks': str(successful_downloads),
                     'failed_tracks': str(failed_count),
@@ -814,7 +908,8 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
     else:
         batch['wishlist_processing_complete'] = True
 
-    return {'m3u_tracks': m3u_tracks, 'tasks_snapshot': tasks_snapshot}
+    return {'m3u_tracks': m3u_tracks, 'tasks_snapshot': tasks_snapshot,
+            'successful_downloads': successful_downloads}
 
 
 def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: LifecycleDeps,
@@ -837,6 +932,16 @@ def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: Lifecyc
         _cleanup_private_album_bundle_staging(batch_id, batch)
     except Exception as _stage_err:  # noqa: BLE001 — best-effort, batch is already complete
         logger.warning(f"{tag} Album-bundle staging cleanup failed (non-fatal): {_stage_err}")
+
+    # post-download playlist sync: note which playlists this batch fed. db
+    # lookups, so it lives out here and not under tasks_lock
+    if outcome.get('successful_downloads', 0) > 0:
+        try:
+            from core.sync.post_download_sync import register_completed_playlist_batch
+            from database.music_database import MusicDatabase
+            register_completed_playlist_batch(batch, tasks_snapshot=tasks_snapshot, database=MusicDatabase())
+        except Exception as reg_err:  # noqa: BLE001 - best-effort, batch is already complete
+            logger.debug("register_completed_playlist_batch failed: %s", reg_err)
 
     # M3U REGENERATION: Regenerate M3U with real library paths now that
     # all post-processing (tagging, moving, DB writes) is complete.

@@ -5,8 +5,9 @@ statuses fails here.
 The legacy vanilla-JS page (webui/static/video/video-downloads-page.js) was
 rewritten in React for the unified downloads page (PR #1651). These contracts
 now pin the same behaviors in the React implementation under
-webui/src/routes/active-downloads/; the .adl-/.vdpg- markup vocabulary and the
-video-side.css overrides are unchanged.
+webui/src/routes/active-downloads/. the cards were rebuilt on the shared dlc-*
+row grammar (dl-parts.tsx, styled in static/downloads-premier.css), so these pin
+the dlc names now.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ _HELPERS = (_VDL / "-vdl.helpers.ts").read_text(encoding="utf-8")
 _TYPES = (_VDL / "-vdl.types.ts").read_text(encoding="utf-8")
 _HEADER = (_VDL / "-ui" / "vdl-header.tsx").read_text(encoding="utf-8")
 _CSS = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
+_CARDS_CSS = (_ROOT / "webui" / "static" / "downloads-premier.css").read_text(encoding="utf-8")
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="replace")
 
 
@@ -29,14 +31,16 @@ def test_cards_carry_a_type_for_cinema_theming():
     assert "data-vtype" in _LIST                       # set on each card
     # the three Cinema palette colours are defined per type
     for vt in ('[data-vtype="movie"]', '[data-vtype="tv"]', '[data-vtype="youtube"]'):
-        assert vt in _CSS, vt
-    assert "--vt: 79, 143, 247" in _CSS and "--vt: 240, 69, 75" in _CSS   # azure + red
+        assert vt in _CARDS_CSS, vt
+    assert "--vt: 79, 143, 247" in _CARDS_CSS and "--vt: 240, 69, 75" in _CARDS_CSS   # azure + red
+    # and the rows actually use it
+    assert "rgb(var(--vt))" in _CARDS_CSS
 
 
 def test_importing_is_a_first_class_active_status():
     assert "importing: { label: 'Importing'" in _HELPERS and "import_failed:" in _HELPERS
     assert "'importing'" in _TYPES                # VDL_ACTIVE_STATUSES counts it as active
-    assert "vdpg-prog-indet" in _LIST                  # indeterminate sweep for queued/searching/importing
+    assert "dlc-rowbar-indet" in _LIST and ".dlc-rowbar-indet" in _CARDS_CSS   # sweep for queued/searching/importing
 
 
 def test_sidebar_has_a_live_downloads_count():
@@ -47,10 +51,10 @@ def test_sidebar_has_a_live_downloads_count():
 
 
 def test_cards_expand_into_a_detail_drawer():
-    assert "function VdlDrawer(" in _LIST
+    assert "function VdlSheet(" in _LIST
     assert "expanded" in _USE                          # open state survives re-patches
-    assert "vdpg-dr-cast" in _LIST and "vdpg-dr-syn" in _LIST   # cast + synopsis sections
-    assert "vdpg-copy" in _LIST                        # copy-path action
+    assert "dlc-cast" in _LIST and "dlc-hero-text" in _LIST   # cast + synopsis sections
+    assert "Copy path" in _LIST                        # copy-path action
     # the lazy TMDB detail endpoint the drawer fetches synopsis/cast from
     assert "/api/video/downloads/meta/" in _HELPERS
 
@@ -58,8 +62,8 @@ def test_cards_expand_into_a_detail_drawer():
 def test_drawer_renders_the_rich_tmdb_fields():
     # cast PHOTOS (the bug was the wrong field name) + logo header + trailer + providers
     assert "c.photo" in _LIST                          # correct TMDB cast-photo field
-    assert "vdpg-dr-logo" in _LIST                     # title logo header
-    assert "vdpg-dr-trailer" in _LIST and "vdpg-prov" in _LIST   # trailer + where-to-watch
+    assert "dlc-hero-logo" in _LIST                    # title logo header
+    assert "dlc-trailer" in _LIST and "dlc-prov" in _LIST   # trailer + where-to-watch
     assert "trailer_url" in _LIST and "providers" in _LIST
 
 
@@ -73,8 +77,8 @@ def test_youtube_open_button_opens_the_channel_page_not_a_show():
 
 
 def test_drawer_has_episode_youtube_and_availability_blocks():
-    assert "vdpg-dr-ytthumb" in _LIST                   # youtube big thumbnail header
-    assert "vdpg-dr-ep" in _LIST and "vdpg-dr-epstill" in _LIST   # episode still + block
+    assert "ym.thumbnail_url" in _LIST                 # youtube big thumbnail header
+    assert "dlc-hero-ep" in _LIST and "ep?.still_url" in _LIST   # episode still + block
     assert "ctx.peer" in _LIST                         # grab-time availability snapshot
     assert "yt-meta/" in _HELPERS                      # youtube metadata fetch
     assert "season=${" in _HELPERS and "episode=${" in _HELPERS   # episode params on the meta fetch
@@ -96,27 +100,25 @@ def test_download_meta_routes_are_registered():
 def test_completed_rows_can_show_an_upgrade_watch_chip():
     # backend annotates completed rows still on the wishlist (below-cutoff grabs)…
     assert "upgrade_watch" in _LIST
-    assert "vdpg-upchip" in _LIST and ".vdpg-upchip" in _CSS
+    assert "dlc-tag-watch" in _LIST and ".dlc-tag-watch" in _CARDS_CSS
     # …and the drawer explains what the chip means
     assert "watching for a better copy" in _LIST
 
 
 def test_youtube_rows_name_their_channel_on_the_collapsed_row():
-    assert "vdpg-mchan" in _LIST and ".vdpg-mchan" in _CSS
-    assert "ctx.channel || ctx.channel_title" in _LIST
+    assert "const channel = vdlRowType(d) === 'youtube' ? ctx.channel || ctx.channel_title" in _LIST
 
 
 def test_import_failed_rows_offer_manual_import():
-    assert "vdpg-row-import" in _LIST
+    assert "const needsImport = d.status === 'import_failed' && canImport;" in _LIST
     assert "vdlGotoVideoImport" in _LIST               # navigates to the Import page
     assert "'video-import'" in _LIST                  # …via the video-side navigate event
     assert "canImport" in _LIST                       # admin-gated, same rule as video-side.js
-    assert "Manual Import" in _LIST                   # drawer button label
-    assert ".vdpg-row-import" in _CSS
+    assert "Manual import" in _LIST                   # sheet button label
 
 
 def test_failed_rows_get_a_retry_all_button():
-    assert "Retry Failed" in _HEADER
+    assert "Retry failed (" in _HEADER                 # in the header's actions menu
     assert "retryAllFailed" in _USE
     assert "vdlIsRetryable" in _HELPERS
     # only real grab failures with a known release count as retryable

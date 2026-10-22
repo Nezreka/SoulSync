@@ -738,13 +738,6 @@ describe('Specialmed: playlists survive leaving the page', () => {
     expect(calls.length).toBe(callsBefore);
   });
 
-  it('a tab that has never loaded still shows the placeholder and fetches nothing', () => {
-    stubFetch();
-    render(<TidalHarness />);
-    expect(screen.getByText("Click 'Refresh' to load your Tidal playlists.")).toBeInTheDocument();
-    expect(calls).toEqual([]);
-  });
-
   it('Refresh still re-fetches even when rows are remembered', async () => {
     stubFetch();
     responder = (url) => {

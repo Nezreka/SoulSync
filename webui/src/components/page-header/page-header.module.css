@@ -69,8 +69,8 @@
   display: block;
   filter: drop-shadow(0 2px 8px rgba(var(--accent-rgb), 0.3));
   transition:
-    transform 0.3s ease,
-    filter 0.3s ease;
+    transform var(--dur-slow) ease,
+    filter var(--dur-slow) ease;
 }
 
 .icon :is(img, svg):hover {

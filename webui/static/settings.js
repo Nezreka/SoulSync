@@ -78,6 +78,17 @@ function syncRetryConditionalRows() {
 }
 window.syncRetryConditionalRows = syncRetryConditionalRows;
 
+// Sign in with OIDC: the provider's settings (and the admin's connect row
+// inside them) only mean something while the toggle is on, so they hide when
+// it is off. Hidden fields keep their values and still save, so switching
+// OIDC off and on again loses nothing.
+function syncOidcProviderBlock() {
+    const toggle = document.getElementById('security-oidc-signin');
+    const block = document.getElementById('security-oidc-provider');
+    if (block) block.hidden = !(toggle && toggle.checked);
+}
+window.syncOidcProviderBlock = syncOidcProviderBlock;
+
 // Every Settings -> Quality control belongs to the profile currently shown in
 // the editor. Keep this list separate from ordinary app settings so a quality
 // edit uses the profile endpoint (and does not re-initialize every service
@@ -519,8 +530,8 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation', '$label'],
-        single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality'],
+        album: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation', '$label'],
+        single: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
         video: ['$artist', '$artistletter', '$title', '$year'],
         podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type'],
@@ -2953,6 +2964,7 @@ async function loadSettingsData() {
         document.getElementById('navidrome-username').value = settings.navidrome?.username || '';
         document.getElementById('navidrome-password').value = settings.navidrome?.password || '';
         loadNavidromePlaylistLogin();
+        loadMediaServerNames();
 
         // Set active server and toggle visibility
         const activeServer = settings.active_media_server || 'plex';
@@ -3405,6 +3417,11 @@ async function loadSettingsData() {
         document.getElementById('write-multi-artist').checked = settings.metadata_enhancement?.tags?.write_multi_artist || false;
         document.getElementById('feat-in-title').checked = settings.metadata_enhancement?.tags?.feat_in_title || false;
         document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
+        const _lcOn = document.getElementById('lidarr-compat-enabled');
+        if (_lcOn) _lcOn.checked = settings.lidarr_compat?.enabled === true;
+        loadLidarrCompatProfiles(settings.lidarr_compat?.profile_id ?? 1);
+        const _mcpOn = document.getElementById('mcp-enabled');
+        if (_mcpOn) _mcpOn.checked = settings.mcp?.enabled === true;
         const _wlTtl = document.getElementById('wishlist-ignore-ttl');
         if (_wlTtl) _wlTtl.value = settings.wishlist?.ignore_ttl_days ?? 30;
         const _wlWingIt = document.getElementById('wishlist-wing-it-guesses');
@@ -3640,6 +3657,39 @@ async function loadSettingsData() {
             if (plexCreate) plexCreate.checked = settings.security?.plex_signin_auto_create !== false;
             const plexDl = document.getElementById('security-plex-signin-can-download');
             if (plexDl) plexDl.checked = settings.security?.plex_signin_default_can_download || false;
+            const oidcOn = document.getElementById('security-oidc-signin');
+            if (oidcOn) oidcOn.checked = settings.security?.oidc_signin || false;
+            syncOidcProviderBlock();
+            for (const [id, key] of [
+                ['security-oidc-issuer', 'oidc_issuer'],
+                ['security-oidc-client-id', 'oidc_client_id'],
+                ['security-oidc-client-secret', 'oidc_client_secret'],
+                ['security-oidc-button-label', 'oidc_button_label'],
+                ['security-oidc-icon-url', 'oidc_icon_url'],
+                ['security-oidc-required-group', 'oidc_required_group'],
+                ['security-oidc-groups-claim', 'oidc_groups_claim'],
+                ['security-oidc-scopes', 'oidc_scopes'],
+                ['security-oidc-redirect-uri', 'oidc_redirect_uri'],
+            ]) {
+                const el = document.getElementById(id);
+                if (el) el.value = settings.security?.[key] || '';
+            }
+            const oidcCreate = document.getElementById('security-oidc-signin-auto-create');
+            if (oidcCreate) oidcCreate.checked = settings.security?.oidc_signin_auto_create !== false;
+            const oidcDl = document.getElementById('security-oidc-signin-can-download');
+            if (oidcDl) oidcDl.checked = settings.security?.oidc_signin_default_can_download || false;
+            // the address to register at the provider, as this browser sees it
+            const oidcCb = document.getElementById('security-oidc-callback-url');
+            if (oidcCb) oidcCb.textContent = window.location.origin + '/api/auth/oidc/callback';
+            const signupSides = document.getElementById('security-signup-sides');
+            if (signupSides) {
+                const sides = settings.security?.signup_sides;
+                signupSides.value = ['music', 'video', 'both'].includes(sides) ? sides : 'music';
+            }
+            const signupLimit = document.getElementById('security-signup-request-limit');
+            if (signupLimit) signupLimit.value = settings.security?.signup_request_limit ?? 0;
+            const signupDays = document.getElementById('security-signup-request-limit-days');
+            if (signupDays) signupDays.value = settings.security?.signup_request_limit_days ?? 7;
 
             // Check if admin has a PIN set
             const profilesRes = await fetch('/api/profiles');
@@ -4029,19 +4079,36 @@ async function clearPlexConfiguration() {
     }
 }
 
-function toggleServer(serverType) {
-    // Update toggle buttons
-    document.getElementById('plex-toggle').classList.remove('active');
-    document.getElementById('jellyfin-toggle').classList.remove('active');
-    document.getElementById('navidrome-toggle').classList.remove('active');
-    document.getElementById('soulsync-toggle')?.classList.remove('active');
-    document.getElementById(`${serverType}-toggle`)?.classList.add('active');
+// The media server names, in UI order. Refreshed from GET /api/media-servers
+// (the per-server descriptor) when the settings page loads; this list is
+// what the page knew before the endpoint existed and stays the fallback.
+let _mediaServerNames = ['plex', 'jellyfin', 'navidrome', 'soulsync'];
 
-    // Show/hide server containers
-    document.getElementById('plex-container').classList.toggle('hidden', serverType !== 'plex');
-    document.getElementById('jellyfin-container').classList.toggle('hidden', serverType !== 'jellyfin');
-    document.getElementById('navidrome-container').classList.toggle('hidden', serverType !== 'navidrome');
-    document.getElementById('soulsync-container')?.classList.toggle('hidden', serverType !== 'soulsync');
+async function loadMediaServerNames() {
+    try {
+        const res = await fetch('/api/media-servers');
+        if (!res.ok) return;
+        const names = ((await res.json())?.servers || []).map(s => s?.name).filter(Boolean);
+        if (names.length) _mediaServerNames = names;
+    } catch (e) {
+        // fallback list stays
+    }
+}
+
+// The server whose toggle is active, else the first one.
+function activeServerFromToggles() {
+    const hit = _mediaServerNames.find(name => document.getElementById(`${name}-toggle`)?.classList.contains('active'));
+    return hit || _mediaServerNames[0];
+}
+
+function toggleServer(serverType) {
+    // Update toggle buttons and show the matching config container. A
+    // server without a toggle or a container on this page (the standalone
+    // library on the video side) is simply skipped.
+    for (const name of _mediaServerNames) {
+        document.getElementById(`${name}-toggle`)?.classList.toggle('active', name === serverType);
+        document.getElementById(`${name}-container`)?.classList.toggle('hidden', name !== serverType);
+    }
 
     // Show Plex setup when Plex is selected; otherwise hide both Plex panels
     const plexConfig = document.getElementById('plex-configuration');
@@ -6278,14 +6345,7 @@ async function saveSettings(quiet = false) {
     }
 
     // Determine active server from toggle buttons
-    let activeServer = 'plex';
-    if (document.getElementById('jellyfin-toggle').classList.contains('active')) {
-        activeServer = 'jellyfin';
-    } else if (document.getElementById('navidrome-toggle').classList.contains('active')) {
-        activeServer = 'navidrome';
-    } else if (document.getElementById('soulsync-toggle')?.classList.contains('active')) {
-        activeServer = 'soulsync';
-    }
+    let activeServer = activeServerFromToggles();
     // ISOLATION: this page is reused on the video side. Connection details (Plex/
     // Jellyfin creds) ARE shared and save fine — but the video side must NEVER
     // change the MUSIC active server. So when saving from the video side, keep
@@ -6600,6 +6660,13 @@ async function saveSettings(quiet = false) {
                 sample_path: document.getElementById('template-sample-path').value
             }
         },
+        mcp: {
+            enabled: _cfgBool('mcp-enabled'),
+        },
+        lidarr_compat: {
+            enabled: _cfgBool('lidarr-compat-enabled'),
+            profile_id: _cfgInt('lidarr-compat-profile', _lidarrCompatProfileId),
+        },
         wishlist: {
             allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked,
             ignore_ttl_days: Math.max(1, Math.min(365,
@@ -6785,6 +6852,21 @@ async function saveSettings(quiet = false) {
             plex_signin: _cfgBool('security-plex-signin'),
             plex_signin_auto_create: _cfgBool('security-plex-signin-auto-create'),
             plex_signin_default_can_download: _cfgBool('security-plex-signin-can-download'),
+            oidc_signin: _cfgBool('security-oidc-signin'),
+            oidc_issuer: _cfgStr('security-oidc-issuer', { trim: true }),
+            oidc_client_id: _cfgStr('security-oidc-client-id', { trim: true }),
+            oidc_client_secret: _cfgStr('security-oidc-client-secret'),
+            oidc_button_label: _cfgStr('security-oidc-button-label', { trim: true }),
+            oidc_icon_url: _cfgStr('security-oidc-icon-url', { trim: true }),
+            oidc_required_group: _cfgStr('security-oidc-required-group', { trim: true }),
+            oidc_groups_claim: _cfgStr('security-oidc-groups-claim', { trim: true }),
+            oidc_scopes: _cfgStr('security-oidc-scopes', { trim: true }),
+            oidc_redirect_uri: _cfgStr('security-oidc-redirect-uri', { trim: true }),
+            oidc_signin_auto_create: _cfgBool('security-oidc-signin-auto-create'),
+            oidc_signin_default_can_download: _cfgBool('security-oidc-signin-can-download'),
+            signup_sides: _cfgStr('security-signup-sides', { fallback: 'music' }),
+            signup_request_limit: _cfgInt('security-signup-request-limit', 0),
+            signup_request_limit_days: _cfgInt('security-signup-request-limit-days', 7),
         }
     };
 
@@ -7013,6 +7095,29 @@ async function clearQuarantine() {
 }
 
 // ======================== API Key Management ========================
+
+// the saved profile, so a save before the list loads keeps it
+let _lidarrCompatProfileId = 1;
+
+async function loadLidarrCompatProfiles(selectedId) {
+    _lidarrCompatProfileId = parseInt(selectedId, 10) || 1;
+    const select = document.getElementById('lidarr-compat-profile');
+    if (!select) return;
+    try {
+        const response = await fetch('/api/profiles');
+        const data = await response.json();
+        const profiles = data.profiles || [];
+        if (!profiles.length) return;
+        select.innerHTML = profiles.map(p => {
+            const note = p.can_download === false ? ' (needs approval)' : '';
+            return `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name || 'Profile ' + p.id)}${note}</option>`;
+        }).join('');
+        select.value = String(_lidarrCompatProfileId);
+        if (select.value !== String(_lidarrCompatProfileId)) select.value = '1';
+    } catch (e) {
+        console.debug('lidarr profile list failed', e);
+    }
+}
 
 async function loadApiKeys() {
     const container = document.getElementById('api-keys-list');

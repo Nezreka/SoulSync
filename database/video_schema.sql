@@ -989,3 +989,17 @@ CREATE TABLE IF NOT EXISTS tvdb_episode_cache (
     fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (tvdb_id, season_number)
 );
+
+-- ── series type for shows not in any library yet ──
+-- a show's series type normally comes from its library row (set by hand, or
+-- the show sits in a library marked anime). a show that is followed, wished
+-- or approved before it is owned has no row, so its type lives here, keyed
+-- by TMDB id: suggested from TMDB when it is first followed (source 'tmdb')
+-- or chosen by an admin (source 'user'). once the show is scanned into a
+-- library the library row decides and this row is no longer read.
+CREATE TABLE IF NOT EXISTS show_type_hints (
+    tmdb_id INTEGER PRIMARY KEY,
+    series_type TEXT NOT NULL,       -- standard | daily | anime
+    source TEXT NOT NULL,            -- tmdb | user
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

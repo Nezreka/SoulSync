@@ -570,7 +570,7 @@ Audible's published runtime is compared against the measured audio duration (ffp
 
 - **Import When Runtime Reaches:** (default **92**) — the tolerance. Books coming up short are **staged, not failed**: **Held back** with the reason shown (e.g. part 1 of 5) until the staging deadline.
 - **Give Up On A Short Book After:** (default **7** days) — the staging deadline, after which the book fails back to the wishlist.
-- Overshoot beyond **1.6×** is rejected as the wrong folder.
+- Overshoot beyond **1.6×** is the wrong release (another book with the same words in its title, or a whole series). It fails right away instead of staging, the release is blocked for that book and the next one is tried.
 
 ## Organization & post-processing
 

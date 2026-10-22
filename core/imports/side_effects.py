@@ -932,13 +932,24 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             existing_file = cursor.execute(
                 "SELECT 1 FROM lib2_track_files WHERE path=?"
                 " AND COALESCE(file_state,'active')='active'", (final_path,)).fetchone()
-            catalogue_track = upsert_track(
-                cursor, server_source="soulsync", server_id=track_id,
-                album_id=catalogue_album, artist_id=catalogue_artist,
-                title=track_name, track_number=track_number, duration=duration_ms,
-                track_artist=track_artist, musicbrainz_id=track_mbid,
-                file_path=final_path, file_size=file_size, bitrate=bitrate,
-                allow_create=True, file_source="import")
+            # #1810: a redownload names the catalogue track it replaces. A new
+            # filename lands on that track instead of minting a second one.
+            replaced = None if existing_file else cursor.execute(
+                "SELECT id FROM lib2_tracks WHERE id=?",
+                (track_info.get("_redownload_library_track_id"),)).fetchone()
+            if replaced:
+                from core.library2.media_server_sync import _upsert_file
+                catalogue_track = int(replaced[0])
+                _upsert_file(cursor, catalogue_track, final_path, file_size, bitrate,
+                             server_source="soulsync", source="import")
+            else:
+                catalogue_track = upsert_track(
+                    cursor, server_source="soulsync", server_id=track_id,
+                    album_id=catalogue_album, artist_id=catalogue_artist,
+                    title=track_name, track_number=track_number, duration=duration_ms,
+                    track_artist=track_artist, musicbrainz_id=track_mbid,
+                    file_path=final_path, file_size=file_size, bitrate=bitrate,
+                    allow_create=True, file_source="import")
             cursor.execute("UPDATE lib2_tracks SET isrc=COALESCE(?, isrc) WHERE id=?",
                            (track_isrc, catalogue_track))
             if recording_disambiguation and track_mbid:

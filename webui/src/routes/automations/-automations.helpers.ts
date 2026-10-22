@@ -26,7 +26,50 @@ export function readAutomationsList(payload: AutomationsListResponse | undefined
  * video side simply has no such rows, so this is a no-op for them.
  */
 export function forMusicSide(automations: Automation[]): Automation[] {
-  return automations.filter((a) => a.owned_by !== 'video');
+  return automations.filter(
+    (a) => a.owned_by !== 'video' && (!a.action_type || !a.action_type.startsWith('video_')),
+  );
+}
+
+/**
+ * Maintenance and repair actions that belong to the "Maintenance" collection
+ * rather than core "Operations". Includes all Tools-page repair jobs, cleanup passes,
+ * backups, deep scans, and metadata cache refreshes.
+ */
+export const MAINTENANCE_ACTIONS = new Set([
+  'run_repair_job',
+  'video_run_repair_job',
+  'clean_search_history',
+  'video_clean_search_history',
+  'clean_completed_downloads',
+  'video_clean_completed_downloads',
+  'backup_database',
+  'video_backup_database',
+  'full_cleanup',
+  'video_full_cleanup',
+  'library_cleanup',
+  'deep_scan_library',
+  'video_deep_scan_movies',
+  'video_deep_scan_tv',
+  'refresh_beatport_cache',
+  'seeding_sweep',
+  'video_seeding_sweep',
+  'import_lastfm_listening',
+  'import_listenbrainz_listening',
+  'audiobook_purge_recycle',
+  'video_clean_youtube_episodes',
+  'video_clean_plex_images',
+  'video_purge_recycle_bin',
+  'video_reenrich_stale',
+]);
+
+export function isMaintenanceAutomation(a: Automation): boolean {
+  if (a.owned_by === 'system:repair_job') return true;
+  return Boolean(a.action_type && MAINTENANCE_ACTIONS.has(a.action_type));
+}
+
+export function isOperationAutomation(a: Automation): boolean {
+  return truthy(a.is_system) && !isMaintenanceAutomation(a);
 }
 
 /**
@@ -46,6 +89,8 @@ export type CollectionKind =
   | 'scheduled'
   | 'events'
   | 'off'
+  | 'operations'
+  | 'maintenance'
   | 'system'
   | 'ungrouped'
   | 'guides'
@@ -93,6 +138,18 @@ const SMART_COLLECTIONS: CollectionDef[] = [
     description: 'Disabled automations, kept around but idle',
   },
   {
+    key: 'operations',
+    kind: 'operations',
+    label: 'Operations',
+    description: 'Core pipeline automations (Wishlist, Watchlist, Scans, Syncs)',
+  },
+  {
+    key: 'maintenance',
+    kind: 'maintenance',
+    label: 'Maintenance',
+    description: 'Tools, cleanups, repair jobs, and backups',
+  },
+  {
     key: 'system',
     kind: 'system',
     label: 'System',
@@ -123,7 +180,8 @@ export function collectionGroupName(key: string): string | null {
 
 /**
  * Every collection the sidebar can show, in sidebar order: smart lenses,
- * then System, then user groups by name, then the ungrouped remainder.
+ * then Operations & Maintenance under System, then user groups by name,
+ * then the ungrouped remainder.
  */
 export function buildCollections(automations: Automation[]): CollectionDef[] {
   const names = [
@@ -131,12 +189,20 @@ export function buildCollections(automations: Automation[]): CollectionDef[] {
   ];
   names.sort();
   return [
-    ...SMART_COLLECTIONS.filter((c) => c.key !== 'system' && c.key !== 'ungrouped'),
+    ...SMART_COLLECTIONS.filter(
+      (c) => !['system', 'operations', 'maintenance', 'ungrouped'].includes(c.key),
+    ),
     {
-      key: 'system',
-      kind: 'system',
-      label: 'System',
-      description: 'Built-in automations that keep SoulSync healthy',
+      key: 'operations',
+      kind: 'operations',
+      label: 'Operations',
+      description: 'Core pipeline automations (Wishlist, Watchlist, Scans, Syncs)',
+    },
+    {
+      key: 'maintenance',
+      kind: 'maintenance',
+      label: 'Maintenance',
+      description: 'Tools, cleanups, repair jobs, and backups',
     },
     ...names.map((name) => ({
       key: groupKey(name),
@@ -176,6 +242,10 @@ export function collectionAutomations(automations: Automation[], key: string): A
       return automations.filter((a) => !isTimerTrigger(a.trigger_type));
     case 'off':
       return filterByHealth(automations, 'off');
+    case 'operations':
+      return automations.filter((a) => isOperationAutomation(a));
+    case 'maintenance':
+      return automations.filter((a) => truthy(a.is_system) && isMaintenanceAutomation(a));
     case 'system':
       return automations.filter((a) => truthy(a.is_system));
     case 'ungrouped':

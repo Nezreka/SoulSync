@@ -15,6 +15,7 @@ from datetime import datetime
 import requests
 from flask import Blueprint, jsonify, request, session
 
+
 from core.metadata import registry as metadata_registry
 from core.metadata.status import invalidate_metadata_status_caches
 from core.permissions import may_manage_profile, profile_view_for
@@ -398,7 +399,18 @@ def _qs_metadata_sources():
     sources = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz']
     sources += [name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)]
     return sources
-_QS_MEDIA_SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
+def _qs_media_servers():
+    from core.media_server import specs
+    return specs.names()
+
+
+def _own_library_supported():
+    """Per-profile own libraries need a server that can hold more than
+    one music library; the descriptor says which can. Reads this module's
+    config_manager so tests can inject one."""
+    from core.media_server import specs
+    descriptor = specs.describe(config_manager.get_active_media_server())
+    return bool(descriptor and descriptor.supports_own_libraries)
 
 
 def _qs_download_chain(mode, hybrid_order):
@@ -455,7 +467,7 @@ def list_profiles():
                         # where an own-library folder goes on this install (#1199):
                         # a mount under /app in docker, anywhere otherwise
                         'own_library_root_hint': _own_library_root_hint(),
-                        'own_library_supported': config_manager.get_active_media_server() in ('plex', 'jellyfin'),
+                        'own_library_supported': _own_library_supported(),
                         # supported != available: the server may be right and the
                         # feature still parked, and the UI must say which
                         'own_library_available': not _own_library_parked()})
@@ -642,7 +654,7 @@ def update_profile(profile_id):
             mode = 'own' if data.get('library_mode') == 'own' else 'shared'
             root = str(data.get('library_root') or '').strip()
             if mode == 'own':
-                if config_manager.get_active_media_server() not in ('plex', 'jellyfin'):
+                if not _own_library_supported():
                     existing_lib = database.get_profile_library(profile_id)
                     is_already_own = (existing_lib.get('mode') == 'own' and
                                       str(existing_lib.get('root') or '').strip() == root)
@@ -809,13 +821,27 @@ def get_current_profile():
 
         pid = session.get('profile_id')
         if not pid:
+            if _require_login_enabled():
+                for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                    session.pop(_k, None)
+                return jsonify({'success': False, 'login_required': True}), 200
             return jsonify({'success': False, 'error': 'No profile selected'}), 200
 
         database = get_database()
         profile = database.get_profile(pid)
         if not profile:
-            session.pop('profile_id', None)
+            for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                session.pop(_k, None)
+            if _require_login_enabled():
+                return jsonify({'success': False, 'login_required': True}), 200
             return jsonify({'success': False, 'error': 'Profile not found'}), 200
+
+        if profile.get('disabled') and not profile.get('is_admin'):
+            for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                session.pop(_k, None)
+            if _require_login_enabled():
+                return jsonify({'success': False, 'login_required': True}), 200
+            return jsonify({'success': False, 'error': 'This profile is turned off', 'disabled': True}), 403
 
         # Check if launch PIN is required
         require_pin = config_manager.get('security.require_pin_on_launch', False) if config_manager else False
@@ -955,6 +981,7 @@ def logout_profile():
     session.pop('profile_id', None)
     session.pop('profile_epoch', None)
     session.pop('device_id', None)
+    session.pop('device_owner', None)
     session.pop('login_authenticated', None)
     session.pop('launch_pin_verified', None)
     return jsonify({'success': True})
@@ -1295,7 +1322,8 @@ def save_profile_server_library():
         library_id = data.get('library_id')
         user_id = data.get('user_id')
 
-        if server_type not in ('plex', 'jellyfin', 'navidrome'):
+        from core.media_server import specs
+        if server_type not in specs.names_where(per_user_accounts=True):
             return jsonify({'success': False, 'error': 'Invalid server type'}), 400
 
         profile_id = get_current_profile_id()
@@ -1528,6 +1556,48 @@ def plex_connect_check():
         return jsonify({'success': False, 'error': 'Connecting with Plex failed. Try again.'}), 502
 
 
+@bp.route('/api/profiles/me/oidc', methods=['GET'])
+def my_oidc_status():
+    """my account's oidc card: whether sign in with oidc is on, whether this
+    profile is connected, and (once) how the last connect went"""
+    from core.security import oidc_signin
+    settings = oidc_signin.read_settings(config_manager)
+    methods = get_database().profile_sign_in_methods(get_current_profile_id())
+    return jsonify({'success': True, 'enabled': settings is not None,
+                    'label': settings.button_label if settings else oidc_signin.DEFAULT_BUTTON_LABEL,
+                    'icon': settings.icon_url if settings else '',
+                    'connected': methods['oidc'],
+                    'last': session.pop('oidc_connect_result', None)})
+
+
+@bp.route('/api/profiles/me/oidc-connect/start', methods=['GET'])
+def oidc_connect_start():
+    """connect with oidc from my account: the signed-in profile proves its
+    account at the provider, and oidc sign-in lands on it from then on. this
+    is the only way an admin profile gets oidc: claims never grant admin"""
+    from api.login import oidc_begin
+    return oidc_begin('connect', profile_id=get_current_profile_id())
+
+
+@bp.route('/api/profiles/me/oidc', methods=['DELETE'])
+def oidc_disconnect():
+    """stop oidc signing in as this profile. refused when it's the profile's
+    only way in: a profile made by oidc sign-in has no password, and dropping
+    the link would lock its owner out for good"""
+    try:
+        pid = get_current_profile_id()
+        methods = get_database().profile_sign_in_methods(pid)
+        if _require_login_enabled and _require_login_enabled() and not (methods['password'] or methods['plex']):
+            return jsonify({'success': False,
+                            'error': "This is the only way this profile can sign in. "
+                                     "Ask your admin to set a password first."}), 400
+        if not get_database().set_profile_oidc_identity(pid, None):
+            return jsonify({'success': False, 'error': 'Failed to remove the connection'}), 500
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @bp.route('/api/profiles/me/plex-home-user', methods=['DELETE'])
 def unlink_plex_home_user():
     """back to the app account for this profile."""
@@ -1626,7 +1696,7 @@ def get_active_sources():
             },
             'server': {
                 'active': config_manager.get_active_media_server(),
-                'options': [{'id': s, 'available': _qs_server_available(s)} for s in _QS_MEDIA_SERVERS],
+                'options': [{'id': s, 'available': _qs_server_available(s)} for s in _qs_media_servers()],
             },
             # read-only here (#1301): the chain is edited in settings, where one
             # source is single mode and two or more is hybrid

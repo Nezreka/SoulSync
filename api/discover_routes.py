@@ -24,7 +24,7 @@ import re
 import types
 
 import requests
-from flask import Blueprint, Response, jsonify, make_response, request, send_file
+from flask import Blueprint, Response, jsonify, make_response, redirect, request, send_file
 
 from api.source_playlists import (
     _get_deezer_client,
@@ -1827,18 +1827,25 @@ def get_seasonal_albums(season_key):
         logger.error(f"Error getting seasonal albums: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@bp.route('/api/discover/seasonal/current/playlist', methods=['GET'])
+@bp.route('/api/discover/seasonal-playlist', methods=['GET'])
 @bp.route('/api/discover/seasonal/<season_key>/playlist', methods=['GET'])
 @_hide_blocked({'tracks': WORKS})
-def get_seasonal_playlist(season_key):
-    """Get curated playlist for a specific season"""
+def get_seasonal_playlist(season_key='current'):
+    """Get curated playlist for a specific season (or current season)."""
     try:
         from core.seasonal_discovery import get_seasonal_discovery_service, SEASONAL_CONFIG
 
-        if season_key not in SEASONAL_CONFIG:
-            return jsonify({"success": False, "error": "Invalid season"}), 400
-
         database = get_database()
         seasonal_service = get_seasonal_discovery_service(_spotify_client(), database)
+
+        if season_key == 'current':
+            season_key = seasonal_service.get_current_season()
+            if not season_key:
+                return jsonify({"success": True, "tracks": []})
+
+        if season_key not in SEASONAL_CONFIG:
+            return jsonify({"success": False, "error": "Invalid season"}), 400
 
         # Get curated track IDs for active source
         active_source = _get_active_discovery_source()
@@ -1990,6 +1997,7 @@ def get_decade_playlist(decade):
         logger.error(f"Error getting decade playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@bp.route('/api/discover/popular-picks', methods=['GET'])
 @bp.route('/api/discover/personalized/popular-picks', methods=['GET'])
 @_hide_blocked({'tracks': WORKS})
 def get_popular_picks_playlist():
@@ -2011,6 +2019,7 @@ def get_popular_picks_playlist():
         logger.error(f"Error getting popular picks playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@bp.route('/api/discover/hidden-gems', methods=['GET'])
 @bp.route('/api/discover/personalized/hidden-gems', methods=['GET'])
 @_hide_blocked({'tracks': WORKS})
 def get_hidden_gems_playlist():
@@ -2132,6 +2141,7 @@ def get_mood_mixes():
         logger.error(f"Error building mood mixes: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@bp.route('/api/discover/discovery-shuffle', methods=['GET'])
 @bp.route('/api/discover/personalized/discovery-shuffle', methods=['GET'])
 @_hide_blocked({'tracks': WORKS})
 def get_discovery_shuffle():
@@ -3451,6 +3461,15 @@ def serve_cached_image(cache_key):
         reason = ' '.join(_redact_url_secrets(str(exc)).split())[:200] \
             or exc.__class__.__name__
         logger.debug("cached image serve failed for %s: %s", cache_key, reason)
+        try:
+            # send the browser to the original instead of a 404 (#1763), but
+            # never hand it a URL that carries a server token
+            from core.image_cache import get_image_cache
+            orig_url = get_image_cache().get_original_url(cache_key)
+            if orig_url and _redact_url_secrets(orig_url) == orig_url:
+                return redirect(orig_url, code=302)
+        except Exception as redirect_exc:
+            logger.debug("original URL redirect lookup failed for %s: %s", cache_key, redirect_exc)
         response = Response('', status=404)
         response.headers['X-SoulSync-Image-Error'] = reason
         response.headers['Cache-Control'] = 'no-store'

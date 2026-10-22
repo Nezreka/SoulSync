@@ -53,7 +53,7 @@ SPLIT_MODULES = [
 ]
 
 # Other JS files that exist in static/ but are NOT part of the split
-NON_SPLIT_JS = {"setup-wizard.js", "docs.js", "helper.js", "particles.js", "worker-orbs.js",
+NON_SPLIT_JS = {"docs.js", "helper.js", "particles.js", "worker-orbs.js",
                 "enrichment-manager.js",
                 "config-migration.js", "video/video-service-status.js"}
 
@@ -76,7 +76,6 @@ def _shell_window_exports() -> set[str]:
 # regressions from the split — they should be deduplicated in a follow-up.
 KNOWN_CROSS_FILE_DUPES = {
     "escapeHtml",        # downloads.js, shared-helpers.js
-    "formatDuration",    # sync-spotify.js, wishlist-tools.js, sync-services.js
     "_formatDuration",   # stats-automations.js, wishlist-tools.js
                          # (pages-extra.js declared a THIRD, millisecond-based
                          #  copy that loaded last and shadowed both; it went
@@ -89,6 +88,8 @@ KNOWN_CROSS_FILE_DUPES = {
 #     — downloads.js declared all three AND so did wishlist-tools.js, which
 #       loads second, so the downloads.js copies had never run. Deleted.
 #   loadDashboardData — search.js's copy went with the file.
+#   formatDuration — the sync-spotify.js / sync-services.js copies went with
+#     upstream's retired legacy sync-page scripts (3.6.0).
 # Resolved by the frontend audit (FE-07):
 #   _escAttr — downloads.js declared a JS-STRING escaper and stats-automations.js
 #     an HTML-ENTITY one under the same global name; stats-automations.js loads
