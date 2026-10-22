@@ -32,6 +32,37 @@ def video_base_dirs(db) -> list:
     return dirs
 
 
+def resolve_video_dir(stored_path, base_dirs, *, min_segments: int = 1,
+                      isdir: Callable[[str], bool] = os.path.isdir) -> Optional[str]:
+    """The folder a DB-stored file path sits in, re-rooted HERE -- for when the
+    file itself no longer resolves because it was renamed in place since the
+    server last reported it (a rename pass, a manual tidy). The folder still says
+    where the title lives.
+
+    Tries the stored folder as-is, then joins its last N segments onto each base
+    dir, DEEPEST first, never fewer than ``min_segments`` -- a bare 'Season 01'
+    must not stand in for a show folder. The folder must exist. Returns the
+    first hit or None -- never raises."""
+    if not isinstance(stored_path, str) or not stored_path:
+        return None
+    parts = [p for p in stored_path.replace("\\", "/").split("/") if p][:-1]
+    if not parts:
+        return None
+    raw = os.path.dirname(stored_path)
+    if raw and isdir(raw):
+        return raw
+    floor = max(1, int(min_segments or 1))
+    for k in range(min(_PROBE_DEPTH, len(parts)), floor - 1, -1):
+        for base in (base_dirs or []):
+            base = str(base or "").rstrip("/\\")
+            if not base:
+                continue
+            cand = os.path.join(base, *parts[-k:])
+            if isdir(cand):
+                return cand
+    return None
+
+
 def resolve_video_file_path(stored_path, base_dirs, *, size_bytes=None,
                             exists: Callable[[str], bool] = os.path.exists,
                             getsize: Callable[[str], int] = os.path.getsize) -> Optional[str]:

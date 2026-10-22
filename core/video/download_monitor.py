@@ -316,7 +316,7 @@ def _make_organizer(db):
         except Exception:   # noqa: BLE001 - a probe crash must not block the import
             probe_info = None
         plan = plan_import(dl, src, list_dir=fs.list_dir, probe=probe_info,
-                           settings=settings, library_dir=_owned_library_dir(db, dl),
+                           settings=settings, library_dir=_owned_library_dir(db, dl, settings),
                            expected_duration_sec=_expected_duration_sec(db, dl))
         if _pre_persist_dest and plan["action"] in ("import", "upgrade") and plan.get("dest"):
             try:
@@ -1027,31 +1027,107 @@ def _wishlist_ids(db, dl):
             ctx.get("season"), ctx.get("episode"), ctx)
 
 
-def _owned_library_dir(db, dl):
+def _owned_library_dir(db, dl, settings=None):
     """The REAL local folder of the copy the library already owns for this
     download's target, or None for brand-new items. The DB stores the SERVER's
     view of the file path (Plex part.file / Jellyfin Path — a different Docker
     mount, drive letter, or NAS export from here); the video path resolver
     re-roots it against the folders SoulSync knows. This is what makes an
     upgrade replace the copy WHERE IT LIVES instead of forking a second copy
-    into the template location. Best-effort — None falls back to the template."""
+    into the template location. Best-effort — None falls back to the template.
+
+    A NEW episode of a show the library already owns has no file of its own, so
+    it is placed beside the show's other episodes: the same season's folder, or
+    for a new season the show's folder plus the template's own season folder.
+    Without this, a library whose show folders don't match the episode template
+    (an imported Sonarr library, a renamed folder) split every show in two the
+    first time a new episode arrived."""
     try:
         import os as _os
 
-        from core.video.path_resolver import resolve_video_file_path, video_base_dirs
-        kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        from core.video.path_resolver import (
+            resolve_video_dir, resolve_video_file_path, video_base_dirs)
+        kind, tmdb_id, sn, en, ctx = _wishlist_ids(db, dl)
         if kind == "youtube" or not tmdb_id:
             return None
         stored = db.video_stored_file_path("movie" if kind == "movie" else "episode",
                                            tmdb_id=int(tmdb_id), season=sn, episode=en)
-        if not stored:
+        base_dirs = video_base_dirs(db)
+        if stored:
+            resolved = resolve_video_file_path(stored["path"], base_dirs,
+                                               size_bytes=stored.get("size_bytes"))
+            if resolved:
+                return _os.path.dirname(resolved)
+            # renamed in place since the server last reported it: the file's
+            # folder still says where the title lives
+            floor = 1 if kind == "movie" else _show_folder_floor(settings, ctx, sn)
+            return resolve_video_dir(stored["path"], base_dirs, min_segments=floor)
+        if kind != "episode" or sn is None:
             return None
-        resolved = resolve_video_file_path(stored["path"], video_base_dirs(db),
-                                           size_bytes=stored.get("size_bytes"))
-        return _os.path.dirname(resolved) if resolved else None
+        return _owned_show_dir(db, int(tmdb_id), sn, ctx, settings, base_dirs,
+                               resolve_video_file_path)
     except Exception:   # noqa: BLE001 - resolution is an assist, never a blocker
         logger.debug("owned-library-dir resolution failed", exc_info=True)
         return None
+
+
+def _show_folder_floor(settings, ctx, season) -> int:
+    """How many folder segments an episode's folder must match to be trusted
+    when re-rooting it by folder alone: the show folder plus the template's
+    folders below it (a bare 'Season 01' never stands in for a show). Two when
+    the template has no series folder to count from."""
+    from core.video import organization
+    ctx = ctx if isinstance(ctx, dict) else {}
+    tail = organization.episode_folders_below_series(
+        settings, {"series": ctx.get("title"), "year": ctx.get("year"), "season": season})
+    return len(tail) + 1 if tail is not None else 2
+
+
+def _owned_show_dir(db, tmdb_id, season, ctx, settings, base_dirs, resolve):
+    """Where a new episode of an owned show goes, from one of the show's owned
+    episodes. Same season: that episode's folder. Another season: climb from it
+    to the show folder by the template's own depth below the series folder, then
+    descend into the template's folders for the new season. The climb must stay
+    strictly inside a library folder, or the template path is used instead."""
+    import os as _os
+
+    from core.video import organization
+    from core.video.path_resolver import resolve_video_dir
+    sib = db.video_show_episode_file_path(tmdb_id, season=season)
+    if not sib:
+        return None
+    ctx = ctx if isinstance(ctx, dict) else {}
+    base = {"series": ctx.get("title"), "year": ctx.get("year")}
+    sib_tail = organization.episode_folders_below_series(
+        settings, dict(base, season=sib.get("season_number")))
+    resolved = resolve(sib["path"], base_dirs, size_bytes=sib.get("size_bytes"))
+    if resolved:
+        ep_dir = _os.path.dirname(resolved)
+    else:
+        # the sibling was renamed in place since the server last reported it
+        # (a rename pass): its folder is still the show's folder
+        ep_dir = resolve_video_dir(sib["path"], base_dirs,
+                                   min_segments=_show_folder_floor(settings, ctx,
+                                                                   sib.get("season_number")))
+        if not ep_dir:
+            return None
+    try:
+        same_season = int(sib.get("season_number")) == int(season)
+    except (TypeError, ValueError):
+        same_season = False
+    if same_season:
+        return ep_dir
+    new_tail = organization.episode_folders_below_series(settings, dict(base, season=season))
+    if sib_tail is None or new_tail is None:
+        return None
+    show_dir = ep_dir
+    for _ in sib_tail:
+        show_dir = _os.path.dirname(show_dir)
+    show_norm = _os.path.normpath(show_dir)
+    inside = any(show_norm.startswith(_os.path.normpath(b) + _os.sep) for b in base_dirs if b)
+    if not inside:
+        return None
+    return _os.path.join(show_dir, *new_tail) if new_tail else show_dir
 
 
 def _wishlist_failed(db, dl) -> None:

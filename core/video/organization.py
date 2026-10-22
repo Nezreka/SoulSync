@@ -351,6 +351,31 @@ def _tidy_component(part: str) -> str:
     return p.rstrip(". ")
 
 
+_SERIES_TOKEN = re.compile(r"\$(?:\{series\}|series(?![A-Za-z0-9_]))")
+
+
+def episode_folders_below_series(settings: Any, fields: dict) -> list | None:
+    """The episode template's folders BELOW the series folder, rendered and tidied
+    for ``fields`` (the default template gives ['Season 03']). None when no
+    folder segment of the template carries $series, i.e. there is no series
+    folder to place a new episode under. The file name is never included."""
+    settings = settings if isinstance(settings, dict) else {}
+    tmpl = settings.get("episode_template") or DEFAULTS["episode_template"]
+    folders = str(tmpl).split("/")[:-1]
+    # the FIRST folder naming the series is the series folder: a season folder
+    # may repeat the name ('Firefly/Firefly Season 1/') and must not be taken for it
+    idx = next((i for i, seg in enumerate(folders) if _SERIES_TOKEN.search(seg)), None)
+    if idx is None:
+        return None
+    values = _episode_values(fields if isinstance(fields, dict) else {})
+    out = []
+    for seg in folders[idx + 1:]:
+        part = _tidy_component(render_template(seg, values))
+        if part:
+            out.append(part)
+    return out
+
+
 def render_path(scope: Any, root: Any, fields: dict, settings: Any, ext: Any) -> dict:
     """Render the destination for a finished download from the user's templates.
     Returns ``{"dir", "filename", "path"}`` (same shape as ``library_paths.plan_path``).
@@ -390,5 +415,5 @@ def render_path(scope: Any, root: Any, fields: dict, settings: Any, ext: Any) ->
 
 __all__ = [
     "DEFAULTS", "default_settings", "normalize", "load", "save",
-    "render_template", "render_path",
+    "render_template", "render_path", "episode_folders_below_series",
 ]

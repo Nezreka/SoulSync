@@ -6743,6 +6743,35 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def video_show_episode_file_path(self, tmdb_id=None, *, season=None):
+        """The server-reported path (+ size, + its season) of ANY owned episode
+        of a show: {"path", "size_bytes", "season_number"} or None. A new episode
+        of an owned show has no file of its own yet, so this is what tells the
+        importer which folder the show already lives in. Same season first, then
+        the latest season; within a season the latest episode."""
+        if not tmdb_id:
+            return None
+        try:
+            want = int(season) if season is not None else -1
+        except (TypeError, ValueError):
+            want = -1
+        conn = self._get_connection()
+        try:
+            r = conn.execute(
+                "SELECT f.relative_path, f.size_bytes, e.season_number FROM media_files f "
+                "JOIN episodes e ON e.id = f.episode_id "
+                "JOIN shows s ON s.id = e.show_id "
+                "WHERE s.tmdb_id=? AND e.has_file=1 AND f.relative_path<>'' "
+                "ORDER BY (e.season_number = ?) DESC, e.season_number DESC, "
+                "e.episode_number DESC, f.size_bytes DESC LIMIT 1",
+                (int(tmdb_id), want)).fetchone()
+            return ({"path": r["relative_path"], "size_bytes": r["size_bytes"],
+                     "season_number": r["season_number"]} if r else None)
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+        finally:
+            conn.close()
+
     def owned_library_id(self, media_type: str, tmdb_id):
         """The local library row id for an owned title, or None.
 
