@@ -303,6 +303,9 @@ class MusicBrainzClient:
         base_url, interval = _settings or _server_settings()
         url = f"{base_url}{path}"
         origin = urlsplit(base_url)
+        entity = path.strip('/').split('/')[0]
+        entity_root = origin.path.rstrip('/') + '/' + entity
+        merge_lookup = entity in ('recording', 'release', 'release-group') and len(path.strip('/').split('/')) == 2
         attempts = self.max_retries + 1
         last_exc: Exception | None = None
 
@@ -329,13 +332,14 @@ class MusicBrainzClient:
                     location = response.headers.get('Location', '')
                     target = urljoin(getattr(response, 'url', None) or request_url, location)
                     parsed = urlsplit(target)
-                    # Merged MBIDs redirect to another recording on this server.
+                    # Merged MBIDs redirect to the same entity type on this server.
                     # Never send mirror requests to another host or a new API root.
                     if (response.status_code not in (301, 308)
+                            or not merge_lookup
                             or parsed.scheme != origin.scheme
                             or parsed.netloc != origin.netloc
-                            or not parsed.path.startswith(origin.path.rstrip('/') + '/recording/')
-                            or not urlsplit(request_url).path.startswith(origin.path.rstrip('/') + '/recording/')
+                            or parsed.path.rsplit('/', 1)[0] != entity_root
+                            or not parsed.path.rsplit('/', 1)[-1]
                             or redirect_count == MAX_REDIRECTS):
                         raise requests.HTTPError(
                             "MusicBrainz API redirected; configure its final base URL", response=response)

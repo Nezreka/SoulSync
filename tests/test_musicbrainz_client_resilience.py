@@ -39,7 +39,7 @@ class _Session:
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
-        outcome.url = url
+        outcome.url = requests.Request('GET', url, params=params).prepare().url
         return outcome
 
 
@@ -122,19 +122,43 @@ def test_retry_after_http_date_is_parsed():
     assert 18 <= delay <= 20
 
 
-def test_merged_recording_redirect_stays_on_mirror(monkeypatch):
+@pytest.mark.parametrize('entity', ['recording', 'release', 'release-group'])
+@pytest.mark.parametrize('status', [301, 308])
+def test_merged_entity_redirect_stays_on_mirror_and_preserves_query(monkeypatch, entity, status):
     import core.musicbrainz_client as mb
     monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', 'http://mirror:5000')
     monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_REQUEST_INTERVAL', '0.1')
     monkeypatch.setattr(mb, '_wait_for_musicbrainz_slot', lambda *args: None)
     session = _Session([
-        _Response(status_code=301, headers={'Location': '/ws/2/recording/canonical?fmt=json'}),
+        _Response(status_code=status, headers={'Location': f'/ws/2/{entity}/canonical'}),
         _Response({'id': 'canonical', 'title': 'Song'}),
     ])
     client = _client(session)
-    assert client.get_recording('merged', raise_on_error=True)['id'] == 'canonical'
+    assert client._get(f'/{entity}/merged', params={'fmt': 'json', 'inc': 'recordings'}).json()['id'] == 'canonical'
     assert len(session.calls) == 2
-    assert session.calls[1]['url'] == 'http://mirror:5000/ws/2/recording/canonical?fmt=json'
+    assert session.calls[1]['url'] == f'http://mirror:5000/ws/2/{entity}/canonical?fmt=json&inc=recordings'
+
+
+@pytest.mark.parametrize('location', ['/ws/2/recording/other', '/elsewhere/release/other', '/ws/2/release/'])
+def test_release_redirect_cannot_change_entity_type_or_api_root(monkeypatch, location):
+    import core.musicbrainz_client as mb
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', 'http://mirror:5000')
+    monkeypatch.setattr(mb, '_wait_for_musicbrainz_slot', lambda *args: None)
+    client = _client(_Session([_Response(status_code=301, headers={'Location': location})]))
+    with pytest.raises(requests.HTTPError, match='final base URL'):
+        client._get('/release/merged', params={'fmt': 'json'})
+    assert len(client.session.calls) == 1
+
+
+def test_release_redirect_loop_is_bounded(monkeypatch):
+    import core.musicbrainz_client as mb
+    monkeypatch.setenv('SOULSYNC_MUSICBRAINZ_BASE_URL', 'http://mirror:5000')
+    monkeypatch.setattr(mb, '_wait_for_musicbrainz_slot', lambda *args: None)
+    client = _client(_Session([_Response(status_code=301, headers={
+        'Location': '/ws/2/release/merged'}) for _ in range(mb.MAX_REDIRECTS + 1)]))
+    with pytest.raises(requests.HTTPError, match='final base URL'):
+        client._get('/release/merged', params={'fmt': 'json'})
+    assert len(client.session.calls) == mb.MAX_REDIRECTS + 1
 
 
 def test_cross_server_recording_redirect_is_rejected(monkeypatch):
