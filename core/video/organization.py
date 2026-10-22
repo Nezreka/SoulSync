@@ -17,10 +17,13 @@ Template tokens
   Movies:   $title $titlefirst $year $quality $resolution $source $codec $edition
             $tmdbid $imdbid
   Episodes: $series $season $seasonraw $episode $episodetitle $year $quality
-            $resolution $source $codec $tvdbid $airdate
+            $resolution $source $codec $tmdbid $imdbid $tvdbid $airdate
+            (an episode's ids are its SHOW's)
   ($season/$episode are zero-padded to 2; $seasonraw is the bare number; a
   multi-episode file renders its span through $episode — 'S01E01-E02'; $airdate
-  is the episode's YYYY-MM-DD air date, for daily-show naming.)
+  is the episode's YYYY-MM-DD air date, for daily-show naming. An id that isn't
+  known renders empty, and a brace group it leaves empty -- '{imdb-}', '{}' --
+  is dropped like an empty '()' or '[]'.)
 
 Pure data + a pure renderer (no DB, no FS) so it's unit-tested in isolation. Isolated —
 stdlib + sibling video ``library_paths`` only; nothing from the music side.
@@ -255,6 +258,12 @@ def _plausible_year(v: Any) -> bool:
         return False
 
 
+def _imdb(v: Any) -> str:
+    """An IMDb id as 'tt1234567' (a bare number gains its 'tt'); '' if none."""
+    t = _str(v).strip()
+    return "tt" + t if t.isdigit() else t
+
+
 def _ext(ext: Any) -> str:
     e = str(ext or "").strip().lower()
     if not e:
@@ -274,7 +283,7 @@ def _movie_values(f: dict) -> dict:
         "codec": _str(f.get("codec")).upper(),
         "edition": _str(f.get("edition")),
         "tmdbid": _str(f.get("tmdbid")),
-        "imdbid": _str(f.get("imdbid")),
+        "imdbid": _imdb(f.get("imdbid")),
     }
 
 
@@ -299,6 +308,8 @@ def _episode_values(f: dict) -> dict:
         "resolution": _str(f.get("resolution")),
         "source": source_label(f.get("source")),
         "codec": _str(f.get("codec")).upper(),
+        "tmdbid": _str(f.get("tmdbid")),
+        "imdbid": _imdb(f.get("imdbid")),
         "tvdbid": _str(f.get("tvdbid")),
     }
 
@@ -341,9 +352,10 @@ def render_template(template: Any, values: dict) -> str:
 
 def _tidy_component(part: str) -> str:
     """Clean one path segment: drop a ' - ' left dangling by an empty token, remove
-    empty ()/[] left by an empty $year, collapse whitespace, trim stray dashes and
-    Windows-hostile trailing dots/spaces."""
-    p = re.sub(r"\s+-\s+(?=(\s|$))", " ", part)   # ' - ' before an empty token
+    empty ()/[] left by an empty $year and an empty {}/{imdb-} left by an empty id,
+    collapse whitespace, trim stray dashes and Windows-hostile trailing dots/spaces."""
+    p = re.sub(r"\{\s*(?:[A-Za-z]+-)?\s*\}", "", part)   # '{imdb-}' / '{}' from an empty id
+    p = re.sub(r"\s+-\s+(?=(\s|$))", " ", p)   # ' - ' before an empty token
     p = re.sub(r"\(\s*\)", "", p)                 # empty ( ) from a missing $year
     p = re.sub(r"\[\s*\]", "", p)
     p = re.sub(r"\s+", " ", p).strip()

@@ -135,9 +135,13 @@ def register_routes(bp):
             probe_info = prober(src) if prober is not None else None
         except Exception:   # noqa: BLE001 - a probe crash must not block the import
             probe_info = None
+        from core.video.download_monitor import template_ids
+        # the picked identity's ids (its media_id is a TMDB id), not the grab's
+        ids = template_ids(db, {"kind": _KIND_FOR_SCOPE[scope], "media_source": "tmdb",
+                                "media_id": override.get("media_id")}, settings)
         plan = plan_import(row, src, list_dir=fs.list_dir, probe=probe_info,
                            settings=settings, force=True, override=override,
-                           expected_duration_sec=_expected_duration_sec(db, row))
+                           expected_duration_sec=_expected_duration_sec(db, row), ids=ids)
         if plan["action"] in ("import", "upgrade") and plan.get("dest"):
             try:
                 db.update_video_download(dl_id, dest_path=plan["dest"]["path"])

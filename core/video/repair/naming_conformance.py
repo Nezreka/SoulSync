@@ -32,7 +32,8 @@ def _fields_of(row: dict) -> dict:
             "year": row.get("year"), "season": row.get("season"),
             "episode": row.get("episode"), "episode_title": row.get("episode_title"),
             "quality": row.get("quality"), "resolution": row.get("resolution"),
-            "codec": row.get("video_codec"), "tmdbid": row.get("tmdb_id")}
+            "codec": row.get("video_codec"), "tmdbid": row.get("tmdb_id"),
+            "imdbid": row.get("imdb_id"), "tvdbid": row.get("tvdb_id")}
 
 
 def _same_path(a: str, b: str) -> bool:

@@ -55,7 +55,7 @@ def _movie_fields(row: Dict[str, Any]) -> Dict[str, Any]:
     return {"title": row.get("title"), "year": row.get("year"),
             "quality": row.get("quality"), "resolution": row.get("resolution"),
             "source": row.get("release_source"), "codec": row.get("video_codec"),
-            "tmdbid": row.get("tmdb_id")}
+            "tmdbid": row.get("tmdb_id"), "imdbid": row.get("imdb_id")}
 
 
 def _episode_fields(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -63,7 +63,10 @@ def _episode_fields(row: Dict[str, Any]) -> Dict[str, Any]:
             "episode": row.get("episode_number"), "episode_title": row.get("episode_title"),
             "year": row.get("show_year"), "quality": row.get("quality"),
             "resolution": row.get("resolution"), "source": row.get("release_source"),
-            "codec": row.get("video_codec")}
+            "codec": row.get("video_codec"),
+            # an episode's ids are its show's, the same as at import
+            "tmdbid": row.get("show_tmdb_id"), "imdbid": row.get("show_imdb_id"),
+            "tvdbid": row.get("show_tvdb_id")}
 
 
 def _base_dir_of(path: str, base_dirs: List[str]) -> Optional[str]:
