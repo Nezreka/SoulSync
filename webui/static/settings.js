@@ -3220,6 +3220,8 @@ async function loadSettingsData() {
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
         markUnsupportedCookieBrowsers(!!(settings._environment && settings._environment.windows));
         document.getElementById('youtube-download-delay').value = settings.youtube?.download_delay ?? 3;
+        const _ytAlbumBundle = document.getElementById('youtube-album-bundle');
+        if (_ytAlbumBundle) _ytAlbumBundle.checked = settings.download_source?.youtube_album_bundle === true;
         const _ytTranscode = document.getElementById('youtube-transcode');
         const _ytTranscodeOpts = document.getElementById('youtube-transcode-options');
         if (_ytTranscode) {
@@ -6537,6 +6539,9 @@ async function saveSettings(quiet = false) {
             // downloads (#857). Rendered in the torrent/usenet client sections.
             torrent_download_path: _cfgStr('torrent-download-path'),
             usenet_download_path: _cfgStr('usenet-download-path'),
+            // #1851: fetch an album through its YouTube Music playlist. Rendered
+            // in the YouTube section; it lives here because the album flow reads it.
+            youtube_album_bundle: _cfgBool('youtube-album-bundle'),
         },
         tidal_download: {
             // quality derived from the global Quality Profile (ranked targets); allow_fallback always true

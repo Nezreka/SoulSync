@@ -5373,6 +5373,26 @@
                                                 <div class="form-group">
                                                     <div class="setting-row">
                                                         <label class="checkbox-label">
+                                                            <input type="checkbox" id="youtube-album-bundle">
+                                                            Download whole albums from YouTube Music
+                                                        </label>
+                                                        <span class="info-icon" role="button" tabindex="0"
+                                                            title="What's this?" onclick="toggleSettingHelp(this)"
+                                                            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    </div>
+                                                    <div class="setting-help-body" hidden>
+                                                        For an album, find the album itself on YouTube Music and
+                                                        download its playlist, instead of searching for each song.
+                                                        Helps with albums whose songs never show up in a song
+                                                        search. The artist and album title must both match; if
+                                                        they don't, SoulSync searches track by track as usual.
+                                                        Some albums need YouTube Music Premium cookies.
+                                                        Off by default.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <div class="setting-row">
+                                                        <label class="checkbox-label">
                                                             <input type="checkbox" id="youtube-transcode" checked
                                                                 onchange="document.getElementById('youtube-transcode-options').style.display = this.checked ? 'block' : 'none'">
                                                             Re-encode YouTube audio
