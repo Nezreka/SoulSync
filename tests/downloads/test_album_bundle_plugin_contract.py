@@ -17,13 +17,14 @@ import pytest
 from core.download_plugins.torrent import TorrentDownloadPlugin
 from core.download_plugins.usenet import UsenetDownloadPlugin
 from core.soulseek_client import SoulseekClient
+from core.youtube_client import YouTubeClient
 
 # Every key `core.downloads.master._bundle_plugin_kwargs` can emit.
 MASTER_BUNDLE_KWARGS = ('quality_profile_id', 'expected_duration_seconds')
 
 
 @pytest.mark.parametrize('plugin_class', [
-    TorrentDownloadPlugin, UsenetDownloadPlugin, SoulseekClient,
+    TorrentDownloadPlugin, UsenetDownloadPlugin, SoulseekClient, YouTubeClient,
 ])
 def test_every_bundle_plugin_accepts_the_master_kwargs(plugin_class):
     signature = inspect.signature(plugin_class.download_album_to_staging)
@@ -44,7 +45,7 @@ def test_every_bundle_plugin_accepts_the_master_kwargs(plugin_class):
 
 
 @pytest.mark.parametrize('plugin_class', [
-    TorrentDownloadPlugin, UsenetDownloadPlugin, SoulseekClient,
+    TorrentDownloadPlugin, UsenetDownloadPlugin, SoulseekClient, YouTubeClient,
 ])
 def test_the_master_kwargs_bind_against_every_plugin(plugin_class):
     """Names alone are not enough, the call itself has to bind."""

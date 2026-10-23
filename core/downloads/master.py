@@ -55,7 +55,6 @@ _VARIANT_WORDS = {
     'remix', 'rmx', 'acapella', 'a cappella', 'instrumental', 'karaoke',
     'live', 'demo', 'extended',
 }
-_ALBUM_BUNDLE_SOURCES = frozenset(('torrent', 'usenet', 'soulseek'))
 
 
 def _norm_text(value: Any) -> str:
@@ -530,8 +529,9 @@ def _resolve_album_bundle_sources(config_manager: Any) -> list[str]:
     complete release instead of dropping directly into a per-track flow that
     deliberately excludes both release-level sources.
     """
+    capable = _album_bundle_dispatch.album_bundle_sources(config_manager.get)
     mode = (config_manager.get('download_source.mode', 'soulseek') or 'soulseek').lower()
-    if mode in _ALBUM_BUNDLE_SOURCES:
+    if mode in capable:
         return [mode]
     if mode != 'hybrid':
         return []
@@ -544,7 +544,7 @@ def _resolve_album_bundle_sources(config_manager: Any) -> list[str]:
     seen = set()
     for raw_source in order:
         source = str(raw_source or '').lower()
-        if source not in _ALBUM_BUNDLE_SOURCES:
+        if source not in capable:
             break
         if source and source not in seen:
             sources.append(source)
