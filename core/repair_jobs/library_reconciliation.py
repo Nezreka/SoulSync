@@ -33,7 +33,7 @@ from core.library.reconciliation_plan import (
     audio_contradicts_local_title, reconcile_folder, _title_score,
     display_title_compatible, file_version_markers, semantic_title_key,
     title_difference_kind, slot_version_markers, _version_markers,
-    _recording_supports_slot,
+    _recording_supports_slot, recording_supports_file_slot,
 )
 from core.library.reconciliation_catalogue import catalogue_scan, current as catalogue_current, deferred, timed, stage
 from core.library.reconciliation_match_cache import cached_match
@@ -44,7 +44,7 @@ from core.library.retag_planner import plan_track, _artist_credit_includes
 from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
 from core.metadata.album_tracks import get_album_for_source, get_album_tracks_for_source
 from core.repair_jobs import register_job
-from core.repair_jobs.base import RepairJob, JobContext, JobResult, all_library_roots, walk_library
+from core.repair_jobs.base import RepairJob, JobContext, JobResult, all_library_roots, walk_library, watchlist_artist_names
 from core.repair_review_identity import missing_slot_key
 from core.text.fold import fold_title
 from utils.logging_config import get_logger
@@ -663,6 +663,13 @@ def _continuous_numbering(scored: tuple) -> int:
     return int(bool(slots) and discs == {1} and positions == list(range(1, len(slots) + 1)))
 
 
+def _inferred_partial(files: list[dict], album: dict | None, watched: set[str], saved_intent) -> bool:
+    """A lone playlist acquisition is not an instruction to collect its album."""
+    return bool(not saved_intent and album and len(files) == 1
+        and files[0].get('playlists')
+        and str(album.get('artist_name') or '').strip().casefold() not in watched)
+
+
 def _complete_collection_fit(files: list[dict], scored: tuple) -> int:
     """Prefer an exact tracklist only when the folder looks like a collection.
 
@@ -1135,7 +1142,7 @@ def _audio_conflicts_with_slot(file: dict, slot: dict) -> bool:
     recordings = (file.get('acoustid') or {}).get('recordings') or []
     return not any(
         float(recording.get('score') or 0) >= 0.90 and
-        _recording_supports_slot(recording, slot)
+        recording_supports_file_slot(recording, file, slot)
         for recording in recordings
     )
 
@@ -1309,7 +1316,9 @@ def candidate_preview(files: list[dict], row: tuple, release_meta: dict) -> dict
 def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                            *, candidates: list[tuple] | None = None,
                            candidate_metadata: dict[tuple[str, str], dict] | None = None,
+                           candidate_differences: dict[tuple[str, str], str] | None = None,
                            state: str = '', intent_scope: str = '',
+                           intent_inferred: bool = False,
                            action_changes: dict[str, dict] | None = None,
                            numbering_mode: str = '',
                            inventory: dict | None = None,
@@ -1352,7 +1361,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
             difference = assignment.get('title_difference')
             categories.append(
                 'title_conventions'
-                if difference in ('typography', 'flavor') else 'title_issues')
+                if difference in ('typography', 'flavor', 'cosmetic') else 'title_issues')
         if changed_fields - {
             'track_number', 'disc_number', 'library_track_number',
             'library_disc_number', 'title', 'library_title', 'filename',
@@ -1371,13 +1380,17 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
         payload = {
             'source': source, 'release_id': release_id, 'state': state,
             'intent_scope': intent_scope,
+            'intent_inferred': intent_inferred,
+            'release_decision_reason': common.get('release_decision_reason') or '',
             'numbering_mode': numbering_mode,
             'inventory': inventory,
             'release_track_count': len(slots), 'local_file_count': len(files),
             'matched': matched, 'clear': clear, 'assignments': assignments,
             'categories': sorted(set(categories)),
             'candidates': [candidate_preview(files, row,
-                            (candidate_metadata or {}).get((row[3], row[4])) or {}) for row in candidate_rows[:6]],
+                            (candidate_metadata or {}).get((row[3], row[4])) or {})
+                            | {'difference_summary': (candidate_differences or {}).get((row[3], row[4]), '')}
+                            for row in candidate_rows[:6]],
         }
         from core.library.reconciliation_fulfillment import settle_assignments
         with stage('plan_persistence'):
@@ -1473,6 +1486,98 @@ def _candidate_shapes_equivalent(left: tuple, right: tuple, *, ignore_positions:
     return (len(left_missing) == len(right_missing) and
             all(compatible_slot(a, b, 3)
                 for a, b in zip(left_missing, right_missing, strict=True)))
+
+
+def _owned_candidate(candidate: tuple) -> ScoredCandidate:
+    """Compare partial acquisitions using only the recordings actually owned."""
+    clear, matched, extras, source, release, slots, plan = candidate
+    pairs = sorted(plan['pairs'], key=lambda pair: pair['file_index'])
+    return ScoredCandidate(clear, matched, extras, source, release,
+        [slots[pair['slot_index']] for pair in pairs],
+        {**plan, 'pairs': [{**pair, 'slot_index': index} for index, pair in enumerate(pairs)],
+         'missing_slots': []})
+
+
+def _owned_candidates_equivalent(left: tuple, right: tuple) -> bool:
+    first, second = _owned_candidate(left), _owned_candidate(right)
+    if first.source == second.source == 'musicbrainz':
+        for a, b in zip(first.slots, second.slots):
+            if a.get('recording_mbid') and b.get('recording_mbid') and a['recording_mbid'] != b['recording_mbid']:
+                return False
+    return _candidate_shapes_equivalent(first, second)
+
+
+def _retain_partial_release(files, album, scored, saved_intent, watched, metadata):
+    if not album or album.get('canonical_locked'):
+        return False
+    current = next((row for row in scored if (row[3], row[4]) ==
+                    (album.get('canonical_source'), str(album.get('canonical_album_id') or ''))), None)
+    partial = (saved_intent and saved_intent[0] == 'partial' and not saved_intent[3]
+               and current and saved_intent[1:3] == (current[3], current[4]))
+    if not partial and not _inferred_partial(files, album, watched, saved_intent):
+        return False
+    if (not current or current[:3] != scored[0][:3] or current[6]['extra_files']
+            or any(pair['confidence'] not in ('clear', 'manual') for pair in current[6]['pairs'])
+            or _single_file_album_context_conflict(album, metadata(current))):
+        return False
+    if not all(_owned_candidates_equivalent(current, row)
+               for row in scored if row[:3] == current[:3]):
+        return False
+    scored.remove(current)
+    scored.insert(0, current)
+    return True
+
+
+def _candidate_difference(selected: tuple, other: tuple) -> str:
+    """Explain the actual mapping difference without exposing ranking scores."""
+    first, second = ScoredCandidate(*selected), ScoredCandidate(*other)
+    left = {pair['file_index']: first.slots[pair['slot_index']] for pair in first.plan['pairs']}
+    right = {pair['file_index']: second.slots[pair['slot_index']] for pair in second.plan['pairs']}
+    if left.keys() != right.keys() or first.plan['extra_files'] != second.plan['extra_files']:
+        return 'Different local files are assigned or remain unmatched.'
+    if _candidate_shapes_equivalent(first, second):
+        if first.clear != second.clear:
+            return 'The same track mapping has different assignment confidence.'
+        return 'The same track mapping; catalogue edition details differ.'
+    for index, slot in left.items():
+        alternate = right[index]
+        label = slot.get('title') or 'An owned track'
+        if (slot.get('disc_number') or 1, slot.get('track_number')) != (
+                alternate.get('disc_number') or 1, alternate.get('track_number')):
+            return (f'{label}: disc {slot.get("disc_number") or 1}, track {slot.get("track_number")} '
+                    f'→ disc {alternate.get("disc_number") or 1}, track {alternate.get("track_number")}.')
+        def single(item, source):
+            return ScoredCandidate(1, 1, 0, source, '', [item],
+                {'pairs': [{'file_index': 0, 'slot_index': 0}], 'missing_slots': [], 'extra_files': []})
+        if not _candidate_shapes_equivalent(single(slot, first.source), single(alternate, second.source)):
+            return f'{label}: a different recording or version is proposed.'
+    if _owned_candidates_equivalent(first, second):
+        return 'Only unowned release tracks differ.'
+    return 'The release tracklist or assignment evidence differs.'
+
+
+def _review_candidates(selected: tuple, ranked: list[tuple], blockers=()) -> list[tuple]:
+    """Keep the selected edition and the actual conflicting alternatives visible."""
+    result = [selected]
+    identities = {(selected[3], selected[4])}
+    for candidate in [*blockers, *ranked]:
+        identity = (candidate[3], candidate[4])
+        if identity in identities:
+            continue
+        if len(result) >= 6:
+            break
+        # Spend the first slots on distinct outcomes. Equivalent catalogue
+        # editions are filled afterward, if the six-card limit allows them.
+        if candidate in blockers or not any(_candidate_shapes_equivalent(candidate, row) for row in result):
+            result.append(candidate)
+            identities.add(identity)
+    for candidate in ranked:
+        if len(result) >= 6:
+            break
+        if (candidate[3], candidate[4]) not in identities:
+            result.append(candidate)
+            identities.add((candidate[3], candidate[4]))
+    return result
 
 
 def _same_recording_copies(files: list[dict], indexes: list[int]) -> bool:
@@ -1947,10 +2052,13 @@ class LibraryReconciliationJob(RepairJob):
                 tracks, albums = self._load_rows(context, roots)
                 walk_roots = roots
         intents = self._intents(context)
+        with context.db._get_connection() as conn:
+            watched_artists = watchlist_artist_names(conn.cursor())
         wishlisted_by_profile = self._wishlisted_slots(context)
         assignment_overrides = self._assignment_overrides(context)
         from core.library import reconciliation_choices as review_choices
         kept_numbering = review_choices.applied_numbering_choices(context.db)
+        numbering_history = review_choices.flattened_numbering_history(context.db)
         playlist_membership = {}
         if context.playlist_membership:
             try:
@@ -2293,6 +2401,9 @@ class LibraryReconciliationJob(RepairJob):
                                 result.findings_created += 1
                             cache.checkpoint()
                             continue
+                    retained_partial = _retain_partial_release(files, album, scored,
+                        intents.get(str(album_id)), watched_artists,
+                        lambda row: _release_metadata(row, release_meta_cache, exact_musicbrainz_releases))
                     ranked_candidates = list(scored)
                     pinned_row = None
                     best_unpinned_rank = rank_candidate(scored[0])
@@ -2329,7 +2440,7 @@ class LibraryReconciliationJob(RepairJob):
                     # cannot erase a real edition decision when equally fitting
                     # candidates contain different tracklists or positions.
                     tied = (len(tied_rows) > 1 and not equivalent_tie)
-                    if pinned_row and not locked_conflict:
+                    if retained_partial or (pinned_row and not locked_conflict):
                         tied = False
                     pinned = bool(album and album.get('canonical_source') == source
                                   and str(album.get('canonical_album_id') or '') == release_id)
@@ -2356,6 +2467,16 @@ class LibraryReconciliationJob(RepairJob):
                     if (locked_conflict or tied or edition_conflict or symmetric_mismatch or
                             position_conflict or digital_edition_choice or
                             (matched == 0 and not pinned)):
+                        blockers = [row for row in tied_rows if tied and
+                                    not _candidate_shapes_equivalent(scored[0], row)]
+                        blockers.extend(row for row in ranked_candidates if
+                            (position_conflict and _distinctive_position_conflict(files, scored[0], [row])) or
+                            (digital_edition_choice and _full_coverage_digital_alternative(
+                                scored[0], [row], len(files), lambda candidate: _release_metadata(
+                                    candidate, release_meta_cache, exact_musicbrainz_releases))))
+                        visible_candidates = _review_candidates(scored[0], ranked_candidates, blockers)
+                        differences = {(row[3], row[4]): _candidate_difference(scored[0], row)
+                                       for row in visible_candidates if row is not scored[0]}
                         issue_type = ('reconciliation_release' if album_id is not None and
                                       (tied or locked_conflict or edition_conflict or
                                        symmetric_mismatch or position_conflict or
@@ -2400,14 +2521,16 @@ class LibraryReconciliationJob(RepairJob):
                             'evidence_signature': _evidence_signature(
                                 files, [(row.source, row.release_id, row.clear, row.matched)
                                         for row in ranked_candidates]),
+                            'release_decision_reason': description,
                         }
                         case_id = _persist_selected_plan(
                             context.db, choice_common, files, scored[0], inventory=album_inventory,
-                            candidates=ranked_candidates, state='release_conflict',
+                            candidates=visible_candidates, state='release_conflict',
+                            candidate_differences=differences,
                             candidate_metadata={
                                 (row.source, row.release_id): _release_metadata(
                                     row, release_meta_cache, exact_musicbrainz_releases)
-                                for row in ranked_candidates[:6]
+                                for row in visible_candidates
                             },
                             numbering_mode=numbering_mode,
                         )
@@ -2427,7 +2550,8 @@ class LibraryReconciliationJob(RepairJob):
                                          files, row, _release_metadata(
                                              row, release_meta_cache,
                                              exact_musicbrainz_releases))
-                                                    for row in ranked_candidates[:6]]}):
+                                                    | {'difference_summary': differences.get((row[3], row[4]), '')}
+                                                    for row in visible_candidates]}):
                             result.findings_created += 1
                         cache.checkpoint()
                         continue
@@ -2557,6 +2681,22 @@ class LibraryReconciliationJob(RepairJob):
                         sorted(disc_tracks) == list(range(1, max(disc_tracks) + 1)) and
                         not any(slot.get('excluded_video_tracks') for slot in slots) and
                         all(disc_totals.values()))
+                    positions = [(slot.get('disc_number') or 1, slot.get('track_number')) for slot in slots]
+                    routine_numbering = (not plan['extra_files'] and
+                        len(set(positions)) == len(slots) and
+                        all(disc > 0 and track is not None and track > 0 for disc, track in positions) and
+                        all(pair['confidence'] in ('clear', 'manual') and
+                            not _audio_conflicts_with_slot(files[pair['file_index']], slots[pair['slot_index']])
+                            for pair in plan['pairs']))
+                    planned_paths = {}
+                    for pair in _review_pairs(files, plan):
+                        member, target_slot = files[pair['file_index']], slots[pair['slot_index']]
+                        absolute_number = (sum(total for disc, total in disc_totals.items()
+                            if disc < target_slot['disc_number']) + target_slot['track_number']
+                            if absolute_filenames else None)
+                        planned_paths[member['path']] = (_suggest_filename(member['path'], target_slot,
+                            absolute_number=absolute_number) if member.get('db') else '')
+                    target_counts = Counter(path for path in planned_paths.values() if path)
                     tool_evidence.compare(files, slots, plan, source)
                     plan_action_changes: dict[str, dict] = {}
                     for pair in _review_pairs(files, plan):
@@ -2740,12 +2880,9 @@ class LibraryReconciliationJob(RepairJob):
                                     'old': current_disambiguation,
                                     'new': confirmed_disambiguation,
                                 }
-                        absolute_number = (sum(total for disc, total in disc_totals.items()
-                                               if disc < slot['disc_number']) + slot['track_number']
-                                           if absolute_filenames else None)
-                        target_path = (_suggest_filename(file['path'], slot,
-                            absolute_number=absolute_number)
-                                       if file.get('db') else '')
+                        target_path = planned_paths[file['path']]
+                        filename_conflict = bool(target_path and
+                            (os.path.exists(target_path) or target_counts[target_path] > 1))
                         if target_path:
                             changed['filename'] = {'old': os.path.basename(file['path']),
                                                    'new': os.path.basename(target_path)}
@@ -2783,6 +2920,8 @@ class LibraryReconciliationJob(RepairJob):
                                    'tool_checks': file.get('tool_checks') or [],
                                    'assignment_evidence': assignment_evidence(file, pair),
                                    'metadata_review_reason': (
+                                       'The proposed filename conflicts with another file; review the rename'
+                                       if filename_conflict else
                                        id_conflict.get('reason') or
                                        'Choose consistent embedded album metadata for this album'
                                        if id_conflict or set(consistency).intersection(changed) else ''),
@@ -2790,6 +2929,8 @@ class LibraryReconciliationJob(RepairJob):
                                    'recording_identity': recording,
                                    'expected_title': slot['title'],
                                    'expected_artist': slot['artist'],
+                                   'expected_artist_names': slot.get('artist_names') or [],
+                                   'artist_aliases': slot.get('artist_aliases') or [],
                                    'expected_duration_ms': slot['duration_ms'],
                                    'recording_mbid': slot['recording_mbid'],
                                    'expected_recording_disambiguation':
@@ -2809,6 +2950,8 @@ class LibraryReconciliationJob(RepairJob):
                                    'size_bytes': file['size_bytes'], 'mtime_ns': file['mtime_ns'],
                                    'match_reasons': pair['reasons'],
                                    'confidence': pair['confidence'],
+                                   'routine_numbering': routine_numbering and not filename_conflict,
+                                   'numbering_recovery': review_choices.recovers_flattened_numbering(numbering_history, file),
                                    'title_difference_kind': title_kind,
                                    'assignment_options': assignment_options,
                                    'saved_assignment': file['path'] in {files[i]['path'] for i in forced_pairs},
@@ -2967,14 +3110,21 @@ class LibraryReconciliationJob(RepairJob):
 
                     saved_intent = intents.get(str(album_id)) if album_id is not None else None
                     intent_scope = (saved_intent[0] if saved_intent and
+                                    saved_intent[0] in ('complete', 'partial') and
                                     saved_intent[1:3] == (source, release_id) else '')
                     wanted_slots = (set(saved_intent[3]) if intent_scope == 'partial' else set())
                     wishlisted_slots = wishlisted_by_profile.get(
                         int(common.get('profile_id') or 1), set())
                     assignment_settled = (
                         not plan['extra_files'] and
-                        all(pair['confidence'] != 'ambiguous' for pair in plan['pairs'])
+                        all(pair['confidence'] in ('clear', 'manual') and
+                            not _audio_conflicts_with_slot(files[pair['file_index']], slots[pair['slot_index']])
+                            for pair in plan['pairs'])
                     )
+                    intent_inferred = assignment_settled and _inferred_partial(
+                        files, album, watched_artists, saved_intent)
+                    if intent_inferred:
+                        intent_scope = 'partial'
                     if missing and album_id is not None:
                         if not intent_scope and assignment_settled:
                             if emit(
@@ -3021,6 +3171,7 @@ class LibraryReconciliationJob(RepairJob):
                             for row in scored[:6]
                         },
                         intent_scope=intent_scope, action_changes=plan_action_changes,
+                        intent_inferred=intent_inferred,
                         numbering_mode=numbering_mode, wanted_slots=wanted_slots,
                         wishlisted_slots=wishlisted_slots,
                     )

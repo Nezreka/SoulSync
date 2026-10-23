@@ -31,7 +31,7 @@ export function findingHeading(finding: ReviewFinding): string {
 
 export function evidenceLabel(evidence: unknown): string {
   if (evidence === 'audio') return 'Audio-supported match';
-  if (evidence === 'metadata') return 'Metadata-supported match';
+  if (evidence === 'metadata') return 'Matched from metadata';
   if (evidence === 'user') return 'User-confirmed assignment';
   if (evidence === 'conflicting') return 'Needs review';
   return 'Assignment settled';
@@ -68,7 +68,7 @@ export function statusLabel(status: string, row?: AlbumAssignment) {
   if (row?.fulfillment_state === 'downloading') return 'Downloading';
   if (row?.fulfillment_state === 'wishlisted') return 'Wishlisted';
   if (row?.numbering_preview && status === 'change') return 'Numbering proposal';
-  if (row?.audio_conflict === 'different_recording') return 'Wrong audio';
+  if (row?.audio_conflict === 'different_recording') return 'Audio conflicts with this track';
   if (row?.relationship === 'version_conflict') return 'Compare versions';
   if (row?.companion_of && status === 'confirmed') return 'Intentional companion';
   return (

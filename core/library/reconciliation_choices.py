@@ -127,6 +127,36 @@ def retains_numbering(previous, current):
     return bool(before) and before == after
 
 
+def flattened_numbering_history(db):
+    """Identify actual legacy repairs that still need a fresh recovery choice."""
+    conn = db._get_connection()
+    try:
+        history, seen = {}, set()
+        for track_id, path, raw in conn.execute('''SELECT entity_id, file_path, details_json
+                FROM repair_findings WHERE job_id='library_reconciliation'
+                AND finding_type='reconciliation_metadata' AND status='resolved'
+                AND user_action='reconciliation_metadata' ORDER BY id DESC'''):
+            details = json.loads(raw or '{}')
+            positions = {'track_number', 'disc_number', 'library_track_number', 'library_disc_number'}
+            if not positions.intersection(details.get('changes') or {}):
+                continue
+            identity = str(track_id or path)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            if details.get('numbering_mode') == 'digital' and (details.get('release_disc_count') or 0) > 1:
+                history[identity] = details
+        return history
+    finally:
+        conn.close()
+
+
+def recovers_flattened_numbering(history, file):
+    previous = history.get(str((file.get('db') or {}).get('id') or file.get('path')))
+    return bool(previous and previous.get('fingerprint_key')
+                and previous['fingerprint_key'] == (file.get('acoustid') or {}).get('fingerprint_key'))
+
+
 def same_relocated_evidence(previous, current):
     """A verified path change alone does not revoke a reviewed decision."""
     if not previous.get('fingerprint_key') or previous.get('fingerprint_key') != current.get('fingerprint_key'):
@@ -142,7 +172,9 @@ def same_relocated_evidence(previous, current):
 def same_annotated_evidence(previous, current):
     """Adding explanations alone preserves an otherwise exact saved choice."""
     annotations = {'assignment_evidence', 'recording_identity', 'numbering_mode',
-                   'recommended_keeper', 'keeper_reason', 'tool_checks', 'match_reasons'}
+                   'recommended_keeper', 'keeper_reason', 'tool_checks', 'match_reasons',
+                   'expected_artist_names', 'artist_aliases', 'routine_numbering',
+                   'numbering_recovery', 'title_difference_kind'}
     empty_defaults = {'metadata_review_reason', 'album_consistency', 'companion_count', 'recording_id_conflict'}
     def substantive(details):
         return {key: value for key, value in details.items()

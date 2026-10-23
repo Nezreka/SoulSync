@@ -100,6 +100,8 @@ export interface AlbumReconciliationPlan {
   source?: string;
   release_id?: string;
   intent_scope?: string;
+  intent_inferred?: boolean;
+  release_decision_reason?: string;
   counts: {
     confirmed: number;
     changed: number;
@@ -122,6 +124,7 @@ export interface AlbumReconciliationPlan {
     extra: number;
     continuous_numbering: boolean;
     release_title?: string;
+    difference_summary?: string;
     image_url?: string;
     country?: string;
     disambiguation?: string;

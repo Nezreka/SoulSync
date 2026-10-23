@@ -61,7 +61,7 @@ const scenarios = [
     name: 'numbering_metadata_conflict',
     ready: false,
     title: 'Open Water',
-    status: 'change',
+    status: 'uncertain',
     reason: 'Album metadata differs between files',
   },
   {
@@ -163,13 +163,11 @@ for (const width of [1800, 390]) {
       ]);
       const board = page.getByLabel('Album decisions', { exact: true });
       const explanation = board.getByText(
-        numbering
-          ? 'Numbering approval does not approve the other metadata changes shown for these tracks.'
-          : 'Files disagree on album title and MusicBrainz release ID. Proposed corrections affect 1 track; this group also includes metadata changes on 1 other track.',
+        'Files disagree on album title and MusicBrainz release ID. Proposed corrections affect 1 track; this group also includes metadata changes on 1 other track.',
         { exact: true },
       );
       const approval = board.getByRole('button', {
-        name: numbering ? 'Plan release track numbers for 1 track' : 'Use 2 proposed changes',
+        name: 'Use 2 proposed changes',
         exact: true,
       });
       await expect(explanation).toBeVisible();
@@ -188,22 +186,18 @@ for (const width of [1800, 390]) {
       ]);
       await board
         .getByRole('button', {
-          name: numbering
-            ? /Renumber tracks to match the selected release/
-            : /Resolve conflicting album metadata/,
+          name: /Resolve conflicting album metadata/,
         })
         .click();
       await expect(page.getByRole('tab', { name: /^Tracks/ })).toHaveAttribute(
         'aria-selected',
         'true',
       );
-      await expect(page.getByLabel('Show tracks')).toHaveValue(
-        numbering ? 'decision:numbering' : 'decision:metadata',
-      );
-      await expect(page.locator('[data-review-assignment]')).toHaveCount(numbering ? 1 : 2);
+      await expect(page.getByLabel('Show tracks')).toHaveValue('decision:metadata');
+      await expect(page.locator('[data-review-assignment]')).toHaveCount(2);
       if (numbering) {
         await page.getByRole('tab', { name: /^Plan/ }).click();
-        await board.getByRole('button', { name: 'Keep current numbering', exact: true }).click();
+        await page.getByRole('button', { name: 'Keep current numbering', exact: true }).click();
         await board.getByRole('button', { name: /Resolve conflicting album metadata/ }).click();
         const pending = page.locator('[data-review-assignment][data-status="uncertain"]');
         await expect(pending).toHaveCount(1);

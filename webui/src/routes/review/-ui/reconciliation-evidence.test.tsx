@@ -6,10 +6,32 @@ import type { AlbumAssignment, ReviewCase, ReviewFinding } from '../-review.api'
 import {
   AssignmentEvidence,
   ReconciliationEvidence,
+  ReleaseComparison,
   type ReleaseEvidence,
 } from './reconciliation-evidence';
 
 afterEach(cleanup);
+
+it('explains the actual alternative that requires a release decision', () => {
+  render(
+    <ReleaseComparison
+      candidates={[
+        { source: 'musicbrainz', release_id: 'current', release_title: 'Current edition' },
+        {
+          source: 'musicbrainz',
+          release_id: 'alternative',
+          release_title: 'Other edition',
+          difference_summary: 'Home: disc 1, track 1 → disc 2, track 1.',
+        },
+      ]}
+      selected={1}
+      onSelect={vi.fn()}
+      decisionReason="Choose between different track positions."
+    />,
+  );
+  expect(screen.getByText('Choose between different track positions.')).toBeVisible();
+  expect(screen.getAllByText('Home: disc 1, track 1 → disc 2, track 1.')).toHaveLength(2);
+});
 
 const release: ReleaseEvidence = {
   source: 'musicbrainz',

@@ -41,6 +41,69 @@ def _file(title, path, duration_ms, recording=None):
                         {'status': 'no_match', 'recordings': []}}
 
 
+@pytest.mark.parametrize(('local', 'remote'), [
+    ('Drift And Die', 'Drift & Die'), ('80s Comedown Machine', '80’s Comedown Machine'),
+    ('Bitch Please II', 'Bitch Please 2'),
+    ('A Love Supreme, Part 1: Acknowledgement', 'A Love Supreme, Pt. I – Acknowledgement'),
+    ('The Forgotten, Part 1', 'The Forgotten (Part One)'),
+    ('Noncompliance to Astm F899-12 Standard', 'Noncompliance to ASTM F 899–12 Standard'),
+    ('River Run:Lvl1', 'River Run: Lvl 1'),
+    ('Untrustable / Part 2 (About Someone Else)', 'Untrustable (Pt. 2) [About Someone Else]'),
+])
+def test_cosmetic_titles_retain_words_and_numeric_identity(local, remote):
+    assert title_difference_kind(local, {'title': remote}) == 'cosmetic'
+
+
+@pytest.mark.parametrize(('local', 'remote'), [
+    ('The Forgotten, Part 1', 'The Forgotten (Part Two)'),
+    ('Part I', 'Part'), ('I', '1'), ('A B', 'AB'),
+    ('Home (live)', 'Home'), ('Home (Alpha remix)', 'Home (Beta remix)'),
+    ('F.O.D.', 'F.O.D. / All by Myself'),
+])
+def test_cosmetic_equivalence_does_not_erase_identity(local, remote):
+    assert title_difference_kind(local, {'title': remote}) in ('material', 'version')
+
+
+def test_unique_metadata_match_is_clear_without_a_fingerprint():
+    file = _file('Home', '/album/01 - Home.flac', 200000)
+    file['tags']['artist'] = 'Artist'
+    slot = {'title': 'Home', 'artist': 'Artist', 'duration_ms': 200500, 'track_number': 1}
+    pair = reconcile_folder([file], [slot])['pairs'][0]
+    assert pair['confidence'] == 'clear'
+    assert not pair['ambiguity_reasons']
+    assert 'Unique title, artist, version and close duration support the assignment' in pair['reasons']
+
+
+@pytest.mark.parametrize('weakness', ['artist', 'duration', 'decode', 'short', 'slot', 'copy', 'version'])
+def test_metadata_route_keeps_uncertain_evidence_manual(weakness):
+    file = _file('Home', '/album/01 - Home.flac', 200000)
+    file['tags']['artist'] = 'Artist'
+    slot = {'title': 'Home', 'artist': 'Artist', 'duration_ms': 200500, 'track_number': 1}
+    files, slots = [file], [slot]
+    if weakness == 'artist':slot['artist'] = 'Another Artist'
+    if weakness == 'duration':slot['duration_ms'] = 204000
+    if weakness == 'decode':file['acoustid']['status'] = 'fingerprint_error'
+    if weakness == 'short':file['tags']['duration_ms'], slot['duration_ms'] = 5000, 6500
+    if weakness == 'slot':slots.append({**slot, 'track_number': 2})
+    if weakness == 'copy':files.append({**file, 'path': '/album/copy.flac'})
+    if weakness == 'version':slot['title'] = 'Home (live)'
+    assert all(pair['confidence'] != 'clear' for pair in reconcile_folder(files, slots)['pairs'])
+
+
+def test_bare_audio_label_uses_same_version_rule_in_matching_and_final_validation():
+    from core.repair_jobs.library_reconciliation import _audio_conflicts_with_slot
+    file = _file('Home - Live', '/album/01 - Home - Live.flac', 200000,
+                 {'mbid': 'bare-id', 'title': 'Home', 'artist': 'Artist', 'score': .99})
+    file['tags']['artist'] = 'Artist'
+    slot = {'title': 'Home (Live) [Bonus Track]', 'artist': 'Artist',
+            'recording_mbid': 'live-id', 'duration_ms': 200100, 'track_number': 1}
+    assert reconcile_folder([file], [slot])['pairs'][0]['confidence'] == 'clear'
+    assert not _audio_conflicts_with_slot(file, slot)
+    file['acoustid']['recordings'][0]['title'] = 'Home (studio version)'
+    assert all(pair['confidence'] != 'clear' for pair in reconcile_folder([file], [slot])['pairs'])
+    assert _audio_conflicts_with_slot(file, slot)
+
+
 def test_same_title_different_artist_is_not_positive_audio_evidence():
     file = _file('Home', '/album/01 - Home.flac', 200000,
                  {'mbid': 'other', 'title': 'Home', 'artist': 'Unrelated Performer', 'score': .99})

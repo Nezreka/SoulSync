@@ -527,6 +527,7 @@ export function ReleaseComparison({
   busy = false,
   currentRelease,
   numberingMode,
+  decisionReason,
   view = 'all',
 }: {
   candidates: Data[];
@@ -536,6 +537,7 @@ export function ReleaseComparison({
   busy?: boolean;
   currentRelease?: Data;
   numberingMode?: string;
+  decisionReason?: string;
   view?: 'all' | 'list' | 'detail';
 }) {
   const [inspectedPair, setInspectedPair] = useState<number | null>(null);
@@ -578,11 +580,12 @@ export function ReleaseComparison({
                   : `Compare ${candidates.length} release candidates`}
               </h4>
               <p>
-                {candidates.length === 1
-                  ? 'Inspect this edition’s audio tracks and local file assignments.'
-                  : allEquivalent
-                    ? 'These editions assign the available files the same way. Choose by country, format, date, or edition.'
-                    : 'Select an edition to inspect its track mapping and unmatched files.'}
+                {decisionReason ||
+                  (candidates.length === 1
+                    ? 'Inspect this edition’s audio tracks and local file assignments.'
+                    : allEquivalent
+                      ? 'These editions assign the available files the same way. Choose by country, format, date, or edition.'
+                      : 'Select an edition to inspect its track mapping and unmatched files.')}
               </p>
             </div>
           </div>
@@ -629,6 +632,9 @@ export function ReleaseComparison({
                         disambiguation={label(candidate.disambiguation)}
                       />
                       {isCurrent && <small>Selected for this album plan</small>}
+                      {label(candidate.difference_summary) && (
+                        <small>{label(candidate.difference_summary)}</small>
+                      )}
                     </span>
                     <CandidateFit candidate={candidate} />
                   </button>
@@ -654,6 +660,7 @@ export function ReleaseComparison({
           <div className={styles.releaseDetailHeader}>
             <div>
               <strong>{label(active.release_title) || `Candidate ${selected + 1}`}</strong>
+              {label(active.difference_summary) && <p>{label(active.difference_summary)}</p>}
               <ReleaseBadges
                 format={label(active.format)}
                 country={label(active.country)}

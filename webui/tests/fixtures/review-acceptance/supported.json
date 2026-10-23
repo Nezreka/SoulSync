@@ -57,6 +57,10 @@
           },
           "expected_title": "Home",
           "expected_artist": "Acceptance Artist",
+          "expected_artist_names": [
+            "Acceptance Artist"
+          ],
+          "artist_aliases": [],
           "expected_duration_ms": 200000,
           "recording_mbid": "00000000-0000-4000-8000-000000000001",
           "expected_recording_disambiguation": "",
@@ -111,6 +115,8 @@
             "duration differs by 0.00s"
           ],
           "confidence": "clear",
+          "routine_numbering": true,
+          "numbering_recovery": false,
           "title_difference_kind": "exact",
           "assignment_options": [
             {
@@ -211,6 +217,10 @@
           },
           "expected_title": "Open Water",
           "expected_artist": "Acceptance Artist",
+          "expected_artist_names": [
+            "Acceptance Artist"
+          ],
+          "artist_aliases": [],
           "expected_duration_ms": 210000,
           "recording_mbid": "00000000-0000-4000-8000-000000000002",
           "expected_recording_disambiguation": "",
@@ -265,6 +275,8 @@
             "duration differs by 0.00s"
           ],
           "confidence": "clear",
+          "routine_numbering": true,
+          "numbering_recovery": false,
           "title_difference_kind": "exact",
           "assignment_options": [
             {
@@ -354,6 +366,8 @@
       "release_id": "11111111-1111-4111-8111-111111111111",
       "state": "changes",
       "intent_scope": "",
+      "intent_inferred": false,
+      "release_decision_reason": "",
       "numbering_mode": "release",
       "inventory": {
         "version": 1,
@@ -611,7 +625,8 @@
           ],
           "missing_slots": [],
           "missing_tracks": [],
-          "extra_files": []
+          "extra_files": [],
+          "difference_summary": ""
         }
       ],
       "case_id": "album:10:acceptance",

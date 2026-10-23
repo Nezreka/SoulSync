@@ -27,6 +27,10 @@ from core.text.title_match import (
 _LEADING_POSITION = re.compile(r'^\s*(?:\d+[-_. ]+){1,2}')
 _EDITORIAL_TITLE_SUFFIX = re.compile(
     r'\s*[\(\[]\s*(?:bonus\s+track|bonus)\s*[\)\]]\s*$', re.IGNORECASE)
+_PART_NUMBERS = dict(zip(
+    ('one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+     'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'),
+    (*range(1, 11), *range(1, 11))))
 _MONTHS = {
     name: number for number, names in enumerate((
         'jan january', 'feb february', 'mar march', 'apr april', 'may',
@@ -264,6 +268,22 @@ def display_title_compatible(local_title: str, slot: dict) -> bool:
     return _version_markers(local_title) == slot_version_markers(slot)
 
 
+def _cosmetic_title_key(title: str) -> str:
+    """Narrow display equivalence; never used to establish audio identity.
+
+    Keep every word and number. Fold numerals only in a part/movement label,
+    or an unambiguous trailing Roman sequel number (not the pronoun I).
+    """
+    title = re.sub(r"[’']", '', title).replace('&', ' and ')
+    title = fold_title(title, drop_brackets=False)
+    title = re.sub(r'\b(?:part|pt|movement|mvmt)\s+(\w+)\b',
+                   lambda m: 'part ' + str(_PART_NUMBERS.get(m[1], m[1])), title)
+    title = re.sub(r'\b(ii|iii|iv|vi|vii|viii|ix)\s*$',
+                   lambda m: str(_PART_NUMBERS[m[1]]), title)
+    # Preserve numeric identity while tolerating F899/F 899 and Lvl1/Lvl 1.
+    return ' '.join(re.sub(r'(?<=\D)(?=\d)|(?<=\d)(?=\D)', ' ', title).split())
+
+
 def title_difference_kind(local_title: str, slot: dict) -> str:
     """Classify display-title drift while retaining recording versions."""
     slot_title = str(slot.get('title') or slot.get('name') or '')
@@ -278,6 +298,10 @@ def title_difference_kind(local_title: str, slot: dict) -> str:
     slot_versions = slot_version_markers({**slot, 'title': slot_clean})
     if local_versions != slot_versions:
         return 'version'
+    if (_cosmetic_title_key(local_clean) and
+            _cosmetic_title_key(local_clean) == _cosmetic_title_key(slot_clean)
+            and not _named_version_conflicts(local_clean, slot_clean)):
+        return 'cosmetic'
     if _title_numbers_differ(local_clean, slot_clean):
         return 'material'
     if _named_version_conflicts(local_clean, slot_clean):
@@ -353,6 +377,24 @@ def _recording_supports_slot(recording: dict, slot: dict) -> bool:
     recording_artist = str(recording.get('artist') or '')
     slot_artist = str(slot.get('artist') or '')
     return _artist_credit_supports(recording_artist, slot_artist, slot.get('artist_aliases'))
+
+
+def recording_supports_file_slot(recording: dict, file: dict, slot: dict) -> bool:
+    """Allow omitted audio-label qualifiers only with local version support."""
+    if _recording_supports_slot(recording, slot):
+        return True
+    title = str(recording.get('title') or '')
+    delta = _duration_delta_ms(file, slot)
+    return bool(
+        not _version_markers(title)
+        and not any(re.search(r'\b(?:studio|original|album)\s+version\b', segment, re.I)
+                    for segment in _recording_qualifier_segments(title))
+        and versions_compatible(file, slot)
+        and delta is not None and delta <= 3000
+        and _same_base_recording_title(title, slot.get('title'))
+        and recording.get('artist') and slot.get('artist')
+        and _artist_credit_supports(recording['artist'], slot['artist'], slot.get('artist_aliases'))
+    )
 
 
 def _artist_credit_supports(recording_artist: str, slot_artist: str, aliases=None) -> bool:
@@ -523,6 +565,26 @@ class _MatchFacts:
         supported = self._memo('close_alternatives', id(file), collect)
         return len(supported) > int(id(slot) in supported)
 
+    def metadata_supports(self, file, slot):
+        def supported():
+            tags, audio = file.get('tags') or {}, file.get('acoustid') or {}
+            artist = tags.get('track_artist') or tags.get('artist')
+            duration = int(tags.get('duration_ms') or file.get('duration_ms') or 0)
+            delta = self.delta(file, slot)
+            return bool(not file.get('companion_of')
+                and audio.get('status') in (None, '', 'ok', 'no_match')
+                and artist and slot.get('artist')
+                and _artist_credit_supports(artist, slot['artist'], slot.get('artist_aliases'))
+                and tags.get('title') and slot.get('title')
+                and fold_title(tags['title'], drop_brackets=False) ==
+                    fold_title(slot['title'], drop_brackets=False)
+                and self.compatible(file, slot) and int(slot.get('track_number') or 0) > 0
+                and delta is not None and delta <= min(3000, duration * .02)
+                and all(recording_supports_file_slot(recording, file, slot)
+                        for recording in audio.get('recordings') or []
+                        if float(recording.get('score') or 0) >= .80))
+        return self._memo('metadata_support', (id(file), id(slot)), supported)
+
 
 def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None,
                  facts: _MatchFacts | None = None) -> tuple[int, list[str]]:
@@ -623,9 +685,7 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None,
             elif facts.supports(recording, slot):
                 fingerprint_weight = max(fingerprint_weight, int(5_000 * score))
                 reasons = ['AcoustID recording title matches release slot']
-            elif (_same_base_recording_title(recording.get('title'), slot_title)
-                  and _artist_credit_supports(str(recording.get('artist') or ''),
-                                              slot_artist, slot.get('artist_aliases'))):
+            elif recording_supports_file_slot(recording, file, slot):
                 # The local title and slot already passed the symmetric
                 # version check above. A bare AcoustID recording label is
                 # therefore positive audio evidence, rather than merely an
@@ -846,6 +906,14 @@ def reconcile_folder(files: list[dict], slots: list[dict],
         if outlying_version:
             ambiguity_reasons.append(
                 'file position is outside this release and audio suggests another version')
+        metadata_clear = (not ambiguity_reasons
+            and facts.metadata_supports(files[file_index], slot)
+            and not any(facts.metadata_supports(files[file_index], other)
+                        for other in slots if other is not slot)
+            and not any(facts.metadata_supports(other, slot)
+                        for index, other in enumerate(files) if index != file_index))
+        if weight < 4500 and metadata_clear:
+            reasons = [*reasons, 'Unique title, artist, version and close duration support the assignment']
         pairs.append({
             'file_index': file_index, 'slot_index': slot_index,
             'score': weight, 'reasons': reasons,
@@ -853,7 +921,7 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             'ambiguity_reasons': ambiguity_reasons,
             'confidence': 'manual' if forced_pairs.get(file_index) == slot_index else
                           'ambiguous' if ambiguous or close_alternative or competing_file or outlying_version or version_wording_review
-                          else 'clear' if weight >= 4500 else 'likely',
+                          else 'clear' if weight >= 4500 or metadata_clear else 'likely',
         })
     # A fingerprint can still name the predominant song when audio from the
     # neighbouring track was appended to it. Opposite, near-equal duration

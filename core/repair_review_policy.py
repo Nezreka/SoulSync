@@ -25,12 +25,20 @@ _RECORDING_ID_CHANGE_KEYS = frozenset({
 })
 
 
-def _replaces_artist_credit(changes: dict[str, Any]) -> bool:
+def _replaces_artist_credit(changes: dict[str, Any], details: dict | None = None) -> bool:
     """An unrelated nonempty credit needs a person, even on a clear match."""
     for field in _TRACK_ARTIST_CHANGE_KEYS:
         change = changes.get(field)
         old, new = _change_value(change, 'old'), _change_value(change, 'new')
         if old and new and old.casefold() != new.casefold():
+            from core.library.reconciliation_metadata import credit_preserves_artists
+            evidence = details or {}
+            if (evidence.get('confidence') in ('clear', 'manual')
+                    and evidence.get('assignment_evidence') in ('audio', 'user')
+                    and credit_preserves_artists(old, new,
+                        evidence.get('expected_artist_names') or [],
+                        evidence.get('artist_aliases') or [])):
+                continue
             return True
     return False
 
@@ -46,6 +54,10 @@ def needs_numbering_review(details: dict) -> bool:
     changes = details.get('changes') or {}
     positions = _POSITION_CHANGE_KEYS.intersection(changes)
     if not positions:
+        return False
+    if details.get('numbering_recovery'):
+        return True
+    if details.get('routine_numbering') and details.get('confidence') in ('clear', 'manual'):
         return False
     # A fully assigned continuous sequence already has its final track numbers.
     # Clearing redundant disc markers is metadata normalization, not renumbering.
@@ -84,7 +96,10 @@ def finding_category(item: dict[str, Any]) -> str:
         return 'title_issues'
     if needs_numbering_review(details):
         return 'numbering'
-    if (details.get('title_difference_kind') in ('typography', 'flavor') and
+    if (details.get('routine_numbering') and _POSITION_CHANGE_KEYS.intersection(changes)
+            and not details.get('numbering_choice') and _finding_tier(item)[0] == 'ready'):
+        return 'numbering'
+    if (details.get('title_difference_kind') in ('typography', 'flavor', 'cosmetic') and
             _TITLE_CHANGE_KEYS.intersection(changes)):
         return 'title_conventions'
     return 'metadata'
@@ -114,6 +129,20 @@ def supported_version_metadata(details: dict) -> bool:
             return False
     return any(row.get('mbid') == expected and float(row.get('score') or 0) >= .9
                for row in candidates)
+
+
+def supported_cosmetic_metadata(details: dict) -> bool:
+    """Numeral/word formatting needs exact recording and close length support."""
+    tags = details.get('current_tags') or {}
+    local, remote = tags.get('duration_ms'), details.get('expected_duration_ms')
+    expected = details.get('recording_mbid')
+    return bool(expected and local and remote
+        and abs(float(local) - float(remote)) <= 3000
+        and details.get('confidence') == 'clear'
+        and not details.get('audio_conflict') and not details.get('version_conflict')
+        and (details.get('acoustid') or {}).get('status') == 'ok'
+        and any(row.get('mbid') == expected and float(row.get('score') or 0) >= .9
+                for row in (details.get('acoustid') or {}).get('recordings') or []))
 
 
 def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tuple[str, str]:
@@ -161,11 +190,17 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
     if (details.get('title_difference_kind') in ('material', 'version') and
             _TITLE_CHANGE_KEYS.intersection(changes) and not supported_version_metadata(details)):
         return 'manual', 'The title may identify a different song or recording version'
+    if (details.get('title_difference_kind') == 'cosmetic'
+            and _TITLE_CHANGE_KEYS.intersection(changes)
+            and not supported_cosmetic_metadata(details)):
+        return 'manual', 'Confirm title formatting without an exact audio match'
     if needs_numbering_review(details):
+        if details.get('numbering_recovery'):
+            return 'manual', 'Review the recovery of previously flattened disc and track numbers'
         return 'manual', 'The release uses a different disc or track numbering scheme'
     if details.get('confidence') not in (None, '', 'clear', 'manual'):
         return 'manual', 'The file-to-track assignment is not clear'
-    if _replaces_artist_credit(changes):
+    if _replaces_artist_credit(changes, details):
         return 'manual', 'Confirm the artist credit before replacing an existing credit'
     if details.get('assignment_evidence') == 'audio':
         return 'ready', 'Audio and release evidence support this metadata repair'
@@ -225,11 +260,12 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
                   'title_difference_kind', 'confidence', 'numbering_mode',
                   'release_disc_count', 'local_file_count', 'release_track_count',
                   'recording_mbid', 'expected_duration_ms', 'expected_title',
-                  'metadata_review_reason', 'assignment_evidence', 'companion_count')
+                  'metadata_review_reason', 'assignment_evidence', 'companion_count',
+                  'expected_artist_names', 'artist_aliases', 'routine_numbering', 'numbering_recovery')
         raw_details = "CASE WHEN json_valid(f.details_json) THEN f.details_json ELSE '{}' END"
         pairs = [f"'{field}', json_extract({raw_details}, '$.{field}')" for field in fields]
         pairs += [f"'current_tags', json_object('duration_ms', json_extract({raw_details}, '$.current_tags.duration_ms'))",
-                  f"'acoustid', CASE WHEN json_extract({raw_details}, '$.title_difference_kind') = 'version' THEN json_extract({raw_details}, '$.acoustid') ELSE json_object('status', json_extract({raw_details}, '$.acoustid.status')) END"]
+                  f"'acoustid', CASE WHEN json_extract({raw_details}, '$.title_difference_kind') IN ('version', 'cosmetic') THEN json_extract({raw_details}, '$.acoustid') ELSE json_object('status', json_extract({raw_details}, '$.acoustid.status')) END"]
         detail_sql = 'json_object(' + ', '.join(pairs) + ')'
         join = ('LEFT JOIN reconcile_review_choices c ON c.finding_id=f.id '
                 'AND c.case_id=f.review_case_key AND c.evidence_json=f.details_json')

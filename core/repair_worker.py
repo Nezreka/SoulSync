@@ -2136,7 +2136,11 @@ class RepairWorker:
                 conn.close()
             return {'success': True, 'message': 'Saved choice cleared. Review the proposal again.'}
         findings = [item for item in case['items']
-                    if (item['id'] in selected_ids if selected_ids is not None else item.get('category') == category)]
+                    if (item['id'] in selected_ids if selected_ids is not None else
+                        item.get('category') == category or
+                        (category == 'numbering' and item['finding_type'] == 'reconciliation_metadata'
+                         and {'track_number', 'disc_number', 'library_track_number', 'library_disc_number'}
+                         .intersection((item.get('details') or {}).get('changes') or {})))]
         if not findings:
             return {'success': False, 'stale': True, 'error': 'Decision is no longer current'}
         # Transactional staging only: retain findings until explicit application.
@@ -2191,6 +2195,12 @@ class RepairWorker:
                     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                         conn.execute(f'DELETE FROM {table} WHERE album_id=? AND source=? AND release_id=?',
                             (str(case['album_id']), plan.get('source'), plan.get('release_id')))
+                # Explicit reconsideration must survive inferred playlist
+                # ownership on the next scan. It requests a question, not tracks.
+                conn.execute('''INSERT INTO reconcile_album_intent(album_id,scope,source,release_id)
+                    VALUES (?,'review',?,?) ON CONFLICT(album_id) DO UPDATE SET
+                    scope='review',source=excluded.source,release_id=excluded.release_id''',
+                    (str(case['album_id']), plan.get('source'), plan.get('release_id')))
                 # An old accepted intent must not suppress this explicit reconsideration.
                 conn.execute("""UPDATE repair_findings SET status='pending', user_action=NULL,
                     resolved_at=NULL WHERE id=(SELECT MAX(id) FROM repair_findings

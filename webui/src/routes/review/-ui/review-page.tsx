@@ -2217,7 +2217,11 @@ export function ReviewPage() {
                             </Button>
                           </div>
                           {reviewCase.album_plan?.intent_scope && (
-                            <span>Intent: {reviewCase.album_plan.intent_scope} album</span>
+                            <span>
+                              {reviewCase.album_plan.intent_inferred
+                                ? 'One playlist track owned; other tracks are uncollected'
+                                : `Intent: ${reviewCase.album_plan.intent_scope} album`}
+                            </span>
                           )}
                           {reviewCase.album_plan?.candidates?.[0] && (
                             <span>
@@ -2558,6 +2562,7 @@ export function ReviewPage() {
                         <p>Edition note: {textValue(active?.details?.release_disambiguation)}</p>
                       )}
                       <ReleaseComparison
+                        decisionReason={reviewCase.album_plan?.release_decision_reason}
                         candidates={releaseCandidates}
                         view="list"
                         selected={previewCandidate}
@@ -2658,14 +2663,16 @@ export function ReviewPage() {
                           <div>
                             <dt>Album scope</dt>
                             <dd>
-                              {reviewCase.album_plan.intent_scope ||
-                                (hasIntentDecision
-                                  ? 'Choice pending'
-                                  : reviewCase.album_plan.counts.missing
-                                    ? albumReady
-                                      ? 'Missing tracks have planned resolutions'
-                                      : 'Resolve track assignments first'
-                                    : 'Full release coverage')}
+                              {reviewCase.album_plan.intent_inferred
+                                ? 'One playlist track owned; other tracks are uncollected'
+                                : reviewCase.album_plan.intent_scope ||
+                                  (hasIntentDecision
+                                    ? 'Choice pending'
+                                    : reviewCase.album_plan.counts.missing
+                                      ? albumReady
+                                        ? 'Missing tracks have planned resolutions'
+                                        : 'Resolve track assignments first'
+                                      : 'Full release coverage')}
                             </dd>
                           </div>
                           {wishlistedCount > 0 && (
@@ -2693,6 +2700,29 @@ export function ReviewPage() {
                               {numberingSchemeLabel(
                                 releaseHasMultipleDiscs,
                                 reviewCase.album_plan.numbering_mode,
+                              )}
+                              {reviewCase.items.some(
+                                (item) =>
+                                  item.details?.routine_numbering &&
+                                  [
+                                    'track_number',
+                                    'disc_number',
+                                    'library_track_number',
+                                    'library_disc_number',
+                                  ].some((field) => field in record(item.details?.changes)),
+                              ) && (
+                                <Button
+                                  type="button"
+                                  disabled={mutationBusy || releaseChoicePending}
+                                  onClick={() =>
+                                    void actGroup(
+                                      { category: 'numbering' } as ReviewDecision,
+                                      'dismiss',
+                                    )
+                                  }
+                                >
+                                  Keep current numbering
+                                </Button>
                               )}
                             </dd>
                           </div>
@@ -2726,7 +2756,9 @@ export function ReviewPage() {
                               disabled={mutationBusy}
                               onClick={() => void reconsiderScope()}
                             >
-                              Review album scope
+                              {reviewCase.album_plan.intent_inferred
+                                ? 'Choose tracks to collect'
+                                : 'Review album scope'}
                             </Button>
                           )}
                         </div>
@@ -2767,6 +2799,7 @@ export function ReviewPage() {
 
                     {albumView === 'release' && (
                       <ReleaseComparison
+                        decisionReason={reviewCase.album_plan?.release_decision_reason}
                         candidates={releaseCandidates}
                         selected={previewCandidate}
                         onSelect={setPreviewCandidate}

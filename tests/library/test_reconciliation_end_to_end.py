@@ -627,8 +627,12 @@ def test_completed_flattening_is_recovered_and_apply_rescan_is_stable(tmp_path, 
     # Model the actual legacy decision: source disc 2 track 1 was flattened,
     # approved and applied. The inverse repair must reopen even though the
     # completed album is no longer an outstanding queue item.
+    cache = ReconciliationEvidence(db, context.acoustid_client)
+    fingerprint = cache.identify(str(paths[1]))['fingerprint_key']
+    cache.close()
     legacy = {'album_id': 10, 'album_folder': str(paths[0].parent),
               'source': 'itunes', 'release_id': 'ashes-release', 'numbering_mode': 'digital',
+              'release_disc_count': 2, 'fingerprint_key': fingerprint,
               'changes': {'track_number': {'old': 1, 'new': 2},
                           'disc_number': {'old': 2, 'new': 1}}}
     worker._create_finding('library_reconciliation', 'reconciliation_metadata', 'warning',
@@ -637,7 +641,7 @@ def test_completed_flattening_is_recovered_and_apply_rescan_is_stable(tmp_path, 
         choices.ensure_schema(conn)
         fid, key, raw = conn.execute('SELECT id,review_case_key,details_json FROM repair_findings').fetchone()
         conn.execute("INSERT INTO reconcile_review_choices(finding_id,case_id,evidence_json,category,choice) VALUES (?,?,?,'numbering','fix')", (fid, key, raw))
-        conn.execute("UPDATE repair_findings SET status='resolved', user_action='fixed'")
+        conn.execute("UPDATE repair_findings SET status='resolved', user_action='reconciliation_metadata'")
     assert not worker.get_review_cases()['items']
     # Stored digital mode is intentionally ignored, without changing settings
     # in the imports, downloader or folder organizer.
@@ -1286,7 +1290,8 @@ def test_stored_release_and_digital_tie_break_respect_explicit_pin(
         assert conn.execute('SELECT source FROM reconcile_album_plans').fetchone()[0] == expected_source
 
 
-def test_lone_playlist_track_requires_explicit_album_intent(tmp_path, monkeypatch):
+@pytest.mark.parametrize('intent', ['inferred', 'watched', 'complete', 'partial'])
+def test_lone_playlist_track_infers_partial_unless_explicit_or_watched(tmp_path, monkeypatch, intent):
     import core.repair_jobs.library_reconciliation as module
 
     root = tmp_path / 'music'
@@ -1322,25 +1327,35 @@ def test_lone_playlist_track_requires_explicit_album_intent(tmp_path, monkeypatc
         acoustid_client=client, create_finding=worker._create_finding,
         playlist_membership=lambda: {'1': ['Imported playlist']},
     )
+    if intent == 'watched':
+        monkeypatch.setattr(module, 'watchlist_artist_names', lambda _: {'lamb of god'})
+    if intent in ('complete', 'partial'):
+        monkeypatch.setattr(LibraryReconciliationJob, '_intents',
+                            lambda *_: {'10': (intent, 'spotify', 'ashes-release', [])})
 
     result = LibraryReconciliationJob().scan(context)
 
-    assert result.findings_created == 1
-    assert worker.get_review_cases(job_id='library_reconciliation')['total'] == 1
+    expected_findings = int(intent in ('watched', 'complete'))
+    assert result.findings_created == expected_findings
+    assert worker.get_review_cases(job_id='library_reconciliation')['total'] == expected_findings
     with db._get_connection() as conn:
         saved = conn.execute(
             'SELECT intent_scope, state, confirmed_count, missing_count, plan_json '
             'FROM reconcile_album_plans'
         ).fetchone()
-    assert saved['intent_scope'] == ''
-    assert saved['state'] == 'review'
+    assert saved['intent_scope'] == ('' if intent == 'watched' else 'complete' if intent == 'complete' else 'partial')
     assert saved['confirmed_count'] == 1
-    assert saved['missing_count'] == 1
     document = json.loads(saved['plan_json'])
-    assert document['counts']['missing'] == 1
+    assert document['intent_inferred'] == (intent == 'inferred')
     assert document['assignments'][0]['playlists'] == ['Imported playlist']
     assert {row['status'] for row in document['assignments']} == {
-        'confirmed', 'missing'}
+        'confirmed', 'missing' if expected_findings else 'not_owned'}
+    # An inferred default is not persisted as a user decision. Removing the
+    # playlist evidence must restore the explicit completeness question.
+    if intent == 'inferred':
+        context.playlist_membership = lambda: {}
+        LibraryReconciliationJob().scan(context)
+        assert worker.get_review_cases()['total'] == 1
 
 
 def test_musicbrainz_release_group_missing_request_uses_exact_edition(tmp_path, monkeypatch):
@@ -2388,8 +2403,10 @@ def test_locked_release_with_better_fitting_edition_requires_release_review(tmp_
     assert finding['finding_type'] == 'reconciliation_release'
     assert finding['details']['locked_release'] == {
         'source': 'spotify', 'release_id': 'ashes-release'}
-    better = finding['details']['candidates'][0]
-    assert better['release_id'] == 'better-edition'
+    candidates = finding['details']['candidates']
+    assert candidates[0]['release_id'] == 'ashes-release'
+    better = next(row for row in candidates if row['release_id'] == 'better-edition')
+    assert better['difference_summary']
     assert better['pairs'][0]['file'] == path.name
     assert better['pairs'][0]['audio_title'] == 'Hourglass'
     assert better['pairs'][0]['slot_title'] == 'Hourglass'

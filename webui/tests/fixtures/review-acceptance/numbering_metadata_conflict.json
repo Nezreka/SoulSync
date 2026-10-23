@@ -78,6 +78,10 @@
           },
           "expected_title": "Open Water",
           "expected_artist": "Acceptance Artist",
+          "expected_artist_names": [
+            "Acceptance Artist"
+          ],
+          "artist_aliases": [],
           "expected_duration_ms": 210000,
           "recording_mbid": "00000000-0000-4000-8000-000000000002",
           "expected_recording_disambiguation": "",
@@ -132,6 +136,8 @@
             "duration differs by 0.00s"
           ],
           "confidence": "clear",
+          "routine_numbering": true,
+          "numbering_recovery": false,
           "title_difference_kind": "exact",
           "assignment_options": [
             {
@@ -196,7 +202,7 @@
         "evidence_token": "numbering_metadata_conflict:evidence_token:4",
         "review_tier": "manual",
         "review_reason": "Choose consistent embedded album metadata for this album",
-        "category": "numbering"
+        "category": "metadata"
       },
       {
         "id": 1,
@@ -269,6 +275,10 @@
           },
           "expected_title": "Home",
           "expected_artist": "Acceptance Artist",
+          "expected_artist_names": [
+            "Acceptance Artist"
+          ],
+          "artist_aliases": [],
           "expected_duration_ms": 200000,
           "recording_mbid": "00000000-0000-4000-8000-000000000001",
           "expected_recording_disambiguation": "",
@@ -323,6 +333,8 @@
             "duration differs by 0.00s"
           ],
           "confidence": "clear",
+          "routine_numbering": true,
+          "numbering_recovery": false,
           "title_difference_kind": "exact",
           "assignment_options": [
             {
@@ -390,34 +402,22 @@
       ],
       "can_apply_ready": false,
       "can_organize": false,
-      "decision_count": 2,
+      "decision_count": 1,
       "categories": [
-        "metadata",
-        "numbering"
+        "metadata"
       ],
       "decisions": [
         {
-          "id": "numbering",
-          "category": "numbering",
-          "label": "Match release track positions",
-          "risk": "manual",
-          "summary": "Correct the positions of 1 track to match the selected release.",
-          "finding_ids": [
-            2
-          ],
-          "action_count": 1,
-          "additional_metadata_summary": "Numbering approval does not approve the other metadata changes shown for these tracks."
-        },
-        {
           "id": "metadata",
           "category": "metadata",
-          "label": "Add MusicBrainz recording IDs",
-          "risk": "ready",
-          "summary": "Add on 1 track.",
+          "label": "Resolve conflicting album metadata",
+          "risk": "manual",
+          "summary": "Files disagree on album title and MusicBrainz release ID. Proposed corrections affect 1 track; this group also includes metadata changes on 1 other track.",
           "finding_ids": [
-            1
+            1,
+            2
           ],
-          "action_count": 1
+          "action_count": 2
         }
       ]
     },
@@ -426,6 +426,8 @@
       "release_id": "11111111-1111-4111-8111-111111111111",
       "state": "changes",
       "intent_scope": "",
+      "intent_inferred": false,
+      "release_decision_reason": "",
       "numbering_mode": "release",
       "inventory": {
         "version": 1,
@@ -629,7 +631,6 @@
           "audio_score": 0.99,
           "audio_conflict": "",
           "playlists": [],
-          "numbering_preview": true,
           "review_state": "pending",
           "planned_choice": null,
           "finding_id": 2,
@@ -697,7 +698,8 @@
           ],
           "missing_slots": [],
           "missing_tracks": [],
-          "extra_files": []
+          "extra_files": [],
+          "difference_summary": ""
         }
       ],
       "case_id": "album:10:acceptance",
@@ -713,27 +715,16 @@
     },
     "decisions": [
       {
-        "id": "numbering",
-        "category": "numbering",
-        "label": "Match release track positions",
-        "risk": "manual",
-        "summary": "Correct the positions of 1 track to match the selected release.",
-        "finding_ids": [
-          2
-        ],
-        "action_count": 1,
-        "additional_metadata_summary": "Numbering approval does not approve the other metadata changes shown for these tracks."
-      },
-      {
         "id": "metadata",
         "category": "metadata",
-        "label": "Add MusicBrainz recording IDs",
-        "risk": "ready",
-        "summary": "Add on 1 track.",
+        "label": "Resolve conflicting album metadata",
+        "risk": "manual",
+        "summary": "Files disagree on album title and MusicBrainz release ID. Proposed corrections affect 1 track; this group also includes metadata changes on 1 other track.",
         "finding_ids": [
-          1
+          1,
+          2
         ],
-        "action_count": 1
+        "action_count": 2
       }
     ],
     "refresh": {
@@ -764,34 +755,22 @@
           ],
           "can_apply_ready": false,
           "can_organize": false,
-          "decision_count": 2,
+          "decision_count": 1,
           "categories": [
-            "metadata",
-            "numbering"
+            "metadata"
           ],
           "decisions": [
             {
-              "id": "numbering",
-              "category": "numbering",
-              "label": "Match release track positions",
-              "risk": "manual",
-              "summary": "Correct the positions of 1 track to match the selected release.",
-              "finding_ids": [
-                null
-              ],
-              "action_count": 1,
-              "additional_metadata_summary": "Numbering approval does not approve the other metadata changes shown for these tracks."
-            },
-            {
               "id": "metadata",
               "category": "metadata",
-              "label": "Add MusicBrainz recording IDs",
-              "risk": "ready",
-              "summary": "Add on 1 track.",
+              "label": "Resolve conflicting album metadata",
+              "risk": "manual",
+              "summary": "Files disagree on album title and MusicBrainz release ID. Proposed corrections affect 1 track; this group also includes metadata changes on 1 other track.",
               "finding_ids": [
+                null,
                 null
               ],
-              "action_count": 1
+              "action_count": 2
             }
           ]
         },

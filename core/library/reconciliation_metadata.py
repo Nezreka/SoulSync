@@ -5,6 +5,26 @@ from collections import Counter
 from uuid import UUID
 
 from core.library.reconciliation_plan import _recording_supports_slot, _title_score
+from core.matching.artist_aliases import split_artist_credit
+from core.text.fold import fold_title
+
+
+def credit_preserves_artists(old: str, new: str, names: list[str], aliases: list[str]) -> bool:
+    """Every existing contributor must survive a structured source credit.
+
+    Whole-name checks precede splitting: punctuation can belong to a band's
+    name. Aliases describe the entire selected credit, not arbitrary guests.
+    """
+    folded = lambda value: fold_title(value, drop_brackets=False)
+    if folded(old) == folded(new):
+        return True
+    if not names or folded(new) != folded('; '.join(names)):
+        return False
+    expected = {folded(name) for name in names if name}
+    if folded(old) in expected or folded(old) in {folded(name) for name in aliases if name}:
+        return True
+    existing = split_artist_credit(old)
+    return bool(existing) and all(folded(name) in expected for name in existing)
 
 
 def confirmed_recording(file: dict, slot: dict, source: str) -> dict:

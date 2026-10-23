@@ -9,7 +9,7 @@ import {
 
 it('distinguishes audio, metadata, user decisions and unknown older evidence', () => {
   expect(evidenceLabel('audio')).toBe('Audio-supported match');
-  expect(evidenceLabel('metadata')).toBe('Metadata-supported match');
+  expect(evidenceLabel('metadata')).toBe('Matched from metadata');
   expect(evidenceLabel('user')).toBe('User-confirmed assignment');
   expect(evidenceLabel(undefined)).toBe('Assignment settled');
   expect(statusLabel('confirmed', { status: 'confirmed', companion_of: '/source.flac' })).toBe(

@@ -1581,6 +1581,19 @@ def test_compact_queue_policy_agrees_with_full_execution_evidence():
            'changes': {'title': {'old': 'Song','new': 'Song (demo)'}},
            'assignment_options': [{'irrelevant': 'large evidence'}] * 100},
            job_id='library_reconciliation', kind='reconciliation_metadata')
+    for index, extra in enumerate([
+        {'title_difference_kind': 'cosmetic', 'recording_mbid': 'recording',
+         'current_tags': {'duration_ms': 200000}, 'expected_duration_ms': 200100,
+         'acoustid': {'status': 'ok', 'recordings': [{'mbid': 'recording', 'score': .99}]},
+         'changes': {'title': {'old': 'Part 1', 'new': 'Part One'}}},
+        {'assignment_evidence': 'audio', 'expected_artist_names': ['Artist', 'Guest'],
+         'artist_aliases': [], 'changes': {'track_artist': {'old': 'Artist', 'new': 'Artist; Guest'}}},
+        {'routine_numbering': True, 'changes': {'track_number': {'old': 9, 'new': 1}}},
+        {'routine_numbering': True, 'numbering_recovery': True,
+         'changes': {'disc_number': {'old': 1, 'new': 2}}},
+    ], 2):
+        db.add(index, f'/music/album/{index}.flac', {'confidence': 'clear', **extra},
+               job_id='library_reconciliation', kind='reconciliation_metadata')
     with db._get_connection() as conn:
         full = effective_case_modes(conn, job_id='library_reconciliation')
         compact = effective_case_modes(conn, job_id='library_reconciliation', compact=True)
