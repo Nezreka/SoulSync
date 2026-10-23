@@ -3121,7 +3121,7 @@ class LibraryReconciliationJob(RepairJob):
                             not _audio_conflicts_with_slot(files[pair['file_index']], slots[pair['slot_index']])
                             for pair in plan['pairs'])
                     )
-                    intent_inferred = assignment_settled and _inferred_partial(
+                    intent_inferred = bool(missing) and assignment_settled and _inferred_partial(
                         files, album, watched_artists, saved_intent)
                     if intent_inferred:
                         intent_scope = 'partial'

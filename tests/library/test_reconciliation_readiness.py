@@ -126,3 +126,14 @@ def test_filename_collision_blocks_the_entire_album(tmp_path, monkeypatch):
     assert conflict['review_tier'] == 'manual'
     assert 'filename conflicts' in conflict['review_reason']
     assert not conflict['details']['routine_numbering']
+
+
+def test_complete_single_is_not_labelled_as_an_incomplete_playlist_acquisition(tmp_path, monkeypatch):
+    from tests.library.test_review_acceptance import build_album, scan_case
+    album = build_album(tmp_path, monkeypatch, 'partial')
+    album.slots[:] = album.slots[:1]
+    album.context.playlist_membership = lambda: {'1': ['Playlist']}
+    case = scan_case(album)
+    assert case['album_plan']['matched'] == case['album_plan']['release_track_count'] == 1
+    assert not case['album_plan']['intent_inferred']
+    assert case['album_plan']['intent_scope'] != 'partial'
