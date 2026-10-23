@@ -24133,6 +24133,13 @@ from api.sidebar_weather import configure as _cfg_sw, create_blueprint as _bp_sw
 _cfg_sw(config_manager=config_manager)
 app.register_blueprint(_bp_sw())
 
+# MetaSync connection (api/metasync_settings.py): pairing with the local
+# MetaSync node, pool-key handoff, status and disconnect for
+# Settings > Advanced > MetaSync. Blank metasync.node_url = not set up.
+from api.metasync_settings import configure as _cfg_ms, create_blueprint as _bp_ms
+_cfg_ms(config_manager=config_manager)
+app.register_blueprint(_bp_ms())
+
 # NOTE: the audiobook wishlist is NOT started here. It is drained by the shared
 # automation engine as the 'audiobook_process_wishlist' system automation, the same
 # way music and video drain theirs — so it can be paused, rescheduled or run by hand

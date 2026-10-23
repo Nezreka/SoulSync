@@ -127,6 +127,10 @@ class ConfigManager:
         # Other
         'hydrabase.api_key',
         'discogs.token',
+        # MetaSync (pool key is the user's SIN account key; the local API key
+        # is issued by their MetaSync node during pairing)
+        'metasync.pool_key',
+        'metasync.local_api_key',
         # Sign in with OIDC
         'security.oidc_client_secret',
     })

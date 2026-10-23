@@ -1181,6 +1181,9 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadSidebarWeatherSettings === 'function') {
         try { loadSidebarWeatherSettings(); } catch (e) { }
     }
+    if (tab === 'advanced' && typeof loadMetaSyncSettings === 'function') {
+        try { loadMetaSyncSettings(); } catch (e) { }
+    }
     // First time the Downloads tab is shown, auto-probe source status so the
     // dots reflect real connection state without a manual "Test all sources".
     if (tab === 'downloads' && typeof autoTestSourcesOnce === 'function') {
@@ -9207,6 +9210,236 @@ async function saveSidebarWeatherUnits() {
         }
     } catch (e) {
         if (typeof showToast === 'function') showToast('Could not update units: ' + e.message, 'error');
+    }
+}
+
+// == METASYNC (Advanced tab)               ==
+// Connection to the local MetaSync node: pairing (or a pasted local API
+// key), the pool key SoulSync holds and hands over, live status, and
+// disconnect. All calls go to SoulSync's own /api/metasync endpoints — the
+// server talks to the node, so the browser never has to reach it. Stored
+// secrets are never sent back here: the key fields only ever carry what
+// the user just typed, and an empty field on save means "unchanged".
+
+async function _msApi(method, path, body) {
+    const resp = await fetch('/api/metasync' + path, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return resp.json();
+}
+
+function _msStatus(text) {
+    const el = document.getElementById('metasync-status');
+    if (el) el.textContent = text;
+}
+
+function _msDetail(html) {
+    const el = document.getElementById('metasync-status-detail');
+    if (el) el.innerHTML = html;
+}
+
+function _msEscape(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
+}
+
+async function loadMetaSyncSettings() {
+    try {
+        const data = await _msApi('GET', '');
+        if (!data || data.success !== true) {
+            _msStatus('Could not load MetaSync settings');
+            return;
+        }
+        const nodeUrl = document.getElementById('metasync-node-url');
+        if (nodeUrl && document.activeElement !== nodeUrl) nodeUrl.value = data.node_url || '';
+        const poolUrl = document.getElementById('metasync-pool-url');
+        if (poolUrl && document.activeElement !== poolUrl) poolUrl.value = data.pool_url || '';
+        const poolKey = document.getElementById('metasync-pool-key');
+        if (poolKey) {
+            poolKey.placeholder = data.pool_key_set
+                ? 'Saved — type a new key only to replace it'
+                : 'Your pool account key';
+        }
+        const state = document.getElementById('metasync-connect-state');
+        if (state) {
+            state.textContent = data.local_key_set
+                ? 'Connected' + (data.node_fingerprint ? ' — node ' + data.node_fingerprint : '')
+                : 'Not connected';
+        }
+        refreshMetaSyncStatus();
+    } catch (e) {
+        console.error('metasync settings load failed', e);
+        _msStatus('Could not load MetaSync settings');
+    }
+}
+
+async function saveMetaSyncSettings() {
+    const body = {
+        node_url: document.getElementById('metasync-node-url')?.value.trim() || '',
+        pool_url: document.getElementById('metasync-pool-url')?.value.trim() || '',
+    };
+    const poolKey = document.getElementById('metasync-pool-key')?.value.trim();
+    if (poolKey) body.pool_key = poolKey;
+    const localKey = document.getElementById('metasync-local-key')?.value.trim();
+    if (localKey) body.local_api_key = localKey;
+    try {
+        const data = await _msApi('PUT', '/settings', body);
+        if (data.success) {
+            if (typeof showToast === 'function') showToast('MetaSync settings saved', 'success');
+            const pk = document.getElementById('metasync-pool-key');
+            if (pk) pk.value = '';
+            const lk = document.getElementById('metasync-local-key');
+            if (lk) lk.value = '';
+            loadMetaSyncSettings();
+        } else if (typeof showToast === 'function') {
+            showToast(data.error || 'Could not save MetaSync settings', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not save MetaSync settings: ' + e.message, 'error');
+    }
+}
+
+async function metasyncPairRequest() {
+    // persist the node URL with the request so claim/handoff use the same one
+    const nodeUrl = document.getElementById('metasync-node-url')?.value.trim() || '';
+    if (!nodeUrl) {
+        if (typeof showToast === 'function') showToast('Enter the MetaSync URL first', 'error');
+        return;
+    }
+    try {
+        const data = await _msApi('POST', '/pair/request', { node_url: nodeUrl });
+        if (!data.success) {
+            if (typeof showToast === 'function') showToast(data.error || 'Pairing request failed', 'error');
+            return;
+        }
+        const box = document.getElementById('metasync-pair-box');
+        if (box) box.style.display = '';
+        const code = document.getElementById('metasync-pair-code');
+        if (code) code.textContent = data.pairing_code || '';
+        const fp = document.getElementById('metasync-pair-fingerprint');
+        if (fp) fp.textContent = data.node_fingerprint || '';
+        if (typeof showToast === 'function') showToast('Approve the pairing in the MetaSync dashboard', 'success');
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Pairing request failed: ' + e.message, 'error');
+    }
+}
+
+async function metasyncPairClaim() {
+    try {
+        const data = await _msApi('POST', '/pair/claim');
+        if (data.success) {
+            if (typeof showToast === 'function') showToast('MetaSync connected', 'success');
+            const box = document.getElementById('metasync-pair-box');
+            if (box) box.style.display = 'none';
+            loadMetaSyncSettings();
+        } else if (typeof showToast === 'function') {
+            showToast(data.error || 'Could not finish connecting', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not finish connecting: ' + e.message, 'error');
+    }
+}
+
+async function metasyncHandoff() {
+    // unsaved field values ride along; the server persists what it used
+    const body = {
+        pool_url: document.getElementById('metasync-pool-url')?.value.trim() || '',
+    };
+    const poolKey = document.getElementById('metasync-pool-key')?.value.trim();
+    if (poolKey) body.pool_key = poolKey;
+    try {
+        const data = await _msApi('POST', '/handoff', body);
+        if (!data.success) {
+            if (typeof showToast === 'function') showToast(data.error || 'Handoff failed', 'error');
+            return;
+        }
+        if (data.exchange_status === 'bound') {
+            if (typeof showToast === 'function') showToast('Pool key handed over — MetaSync is bound to the pool', 'success');
+        } else if (data.exchange_status === 'binding_pending') {
+            if (typeof showToast === 'function') showToast('Pool key handed over — waiting for approval in the portal', 'warning');
+        } else if (data.exchange_status === 'error') {
+            if (typeof showToast === 'function') showToast('Pool key handed over, but the pool exchange failed: ' + (data.exchange_error || 'unknown error'), 'error');
+        } else {
+            if (typeof showToast === 'function') showToast('Pool key handed over to MetaSync', 'success');
+        }
+        loadMetaSyncSettings();
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Handoff failed: ' + e.message, 'error');
+    }
+}
+
+// The node's binding words, in plain language for the status readout.
+const _MS_BINDING_TEXT = {
+    bound: 'Bound to the pool',
+    pending_approval: 'Waiting for approval in the portal',
+    auth_failed: 'Pool authentication failed',
+    unbound: 'Not bound yet',
+    not_checked: 'Not checked yet',
+    not_connected: 'No pool key on MetaSync',
+    not_applicable: 'Direct key (no binding)',
+};
+
+async function refreshMetaSyncStatus() {
+    try {
+        const data = await _msApi('GET', '/status');
+        if (!data || data.success !== true) {
+            _msStatus((data && data.error) || 'MetaSync status unavailable');
+            _msDetail('');
+            return;
+        }
+        const s = data.status || {};
+        _msStatus('Connected — MetaSync ' + (s.version || '') +
+            (s.soulsync_connected ? ', reading this SoulSync' : ', not reading this SoulSync yet'));
+        const lines = [];
+        if (s.node_fingerprint) lines.push('Node fingerprint: ' + _msEscape(s.node_fingerprint));
+        const pools = Array.isArray(s.pools) ? s.pools : [];
+        if (!pools.length) {
+            lines.push('No pools on MetaSync yet — send your pool key to add one.');
+        }
+        pools.forEach(p => {
+            const binding = _MS_BINDING_TEXT[p.binding_status] || p.binding_status || 'Unknown';
+            let line = _msEscape(p.name || p.id || 'Pool') + ' (' + _msEscape(p.url || '') + '): ' +
+                _msEscape(binding);
+            if (p.last_exchange_error) line += ' — last error: ' + _msEscape(p.last_exchange_error);
+            lines.push(line);
+        });
+        if (s.pairing_status === 'pending') lines.push('A pairing request is waiting for approval in the MetaSync dashboard.');
+        _msDetail(lines.join('<br>'));
+    } catch (e) {
+        _msStatus('MetaSync status unavailable');
+        _msDetail('');
+    }
+}
+
+async function metasyncDisconnect() {
+    const ok = await showConfirmDialog({
+        title: 'Disconnect MetaSync?',
+        message: 'The pool key on MetaSync is cleared and the SoulSync key it holds is revoked. ' +
+            'Your pool key stays saved here.',
+        confirmText: 'Disconnect',
+        cancelText: 'Cancel',
+        destructive: true
+    });
+    if (!ok) return;
+    try {
+        const data = await _msApi('POST', '/disconnect');
+        if (data.success) {
+            if (typeof showToast === 'function') {
+                showToast(data.node_notified
+                    ? 'MetaSync disconnected'
+                    : 'Disconnected here — MetaSync could not be reached, so clear its pool key from its dashboard too', 'success');
+            }
+            const box = document.getElementById('metasync-pair-box');
+            if (box) box.style.display = 'none';
+            loadMetaSyncSettings();
+        } else if (typeof showToast === 'function') {
+            showToast(data.error || 'Disconnect failed', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Disconnect failed: ' + e.message, 'error');
     }
 }
 
