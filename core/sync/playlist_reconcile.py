@@ -74,13 +74,27 @@ def norm_title(t: str) -> str:
 
 
 def _src_entry(src: Dict[str, Any], position_fallback: int) -> Dict[str, Any]:
+    # Positions are 1-based everywhere the user sees them: mirrored rows are
+    # stored i+1 (music_database mirror insert) and the editor's server column
+    # is always ordinal (index + 1). ``position_fallback`` is the 0-based
+    # enumerate index, so a source with no stored position (sync-history
+    # entries carry a 0-based 'index' and no 'position' at all) must fall back
+    # to fallback + 1 — falling back to the raw index numbered the first
+    # source track 0 against the server's 1, shifting every paired row by one
+    # and making a 55-track source read as numbered 0..54 (#1852).
+    # Anything that is not a positive int (missing, None, a stray 0, a bool,
+    # a string) is not a usable 1-based position either — the row's own
+    # ordinal is the only honest number for it.
+    position = src.get('position')
+    if not isinstance(position, int) or isinstance(position, bool) or position < 1:
+        position = position_fallback + 1
     return {
         'name': src.get('name', ''),
         'artist': src.get('artist', ''),
         'album': src.get('album', ''),
         'image_url': src.get('image_url', ''),
         'duration_ms': src.get('duration_ms', 0),
-        'position': src.get('position', position_fallback),
+        'position': position,
         # #768 Bug B: echo the source id back so the editor can persist a
         # manual "Find & add" override against it.
         'source_track_id': src.get('source_track_id', '') or '',
@@ -318,16 +332,27 @@ def compute_order_status(combined: List[Dict[str, Any]]) -> Dict[str, Any]:
     Returns ``{matched, in_order, out_of_order}``. ``out_of_order`` is True only when
     there are >= 2 matched tracks AND their server positions aren't ascending — so a
     playlist with 0 or 1 matches (nothing to compare) is never flagged.
+
+    A server position can repeat: pass 0 deliberately pairs two source rows
+    with ONE server track (two provider ids for the same song, both
+    user-confirmed — see ``resolve_match_overrides``), so a shared track's
+    index appears twice in the sequence. A repeat is not disorder — the
+    shared track sits in exactly one place on the server — so the check
+    runs over each position's first occurrence. Without that, any playlist
+    with a shared pairing (55 source rows matched to 54 server tracks) was
+    flagged out of order no matter how the server was actually ordered
+    (#1852).
     """
     positions = [
         e['server_index'] for e in combined
         if e.get('match_status') == 'matched' and e.get('server_index') is not None
     ]
-    in_order = all(a < b for a, b in zip(positions, positions[1:], strict=False))
+    distinct = list(dict.fromkeys(positions))
+    in_order = all(a < b for a, b in zip(distinct, distinct[1:], strict=False))
     return {
         'matched': len(positions),
         'in_order': in_order,
-        'out_of_order': len(positions) >= 2 and not in_order,
+        'out_of_order': len(distinct) >= 2 and not in_order,
     }
 
 
