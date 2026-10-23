@@ -9246,6 +9246,37 @@ function _msEscape(text) {
     return div.innerHTML;
 }
 
+let _msAutoDetectTried = false;
+
+// Ask SoulSync to probe the usual places for the MetaSync node. On a find,
+// fill the URL field and return the URL; on no find, return '' and stay
+// quiet — the manual field remains the fallback either way.
+async function metasyncDetect() {
+    try {
+        const data = await _msApi('POST', '/detect');
+        if (data && data.success && data.found && data.node_url) {
+            const field = document.getElementById('metasync-node-url');
+            if (field) field.value = data.node_url;
+            return data.node_url;
+        }
+    } catch (e) {
+        console.error('metasync detect failed', e);
+    }
+    return '';
+}
+
+// Auto-detect runs once per page load, and only while there is nothing to
+// lose: no connection stored yet and no URL typed or saved. A find fills
+// the field and says so; finding nothing changes nothing on screen.
+async function _msMaybeAutoDetect(view) {
+    if (_msAutoDetectTried || view.local_key_set) return;
+    const field = document.getElementById('metasync-node-url');
+    if (!field || field.value.trim()) return;
+    _msAutoDetectTried = true;
+    const found = await metasyncDetect();
+    if (found) _msStatus('MetaSync found at ' + found);
+}
+
 async function loadMetaSyncSettings() {
     try {
         const data = await _msApi('GET', '');
@@ -9269,7 +9300,8 @@ async function loadMetaSyncSettings() {
                 ? 'Connected' + (data.node_fingerprint ? ' — node ' + data.node_fingerprint : '')
                 : 'Not connected';
         }
-        refreshMetaSyncStatus();
+        await refreshMetaSyncStatus();
+        await _msMaybeAutoDetect(data);
     } catch (e) {
         console.error('metasync settings load failed', e);
         _msStatus('Could not load MetaSync settings');
@@ -9304,7 +9336,11 @@ async function saveMetaSyncSettings() {
 
 async function metasyncPairRequest() {
     // persist the node URL with the request so claim/handoff use the same one
-    const nodeUrl = document.getElementById('metasync-node-url')?.value.trim() || '';
+    let nodeUrl = document.getElementById('metasync-node-url')?.value.trim() || '';
+    if (!nodeUrl) {
+        // Nothing typed — try to find the node before asking the user for it.
+        nodeUrl = await metasyncDetect();
+    }
     if (!nodeUrl) {
         if (typeof showToast === 'function') showToast('Enter the MetaSync URL first', 'error');
         return;
