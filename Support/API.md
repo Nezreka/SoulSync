@@ -816,6 +816,33 @@ Library statistics (counts and database info).
 
 ---
 
+### Library — Download Activity
+
+#### `GET /api/v1/library/download-activity`
+
+Per-album completed-download aggregates, used by the MetaSync node to build its download-based signals. One row per library album that has at least one completed download, keyed by the album's MusicBrainz release ID (an opaque text identifier). Only IDs, counts, and timestamps are returned — no titles or file paths. Albums without a MusicBrainz release ID do not appear.
+
+**Parameters:**
+- `since` (optional): ISO-8601 timestamp. Each row's `completed_since` counts only downloads completed at or after this instant. Without `since`, `completed_since` equals `completed_downloads`.
+
+```json
+{
+  "data": {
+    "albums": [
+      {
+        "musicbrainz_release_id": "b1392450-e666-3926-a536-22c65f834433",
+        "completed_downloads": 12,
+        "completed_since": 3,
+        "first_downloaded_at": "2026-08-02 14:03:11",
+        "last_downloaded_at": "2026-10-21 09:30:00"
+      }
+    ]
+  }
+}
+```
+
+---
+
 ### Search
 
 Search external music sources (Spotify, iTunes, Hydrabase). These endpoints search **external services**, not your local library (use `/library/tracks` or `/library/lookup` for that).
