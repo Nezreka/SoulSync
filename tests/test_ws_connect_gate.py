@@ -10,6 +10,7 @@ import tempfile
 import pytest
 
 from core.security.ws_gate import is_ws_connection_blocked as blocked
+from core.security.ws_gate import is_session_revoked as revoked
 
 
 # ── pure gate logic ────────────────────────────────────────────────────────
@@ -105,3 +106,326 @@ def test_socket_allowed_when_login_authenticated(monkeypatch):
         s['login_authenticated'] = True
     sio = web_server.socketio.test_client(web_server.app, flask_test_client=flask_client)
     assert sio.is_connected() is True
+
+
+# ── revocation (#1837): HTTP's epoch/device checks apply to sockets too ────
+def _r(**kw):
+    base = dict(has_profile_session=True, epoch_current=True, device_live=True)
+    base.update(kw)
+    return revoked(**base)
+
+
+def test_no_profile_session_is_never_revoked():
+    assert _r(has_profile_session=False, epoch_current=False, device_live=False) is False
+
+
+def test_live_session_is_not_revoked():
+    assert _r() is False
+
+
+def test_stale_epoch_is_revoked():
+    assert _r(epoch_current=False) is True
+
+
+def test_revoked_device_is_revoked():
+    assert _r(device_live=False) is True
+
+
+def test_revoked_blocks_even_when_fully_authenticated():
+    assert _b(session_revoked=True) is True
+    assert _b(require_login=True, login_authenticated=True, session_revoked=True) is True
+
+
+def _session_client(pid, epoch, device_id):
+    """a fresh client carrying the session cookie, as a replay would."""
+    flask_client = web_server.app.test_client()
+    with flask_client.session_transaction() as s:
+        s['login_authenticated'] = True
+        s['profile_id'] = pid
+        s['profile_epoch'] = epoch
+        s['device_id'] = device_id
+    return flask_client
+
+
+def _profile_with_device(device_id):
+    db = web_server.get_database()
+    pid = db.create_profile(f'WsRev-{device_id}')
+    assert pid
+    assert db.add_profile_device(device_id, pid, 'Browser', '127.0.0.1')
+    epoch = (db.get_profile(pid) or {}).get('session_epoch', 0)
+    return pid, epoch
+
+
+def test_socket_allowed_when_session_live(monkeypatch):
+    _login_on(monkeypatch)
+    pid, epoch = _profile_with_device('dev-live-1837')
+    sio = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-live-1837'))
+    assert sio.is_connected() is True
+    sio.disconnect()
+
+
+def test_socket_rejected_when_device_revoked(monkeypatch):
+    # logout / admin sign-out revokes the device row; the replayed cookie
+    # still carries login_authenticated, but HTTP would 401 it — so must WS
+    _login_on(monkeypatch)
+    pid, epoch = _profile_with_device('dev-revoked-1837')
+    db = web_server.get_database()
+    assert db.revoke_profile_device(pid, 'dev-revoked-1837')
+    from core.security.devices import forget
+    forget('dev-revoked-1837')  # the revoke endpoint clears the live cache
+    sio = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-revoked-1837'))
+    assert sio.is_connected() is False
+
+
+def test_socket_rejected_when_epoch_bumped(monkeypatch):
+    # "sign out everywhere": the profile epoch moves past the session's
+    _login_on(monkeypatch)
+    pid, epoch = _profile_with_device('dev-epoch-1837')
+    db = web_server.get_database()
+    assert db.bump_profile_session_epoch(pid) is not None
+    from core.security.session_epoch import forget
+    forget(pid)  # the sign-out-everywhere endpoint clears the epoch cache
+    sio = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-epoch-1837'))
+    assert sio.is_connected() is False
+
+
+def test_socket_rejected_when_revoked_even_with_gates_off():
+    # revocation is not part of the login/PIN gate: HTTP applies it whenever
+    # the session carries a profile, so a revoked socket is refused even on
+    # an install with no gate enabled
+    pid, epoch = _profile_with_device('dev-nogate-1837')
+    db = web_server.get_database()
+    assert db.revoke_profile_device(pid, 'dev-nogate-1837')
+    from core.security.devices import forget
+    forget('dev-nogate-1837')
+    sio = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-nogate-1837'))
+    assert sio.is_connected() is False
+
+
+def test_connected_socket_dropped_when_revoked(monkeypatch):
+    _login_on(monkeypatch)
+    pid, epoch = _profile_with_device('dev-drop-1837')
+    pid2, epoch2 = _profile_with_device('dev-keep-1837')
+    dropped = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-drop-1837'))
+    kept = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid2, epoch2, 'dev-keep-1837'))
+    assert dropped.is_connected() is True and kept.is_connected() is True
+
+    db = web_server.get_database()
+    assert db.revoke_profile_device(pid, 'dev-drop-1837')
+    from core.security.devices import forget
+    forget('dev-drop-1837')
+    web_server._disconnect_revoked_sockets()
+
+    assert dropped.is_connected() is False   # delivery stops at revocation
+    assert kept.is_connected() is True       # other sessions are untouched
+    kept.disconnect()
+
+
+def test_connected_socket_dropped_when_epoch_bumped(monkeypatch):
+    # the sweep path for "sign out everywhere", not just device revocation
+    _login_on(monkeypatch)
+    pid, epoch = _profile_with_device('dev-epoch-drop-1837')
+    sio = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-epoch-drop-1837'))
+    assert sio.is_connected() is True
+
+    db = web_server.get_database()
+    assert db.bump_profile_session_epoch(pid) is not None
+    from core.security.session_epoch import forget
+    forget(pid)
+    web_server._disconnect_revoked_sockets()
+    assert sio.is_connected() is False
+
+
+def test_socket_without_device_id_relies_on_epoch_only(monkeypatch):
+    # pre-device sessions carry no device_id: the device check is a no-op
+    # for them (same as HTTP), the epoch check still revokes them
+    _login_on(monkeypatch)
+    db = web_server.get_database()
+    pid = db.create_profile('WsRev-nodev-1837')
+    assert pid
+    epoch = (db.get_profile(pid) or {}).get('session_epoch', 0)
+    flask_client = web_server.app.test_client()
+    with flask_client.session_transaction() as s:
+        s['login_authenticated'] = True
+        s['profile_id'] = pid
+        s['profile_epoch'] = epoch
+    sio = web_server.socketio.test_client(web_server.app, flask_test_client=flask_client)
+    assert sio.is_connected() is True
+
+    assert db.bump_profile_session_epoch(pid) is not None
+    from core.security.session_epoch import forget
+    forget(pid)
+    web_server._disconnect_revoked_sockets()
+    assert sio.is_connected() is False
+
+
+def test_revocation_check_fails_open_on_db_error(monkeypatch):
+    # the revocation check is auxiliary to the gate: a broken db must read
+    # as "not revoked" (mirrors HTTP's fail-open helpers), never throw into
+    # the gate and never become a new way to block a sessionless handshake
+    def _boom(*a, **k):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(web_server, 'get_database', _boom)
+    with web_server.app.test_request_context('/socket.io/'):
+        from flask import session as _session
+        _session['profile_id'] = 1
+        _session['profile_epoch'] = 0
+        _session['device_id'] = 'dev-broken-1837'
+        assert web_server._ws_current_session_revoked() is False
+        assert web_server._ws_connection_blocked() is False
+
+
+def test_ws_gate_without_any_session_context_stays_open_when_gates_off():
+    # no request context at all: pre-#1837 the gate returned False here
+    # without ever touching the session; revocation must not change that
+    assert web_server._ws_connection_blocked() is False
+
+
+def test_socket_rejected_replaying_cookie_after_real_logout(monkeypatch):
+    # end-to-end, the issue's exact report: sign in through the real login
+    # endpoint, connect, sign out through the real logout endpoint, then
+    # replay the pre-logout cookie at the socket
+    _login_on(monkeypatch)
+    db = web_server.get_database()
+    pid = db.create_profile('WsRev-e2e-1837')
+    assert pid
+    db.set_profile_password(pid, 'hunter2-1837')
+    client = web_server.app.test_client()
+    res = client.post('/api/auth/login',
+                      json={'username': 'WsRev-e2e-1837', 'password': 'hunter2-1837'})
+    assert res.status_code == 200
+    cookie = client.get_cookie('soulsync_session')
+    assert cookie is not None
+    sio = web_server.socketio.test_client(web_server.app, flask_test_client=client)
+    assert sio.is_connected() is True
+    sio.disconnect()
+    assert client.post('/api/auth/logout').status_code == 200
+
+    replay = web_server.app.test_client()
+    replay.set_cookie('soulsync_session', cookie.value)
+    sio2 = web_server.socketio.test_client(web_server.app, flask_test_client=replay)
+    assert sio2.is_connected() is False
+
+
+def test_profile_join_keeps_the_connect_session_checked():
+    # an admin socket (or a stolen admin cookie) joining another profile's
+    # room must not shed its own session's checks: logging that browser out
+    # still drops it
+    db = web_server.get_database()
+    pid_a = db.create_profile('WsRev-adminA-1837', is_admin=True)
+    pid_b, epoch_b = _profile_with_device('dev-B-1837')
+    assert pid_a
+    db.add_profile_device('dev-A-1837', pid_a, 'Browser', '127.0.0.1')
+    epoch_a = (db.get_profile(pid_a) or {}).get('session_epoch', 0)
+
+    sio = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid_a, epoch_a, 'dev-A-1837'))
+    assert sio.is_connected() is True
+    sio.emit('profile:join', {'profile_id': pid_b})
+
+    # signing B out is about B's browsers, not this one
+    assert db.bump_profile_session_epoch(pid_b) is not None
+    from core.security.session_epoch import forget as _epoch_forget
+    _epoch_forget(pid_b)
+    web_server._disconnect_revoked_sockets()
+    assert sio.is_connected() is True
+
+    assert db.revoke_profile_device(pid_a, 'dev-A-1837')
+    from core.security.devices import forget as _dev_forget
+    _dev_forget('dev-A-1837')
+    web_server._disconnect_revoked_sockets()
+    assert sio.is_connected() is False
+
+
+def test_socket_rejected_in_pin_mode_when_revoked(monkeypatch):
+    _pin_on(monkeypatch)
+    pid, epoch = _profile_with_device('dev-pin-1837')
+    db = web_server.get_database()
+    assert db.revoke_profile_device(pid, 'dev-pin-1837')
+    from core.security.devices import forget
+    forget('dev-pin-1837')
+    flask_client = web_server.app.test_client()
+    with flask_client.session_transaction() as s:
+        s['launch_pin_verified'] = True
+        s['profile_id'] = pid
+        s['profile_epoch'] = epoch
+        s['device_id'] = 'dev-pin-1837'
+    sio = web_server.socketio.test_client(web_server.app, flask_test_client=flask_client)
+    assert sio.is_connected() is False
+
+
+def test_connected_socket_dropped_when_profile_deleted():
+    pid, epoch = _profile_with_device('dev-gone-1837')
+    sio = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-gone-1837'))
+    assert sio.is_connected() is True
+    db = web_server.get_database()
+    assert db.delete_profile(pid)
+    web_server._disconnect_revoked_sockets()
+    assert sio.is_connected() is False
+
+
+def test_revoked_socket_cannot_act_via_inbound_events(monkeypatch):
+    # no waiting for the sweep: the next inbound event re-gates and drops it
+    _login_on(monkeypatch)
+    pid, epoch = _profile_with_device('dev-act-1837')
+    sio = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-act-1837'))
+    assert sio.is_connected() is True
+    db = web_server.get_database()
+    assert db.revoke_profile_device(pid, 'dev-act-1837')
+    from core.security.devices import forget
+    forget('dev-act-1837')
+    sio.emit('activity:subscribe')
+    assert sio.is_connected() is False
+
+
+def test_snapshot_revoked_wrapper_swallows_helper_errors(monkeypatch):
+    # exercise _ws_snapshot_revoked's own except branch: a helper that
+    # raises somewhere the helpers' internal fail-open can't reach
+    import core.security.session_epoch as _epoch_mod
+    def _boom(*a, **k):
+        raise RuntimeError("epoch store exploded")
+    monkeypatch.setattr(_epoch_mod, 'session_is_current', _boom)
+    assert web_server._ws_snapshot_revoked(
+        {'profile_id': 1, 'profile_epoch': 0, 'device_id': 'dev-x-1837'}) is False
+
+
+def test_actor_reconnect_with_new_epoch_survives_sweep(monkeypatch):
+    # "sign out everywhere" keeps the ACTING browser: its cookie moves to
+    # the new epoch, and the client re-handshakes (pfReconnectSocket). The
+    # re-handshaked socket must survive the sweep; the stale one must not.
+    _login_on(monkeypatch)
+    pid, epoch = _profile_with_device('dev-actor-1837')
+    stale = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-actor-1837'))
+    assert stale.is_connected() is True
+    db = web_server.get_database()
+    new_epoch = db.bump_profile_session_epoch(pid)
+    assert new_epoch is not None
+    from core.security.session_epoch import forget
+    forget(pid)
+    fresh = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, new_epoch, 'dev-actor-1837'))
+    assert fresh.is_connected() is True
+    web_server._disconnect_revoked_sockets()
+    assert stale.is_connected() is False
+    assert fresh.is_connected() is True
+    fresh.disconnect()
+
+
+def test_anonymous_socket_survives_sweep():
+    # no profile in the session: nothing to revoke, the sweep leaves it be
+    flask_client = web_server.app.test_client()
+    sio = web_server.socketio.test_client(web_server.app, flask_test_client=flask_client)
+    assert sio.is_connected() is True
+    web_server._disconnect_revoked_sockets()
+    assert sio.is_connected() is True
+    sio.disconnect()
