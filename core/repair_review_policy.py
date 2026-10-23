@@ -16,7 +16,6 @@ _GLOBAL_BLOCKER_TYPES = frozenset({'reconciliation_release'})
 _POSITION_CHANGE_KEYS = frozenset({
     'track_number', 'disc_number', 'library_track_number', 'library_disc_number',
 })
-_TITLE_CHANGE_KEYS = frozenset({'title', 'library_title', 'filename'})
 _TRACK_ARTIST_CHANGE_KEYS = frozenset({
     'artist', 'track_artist', 'library_track_artist',
 })
@@ -46,6 +45,20 @@ def _replaces_artist_credit(changes: dict[str, Any], details: dict | None = None
 def _change_value(change: Any, key: str) -> str:
     value = change.get(key) if isinstance(change, dict) else None
     return str(value or '').strip()
+
+
+def _changes_title_text(changes: dict) -> bool:
+    """A filename's position prefix alone is not a title or version change."""
+    if {'title', 'library_title'}.intersection(changes):
+        return True
+    if 'filename' not in changes:
+        return False
+    import os
+    from core.text.track_prefix import parse_track_prefix
+    def title(key):
+        stem = os.path.splitext(_change_value(changes['filename'], key))[0]
+        return parse_track_prefix(stem).remainder
+    return title('old') != title('new')
 
 
 def needs_numbering_review(details: dict) -> bool:
@@ -92,7 +105,7 @@ def finding_category(item: dict[str, Any]) -> str:
     # when its atomic repair also carries track-number or filename changes.
     # The grouped numbering button must never conceal a material title edit.
     if (details.get('title_difference_kind') in ('material', 'version') and
-            _TITLE_CHANGE_KEYS.intersection(changes) and not supported_version_metadata(details)):
+            _changes_title_text(changes) and not supported_version_metadata(details)):
         return 'title_issues'
     if needs_numbering_review(details):
         return 'numbering'
@@ -100,7 +113,7 @@ def finding_category(item: dict[str, Any]) -> str:
             and not details.get('numbering_choice') and _finding_tier(item)[0] == 'ready'):
         return 'numbering'
     if (details.get('title_difference_kind') in ('typography', 'flavor', 'cosmetic') and
-            _TITLE_CHANGE_KEYS.intersection(changes)):
+            _changes_title_text(changes)):
         return 'title_conventions'
     return 'metadata'
 
@@ -188,10 +201,10 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
             and set(changes) - {'library_album_title'}):
         return 'manual', 'Audio could not be decoded; review before changing this file'
     if (details.get('title_difference_kind') in ('material', 'version') and
-            _TITLE_CHANGE_KEYS.intersection(changes) and not supported_version_metadata(details)):
+            _changes_title_text(changes) and not supported_version_metadata(details)):
         return 'manual', 'The title may identify a different song or recording version'
     if (details.get('title_difference_kind') == 'cosmetic'
-            and _TITLE_CHANGE_KEYS.intersection(changes)
+            and _changes_title_text(changes)
             and not supported_cosmetic_metadata(details)):
         return 'manual', 'Confirm title formatting without an exact audio match'
     if needs_numbering_review(details):

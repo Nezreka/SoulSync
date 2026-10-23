@@ -2701,29 +2701,32 @@ export function ReviewPage() {
                                 releaseHasMultipleDiscs,
                                 reviewCase.album_plan.numbering_mode,
                               )}
-                              {reviewCase.items.some(
-                                (item) =>
-                                  item.details?.routine_numbering &&
-                                  [
-                                    'track_number',
-                                    'disc_number',
-                                    'library_track_number',
-                                    'library_disc_number',
-                                  ].some((field) => field in record(item.details?.changes)),
-                              ) && (
-                                <Button
-                                  type="button"
-                                  disabled={mutationBusy || releaseChoicePending}
-                                  onClick={() =>
-                                    void actGroup(
-                                      { category: 'numbering' } as ReviewDecision,
-                                      'dismiss',
-                                    )
-                                  }
-                                >
-                                  Keep current numbering
-                                </Button>
-                              )}
+                              {!reviewDecisions.some(
+                                (decision) => decision.category === 'numbering',
+                              ) &&
+                                reviewCase.items.some(
+                                  (item) =>
+                                    item.details?.routine_numbering &&
+                                    [
+                                      'track_number',
+                                      'disc_number',
+                                      'library_track_number',
+                                      'library_disc_number',
+                                    ].some((field) => field in record(item.details?.changes)),
+                                ) && (
+                                  <Button
+                                    type="button"
+                                    disabled={mutationBusy || releaseChoicePending}
+                                    onClick={() =>
+                                      void actGroup(
+                                        { category: 'numbering' } as ReviewDecision,
+                                        'dismiss',
+                                      )
+                                    }
+                                  >
+                                    Keep current numbering
+                                  </Button>
+                                )}
                             </dd>
                           </div>
                         </dl>

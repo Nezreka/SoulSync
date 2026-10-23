@@ -33,7 +33,7 @@ from core.library.reconciliation_plan import (
     audio_contradicts_local_title, reconcile_folder, _title_score,
     display_title_compatible, file_version_markers, semantic_title_key,
     title_difference_kind, slot_version_markers, _version_markers,
-    _recording_supports_slot, recording_supports_file_slot,
+    recording_supports_file_slot,
 )
 from core.library.reconciliation_catalogue import catalogue_scan, current as catalogue_current, deferred, timed, stage
 from core.library.reconciliation_match_cache import cached_match

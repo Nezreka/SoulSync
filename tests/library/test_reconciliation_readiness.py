@@ -137,3 +137,42 @@ def test_complete_single_is_not_labelled_as_an_incomplete_playlist_acquisition(t
     assert case['album_plan']['matched'] == case['album_plan']['release_track_count'] == 1
     assert not case['album_plan']['intent_inferred']
     assert case['album_plan']['intent_scope'] != 'partial'
+
+
+def test_numbering_recovery_survives_reindexing_but_not_replacement(tmp_path):
+    import json
+    from core.library.reconciliation_choices import flattened_numbering_history, recovers_flattened_numbering
+    from tests.library.test_review_acceptance import MusicDatabase, RepairWorker
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    worker = RepairWorker(database=db)
+    details = {'numbering_mode': 'digital', 'release_disc_count': 2,
+               'fingerprint_key': 'same-audio', 'changes': {'disc_number': {'old': 2, 'new': 1}}}
+    worker._create_finding(job_id='library_reconciliation', finding_type='reconciliation_metadata',
+        severity='info', entity_type='track', entity_id='old-id', file_path='/music/song.flac',
+        title='Numbering', description='Legacy flattening', details=details)
+    with db._get_connection() as conn:
+        conn.execute("UPDATE repair_findings SET status='resolved', user_action='reconciliation_metadata'")
+    file = {'db': {'id': 'new-id'}, 'path': '/music/song.flac',
+            'acoustid': {'fingerprint_key': 'same-audio'}}
+    assert recovers_flattened_numbering(flattened_numbering_history(db), file)
+    file['acoustid']['fingerprint_key'] = 'replacement'
+    assert not recovers_flattened_numbering(flattened_numbering_history(db), file)
+    # A later, explicitly applied source-numbering correction supersedes it.
+    details['numbering_mode'] = 'release'
+    with db._get_connection() as conn:
+        conn.execute('UPDATE repair_findings SET details_json=?', (json.dumps(details),))
+    file['acoustid']['fingerprint_key'] = 'same-audio'
+    assert not recovers_flattened_numbering(flattened_numbering_history(db), file)
+
+
+@pytest.mark.parametrize('kind', ['cosmetic', 'version', 'material'])
+def test_filename_number_only_change_does_not_require_title_confirmation(kind):
+    details = {'confidence': 'clear', 'routine_numbering': True,
+               'title_difference_kind': kind,
+               'changes': {'filename': {'old': '02 - Home - Live.mp3', 'new': '12 - Home - Live.mp3'},
+                           'track_number': {'old': 2, 'new': 12}}}
+    item = {'finding_type': 'reconciliation_metadata', 'details': details}
+    assert _finding_tier(item)[0] == 'ready'
+    assert finding_category(item) == 'numbering'
+    details['changes']['filename']['new'] = '12 - Home.mp3'
+    assert _finding_tier(item)[0] == 'manual'
