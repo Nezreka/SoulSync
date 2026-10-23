@@ -10407,8 +10407,8 @@
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
                                         <h3>MetaSync</h3>
-                                        <span class="settings-section-hint">Metadata pools (SIN) via your
-                                            local MetaSync</span>
+                                        <span class="settings-section-hint">Join metadata pools like SIN,
+                                            through the MetaSync companion</span>
                                     </div>
                                     <div class="settings-section-body collapsed" data-stg="advanced">
                                         <div class="settings-group" data-stg="advanced">
@@ -10416,24 +10416,26 @@
                                             <div class="help-text" style="margin-bottom:12px;">
                                                 MetaSync is a small companion program that runs next to
                                                 SoulSync and joins metadata pools for you — SIN is the
-                                                first pool. Install and start MetaSync, then connect it
-                                                here. Installing MetaSync joins nothing by itself; the
-                                                pool key below is what joins a pool.
+                                                first pool. Two separate steps happen on this page, and
+                                                they are not the same thing:
+                                                <br><strong>Step 1</strong> connects SoulSync and
+                                                MetaSync to each other, on this machine.
+                                                <br><strong>Step 2</strong> joins a pool. MetaSync does
+                                                the joining — SoulSync itself never talks to a pool, it
+                                                only hands MetaSync your pool key.
+                                                <br>Installing MetaSync joins nothing by itself.
                                             </div>
 
                                             <div class="form-group">
-                                                <label for="metasync-node-url">MetaSync URL:</label>
-                                                <input type="text" id="metasync-node-url"
-                                                    placeholder="http://localhost:8790">
-                                                <div class="help-text">
-                                                    Where your local MetaSync answers. SoulSync looks
-                                                    for it on this machine automatically (port 8790) —
-                                                    type an address only if it lives somewhere else.
+                                                <label>Step 1 — Connect SoulSync and MetaSync:</label>
+                                                <div class="help-text" style="margin-bottom:6px;">
+                                                    Connecting pairs the two programs. When you click
+                                                    Connect, a code appears here and in MetaSync's
+                                                    dashboard; approve it there and the two programs swap
+                                                    keys automatically — MetaSync gets a key to read this
+                                                    SoulSync, SoulSync gets a key to talk to MetaSync.
+                                                    You never type or see either key.
                                                 </div>
-                                            </div>
-
-                                            <div class="form-group">
-                                                <label>Connect SoulSync and MetaSync:</label>
                                                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                                     <button class="test-button"
                                                         onclick="metasyncPairRequest()">Connect</button>
@@ -10449,30 +10451,63 @@
                                                     <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top:6px;">
                                                         <span>Code: <strong id="metasync-pair-code"
                                                                 style="font-size:18px; letter-spacing:2px;"></strong></span>
-                                                        <span>Node fingerprint: <code
+                                                        <span>MetaSync's ID: <code
                                                                 id="metasync-pair-fingerprint"></code></span>
                                                         <button class="test-button"
                                                             onclick="metasyncPairClaim()">I've approved it —
                                                             finish connecting</button>
                                                     </div>
                                                     <div class="help-text">
-                                                        Codes last 10 minutes, and SoulSync can only finish
-                                                        after you approve — the code on its own connects
-                                                        nothing.
+                                                        Check the code and the ID match what MetaSync's
+                                                        dashboard shows. Codes last 10 minutes, and SoulSync
+                                                        can only finish after you approve — the code on its
+                                                        own connects nothing.
                                                     </div>
-                                                </div>
-                                                <div class="help-text">
-                                                    Or skip pairing: in MetaSync's dashboard, create a local
-                                                    API key and paste it here instead. Either way SoulSync
-                                                    ends up holding the same key.
-                                                </div>
-                                                <div style="display: flex; gap: 8px; margin-top:6px;">
-                                                    <input type="password" id="metasync-local-key"
-                                                        placeholder="MetaSync local API key (paste to connect manually)"
-                                                        style="flex:1;">
                                                 </div>
                                             </div>
 
+                                            <div class="form-group">
+                                                <label for="metasync-node-url">MetaSync URL:</label>
+                                                <input type="text" id="metasync-node-url"
+                                                    placeholder="http://localhost:8790">
+                                                <div class="help-text">
+                                                    Where the MetaSync program answers. If it runs on
+                                                    this same machine, SoulSync finds it on its own
+                                                    (port 8790) — type an address only if MetaSync
+                                                    lives somewhere else.
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <details>
+                                                    <summary style="cursor:pointer;">Rather type a key?
+                                                        Connect manually instead of pairing</summary>
+                                                    <div class="help-text" style="margin-top:6px;">
+                                                        Pairing above does this for you. The manual way:
+                                                        in MetaSync's dashboard, create a local API key
+                                                        and paste it here, then Save. SoulSync ends up
+                                                        holding the same kind of key either way.
+                                                    </div>
+                                                    <div style="display: flex; gap: 8px; margin-top:6px;">
+                                                        <input type="password" id="metasync-local-key"
+                                                            placeholder="MetaSync local API key (paste to connect manually)"
+                                                            style="flex:1;">
+                                                    </div>
+                                                </details>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label>Step 2 — Join a pool (optional):</label>
+                                                <div class="help-text">
+                                                    A pool is a shared metadata network; SIN is the
+                                                    first one. Get a key from your pool account, put
+                                                    it below, and send it to MetaSync. MetaSync joins
+                                                    the pool and does all the pool talking — it swaps
+                                                    your key for short-lived access tokens, so the key
+                                                    itself stays between you and MetaSync. Nothing is
+                                                    joined until you send the key.
+                                                </div>
+                                            </div>
                                             <div class="form-group">
                                                 <label for="metasync-pool-url">Pool URL:</label>
                                                 <input type="text" id="metasync-pool-url"
@@ -10484,24 +10519,26 @@
                                                     placeholder="Your pool account key">
                                                 <div class="help-text">
                                                     Your own key for the pool, from your pool account.
-                                                    SoulSync keeps it here and hands it to MetaSync when
-                                                    you say so — MetaSync exchanges it with the pool
-                                                    itself.
+                                                    SoulSync stores it here only so it can hand it to
+                                                    MetaSync when you click Send — SoulSync never uses
+                                                    it itself.
                                                 </div>
                                             </div>
 
                                             <div class="form-group">
                                                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                                     <button class="test-button"
-                                                        onclick="saveMetaSyncSettings()">Save</button>
-                                                    <button class="test-button"
                                                         onclick="metasyncHandoff()">Send pool key to
                                                         MetaSync</button>
                                                     <button class="test-button"
+                                                        onclick="saveMetaSyncSettings()">Save</button>
+                                                    <button class="test-button"
                                                         onclick="refreshMetaSyncStatus()">Refresh
                                                         status</button>
-                                                    <button class="test-button"
-                                                        onclick="metasyncDisconnect()">Disconnect</button>
+                                                </div>
+                                                <div class="help-text">
+                                                    Send pool key is the button that joins the pool.
+                                                    Save only stores what you typed above, for later.
                                                 </div>
                                             </div>
 
@@ -10509,6 +10546,17 @@
                                                 <label>Status:</label>
                                                 <span id="metasync-status" class="readonly-field">Loading...</span>
                                                 <div id="metasync-status-detail" class="help-text"></div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                                                    <button class="test-button"
+                                                        onclick="metasyncDisconnect()">Disconnect</button>
+                                                    <span class="help-text" style="margin:0;">Undoes step 1 and
+                                                        step 2: MetaSync leaves the pool, the key it reads
+                                                        this SoulSync with is revoked, and SoulSync forgets
+                                                        MetaSync's key. Your pool key stays saved above.</span>
+                                                </div>
                                             </div>
                                         </div>
                                     </div><!-- end MetaSync body -->
