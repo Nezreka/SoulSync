@@ -25,6 +25,8 @@ _SENSITIVE_KEYS = {
     "lastfm.api_key",
     "genius.access_token",
     "hydrabase.api_key",
+    "metasync.pool_key",
+    "metasync.local_api_key",
     "security.oidc_client_secret",
 }
 
