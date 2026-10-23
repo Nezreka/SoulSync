@@ -378,6 +378,17 @@ def test_nonadjacent_shared_server_track_is_not_out_of_order():
     assert status["out_of_order"] is False
 
 
+def test_all_matched_rows_sharing_one_server_track_is_not_out_of_order():
+    # The distinct==1 case: every matched row points at the SAME server
+    # track, so there is no pair of distinct positions to compare at all.
+    source = [_src("Song A", "X", "a1"), _src("Song A (alt take)", "X", "a2"),
+              _src("Song A (live)", "X", "a3")]
+    server = [_svr("Song A", "X", "nvA")]
+    combined = reconcile_playlist(source, server, override_pairs={0: 0, 1: 0, 2: 0})
+    status = compute_order_status(combined)
+    assert status == {"matched": 3, "in_order": True, "out_of_order": False}
+
+
 def test_shared_server_track_still_flags_real_disorder():
     # Sharing must not mask a genuine reversal of the DISTINCT tracks.
     source = [_src("Song B", "Y", "b1"), _src("Song A", "X", "a1"),

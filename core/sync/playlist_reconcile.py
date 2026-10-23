@@ -348,6 +348,13 @@ def compute_order_status(combined: List[Dict[str, Any]]) -> Dict[str, Any]:
     with a shared pairing (55 source rows matched to 54 server tracks) was
     flagged out of order no matter how the server was actually ordered
     (#1852).
+
+    One shape this deliberately does not flag is a straddle: a shared
+    track whose two source slots sit on opposite sides of another track
+    (A B A). No single server placement can satisfy both slots, and
+    flagging it would re-break legitimate duplicate-song playlists over
+    something reordering the server cannot fix — so first-occurrence
+    order is the verdict, and a straddle reads as in order.
     """
     positions = [
         e['server_index'] for e in combined
