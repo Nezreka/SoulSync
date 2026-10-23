@@ -68,6 +68,50 @@ def set_system_job_enabled(database, engine, job_id: str, enabled: bool,
     return True
 
 
+# action_type -> fn(job_id, enabled). the reverse of set_system_job_enabled:
+# the Automations page flips the row, these write the job's own toggle so
+# Tools shows (and run_job_now respects) the same state. registered by
+# web_server since the music worker lives there.
+_job_toggle_sinks: dict = {}
+
+
+def register_job_toggle_sink(action_type: str, fn) -> None:
+    _job_toggle_sinks[action_type] = fn
+
+
+def _job_id_of(auto) -> str | None:
+    if not auto or auto.get("owned_by") != _SYSTEM_OWNER:
+        return None
+    try:
+        cfg = auto.get("action_config") or "{}"
+        if isinstance(cfg, str):
+            cfg = json.loads(cfg)
+        return cfg.get("job_id")
+    except Exception:
+        return None
+
+
+def mirror_automation_toggle(database, automation_id: int) -> bool:
+    """Push a system automation's enabled flag onto its job's Tools toggle.
+    toggling from the Automations page only wrote the row, so Tools kept the
+    old state and the music handler skipped the run as 'switched off in Tools'.
+    returns whether a job was updated."""
+    try:
+        auto = database.get_automation(automation_id)
+    except Exception:
+        return False
+    job_id = _job_id_of(auto)
+    sink = _job_toggle_sinks.get(auto.get("action_type")) if job_id else None
+    if not sink:
+        return False
+    try:
+        sink(job_id, bool(auto.get("enabled")))
+        return True
+    except Exception as e:
+        logger.debug("Could not mirror automation toggle to job %s: %s", job_id, e)
+        return False
+
+
 def _validate_interval(value, job_id: str) -> float | None:
     """Validate an interval_hours value. Returns float hours or None if invalid."""
     try:
@@ -101,6 +145,35 @@ def _get_video_job_config(video_db, job_id: str) -> dict:
     except Exception as e:
         logger.debug("Could not read video job config for %s: %s", job_id, e)
         return {}
+
+
+def _reconcile_job_toggle(auto, job_id, job_cls, prefix, is_video,
+                          config_manager, video_db) -> None:
+    """Heal a job whose Tools toggle drifted from its row. Tools always wrote
+    through to the row, so drift only ever came from an Automations-page
+    toggle: the row is the newer intent, and it's what actually schedules."""
+    row_enabled = bool(auto.get("enabled"))
+    try:
+        if is_video:
+            if video_db is None:
+                return
+            cfg = _get_video_job_config(video_db, job_id)
+            if not cfg or bool(cfg.get("enabled")) == row_enabled:
+                return
+            raw = video_db.get_setting(f"{prefix}.{job_id}")
+            saved = (json.loads(raw) if isinstance(raw, str) else dict(raw)) if raw else {}
+            saved["enabled"] = row_enabled
+            video_db.set_setting(f"{prefix}.{job_id}", json.dumps(saved))
+        else:
+            current = config_manager.get(f"{prefix}.{job_id}.enabled",
+                                         getattr(job_cls, "default_enabled", False))
+            if bool(current) == row_enabled:
+                return
+            config_manager.set(f"{prefix}.{job_id}.enabled", row_enabled)
+        logger.info("Synced %s Tools toggle to its automation (%s)",
+                    job_id, "on" if row_enabled else "off")
+    except Exception as e:
+        logger.debug("Could not reconcile toggle for %s: %s", job_id, e)
 
 
 def ensure_repair_job_automations(engine, database, config_manager,
@@ -153,7 +226,10 @@ def ensure_repair_job_automations(engine, database, config_manager,
 
     for jobs, prefix, action_type, is_video in sources:
         for idx, (job_id, job_cls) in enumerate(sorted(jobs.items())):
-            if _find_system_automation(database, profile_id, job_id, action_type):
+            existing = _find_system_automation(database, profile_id, job_id, action_type)
+            if existing:
+                _reconcile_job_toggle(existing, job_id, job_cls, prefix, is_video,
+                                      config_manager, video_db)
                 skipped += 1
                 continue
 

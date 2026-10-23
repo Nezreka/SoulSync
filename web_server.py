@@ -1761,7 +1761,13 @@ def _register_automation_handlers():
     # Idempotent — existing rows are never clobbered.
     if automation_engine is not None:
         try:
-            from core.automation.migrate_repair_jobs import ensure_repair_job_automations
+            from core.automation.migrate_repair_jobs import (
+                ensure_repair_job_automations, register_job_toggle_sink)
+            from core.video.repair.worker import get_video_repair_worker
+            register_job_toggle_sink(
+                'video_run_repair_job',
+                lambda job_id, enabled: get_video_repair_worker().set_job_config(
+                    job_id, enabled=enabled))
             try:
                 from api.video import get_video_db
                 _video_db = get_video_db()
@@ -22598,6 +22604,11 @@ try:
     if automation_engine is not None:
         repair_worker._event_emit = automation_engine.emit
         repair_worker._automation_engine = automation_engine
+    # Automations-page toggles on a [System] job row land in Tools too
+    from core.automation.migrate_repair_jobs import register_job_toggle_sink
+    register_job_toggle_sink(
+        'run_repair_job',
+        lambda job_id, enabled: repair_worker.set_job_enabled(job_id, enabled, bridge=False))
     repair_worker.start()
     logger.info("Repair worker initialized and started")
 except Exception as e:
