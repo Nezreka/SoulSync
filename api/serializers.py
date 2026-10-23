@@ -201,6 +201,8 @@ def serialize_album(obj, fields: Optional[Set[str]] = None) -> dict:
         "soul_id": d.get("soul_id"),
         # External IDs
         "musicbrainz_release_id": d.get("musicbrainz_release_id"),
+        # The album across all its editions; filled by the MusicBrainz worker.
+        "musicbrainz_release_group_id": d.get("musicbrainz_release_group_id"),
         "spotify_album_id": d.get("spotify_album_id"),
         "itunes_album_id": d.get("itunes_album_id"),
         "audiodb_id": d.get("audiodb_id"),
@@ -475,6 +477,9 @@ def serialize_wishlist_track(obj, fields: Optional[Set[str]] = None) -> dict:
         # A native client has to be able to READ BACK what was actually stored,
         # otherwise it cannot verify its own write (P1-02).
         "quality_profile_id": d.get("quality_profile_id"),
+        # The wishlisted track's album as a MusicBrainz release group, matched
+        # in the background by the MusicBrainz worker; None until then.
+        "musicbrainz_release_group_id": d.get("musicbrainz_release_group_id"),
     }
     return filter_fields(result, fields)
 

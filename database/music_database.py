@@ -1940,6 +1940,7 @@ class MusicDatabase:
 
             self._ensure_wishlist_quality_columns(cursor)
             self._ensure_library_quality_column(cursor)
+            self._add_release_group_columns(cursor)
 
             # One-time: materialize the current global quality/AcoustID/downsample
             # settings into the `quality_profiles` default row and backfill
@@ -2533,6 +2534,63 @@ class MusicDatabase:
                         logger.debug("wishlist column removal %s: %s", dead_col, e)
         except Exception as e:
             logger.error("Error adding wishlist quality-profile column: %s", e)
+
+    def _add_release_group_columns(self, cursor):
+        """MusicBrainz release-GROUP ids for albums and wishlist rows.
+
+        A release id names one edition (the 2011 remaster, the Japanese
+        pressing); its release group names the album across every edition.
+        MetaSync's SIN signals key on the group, so without it every node
+        looked the group up on MusicBrainz itself, one call per album, and
+        wishlist rows (Spotify-shaped, no MusicBrainz id at all) never
+        counted. The MusicBrainz worker fills both columns:
+
+        * albums: from the release it matches, or, for an album that
+          already has a release id (tags, a manual match, an import), one
+          release lookup — ``musicbrainz_release_group_attempted`` paces
+          the retries;
+        * wishlist_tracks: by matching the row's album + artist in the
+          background, like the library's own albums, with the usual
+          ``musicbrainz_match_status`` / ``musicbrainz_last_attempted``.
+
+        A trigger clears an album's group whenever its release id changes
+        to something the same UPDATE did not also give a group for, so a
+        retag or re-match can never leave a group from the old edition.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(albums)")
+            album_cols = {c[1] for c in cursor.fetchall()}
+            if 'musicbrainz_release_group_id' not in album_cols:
+                cursor.execute("ALTER TABLE albums ADD COLUMN musicbrainz_release_group_id TEXT")
+            if 'musicbrainz_release_group_attempted' not in album_cols:
+                cursor.execute("ALTER TABLE albums ADD COLUMN musicbrainz_release_group_attempted TIMESTAMP")
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS trg_albums_release_group_reset
+                AFTER UPDATE OF musicbrainz_release_id ON albums
+                WHEN OLD.musicbrainz_release_id IS NOT NEW.musicbrainz_release_id
+                 AND OLD.musicbrainz_release_group_id IS NEW.musicbrainz_release_group_id
+                BEGIN
+                    UPDATE albums
+                    SET musicbrainz_release_group_id = NULL,
+                        musicbrainz_release_group_attempted = NULL
+                    WHERE id = NEW.id;
+                END
+            """)
+            cursor.execute("PRAGMA table_info(wishlist_tracks)")
+            wish_cols = {c[1] for c in cursor.fetchall()}
+            if wish_cols:
+                for col, ddl in (
+                    ('musicbrainz_release_group_id', 'TEXT'),
+                    ('musicbrainz_match_status', 'TEXT'),
+                    ('musicbrainz_last_attempted', 'TIMESTAMP'),
+                ):
+                    if col not in wish_cols:
+                        cursor.execute(f"ALTER TABLE wishlist_tracks ADD COLUMN {col} {ddl}")
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_wishlist_mb_status "
+                    "ON wishlist_tracks (musicbrainz_match_status, id)")
+        except Exception as e:
+            logger.error(f"Error adding release-group columns: {e}")
 
     def _ensure_library_quality_column(self, cursor):
         """Give every library track a pointer to its own quality profile.
@@ -16814,7 +16872,7 @@ class MusicDatabase:
                 query = """
                     SELECT id, spotify_track_id, spotify_data, failure_reason, retry_count,
                            last_attempted, date_added, source_type, source_info,
-                           quality_profile_id
+                           quality_profile_id, musicbrainz_release_group_id
                     FROM wishlist_tracks
                     WHERE profile_id = ?
                 """
@@ -16863,6 +16921,8 @@ class MusicDatabase:
                             'source_type': row['source_type'],
                             'source_info': source_info,
                             'quality_profile_id': row['quality_profile_id'],
+                            # filled in the background by the MusicBrainz worker
+                            'musicbrainz_release_group_id': row['musicbrainz_release_group_id'],
                         })
                     except json.JSONDecodeError as e:
                         logger.error(f"Error parsing wishlist track data: {e}")
