@@ -1155,39 +1155,35 @@
         kick();   // the TMDB title is pre-filled — search it immediately
     }
 
-    // Remove a hand-made link. Two-click arm (no native confirm anywhere on
-    // this page): first click arms, second click unlinks.
-    function unlinkManualMatch(btn) {
+    // Remove a hand-made link. The button lives in the More menu, which
+    // closes on any pick, so a two-click arm never got its second click.
+    // Ask with the SoulSync confirm modal instead.
+    function unlinkManualMatch() {
         if (!data || data.source === 'tmdb' || !data._mm_tmdb) return;
-        if (!btn.getAttribute('data-vht-armed')) {
-            btn.setAttribute('data-vht-armed', '1');
-            btn.innerHTML = '<span class="vd-manage-ic">\uD83D\uDD17</span> Click again to unlink';
-            setTimeout(function () {
-                if (data && data._mm_tmdb && !btn.getAttribute('data-vht-done')) renderActions(data);
-            }, 4000);
-            return;
-        }
-        btn.setAttribute('data-vht-done', '1');
-        btn.disabled = true;
-        fetch('/api/video/manual-match', {
-            method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ kind: data.kind, tmdb_id: data._mm_tmdb })
-        })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (res) {
-                if (res && res.success) {
-                    data._mm_tmdb = null; data._mm_checked = false;
-                    toast('Manual link removed');
-                    renderActions(data);
-                } else {
-                    btn.disabled = false;
-                    toast('Couldn\u2019t remove the link', 'error');
-                }
+        var d = data;
+        var doUnlink = function () {
+            fetch('/api/video/manual-match', {
+                method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind: d.kind, tmdb_id: d._mm_tmdb })
             })
-            .catch(function () {
-                btn.disabled = false;
-                toast('Couldn\u2019t reach the server', 'error');
-            });
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (res && res.success) {
+                        d._mm_tmdb = null;
+                        toast('Manual link removed');
+                        if (data === d) renderActions(d);
+                    } else {
+                        toast('Couldn\u2019t remove the link', 'error');
+                    }
+                })
+                .catch(function () { toast('Couldn\u2019t reach the server', 'error'); });
+        };
+        if (typeof showConfirmDialog !== 'function') { doUnlink(); return; }
+        showConfirmDialog({ title: 'Remove manual link',
+            message: '\u201c' + (d.title || 'This title') + '\u201d was linked to your library by hand. ' +
+                'Remove the link? The TMDB page will read as not in your library again.',
+            confirmText: 'Unlink', cancelText: 'Cancel', destructive: true })
+            .then(function (ok) { if (ok) doUnlink(); });
     }
 
     // Continue Watching: played/unplayed toggle → POST /detail/<kind>/<id>/watched
@@ -3442,7 +3438,7 @@
             else if (which === 'sync-movie') syncMovieNow(act);
             else if (which === 'watched-toggle') toggleWatchedState(act);
             else if (which === 'ihavethis') openHaveThisModal();
-            else if (which === 'unlink') unlinkManualMatch(act);
+            else if (which === 'unlink') unlinkManualMatch();
             else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);
