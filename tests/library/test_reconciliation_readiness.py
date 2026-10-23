@@ -140,7 +140,6 @@ def test_complete_single_is_not_labelled_as_an_incomplete_playlist_acquisition(t
 
 
 def test_numbering_recovery_survives_reindexing_but_not_replacement(tmp_path):
-    import json
     from core.library.reconciliation_choices import flattened_numbering_history, recovers_flattened_numbering
     from tests.library.test_review_acceptance import MusicDatabase, RepairWorker
     db = MusicDatabase(str(tmp_path / 'music.db'))
@@ -167,9 +166,14 @@ def test_numbering_recovery_survives_reindexing_but_not_replacement(tmp_path):
     assert not recovers_flattened_numbering(flattened_numbering_history(db), file, **context)
     # A later, explicitly applied source-numbering correction supersedes it.
     details['numbering_mode'] = 'release'
+    worker._create_finding(job_id='library_reconciliation', finding_type='reconciliation_metadata',
+        severity='info', entity_type='track', entity_id='new-id', file_path=file['path'],
+        title='Numbering', description='Source numbering restored', details=details)
     with db._get_connection() as conn:
-        conn.execute('UPDATE repair_findings SET details_json=?', (json.dumps(details),))
+        conn.execute("UPDATE repair_findings SET status='resolved', user_action='reconciliation_metadata'")
     file['acoustid']['fingerprint_key'] = 'same-audio'
+    assert not recovers_flattened_numbering(flattened_numbering_history(db), file, **context)
+    file.update(db={'id': 'third-id'}, path='/music/moved-again/song.flac')
     assert not recovers_flattened_numbering(flattened_numbering_history(db), file, **context)
 
 

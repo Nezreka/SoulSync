@@ -148,9 +148,7 @@ def flattened_numbering_history(db):
                     continue
                 seen.add(identity)
                 history[identity] = details
-            if (details.get('numbering_mode') == 'digital'
-                    and (details.get('release_disc_count') or 0) > 1
-                    and details.get('fingerprint_key') and details.get('album_id')
+            if (details.get('fingerprint_key') and details.get('album_id')
                     and details.get('source') and details.get('release_id')):
                 identity = ('audio', str(details['album_id']), details['source'],
                             details['release_id'], details['fingerprint_key'])
