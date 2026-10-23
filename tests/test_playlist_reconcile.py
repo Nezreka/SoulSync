@@ -340,13 +340,14 @@ def test_sync_history_shaped_source_rows_are_numbered_from_one():
 
 
 def test_unusable_position_values_fall_back_to_the_ordinal():
-    # A stored 0, a bool, or a string is not a 1-based position — the row
-    # must show its own ordinal instead of the stored junk.
+    # A stored 0, a negative, a bool, a string, or a float is not a 1-based
+    # position — the row must show its own ordinal instead of the stored junk.
     source = [_src("one", "A", "s0", position=0), _src("two", "A", "s1", position=True),
-              _src("three", "A", "s2", position="3")]
-    server = [_svr("one", "A", "nv0"), _svr("two", "A", "nv1"), _svr("three", "A", "nv2")]
+              _src("three", "A", "s2", position="3"), _src("four", "A", "s3", position=-3),
+              _src("five", "A", "s4", position=5.0)]
+    server = [_svr(t, "A", f"nv{i}") for i, t in enumerate(["one", "two", "three", "four", "five"])]
     combined = reconcile_playlist(source, server)
-    assert [c["source_track"]["position"] for c in combined] == [1, 2, 3]
+    assert [c["source_track"]["position"] for c in combined] == [1, 2, 3, 4, 5]
 
 
 # ── #1852: a shared server track always flagged "out of order" ───────────

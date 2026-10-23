@@ -84,7 +84,11 @@ def _src_entry(src: Dict[str, Any], position_fallback: int) -> Dict[str, Any]:
     # and making a 55-track source read as numbered 0..54 (#1852).
     # Anything that is not a positive int (missing, None, a stray 0, a bool,
     # a string) is not a usable 1-based position either — the row's own
-    # ordinal is the only honest number for it.
+    # ordinal is the only honest number for it. This assumes a list's stored
+    # positions are homogeneous (every row has one, or none do): both real
+    # producers are — mirrored rows all carry one, sync-history rows carry
+    # none — so a fallback ordinal never collides with a neighbour's stored
+    # position in practice.
     position = src.get('position')
     if not isinstance(position, int) or isinstance(position, bool) or position < 1:
         position = position_fallback + 1
@@ -323,15 +327,17 @@ def compute_order_status(combined: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     Reads each matched entry's ``server_index`` (its position in the server
     playlist) off the combined view — which is already in source order — and checks
-    that sequence is strictly ascending. Relative order is used on purpose: missing
+    that the DISTINCT positions, in first-occurrence order, are strictly ascending.
+    Relative order is used on purpose: missing
     and extra tracks shift absolute positions, so comparing positions directly would
     false-flag any playlist that isn't a perfect 1:1. The model is one-way (source
     order is truth; the server may have drifted), so we only ever report whether the
     server is *behind* the source order — never the reverse.
 
     Returns ``{matched, in_order, out_of_order}``. ``out_of_order`` is True only when
-    there are >= 2 matched tracks AND their server positions aren't ascending — so a
-    playlist with 0 or 1 matches (nothing to compare) is never flagged.
+    there are >= 2 DISTINCT matched server positions AND they aren't ascending — so a
+    playlist with 0 or 1 distinct matched positions (nothing to compare) is never
+    flagged. ``matched`` still counts every matched entry, shared pairings included.
 
     A server position can repeat: pass 0 deliberately pairs two source rows
     with ONE server track (two provider ids for the same song, both
