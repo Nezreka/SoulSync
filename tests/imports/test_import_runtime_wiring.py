@@ -129,3 +129,25 @@ def test_track_downloaded_reaches_the_engine_through_the_runtime(tree):
     assert engine.events == [("track_downloaded", {
         "artist": "Andrew Gold", "title": "Spooky, Scary Skeletons",
         "album": "Halloween Howls", "quality": "MP3 320"})]
+
+
+@pytest.mark.parametrize("album, expected", [
+    ({"name": "Actions Made Audible", "id": "f669a0b5", "images": [{"url": "https://x"}]}, "Actions Made Audible"),
+    ({"title": "Halloween Howls"}, "Halloween Howls"),
+    ({"id": "no-name-here"}, ""),
+    ("Already A Name", "Already A Name"),
+])
+def test_track_downloaded_carries_the_album_name_not_the_record(album, expected):
+    """track_info often holds the whole album record; {album} in a
+    notification showed it as a python dict"""
+    class Engine:
+        def __init__(self):
+            self.events = []
+
+        def emit(self, event, data):
+            self.events.append((event, data))
+
+    engine = Engine()
+    emit_track_downloaded({"track_info": {"name": "t", "artists": [{"name": "a"}], "album": album},
+                           "_audio_quality": "MP3-320"}, engine)
+    assert engine.events[0][1]["album"] == expected
