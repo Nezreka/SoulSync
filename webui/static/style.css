@@ -5981,6 +5981,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: flex; justify-content: space-between; align-items: center;
     padding: 16px 18px 12px;
     border-bottom: 1px solid var(--white-a06);
+    gap: 8px;
 }
 .notif-panel-title { font-size: 14px; font-weight: 700; color: #fff; }
 /* System health, as symbols in the notification panel header. Health is a STATE,
@@ -5990,7 +5991,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 /* Pushed right, but with room either side: the header buttons ran together into
    "HistoryClear All" once the pill landed between them. */
 .notif-health { display: inline-flex; align-items: center; margin-left: auto; }
-.notif-panel-header { gap: 8px; }
 .notif-panel-header .notif-panel-clear + .notif-panel-clear { margin-left: 4px; }
 .notif-health-btn {
     display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
@@ -7102,6 +7102,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .modal-overlay.hidden {
     opacity: 0;
     pointer-events: none;
+    display: none !important;
 }
 
 
@@ -7656,6 +7657,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex;
     align-items: center;
     gap: 18px;
+    cursor: pointer;
+    position: relative;
 }
 
 .album-icon {
@@ -7711,10 +7714,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 /* Album download button now uses shared neo-button styling above */
 
 /* Album Expansion Functionality */
-.album-card-header {
-    cursor: pointer;
-    position: relative;
-}
 
 .album-expand-indicator {
     position: absolute;
@@ -12125,10 +12124,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     flex-shrink: 0;
 }
 
-.auto-sync-column-head small {
-    text-transform: uppercase;
-}
-
 .auto-sync-column-list {
     flex: 1;
     min-height: 0;
@@ -12169,10 +12164,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: var(--white-a35);
     font-size: 12px;
     text-align: center;
-}
-
-.auto-sync-drop-hint strong {
-    text-transform: uppercase;
 }
 
 .auto-sync-drop-hint span {
@@ -12239,21 +12230,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     flex-shrink: 0;
     font-size: 12px;
     transition: all var(--dur-base) ease;
-}
-
-.auto-sync-scheduled-card button.run {
-    width: auto;
-    min-width: 0;
-    height: 26px;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.auto-sync-scheduled-card button.run:not(:disabled):hover {
-    color: rgb(var(--accent-neon-rgb));
-    border-color: rgba(var(--accent-rgb), 0.4);
 }
 
 .auto-sync-scheduled-card.failing {
@@ -17779,6 +17755,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 13px;
     text-align: left;
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
 }
 
 .pl-menu-item:hover { background: var(--white-a07); color: #fff; }
@@ -17795,8 +17776,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .pl-menu-item--on { color: rgb(var(--accent-light-rgb)); }
-
-.pl-menu-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
 
 .pl-menu-tick { font-size: 11px; }
 
@@ -18400,6 +18379,15 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .playlist-card-actions button {
     position: relative;
     overflow: hidden;
+    background: transparent;
+    border: 1px solid rgb(var(--accent-rgb));
+    border-radius: 15px;
+    color: rgb(var(--accent-rgb));
+    font-size: 10px;
+    font-weight: bold;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: all var(--dur-base) ease;
 }
 
 .playlist-card-actions button::before {
@@ -18985,11 +18973,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-color: rgba(var(--danger-soft-rgb), 0.5);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(var(--danger-soft-rgb), 0.3);
-}
-
-/* Modal state management */
-.modal-overlay.hidden {
-    display: none !important;
 }
 
 /* Playlist Details Modal - Clean Premium Design */
@@ -22134,6 +22117,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         inset 0 1px 0 var(--white-a10);
     border: 1px solid var(--white-a10);
     transition: all var(--dur-slow) ease;
+    animation: imageSlideIn 0.6s ease-out 0.2s both;
 }
 
 .download-missing-modal-hero-image:hover {
@@ -22184,6 +22168,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     flex-direction: column;
     gap: 8px;
     min-width: 0;
+    animation: textSlideIn 0.6s ease-out 0.3s both;
 }
 
 .download-missing-modal-hero-title {
@@ -22238,6 +22223,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     text-transform: uppercase;
     letter-spacing: 0.5px;
     font-size: 12px;
+    animation: detailPop 0.4s ease-out 0.5s both;
 }
 
 /* Header Actions (close button) */
@@ -22344,10 +22330,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 /* Hero section animations */
-.download-missing-modal-hero-image {
-    animation: imageSlideIn 0.6s ease-out 0.2s both;
-}
-
 @keyframes imageSlideIn {
     0% {
         opacity: 0;
@@ -22360,10 +22342,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     }
 }
 
-.download-missing-modal-hero-metadata {
-    animation: textSlideIn 0.6s ease-out 0.3s both;
-}
-
 @keyframes textSlideIn {
     0% {
         opacity: 0;
@@ -22374,10 +22352,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         opacity: 1;
         transform: translateY(0);
     }
-}
-
-.download-missing-modal-hero-detail {
-    animation: detailPop 0.4s ease-out 0.5s both;
 }
 
 @keyframes detailPop {
@@ -22393,10 +22367,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 /* Stats dashboard animation */
-.dashboard-stat {
-    animation: statSlideUp 0.5s ease-out calc(0.4s + var(--stat-index, 0) * 0.1s) both;
-}
-
 @keyframes statSlideUp {
     0% {
         opacity: 0;
@@ -22410,10 +22380,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 /* Progress section animation */
-.progress-item {
-    animation: progressSlideIn 0.5s ease-out calc(0.6s + var(--progress-index, 0) * 0.1s) both;
-}
-
 @keyframes progressSlideIn {
     0% {
         opacity: 0;
@@ -22740,6 +22706,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .dashboard-stat {
+    animation: statSlideUp 0.5s ease-out calc(0.4s + var(--stat-index, 0) * 0.1s) both;
     text-align: center;
     transition: all var(--dur-slow) ease;
 }
@@ -22780,6 +22747,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .progress-item {
+    animation: progressSlideIn 0.5s ease-out calc(0.6s + var(--progress-index, 0) * 0.1s) both;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -23041,16 +23009,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     box-shadow: 0 4px 16px var(--black-a50);
     border: 1px solid var(--white-a10);
     line-height: 1.4;
-}
-
-/* Only show tooltip when content is actually truncated (has title attr) */
-.track-name:hover::after,
-.track-artist:hover::after,
-.track-match-status:hover::after,
-.track-download-status:hover::after {
     content: attr(title);
 }
 
+/* Only show tooltip when content is actually truncated (has title attr) */
 .track-name:not([title]):hover::after,
 .track-artist:not([title]):hover::after,
 .track-match-status:not([title]):hover::after,
@@ -23523,18 +23485,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     z-index: 9000;
     align-items: center;
     justify-content: center;
-}
-
-.playlist-card-actions button {
-    background: transparent;
-    border: 1px solid rgb(var(--accent-rgb));
-    border-radius: 15px;
-    color: rgb(var(--accent-rgb));
-    font-size: 10px;
-    font-weight: bold;
-    padding: 8px 16px;
-    cursor: pointer;
-    transition: all var(--dur-base) ease;
 }
 
 .playlist-card-actions button:hover {
@@ -26826,16 +26776,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid var(--white-a05);
 }
 
-.artist-image-container {
-    /* Bound relative to the PARENT, not the viewport: the old 40vw cap let a
-       huge source image (Deezer ships up to 1000px) out-muscle its flex
-       siblings whenever the hero was narrower than the viewport — the info
-       column collapsed ("KISS" clipped to "KIS") and overlapped the fixed
-       280px Top Tracks sidebar (#1036). 38% + sidebar + gaps always leaves
-       the info column real room. */
-    max-width: min(38%, 460px);
-}
-
 #artist-hero-section #artist-detail-image {
     width: 100%;
     height: auto;
@@ -27006,6 +26946,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     flex-direction: column;
     height: 300px;
     /* Fixed height for consistent layout */
+    position: relative !important;
+    /* Ensure positioning context */
 }
 
 .discography-sections .release-card {
@@ -27251,6 +27193,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .artist-image-container {
+    /* Bound relative to the PARENT, not the viewport: the old 40vw cap let a
+       huge source image (Deezer ships up to 1000px) out-muscle its flex
+       siblings whenever the hero was narrower than the viewport — the info
+       column collapsed ("KISS" clipped to "KIS") and overlapped the fixed
+       280px Top Tracks sidebar (#1036). 38% + sidebar + gaps always leaves
+       the info column real room. */
+    max-width: min(38%, 460px);
     position: relative;
     flex-shrink: 0;
 }
@@ -27398,9 +27347,6 @@ div.artist-hero-badge {
 }
 .artist-enrich-circle {
     min-width: 0;
-}
-
-.artist-enrich-circle {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -27836,6 +27782,7 @@ div.artist-hero-badge {
 #add-to-wishlist-modal-overlay:not(.hidden) .add-to-wishlist-modal {
     transform: scale(1);
     opacity: 1;
+    animation: wishlistModalFadeIn 0.4s ease-out;
 }
 
 /* Modal Header */
@@ -28294,10 +28241,6 @@ div.artist-hero-badge {
         opacity: 1;
         transform: scale(1) translateY(0);
     }
-}
-
-#add-to-wishlist-modal-overlay:not(.hidden) .add-to-wishlist-modal {
-    animation: wishlistModalFadeIn 0.4s ease-out;
 }
 
 /* Mobile Responsiveness */
@@ -33806,6 +33749,8 @@ div.artist-hero-badge {
     font-size: 13px; font-weight: 700; color: #fff;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     text-shadow: 0 1px 4px var(--black-a60);
+    cursor: pointer;
+    transition: color var(--dur-fast);
 }
 /* Metadata source badges (SP, IT, Dz, DC) */
 .ya-card-badges {
@@ -33830,9 +33775,6 @@ div.artist-hero-badge {
 }
 
 /* Artist name clickable */
-.ya-card-name {
-    cursor: pointer; transition: color var(--dur-fast);
-}
 .ya-card-name:hover { color: var(--accent); }
 
 /* ── Your Mixes (Spotify-style playlist cards, #discover redesign) ───────────
@@ -35666,6 +35608,7 @@ div.artist-hero-badge {
     padding: 8px 4px;
     border-radius: var(--radius-lg);
     transition: all var(--dur-moderate) var(--ease-standard);
+    position: relative;
 }
 
 .genre-dive-artist:first-child {
@@ -35772,10 +35715,6 @@ div.artist-hero-badge {
     width: 8px;
     height: 8px;
     box-shadow: 0 1px 4px var(--black-a40);
-}
-
-.genre-dive-artist {
-    position: relative;
 }
 
 /* Tracks */
@@ -36201,6 +36140,10 @@ div.artist-hero-badge {
     height: 40px;
     border-radius: var(--radius-xs);
     overflow: hidden;
+    /* #1296 the play overlay anchors to its thumb on every row that has one. scoped
+       to .has-select, the search playlist modal's buttons (no checkboxes) escaped
+       to the overlay: invisible full-screen buttons that ate every click and scroll. */
+    position: relative;
 }
 
 .track-compact-image img {
@@ -36263,13 +36206,6 @@ div.artist-hero-badge {
     height: 15px;
     cursor: pointer;
     accent-color: var(--accent);
-}
-
-/* #1296 the play overlay anchors to its thumb on every row that has one. scoped
-   to .has-select, the search playlist modal's buttons (no checkboxes) escaped
-   to the overlay: invisible full-screen buttons that ate every click and scroll. */
-.track-compact-image {
-    position: relative;
 }
 
 .track-compact-play {
@@ -40127,11 +40063,6 @@ div.artist-hero-badge {
 }
 
 /* MusicBrainz Integration */
-.release-card {
-    position: relative !important;
-    /* Ensure positioning context */
-}
-
 .mb-link-btn {
     display: inline-flex;
     align-items: center;
@@ -44951,7 +44882,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .lib-row-btn:hover,
 .lib-row-btn[aria-expanded="true"] { color: #fff; background: var(--white-a10); }
 .lib-row-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.5); }
-.lib-row-more { color: var(--white-a40); }
+.lib-row-more { color: var(--white-a40); position: relative; }
 .enhanced-track-table tbody tr:hover .lib-row-more { color: var(--white-a60); }
 .lib-row-more.busy::after {
     content: '';
@@ -44963,7 +44894,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     transform: translate(9px, -9px);
     animation: libPulse 1s ease-in-out infinite;
 }
-.lib-row-more { position: relative; }
 @keyframes libPulse { 50% { opacity: 0.3; } }
 .enhanced-track-report-btn:hover { color: var(--lib-warn); background: rgba(255, 184, 77, 0.12); }
 
@@ -46403,6 +46333,13 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     pointer-events: none;
     z-index: 0;
     transition: background 1.2s ease;
+    top: -30% !important;
+    height: 72% !important;
+    background: radial-gradient(ellipse at 28% 18%,
+        rgba(var(--np-ambient-r), var(--np-ambient-g), var(--np-ambient-b), 0.45) 0%,
+        rgba(var(--np-ambient-r), var(--np-ambient-g), var(--np-ambient-b), 0.12) 38%,
+        transparent 68%) !important;
+    filter: blur(48px) !important;
 }
 .np-modal > * {
     position: relative;
@@ -46441,6 +46378,14 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-modal {
     display: flex;
     flex-direction: column;
+    width: min(960px, 94vw) !important;
+    max-width: 960px !important;
+    border-radius: 28px !important;
+    background: linear-gradient(180deg, rgba(26,26,28,0.97) 0%, rgba(11,11,12,0.99) 100%) !important;
+    border: 1px solid var(--white-a08) !important;
+    box-shadow: 0 40px 120px rgba(0,0,0,0.72),
+                0 0 0 1px var(--white-a03) inset,
+                0 1px 0 var(--white-a06) inset !important;
 }
 .np-body {
     display: flex;
@@ -46448,6 +46393,9 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
+    padding: 54px 44px 38px !important;
+    gap: 48px !important;
+    align-items: flex-start !important;
 }
 .np-body::-webkit-scrollbar {
     width: 8px;
@@ -46481,6 +46429,11 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     position: relative;
     background: var(--white-a03);
     flex-shrink: 0;
+    width: 340px !important;
+    height: 340px !important;
+    border-radius: 22px !important;
+    box-shadow: 0 24px 70px var(--black-a60), 0 6px 22px rgba(var(--accent-rgb),0.16) !important;
+    transition: transform var(--dur-slowest) var(--ease-emphasized), box-shadow var(--dur-slowest) !important;
 }
 .np-album-art {
     width: 100%;
@@ -46510,18 +46463,26 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 /* Track Info */
 .np-track-info {
     width: 300px;
+    text-align: left !important;
 }
 .np-track-title {
     color: #fff;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    font-size: 28px !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.02em !important;
+    line-height: 1.1 !important;
 }
 .np-artist-name {
     margin-top: 4px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    color: rgb(var(--accent-light-rgb)) !important;
 }
 .np-album-name {
     font-style: italic;
@@ -46529,9 +46490,15 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    font-size: 13px !important;
+    color: var(--white-a40) !important;
 }
 .np-format-badges {
     justify-content: center;
+    display: flex !important;
+    gap: 8px !important;
+    flex-wrap: wrap !important;
+    margin-top: 16px !important;
 }
 
 /* Progress Section */
@@ -46600,6 +46567,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     display: flex;
     justify-content: space-between;
     margin-top: 6px;
+    font-variant-numeric: tabular-nums !important;
 }
 .np-current-time,
 .np-total-time {
@@ -46617,6 +46585,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 24px !important;
 }
 .np-btn {
     background: none;
@@ -46652,6 +46621,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     width: 4px;
     height: 4px;
     border-radius: var(--radius-circle);
+    background: rgb(var(--accent-light-rgb)) !important;
 }
 .np-btn-shuffle,
 .np-btn-repeat {
@@ -46997,10 +46967,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     padding: 2px 0;
 }
 
-.np-lyrics-line.active {
-    transform: translateX(4px);
-}
-
 .np-lyrics-line.passed {
     color: var(--white-a45);
 }
@@ -47076,9 +47042,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-queue-item {
     justify-content: space-between;
 }
-.np-queue-item.active {
-    border-left: 3px solid rgb(var(--accent-rgb));
-}
 .np-queue-item-info {
     flex: 1;
 }
@@ -47111,35 +47074,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
    source order. Accent-driven via --accent-rgb / --accent-light-rgb.
    ══════════════════════════════════════════════════════════════════════ */
 
-.np-modal {
-    width: min(960px, 94vw) !important;
-    max-width: 960px !important;
-    border-radius: 28px !important;
-    background: linear-gradient(180deg, rgba(26,26,28,0.97) 0%, rgba(11,11,12,0.99) 100%) !important;
-    border: 1px solid var(--white-a08) !important;
-    box-shadow: 0 40px 120px rgba(0,0,0,0.72),
-                0 0 0 1px var(--white-a03) inset,
-                0 1px 0 var(--white-a06) inset !important;
-}
-.np-modal::before {
-    top: -30% !important;
-    height: 72% !important;
-    background: radial-gradient(ellipse at 28% 18%,
-        rgba(var(--np-ambient-r), var(--np-ambient-g), var(--np-ambient-b), 0.45) 0%,
-        rgba(var(--np-ambient-r), var(--np-ambient-g), var(--np-ambient-b), 0.12) 38%,
-        transparent 68%) !important;
-    filter: blur(48px) !important;
-}
-.np-body { padding: 54px 44px 38px !important; gap: 48px !important; align-items: flex-start !important; }
-
 /* ── Album art: big, rounded, accent depth, scales while playing ── */
-.np-album-art-container {
-    width: 340px !important;
-    height: 340px !important;
-    border-radius: 22px !important;
-    box-shadow: 0 24px 70px var(--black-a60), 0 6px 22px rgba(var(--accent-rgb),0.16) !important;
-    transition: transform var(--dur-slowest) var(--ease-emphasized), box-shadow var(--dur-slowest) !important;
-}
 .np-modal.playing .np-album-art-container {
     transform: scale(1.02) !important;
     box-shadow: 0 30px 92px rgba(0,0,0,0.66), 0 12px 40px rgba(var(--accent-rgb),0.28) !important;
@@ -47157,14 +47092,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
 }
 
-/* ── Track meta ── */
-.np-track-info { text-align: left !important; }
-.np-track-title { font-size: 28px !important; font-weight: 800 !important; letter-spacing: -0.02em !important; line-height: 1.1 !important; }
-.np-artist-name { font-size: 15px !important; font-weight: 600 !important; color: rgb(var(--accent-light-rgb)) !important; }
-.np-album-name { font-size: 13px !important; color: var(--white-a40) !important; }
-
 /* ── Format badges → accent pills ── */
-.np-format-badges { display: flex !important; gap: 8px !important; flex-wrap: wrap !important; margin-top: 16px !important; }
 .np-format-badge {
     font-size: 10.5px !important; font-weight: 700 !important; letter-spacing: 0.04em !important; text-transform: uppercase !important;
     padding: 5px 11px !important; border-radius: var(--radius-pill) !important;
@@ -47189,7 +47117,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     border-radius: var(--radius-pill) !important;
 }
 .np-progress-bar-container:hover .np-progress-fill { box-shadow: 0 0 12px rgba(var(--accent-rgb),0.6) !important; }
-.np-time-display { font-variant-numeric: tabular-nums !important; }
 
 /* Seek hover tooltip — timestamp under the cursor on the progress bar. */
 .np-progress-bar-container { position: relative; }
@@ -47202,7 +47129,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-seek-tip.visible { opacity: 1; }
 
 /* ── Transport: dominant gradient play button ── */
-.np-controls-row { gap: 24px !important; }
 .np-btn {
     width: 46px !important; height: 46px !important; border-radius: var(--radius-circle) !important;
     color: rgba(255,255,255,0.62) !important; transition: all 0.16s ease !important;
@@ -47227,7 +47153,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     box-shadow: 0 12px 40px rgba(var(--accent-rgb),0.66), inset 0 1px 0 var(--white-a45) !important;
 }
 .np-btn-shuffle.active, .np-btn-repeat.active { color: rgb(var(--accent-light-rgb)) !important; }
-.np-btn-shuffle.active::after, .np-btn-repeat.active::after { background: rgb(var(--accent-light-rgb)) !important; }
 
 /* Stop is a text pill, NOT a circular transport button — exempt it from the
    round .np-btn sizing above (which was squashing "Stop" into a tiny circle). */
@@ -47252,15 +47177,14 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 }
 
 /* ── Queue rows: rounded, hover, accent active row + accent title ── */
-.np-queue-item { border-radius: var(--radius-lg) !important; transition: background 0.14s !important; }
 .np-queue-item:hover { background: var(--white-a05) !important; }
-.np-queue-item.active { background: rgba(var(--accent-rgb),0.12) !important; }
+.np-queue-item.active { border-left: 3px solid rgb(var(--accent-rgb)); background: rgba(var(--accent-rgb),0.12) !important; }
 .np-queue-item.active .np-queue-item-title { color: rgb(var(--accent-light-rgb)) !important; }
 .np-radio-btn.active, .np-queue-toggle.active { color: rgb(var(--accent-light-rgb)) !important; }
 
 /* ── Close button + lyrics (active line + click-to-seek affordance) ── */
 .np-close-btn:hover { color: #fff !important; background: var(--white-a10) !important; }
-.np-lyrics-line.active { color: rgb(var(--accent-light-rgb)) !important; font-weight: 700 !important; }
+.np-lyrics-line.active { transform: translateX(4px); color: rgb(var(--accent-light-rgb)) !important; font-weight: 700 !important; }
 .np-lyrics-line { cursor: pointer; border-radius: var(--radius-sm); transition: background var(--dur-xfast), color var(--dur-xfast); }
 .np-lyrics-line:hover { background: rgba(var(--accent-rgb),0.10); color: rgb(var(--accent-light-rgb)); }
 
@@ -47334,11 +47258,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-upnext-artist { font-size: 11.5px; color: var(--white-a40); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Rich queue rows: thumbnail + meta + duration/eq + remove ── */
-.np-queue-item {
-    display: grid !important;
-    align-items: center !important; gap: 13px !important;
-    padding: 8px 10px !important;
-}
 .np-queue-item-art { width: 44px; height: 44px; border-radius: var(--radius-md); object-fit: cover; background: var(--white-a05); }
 .np-queue-item-info { min-width: 0; }
 .np-queue-item-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -47361,8 +47280,16 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-queue-item-remove { opacity: 0; transition: opacity 0.14s, color 0.14s; }
 .np-queue-item:hover .np-queue-item-remove { opacity: 1; }
 
+.np-queue-item {
+    border-radius: var(--radius-lg) !important; transition: background 0.14s !important;
+    display: grid !important;
+    align-items: center !important; gap: 13px !important;
+    padding: 8px 10px !important;
+    grid-template-columns: 44px minmax(0, 1fr) auto auto !important;
+    cursor: grab;
+}
+
 /* Drag-to-reorder states */
-.np-queue-item { cursor: grab; }
 .np-queue-item:active { cursor: grabbing; }
 .np-queue-item.dragging { opacity: 0.4; background: var(--white-a07) !important; }
 .np-queue-item.drag-over { box-shadow: inset 0 2px 0 rgb(var(--accent-light-rgb)); }
@@ -49954,10 +49881,6 @@ tr.tag-diff-same {
     align-items: center;
 }
 
-.repair-album-tag {
-    white-space: nowrap;
-}
-
 .repair-album-tag.corrupt_audio {
     background: rgba(239, 68, 68, 0.15);
     color: #fca5a5;
@@ -50100,6 +50023,7 @@ tr.tag-diff-same {
 }
 
 .repair-album-tag {
+    white-space: nowrap;
     font-size: 9.5px;
     font-weight: 600;
     text-transform: uppercase;
@@ -60074,12 +59998,11 @@ body.max-performance #page-particles-canvas {
     max-width: 1500px; margin: 0 auto; width: 100%; }
 .wl-list-sortbar { display: flex; gap: 8px; margin-bottom: 14px; justify-content: space-between; }
 .wl-list-sorts { display: flex; gap: 8px; }
-.wl-list-sep { cursor: pointer; }
 .wl-list-sep:hover { background: var(--white-a04); }
 .wl-list-chevron { font-size: 11px; color: var(--white-a35); transition: transform var(--dur-quick) ease; }
 .wl-list-chevron.open { transform: rotate(90deg); }
 .wl-list-section { display: flex; flex-direction: column; }
-.wl-list-sep { display: flex; align-items: center; gap: 10px; padding: 14px 10px 8px;
+.wl-list-sep { cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 14px 10px 8px;
     border-bottom: 1px solid var(--white-a06); margin-bottom: 4px;
     position: sticky; top: 0; background: rgba(11,11,15,0.92); backdrop-filter: blur(6px); z-index: 2; }
 .wl-list-avatar { width: 26px; height: 26px; border-radius: var(--radius-circle); object-fit: cover;
@@ -61710,6 +61633,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
         box-shadow 0.24s ease;
     overflow: hidden;
     isolation: isolate;
+    animation: dashCardMount 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
 /* Cursor-following accent blob — two-layer "liquid" effect that spans
@@ -61802,9 +61726,6 @@ body.max-performance .dash-card::after {
 @keyframes dashCardMount {
     from { opacity: 0; transform: translateY(14px); }
     to   { opacity: 1; transform: translateY(0); }
-}
-.dash-card {
-    animation: dashCardMount 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 .dash-card[data-card="services"]        { animation-delay: 0.00s; }
 .dash-card[data-card="stats"]           { animation-delay: 0.06s; }
@@ -62528,6 +62449,7 @@ body.max-performance .dash-card::after {
     .dash-card[data-card="library"] .library-status-header {
         min-width: 0;
         flex-basis: 100%;
+        flex-wrap: wrap;
     }
     /* The band stacks: art + name + countdown up top, result chips next,
        the ownership bar full-width beneath. Actions stay touchable. */
@@ -62575,9 +62497,6 @@ body.max-performance .dash-card::after {
     }
     .dash-card[data-card="library"] .library-status-stat + .library-status-stat {
         border-left: none;
-    }
-    .dash-card[data-card="library"] .library-status-header {
-        flex-wrap: wrap;
     }
     .dash-card[data-card="library"] .library-status-actions {
         flex-direction: row;
@@ -63555,6 +63474,7 @@ body.max-performance .dash-card::after {
 }
 
 .auto-sync-column-head small {
+    text-transform: uppercase;
     color: rgba(var(--accent-light-rgb), 0.65);
     font-weight: 700;
     font-size: 10px;
@@ -63592,6 +63512,7 @@ body.max-performance .dash-card::after {
 }
 
 .auto-sync-drop-hint strong {
+    text-transform: uppercase;
     display: block;
     color: var(--white-a70);
     font-size: 12px;
@@ -63697,6 +63618,13 @@ body.max-performance .dash-card::after {
 /* — Card buttons: pill primary + ghost secondary, matching the
  *   app-wide button language. */
 .auto-sync-scheduled-card button.run {
+    width: auto;
+    min-width: 0;
+    height: 26px;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     background:
         linear-gradient(135deg,
             color-mix(in srgb, rgb(var(--accent-rgb)) 95%, white 5%) 0%,
@@ -63716,6 +63644,8 @@ body.max-performance .dash-card::after {
 }
 
 .auto-sync-scheduled-card button.run:not(:disabled):hover {
+    color: rgb(var(--accent-neon-rgb));
+    border-color: rgba(var(--accent-rgb), 0.4);
     transform: translateY(-1px);
     box-shadow:
         0 6px 16px rgba(var(--accent-rgb), 0.4),
@@ -64603,8 +64533,8 @@ body.max-performance .dash-card::after {
     cursor: pointer;
     text-align: left;
     transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
+    position: relative;
 }
-.em-worker-row { position: relative; }
 .em-worker-row:hover { background: var(--white-a05); }
 .em-worker-row.active {
     background: rgba(var(--accent-rgb), 0.14);
@@ -65058,6 +64988,7 @@ body.em-scroll-lock { overflow: hidden; }
         0 32px 80px var(--black-a65),
         0 0 60px rgba(var(--accent-rgb), 0.07),
         inset 0 1px 0 var(--white-a05);
+    animation: modal-revamp-enter 0.38s cubic-bezier(0.22, 1.2, 0.36, 1);
 }
 
 /* Accent light-edge along the top — the signature of the new surfaces */
@@ -65301,6 +65232,7 @@ body.em-scroll-lock { overflow: hidden; }
 .youtube-discovery-modal .modal-header {
     padding: 22px 28px 18px;
     border-bottom: 1px solid var(--white-a05);
+    overflow: hidden;
 }
 
 .youtube-discovery-modal .modal-header h2 {
@@ -65391,11 +65323,6 @@ body.em-scroll-lock { overflow: hidden; }
    compositor-only: transform/opacity only, one-shots or self-gating) ── */
 
 /* Entrance — a soft rise + settle, once */
-.download-missing-modal-content,
-.youtube-discovery-modal {
-    animation: modal-revamp-enter 0.38s cubic-bezier(0.22, 1.2, 0.36, 1);
-}
-
 @keyframes modal-revamp-enter {
     0%   { opacity: 0; transform: translateY(12px) scale(0.975); }
     100% { opacity: 1; transform: translateY(0) scale(1); }
@@ -65422,10 +65349,6 @@ body.em-scroll-lock { overflow: hidden; }
     animation: dashboard-header-sweep 12s ease-in-out infinite;
     pointer-events: none;
     z-index: 1;
-}
-
-.youtube-discovery-modal .modal-header {
-    overflow: hidden;
 }
 
 /* Progress sheen — a light band scanning the FILL. It lives inside the
@@ -71217,7 +71140,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
        do the scrolling. Verified in Chromium at 390px: .sync-main-panel stops
        overflowing entirely and the strip reports scrollWidth 736 in a 246px
        box. */
-    .library-filters { display: block; }
+    .library-filters { display: block; margin-left: 2px; margin-right: 2px; }
     .library-tabs {
         display: flex;
         /* The row's flex `gap` does nothing once it is a block. */
@@ -71267,8 +71190,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     .playlist-scroll-container { padding: 5px; }
 
     .pl-grid { padding: 2px 2px 10px; }
-
-    .library-filters { margin-left: 2px; margin-right: 2px; }
 
     .sync-header { margin-bottom: 16px; }
     .sync-title { font-size: 22px; }
@@ -71499,6 +71420,10 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
        height below meaningless and the box grew with every message */
     #chat-page .chat-shell {
         flex: none;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto auto minmax(0, 1fr);
+        gap: 8px;
+        height: calc(100vh - 214px);
     }
 
     #chat-page .chat-guild-wrap {
@@ -71518,13 +71443,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     #chat-page .chat-social-nav-text,
     #chat-page .chat-side-label-row {
         display: none;
-    }
-
-    #chat-page .chat-shell {
-        grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: auto auto minmax(0, 1fr);
-        gap: 8px;
-        height: calc(100vh - 214px);
     }
 
     #chat-page .chat-guilds {
@@ -71620,15 +71538,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
         min-width: 0;
     }
 
-    #chat-page .chat-jbx-headbar {
-        gap: 8px;
-    }
-
-    #chat-page .chat-jbx-headbar .chat-jbx-form {
-        min-width: 0;
-        margin-left: 0;
-    }
-
     #chat-page .chat-shell {
         /* ends above the floating activity / bell / help buttons, which
            otherwise sit on top of the send button */
@@ -71638,11 +71547,8 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 
     #chat-page .chat-head {
         padding: 10px 12px;
-    }
-
-    /* the header is one row that scrolls sideways, the topic hides. wrapped,
-       the title, topic and six buttons took 212px of a 624px chat */
-    #chat-page .chat-head {
+        /* the header is one row that scrolls sideways, the topic hides. wrapped,
+           the title, topic and six buttons took 212px of a 624px chat */
         flex-wrap: nowrap;
         overflow-x: auto;
         scrollbar-width: none;
@@ -71700,6 +71606,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 
     #chat-page .chat-input--bare {
         padding: 8px;
+        flex: 1 1 auto;
     }
 
     #chat-page .chat-send-fab {
@@ -71717,10 +71624,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
         display: none;
     }
 
-    #chat-page .chat-input--bare {
-        flex: 1 1 auto;
-    }
-
     /* the plain-text note keeps its first line; the rest is desktop detail */
     #chat-page .chat-modehint {
         overflow: hidden;
@@ -71736,10 +71639,13 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     }
 
     #chat-page .chat-jbx-headbar {
+        gap: 8px;
         flex-wrap: nowrap;
     }
 
     #chat-page .chat-jbx-headbar .chat-jbx-form {
+        min-width: 0;
+        margin-left: 0;
         flex: 1 1 0;
     }
 
@@ -73613,7 +73519,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 
 /* Keep queue metadata and actions in explicit slots; the arrows must not create
    implicit grid rows in the original four-column queue layout. */
-.np-queue-item { grid-template-columns: 44px minmax(0, 1fr) auto auto !important; }
 .np-queue-item-meta { min-width: 0; text-align: right; }
 .np-queue-item-actions { display: flex; align-items: center; gap: 2px; }
 .np-queue-item-actions > button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 36px; width: 36px; height: 36px; padding: 0; margin: 0; }
@@ -75902,6 +75807,7 @@ body.src-modal-open { overflow: hidden; }
     padding: 8px 6px 8px 4px;
     background: none;
     border-color: transparent;
+    position: relative;
 }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row:hover { background: var(--white-a04); }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row--live { background: rgba(var(--accent-rgb), 0.06); }
@@ -75912,7 +75818,6 @@ body.src-modal-open { overflow: hidden; }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-last:not(.dash-autom-last--bad)::before { content: 'ran '; }
 /* narrow rail: run/pause float over the row on hover instead of holding a
    column open that squeezes the names */
-#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row { position: relative; }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-actions {
     position: absolute;
     right: 8px;
@@ -76374,6 +76279,12 @@ body.src-modal-open { overflow: hidden; }
     font: inherit;
     font-size: 12.5px;
     cursor: pointer;
+    height: 30px;
+    padding: 0 28px 0 12px;
+    border-color: transparent;
+    background-color: var(--white-a05);
+    color: var(--white-a70);
+    font-weight: 600;
 }
 .mm-sort select:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: 1px; }
 .mm-sort-note { font-size: 12px; color: var(--white-a40); }
@@ -76641,14 +76552,6 @@ body.src-modal-open { overflow: hidden; }
 /* the sort is a quiet pill on the right, above the column head */
 .mm-sortbar { justify-content: flex-end; padding: 4px 22px 4px; background: #121216; }
 .mm-sort-note { margin-right: auto; }
-.mm-sort select {
-    height: 30px;
-    padding: 0 28px 0 12px;
-    border-color: transparent;
-    background-color: var(--white-a05);
-    color: var(--white-a70);
-    font-weight: 600;
-}
 .mm-sort select:hover { color: #fff; background-color: var(--white-a08); }
 .mm-list { background: #121216; padding: 0 0 12px; }
 .mm-list-head { background: #121216; margin: 0 12px; padding: 0 22px; }
