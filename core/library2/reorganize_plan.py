@@ -1,0 +1,418 @@
+"""Where a Library-v2 album's files belong, computed from the catalogue alone.
+
+Reorganize used to answer this by asking a metadata provider for the album's
+tracklist and naming files after what came back. The library's own values were
+pulled in one exception at a time — ``_keep_user_casing`` for the album name
+(#1078), again for the track title (#1078), ``_keep_user_year`` for the year
+(#1080). Three patches, each added after a report, each saying the same thing:
+where the catalogue and the provider disagreed, the catalogue was right.
+
+So this planner reads the catalogue and nothing else. Consequences, all
+intended:
+
+* An album with no stored source id is reorganizable. The old planner refused
+  it outright (``status: 'no_source_id'``) — for an operation that moves a
+  file, which needs no provider at all.
+* The plan is offline. No 4.4s preview, and no ``Invalid base62 id`` 400s from
+  candidate ids that were never Spotify's to begin with.
+* The filename matches what the Library page shows, hand-set titles included,
+  because both read through the same ``project_metadata`` override layer.
+* ``total_discs`` comes from the discs the catalogue knows rather than from a
+  live tracklist, which is how a half-downloaded album's layout oscillated
+  between ``Disc N/`` and flat (#1080).
+
+The cost is stated rather than hidden: a manual match no longer changes the
+path by itself. Re-tag moves a provider's values into the catalogue;
+reorganize applies the template to what the catalogue says.
+
+The path is still built by ``core.imports.paths.build_final_path_for_track``
+through the same context shape post-processing uses, so a reorganize
+destination and a fresh download's destination cannot drift apart.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from typing import Any, Callable, Dict, List, Optional
+
+from utils.logging_config import get_logger
+
+logger = get_logger("library2.reorganize_plan")
+
+
+FILED_RELEASE_KEY = "_filed_release"
+
+
+def record_filed_release(conn, album_id: Any, context: Any) -> None:
+    """Remember on the album how this download filed the release.
+
+    The path builder stashes the inputs of its release-type decision on the
+    import context (``_filed_release``): the source's type, the track count,
+    which source said it and whether the artist-page section locked it. The
+    catalogue alone cannot reproduce that -- it keeps one ``album_type`` and
+    neither the source nor the lock -- so a reorganize would re-judge the
+    release and move it. Secondary types (Live, Soundtrack, ...) fill an empty
+    ``secondary_types`` so ``$atypes`` keeps its labels. Never raises.
+    """
+    filed = context.get(FILED_RELEASE_KEY) if isinstance(context, dict) else None
+    if not album_id or not isinstance(filed, dict) or not filed.get("type"):
+        return
+    try:
+        payload = {
+            "type": str(filed.get("type") or "album").strip().lower(),
+            "total_tracks": int(filed.get("total_tracks") or 0),
+            "source": str(filed.get("source") or ""),
+            "locked": bool(filed.get("locked")),
+        }
+        conn.execute("UPDATE lib2_albums SET filed_release=? WHERE id=?",
+                     (json.dumps(payload), int(album_id)))
+        secondary = [str(v) for v in (filed.get("secondary_types") or []) if v]
+        if secondary:
+            conn.execute(
+                "UPDATE lib2_albums SET secondary_types=? WHERE id=?"
+                " AND COALESCE(secondary_types, '[]') IN ('', '[]')",
+                (json.dumps(secondary), int(album_id)))
+    except Exception as exc:  # noqa: BLE001 - bookkeeping must not fail an import
+        logger.debug("filed release not recorded for album %s: %s", album_id, exc)
+
+
+def _filing(album_row: Any, album: Dict[str, Any]) -> Dict[str, Any]:
+    """How a reorganize judges the release type, in this order:
+
+    1. a type the user set by hand (an override): the section, used as-is;
+    2. how the last download filed it: the same inputs, so the same folder;
+    3. otherwise the catalogue type split by the release's track count.
+    """
+    base_type = str(album_row["album_type"] or "album").strip().lower() or "album"
+    effective_type = str(album.get("album_type") or base_type).strip().lower() or base_type
+    if effective_type != base_type:
+        return {"type": effective_type, "source": "", "locked": True, "total_tracks": 0}
+    try:
+        filed = json.loads(album_row["filed_release"] or "{}")
+    except (TypeError, ValueError, IndexError, KeyError):
+        filed = {}
+    if isinstance(filed, dict) and filed.get("type"):
+        return {
+            "type": str(filed["type"]).strip().lower(),
+            "source": str(filed.get("source") or ""),
+            "locked": bool(filed.get("locked")),
+            "total_tracks": int(filed.get("total_tracks") or 0),
+        }
+    return {"type": base_type, "source": "tags", "locked": None, "total_tracks": 0}
+
+
+def _album_row(conn, album_id: int):
+    return conn.execute(
+        """SELECT al.id, al.title, al.year, al.release_date, al.album_type,
+                  al.secondary_types, al.filed_release,
+                  al.image_url, al.spotify_id, al.primary_artist_id,
+                  al.expected_track_count, al.track_count,
+                  ar.name AS artist_name
+             FROM lib2_albums al
+             LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+            WHERE al.id = ?""",
+        (int(album_id),),
+    ).fetchone()
+
+
+def _track_rows(conn, album_id: int) -> List[Any]:
+    """The album's tracks with their primary file, catalogue order.
+
+    Retain positions without usable files for release/disc counts; the planner
+    filters them out before creating move entries.
+    """
+    from core.library2.sql_util import owner_clause
+    from core.library2.track_files import primary_order
+
+    # the file of the library this runs in: a reorganize never moves another
+    # library's copy into this library's folder (#1199)
+    return conn.execute(
+        f"""SELECT t.id, t.title, t.track_number, t.disc_number,
+                   selected.id AS file_id, selected.path AS file_path
+              FROM lib2_tracks t
+              LEFT JOIN lib2_track_files selected ON selected.id =
+                   (SELECT tf.id FROM lib2_track_files tf
+                     WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
+                       AND COALESCE(tf.file_state,'active')
+                           NOT IN ('missing_confirmed','deleted')
+                       {owner_clause(column="tf.owner_profile_id")}
+                     ORDER BY {primary_order('tf')} LIMIT 1)
+             WHERE t.album_id = ?
+             ORDER BY COALESCE(t.disc_number,1), t.track_number, t.id""",
+        (int(album_id),),
+    ).fetchall()
+
+
+def _effective(conn, entity_type: str, entity_id: Any, fields: Dict[str, Any]) -> Dict[str, Any]:
+    """``fields`` with this entity's hand-set values on top.
+
+    The same projection ``queries._serialize_track`` uses, so the name on disk
+    and the name on the page are the same string by construction.
+    """
+    from core.library2.metadata_overrides import project_metadata
+
+    if not entity_id:
+        return dict(fields)
+    try:
+        effective, _overrides = project_metadata(
+            conn, entity_type=entity_type, entity_id=int(entity_id),
+            provider_fields=fields,
+        )
+        return effective
+    except Exception as exc:  # noqa: BLE001 - a planner never fails on the override layer
+        logger.debug("override projection skipped for %s %s: %s",
+                     entity_type, entity_id, exc)
+        return dict(fields)
+
+
+def _credited_artists(conn, track_id: int) -> List[str]:
+    rows = conn.execute(
+        """SELECT ar.id, ar.name FROM lib2_track_artists ta
+             JOIN lib2_artists ar ON ar.id = ta.artist_id
+            WHERE ta.track_id = ? ORDER BY ta.position""",
+        (int(track_id),),
+    ).fetchall()
+    # ARCH-04: a corrected artist name is an override on the artist, and the
+    # path has to be built from the same effective value the page shows.
+    from core.library2.metadata_overrides import effective_artist_names
+
+    names = effective_artist_names(conn, [r["id"] for r in rows])
+    return [n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n]
+
+
+def _as_provider_album(album: Dict[str, Any], track_count: int,
+                       total_discs: int) -> Dict[str, Any]:
+    """Shape the catalogue album like the provider payload the context builder
+    reads. Reusing that builder — rather than inventing a second context shape
+    — is what keeps a reorganize destination identical to a download's."""
+    secondary_types = album.get("secondary_types") or []
+    if isinstance(secondary_types, str):
+        try:
+            decoded = json.loads(secondary_types)
+        except (TypeError, ValueError):
+            decoded = []
+        secondary_types = decoded if isinstance(decoded, list) else []
+    album_type = str(album.get("album_type") or "album").strip().lower() or "album"
+    return {
+        "id": album.get("spotify_id") or "",
+        "name": album.get("title") or "Unknown Album",
+        "release_date": album.get("release_date") or (
+            str(album["year"]) if album.get("year") else ""),
+        "total_tracks": track_count,
+        "total_discs": total_discs,
+        "image_url": album.get("image_url") or "",
+        "album_type": album_type,
+        "record_type": album_type,
+        "secondary_types": [str(value) for value in secondary_types if value],
+        "is_compilation": album_type == "compilation",
+    }
+
+
+def plan_album_reorganize(
+    conn: Any,
+    album_id: int,
+    *,
+    build_final_path_fn: Callable,
+    transfer_dir: str,
+    resolve_file_path_fn: Callable[[Optional[str]], Optional[str]],
+) -> Dict[str, Any]:
+    """Compute every track's destination for one lib2 album. Moves nothing.
+
+    Returns the shape the reorganize preview and the rename executor both read,
+    so what the user approves is exactly what runs.
+    """
+    from core.library_reorganize import (
+        _build_album_info, _build_post_process_context, _canonical_file_path,
+        _is_in_deleted_quarantine, _same_physical_file, _trim_to_transfer,
+    )
+
+    album_row = _album_row(conn, album_id)
+    if album_row is None:
+        return {"success": False, "status": "no_album", "source": None,
+                "album": "", "artist": "", "transfer_dir": transfer_dir,
+                "tracks": []}
+
+    album = _effective(conn, "release_group", album_row["id"], {
+        "title": album_row["title"],
+        "year": album_row["year"],
+        "release_date": album_row["release_date"],
+        "album_type": album_row["album_type"],
+        "secondary_types": album_row["secondary_types"],
+        "image_url": album_row["image_url"],
+    })
+    album["spotify_id"] = album_row["spotify_id"]
+    album_title = album.get("title") or "Unknown Album"
+    # ARCH-04: the same effective name the artist page shows, so a corrected
+    # name reaches the folder on disk instead of only the UI.
+    from core.library2.metadata_overrides import effective_artist_name
+    artist_name = effective_artist_name(
+        conn, album_row["primary_artist_id"], album_row["artist_name"]
+    ) or "Unknown Artist"
+
+    all_rows = _track_rows(conn, album_id)
+    from core.library2.retag import track_contexts
+    references = {r['id']: r['db_data'] for r in track_contexts(conn, [r['id'] for r in all_rows])}
+    all_tracks = [{**references[r['id']], 'id': r['id'], 'file_path': r['file_path'],
+                   'file_id': r['file_id']} for r in all_rows]
+    tracks = [t for t in all_tracks if t["file_path"]]
+    common = {
+        "source": None,
+        "album": album_title,
+        "artist": artist_name,
+        "transfer_dir": transfer_dir,
+    }
+    if not tracks:
+        return {"success": False, "status": "no_tracks", **common, "tracks": []}
+
+    # Same reasoning for the track count $albumtype splits on: it is the
+    # RELEASE's, not how many of its files have arrived. Counting files
+    # planned three downloaded tracks of a 12-track album into Single/,
+    # where the download (which knew the release total) never put them.
+    release_tracks = (album_row["expected_track_count"] or album_row["track_count"]
+                      or len(all_tracks))
+
+    # ARCH-03: the disc count is a property of the ALBUM, so it is read from
+    # every catalogue position — including tracks whose file has not arrived
+    # yet. Computing it after the file filter declared a known two-disc album
+    # single-disc while only disc 1 was downloaded (`total_discs_declared=True`
+    # suppresses the shared path builder's own disc detection), moved disc 1 out
+    # of `Disc 1/`, and moved it straight back the moment disc 2's first file
+    # landed — the #1080 oscillation from the other direction.
+    total_discs = max((int(t.get('total_discs') or t['disc_number'] or 1) for t in all_tracks), default=1)
+    filing = _filing(album_row, album)
+
+    planned: List[Dict[str, Any]] = []
+    for track in tracks:
+        db_path = track["file_path"]
+        resolved = resolve_file_path_fn(db_path) if db_path else None
+        file_ext = os.path.splitext(resolved or db_path or ".flac")[1] or ".flac"
+        title = track.get("title") or ""
+        item = {
+            "track_id": track["id"],
+            "file_id": track["file_id"],
+            "source_db_path": db_path,
+            "sibling_files": [],
+            "title": title,
+            "track_number": track.get("track_number") or 0,
+            "disc_number": int(track.get("disc_number") or 1),
+            "current_path": _trim_to_transfer(db_path, resolved, transfer_dir),
+            "new_path": "",
+            "current_path_abs": resolved or "",
+            "new_path_abs": "",
+            "file_exists": resolved is not None,
+            "unchanged": False,
+            "collision": False,
+            "matched": resolved is not None,
+            "reason": None if resolved else "File not found on disk",
+        }
+
+        # #746: files parked in the duplicate-cleaner quarantine
+        # (<transfer>/deleted) are not library files and must stay put.
+        if resolved and _is_in_deleted_quarantine(resolved, transfer_dir):
+            item["matched"] = False
+            item["reason"] = "In deleted/quarantine folder — skipped"
+            planned.append(item)
+            continue
+        if not item["matched"]:
+            planned.append(item)
+            continue
+        if track.get('edition_status') == 'unknown' or not track.get('track_number'):
+            item.update(matched=False, reason='Unknown release position; select the release edition in Re-identify')
+            planned.append(item)
+            continue
+
+        # A matching basename is not evidence that neighbouring audio belongs
+        # to this recording. Carry only catalogue versions of this track in
+        # the selected source directory, and retain their IDs for the updater.
+        from core.library2.sql_util import owner_clause
+        from core.library_reorganize import _AUDIO_EXTS
+        source_dir = _canonical_file_path(os.path.dirname(resolved))
+        source_stem = os.path.splitext(os.path.basename(resolved))[0]
+        for sibling in conn.execute(
+            f"""SELECT f.id, f.path FROM lib2_track_files f
+                 WHERE f.track_id=? AND f.id<>?
+                   AND COALESCE(f.file_state,'active') NOT IN ('missing_confirmed','deleted')
+                   {owner_clause(column='f.owner_profile_id')}""",
+            (track['id'], track['file_id']),
+        ):
+            sibling_abs = resolve_file_path_fn(sibling['path']) if sibling['path'] else None
+            if not sibling_abs or _same_physical_file(sibling_abs, resolved):
+                continue
+            stem, ext = os.path.splitext(os.path.basename(sibling_abs))
+            if (stem == source_stem and ext.lower() in _AUDIO_EXTS
+                    and _canonical_file_path(os.path.dirname(sibling_abs)) == source_dir):
+                item['sibling_files'].append({
+                    'file_id': sibling['id'], 'source_db_path': sibling['path'],
+                    'current_path_abs': sibling_abs,
+                })
+
+        artists = _credited_artists(conn, track["id"]) or [artist_name]
+        context = _build_post_process_context(
+            _as_provider_album({**album, "title": track['album_title'], "album_type": filing["type"]},
+                               filing["total_tracks"] or release_tracks, total_discs),
+            {
+                "id": "",
+                "name": title,
+                "track_number": track.get("track_number") or 1,
+                "disc_number": int(track.get("disc_number") or 1),
+                "duration_ms": 0,
+                "artists": [{"name": a} for a in artists],
+            },
+            artist_name,
+            track['album_title'],
+            total_discs,
+            local_title=title,
+            local_year=(str(album["year"]) if album.get("year") else None),
+            record_type=filing["type"],
+            type_source=filing["source"],
+        )
+        if filing["locked"] is not None:
+            # reproduce the download's decision exactly: its source and its
+            # lock, not the context builder's own guess from the source name
+            context["_album_type_source"] = filing["source"]
+            context["spotify_album"]["album_type_locked"] = filing["locked"]
+        try:
+            new_full, _ok = build_final_path_fn(
+                context, context["spotify_artist"], _build_album_info(context),
+                file_ext, create_dirs=False,
+            )
+            item["new_path_abs"] = new_full or ""
+            item["new_path"] = (
+                os.path.relpath(new_full, transfer_dir)
+                if transfer_dir and new_full and new_full.startswith(transfer_dir)
+                else new_full or ""
+            )
+            if resolved and new_full and _same_physical_file(resolved, new_full):
+                item["unchanged"] = True
+        except Exception as exc:  # noqa: BLE001 - reported per track, never fatal
+            item["reason"] = f"Couldn't compute destination path: {exc}"
+        planned.append(item)
+
+    # Two tracks planned onto one path would overwrite each other on apply:
+    # post-processing publishes through `safe_move_file`, an atomic
+    # `os.replace` that never refuses an occupied destination.
+    #
+    # An `unchanged` track is one already sitting at its destination. It does
+    # not move, but it is still the file another track would land on top of —
+    # so it takes part in the detection as an occupant while never being
+    # flagged itself. Skipping unchanged rows outright (as this did) left the
+    # single most destructive shape invisible: a second track silently
+    # replacing a file the plan reported as needing no work at all.
+    seen: Dict[str, Dict[str, Any]] = {}
+    for item in planned:
+        if not item["matched"] or not item["new_path"]:
+            continue
+        key = _canonical_file_path(item.get("new_path_abs") or item["new_path"])
+        first = seen.get(key)
+        if first is None:
+            seen[key] = item
+            continue
+        for clashing in (first, item):
+            if not clashing["unchanged"]:
+                clashing["collision"] = True
+
+    return {"success": True, "status": "planned", **common, "tracks": planned}
+
+
+__all__ = ["plan_album_reorganize"]

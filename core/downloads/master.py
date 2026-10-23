@@ -327,8 +327,7 @@ def match_track_in_library(db, track_data, *, album_tracks_map, album_context,
         for artist in artists:
             db_track, track_confidence = db.check_track_exists(
                 track_name, _artist_name_of(artist), confidence_threshold=0.7,
-                server_source=active_server, album=fallback_album,
-                include_downloads=True,
+                server_source=active_server, album=fallback_album, include_downloads=True,
             )
             if db_track and track_confidence >= 0.7:
                 # Re-release gate (5BILLION round 3): the hit came from the
@@ -649,16 +648,15 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
     1. Runs the analysis.
     2. If missing tracks are found, it automatically queues them for download.
     """
-    # the analysis asks "do we already have this" through the batch owner's
-    # library (#1199); this runs on a pool thread with no request context
-    from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
+    # the analysis asks "do we already have this" through the library the
+    # batch fills (#1199) -- the one decided when it was created, which for an
+    # admin is the library they had selected, not their own. this runs on a
+    # pool thread with no request context.
+    from core.library_scope import batch_scope, library_scope
     with tasks_lock:
-        _batch_profile = (download_batches.get(batch_id) or {}).get('profile_id')
-    _scope_token = set_library_scope(library_scope_for_profile(_batch_profile))
-    try:
+        _batch = dict(download_batches.get(batch_id) or {})
+    with library_scope(batch_scope(_batch)):
         return _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps, serialize)
-    finally:
-        reset_library_scope(_scope_token)
 
 
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: MasterDeps,
@@ -713,6 +711,11 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     download_batches[batch_id].get('source_playlist_ref') or ''
                 ).strip()
                 batch_skip_acoustid = bool(download_batches[batch_id].get('skip_acoustid', False))
+        # a Library v2 wishlist -- the admin's, or one filling a profile's own
+        # library (#1199) -- carries upgrade intents; asked once, off the lock
+        from core.library_scope import library_scope_for_profile
+        _lib2_wishlist = (int(batch_profile_id or 1) == 1
+                          or library_scope_for_profile(batch_profile_id) == int(batch_profile_id))
 
         # Most album requests carry one explicit/mirrored profile on the batch.
         # For older/internal callers, recover the same intent from the first
@@ -728,17 +731,14 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             resolve_playlist_folder_mode_for_batch,
             track_exists_in_playlist_folder_from_track_data,
         )
-        if batch_id in download_batches and download_batches[batch_id].get("album_completion_only"):
-            effective_playlist_folder_mode, effective_playlist_name = False, batch_playlist_name
-        else:
-            effective_playlist_folder_mode, effective_playlist_name = resolve_playlist_folder_mode_for_batch(
-                db,
-                playlist_id=str(batch_playlist_id),
-                playlist_name=batch_playlist_name,
-                batch_playlist_folder_mode=batch_playlist_folder_mode,
-                profile_id=batch_profile_id,
-                source=batch_source,
-            )
+        effective_playlist_folder_mode, effective_playlist_name = resolve_playlist_folder_mode_for_batch(
+            db,
+            playlist_id=str(batch_playlist_id),
+            playlist_name=batch_playlist_name,
+            batch_playlist_folder_mode=batch_playlist_folder_mode,
+            profile_id=batch_profile_id,
+            source=batch_source,
+        )
         if effective_playlist_folder_mode and not batch_playlist_folder_mode:
             with tasks_lock:
                 if batch_id in download_batches:
@@ -1043,7 +1043,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             # Handle auto-initiated wishlist completion even when no missing tracks
             if is_auto_batch and playlist_id == 'wishlist':
                 logger.warning("[Auto-Wishlist] No missing tracks found - calling auto-completion handler to toggle cycle and reschedule")
-                deps.missing_download_executor.submit(deps.process_failed_tracks_to_wishlist_exact_with_auto_completion, batch_id)
+                # the pool thread starts with an empty context, so the batch
+                # owner's scope has to travel with the callable (#1199)
+                from core.library_scope import carrying_scope
+                deps.missing_download_executor.submit(
+                    carrying_scope(deps.process_failed_tracks_to_wishlist_exact_with_auto_completion),
+                    batch_id)
 
             # Organize-by-playlist with NOTHING to download (every track already
             # owned): the batch never enters the download/lifecycle path, so build
@@ -1091,7 +1096,6 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             batch_album_context = batch.get('album_context')
             batch_artist_context = batch.get('artist_context')
             batch_is_album = batch.get('is_album_download', False)
-            batch_album_completion_only = bool(batch.get('album_completion_only', False))
             batch_private_album_bundle = bool(batch.get('album_bundle_private_staging'))
             batch_playlist_folder_mode = batch.get('playlist_folder_mode', False)
             batch_playlist_name = batch.get('playlist_name', 'Unknown Playlist')
@@ -1182,8 +1186,6 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         def _dispatch_bundle_sources(sources):
             """Try an ordered segment. Return True only for a terminal result."""
             nonlocal _album_bundle_staged
-            if batch_album_completion_only:
-                return False
             for source in sources:
                 if _album_bundle_staged:
                     break
@@ -1241,9 +1243,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         scored_albums = []
         _soulseek_bundle_plugin = (
             _configured_bundle_plugin('soulseek')
-            if (_soulseek_bundle_index is not None
-                and not batch_private_album_bundle
-                and not batch_album_completion_only)
+            if _soulseek_bundle_index is not None and not batch_private_album_bundle
             else None
         )
         soulseek_is_source = (
@@ -1771,14 +1771,43 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                             _prov_si.get('playlist_name') or batch_playlist_name
                         )
 
+                from core.imports.upgrade_intent import (
+                    CONTEXT_KEY as _UPGRADE_INTENT_KEY,
+                    is_upgrade_intent,
+                    issue_upgrade_intent,
+                )
+                _upgrade_intent = track_info.pop(_UPGRADE_INTENT_KEY, None)
+                if (
+                    not is_upgrade_intent(_upgrade_intent)
+                    and playlist_id == 'wishlist'
+                    and _lib2_wishlist
+                ):
+                    _upgrade_source = track_info.get('source_info') or {}
+                    if isinstance(_upgrade_source, str):
+                        try:
+                            _upgrade_source = json.loads(_upgrade_source)
+                        except (TypeError, ValueError):
+                            _upgrade_source = {}
+                    if (
+                        isinstance(_upgrade_source, dict)
+                        and _upgrade_source.get('source') == 'library_v2'
+                        and _upgrade_source.get('upgrade_check') is True
+                        and _upgrade_source.get('lib2_track_id')
+                    ):
+                        _upgrade_intent = issue_upgrade_intent(
+                            _upgrade_source['lib2_track_id'], origin='wishlist')
+
                 download_tasks[task_id] = {
                     'status': 'pending', 'track_info': track_info,
+                    'profile_id': batch_profile_id,
                     'playlist_id': playlist_id, 'batch_id': batch_id,
                     'track_index': res['track_index'], 'retry_count': 0,
                     'cached_candidates': [], 'used_sources': set(),
                     'status_change_time': time.time(),
                     'metadata_enhanced': False
                 }
+                if is_upgrade_intent(_upgrade_intent):
+                    download_tasks[task_id][_UPGRADE_INTENT_KEY] = _upgrade_intent
                 download_batches[batch_id]['queue'].append(task_id)
 
         deps.download_monitor.start_monitoring(batch_id)

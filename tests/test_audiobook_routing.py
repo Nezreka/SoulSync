@@ -10,8 +10,10 @@ from database.music_database import MusicDatabase
 
 
 @pytest.fixture
-def db(tmp_path):
-    return MusicDatabase(str(tmp_path / "m.db"))
+def db(tmp_path, monkeypatch):
+    database = MusicDatabase(str(tmp_path / "m.db"))
+    monkeypatch.setattr(routing, '_database', lambda: database)
+    return database
 
 
 @pytest.fixture
@@ -336,6 +338,57 @@ def test_moved_albums_stay_owned_through_the_ledger(db, folders):
     routing.move_existing("Bobby & Max", apply=True)
     track, _ = db.check_track_exists("Fibis Ferienresort", "Bobby & Max", include_downloads=True)
     assert track is not None and track.file_path.startswith(str(books))
+
+
+def test_move_repoints_native_files_without_changing_identity(db, folders, monkeypatch):
+    from tests import lib2_seed
+
+    transfer, books = folders
+    monkeypatch.setattr(routing, '_database', lambda: db)
+    folder = _album(transfer, 'Bobby & Max', 'Folge 84', files=('01 - Episode.mp3',))
+    old = str(folder / '01 - Episode.mp3')
+    with db._get_connection() as conn:
+        tid = lib2_seed.track(conn, 'Bobby & Max', 'Folge 84', 'Episode', path=old)
+        fid = conn.execute('SELECT id FROM lib2_track_files WHERE track_id=?', (tid,)).fetchone()[0]
+        conn.commit()
+    _record_download(db, old, 'Episode', 'Bobby & Max')
+    db.record_manual_metadata_file(old)
+    result = routing.move_existing('Bobby & Max', apply=True)
+    assert result['moved'] == 1 and result['failed'] == 0
+    expected = str(books / 'Bobby & Max' / 'Folge 84' / '01 - Episode.mp3')
+    with db._get_connection() as conn:
+        row = conn.execute('SELECT track_id,path FROM lib2_track_files WHERE id=?', (fid,)).fetchone()
+        assert tuple(row) == (tid, expected)
+        assert conn.execute('SELECT file_path FROM track_downloads').fetchone()[0] == expected
+    assert db.manual_path_key(expected) in db.manual_path_keys()
+
+
+def test_routed_ledger_does_not_claim_another_librarys_file(db, folders, monkeypatch):
+    from tests import lib2_seed
+
+    _, books = folders
+    routing.add_route('Bobby & Max', db)
+    path = books / 'episode.mp3'
+    path.write_bytes(b'x')
+    _record_download(db, path, 'Episode', 'Bobby & Max')
+    with db._get_connection() as conn:
+        tid = lib2_seed.track(conn, 'Bobby & Max', 'Folge 84', 'Episode', path=str(path))
+        conn.execute('UPDATE lib2_track_files SET owner_profile_id=7 WHERE track_id=?', (tid,))
+        conn.commit()
+    monkeypatch.setattr('core.library2.sql_util.ambient_scope', lambda: 'shared')
+    assert db._routed_download_match('Episode', 'Bobby & Max', 0.8) is None
+
+
+def test_move_rolls_back_when_the_catalogue_cannot_follow(db, folders, monkeypatch):
+    transfer, books = folders
+    folder = _album(transfer, 'Bobby & Max', 'Folge 84')
+    def unavailable(*args):
+        raise RuntimeError('catalogue unavailable')
+    monkeypatch.setattr(routing, '_repoint_moved_album', unavailable)
+    outcome = routing.move_existing('Bobby & Max', apply=True)
+    assert outcome['moved'] == 0 and outcome['failed'] == 1
+    assert folder.is_dir()
+    assert not (books / 'Bobby & Max' / 'Folge 84').exists()
 
 
 def test_move_api(db, folders, monkeypatch):

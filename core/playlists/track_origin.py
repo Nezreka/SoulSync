@@ -20,11 +20,11 @@ from utils.logging_config import get_logger
 
 logger = get_logger("playlists.track_origin")
 
-# the services a track can carry an id from, and the library column each one's
-# enrichment worker fills
+# the services a track can carry an id from, and where the Library v2 catalogue
+# keeps each one's id (spotify has its own column, the rest live in external_ids)
 LIBRARY_ID_COLUMNS = {
-    'spotify': 'spotify_track_id',
-    'deezer': 'deezer_id',
+    'spotify': 't.spotify_id',
+    'deezer': "json_extract(t.external_ids, '$.deezer')",
 }
 ORIGIN_SOURCES = frozenset(LIBRARY_ID_COLUMNS) | {'spotify_public', 'itunes', 'tidal', 'qobuz'}
 MAX_ORIGIN_ID_LENGTH = 100
@@ -58,37 +58,31 @@ def _extra(track: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def library_ids(db: Any, title: str, artist: str) -> Dict[str, str]:
-    """the ids the library has for this song, by its normalised title and
-    artist. empty when the library doesn't have it."""
+    """the ids the library has for this song, by its title and the artist the
+    album or the track itself is credited to. empty when the library doesn't
+    have it."""
     found: Dict[str, str] = {}
     try:
-        title_norm = db._normalize_for_comparison(title or '')
-        artist_norm = db._normalize_for_comparison(artist or '')
-        if not title_norm or not artist_norm:
+        from core.library2.importer import normalize_name
+
+        title = (title or '').strip()
+        artist_key = normalize_name(artist or '')
+        if not title or not artist_key:
             return {}
         with db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(tracks)")
-            cols = {r[1] for r in cursor.fetchall()}
-            wanted = [c for c in LIBRARY_ID_COLUMNS.values() if c in cols]
-            if not wanted or 'title_norm' not in cols:
-                return {}
-            artist_clause = "t.artist_id IN (SELECT id FROM artists WHERE name_norm = ?)"
-            params = [title_norm, artist_norm]
-            if 'track_artist_norm' in cols:
-                artist_clause = f"(t.track_artist_norm = ? OR {artist_clause})"
-                params = [title_norm, artist_norm, artist_norm]
-            cursor.execute(
-                f"SELECT {', '.join('t.' + c for c in wanted)} FROM tracks t "
-                f"WHERE t.title_norm = ? AND {artist_clause} LIMIT 5",
-                params,
-            )
-            for row in cursor.fetchall():
-                for service, column in LIBRARY_ID_COLUMNS.items():
-                    if column in wanted and service not in found:
-                        value = row[column]
-                        if value:
-                            found[service] = str(value)
+            rows = conn.execute(
+                f"SELECT {', '.join(LIBRARY_ID_COLUMNS.values())} FROM lib2_tracks t "
+                "WHERE LOWER(t.title) = LOWER(?) AND ("
+                " EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_artists ar ON ar.id = al.primary_artist_id"
+                "          WHERE al.id = t.album_id AND ar.name_key = ?)"
+                " OR EXISTS (SELECT 1 FROM lib2_track_artists ta JOIN lib2_artists ar ON ar.id = ta.artist_id"
+                "             WHERE ta.track_id = t.id AND ar.name_key = ?)) LIMIT 5",
+                (title, artist_key, artist_key),
+            ).fetchall()
+        for row in rows:
+            for service, value in zip(LIBRARY_ID_COLUMNS, row):
+                if value and service not in found:
+                    found[service] = str(value)
     except Exception as e:  # noqa: BLE001 - no ids just means identify searches
         logger.debug("library id lookup failed for %s - %s: %s", artist, title, e)
     return found

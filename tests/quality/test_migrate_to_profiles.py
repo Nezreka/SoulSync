@@ -302,14 +302,14 @@ def test_migration_backfills_existing_library_tracks(db):
     try:
         conn.execute("DELETE FROM metadata WHERE key=?", (_MIGRATION_FLAG_KEY,))
         conn.execute(
-            "INSERT INTO artists (id, name) VALUES (1, 'Artist')"
+            "INSERT INTO lib2_artists (id, name) VALUES (1, 'Artist')"
         )
         conn.execute(
-            "INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'Album')"
+            "INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'Album')"
         )
         conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, quality_profile_id) "
-            "VALUES (1, 1, 1, 'Track', NULL)"
+            "INSERT INTO lib2_tracks (id, album_id, title, quality_profile_id) "
+            "VALUES (1, 1, 'Track', NULL)"
         )
         conn.commit()
     finally:
@@ -319,7 +319,7 @@ def test_migration_backfills_existing_library_tracks(db):
     try:
         ran = materialize_default_profile_and_backfill(db, conn)
         assert ran is True
-        row = conn.execute("SELECT quality_profile_id FROM tracks WHERE id=1").fetchone()
+        row = conn.execute("SELECT quality_profile_id FROM lib2_tracks WHERE id=1").fetchone()
         assert row["quality_profile_id"] == 1
     finally:
         conn.close()

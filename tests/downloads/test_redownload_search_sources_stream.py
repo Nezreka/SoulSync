@@ -84,6 +84,10 @@ def client(monkeypatch):
     monkeypatch.setattr(validation, 'download_orchestrator', _Orch())
     db = _Db(blacklisted={('mallory', 'Mazzy Star/Bad/04 - Fade Into You.flac')})
     monkeypatch.setattr(web_server, 'get_database', lambda *a, **k: db)
+    # this branch holds catalogue POSTs while a Library v2 upgrade runs; the
+    # stand-in database has no catalogue to ask
+    from core.library2 import migration_gate
+    monkeypatch.setattr(migration_gate, 'migration_required', lambda db: False)
     web_server.app.config['TESTING'] = True
     return web_server.app.test_client()
 

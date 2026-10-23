@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as LibraryV2RouteImport } from './routes/library-v2'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as WishlistRouteRouteImport } from './routes/wishlist/route'
 import { Route as WatchlistRouteRouteImport } from './routes/watchlist/route'
@@ -45,6 +46,11 @@ import { Route as AudiobooksNarratorNameRouteImport } from './routes/audiobooks/
 import { Route as AudiobooksAuthorNameRouteImport } from './routes/audiobooks/author/$name'
 import { Route as ArtistDetailSourceIdRouteImport } from './routes/artist-detail/$source/$id'
 
+const LibraryV2Route = LibraryV2RouteImport.update({
+  id: '/library-v2',
+  path: '/library-v2',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
   path: '/$',
@@ -242,6 +248,7 @@ export interface FileRoutesByFullPath {
   '/watchlist': typeof WatchlistRouteRoute
   '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
+  '/library-v2': typeof LibraryV2Route
   '/audiobooks/$asin': typeof AudiobooksAsinRoute
   '/audiobooks/library': typeof AudiobooksLibraryRoute
   '/audiobooks/wishlist': typeof AudiobooksWishlistRoute
@@ -276,6 +283,7 @@ export interface FileRoutesByTo {
   '/watchlist': typeof WatchlistRouteRoute
   '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
+  '/library-v2': typeof LibraryV2Route
   '/audiobooks/$asin': typeof AudiobooksAsinRoute
   '/audiobooks/library': typeof AudiobooksLibraryRoute
   '/audiobooks/wishlist': typeof AudiobooksWishlistRoute
@@ -314,6 +322,7 @@ export interface FileRoutesById {
   '/watchlist': typeof WatchlistRouteRoute
   '/wishlist': typeof WishlistRouteRoute
   '/$': typeof SplatRoute
+  '/library-v2': typeof LibraryV2Route
   '/audiobooks/$asin': typeof AudiobooksAsinRoute
   '/audiobooks/library': typeof AudiobooksLibraryRoute
   '/audiobooks/wishlist': typeof AudiobooksWishlistRoute
@@ -353,6 +362,7 @@ export interface FileRouteTypes {
     | '/watchlist'
     | '/wishlist'
     | '/$'
+    | '/library-v2'
     | '/audiobooks/$asin'
     | '/audiobooks/library'
     | '/audiobooks/wishlist'
@@ -387,6 +397,7 @@ export interface FileRouteTypes {
     | '/watchlist'
     | '/wishlist'
     | '/$'
+    | '/library-v2'
     | '/audiobooks/$asin'
     | '/audiobooks/library'
     | '/audiobooks/wishlist'
@@ -424,6 +435,7 @@ export interface FileRouteTypes {
     | '/watchlist'
     | '/wishlist'
     | '/$'
+    | '/library-v2'
     | '/audiobooks/$asin'
     | '/audiobooks/library'
     | '/audiobooks/wishlist'
@@ -462,12 +474,20 @@ export interface RootRouteChildren {
   WatchlistRouteRoute: typeof WatchlistRouteRoute
   WishlistRouteRoute: typeof WishlistRouteRoute
   SplatRoute: typeof SplatRoute
+  LibraryV2Route: typeof LibraryV2Route
   LabelDetailIdRoute: typeof LabelDetailIdRoute
   ArtistDetailSourceIdRoute: typeof ArtistDetailSourceIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/library-v2': {
+      id: '/library-v2'
+      path: '/library-v2'
+      fullPath: '/library-v2'
+      preLoaderRoute: typeof LibraryV2RouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$': {
       id: '/$'
       path: '/$'
@@ -793,6 +813,7 @@ const rootRouteChildren: RootRouteChildren = {
   WatchlistRouteRoute: WatchlistRouteRoute,
   WishlistRouteRoute: WishlistRouteRoute,
   SplatRoute: SplatRoute,
+  LibraryV2Route: LibraryV2Route,
   LabelDetailIdRoute: LabelDetailIdRoute,
   ArtistDetailSourceIdRoute: ArtistDetailSourceIdRoute,
 }

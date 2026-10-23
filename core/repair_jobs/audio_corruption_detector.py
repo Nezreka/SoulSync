@@ -39,7 +39,7 @@ from typing import Dict, Iterable, Optional, Tuple
 
 from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.audio_corruption")
@@ -121,6 +121,20 @@ def _file_identity(path: str):
     except OSError:
         return None
     return (stat.st_size, stat.st_mtime_ns)
+
+
+def _whole_library(context: JobContext) -> bool:
+    """True when this run saw every library file: no artist/file scope and no
+    one-library scope (#1199). Only then is a remembered file the run did not
+    see one that left the library."""
+    from core.repair_jobs.base import get_scope_file_paths
+    if get_scope_file_paths(context) is not None:
+        return False
+    try:
+        from core.library2.sql_util import owner_clause
+        return not owner_clause(column="f.owner_profile_id")
+    except Exception:  # noqa: BLE001 - unknown scope: keep the memory
+        return False
 
 
 def _decoder_available() -> bool:
@@ -244,6 +258,7 @@ class AudioCorruptionDetectorJob(RepairJob):
     }
     setting_options: dict = {}
     auto_fix = False
+    supports_file_scope = True
 
     def _setting_int(self, context: JobContext, key: str, default: int) -> int:
         """A numeric setting. The Tools page saves job settings as one dict under
@@ -274,26 +289,35 @@ class AudioCorruptionDetectorJob(RepairJob):
         cutoff_mtime = (time.time() - within_days * 86400) if within_days > 0 else None
 
         rows = []
-        conn = None
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, al.title AS album_title,
-                       t.file_path
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-            """)
-            rows = [dict(r) for r in cursor.fetchall()]
+            from core.library2.maintenance_subjects import active_file_subjects
+
+            for subject in scoped_file_subjects(context, active_file_subjects(
+                context.db, context.config_manager,
+            )):
+                rows.append({
+                    'id': f"lib2:{subject['track_id']}",
+                    'title': subject['title'],
+                    'artist_name': subject['artist_name'],
+                    'album_title': subject['album_title'],
+                    'file_path': str(subject["path"]),
+                    'subject': subject,
+                })
         except Exception as e:
-            logger.error("[Corrupt File Detector] error reading tracks: %s", e, exc_info=True)
-            result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
+            logger.warning("[Corrupt File Detector] V2 subject enumeration failed: %s", e)
+        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+        for file_path in filesystem_audio_files(
+            context, extensions=_CORRUPT_CHECK_EXTS,
+        ):
+            rows.append({
+                'id': None,
+                'title': os.path.splitext(os.path.basename(file_path))[0],
+                'artist_name': None,
+                'album_title': os.path.basename(os.path.dirname(file_path)),
+                'file_path': file_path,
+                'subject': None,
+            })
 
         # Narrow to FLAC up front so progress reflects the real work-list.
         rows = [r for r in rows
@@ -399,7 +423,10 @@ class AudioCorruptionDetectorJob(RepairJob):
         # have left the library. Not when paths failed to resolve: an unmounted
         # library "sees" nothing, and forgetting everything would cost a full
         # re-decode of a library that never changed.
-        if memory and not stopped and cutoff_mtime is None and unresolved * 100 <= total:
+        # Nor when the run saw one library or one artist: the files it did not
+        # see are still there.
+        if (memory and not stopped and cutoff_mtime is None and unresolved * 100 <= total
+                and _whole_library(context)):
             memory.prune(seen_paths, remembered_rows)
         if stopped:
             return result
@@ -480,27 +507,42 @@ class AudioCorruptionDetectorJob(RepairJob):
 
         if context.create_finding:
             try:
+                subject = row.get('subject')
+                finding_details = {
+                    'track_id': row['id'],
+                    'title': row['title'],
+                    'artist': row['artist_name'],
+                    'album': row['album_title'],
+                    'reason': reason,
+                    'original_path': row['file_path'],
+                }
+                if subject:
+                    from core.library2.maintenance_subjects import subject_details
+
+                    finding_details.update(subject_details(subject))
                 inserted = context.create_finding(
                     job_id=self.job_id,
                     finding_type='corrupt_audio',
                     severity='error',
-                    entity_type='track',
-                    entity_id=str(row['id']),
+                    entity_type='track' if subject else 'file',
+                    entity_id=str(row['id']) if row['id'] is not None else None,
                     file_path=row['file_path'],
                     title=f'Corrupt file: {artist} - {title}',
+                    # The walk reaches audio the catalogue does not know, and
+                    # those findings have no track to put back on the
+                    # wishlist. Promising a re-download there was a promise
+                    # the fix could not keep.
                     description=(
                         f'"{title}" by {artist} failed a decode test '
                         f'({reason}). The audio is damaged and can\'t be repaired by '
                         're-tagging — approve to move it to the deleted-files folder and '
-                        're-download the real version.'),
-                    details={
-                        'track_id': row['id'],
-                        'title': row['title'],
-                        'artist': row['artist_name'],
-                        'album': row['album_title'],
-                        'reason': reason,
-                        'original_path': row['file_path'],
-                    })
+                        're-download the real version.'
+                        if subject else
+                        f'This file failed a decode test ({reason}). The audio is '
+                        'damaged and can\'t be repaired by re-tagging. It is not in '
+                        'your library, so approve to move it to the deleted-files '
+                        'folder — nothing will be queued to replace it.'),
+                    details=finding_details)
                 if inserted:
                     result.findings_created += 1
                 else:
@@ -512,18 +554,23 @@ class AudioCorruptionDetectorJob(RepairJob):
         return True
 
     def estimate_scope(self, context: JobContext) -> int:
-        conn = None
+        count = 0
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM tracks
-                WHERE file_path IS NOT NULL AND lower(file_path) LIKE '%.flac'
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
-        except Exception:
-            return 0
-        finally:
-            if conn:
-                conn.close()
+            from core.library2.maintenance_subjects import active_file_subjects
+
+            count += sum(
+                1 for subject in scoped_file_subjects(context, active_file_subjects(
+                    context.db, context.config_manager,
+                )) if str(subject.get("path") or "").lower().endswith(".flac")
+            )
+        except Exception as exc:
+            logger.debug("Could not estimate indexed FLAC scope: %s", exc)
+        try:
+            from core.repair_jobs.filesystem_subjects import filesystem_audio_files
+
+            count += len(filesystem_audio_files(
+                context, extensions=_CORRUPT_CHECK_EXTS,
+            ))
+        except Exception as exc:
+            logger.debug("Could not estimate filesystem FLAC scope: %s", exc)
+        return count

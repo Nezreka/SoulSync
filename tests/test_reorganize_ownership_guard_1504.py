@@ -31,17 +31,21 @@ def profiles():
     db = web_server.get_database()
     sam = db.create_profile(name=f'sam_reorg_{os.urandom(3).hex()}')
     alex = db.create_profile(name=f'alex_reorg_{os.urandom(3).hex()}')
-    # a real album row so the enqueue endpoint gets past its 404 check
-    # (neither artists.id nor albums.id auto-increments — set both explicitly)
-    artist_pk = f'guard_artist_{os.urandom(4).hex()}'
-    album_pk = f'guard_album_{os.urandom(4).hex()}'
+    # a real album row so the enqueue endpoint gets past its 404 check.
+    # Ours: a Library v2 album -- the catalogue the endpoint reads.
     conn = sqlite3.connect(os.environ['DATABASE_PATH'])
     try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (?, 'Guard Artist')", (artist_pk,))
+        artist_pk = conn.execute(
+            "INSERT INTO lib2_artists (name) VALUES ('Guard Artist')").lastrowid
+        album_pk = conn.execute(
+            "INSERT INTO lib2_albums (primary_artist_id, title) VALUES (?, 'Guard Album')",
+            (artist_pk,)).lastrowid
+        track_pk = conn.execute(
+            "INSERT INTO lib2_tracks (album_id, title) VALUES (?, 'Guard Track')",
+            (album_pk,)).lastrowid
         conn.execute(
-            "INSERT INTO albums (id, title, artist_id, owner_profile_id) VALUES (?, 'Guard Album', ?, ?)",
-            (album_pk, artist_pk, sam),
-        )
+            "INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+            (track_pk, f'/guard/{os.urandom(4).hex()}.flac'))
         conn.commit()
     finally:
         conn.close()

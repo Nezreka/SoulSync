@@ -676,23 +676,29 @@ class SpotifyClient:
 
     @property
     def _fallback_source(self) -> str:
-        """Get configured primary metadata source for internal fallback routing."""
+        """The source ``_fallback`` really is. Callers label fallback results
+        with it, so it never says 'spotify': with the primary source stored as
+        'spotify' the fallback is iTunes, and that label put numeric iTunes ids
+        into Spotify slots."""
         try:
-            return config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
+            configured = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
         except Exception:
             return 'deezer'
+        if configured == 'deezer':
+            return 'deezer'
+        # Discogs only with a token configured
+        if configured == 'discogs' and config_manager.get('discogs.token', ''):
+            return 'discogs'
+        return 'itunes'
 
     @property
     def _fallback(self):
         """Get the active fallback metadata client based on settings"""
-        if self._fallback_source == 'deezer':
+        source = self._fallback_source
+        if source == 'deezer':
             return self._deezer
-        if self._fallback_source == 'discogs':
-            # Only use Discogs if token is configured
-            token = config_manager.get('discogs.token', '')
-            if token:
-                return self._discogs
-            return self._itunes  # Fall back to iTunes if no Discogs token
+        if source == 'discogs':
+            return self._discogs
         return self._itunes
 
     def _free_selected(self) -> bool:

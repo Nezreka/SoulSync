@@ -47,7 +47,7 @@ def verified_listing(obj, name: str) -> list:
 
 
 class DatabaseUpdateWorker:
-    """Worker for updating SoulSync database with media server library data."""
+    """Map media-server identities onto imported Library-v2 rows."""
     
     def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex", force_sequential: bool = False, owner_profile_id=None):
         # Force sequential processing for web server mode to avoid threading issues
@@ -98,6 +98,7 @@ class DatabaseUpdateWorker:
         # type. The superseded-row pass at the end folds a row the server no
         # longer lists into the live row for the same file (#1257).
         self._seen_track_ids = set()
+        self._seen_credit_artist_ids = set()
         self._trashed_skipped = 0
 
         # scopes the deep scan asked about and got no answer for: an artist
@@ -151,31 +152,19 @@ class DatabaseUpdateWorker:
         attrib = getattr(data, 'attrib', None)
         return bool(attrib and attrib.get('deletedAt'))
 
-    def _absorb_superseded_tracks(self):
-        """fold rows this run did not see into the live row for the same file.
+    def _log_trashed_skipped(self):
+        """Say how many trashed server items this run ignored.
 
-        a reorganize repoints a row at the new path; the server then trashes
-        that item and mints a new one for the same file, so the next scan
-        inserts a second row and the album lists every track twice. only the
-        deep scan removed the old row, and its 50% safety skipped exactly the
-        libraries that had this the worst. runs after every scan, over the
-        albums this run touched, and never touches a row the server still
-        lists."""
-        # getattr: tests build workers through __new__ without the run state
-        touched = getattr(self, '_touched_album_ids', None)
-        seen = getattr(self, '_seen_track_ids', None)
-        if not self.database or not touched or not seen:
-            return 0
-        try:
-            absorbed = self.database.absorb_superseded_tracks(touched, seen, self.server_type)
-        except Exception as e:
-            logger.warning(f"Superseded track pass failed (non-fatal): {e}")
-            return 0
-        if absorbed:
-            logger.info(f"Folded {absorbed} superseded track rows into their live rows")
+        Upstream pairs this with a pass that folds a re-ided file's old row
+        into its live one (#1257). That pass is a legacy-mirror repair: it
+        rewrites `tracks` rows keyed by server id, and one file appearing
+        twice is a shape this catalogue cannot take — a file is a
+        lib2_track_files row, its identity is the path and content hash, and
+        a server re-id moves a mapping in lib2_media_server_mappings rather
+        than minting a second track. So only the reporting half applies here.
+        """
         if getattr(self, '_trashed_skipped', 0):
             logger.info(f"Skipped {self._trashed_skipped} trashed {self.server_type} items")
-        return absorbed
 
     def _emit_signal(self, signal_name: str, *args):
         """Emit a signal through the callback registry."""
@@ -186,29 +175,27 @@ class DatabaseUpdateWorker:
                 logger.error(f"Error in callback for {signal_name}: {e}")
 
     def _emit_finished(self, *args):
-        """Run the post-scan hook (auto-reconcile) as the final phase, THEN
-        emit 'finished'.
+        """Run the post-scan hook, THEN announce completion.
 
-        Running the hook before 'finished' keeps the scan's status at
-        'running' through the reconcile, so every caller (automations that
-        poll for completion, the dashboard card, the Tools page) treats it as
-        a normal scan phase and waits for it — rather than seeing 'finished'
-        and missing the tail. Best-effort: a hook failure never blocks the
-        completion signal.
+        The scan itself stays mapping-only: it never creates catalogue rows or
+        moves file ownership. The hook is the tail that reads the TAGS of the
+        files this run newly mapped and gap-fills provider ids the catalogue
+        does not have yet — no rows created, nothing moved, so it stays inside
+        that rule.
+
+        Order matters. While the hook runs the scan still reads as `running`,
+        so automations polling for completion, the dashboard card and the Tools
+        page all treat it as a normal phase and wait for it, instead of seeing
+        `finished` and walking away mid-reconcile.
+
+        Best-effort: a gap-fill is a nice-to-have, a scan finishing is not, so
+        a broken hook never swallows the completion signal.
         """
         if self.post_scan_hook:
             try:
                 self.post_scan_hook(self)
             except Exception as e:
                 logger.warning(f"post-scan hook failed (non-fatal): {e}")
-        # the scan writes artists and albums without their normalized text;
-        # fill it now so the first ownership check after a scan is the fast one
-        try:
-            db = getattr(self, 'database', None)
-            if db is not None and hasattr(db, 'ensure_norm_backfilled'):
-                db.ensure_norm_backfilled()
-        except Exception as e:
-            logger.warning(f"norm backfill after scan failed (non-fatal): {e}")
         # a scan reshapes the library, so the planner's picture of it goes
         # stale. it only ever got refreshed after a one-time backfill, so new
         # indexes went unanalyzed and every title search walked the whole
@@ -243,18 +230,56 @@ class DatabaseUpdateWorker:
             except Exception as e:
                 logger.warning(f"Could not clear {self.server_type} cache on stop: {e}")
     
+    def _can_detach_server_mappings(self, candidate_count=None, *, identity_repair_ok=True):
+        """Keep mappings when a stopped scan or transient server inventory is unsafe.
+
+        A rescan observed anywhere in this run invalidates its inventory even
+        if the server finishes before removal. Unknown scan status retains the
+        existing allowance for a few stale tracks, but never clears a library.
+        """
+        if self.should_stop or not identity_repair_ok:
+            return False
+        if getattr(self, '_detach_blocked_by_rescan', False):
+            return False
+        if not hasattr(self.media_client, 'is_library_scanning'):
+            return True
+        try:
+            scanning = bool(self.media_client.is_library_scanning())
+        except Exception:
+            scanning = None
+        if scanning:
+            self._detach_blocked_by_rescan = True
+        safe = (scanning is False or
+                (scanning is None and candidate_count is not None
+                 and candidate_count <= _RESCAN_UNKNOWN_STALE_LIMIT))
+        if not safe:
+            logger.warning(
+                "Keeping %s server mappings: its scan is active or its scan status is unknown",
+                self.server_type.capitalize(),
+            )
+        return safe
+
     def run(self):
         """Main worker thread execution"""
         try:
+            self._detach_blocked_by_rescan = False
             # Initialize database
             self.database = get_database(self.database_path)
+            from core.library2.migration_gate import migration_required
+            if migration_required(self.database):
+                self._emit_signal('error', "Library upgrade in progress; media scan deferred")
+                return
+            self._can_detach_server_mappings(0)
             # mounts and library paths may have changed since the last scan
             from core.library.server_paths import reset as _reset_server_paths
             _reset_server_paths()
 
             if self.full_refresh:
-                logger.info(f"Performing full database refresh for {self.server_type} - clearing existing {self.server_type} data")
-                self.database.clear_server_data(self.server_type, owner_profile_id=self.owner_profile_id)
+                logger.info(
+                    "Performing full database refresh for %s - existing mappings stay "
+                    "live until the server read is verified",
+                    self.server_type,
+                )
 
                 # The client names its preparing phase and reports progress
                 # (Jellyfin: cache prep; Navidrome: connecting).
@@ -281,23 +306,26 @@ class DatabaseUpdateWorker:
                     # failed fetch and must still abort — never delete a
                     # library's rows because the API had a bad minute.
                     if not getattr(self, '_artists_fetch_verified', False):
-                        logger.error(
-                            "Full refresh aborted: artists fetch UNVERIFIED for %s "
-                            "(connection/API failure, last API error: %r) — stale "
-                            "removal skipped as a safety measure",
-                            self.server_type,
-                            getattr(self.media_client, 'last_api_error', None))
-                        self._emit_signal('error', f"No artists found in {self.server_type} library or connection failed")
+                        self._emit_signal(
+                            'error',
+                            f"Could not read {self.server_type}; existing server mappings were kept",
+                        )
                         return
-                    logger.info(
-                        "Full refresh: %s library verified EMPTY — continuing to "
-                        "removal so stale artists from the previous library are "
-                        "cleared", self.server_type)
-                    self._emit_signal('phase_changed',
-                                      "Library is empty — removing stale data...")
-                    artists_to_process = []
-                else:
-                    logger.info(f"Full refresh: Found {len(artists_to_process)} artists in {self.server_type} library")
+                    # A real empty library is destructive too: confirm it once
+                    # more before detaching every recognition mapping.
+                    self._emit_signal(
+                        'phase_changed',
+                        f"{self.server_type.title()} returned no artists — verifying...",
+                    )
+                    artists_to_process = self._get_all_artists()
+                    if (not artists_to_process
+                            and not getattr(self, '_artists_fetch_verified', False)):
+                        self._emit_signal(
+                            'error',
+                            f"Could not verify empty {self.server_type} library; existing mappings were kept",
+                        )
+                        return
+                logger.info(f"Full refresh: Found {len(artists_to_process)} artists in {self.server_type} library")
             else:
                 logger.info("Performing smart incremental update - checking recently added content")
                 # For incremental, use smart recent-first approach
@@ -360,15 +388,23 @@ class DatabaseUpdateWorker:
                 except Exception as e:
                     logger.warning(f"Could not clear {self.server_type} cache: {e}")
 
-            self._post_scan()
+            identity_repair_ok = self._post_scan()
 
-            self._absorb_superseded_tracks()
+            if (self.full_refresh and not artists_to_process
+                    and getattr(self, '_artists_fetch_verified', False)
+                    and self._can_detach_server_mappings(identity_repair_ok=identity_repair_ok)):
+                logger.info("Full refresh: %s library verified empty twice; detaching mappings",
+                            self.server_type)
+                self.database.clear_server_data(
+                    self.server_type, owner_profile_id=self.owner_profile_id)
+
+            self._log_trashed_skipped()
 
             # Detect and remove content deleted from the media server
             # Only run on full refreshes — fetching the entire catalog on every
             # incremental scan is too expensive (especially for Plex) and unnecessary
             # since incremental scans add content, they don't detect removals.
-            if self.full_refresh and self.database:
+            if self.full_refresh and self.database and identity_repair_ok:
                 try:
                     removal_results = self._detect_and_remove_stale_content()
                     if removal_results:
@@ -486,11 +522,16 @@ class DatabaseUpdateWorker:
         return self._post_scan()
 
     def run_deep_scan(self):
-        """Deep library scan: fetch ALL content, insert only NEW tracks, remove STALE tracks.
-        Never calls clear_server_data() — preserves all enrichment data."""
+        """Deep scan: map all known content and detach stale server identities."""
         try:
+            self._detach_blocked_by_rescan = False
             # Initialize database
             self.database = get_database(self.database_path)
+            from core.library2.migration_gate import migration_required
+            if migration_required(self.database):
+                self._emit_signal('error', "Library upgrade in progress; media scan deferred")
+                return
+            self._can_detach_server_mappings(0)
             # mounts and library paths may have changed since the last scan
             from core.library.server_paths import reset as _reset_server_paths
             _reset_server_paths()
@@ -551,14 +592,13 @@ class DatabaseUpdateWorker:
 
             identity_repair_ok = self._repair_navidrome_identities()
 
-            # superseded rows go first: they are certain, and they must not
-            # count toward the 50% safety below (a reorganized library is
-            # nearly half superseded rows, which is what kept tripping it)
-            self._absorb_superseded_tracks()
+            self._log_trashed_skipped()
 
             # Phase 3: Stale track removal
             self._emit_signal('phase_changed', "Deep scan: Checking for stale tracks...")
-            db_track_ids = self.database.get_all_track_ids_for_server(self.server_type, owner_profile_id=self.owner_profile_id)
+            # the library this scan is reading, not every library (#1199)
+            db_track_ids = self.database.get_all_track_ids_for_server(
+                self.server_type, owner_profile_id=self.owner_profile_id)
             stale = db_track_ids - seen_track_ids
             stale_removed = 0
 
@@ -593,37 +633,11 @@ class DatabaseUpdateWorker:
                         self._emit_signal('phase_changed',
                                           f"Deep scan: {len(kept)} track(s) kept, their listing failed this run")
                     stale -= fenced
-            # The media server answering is not the same as the media server
-            # being DONE: while the server is mid-rescan its answers can be
-            # HTTP 200 with transiently incomplete listings. Every one of
-            # those looks "fully trusted" (no failures recorded), so the 50%
-            # guard is bypassed and live tracks get deleted as stale. Never
-            # remove on a scan that ran during a server-side rescan.
-            # Applies to every server type whose client implements
-            # is_library_scanning() (Plex, Jellyfin, Navidrome, SoulSync) — the probe
-            # is consulted, not the server_type string.
-            if stale and hasattr(self.media_client, "is_library_scanning"):
-                try:
-                    _server_scanning: Optional[bool] = bool(
-                        self.media_client.is_library_scanning())
-                except Exception:
-                    _server_scanning = None
-                # Fail closed: a probe that raises leaves the scan state
-                # unknown, and unknown must not green-light a mass deletion.
-                _skip_for_rescan = (
-                    _server_scanning is True
-                    or (_server_scanning is None
-                        and len(stale) > _RESCAN_UNKNOWN_STALE_LIMIT)
-                )
-                if _skip_for_rescan:
-                    logger.warning(
-                        "Skipping stale removal: %s is running its own library "
-                        "scan — its listings are transiently incomplete, so %d unseen "
-                        "track(s) are unscanned, not gone",
-                        self.server_type.capitalize(), len(stale))
-                    self._emit_signal('phase_changed',
-                                      "Deep scan: media server is rescanning, keeping every track")
-                    stale = set()
+            if stale and not self._can_detach_server_mappings(
+                    len(stale), identity_repair_ok=identity_repair_ok):
+                self._emit_signal('phase_changed',
+                                  "Deep scan: media server scan is not trusted, keeping every track")
+                stale = set()
             if stale:
                 # A fully-trusted scan may exceed the 50% threshold: the server
                 # answered (verified fetch), every artist processed cleanly, and
@@ -643,7 +657,19 @@ class DatabaseUpdateWorker:
                         logger.info(f"Deep scan: removing {len(stale)}/{len(db_track_ids)} tracks — allowed because "
                                     f"the scan is fully trusted (server answered, no per-artist failures, not stopped)")
                     logger.info(f"Deep scan: Removing {len(stale)} stale tracks from database")
-                    stale_removed = self.database.delete_stale_tracks(stale, self.server_type)
+                    stale_removed = self.database.delete_stale_tracks(
+                        stale, self.server_type,
+                        owner_profile_id=self.owner_profile_id)
+
+            if not artists and getattr(self, '_artists_fetch_verified', False):
+                if self._can_detach_server_mappings(identity_repair_ok=identity_repair_ok):
+                    self.database.clear_server_data(
+                        self.server_type, owner_profile_id=self.owner_profile_id)
+                else:
+                    logger.warning(
+                        "Skipping empty-library clear: %s scan is not trusted; keeping existing mappings",
+                        self.server_type.capitalize(),
+                    )
 
             # Phase 4: Cleanup
             self._emit_signal('phase_changed', "Deep scan: Cleaning up orphaned records...")
@@ -1240,7 +1266,7 @@ class DatabaseUpdateWorker:
                     artist_name = getattr(artist, 'title', 'Unknown Artist')
                     
                     # Insert/update the artist
-                    artist_success = self.database.insert_or_update_media_artist(artist, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
+                    artist_success = self.database.insert_or_update_media_artist(artist, server_source=self.server_type)
                     if artist_success:
                         total_processed_artists += 1
                         self._touched_artist_ids.add(self._library_artist_id(artist_id))
@@ -1258,7 +1284,7 @@ class DatabaseUpdateWorker:
                                 album = album_tracks[0].album()  # Get album object
                                 if album:
                                     # Insert/update album
-                                    album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
+                                    album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type)
                                     if album_success:
                                         total_processed_albums += 1
                                         self._touched_album_ids.add(str(album_id))
@@ -1273,9 +1299,12 @@ class DatabaseUpdateWorker:
 
                                         try:
                                             self._seen_track_ids.add(str(track.ratingKey))
-                                            track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
+                                            track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type)
                                             if track_success:
                                                 total_processed_tracks += 1
+                                                # Newly MAPPED, not newly created: the row the
+                                                # library just connected to the server. The
+                                                # post-scan reconcile reads exactly these.
                                                 if track_success == 'inserted':
                                                     self._new_track_ids.add(str(track.ratingKey))
                                                 logger.debug(f"Processed new track: {track.title}")
@@ -1321,7 +1350,7 @@ class DatabaseUpdateWorker:
                     track_id = str(track.ratingKey)
                     
                     # Get current data from database
-                    db_track = self.database.get_track_by_id(track_id)
+                    db_track = self.database.get_track_by_server_id(track_id, self.server_type)
                     if not db_track:
                         continue  # Track doesn't exist in DB, not a metadata change
                     
@@ -1360,8 +1389,12 @@ class DatabaseUpdateWorker:
             return False  # Assume no changes if we can't check
     
     def _library_artist_id(self, artist_id):
-        from core.library_scope import library_artist_id
-        return library_artist_id(artist_id, self.server_type, self.owner_profile_id)
+        # Library v2 stores the server's native id: an own library's rows are
+        # told apart by the mapping's server library (media_server_sync.
+        # scan_library_id), not by a prefix. Prefixed, the deep-scan fences
+        # and the removal diff never matched a stored id.
+        from core.library_scope import native_jellyfin_artist_id
+        return native_jellyfin_artist_id(artist_id)
 
     def _clear_phantom_artist_thumbs(self):
         """null the server-built photo url of every artist the server says has
@@ -1397,19 +1430,13 @@ class DatabaseUpdateWorker:
         if not hasattr(self.media_client, 'get_all_artist_ids') or not hasattr(self.media_client, 'get_all_album_ids'):
             logger.info(f"Removal detection not supported for {self.server_type} — skipping")
             return None
+        if not self._can_detach_server_mappings():
+            return None
 
-        # Fetch current IDs from media server (lightweight calls).
-        #
-        # `last_fetch_failed` is read IMMEDIATELY after each call — it describes
-        # the most recent fetch and the next call overwrites it.
-        #
-        # The tripwire matters: it is set True before each call so a client that
-        # does NOT implement the contract (Plex and Jellyfin's id fetchers don't)
-        # leaves it True and reads as unverified, keeping the old conservative
-        # behaviour. Only a client that explicitly clears it can authorise
-        # removal on an empty answer. Without the tripwire we'd be reading a
-        # stale flag left by some earlier call — and that flag decides whether
-        # rows get deleted.
+        # Fetch current IDs from the media server. The flag is deliberately
+        # primed to failure before EACH call: clients that do not implement the
+        # verification contract therefore remain conservative, while a client
+        # that explicitly clears it may prove a genuinely empty catalogue.
         logger.info(f"Removal detection: fetching current IDs from {self.server_type}...")
         self._emit_signal('phase_changed', f"Fetching artist catalog from {self.server_type}...")
         self.media_client.last_fetch_failed = True
@@ -1420,27 +1447,21 @@ class DatabaseUpdateWorker:
         server_album_ids = self.media_client.get_all_album_ids()
         albums_verified = not getattr(self.media_client, 'last_fetch_failed', True)
 
-        # Safety: both empty usually means the server is unreachable — UNLESS both
-        # fetches were verified, which is a genuinely empty library and exactly
-        # the case 5BILLION has been reporting since July. Removing on a real
-        # empty is the whole point; removing on a failure is the thing to fear.
-        #
-        # The early return here is DIAGNOSTIC, not load-bearing: the
-        # `not check_artists and not check_albums` guard further down catches the
-        # same case, because an unverified empty leaves both checks False. It is
-        # kept because that later message ("both checks disabled") does not say
-        # WHY, and every round of this bug has been prolonged by a failure that
-        # did not explain itself. Deleting it changes no behaviour, only the log.
+        # Both empty is destructive only when BOTH independent reads vouched
+        # for that answer. An unverified empty is still treated as an outage.
         if not server_artist_ids and not server_album_ids:
             if not (artists_verified and albums_verified):
-                logger.warning("SAFETY: Server returned zero artists AND zero albums, "
-                               "unverified (artists_verified=%s albums_verified=%s) — "
-                               "skipping removal detection",
-                               artists_verified, albums_verified)
+                logger.warning(
+                    "SAFETY: Server returned zero artists AND zero albums, "
+                    "unverified (artists_verified=%s albums_verified=%s) — "
+                    "skipping removal detection",
+                    artists_verified, albums_verified,
+                )
                 return None
-            logger.info("Removal detection: %s verified EMPTY (both catalogues "
-                        "answered with zero) — removing everything stale",
-                        self.server_type)
+            logger.info(
+                "Removal detection: %s verified EMPTY — removing stale mappings",
+                self.server_type,
+            )
 
         # Get current DB counts for safety threshold
         try:
@@ -1451,60 +1472,31 @@ class DatabaseUpdateWorker:
             db_artist_count = 0
             db_album_count = 0
 
-        # Per-type safety: skip removal for any type where the server returned
-        # empty or suspiciously few results — an empty set USUALLY means the API
-        # call failed rather than the server having zero items.
-        #
-        # "Usually" is the whole bug: a VERIFIED empty answer really does mean
-        # zero, and refusing to act on it is what left 5BILLION's artists on
-        # screen after every Refresh. Verified empty is allowed through; empty
-        # from a client that cannot vouch for it still is not.
+        # A verified empty may be checked; an unverified empty may not.
         check_artists = bool(server_artist_ids) or artists_verified
         check_albums = bool(server_album_ids) or albums_verified
 
-        # The >50%-shrink threshold guards against an API that answered but
-        # answered SHORT — a partial catalogue that would mass-delete real rows.
-        #
-        # A verified-empty answer is the one case it must not apply to. Zero is
-        # always less than half of anything, so leaving the threshold in charge
-        # re-disables both checks for any library over 100 artists and lands
-        # straight back on "Refresh doesn't remove anything" — the bug, for
-        # everyone except users with tiny libraries. Deep scan already makes
-        # this exact carve-out (see `scan_trusted` in run_deep_scan).
-        # Deliberately the WHOLE library, not per-catalogue. Exempting the
-        # artist threshold on "zero artists" alone would fire on a contradictory
-        # answer — zero artists WITH albums present — which cannot be a real
-        # library state and is the signature of a partial read. That would wipe
-        # every artist row. The exemption is for one situation only: the server
-        # says the entire library is empty, and vouched for both halves of it.
+        # Exempt only a whole, internally consistent verified-empty library
+        # from the mass-shrink threshold. "No artists but some albums" is a
+        # partial read, not a possible catalogue state.
         library_verified_empty = (
             artists_verified and albums_verified
             and not server_artist_ids and not server_album_ids
         )
-        artists_verified_empty = library_verified_empty
-        albums_verified_empty = library_verified_empty
 
-        if check_artists and db_artist_count > 100 and not artists_verified_empty:
+        if check_artists and db_artist_count > 100 and not library_verified_empty:
             if len(server_artist_ids) < db_artist_count * 0.5:
                 logger.warning(
                     f"SAFETY: Server reported {len(server_artist_ids)} artists but "
                     f"database has {db_artist_count} — skipping artist removal check")
                 check_artists = False
 
-        if check_albums and db_album_count > 100 and not albums_verified_empty:
+        if check_albums and db_album_count > 100 and not library_verified_empty:
             if len(server_album_ids) < db_album_count * 0.5:
                 logger.warning(
                     f"SAFETY: Server reported {len(server_album_ids)} albums but "
                     f"database has {db_album_count} — skipping album removal check")
                 check_albums = False
-
-        if artists_verified_empty or albums_verified_empty:
-            logger.info(
-                "Removal detection: verified-empty catalogue exempt from the "
-                "shrink threshold (artists_empty=%s albums_empty=%s, db has "
-                "%d artists / %d albums)",
-                artists_verified_empty, albums_verified_empty,
-                db_artist_count, db_album_count)
 
         if not check_artists and not check_albums:
             logger.warning("SAFETY: Both artist and album checks disabled — "
@@ -1518,7 +1510,7 @@ class DatabaseUpdateWorker:
 
         # Compute removal sets (only for types we have valid server data for)
         server_artist_ids = {self._library_artist_id(i) for i in server_artist_ids}
-        removed_artist_ids = (db_artist_ids - server_artist_ids) if check_artists else set()
+        removed_artist_ids = (db_artist_ids - server_artist_ids - self._seen_credit_artist_ids) if check_artists else set()
         removed_album_ids = (db_album_ids - server_album_ids) if check_albums else set()
 
         # Filter out albums that will already be cascade-deleted with their artist
@@ -1532,10 +1524,19 @@ class DatabaseUpdateWorker:
                     for i in range(0, len(artist_list), batch_size):
                         batch = artist_list[i:i + batch_size]
                         placeholders = ','.join('?' * len(batch))
+                        # Both sets hold the SERVER's own ids, so the walk
+                        # goes artist server_id -> catalogue row -> its albums
+                        # -> their server ids.
                         cursor.execute(
-                            f"SELECT id FROM albums WHERE artist_id IN ({placeholders}) "
-                            f"AND server_source = ?",
-                            batch + [self.server_type])
+                            f"SELECT am.server_id FROM lib2_media_server_mappings am "
+                            f"JOIN lib2_albums al ON al.id=am.entity_id "
+                            f"JOIN lib2_media_server_mappings arm "
+                            f" ON arm.entity_type='artist' "
+                            f"AND arm.entity_id=al.primary_artist_id "
+                            f"AND arm.server_source=am.server_source "
+                            f"WHERE am.entity_type='album' AND am.server_source=? "
+                            f"AND arm.server_id IN ({placeholders})",
+                            [self.server_type, *batch])
                         cascade_album_ids.update(row[0] for row in cursor.fetchall())
                     removed_album_ids -= cascade_album_ids
             except Exception as e:
@@ -1553,8 +1554,13 @@ class DatabaseUpdateWorker:
                          f"Removing {len(removed_artist_ids)} artists, "
                          f"{len(removed_album_ids)} albums no longer on server...")
 
+        if not self._can_detach_server_mappings():
+            return None
         results = self.database.delete_removed_content(
-            removed_artist_ids, removed_album_ids, self.server_type)
+            removed_artist_ids, removed_album_ids, self.server_type,
+            owner_profile_id=self.owner_profile_id,
+            # an album the server still lists survives its old artist's removal
+            keep_album_ids=server_album_ids if check_albums else ())
 
         self._removal_results = results
         return results
@@ -1768,14 +1774,12 @@ class DatabaseUpdateWorker:
 
             # 1. Insert/update the artist using server-agnostic method
             artist_id = str(media_artist.ratingKey)
-            artist_success = self.database.insert_or_update_media_artist(media_artist, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
-            if not artist_success:
-                if seen_track_ids is not None:
-                    # deep scan: nothing under this artist was looked at
-                    self._unverified_artist_ids.add(self._library_artist_id(artist_id))
-                return False, "Failed to update artist data", 0, 0
-
-            self._touched_artist_ids.add(self._library_artist_id(artist_id))
+            artist_success = self.database.insert_or_update_media_artist(media_artist, server_source=self.server_type)
+            if artist_success:
+                self._touched_artist_ids.add(self._library_artist_id(artist_id))
+            # An unmapped artist/edition does not make its imported files
+            # unknown. Inspect the tracks so exact file/recording evidence can
+            # reconnect them without creating catalogue rows.
 
             # 2. Get all albums for this artist (cached from aggressive pre-population)
             try:
@@ -1809,63 +1813,65 @@ class DatabaseUpdateWorker:
                     try:
                         # Insert/update album using server-agnostic method
                         album_id = str(album.ratingKey)
-                        album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
-                        if not album_success and seen_track_ids is not None:
-                            # deep scan: the album's tracks were never listed
-                            self._unverified_album_ids.add(album_id)
+                        album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type)
                         if album_success:
                             album_count += 1
                             self._touched_album_ids.add(album_id)
 
-                            # 4. Process tracks in this album (cached from aggressive pre-population)
+                        # 4. Process tracks in this album (cached from aggressive pre-population)
+                        try:
                             try:
-                                try:
-                                    tracks = verified_listing(album, 'tracks')
-                                except ListingUnavailable as e:
-                                    logger.warning(f"Could not get tracks for album '{getattr(album, 'title', 'Unknown')}': {e}")
-                                    if seen_track_ids is not None:
-                                        # deep scan: the album answered nothing, so
-                                        # its rows are unverified, not stale
-                                        self._unverified_album_ids.add(album_id)
-                                    tracks = []
-
-                                # Batch insert tracks for better database performance
-                                track_batch = []
-                                for track in tracks:
-                                    if self.should_stop:
-                                        break
-                                    if self._is_trashed(track):
-                                        self._trashed_skipped += 1
-                                        continue
-                                    track_batch.append((track, album_id, artist_id))
-
-                                # Process track batch
-                                for track, alb_id, art_id in track_batch:
-                                    try:
-                                        track_id_str = str(track.ratingKey)
-                                        self._seen_track_ids.add(track_id_str)
-
-                                        # Deep scan: collect all server track IDs
-                                        if seen_track_ids is not None:
-                                            seen_track_ids.add(track_id_str)
-
-                                        # Deep scan: always call insert_or_update to refresh file_path
-                                        # and other server-provided fields. UPDATE preserves enrichment.
-                                        is_existing = skip_existing_tracks and self.database.track_exists_by_server(track_id_str, self.server_type)
-                                        track_success = self.database.insert_or_update_media_track(track, alb_id, art_id, server_source=self.server_type, owner_profile_id=self.owner_profile_id)
-                                        if is_existing:
-                                            skipped_count += 1
-                                        elif track_success:
-                                            track_count += 1
-                                            if track_success == 'inserted':
-                                                self._new_track_ids.add(track_id_str)
-                                    except Exception as e:
-                                        logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
-
-                            except Exception as e:
+                                tracks = verified_listing(album, 'tracks')
+                            except ListingUnavailable as e:
                                 logger.warning(f"Could not get tracks for album '{getattr(album, 'title', 'Unknown')}': {e}")
                                 if seen_track_ids is not None:
+                                    # deep scan: the album answered nothing, so
+                                    # its rows are unverified, not stale
                                     self._unverified_album_ids.add(album_id)
+                                tracks = []
+
+                            # Batch insert tracks for better database performance
+                            track_batch = []
+                            for track in tracks:
+                                if self.should_stop:
+                                    break
+                                if self._is_trashed(track):
+                                    self._trashed_skipped += 1
+                                    continue
+                                track_batch.append((track, album_id, artist_id))
+
+                            # Process track batch
+                            for track, alb_id, art_id in track_batch:
+                                try:
+                                    track_id_str = str(track.ratingKey)
+                                    self._seen_track_ids.add(track_id_str)
+
+                                    # Deep scan: collect all server track IDs
+                                    if seen_track_ids is not None:
+                                        seen_track_ids.add(track_id_str)
+
+                                    # Always refresh the mapping/technical observations;
+                                    # catalogue and file ownership stay import-controlled.
+                                    is_existing = skip_existing_tracks and self.database.track_exists_by_server(track_id_str, self.server_type)
+                                    track_success = self.database.insert_or_update_media_track(track, alb_id, art_id, server_source=self.server_type)
+                                    if track_success:
+                                        from core.library2.media_server_sync import track_artist_references
+                                        credit_ids = {self._library_artist_id(ref[0]) for ref in track_artist_references(track)}
+                                        self._seen_credit_artist_ids.update(credit_ids)
+                                        self._touched_artist_ids.update(credit_ids)
+                                    if track_success == 'inserted':
+                                        self._new_track_ids.add(track_id_str)
+                                    if is_existing:
+                                        skipped_count += 1
+                                    elif track_success:
+                                        track_count += 1
+                                except Exception as e:
+                                    logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
+
+                        except Exception as e:
+                            logger.warning(f"Could not get tracks for album '{getattr(album, 'title', 'Unknown')}': {e}")
+                            if seen_track_ids is not None:
+                                self._unverified_album_ids.add(album_id)
 
                     except Exception as e:
                         logger.warning(f"Failed to process album '{getattr(album, 'title', 'Unknown')}': {e}")
@@ -1873,7 +1879,7 @@ class DatabaseUpdateWorker:
                             self._unverified_album_ids.add(str(getattr(album, 'ratingKey', '')))
 
             if skip_existing_tracks:
-                details = f"{album_count} albums, {track_count} new tracks ({skipped_count} existing updated)"
+                details = f"{album_count} albums, {track_count} newly mapped tracks ({skipped_count} existing updated)"
             else:
                 details = f"Updated with {album_count} albums, {track_count} tracks"
             return True, details, album_count, track_count

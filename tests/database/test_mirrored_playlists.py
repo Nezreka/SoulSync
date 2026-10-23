@@ -1,6 +1,9 @@
+import json
+
 import pytest
 
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_library_track
 
 
 def test_update_mirrored_playlist_source_ref_preserves_tracks(tmp_path):
@@ -625,3 +628,165 @@ class TestTrackArtFromDiscovery:
         rows = db.get_mirrored_playlist_tracks(pid)
         assert len(rows) == 2
         assert not rows[0].get("image_url")
+
+
+# ── the batch status counts' in-library figure ─────────────────────────────
+#
+# The flag the sync matcher writes is the answer; the join underneath it is the
+# fallback for a playlist nobody has synced since the flag was added. That
+# fallback reads Library v2, and the whole counts function is wrapped in one
+# try/except that logs and returns zeros — so a broken query here reports "you
+# own none of it" rather than raising. These pin the SQL.
+
+def _mirror_one(db, *, track_name="Song", artist_name="Artist",
+                source_track_id="sp1", extra_data=None):
+    return db.mirror_playlist(
+        source="spotify",
+        source_playlist_id="pl1",
+        name="Mirror",
+        tracks=[{
+            "track_name": track_name,
+            "artist_name": artist_name,
+            "source_track_id": source_track_id,
+            "extra_data": json.dumps(extra_data or {}),
+        }],
+        profile_id=1,
+    )
+
+
+def _counts(db, playlist_id):
+    return db.get_all_mirrored_playlist_status_counts(1)[playlist_id]
+
+
+def test_the_stored_flag_is_believed_over_the_join(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    playlist_id = _mirror_one(db, extra_data={
+        "in_library": True, "library_checked_at": 1,
+    })
+
+    counts = _counts(db, playlist_id)
+    assert counts["in_library"] == 1
+    assert counts["library_checked"] == 1
+
+
+def test_a_checked_track_the_matcher_rejected_stays_rejected(tmp_path):
+    """Owning a same-named track does not overrule the matcher's verdict — the
+    flag is right about the cases the join cannot reach, in both directions."""
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    playlist_id = _mirror_one(db, extra_data={
+        "in_library": False, "library_checked_at": 1,
+    })
+    conn = db._get_connection()
+    seed_library_track(conn, artist="Artist", album="Album", title="Song",
+                       file_path="/music/Artist/Album/Song.flac")
+    conn.commit()
+    conn.close()
+
+    assert _counts(db, playlist_id)["in_library"] == 0
+
+
+def test_an_unchecked_track_falls_back_to_the_library_v2_join(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    playlist_id = _mirror_one(db)
+    assert _counts(db, playlist_id)["in_library"] == 0
+
+    conn = db._get_connection()
+    seed_library_track(conn, artist="Artist", album="Album", title="Song",
+                       file_path="/music/Artist/Album/Song.flac")
+    conn.commit()
+    conn.close()
+
+    counts = _counts(db, playlist_id)
+    assert counts["in_library"] == 1
+    # Nobody has actually looked — the fallback answering is not a check.
+    assert counts["library_checked"] == 0
+
+
+def test_the_fallback_matches_on_the_source_id_too(tmp_path):
+    """Id-first: a differently-spelled title still counts when the Spotify id
+    is the one the mirrored row carries."""
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    playlist_id = _mirror_one(db, track_name="Song (Remastered)",
+                              artist_name="Artist feat. Someone")
+
+    conn = db._get_connection()
+    track_id = seed_library_track(conn, artist="Artist", album="Album",
+                                  title="Song",
+                                  file_path="/music/Artist/Album/Song.flac")
+    conn.execute("UPDATE lib2_tracks SET spotify_id='sp1' WHERE id=?", (track_id,))
+    conn.commit()
+    conn.close()
+
+    assert _counts(db, playlist_id)["in_library"] == 1
+
+
+def test_a_provider_only_row_with_no_file_is_not_owned(tmp_path):
+    """A discography row lib2 knows about but holds no active file for is
+    known, not owned."""
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    playlist_id = _mirror_one(db)
+
+    conn = db._get_connection()
+    seed_library_track(conn, artist="Artist", album="Album", title="Song")
+    conn.commit()
+    conn.close()
+
+    assert _counts(db, playlist_id)["in_library"] == 0
+
+
+# The single-playlist variant reads the same way. It feeds the sync history
+# entry while the batched one renders the card, and one playlist reporting two
+# different ownership figures is worse than either being a little wrong.
+
+def _one_count(db, playlist_id):
+    return db.get_mirrored_playlist_status_counts(playlist_id)
+
+
+def test_the_single_playlist_count_believes_the_flag_too(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    playlist_id = _mirror_one(db, extra_data={
+        "in_library": True, "library_checked_at": 1,
+    })
+
+    assert _one_count(db, playlist_id)["in_library"] == 1
+
+
+def test_the_single_playlist_count_honours_a_rejection(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    playlist_id = _mirror_one(db, extra_data={
+        "in_library": False, "library_checked_at": 1,
+    })
+    conn = db._get_connection()
+    seed_library_track(conn, artist="Artist", album="Album", title="Song",
+                       file_path="/music/Artist/Album/Song.flac")
+    conn.commit()
+    conn.close()
+
+    assert _one_count(db, playlist_id)["in_library"] == 0
+
+
+def test_the_single_playlist_count_falls_back_to_the_join(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    playlist_id = _mirror_one(db)
+    assert _one_count(db, playlist_id)["in_library"] == 0
+
+    conn = db._get_connection()
+    seed_library_track(conn, artist="Artist", album="Album", title="Song",
+                       file_path="/music/Artist/Album/Song.flac")
+    conn.commit()
+    conn.close()
+
+    assert _one_count(db, playlist_id)["in_library"] == 1
+
+
+def test_both_variants_agree_on_the_same_playlist(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    playlist_id = _mirror_one(db)
+    conn = db._get_connection()
+    seed_library_track(conn, artist="Artist", album="Album", title="Song",
+                       file_path="/music/Artist/Album/Song.flac")
+    conn.commit()
+    conn.close()
+
+    assert _counts(db, playlist_id)["in_library"] == \
+        _one_count(db, playlist_id)["in_library"] == 1

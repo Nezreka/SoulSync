@@ -251,52 +251,10 @@ def test_scan_dry_run_default_is_findings_only():
     assert res.findings_created == 1 and db.deleted_history == []   # nothing deleted
 
 
-def test_scan_auto_delete_when_dry_run_off():
-    db = _DB([_cand(1, created=OLD, path="/music/x.flac")])
-    findings = []
-    res = ExpiredDownloadCleanerJob().scan(_ctx(
-        db, {'playlist_retention': '2mo', 'dry_run': False}, findings))
-    assert findings == []                       # no findings in auto mode
-    assert res.auto_fixed == 1
-    assert 1 in db.deleted_history             # history row removed
-    assert "/music/x.flac" in db.deleted_paths # track row removed
-
-
-# ── delete helper ────────────────────────────────────────────────────────────
-
-def test_delete_origin_download_missing_file(tmp_path):
-    # File doesn't exist → still cleans up the history row (orphan), no error.
-    db = _DB([])
-    entry = {"id": 9, "file_path": str(tmp_path / "gone.flac")}
-    cfg = SimpleNamespace(get=lambda k, d=None: d)
-    res = delete_origin_download(db, entry, cfg)
-    assert res["error"] is None and res["file_deleted"] is False
-    assert db.deleted_history == [9]
-
-
-def test_delete_origin_download_keeps_navidrome_virtual_path():
-    db = _DB([])
-    entry = {"id": 12, "file_path": "Muse/The Wow! Signal/01-06 - Hexagons.flac"}
-    cfg = SimpleNamespace(
-        get=lambda k, d=None: d,
-        get_active_media_server=lambda: "navidrome",
-    )
-    res = delete_origin_download(db, entry, cfg)
-    assert res["removed"] == 0
-    assert res["file_deleted"] is False
-    assert "Report Real Path" in res["error"]
-    assert db.deleted_history == []
-    assert db.deleted_paths == []
-
-
-def test_delete_origin_download_removes_real_file(tmp_path):
-    f = tmp_path / "song.flac"; f.write_bytes(b"x")
-    db = _DB([])
-    entry = {"id": 5, "file_path": str(f)}
-    cfg = SimpleNamespace(get=lambda k, d=None: d)
-    res = delete_origin_download(db, entry, cfg)
-    assert res["file_deleted"] is True and not f.exists()
-    assert db.deleted_history == [5]
+# The auto-delete and delete_origin_download tests are not here: on this
+# branch the delete goes through Library v2's journaled file delete
+# (core/library2/file_delete.py); tests/library/test_expired_cleanup.py covers
+# delete_origin_download against a real catalogue.
 
 
 # ── #1416: every profile's mirrors and watchlists protect, under every name ──

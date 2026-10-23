@@ -17,6 +17,7 @@ import re
 from typing import Optional
 
 from core.wishlist.presence import load_wishlist_keys as _load_wishlist_keys_shared
+from core.wishlist.presence import presence_key as _presence_key
 
 logger = logging.getLogger(__name__)
 
@@ -25,27 +26,117 @@ logger = logging.getLogger(__name__)
 _ARTIST_SPLIT_RE = re.compile(r'\s+\b(?:feat|ft|featuring)\b\.?\s*', re.IGNORECASE)
 
 
-def _norm_key(text: str) -> str:
-    """Normalise text for ownership-key comparison.
-
-    Applies accent folding (Björk → bjork), lowercases, and strips every
-    non-alphanumeric character so that punctuation / spacing
-    differences never break a match. the same function fills
-    artists.name_key, which is how a result row finds its artist by index.
-    """
-    from core.text.normalize import normalize_key
-    return normalize_key(text or '')
-
-
 def _first_artist(name: str) -> str:
     """Return the primary credit when an explicit featured artist is present."""
     parts = _ARTIST_SPLIT_RE.split(name or '')
     return parts[0].strip() if parts else (name or '').strip()
 
 
-def _album_key(album_title: str, artist_name: str) -> str:
-    """Build a normalised album ownership key."""
-    return _norm_key(album_title) + '|||' + _norm_key(artist_name)
+# Ownership is asked of Library v2 (docs §50.4.4.14). Three things the port had
+# to settle:
+#
+# **"Owned" requires a physical active file.** ``origin`` records provenance,
+# not whether a usable file is still present.
+#
+# **The comparison key is built in Python on both sides.** It always was on the
+# search-result side; the catalogue side used SQL ``LOWER()``, which is
+# ASCII-only, so a stored ``Björk`` and a searched ``BJÖRK`` folded to different
+# strings and an owned track was reported missing. Same normalizer both sides
+# now — the whole table is read into a dict here anyway, so nothing is paid for
+# it.
+#
+# **A path is a file row.** ``file_path`` comes from the primary active file
+# (ADR-03); a known, unfetched catalogue track is not reported as owned.
+_OWNED_ALBUMS_SQL_TEMPLATE = """
+    SELECT al.title, ar.name
+      FROM lib2_albums al
+      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+     WHERE EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                   ON f.track_id=t.id WHERE t.album_id=al.id
+                   AND f.file_state='active' AND TRIM(f.path)<>''{owner})
+"""
+
+
+def _owned_albums_sql() -> str:
+    """The albums the CALLER owns. Built per call: the library scope is a
+    property of who is asking, and a module constant would freeze it."""
+    from core.library2.sql_util import owner_clause
+    return _OWNED_ALBUMS_SQL_TEMPLATE.format(owner=owner_clause(column="f.owner_profile_id"))
+
+# INT-03: ownership is keyed on the TRACK's artist. Joining only
+# ``lib2_albums.primary_artist_id`` meant a Muse track sitting on a Various
+# Artists compilation was keyed (title, "Various Artists") and nothing else —
+# so a search for the Muse track reported the file we already own as missing,
+# and the user was one click from downloading it a second time. Every credit the
+# catalogue holds for the track is emitted as its own key: the per-track credit
+# text, each relational track artist, and the album artist as the fallback it
+# always was. ``name_rank`` keeps the album artist last so an existing key still
+# resolves to the row it used to.
+_TRACK_CREDIT_NAMES_SQL = """
+    SELECT ta.track_id AS track_id, ar.name AS name, 0 AS name_rank
+      FROM lib2_track_artists ta
+      JOIN lib2_artists ar ON ar.id = ta.artist_id
+     WHERE TRIM(COALESCE(ar.name, '')) <> ''
+    UNION ALL
+    SELECT t.id, t.track_artist, 1
+      FROM lib2_tracks t
+     WHERE TRIM(COALESCE(t.track_artist, '')) <> ''
+    UNION ALL
+    SELECT t.id, ar.name, 2
+      FROM lib2_tracks t
+      JOIN lib2_albums al ON al.id = t.album_id
+      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+     WHERE TRIM(COALESCE(ar.name, '')) <> ''
+"""
+
+_OWNED_TRACKS_SQL_TEMPLATE = f"""
+    WITH track_credits AS ({_TRACK_CREDIT_NAMES_SQL})
+    SELECT t.title, credit.name,
+           COALESCE((SELECT m.server_id FROM lib2_media_server_mappings m
+                      WHERE m.entity_type='track' AND m.entity_id=t.id
+                        AND m.server_source=? LIMIT 1),
+                    CASE WHEN t.server_source=? THEN t.server_id END,
+                    t.legacy_track_id,
+                    -- Always populated, so the projection cannot come back
+                    -- identity-less. After the legacy cutover a natively
+                    -- imported track has no mapping, no matching server_source
+                    -- and no legacy id, and the player was handed ''.
+                    t.id),
+           t.id,
+           al.title, al.image_url,
+           (SELECT f.path FROM lib2_track_files f
+             WHERE f.track_id = t.id
+               AND COALESCE(f.file_state, 'active') = 'active'
+               AND f.path IS NOT NULL AND f.path != ''
+             ORDER BY f.is_primary DESC, f.id LIMIT 1)
+      FROM lib2_tracks t
+      JOIN lib2_albums al ON al.id = t.album_id
+      JOIN track_credits credit ON credit.track_id = t.id
+     WHERE EXISTS (SELECT 1 FROM lib2_track_files owned_f WHERE owned_f.track_id=t.id
+                   AND owned_f.file_state='active' AND TRIM(owned_f.path)<>''{{owner}})
+     ORDER BY (EXISTS (SELECT 1 FROM lib2_media_server_mappings active_m
+                        WHERE active_m.entity_type='track'
+                          AND active_m.entity_id=t.id
+                          AND active_m.server_source=?)
+               OR t.server_source=?) DESC,
+              credit.name_rank,
+              t.id
+"""
+
+
+def _primary_artist(raw: str) -> str:
+    """The credit an ownership key is built from.
+
+    It used to be ``raw.split(',')[0]`` -- a search result credits every artist,
+    so key it on the first. That claims ownership on evidence that is not there:
+    a result credited "Pink Floyd, Roger Waters" became "Pink Floyd" and matched
+    a Pink Floyd release we own, and "Earth, Wind & Fire" matched a library
+    "Earth" (upstream dfaff5a0a / 3684689b1). The catalogue side already emits
+    every credit it holds as its own key (INT-03 below), so the query side does
+    not need to guess one -- only the explicit featured-artist form is split
+    off, by _first_artist, where the credit says so in words.
+    """
+    return str(raw or '').strip()
 
 
 def _resolve_plex_thumb(thumb: str, plex_base: str, plex_token: str) -> str:
@@ -79,70 +170,12 @@ def _load_wishlist_keys(cursor, profile_id: int) -> set[str]:
     return _load_wishlist_keys_shared(cursor, profile_id)
 
 
-def _artist_ids_for(cursor, database, names: list[str]) -> list:
-    """library artist ids whose name_key equals any of these names' keys.
-    indexed on artists.name_key; a library that hasn't finished its norm
-    backfill gets the same answer from a scan of the (small) artists table."""
-    keys = list(dict.fromkeys(_norm_key(n) for n in names if n))
-    keys = [k for k in keys if k]
-    if not keys:
-        return []
-    ph = ','.join('?' for _ in keys)
-    if database._norm_ready(cursor):
-        cursor.execute(f"SELECT id FROM artists WHERE name_key IN ({ph})", keys)
-        return [r[0] for r in cursor.fetchall()]
-    cursor.execute("SELECT id, name FROM artists")
-    return [r[0] for r in cursor.fetchall() if _norm_key(r[1] or '') in keys]
 
-
-def _owned_album_keys(cursor, artist_ids: list) -> set[str]:
-    if not artist_ids:
-        return set()
-    ph = ','.join('?' for _ in artist_ids)
-    cursor.execute(
-        f"SELECT al.title, ar.name FROM albums al JOIN artists ar ON ar.id = al.artist_id "
-        f"WHERE al.artist_id IN ({ph})", artist_ids)
-    keys: set[str] = set()
-    for row in cursor.fetchall():
-        db_title, db_artist = row[0] or '', row[1] or ''
-        keys.add(_album_key(db_title, db_artist))
-        first = _first_artist(db_artist)
-        if first and first != db_artist:
-            keys.add(_album_key(db_title, first))
-    return keys
-
-
-def _owned_tracks_for(cursor, artist_ids: list) -> dict[str, dict]:
-    if not artist_ids:
-        return {}
-    ph = ','.join('?' for _ in artist_ids)
-    cursor.execute(
-        f"""
-        SELECT t.title, a.name, t.id, t.file_path, al.title, al.thumb_url
-        FROM tracks t
-        JOIN artists a ON a.id = t.artist_id
-        JOIN albums al ON al.id = t.album_id
-        WHERE t.artist_id IN ({ph})
-        """, artist_ids)
-    owned: dict[str, dict] = {}
-    for r in cursor.fetchall():
-        track_title, artist_name = r[0] or '', r[1] or ''
-        key = _norm_key(track_title) + '|||' + _norm_key(artist_name)
-        if key not in owned:  # keep first match only
-            owned[key] = {
-                'track_id': r[2],
-                'file_path': r[3],
-                'title': r[0],
-                'artist_name': r[1],
-                'album_title': r[4],
-                'album_thumb_url': r[5],
-            }
-        first = _first_artist(artist_name)
-        if first and first != artist_name:
-            first_key = _norm_key(track_title) + '|||' + _norm_key(first)
-            if first_key not in owned:
-                owned[first_key] = owned[key]
-    return owned
+def _owned_tracks_sql() -> str:
+    """The tracks the CALLER owns, same reasoning as _owned_albums_sql."""
+    from core.library2.sql_util import owner_clause
+    return _OWNED_TRACKS_SQL_TEMPLATE.format(
+        owner=owner_clause(column="owned_f.owner_profile_id"))
 
 
 def check_library_presence(
@@ -160,74 +193,70 @@ def check_library_presence(
       track metadata + resolved thumb URL; unmatched rows get
       `{in_library: False, in_wishlist: bool}`.
 
-    this used to read EVERY album and EVERY track in the library into python
-    on every call, normalizing each, to build two lookup dicts (a million
-    rows per search on a big library, on the request thread, after every
-    search and every chat wanted card). now each result row looks up its
-    artist by indexed key and compares against that artist's rows only, with
-    the same key function, so the answers are identical and the cost is
-    proportional to the results rather than the library.
+    Ownership is read in one pass per call: two queries build the owned-album
+    and owned-track key sets, and every result row is then a dict lookup.
+
+    Upstream's 72749f414 replaced its own version of this with a per-artist
+    lookup cached by artist id, because its `tracks`/`albums` read really was
+    the whole library per search. That shape needs `artists.name_key` and an
+    `artists` table, both of which this branch replaced; the lib2 read here is
+    bounded by owned files rather than by catalogue rows, and the credit
+    fan-out above (INT-03) is what makes a single pass answer correctly for
+    compilations. What was taken from upstream is the featured-artist fallback
+    on the query side.
     """
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
-        artist_cache: dict[tuple, list] = {}
-        album_keys_cache: dict[tuple, set] = {}
-        tracks_cache: dict[tuple, dict] = {}
+        cursor.execute(_owned_albums_sql())
+        owned_albums = {_presence_key(r[0], r[1]) for r in cursor.fetchall()}
 
-        def _ids(q_artist: str) -> tuple:
-            names = [q_artist]
-            first = _first_artist(q_artist)
-            if first:
-                names.append(first)
-            key = tuple(dict.fromkeys(_norm_key(n) for n in names if n))
-            if key not in artist_cache:
-                artist_cache[key] = _artist_ids_for(cursor, database, names)
-            return tuple(artist_cache[key])
+        active_server = getattr(
+            config_manager, 'get_active_media_server',
+            lambda: config_manager.get('media_server.type', 'plex'))()
+        cursor.execute(
+            _owned_tracks_sql(),
+            (active_server, active_server, active_server, active_server),
+        )
+        owned_tracks: dict[str, dict] = {}
+        for r in cursor.fetchall():
+            key = _presence_key(r[0], r[1])
+            if key not in owned_tracks:  # keep first match only
+                owned_tracks[key] = {
+                    'track_id': r[2],
+                    'lib2_track_id': r[3],
+                    'file_path': r[6],
+                    'title': r[0],
+                    'artist_name': r[1],
+                    'album_title': r[4],
+                    'album_thumb_url': r[5],
+                }
+
+        wishlist_keys = _load_wishlist_keys(cursor, profile_id)
 
         # --- Match albums ----------------------------------------------------
         album_results: list[bool] = []
         for a in albums:
-            q_name = a.get('name', '')
-            q_artist = a.get('artist', '')
-            ids = _ids(q_artist)
-            if ids not in album_keys_cache:
-                album_keys_cache[ids] = _owned_album_keys(cursor, list(ids))
-            owned_albums = album_keys_cache[ids]
-            # Try the full credit before an explicit featured-artist fallback.
-            keys_to_try = {_album_key(q_name, q_artist)}
+            q_artist = _primary_artist(a.get('artist', ''))
+            # The full credit first, then the credit with an explicit featured
+            # artist dropped: upstream dfaff5a0a found that a result credited
+            # "A feat. B" never matched a catalogue row filed under "A".
+            keys_to_try = {_presence_key(a.get('name', ''), q_artist)}
             first_q = _first_artist(q_artist)
-            if first_q:
-                keys_to_try.add(_album_key(q_name, first_q))
+            if first_q and first_q != q_artist:
+                keys_to_try.add(_presence_key(a.get('name', ''), first_q))
             album_results.append(bool(keys_to_try & owned_albums))
-
-        raw_wishlist_keys = _load_wishlist_keys(cursor, profile_id)
-        # Normalise wishlist keys the same way we normalise owned keys,
-        # so the lookup uses the same alphabet.
-        wishlist_keys: set[str] = set()
-        for wk in raw_wishlist_keys:
-            parts = wk.split('|||', 1)
-            if len(parts) == 2:
-                wishlist_keys.add(_norm_key(parts[0]) + '|||' + _norm_key(parts[1]))
-            else:
-                wishlist_keys.add(_norm_key(wk))
 
         plex_base, plex_token = _resolve_plex_credentials(plex_client, config_manager)
 
         # --- Match tracks ----------------------------------------------------
         track_results: list[dict] = []
         for t in tracks:
-            t_name = t.get('name', '')
-            t_artist = t.get('artist', '')
-            ids = _ids(t_artist)
-            if ids not in tracks_cache:
-                tracks_cache[ids] = _owned_tracks_for(cursor, list(ids))
-            owned_tracks = tracks_cache[ids]
-            keys_to_try = [_norm_key(t_name) + '|||' + _norm_key(t_artist)]
+            t_artist = _primary_artist(t.get('artist', ''))
+            keys_to_try = [_presence_key(t.get('name', ''), t_artist)]
             first_t = _first_artist(t_artist)
-            if first_t:
-                keys_to_try.append(_norm_key(t_name) + '|||' + _norm_key(first_t))
-
+            if first_t and first_t != t_artist:
+                keys_to_try.append(_presence_key(t.get('name', ''), first_t))
             in_wishlist = any(k in wishlist_keys for k in keys_to_try)
             match = None
             for k in keys_to_try:

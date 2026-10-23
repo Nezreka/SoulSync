@@ -35,18 +35,15 @@ def test_retag_keeps_the_album_artist(tmp_path):
     f = tmp_path / 'music' / 'Various Artists' / 'Trail Songs' / '04 - wrong.flac'
     f.parent.mkdir(parents=True)
     _make_flac(f)
+    from tests.lib2_seed import track
     with db._get_connection() as conn:
-        conn.execute("INSERT OR REPLACE INTO artists (id, name, server_source) "
-                     "VALUES ('va','Various Artists','plex')")
-        conn.execute("INSERT OR REPLACE INTO albums (id, title, artist_id) VALUES (10,'Trail Songs','va')")
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, "
-                     "file_path, server_source) VALUES ('t1',10,'va','Wrong Title',4,100,?, 'plex')",
-                     (str(f),))
+        tid = track(conn, 'Various Artists', 'Trail Songs', 'Wrong Title',
+                    path=str(f), track_number=4, duration=100)
         conn.commit()
 
     worker = RepairWorker(db)
     res = worker._fix_acoustid_mismatch(
-        'track', 't1', str(f),
+        'track', f'lib2:{tid}', str(f),
         {'_fix_action': 'retag', 'acoustid_title': 'Such Great Heights', 'acoustid_artist': 'Iron & Wine'})
 
     assert res['success'] is True

@@ -172,7 +172,16 @@ function setTrackInfo(track) {
 
     const gotoArtistBtn = document.getElementById('np-goto-artist');
     if (gotoArtistBtn) {
-        if (track.artist_id) {
+        // iss29-B08: a Library V2 track has no LEGACY artist id — `artist_id`
+        // is correctly null — so this button was permanently disabled for the
+        // whole of V2 playback. The V2 id travels separately and routes into
+        // the Library page, which is where that artist actually lives.
+        if (track.lib2_artist_id) {
+            gotoArtistBtn.href = `/library?artist=${encodeURIComponent(track.lib2_artist_id)}`;
+            gotoArtistBtn.style.pointerEvents = '';
+            gotoArtistBtn.setAttribute('aria-disabled', 'false');
+            gotoArtistBtn.tabIndex = 0;
+        } else if (track.artist_id) {
             gotoArtistBtn.href = buildArtistDetailPath(track.artist_id, track.artist_source || null);
             gotoArtistBtn.style.pointerEvents = '';
             gotoArtistBtn.setAttribute('aria-disabled', 'false');
@@ -1274,7 +1283,7 @@ function onAudioEnded() {
     }
 
     // Radio mode: auto-fetch similar tracks when queue is exhausted
-    if (npRadioMode && currentTrack && currentTrack.id && !npLoadingQueueItem) {
+    if (npRadioMode && npRadioTrackId(currentTrack) && !npLoadingQueueItem) {
         npFetchRadioTracks();
     }
 }
@@ -1484,6 +1493,9 @@ const npQueuePrefetchBatchIds = new Set();
 const NP_QUEUE_PREFETCH_TERMINAL = new Set(['failed', 'not_found', 'cancelled', 'quarantined']);
 
 function npQueueIdentity(track) {
+    if (track?.lib2_track_id != null) {
+        return `lib2:${track.lib2_track_id}:${track.lib2_album_id ?? ''}:${track.release_edition_id ?? ''}:${track.profile_id ?? ''}:${track.library_owner_id ?? 'shared'}:${track.quality_profile_id ?? ''}`;
+    }
     const source = String(track?.source || track?.metadata_source || '').trim().toLowerCase();
     const sourceId = String(track?.source_track_id || track?.spotify_track_id || track?.tidal_track_id ||
         track?.deezer_id || track?.itunes_track_id || track?.musicbrainz_recording_id || track?.track_id || '').trim();
@@ -1564,11 +1576,15 @@ function npQueueStatusLabel(track) {
     }
 }
 
-function npApplyQueuePrefetchState(requestIds, state, finalPath = '', progress = 0, error = '') {
+function npApplyQueuePrefetchState(requestIds, state, finalPath = '', progress = 0, error = '', identity = {}) {
     const ids = new Set((requestIds || []).map(String));
     let changed = false;
     npQueue.forEach(track => {
         if (!ids.has(String(track?._queue_request_id || ''))) return;
+        for (const field of ['lib2_track_id', 'lib2_album_id', 'release_edition_id',
+            'quality_profile_id', 'profile_id', 'library_owner_id']) {
+            if (Object.prototype.hasOwnProperty.call(identity, field)) track[field] = identity[field];
+        }
         if (finalPath) {
             track.file_path = finalPath;
             track.filename = finalPath;
@@ -1607,6 +1623,7 @@ async function npPollQueuePrefetch() {
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.error || 'Queue download status unavailable');
         let changed = false;
+        let refill = false;
         Object.entries(data.batches || {}).forEach(([batchId, batch]) => {
             const tasks = Array.isArray(batch?.tasks) ? batch.tasks : [];
             tasks.forEach(task => {
@@ -1617,19 +1634,26 @@ async function npPollQueuePrefetch() {
                 if (!requestIds.length) return;
                 const state = task.quarantine_entry_id ? 'quarantined' : String(task.status || 'queued');
                 const finalPath = state === 'completed' ? String(task.final_file_path || '') : '';
+                if ((finalPath || NP_QUEUE_PREFETCH_TERMINAL.has(state)) && npQueue.some(track =>
+                    requestIds.includes(track._queue_request_id) && npQueueTrackNeedsDownload(track))) refill = true;
                 changed = npApplyQueuePrefetchState(
                     requestIds,
                     finalPath ? 'ready' : state,
                     finalPath,
                     task.progress,
                     task.error_message,
+                    info,
                 ) || changed;
             });
             const terminal = ['complete', 'error', 'cancelled'].includes(batch?.phase) &&
                 tasks.every(task => ['completed', 'failed', 'not_found', 'cancelled'].includes(task.status));
             if (terminal) npQueuePrefetchBatchIds.delete(batchId);
         });
+        // A batch the server no longer reports (another library is selected
+        // now, or it was cleaned up) can never finish here: stop asking.
+        npQueuePrefetchBatchIds.forEach(id => { if (!data.batches?.[id]) npQueuePrefetchBatchIds.delete(id); });
         if (changed) renderNpQueue();
+        if (refill) npScheduleQueuePrefetch();
         if (npQueuePrefetchBatchIds.size === 0) npStopQueuePrefetchPolling();
     } catch (error) {
         console.warn('Queue prefetch status failed:', error.message);
@@ -1639,7 +1663,10 @@ async function npPollQueuePrefetch() {
 async function npPrefetchMissingQueueTracks() {
     if (!npAutoDownloadQueue) return;
     if (npQueuePrefetchRequest) return npQueuePrefetchRequest;
-    const missing = npQueue.filter(npQueueTrackNeedsDownload);
+    // Keep a short buffer ahead of the current song. A long native artist
+    // queue must not start acquiring every release at once or overflow the
+    // backend's request limit, leaving later rows stuck in "Preparing".
+    const missing = npQueue.slice(Math.max(0, npQueueIndex)).filter(npQueueTrackNeedsDownload).slice(0, 25);
     if (!missing.length) return;
     missing.forEach(track => { track.playback_status = 'requesting'; });
     renderNpQueue();
@@ -1657,6 +1684,9 @@ async function npPrefetchMissingQueueTracks() {
                     item.request_ids || [],
                     item.state || 'queued',
                     item.final_path || '',
+                    0,
+                    item.error || '',
+                    item,
                 );
             });
             (data.batch_ids || []).forEach(id => npQueuePrefetchBatchIds.add(String(id)));
@@ -1721,6 +1751,11 @@ function npQueueHasNext() {
         : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all');
 }
 
+// Radio endpoints read the native catalogue; player `id` can be a server id.
+function npRadioTrackId(track) {
+    return track && (track.lib2_track_id || track.id) || null;
+}
+
 function npEnsureCurrentTrackInQueue() {
     if (!currentTrack || !currentTrack.is_library || npQueue.length > 0) return;
     npQueue.push({
@@ -1732,6 +1767,11 @@ function npEnsureCurrentTrackInQueue() {
         is_library: true,
         image_url: currentTrack.image_url,
         id: currentTrack.id,
+        lib2_track_id: currentTrack.lib2_track_id || null,
+        lib2_album_id: currentTrack.lib2_album_id || null,
+        lib2_artist_id: currentTrack.lib2_artist_id || null,
+        server_track_id: currentTrack.server_track_id || null,
+        legacy_track_id: currentTrack.legacy_track_id || null,
         artist_id: currentTrack.artist_id,
         album_id: currentTrack.album_id,
         bitrate: currentTrack.bitrate,
@@ -1758,7 +1798,7 @@ function npSetRadioMode(enabled, options = {}) {
         // (non-library) track has none, so promising auto-queue would be a
         // lie. Mode stays armed either way: it engages on the next library
         // track that plays.
-        if (npRadioMode && currentTrack && !currentTrack.id) {
+        if (npRadioMode && currentTrack && !npRadioTrackId(currentTrack)) {
             showToast('Radio armed - it kicks in when a library track plays', 'info');
         } else {
             showToast(npRadioMode ? 'Radio mode on - similar tracks will auto-queue' : 'Radio mode off', 'success');
@@ -1771,7 +1811,7 @@ function npSetRadioMode(enabled, options = {}) {
     } else if (/radio/i.test(npPlayContext)) {
         npSetPlayContext('');
     }
-    if (npRadioMode && fetchIfNeeded && currentTrack && currentTrack.id && !npLoadingQueueItem && !npQueueHasNext()) {
+    if (npRadioMode && fetchIfNeeded && npRadioTrackId(currentTrack) && !npLoadingQueueItem && !npQueueHasNext()) {
         npEnsureCurrentTrackInQueue();
         npFetchRadioTracks();
     }
@@ -2006,8 +2046,10 @@ function syncExpandedPlayerUI() {
 
 // a library track: played from the library, with its db ids. streams and
 // queued downloads have nothing an issue could point at.
+// an issue names its item by Library v2 id here (api/issues snapshots lib2):
+// a player row's `id` is a server/legacy id, so only its lib2 id can report
 function npIsReportableTrack(track) {
-    return !!(track && track.is_library && track.id != null && track.id !== '' && track.artist_id != null);
+    return !!(track && track.is_library && track.lib2_track_id != null && track.lib2_track_id !== '');
 }
 
 function updateNpTrackInfo() {
@@ -2131,15 +2173,16 @@ function updateNpTrackInfo() {
                     const t = currentTrack;
                     if (!npIsReportableTrack(t) || typeof window.showReportIssueModal !== 'function') return;
                     try { closeNowPlayingModal(); } catch (e) { /* the report opens either way */ }
-                    window.showReportIssueModal('track', t.id, t.title || 'Track', t.artist || '', t.album || '');
+                    window.showReportIssueModal('track', t.lib2_track_id, t.title || 'Track', t.artist || '', t.album || '');
                 });
                 reportBtn._npReportAttached = true;
             }
         }
 
         // Track recently played for radio mode
-        if (currentTrack.id && !npRecentlyPlayedIds.includes(currentTrack.id)) {
-            npRecentlyPlayedIds.push(currentTrack.id);
+        const radioTrackId = npRadioTrackId(currentTrack);
+        if (radioTrackId && !npRecentlyPlayedIds.includes(radioTrackId)) {
+            npRecentlyPlayedIds.push(radioTrackId);
             if (npRecentlyPlayedIds.length > 50) npRecentlyPlayedIds.shift();
         }
     } else {
@@ -2683,7 +2726,7 @@ function playNextInQueue() {
     if (npQueue.length === 0) {
         // Radio with an empty queue (e.g. cleared mid-session): a skip should
         // re-seed from the current track, not go dead.
-        if (npRadioMode && currentTrack && currentTrack.id && !npLoadingQueueItem) {
+        if (npRadioMode && npRadioTrackId(currentTrack) && !npLoadingQueueItem) {
             npEnsureCurrentTrackInQueue();
             npFetchRadioTracks(true);
         }
@@ -2709,7 +2752,7 @@ function playNextInQueue() {
             // Radio mode: a skip at the tail of the fetched batch used to do
             // nothing (more tracks only arrived when the song ENDED naturally)
             // — fetch the next batch now and advance as soon as it lands.
-            if (npRadioMode && currentTrack && currentTrack.id && !npLoadingQueueItem) {
+            if (npRadioMode && npRadioTrackId(currentTrack) && !npLoadingQueueItem) {
                 npFetchRadioTracks(true);
             }
             return;
@@ -2856,7 +2899,17 @@ async function playQueueItem(index, options = {}) {
                 is_library: true,
                 image_url: track.image_url,
                 id: track.id,
+                // A queue row can come from Library v2 (album/artist Play), and
+                // those rows address the catalogue by TYPED id — `id` is then a
+                // server/legacy id or null. Dropping them here is what left a
+                // queued v2 play without play-log attribution and with a dead
+                // "Go to artist"; playLibraryTrack has threaded them all along.
+                lib2_track_id: track.lib2_track_id || null,
+                lib2_album_id: track.lib2_album_id || null,
+                legacy_track_id: track.legacy_track_id || null,
+                server_track_id: track.server_track_id || null,
                 artist_id: track.artist_id,
+                lib2_artist_id: track.lib2_artist_id || null,
                 album_id: track.album_id,
                 bitrate: track.bitrate,
                 sample_rate: track.sample_rate
@@ -2873,8 +2926,14 @@ async function playQueueItem(index, options = {}) {
                     album: track.album || '',
                     // Server song id (Navidrome/Subsonic) so playback can fall
                     // back to streaming via the server when the file isn't on
-                    // SoulSync's disk (#809).
-                    track_id: track.id || null
+                    // SoulSync's disk (#809). A Library v2 `id` means nothing
+                    // to the media server, so only a server/legacy id may be
+                    // sent as `track_id` -- same contract as playLibraryTrack.
+                    track_id: track.server_track_id || track.legacy_track_id ||
+                        (track.lib2_track_id ? null : (track.id || null)),
+                    lib2_track_id: track.lib2_track_id || null,
+                    legacy_track_id: track.legacy_track_id || null,
+                    server_track_id: track.server_track_id || null
                 })
             });
             const result = await response.json();
@@ -3240,7 +3299,7 @@ function npFireSleepTimer() {
 function updateNpPrevNextButtons() {
     const canPrev = npQueueIndex > 0 || (audioPlayer && audioPlayer.currentTime > 3);
     // Radio keeps next alive at the batch tail — a skip there fetches more.
-    const radioCanFetch = npRadioMode && currentTrack && currentTrack.id;
+    const radioCanFetch = npRadioMode && npRadioTrackId(currentTrack);
     const canNext = (npQueue.length > 0 && (npShuffleOn ? npQueue.length > 1 : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all')))
         || Boolean(radioCanFetch);
 
@@ -3798,7 +3857,12 @@ function npMapRadioTrack(t) {
         filename: t.file_path,
         is_library: true,
         image_url: t.image_url || null,
-        id: t.id,
+        id: t.server_track_id || t.legacy_track_id || null,
+        lib2_track_id: t.lib2_track_id || t.id,
+        lib2_album_id: t.lib2_album_id || t.album_id,
+        lib2_artist_id: t.lib2_artist_id || t.artist_id,
+        server_track_id: t.server_track_id || null,
+        legacy_track_id: t.legacy_track_id || null,
         artist_id: t.artist_id,
         album_id: t.album_id,
         bitrate: t.bitrate,
@@ -3869,16 +3933,18 @@ async function playTrackList(tracks, contextName, options = {}) {
     return await playQueueItem(0, options);
 }
 window.playTrackList = playTrackList;
+window.isQueueAutoDownloadEnabled = () => npAutoDownloadQueue;
 
 async function npFetchRadioTracks(forceAdvance = false) {
     // forceAdvance: a manual skip at the tail of the fetched batch (next
     // button / 'n' key) — the user asked for the next track, so advance as
     // soon as the new batch lands even though something is still playing.
-    if (!currentTrack || !currentTrack.id) return;
+    const trackId = npRadioTrackId(currentTrack);
+    if (!trackId) return;
     try {
         npLoadingQueueItem = true;
         const excludeIds = npRecentlyPlayedIds.join(',');
-        const resp = await fetch(`/api/library/radio?track_id=${currentTrack.id}&limit=50&exclude=${encodeURIComponent(excludeIds)}`);
+        const resp = await fetch(`/api/library/radio?track_id=${encodeURIComponent(trackId)}&limit=50&exclude=${encodeURIComponent(excludeIds)}`);
         if (!resp.ok) {
             console.warn('Radio endpoint returned', resp.status);
             npLoadingQueueItem = false;
@@ -3978,6 +4044,9 @@ function npMaybeLogPlay() {
             body: JSON.stringify({
                 track: {
                     id: currentTrack.id,
+                    lib2_track_id: currentTrack.lib2_track_id || null,
+                    legacy_track_id: currentTrack.legacy_track_id || null,
+                    server_track_id: currentTrack.server_track_id || null,
                     title: currentTrack.title,
                     artist: currentTrack.artist,
                     album: currentTrack.album,

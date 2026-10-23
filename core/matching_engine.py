@@ -368,9 +368,9 @@ class MusicMatchingEngine:
 
         return standard_ratio
     
-    def duration_similarity(self, duration1: int, duration2: int) -> float:
+    def duration_similarity(self, duration1: Optional[int], duration2: Optional[int]) -> float:
         """Calculates similarity score based on track duration (in ms)."""
-        if duration1 == 0 or duration2 == 0:
+        if not duration1 or not duration2:
             return 0.5 # Neutral score if a duration is missing
         
         # Allow a 5-second tolerance (5000 ms)
@@ -381,8 +381,8 @@ class MusicMatchingEngine:
         return max(0, 1.0 - diff_ratio * 5)
 
     def score_track_match(self, source_title: str, source_artists: List[str],
-                          source_duration_ms: int, candidate_title: str,
-                          candidate_artists: List[str], candidate_duration_ms: int) -> Tuple[float, str]:
+                          source_duration_ms: Optional[int], candidate_title: str,
+                          candidate_artists: List[str], candidate_duration_ms: Optional[int]) -> Tuple[float, str]:
         """Generic track matching — same logic as calculate_match_confidence but type-agnostic.
 
         Works for any two tracks regardless of source (Spotify, iTunes, YouTube, Tidal, etc.).
@@ -391,6 +391,11 @@ class MusicMatchingEngine:
 
         Returns (confidence, match_type) tuple.
         """
+        # Catalogue rows and provider responses may omit the runtime. Use the
+        # existing unknown-duration sentinel before comparisons or arithmetic.
+        source_duration_ms = source_duration_ms or 0
+        candidate_duration_ms = candidate_duration_ms or 0
+
         # --- Artist Scoring ---
         source_artists_cleaned = [self.clean_artist(a) for a in source_artists if a]
 

@@ -1,9 +1,9 @@
 """Automation handler: ``apply_quality_upgrades`` action.
 
-The Quality Upgrade Finder files findings; applying one queues the better
-version on the wishlist. This action applies them on a schedule, for profiles
-that asked to keep upgrading until their cutoff. Nothing runs unless someone
-adds the action to an automation.
+The native quality audit files proposals. This action applies current proposals
+for already-wanted tracks in the automation owner's library, whose live profile
+asks to keep upgrading until cutoff. Unmonitored audit subjects stay for review.
+Preserved pre-v2 findings remain actionable for the shared library.
 """
 
 from __future__ import annotations
@@ -23,7 +23,8 @@ def auto_apply_quality_upgrades(config: Dict[str, Any], deps: AutomationDeps) ->
     except (TypeError, ValueError):
         limit = DEFAULT_LIMIT
 
-    ids = until_cutoff_finding_ids(deps.get_database(), limit=limit)
+    owner = int(config.get('_profile_id') or getattr(deps, 'get_current_profile_id', lambda: 1)())
+    ids = until_cutoff_finding_ids(deps.get_database(), limit=limit, profile_id=owner)
     if not ids:
         deps.update_progress(
             automation_id, status='finished', progress=100, phase='Nothing to apply',
@@ -41,7 +42,9 @@ def auto_apply_quality_upgrades(config: Dict[str, Any], deps: AutomationDeps) ->
         return {'status': 'skipped', 'reason': 'repair worker unavailable',
                 '_manages_own_progress': True}
 
-    result = deps.bulk_fix_repair_findings(ids) or {}
+    result = deps.bulk_fix_repair_findings(
+        ids, fix_action=f'scheduled_quality_upgrade:{owner}',
+    ) or {}
     fixed = int(result.get('fixed') or 0)
     failed = int(result.get('failed') or 0)
     deps.update_progress(

@@ -201,6 +201,53 @@ describe('sample-studio route', () => {
     expect(searched[0]).toContain('q=roc');
   });
 
+  it('keeps a saved chop playable when its original track is gone', async () => {
+    const sourceLookups: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.includes('title=')) sourceLookups.push(url);
+        if (url.includes('/api/sample/stash')) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              data: {
+                entries: [
+                  {
+                    id: 12,
+                    name: 'saved orphan',
+                    tags: [],
+                    track_id: null,
+                    track_title: 'Gone Song',
+                    artist_name: 'Artist',
+                    start_s: 1,
+                    end_s: 2,
+                    pitch_st: 0,
+                    target_bpm: null,
+                    format: 'wav16',
+                    file_path: '/samples/saved.wav',
+                    created_at: 0,
+                    folder: null,
+                  },
+                ],
+              },
+              error: null,
+            }),
+          );
+        }
+        return stubbedResponse(url, analysis, 200);
+      }),
+    );
+    renderRoute();
+    expect(await screen.findByRole('button', { name: 'Play saved orphan' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Re-open saved orphan' }));
+    expect(
+      await screen.findByText(/Couldn’t find “Gone Song” in your library/),
+    ).toBeInTheDocument();
+    expect(sourceLookups).toEqual([]);
+  });
+
   it('asks before deleting a chop, and only deletes on yes', async () => {
     const stashEntry = {
       id: 11,

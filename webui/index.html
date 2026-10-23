@@ -6104,6 +6104,7 @@
                                                             <select id="quality-upgrade-policy"
                                                                 style="width:100%;max-width:420px;"
                                                                 onchange="onUpgradePolicyChange(); debouncedSaveQualityProfile();">
+                                                                <option value="none">No upgrades</option>
                                                                 <option value="acceptable">Any accepted target</option>
                                                                 <option value="until_cutoff">Selected target or better
                                                                 </option>
@@ -6116,6 +6117,9 @@
                                                                     onchange="debouncedSaveQualityProfile()"></select>
                                                             </div>
                                                             <div class="help-text setting-help-body" hidden>
+                                                                <strong>No upgrades</strong> never replaces a file
+                                                                that already exists.
+                                                                <br><br>
                                                                 <strong>Any accepted target</strong> stops upgrade
                                                                 findings as soon as a file matches any target in the
                                                                 list.
@@ -8091,6 +8095,17 @@
                                                         formats side-by-side in the same folder with shared NFO sidecars
                                                         so both Music and TV media libraries can index the same folder
                                                         simultaneously.</small>
+                                                </div>
+                                                <label class="toggle-row" style="margin-top: 10px;">
+                                                    <input type="checkbox" id="redownload-externally-deleted">
+                                                    <span>Re-download files deleted outside SoulSync</span>
+                                                </label>
+                                                <div class="help-text" style="margin-top: 6px;">
+                                                    When a library scan finds that a monitored track's file was
+                                                    deleted outside SoulSync, the track is wanted again and goes
+                                                    back to the Wishlist (on by default, like Lidarr). Turn off to
+                                                    treat such a deletion like <em>Don't download again</em>:
+                                                    the track is unmonitored instead.
                                                 </div>
                                             </div>
 

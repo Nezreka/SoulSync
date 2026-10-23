@@ -76,11 +76,12 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
     id_cols = list(source_cols.values())
 
     # Reject known placeholder images and local server paths
-    _placeholder_hashes = {'2a96cbd8b46e442fc41c2b86b821562f'}
+    from core.metadata.artwork import is_placeholder_image_url
+
     def _valid_image(url):
         if not url or not url.strip():
             return None
-        if any(ph in url for ph in _placeholder_hashes):
+        if is_placeholder_image_url(url):
             return None
         # Reject local media server paths (Plex/Jellyfin) — not loadable in browser
         if url.startswith('/') or url.startswith('\\'):
@@ -169,7 +170,15 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
         try:
             conn = database._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1", (name,))
+            from core.library2.importer import normalize_name
+            from core.library2.provider_ids import ARTIST_IDS_SQL
+            # The catalogue's artist row under the per-source field names this
+            # harvest already speaks, keyed by the stored fold (COLLATE NOCASE
+            # is ASCII-only and missed every non-ASCII artist).
+            cursor.execute(
+                f"SELECT *, image_url AS thumb_url, {ARTIST_IDS_SQL}"
+                f" FROM lib2_artists WHERE name_key = ? LIMIT 1",
+                (normalize_name(name),))
             row = cursor.fetchone()
             if row:
                 r = dict(row)
@@ -270,15 +279,22 @@ def _backfill_liked_artist_images(database, profile_id: int, search_clients: dic
     try:
         conn = database._get_connection()
         cursor = conn.cursor()
-        cursor.execute("""
+        from core.metadata.artwork import PLACEHOLDER_IMAGE_MARKERS
+
+        # Built from the shared marker list so a newly discovered placeholder is
+        # backfilled away here too, instead of only being rejected on write.
+        placeholder_clause = " ".join(
+            "OR image_url LIKE '%' || ? || '%'" for _ in PLACEHOLDER_IMAGE_MARKERS
+        )
+        cursor.execute(f"""
             SELECT id, artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id
             FROM liked_artists_pool
             WHERE profile_id = ? AND match_status = 'matched'
               AND (image_url IS NULL OR image_url = ''
-                   OR image_url LIKE '%2a96cbd8b46e442fc41c2b86b821562f%'
+                   {placeholder_clause}
                    OR image_url NOT LIKE 'http%')
             LIMIT 100
-        """, (profile_id,))
+        """, (profile_id, *PLACEHOLDER_IMAGE_MARKERS))
         rows = cursor.fetchall()
         if not rows:
             return

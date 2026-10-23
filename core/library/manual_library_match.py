@@ -615,7 +615,9 @@ def list_unmatched_wanted_tracks(db, profile_id: int, limit: int = 200) -> list[
         wishlist_rows = []
     ext_lookup = getattr(db, "api_get_track_by_external_id", None)
     for r in wishlist_rows:
-        tid = r.get("track_id") or ""
+        # a row wanted from one release is keyed `<track>::<album>`; the
+        # source track is the part before the separator
+        tid = str(r.get("track_id") or "").split("::", 1)[0]
         if not tid:
             continue
         key = ("spotify", tid)

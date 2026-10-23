@@ -12,6 +12,7 @@
   folder-column migration.
 """
 
+from tests.lib2_seed import file_track
 import os
 import struct
 
@@ -317,11 +318,9 @@ def client(tmp_path, monkeypatch):
     db = mdb.get_database()
     conn = db._get_connection()
     try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Folder Artist')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'Folder Album')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (1, 1, 1, 'Folder Track', ?)",
-            (str(wav),),
+        conn.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Folder Artist')")
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'Folder Album')")
+        file_track(conn, 1, 1, 'Folder Track', str(wav),
         )
         conn.commit()
     finally:
@@ -438,7 +437,7 @@ def test_stem_chop_embeds_original_track_art(client, tmp_path, monkeypatch):
     conn = db._get_connection()
     try:
         track_path = conn.execute(
-            "SELECT file_path FROM tracks WHERE id = 1").fetchone()[0]
+            "SELECT path FROM lib2_track_files WHERE track_id = 1").fetchone()[0]
     finally:
         conn.close()
 

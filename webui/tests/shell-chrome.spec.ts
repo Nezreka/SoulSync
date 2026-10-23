@@ -72,7 +72,8 @@ async function openDashboard(page: Page, baseURL: string) {
   await page.goto(new URL('/dashboard', baseURL).toString(), { waitUntil: 'domcontentloaded' });
   await expect
     .poll(async () => page.evaluate(() => document.querySelector('.page.active')?.id ?? ''))
-    .toBe('dashboard-page');
+    .toBe('webui-react-root');
+  await expect(page.locator('#dashboard-page')).toBeVisible();
 }
 
 async function expectChromeHidden(page: Page) {

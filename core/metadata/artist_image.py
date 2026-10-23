@@ -16,7 +16,46 @@ logger = get_logger("metadata.artist_image")
 __all__ = [
     "get_artist_image_url",
     "gather_artist_image_candidates",
+    "is_placeholder_artist_image",
 ]
+
+
+# Images a provider hands out when it has NO photo. They are valid, downloadable
+# URLs, so nothing downstream can tell them from a real portrait — the library
+# just showed seven artists the same grey Last.fm star. Matched on the asset id
+# so every size/extension variant of the same asset is caught.
+_PLACEHOLDER_IMAGE_MARKERS = (
+    # Last.fm's generic "no artist image" star — the one actually observed in
+    # the wild. Add a marker here only for an asset id confirmed to be a
+    # provider's stand-in, never a guessed one.
+    "2a96cbd8b46e442fc41c2b86b821562f",
+)
+
+# Deezer does not use a magic asset id: when an artist has no photo it returns
+# the normal CDN URL with the asset hash simply MISSING —
+# ``/images/artist//1000x1000-000000-80-0-0.jpg`` — and serves a grey
+# silhouette for it. Verified live against api.deezer.com/artist/5541359.
+_EMPTY_ASSET_PATH = re.compile(r"/images/[a-z]+//")
+
+
+def is_placeholder_artist_image(url: Any) -> bool:
+    """True when ``url`` is a provider's stand-in for "no photo at all"."""
+    text = str(url or "").strip().lower()
+    if not text:
+        return False
+    if any(marker in text for marker in _PLACEHOLDER_IMAGE_MARKERS):
+        return True
+    return _EMPTY_ASSET_PATH.search(text) is not None
+
+
+def _real_artist_image(url: Optional[str]) -> Optional[str]:
+    """``url`` unless it is a provider placeholder — then nothing at all.
+
+    "No photo" has to travel as no photo: storing the placeholder makes the
+    artist look enriched, stops every later lookup from trying again, and puts
+    the identical grey star on every artist the provider could not picture.
+    """
+    return None if is_placeholder_artist_image(url) else url
 
 
 def _extract_artist_image_url(artist_data: Any) -> Optional[str]:
@@ -32,11 +71,11 @@ def _extract_artist_image_url(artist_data: Any) -> Optional[str]:
 
     if images:
         first_image = images[0]
-        image_url = _extract_lookup_value(first_image, 'url')
+        image_url = _real_artist_image(_extract_lookup_value(first_image, 'url'))
         if image_url:
             return image_url
 
-    return _extract_lookup_value(
+    return _real_artist_image(_extract_lookup_value(
         artist_data,
         'image_url',
         'thumb_url',
@@ -44,7 +83,7 @@ def _extract_artist_image_url(artist_data: Any) -> Optional[str]:
         'picture_xl',
         'picture_big',
         'picture_medium',
-    )
+    ))
 
 
 def _get_artist_image_from_source(source: str, artist_id: str) -> Optional[str]:
@@ -67,7 +106,7 @@ def _get_artist_image_from_source(source: str, artist_id: str) -> Optional[str]:
 
     if hasattr(client, '_get_artist_image_from_albums'):
         try:
-            return client._get_artist_image_from_albums(artist_id)
+            return _real_artist_image(client._get_artist_image_from_albums(artist_id))
         except Exception as exc:
             logger.debug("Could not fetch artist album art for %s on %s: %s", artist_id, source, exc)
 
@@ -94,7 +133,7 @@ def _lookup_artist_image_by_name(name: str) -> Optional[str]:
                 image_url = getattr(top, 'image_url', None) or (
                     top.get('image_url') if isinstance(top, dict) else None
                 )
-                if image_url:
+                if _real_artist_image(image_url):
                     return image_url
         except Exception as exc:
             logger.debug("Artist image lookup by name failed on %s for %r: %s", source, name, exc)

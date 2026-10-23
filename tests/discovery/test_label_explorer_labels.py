@@ -13,20 +13,24 @@ from core.discovery.labels import your_labels
 
 @pytest.fixture
 def conn():
+    # Library v2: an album is yours when one of its tracks has a live file
     c = sqlite3.connect(':memory:')
     c.executescript("""
-        CREATE TABLE albums (id INTEGER PRIMARY KEY, label TEXT);
-        CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id INTEGER, play_count INTEGER);
+        CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, label TEXT);
+        CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, album_id INTEGER, play_count INTEGER);
+        CREATE TABLE lib2_track_files (id INTEGER PRIMARY KEY, track_id INTEGER, path TEXT,
+                                       file_state TEXT, owner_profile_id INTEGER);
     """)
     return c
 
 
 def _album(c, aid, label, plays=(), unplayed=0):
-    c.execute("INSERT INTO albums VALUES (?, ?)", (aid, label))
-    for p in plays:
-        c.execute("INSERT INTO tracks (album_id, play_count) VALUES (?, ?)", (aid, p))
-    for _ in range(unplayed):
-        c.execute("INSERT INTO tracks (album_id, play_count) VALUES (?, 0)", (aid,))
+    c.execute("INSERT INTO lib2_albums VALUES (?, ?)", (aid, label))
+    for p in [*plays, *([0] * unplayed)]:
+        tid = c.execute("INSERT INTO lib2_tracks (album_id, play_count) VALUES (?, ?)",
+                        (aid, p)).lastrowid
+        c.execute("INSERT INTO lib2_track_files (track_id, path) VALUES (?, ?)",
+                  (tid, f'/m/{tid}.flac'))
 
 
 def test_the_labels_you_play_lead(conn):

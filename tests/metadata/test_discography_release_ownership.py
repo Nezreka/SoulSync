@@ -170,18 +170,14 @@ def _yellowcard_library(tmp_path):
     """A scanned library owning Ocean Avenue (filed 2003), with no stored
     Deezer ids — the SeadogsBooty shape."""
     from database.music_database import MusicDatabase
+    from tests import lib2_seed
     db = MusicDatabase(str(tmp_path / "m.db"))
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('AR1', 'Yellowcard', 'test')")
-        conn.execute(
-            "INSERT INTO albums (id, artist_id, title, year, track_count, server_source) "
-            "VALUES ('AL1', 'AR1', 'Ocean Avenue', 2003, 2, 'test')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
-            "VALUES ('T1', 'AL1', 'AR1', 'Ocean Avenue', 1, '/m/t1.flac', 'test')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
-            "VALUES ('T2', 'AL1', 'AR1', 'Breathing', 2, '/m/t2.flac', 'test')")
+        album_cols = {"year": 2003, "track_count": 2, "server_source": "test"}
+        lib2_seed.track(conn, "Yellowcard", "Ocean Avenue", "Ocean Avenue", track_number=1,
+                        path="/m/t1.flac", album_cols=album_cols)
+        lib2_seed.track(conn, "Yellowcard", "Ocean Avenue", "Breathing", track_number=2,
+                        path="/m/t2.flac")
         conn.commit()
     return db
 
@@ -215,7 +211,7 @@ def test_owned_release_tracks_deezer_conflicting_id_still_missing(tmp_path):
     fire and the downloader's check agrees with the page ([])."""
     db = _yellowcard_library(tmp_path)
     with db._get_connection() as conn:
-        conn.execute("UPDATE albums SET deezer_id = 'DZ-9' WHERE id = 'AL1'")
+        conn.execute("""UPDATE lib2_albums SET external_ids = '{"deezer": "DZ-9"}'""")
         conn.commit()
     candidates = db.get_candidate_albums_for_artist('Yellowcard', server_source='test')
     tracks = df.owned_release_tracks(
@@ -225,23 +221,33 @@ def test_owned_release_tracks_deezer_conflicting_id_still_missing(tmp_path):
     assert tracks == []
 
 
+def _lib2_release(conn, artist_id, title, year, track_count, kind, deezer_id=None):
+    """Ours: one Library v2 release. A known kind is the type plus the
+    download's filing record (lib2_albums.album_type defaults to 'album')."""
+    import json
+    cols = {"primary_artist_id": artist_id, "title": title, "origin": "library",
+            "year": year, "track_count": track_count, "server_source": "test",
+            "album_type": kind, "filed_release": json.dumps({"type": kind})}
+    if deezer_id:
+        cols["external_ids"] = json.dumps({"deezer": deezer_id})
+    return conn.execute(
+        f"INSERT INTO lib2_albums ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+        list(cols.values())).lastrowid
+
+
 def _single_vs_album_library(tmp_path):
     """Library holds a same-year, same-title KNOWN-album row with only 2
     tracks — the count guard cannot fire, so the kind gate is what must
     reject it for a single card."""
     from database.music_database import MusicDatabase
+    from tests.lib2_seed import artist, file_track
     db = MusicDatabase(str(tmp_path / "m.db"))
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('AR1', 'Yellowcard', 'test')")
-        conn.execute(
-            "INSERT INTO albums (id, artist_id, title, year, track_count, record_type, server_source) "
-            "VALUES ('AL1', 'AR1', 'Ocean Avenue', 2024, 2, 'album', 'test')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
-            "VALUES ('T1', 'AL1', 'AR1', 'Ocean Avenue', 1, '/m/t1.flac', 'test')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
-            "VALUES ('T2', 'AL1', 'AR1', 'B-Side Thing', 2, '/m/t2.flac', 'test')")
+        artist_id = artist(conn, 'Yellowcard', server_source='test')
+        al1 = _lib2_release(conn, artist_id, 'Ocean Avenue', 2024, 2, 'album')
+        file_track(conn, 1, al1, 'Ocean Avenue', '/m/t1.flac')
+        file_track(conn, 2, al1, 'B-Side Thing', '/m/t2.flac')
+        conn.execute("UPDATE lib2_tracks SET track_number=id")
         conn.commit()
     return db
 
@@ -279,21 +285,15 @@ def _album_and_single_library(tmp_path):
     confidence tie returns it) and the true single row carrying the card's
     Deezer id."""
     from database.music_database import MusicDatabase
+    from tests.lib2_seed import artist, file_track
     db = MusicDatabase(str(tmp_path / "m.db"))
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('AR1', 'Yellowcard', 'test')")
-        conn.execute(
-            "INSERT INTO albums (id, artist_id, title, year, track_count, record_type, deezer_id, server_source) "
-            "VALUES ('AL0', 'AR1', 'Ocean Avenue', 2024, 13, 'album', 'DZ-ALBUM-1', 'test')")
-        conn.execute(
-            "INSERT INTO albums (id, artist_id, title, year, track_count, record_type, deezer_id, server_source) "
-            "VALUES ('AL1', 'AR1', 'Ocean Avenue', 2024, 1, 'single', 'DZ-SINGLE-1', 'test')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
-            "VALUES ('T0', 'AL0', 'AR1', 'Ocean Avenue', 1, '/m/a1.flac', 'test')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, server_source) "
-            "VALUES ('T1', 'AL1', 'AR1', 'Ocean Avenue', 1, '/m/s1.flac', 'test')")
+        artist_id = artist(conn, 'Yellowcard', server_source='test')
+        al0 = _lib2_release(conn, artist_id, 'Ocean Avenue', 2024, 13, 'album', 'DZ-ALBUM-1')
+        al1 = _lib2_release(conn, artist_id, 'Ocean Avenue', 2024, 1, 'single', 'DZ-SINGLE-1')
+        file_track(conn, 1, al0, 'Ocean Avenue', '/m/a1.flac')
+        file_track(conn, 2, al1, 'Ocean Avenue', '/m/s1.flac')
+        conn.execute("UPDATE lib2_tracks SET track_number=1")
         conn.commit()
     return db
 

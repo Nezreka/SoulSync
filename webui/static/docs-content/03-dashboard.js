@@ -204,20 +204,17 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Track Number Repair | Fixes missing/incorrect track numbers against official tracklists |
 | Orphan File Detector | Finds audio files in your output folder not tracked in the database |
 | Dead File Cleaner | Removes database entries pointing to files that no longer exist |
-| Duplicate Detector | Identifies duplicate tracks by fingerprint or metadata match |
 | AcoustID Scanner | Batch audio fingerprint verification across your library |
 | Cover Art Filler | Detects albums/tracks without embedded artwork and fetches it |
 | Metadata Gap Filler | Completes missing fields (genre, year, …) from connected services |
-| Album Completeness | Flags incomplete albums and finds the missing tracks |
-| Fake Lossless Detector | Identifies FLAC files without real high-frequency content |
+| Fake Lossless Detector | Flags suspected lossy transcodes for review; findings have no automatic repair or re-download action |
 | Library Reorganize | Restructures folders to match your path templates |
 | MBID Mismatch Detector | Verifies MusicBrainz IDs are still accurate |
 | Album Tag Consistency | Standardizes tags across all tracks in an album |
 | Cache Maintenance | Cleans expired metadata cache entries |
 | Corrupt File Detector | Decode-tests every library FLAC (\`flac -t\`, falling back to ffmpeg) and flags physically damaged files — the only cure is a fresh download |
-| Resolve Canonical Album Versions | Pins each album's canonical release across metadata sources so the reorganizer and track-number repair resolve the same release (opt-in; costs API calls, done once per album) |
 | Comma Artist Splitter | Finds dummy artists that are really several artists joined by separators ("Camellia, Toby Fox") and splits their tags — verifies against metadata APIs first so real separator-named acts like "Tyler, The Creator" are never split |
-| Discography Backfill | Finds missing albums and tracks for artists already in your library |
+| Monitoring List Reconcile | Reconciles monitored artists with the Watchlist and missing or upgrade-eligible tracks with the Wishlist |
 | Empty Folder Cleaner | Finds truly-empty folders (or folders holding only OS junk like .DS_Store) in the library root — never touches a folder containing audio or cover art |
 | Expired Download Cleaner | Proposes deleting watchlist/playlist-sourced downloads past their per-origin retention window; always keeps actively-mirrored playlists, watched artists, and tracks you've played more than once (optional auto-delete) |
 | Genre Tag Cleanup | Re-applies the strict genre whitelist to genres stored before it was enabled — one finding per artist/album with off-whitelist genres |
@@ -226,12 +223,10 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Live/Commentary Cleaner | Finds live performances, commentary, interviews, and spoken-word content in the library |
 | Lossy Converter | Finds lossless files with no lossy copy alongside and converts them with ffmpeg using your configured codec/bitrate |
 | Lyrics Filler | Finds tracks with no \`.lrc\` sidecar, checks LRClib so instrumentals are never flagged, then fetches synced lyrics — writes the \`.lrc\` and embeds them |
-| Quality Upgrade Finder | Finds library tracks below your quality profile and actively searches a better version to add to the wishlist |
-| Quality Check | Flags library tracks below your quality profile — you decide re-download, delete, or ignore per finding |
 | ReplayGain Filler | Finds tracks with no ReplayGain loudness tag, analyzes them, and writes the tags |
 | Preview Clip Cleanup | Detects ~30s preview clips (some sources deliver samples instead of full songs), compares against the expected length from the metadata source, and re-fetches the full track |
-| Single/Album Dedup | Flags singles that are redundant because the same track already exists on an album in your library |
-| Fix Unknown Artists | Finds tracks tagged "Unknown Artist", resolves the correct artist/album/track from file tags or the metadata API, then re-tags, moves the file to the correct folder, and updates the database |
+
+Library v2 handles catalogue identity, duplicate review, release completeness, and wanted quality upgrades directly. The retired Duplicate Detector, Album Completeness, Quality Upgrade Finder, Quality Check, Single/Album Dedup, and Fix Unknown Artists jobs are not offered. Missing and upgrade-eligible monitored tracks reach the Wishlist through **Monitoring List Reconcile**; there is no **Apply Quality Upgrades** automation action.
 
 > [!WARNING]
 > **Mass orphan safety:** when the orphan detector's mass-orphan guard trips (over half the scanned files look like orphans — usually a DB↔filesystem path mismatch, not real orphans), the scan refuses to create any findings at all, so there's nothing to bulk-delete. The **"Witness Me"** type-the-phrase confirmation exists for bulk orphan deletes, but it can't trigger while the guard refuses findings.

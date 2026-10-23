@@ -261,5 +261,3 @@ class TestNowPlayingAndWantedCards:
         assert meta["tn"] == 1
         assert meta["disc"] == 1
         assert meta["dur"] == 268000
-
-

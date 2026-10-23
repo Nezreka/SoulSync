@@ -100,6 +100,13 @@ def _patch_common(monkeypatch, music_db):
                         lambda tracks: (tracks, []))
     monkeypatch.setattr(wl_processing, "_run_wishlist_cycle",
                         lambda *a, **k: {"album_batches": 0, "residual_count": 0})
+    # On this branch two profiles on the SHARED library want one download, so
+    # sanitize keeps one X for both (#1199, E-06). Profile 2 keeps a library
+    # of its own here, which is the case where both owners' X are attempted.
+    import core.library_scope as library_scope
+    monkeypatch.setattr(library_scope, "library_scope_for_profile", lambda pid: pid)
+    monkeypatch.setattr(library_scope, "owner_for_scope",
+                        lambda scope: 2 if scope == 2 else None)
     # sanitize is real; make sure it keeps our marker + owner keys
     return music_db
 

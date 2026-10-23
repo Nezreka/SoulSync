@@ -1,6 +1,6 @@
 """on repeat, repeat rewind, flow and blend (sept 29 2026).
 
-all four are owned tracks read off listening_history.db_track_id, so they play
+all four are owned tracks read off listening_history.lib2_track_id, so they play
 straight away. these pin what each one means, on a real MusicDatabase.
 """
 
@@ -24,17 +24,25 @@ def db(tmp_path):
 
 
 def _track(db, artist, title, album='LP', owned=True, play_count=0):
-    tid, ar, al = f't{next(_ids)}', f'ar-{artist}', f'al-{artist}-{album}'
+    # Library v2: one artist row per name, one album per (artist, album)
     with db._get_connection() as conn:
-        conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", (ar, artist))
-        conn.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES (?, ?, ?)",
-                     (al, ar, album))
-        conn.execute(
-            "INSERT INTO tracks (id, artist_id, album_id, title, duration, play_count, file_path) "
-            "VALUES (?, ?, ?, ?, 200000, ?, ?)",
-            (tid, ar, al, title, play_count, f'/m/{tid}.flac' if owned else None))
+        row = conn.execute("SELECT id FROM lib2_artists WHERE name = ?", (artist,)).fetchone()
+        ar = row[0] if row else conn.execute(
+            "INSERT INTO lib2_artists (name, name_key) VALUES (?, ?)",
+            (artist, artist.lower())).lastrowid
+        row = conn.execute("SELECT id FROM lib2_albums WHERE primary_artist_id = ? AND title = ?",
+                           (ar, album)).fetchone()
+        al = row[0] if row else conn.execute(
+            "INSERT INTO lib2_albums (primary_artist_id, title, origin) VALUES (?, ?, 'library')",
+            (ar, album)).lastrowid
+        tid = conn.execute(
+            "INSERT INTO lib2_tracks (album_id, title, duration, play_count) VALUES (?, ?, 200000, ?)",
+            (al, title, play_count)).lastrowid
+        if owned:
+            conn.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+                         (tid, f'/m/{tid}.flac'))
         conn.commit()
-    return tid
+    return str(tid)
 
 
 def _play(db, tid, days_ago, times=1, owner=1, artist='x'):
@@ -43,7 +51,7 @@ def _play(db, tid, days_ago, times=1, owner=1, artist='x'):
             when = (NOW - timedelta(days=days_ago, minutes=n)).strftime('%Y-%m-%d %H:%M:%S')
             conn.execute(
                 "INSERT INTO listening_history "
-                "(track_id, title, artist, played_at, db_track_id, profile_id) "
+                "(track_id, title, artist, played_at, lib2_track_id, profile_id) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (f'k{next(_ids)}', 't', artist, when, tid, owner))
         conn.commit()

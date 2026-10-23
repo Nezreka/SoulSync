@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from core.amazon_outage import amazon_enrichment_should_run
+from core.amazon_outage import amazon_enrichment_should_run, amazon_host_configured
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,6 +46,21 @@ def test_a_self_hosted_instance_still_runs():
 def test_a_self_hosted_instance_still_respects_pause():
     cfg = _Cfg({"amazon_enrichment_paused": True, "amazon.base_url": "http://192.168.1.5:8080"})
     assert amazon_enrichment_should_run(cfg) is False
+
+
+@pytest.mark.parametrize("base, expected", [
+    (None, False), ("https://t2tunes.site", False), ("http://192.168.1.5:8080", True),
+])
+def test_only_a_self_hosted_instance_counts_as_configured(base, expected):
+    """the native enrichment sweep walks every "configured" provider; the dead
+    default host cost 50 errors per run and never matched once."""
+    cfg = _Cfg() if base is None else _Cfg({"amazon.base_url": base})
+    assert amazon_host_configured(cfg) is expected
+
+
+def test_enrichment_status_asks_the_host_check():
+    block = _read("web_server.py").split("configured_checks = {", 1)[1].split("\n    }", 1)[0]
+    assert "'amazon_enrichment': lambda: _amazon_host_configured(config_manager)" in block
 
 
 def test_boot_asks_the_gate():

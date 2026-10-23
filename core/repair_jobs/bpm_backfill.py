@@ -1,6 +1,6 @@
 """BPM Backfill Job — finds tracks missing BPM and fills it from Deezer or local analysis.
 
-Issue #1476: tracks.bpm is only written at download time. Tracks already in
+Issue #1476: lib2_tracks.bpm is only written at download time. Tracks already in
 the library never get one. This job backfills BPM for existing tracks:
 
 1. Deezer API first (via deezer_id) — fast, no local CPU cost
@@ -12,10 +12,14 @@ not auto-written. The existing _fix_metadata_gap handler applies the bpm field.
 
 import os
 
-from core.library.path_resolver import resolve_library_file_path
 from core.metadata_service import get_client_for_source
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, not_locked_sql
+from core.library2.maintenance_subjects import active_file_subjects, subject_details
+from core.library2.paths import resolve_lib2_path
+from core.repair_jobs.base import (
+    JobContext, JobResult, RepairJob, drop_hand_tagged, scoped_file_subjects,
+)
+from core.repair_jobs.metadata_gap_filler import _gap_cursor
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.bpm_backfill")
@@ -47,6 +51,7 @@ class BpmBackfillJob(RepairJob):
         'use_local_analysis': True,
     }
     auto_fix = False
+    supports_file_scope = True
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -82,55 +87,20 @@ class BpmBackfillJob(RepairJob):
             )
             return result
 
-        # Find tracks missing BPM
-        tracks = []
-        conn = None
+        # Tracks missing BPM, one subject per track (its primary file when it
+        # has several). A batch per run, continuing where the last one stopped:
+        # a track no source can answer would otherwise hold its place in the
+        # first batch on every run and the rest of the library never come up.
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(tracks)")
-            track_columns = {column[1] for column in cursor.fetchall()}
-
-            select_cols = [
-                "t.id",
-                "t.title",
-                "ar.name",
-                "al.title",
-                "t.file_path",
-                "al.thumb_url",
-                "ar.thumb_url",
-                "ar.id",
-            ]
-            # Deezer ID for API lookup (column is deezer_id, not deezer_track_id)
-            if "deezer_id" in track_columns:
-                select_cols.append("t.deezer_id AS deezer_id")
-                deezer_idx = len(select_cols) - 1
-            else:
-                deezer_idx = None
-
-            locked_filter = not_locked_sql(cursor, 'tracks', 't') + not_locked_sql(cursor, 'albums', 'al')
-            # Order Deezer-matched tracks first (faster lookups)
-            order_by = (
-                "ORDER BY CASE WHEN t.deezer_id IS NOT NULL AND t.deezer_id != '' THEN 0 ELSE 1 END"
-                if "deezer_id" in track_columns else ""
-            )
-            cursor.execute(f"""
-                SELECT {', '.join(select_cols)}
-                FROM tracks t
-                LEFT JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.title IS NOT NULL AND t.title != ''
-                  AND (t.bpm IS NULL OR t.bpm = 0){locked_filter}
-                {order_by}
-            """)
-            tracks = cursor.fetchall()
+            missing = _missing_bpm_subjects(context)
         except Exception as e:
             logger.error("Error fetching tracks missing BPM: %s", e, exc_info=True)
             result.errors += 1
             return result
-        finally:
-            if conn:
-                conn.close()
+        cursor = _gap_cursor(context, _BPM_CURSOR_KEY)
+        tracks = [s for s in missing if int(s['track_id']) > cursor][:_BPM_BATCH]
+        if not tracks:
+            tracks = missing[:_BPM_BATCH]
 
         total = len(tracks)
         if context.update_progress:
@@ -148,10 +118,10 @@ class BpmBackfillJob(RepairJob):
             if i % 20 == 0 and context.wait_if_paused():
                 return result
 
-            track_id, title, artist_name, album_title = row[0], row[1], row[2], row[3]
-            file_path = row[4]
-            album_thumb, artist_thumb, artist_id = row[5], row[6], row[7]
-            deezer_id = row[deezer_idx] if deezer_idx is not None else None
+            track_id = row['track_id']
+            title, artist_name, album_title = row.get('title'), row.get('artist_name'), row.get('album_title')
+            file_path = row.get('path')
+            deezer_id = row.get('deezer_id')
 
             result.scanned += 1
 
@@ -195,15 +165,15 @@ class BpmBackfillJob(RepairJob):
 
             # 2. Fall back to local analysis
             if bpm_value is None and local_available and file_path:
-                # the stored path is often the media server's view (docker,
-                # nas), so a bare exists() check skipped every file (#1476)
-                local_path = self._resolve(file_path, context)
+                local_path = file_path if os.path.exists(file_path) else resolve_lib2_path(
+                    file_path, config_manager=context.config_manager)
                 if not local_path:
+                    # upstream 1db9c12bf: counted and reported below, never silent
                     unreachable += 1
                 else:
                     try:
-                        from core.sample.analyze import analyze_track
-                        analysis = analyze_track(local_path)
+                        from core.sample.isolated import analyze_track_isolated
+                        analysis = analyze_track_isolated(local_path)
                         bpm_val = analysis.get('bpm')
                         if bpm_val and float(bpm_val) > 0:
                             bpm_value = round(float(bpm_val), 1)
@@ -234,30 +204,32 @@ class BpmBackfillJob(RepairJob):
                     )
                 if context.create_finding:
                     try:
+                        details = {
+                            'track_id': f'lib2:{track_id}',
+                            'title': title,
+                            'artist': artist_name,
+                            'album': album_title,
+                            'bpm': bpm_value,
+                            'bpm_source': bpm_source,
+                            'found_fields': {'bpm': bpm_value},
+                            'album_thumb_url': row.get('album_image') or None,
+                            'artist_thumb_url': row.get('artist_image') or None,
+                            'artist_id': row.get('artist_id'),
+                        }
+                        details.update(subject_details(row))
                         inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='bpm_backfill',
                             severity='info',
                             entity_type='track',
-                            entity_id=str(track_id),
+                            entity_id=f'lib2:{track_id}',
                             file_path=file_path,
                             title=f'Missing BPM: {title or "Unknown"}',
                             description=(
                                 f'Track "{title}" by {artist_name or "Unknown"} is missing BPM. '
                                 f'Found {bpm_value} BPM via {bpm_source}.'
                             ),
-                            details={
-                                'track_id': track_id,
-                                'title': title,
-                                'artist': artist_name,
-                                'album': album_title,
-                                'bpm': bpm_value,
-                                'bpm_source': bpm_source,
-                                'found_fields': {'bpm': bpm_value},
-                                'album_thumb_url': album_thumb or None,
-                                'artist_thumb_url': artist_thumb or None,
-                                'artist_id': artist_id,
-                            }
+                            details=details,
                         )
                         if inserted:
                             result.findings_created += 1
@@ -279,6 +251,8 @@ class BpmBackfillJob(RepairJob):
 
         if context.update_progress:
             context.update_progress(total, total)
+        if tracks:
+            _gap_cursor(context, _BPM_CURSOR_KEY, int(tracks[-1]['track_id']))
 
         if unreachable:
             logger.warning("BPM backfill: %d track files couldn't be found on disk", unreachable)
@@ -293,22 +267,6 @@ class BpmBackfillJob(RepairJob):
                     result.scanned, result.findings_created, result.skipped)
         return result
 
-    @staticmethod
-    def _resolve(file_path, context: JobContext):
-        """A stored library path this process can read, or None.
-
-        passes the transfer folder and config like the corruption scan does,
-        a bare resolve has nothing to suffix-walk.
-        """
-        resolved = resolve_library_file_path(
-            file_path,
-            transfer_folder=context.transfer_folder,
-            config_manager=context.config_manager,
-        )
-        if not resolved and os.path.isfile(file_path):
-            resolved = file_path
-        return resolved
-
     def _get_settings(self, context: JobContext) -> dict:
         if not context.config_manager:
             return self.default_settings.copy()
@@ -318,21 +276,30 @@ class BpmBackfillJob(RepairJob):
         return merged
 
     def estimate_scope(self, context: JobContext) -> int:
-        conn = None
         try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            # Note: does not apply not_locked_sql filters; may overcount slightly
-            # vs. what scan() will process. Acceptable for an estimate.
-            cursor.execute("""
-                SELECT COUNT(*) FROM tracks
-                WHERE title IS NOT NULL AND title != ''
-                  AND (bpm IS NULL OR bpm = 0)
-            """)
-            row = cursor.fetchone()
-            return row[0] if row else 0
+            return len(_missing_bpm_subjects(context))
         except Exception:
             return 0
-        finally:
-            if conn:
-                conn.close()
+
+
+_BPM_BATCH = 500
+_BPM_CURSOR_KEY = 'repair.bpm_backfill.cursor'
+
+
+def _missing_bpm_subjects(context: JobContext) -> list:
+    """Library-v2 tracks without a BPM, by track id, hand-tagged files left out."""
+    by_track: dict = {}
+    for subject in drop_hand_tagged(context, scoped_file_subjects(
+            context, active_file_subjects(context.db, context.config_manager))):
+        if not str(subject.get('title') or '').strip():
+            continue
+        try:
+            if subject.get('bpm') and float(subject['bpm']) > 0:
+                continue
+        except (TypeError, ValueError):
+            pass
+        track_id = int(subject['track_id'])
+        if track_id in by_track and not subject.get('is_primary'):
+            continue
+        by_track[track_id] = subject
+    return [by_track[k] for k in sorted(by_track)]

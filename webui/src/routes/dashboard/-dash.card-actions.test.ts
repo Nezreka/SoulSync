@@ -19,8 +19,13 @@ import {
  */
 
 const loadAlbumTracks = vi.fn();
-vi.mock('../library/-library.api', () => ({
-  loadAlbumTracks: (id: unknown) => loadAlbumTracks(id),
+vi.mock('../library/-library-v2.api', () => ({
+  fetchLibraryV2Album: async (id: unknown) => ({
+    id,
+    title: 'Kyougen',
+    image_url: null,
+    tracks: await loadAlbumTracks(id),
+  }),
 }));
 const resolveLibraryTrack = vi.fn();
 vi.mock('../../features/playback/play-track', () => ({
@@ -42,7 +47,7 @@ const album = (over: Partial<RecentlyAddedAlbum> = {}): RecentlyAddedAlbum => ({
   source: 'soulseek',
   playTitle: 'Vivarium',
   playFilePath: '/m/v.flac',
-  albumId: 'al1',
+  albumId: '7',
   artistId: 'ar1',
   ...over,
 });
@@ -59,9 +64,22 @@ const play: RecentPlay = {
   plays: 1,
 };
 
+// Library v2 album tracks: the file rides on the row, the credit names the artist
 const TRACKS = [
-  { id: 1, title: 'Readymade', file_path: '/m/1.flac', track_number: 1 },
-  { id: 2, title: 'Odo', file_path: '/m/2.flac', track_number: 2 },
+  {
+    id: 1,
+    title: 'Readymade',
+    file: { path: '/m/1.flac', file_state: 'active' },
+    track_number: 1,
+    artists: [{ id: 3, name: 'Ado', role: 'primary' }],
+  },
+  {
+    id: 2,
+    title: 'Odo',
+    file: { path: '/m/2.flac', file_state: 'active' },
+    track_number: 2,
+    artists: [{ id: 3, name: 'Ado', role: 'primary' }],
+  },
 ];
 
 beforeEach(() => {
@@ -83,7 +101,7 @@ afterEach(() => {
 describe('recentAlbumTracks', () => {
   it('is the whole library album, as playable library rows', async () => {
     const tracks = await recentAlbumTracks(album());
-    expect(loadAlbumTracks).toHaveBeenCalledWith('al1');
+    expect(loadAlbumTracks).toHaveBeenCalledWith(7);
     expect(tracks.map((t) => t.title)).toEqual(['Readymade', 'Odo']);
     expect(tracks[0]).toMatchObject({
       artist: 'Ado',
@@ -92,8 +110,9 @@ describe('recentAlbumTracks', () => {
       is_library: true,
       playback_status: 'ready',
       image_url: 'k.jpg',
-      album_id: 'al1',
+      album_id: '7',
       artist_id: 'ar1',
+      lib2_track_id: 1,
     });
   });
 

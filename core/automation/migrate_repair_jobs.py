@@ -147,6 +147,37 @@ def _get_video_job_config(video_db, job_id: str) -> dict:
         return {}
 
 
+def _retire_renamed_job_rows(engine, database, profile_id: int, jobs: dict) -> None:
+    """System rows seeded under a since-renamed or retired job id would fail on
+    every tick (renamed) or never stop firing (retired). Point a renamed row at
+    its successor unless that already has one; drop the rest."""
+    from core.repair_jobs import JOB_ID_MIGRATIONS, RETIRED_JOB_IDS
+    for auto in database.get_automations(profile_id) or []:
+        if auto.get("owned_by") != _SYSTEM_OWNER or auto.get("action_type") != "run_repair_job":
+            continue
+        try:
+            cfg = json.loads(auto.get("action_config") or "{}")
+        except (TypeError, ValueError):
+            continue
+        old = cfg.get("job_id")
+        if old not in RETIRED_JOB_IDS and old not in JOB_ID_MIGRATIONS:
+            continue
+        new = JOB_ID_MIGRATIONS.get(old)
+        if engine is not None:
+            engine.cancel_automation(auto["id"])
+        if new in jobs and not _find_system_automation(database, profile_id, new):
+            database.update_automation(
+                auto["id"], action_config=json.dumps({**cfg, "job_id": new}),
+                name=f"[System] {getattr(jobs[new], 'display_name', new)}")
+            if engine is not None:
+                engine.schedule_automation(auto["id"])
+        else:  # delete_automation refuses system rows by design
+            database.update_automation(auto["id"], is_system=0)
+            database.delete_automation(auto["id"])
+        logger.info("System automation for retired job %s %s", old,
+                    f"now runs {new}" if new in jobs else "removed")
+
+
 def _reconcile_job_toggle(auto, job_id, job_cls, prefix, is_video,
                           config_manager, video_db) -> None:
     """Heal a job whose Tools toggle drifted from its row. Tools always wrote
@@ -223,6 +254,11 @@ def ensure_repair_job_automations(engine, database, config_manager,
         (get_music_jobs(), "repair.jobs", "run_repair_job", False),
         (get_video_jobs(), "video_repair.jobs", "video_run_repair_job", True),
     ]
+
+    try:
+        _retire_renamed_job_rows(engine, database, profile_id, sources[0][0])
+    except Exception as e:  # noqa: BLE001 - seeding must still run
+        logger.warning("Could not retire renamed repair-job automations: %s", e)
 
     for jobs, prefix, action_type, is_video in sources:
         for idx, (job_id, job_cls) in enumerate(sorted(jobs.items())):

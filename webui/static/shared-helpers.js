@@ -1978,7 +1978,6 @@ function updateArtistDownloadsSection() {
     }
     downloadsUpdateTimeout = setTimeout(() => {
         showArtistDownloadsSection();
-        showLibraryDownloadsSection();
         showBeatportDownloadsSection();
         updateDashboardDownloads();
     }, 300); // 300ms debounce

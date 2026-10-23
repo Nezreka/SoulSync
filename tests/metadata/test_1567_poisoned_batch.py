@@ -89,7 +89,7 @@ def test_1567_poisoned_batch_album_context_distrusted(caplog):
     assert md["artist"] == "Foo Fighters"
     assert md["album_artist"] == "Foo Fighters"  # NOT Nickelback
     assert md["album"] == "music"  # the track's own provider album, not "Music"
-    assert md["total_tracks"] == 1  # NOT 10
+    assert md["total_tracks"] in (0, None)  # NOT 10; v2 writes an unknown total as unknown
     assert "date" not in md  # NOT 2001
     warnings = [r for r in caplog.records
                 if r.levelno >= 20 and "#1567" in r.getMessage()]
@@ -390,7 +390,7 @@ def test_1567_distrust_quarantines_genres_artwork_and_release_id():
     assert md.get("album_art_url") in (None, ""), "batch artwork must not leak"
     assert "musicbrainz_release_id" not in md, "batch MB release id must not leak"
     assert md["album"] == "music"  # track's own album (is_album branch quarantined too)
-    assert md["total_tracks"] == 1
+    assert md["total_tracks"] in (0, None)  # v2: unknown, never the batch's
 
 
 def test_1567_distrust_uses_track_own_artwork_when_present():
@@ -510,7 +510,7 @@ def test_1567_r2_residual_path_stranger_ctx_artist_distrusted(caplog):
             {"is_album": True, "album_name": "Music", "track_number": 3},
         )
     assert md["album_artist"] == "Foo Fighters"  # NOT Nickelback
-    assert md["total_tracks"] == 1  # NOT the batch's 10 (own album has no total)
+    assert md["total_tracks"] in (0, None)  # NOT the batch's 10 (own album has no total)
     assert md.get("date") != "2001"  # NOT the batch's date
     assert md["album"] == "music"  # the track's own provider album, not the batch's "Music"
     assert md.get("album_art_url") is None  # strangers' art quarantined

@@ -198,7 +198,9 @@ def _run_auto_flow(monkeypatch, tracks_by_profile):
     monkeypatch.setattr(wishlist_processing, 'set_wishlist_cycle', lambda db_factory, cycle: None)
 
     def fake_cycle(runtime, **kwargs):
-        captured['tracks'] = kwargs['tracks']
+        # this branch dispatches one cycle per owning profile (A6), so
+        # collect every call
+        captured.setdefault('tracks', []).extend(kwargs['tracks'])
         captured['auto_initiated'] = kwargs['auto_initiated']
         return {'submitted': [], 'album_batches': 0,
                 'residual_count': len(kwargs['tracks'])}
@@ -226,8 +228,12 @@ def test_auto_flow_stamps_each_track_with_its_owning_profile(monkeypatch):
 
 
 def test_auto_flow_keeps_both_owners_of_a_shared_track(monkeypatch):
-    """The same track wishlisted by two profiles is two owned requests: the
-    per-(track, owner) dedupe keeps both, each stamped with its owner."""
+    """The same track wishlisted by two profiles with two libraries is two
+    owned requests: the per-(track, owner) dedupe keeps both, each stamped
+    with its owner."""
+    import core.library_scope as library_scope
+    monkeypatch.setattr(library_scope, 'library_scope_for_profile', lambda pid: pid)
+    monkeypatch.setattr(library_scope, 'owner_for_scope', lambda scope: 2 if scope == 2 else None)
     tracks = {
         1: [{'spotify_track_id': 'shared', 'name': 'Shared Track'}],
         2: [{'spotify_track_id': 'shared', 'name': 'Shared Track'}],
@@ -237,6 +243,18 @@ def test_auto_flow_keeps_both_owners_of_a_shared_track(monkeypatch):
     owners = sorted(t['profile_id'] for t in captured['tracks']
                     if t['spotify_track_id'] == 'shared')
     assert owners == [1, 2]
+
+
+def test_auto_flow_downloads_a_shared_library_track_once(monkeypatch):
+    """Two profiles on the SHARED library want one download, not two copies of
+    the same file in one folder (#1199, E-06)."""
+    tracks = {
+        1: [{'spotify_track_id': 'shared', 'name': 'Shared Track'}],
+        2: [{'spotify_track_id': 'shared', 'name': 'Shared Track'}],
+    }
+    captured = _run_auto_flow(monkeypatch, tracks)
+
+    assert [t['spotify_track_id'] for t in captured['tracks']] == ['shared']
 
 
 def _cycle_runtime(batches):

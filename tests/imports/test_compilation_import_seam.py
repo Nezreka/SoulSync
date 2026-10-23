@@ -60,11 +60,13 @@ def imported(db, tmp_path, monkeypatch):
 
         with db._get_connection() as conn:
             cur = conn.cursor()
+            # the catalogue is Library v2 on this branch
             cur.execute("""
                 SELECT ar.name, al.title, t.title, t.track_artist
-                FROM tracks t
-                JOIN albums al ON t.album_id = al.id
-                JOIN artists ar ON al.artist_id = ar.id
+                FROM lib2_tracks t
+                JOIN lib2_albums al ON t.album_id = al.id
+                JOIN lib2_artists ar ON al.primary_artist_id = ar.id
+                ORDER BY t.id
             """)
             return cur.fetchall()
 
@@ -160,8 +162,11 @@ def test_profile_one_import_writes_shared_owner_null(db, tmp_path, monkeypatch):
     se.record_soulsync_library_entry(
         context, {'name': 'Katy Perry'}, {'album_name': 'Teenage Dream'})
 
+    # Library v2 keeps the owner on the file row; profile 1 without a library
+    # of its own files into the shared one (NULL)
     with db._get_connection() as conn:
         cur = conn.cursor()
-        for table in ('tracks', 'albums', 'artists'):
-            cur.execute(f"SELECT COUNT(*) AS n FROM {table} WHERE owner_profile_id IS NOT NULL")
-            assert cur.fetchone()['n'] == 0, f"{table} has non-NULL owner_profile_id"
+        cur.execute("SELECT COUNT(*) AS n, SUM(owner_profile_id IS NOT NULL) AS owned"
+                    " FROM lib2_track_files")
+        row = cur.fetchone()
+        assert row['n'] == 1 and not row['owned'], "the import file row has a non-NULL owner"

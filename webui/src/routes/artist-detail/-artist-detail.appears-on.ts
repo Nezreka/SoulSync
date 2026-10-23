@@ -6,6 +6,7 @@
 
 export interface AppearsOnTrack {
   id: string | number;
+  lib2_track_id?: number;
   title?: string;
   track_number?: number | null;
   disc_number?: number | null;
@@ -105,7 +106,14 @@ export function subLine(track: AppearsOnTrack, pageArtist: string): string {
 export function queueRow(track: AppearsOnTrack, pageArtist: string) {
   const credits = track.credits?.length ? track.credits.join(', ') : track.artist_name;
   return {
-    id: track.id,
+    id: track.lib2_track_id ? null : track.id,
+    ...(track.lib2_track_id
+      ? {
+          lib2_track_id: track.lib2_track_id,
+          lib2_album_id: track.album_id,
+          lib2_artist_id: track.artist_id,
+        }
+      : {}),
     title: track.title || 'Unknown Track',
     artist: credits || pageArtist,
     album: track.album_title || '',

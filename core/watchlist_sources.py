@@ -105,11 +105,11 @@ def library_artist_provider_ids(cursor, artist_id) -> list:
     aid = str(artist_id or "").strip()
     if not aid.isdigit():
         return []
-    cols = {r[1] for r in cursor.execute("PRAGMA table_info(artists)").fetchall()}
-    wanted = [c for c in _LIBRARY_ARTIST_ID_COLUMNS if c in cols]
-    if not wanted:
-        return []
-    row = cursor.execute(f"SELECT {', '.join(wanted)} FROM artists WHERE id = ? LIMIT 1",
+    # the library row is a Library v2 artist on this branch: the same ids,
+    # under the names api/artist_watchlist's add translates them from
+    from core.library2.provider_ids import ARTIST_IDS_SQL
+    row = cursor.execute(f"SELECT {', '.join(_LIBRARY_ARTIST_ID_COLUMNS)} FROM "
+                         f"(SELECT {ARTIST_IDS_SQL} FROM lib2_artists WHERE id = ? LIMIT 1)",
                          (int(aid),)).fetchone()
     if not row:
         return []

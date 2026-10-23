@@ -117,3 +117,13 @@ def test_track_count_guard_is_independent_of_release_ids(tmp_path):
     _folder, tracks = _existing_folder(tmp_path, 16)
     db = _Db(tracks, row_release_id="some-release-id")
     assert _resolve(tmp_path, db, 12, identity=("some-release-id", "")) is None
+
+
+def test_wanted_catalogue_rows_without_files_do_not_count(tmp_path):
+    """Library v2: an album's rows include its wanted tracklist. Six files
+    of a 13-row catalogue album are not a bigger edition than a 12-track
+    release; only the files are what the folder holds."""
+    folder, tracks = _existing_folder(tmp_path, 6)
+    tracks += [SimpleNamespace(file_path=None) for _ in range(7)]
+    db = _Db(tracks, row_release_id=None)
+    assert _resolve(tmp_path, db, 12) == os.path.normpath(folder)

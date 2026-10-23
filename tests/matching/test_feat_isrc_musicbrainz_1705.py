@@ -563,26 +563,32 @@ def test_feat_release_prefers_the_featured_credit_release(service):
 # --- the worker plumbing -------------------------------------------------------
 
 
-def test_priority_queue_track_item_carries_isrc(tmp_path):
-    from core.worker_utils import priority_pending_item
+def test_priority_queue_track_item_carries_isrc(tmp_path, monkeypatch):
+    """Library v2 port: the worker's queue (pinned to tracks, as Manage
+    Enrichment Workers does) hands the track's stored ISRC to the matcher."""
+    from core.musicbrainz_worker import MusicBrainzWorker
     from database.music_database import MusicDatabase
 
     db = MusicDatabase(str(tmp_path / "prio.db"))
     conn = db._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES ('a1', 'Clean Bandit')")
-    cur.execute(
-        "INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'a1', 'Rather Be')")
-    cur.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, isrc) "
-        "VALUES ('t1', 'al1', 'a1', 'Rather Be (feat. Jess Glynne)', 'GBAHS1300498')")
+    artist = conn.execute("INSERT INTO lib2_artists (name, name_key) VALUES ('Clean Bandit', 'clean bandit')").lastrowid
+    album = conn.execute("INSERT INTO lib2_albums (primary_artist_id, title) VALUES (?, 'Rather Be')",
+                         (artist,)).lastrowid
+    track = conn.execute(
+        "INSERT INTO lib2_tracks (album_id, title, isrc) VALUES (?, 'Rather Be (feat. Jess Glynne)', 'GBAHS1300498')",
+        (album,)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, '/m/rb.flac', 1)", (track,))
     conn.commit()
-
-    item = priority_pending_item(cur, "musicbrainz", "track")
-
-    assert item is not None
-    assert item["isrc"] == "GBAHS1300498"
     conn.close()
+    monkeypatch.setattr("core.worker_utils.read_enrichment_priority", lambda _service: "track")
+
+    worker = MusicBrainzWorker.__new__(MusicBrainzWorker)
+    worker.db = db
+    worker.retry_days = 30
+    item = worker._get_next_item()
+
+    assert item is not None and item["type"] == "track"
+    assert item["isrc"] == "GBAHS1300498"
 
 
 # --- the import flow's file-tag ISRC probe ------------------------------------

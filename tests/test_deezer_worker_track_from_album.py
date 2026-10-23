@@ -50,11 +50,14 @@ def test_track_number_breaks_a_tie():
 
 
 def _worker(deezer_album_id, tracklist):
+    # Ours: Library v2 rows; the album's Deezer id lives in external_ids.
+    import json
     db = sqlite3.connect(':memory:')
-    db.execute("CREATE TABLE albums (id INTEGER PRIMARY KEY, deezer_id TEXT)")
-    db.execute("CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id INTEGER, track_number INTEGER)")
-    db.execute("INSERT INTO albums VALUES (1, ?)", (deezer_album_id,))
-    db.execute("INSERT INTO tracks VALUES (7, 1, 2)")
+    db.execute("CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, external_ids TEXT)")
+    db.execute("CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, album_id INTEGER, track_number INTEGER)")
+    db.execute("INSERT INTO lib2_albums VALUES (1, ?)",
+               (json.dumps({'deezer': deezer_album_id}) if deezer_album_id else '{}',))
+    db.execute("INSERT INTO lib2_tracks VALUES (7, 1, 2)")
     w = DeezerWorker.__new__(DeezerWorker)
     w.db = MagicMock()
     w.db._get_connection = lambda: _Conn(db)
@@ -158,7 +161,8 @@ def test_tracklist_fetch_waits_for_a_shared_budget_slot(monkeypatch):
 # ── _process_track tries the album tracklist before the artist search ───────
 
 def _process(monkeypatch, tracklist, search_hit=None):
-    monkeypatch.setattr('core.deezer_worker.honor_stored_match', lambda **kw: None)
+    # ours: honor_stored_match takes the db positionally
+    monkeypatch.setattr('core.deezer_worker.honor_stored_match', lambda *a, **kw: None)
     w = _worker('356502127', tracklist)
     w.stats = {'matched': 0, 'not_found': 0, 'errors': 0}
     w.name_similarity_threshold = 0.80

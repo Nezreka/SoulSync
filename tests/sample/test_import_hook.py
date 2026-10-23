@@ -12,41 +12,25 @@ from types import SimpleNamespace
 from core.imports import side_effects
 
 
-class _FakeDB:
-    def __init__(self, conn):
-        self._conn = conn
+class _Db:
+    """A real Library v2 database; ``conn`` reads it like the old fixture."""
 
-    def _get_connection(self):
-        return self._conn
+    def __init__(self, tmp_path):
+        from database.music_database import MusicDatabase
+        self.db = MusicDatabase(str(tmp_path / "m.db"))
+        self.conn = self.db._get_connection()
+        self.conn.row_factory = sqlite3.Row
+
+    def execute(self, sql, params=()):
+        return self.conn.execute(sql, params)
 
 
-def _make_soulsync_db():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT, genres TEXT,
-           thumb_url TEXT, server_source TEXT, created_at TEXT, updated_at TEXT,
-           spotify_artist_id TEXT)"""
-    )
-    conn.execute(
-        """CREATE TABLE albums (id TEXT PRIMARY KEY, artist_id TEXT, title TEXT,
-           year INTEGER, thumb_url TEXT, genres TEXT, track_count INTEGER,
-           duration INTEGER, server_source TEXT, created_at TEXT, updated_at TEXT,
-           spotify_album_id TEXT)"""
-    )
-    conn.execute(
-        """CREATE TABLE tracks (id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT,
-           title TEXT, track_number INTEGER, duration INTEGER, file_path TEXT,
-           bitrate INTEGER, file_size INTEGER, track_artist TEXT,
-           musicbrainz_recording_id TEXT, isrc TEXT, quality_profile_id INTEGER,
-           server_source TEXT, created_at TEXT, updated_at TEXT,
-           spotify_track_id TEXT, deezer_id TEXT)"""
-    )
-    return conn
+def _make_soulsync_db(tmp_path):
+    return _Db(tmp_path)
 
 
 def _patch_common(monkeypatch, conn):
-    monkeypatch.setattr(side_effects, "get_database", lambda: _FakeDB(conn))
+    monkeypatch.setattr(side_effects, "get_database", lambda: conn.db)
     monkeypatch.setattr(
         side_effects,
         "_get_config_manager",
@@ -96,7 +80,7 @@ def _artist_album():
 
 
 def test_fresh_import_enqueues_analysis_exactly_once(tmp_path, monkeypatch):
-    conn = _make_soulsync_db()
+    conn = _make_soulsync_db(tmp_path)
     _patch_common(monkeypatch, conn)
     calls = []
     monkeypatch.setattr(
@@ -108,14 +92,14 @@ def test_fresh_import_enqueues_analysis_exactly_once(tmp_path, monkeypatch):
     side_effects.record_soulsync_library_entry(context, artist_context, album_info)
 
     assert len(calls) == 1
-    row = conn.execute("SELECT id FROM tracks").fetchone()
+    row = conn.execute("SELECT id FROM lib2_tracks").fetchone()
     assert row is not None
     # The enqueued id is the track id the insert minted.
     assert str(calls[0]) == str(row["id"])
 
 
 def test_existing_row_does_not_reenqueue(tmp_path, monkeypatch):
-    conn = _make_soulsync_db()
+    conn = _make_soulsync_db(tmp_path)
     _patch_common(monkeypatch, conn)
     calls = []
     monkeypatch.setattr(
@@ -133,7 +117,7 @@ def test_existing_row_does_not_reenqueue(tmp_path, monkeypatch):
 
 
 def test_enqueue_failure_never_breaks_import(tmp_path, monkeypatch):
-    conn = _make_soulsync_db()
+    conn = _make_soulsync_db(tmp_path)
     _patch_common(monkeypatch, conn)
 
     def _boom(tid):
@@ -146,13 +130,13 @@ def test_enqueue_failure_never_breaks_import(tmp_path, monkeypatch):
     # Must not raise — the track row still lands.
     side_effects.record_soulsync_library_entry(context, artist_context, album_info)
 
-    row = conn.execute("SELECT title FROM tracks").fetchone()
+    row = conn.execute("SELECT title FROM lib2_tracks").fetchone()
     assert row is not None and row["title"] == "Hook Song"
 
 
 def test_hook_is_silent_when_sample_worker_unimportable(tmp_path, monkeypatch):
     """Even an ImportError inside the lazy import must not break imports."""
-    conn = _make_soulsync_db()
+    conn = _make_soulsync_db(tmp_path)
     _patch_common(monkeypatch, conn)
 
     import builtins
@@ -170,4 +154,4 @@ def test_hook_is_silent_when_sample_worker_unimportable(tmp_path, monkeypatch):
     artist_context, album_info = _artist_album()
     side_effects.record_soulsync_library_entry(context, artist_context, album_info)
 
-    assert conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0] == 1

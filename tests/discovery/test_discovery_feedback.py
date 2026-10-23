@@ -255,13 +255,12 @@ def library(db):
     """Three artists you own and play; Daft Punk most, Justice least."""
     conn = db._get_connection()
     cur = conn.cursor()
+    from tests.lib2_seed import artist as _artist, track as _track
     for aid, name, sp, plays in ((1, 'Daft Punk', 'sp1', 30), (2, 'Justice', 'sp2', 10),
                                  (3, 'Air', 'sp3', 20)):
-        cur.execute("INSERT INTO artists (id, name, spotify_artist_id) VALUES (?,?,?)", (aid, name, sp))
-        cur.execute("INSERT INTO albums (id, title, artist_id) VALUES (?,?,?)", (aid * 10, 'Al', aid))
+        _artist(conn, name, spotify_id=sp)
         for t in range(8):
-            cur.execute("INSERT INTO tracks (title, artist_id, album_id, file_path) VALUES (?,?,?,?)",
-                        (f'{name} {t}', aid, aid * 10, f'/m/{aid}-{t}.flac'))
+            _track(conn, name, 'Al', f'{name} {t}', path=f'/m/{aid}-{t}.flac')
         for i in range(plays):
             cur.execute("INSERT INTO listening_history (title, artist, played_at) "
                         "VALUES (?,?,datetime('now', ?))", (f'{name} {i % 8}', name, f'-{i} hours'))

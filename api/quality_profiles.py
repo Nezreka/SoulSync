@@ -78,6 +78,8 @@ def save_quality_profile():
         success = db.set_quality_profile(data)
 
         if success:
+            from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
+            refresh_quality_profile_wishlist(db, db.get_quality_profile()["id"])
             add_activity_item("", "Quality Profile Updated", f"Preset: {data.get('preset', 'custom')}", "Now")
             return jsonify({"success": True, "message": "Quality profile saved successfully"})
         else:
@@ -123,11 +125,15 @@ def apply_quality_preset(preset_name):
         preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
         preset['rank_candidates_by_quality'] = current.get(
             'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
+        preset['upgrade_policy'] = current.get('upgrade_policy', 'none')
+        preset['upgrade_cutoff_index'] = current.get('upgrade_cutoff_index', 0)
         # Quick Sets change quality targets, preserving profile import scope.
         preset['release_import_mode'] = normalize_release_import_mode(current.get('release_import_mode'))
         success = db.set_quality_profile(preset)
 
         if success:
+            from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
+            refresh_quality_profile_wishlist(db, db.get_quality_profile()["id"])
             add_activity_item("", "Quality Preset Applied", f"Switched to '{preset_name}' preset", "Now")
             return jsonify({
                 "success": True,
@@ -154,11 +160,15 @@ def reset_quality_preset(preset_name):
         preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
         preset['rank_candidates_by_quality'] = current.get(
             'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
+        preset['upgrade_policy'] = current.get('upgrade_policy', 'none')
+        preset['upgrade_cutoff_index'] = current.get('upgrade_cutoff_index', 0)
         # Quick Sets change quality targets, preserving profile import scope.
         preset['release_import_mode'] = normalize_release_import_mode(current.get('release_import_mode'))
         success = db.set_quality_profile(preset)
 
         if success:
+            from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
+            refresh_quality_profile_wishlist(db, db.get_quality_profile()["id"])
             add_activity_item("", "Quality Preset Reset", f"Reset '{preset_name}' to defaults", "Now")
             return jsonify({
                 "success": True,
@@ -178,7 +188,11 @@ def reset_quality_preset(preset_name):
 
 @bp.route('/api/quality-profile/custom', methods=['GET'])
 def list_custom_quality_profiles():
-    """List every quality profile (built-ins + user-created), default first."""
+    """List every quality profile (built-ins + user-created), default first.
+
+    ``upgrade_policy`` values are ``none``, ``acceptable``, ``until_cutoff`` and the
+    persisted compatibility alias ``until_top`` (implicit cutoff index 0).
+    """
     try:
         from database.music_database import MusicDatabase
         db = MusicDatabase()
@@ -190,7 +204,12 @@ def list_custom_quality_profiles():
 
 @bp.route('/api/quality-profile/custom', methods=['POST'])
 def create_custom_quality_profile():
-    """Save the current Quality-page settings as a new named profile."""
+    """Save the current Quality-page settings as a new named profile.
+
+    New UI writes use ``none``, ``acceptable`` or ``until_cutoff``; ``until_top`` stays
+    accepted on existing/imported profiles as the top-target compatibility
+    alias.
+    """
     try:
         from database.music_database import MusicDatabase
         db = MusicDatabase()
@@ -249,6 +268,8 @@ def apply_custom_quality_profile(profile_id):
         if profile is None:
             return jsonify({"success": False, "error": "Profile not found"}), 404
 
+        from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
+        refresh_quality_profile_wishlist(db, profile_id)
         add_activity_item("", "Quality Profile Applied", f"Now using '{profile.get('preset', 'custom')}'", "Now")
         return jsonify({"success": True, "profile": profile})
     except Exception as e:
@@ -283,6 +304,8 @@ def update_custom_quality_profile(profile_id):
             db.apply_quality_profile_to_settings(profile_id)
             profiles = db.list_quality_profiles()
 
+        from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
+        refresh_quality_profile_wishlist(db, profile_id)
         add_activity_item("", "Quality Profile Updated", f"Updated saved profile {profile_id}", "Now")
         return jsonify({"success": True, "profiles": profiles})
     except Exception as e:
@@ -305,6 +328,8 @@ def rename_custom_quality_profile(profile_id):
         if not ok:
             status = 404 if reason == "Profile not found" else 400
             return jsonify({"success": False, "error": reason}), status
+        from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
+        refresh_quality_profile_wishlist(db, profile_id)
         return jsonify({"success": True, "profiles": db.list_quality_profiles()})
     except Exception as e:
         logger.error(f"Error renaming quality profile: {e}")
@@ -323,8 +348,11 @@ def delete_custom_quality_profile(profile_id):
         ok, reason = db.delete_quality_profile(profile_id)
         if not ok:
             return jsonify({"success": False, "error": reason}), 400
-        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+        profiles = db.list_quality_profiles()
+        from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
+        refresh_quality_profile_wishlist(
+            db, next(p["id"] for p in profiles if p.get("is_default")))
+        return jsonify({"success": True, "profiles": profiles})
     except Exception as e:
         logger.error(f"Error deleting quality profile: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
-

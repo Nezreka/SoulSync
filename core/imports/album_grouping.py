@@ -46,71 +46,79 @@ def find_existing_soulsync_album_id(
     cursor: Any,
     *,
     name_key_id: str,
-    artist_id: str,
+    artist_id: Any,
     album_name: str,
     album_source_col: Optional[str] = None,
     album_source_id: Optional[str] = None,
-) -> Optional[str]:
-    """Resolve the existing ``soulsync`` album row a track should join, or None
-    (caller inserts a new row).
+    source: Optional[str] = None,
+    release_id: Optional[str] = None,
+) -> Optional[int]:
+    """Resolve the catalogue album row a track should join, or None.
 
     Match precedence:
-      1. ``album_source_col == album_source_id`` — CANONICAL grouping: the row
-         already carrying THIS release's id, so a differently-named import of
-         the same release unifies instead of splitting. Only when the column is
-         allow-listed and the id is non-empty.
-      2. ``name_key_id`` — the prior stable-name-hash id.
-      3. ``(title, artist_id)`` — the legacy name match.
+      0. ``release_id`` — the MusicBrainz release this import IS. The sharpest
+         edition identity there is, and the only one a MusicBrainz import has.
+      1. ``name_key_id`` — the stable name hash the import mints, kept as the
+         row's ``server_id`` (a re-import with the identical name hits its own
+         row).
+      2. the release's own source id — CANONICAL grouping, so a differently
+         named import of the same release unifies instead of splitting. v2
+         promotes Spotify and MusicBrainz to columns and keeps the rest in
+         ``external_ids``.
+      3. ``(title, artist)`` — the name match, kept so nothing that grouped
+         before stops grouping now.
 
-    2 and 3 skip a row that already carries a DIFFERENT release id in that
-    column. two releases can share a title and artist and differ only by
-    musicbrainz's disambiguation (#1299); matching them by name merged both into
-    one album with every shared song twice. a row with no id yet still matches,
-    so nothing that grouped before stops grouping now.
+    1 to 3 skip a row that already carries a DIFFERENT release id. Two
+    releases can share a title and an artist and differ only by MusicBrainz's
+    disambiguation (#1299); matching them by name merged both into one album
+    with every shared song twice. A row with no release id yet still matches.
     """
-    source_col = album_source_col if album_source_col in ALLOWED_ALBUM_SOURCE_COLS else None
-    source_id = (album_source_id or "").strip() if source_col else ""
+    release = (release_id or "").strip().casefold()
 
-    if source_id:
+    def _usable(row) -> bool:
+        if not row:
+            return False
+        stored = str(row[1] or "").strip().casefold()
+        return not (release and stored and stored != release)
+
+    if release:
+        row = cursor.execute(
+            "SELECT id FROM lib2_albums WHERE LOWER(musicbrainz_id) = ? LIMIT 1",
+            (release,),
+        ).fetchone()
+        if row:
+            return int(row[0])
+
+    row = cursor.execute(
+        "SELECT id, musicbrainz_id FROM lib2_albums"
+        " WHERE server_source = 'soulsync' AND server_id = ?",
+        (str(name_key_id),),
+    ).fetchone()
+    if _usable(row):
+        return int(row[0])
+
+    provider = (source or '').strip().lower()
+    if album_source_id and provider:
+        if provider in ('spotify', 'musicbrainz'):
+            column = 'spotify_id' if provider == 'spotify' else 'musicbrainz_id'
+            where = f"{column} = ?"
+        else:
+            where = f"json_extract(external_ids, '$.{provider}') = ?"
         try:
-            cursor.execute(
-                f"SELECT id FROM albums WHERE {source_col} = ? "
-                "AND server_source = 'soulsync' LIMIT 1",
-                (source_id,),
-            )
-            row = cursor.fetchone()
-            if row:
-                return row[0]
+            row = cursor.execute(
+                f"SELECT id, musicbrainz_id FROM lib2_albums WHERE {where} LIMIT 1",
+                (album_source_id,),
+            ).fetchone()
+            if _usable(row):
+                return int(row[0])
         except Exception as exc:
-            # That source has no dedicated album column on this DB (e.g. Deezer
-            # doesn't split per-entity id columns) — fall through to the name
-            # match rather than break the import. Mirrors the guarded source-id
-            # UPDATE the caller already does on insert.
-            logger.debug("album source-id lookup skipped (%s): %s", source_col, exc)
-            source_id = ""
+            logger.debug("album source-id lookup skipped (%s): %s", provider, exc)
 
-    for sql, params in (
-        ("SELECT id{extra} FROM albums WHERE id = ? AND server_source = 'soulsync'",
-         (name_key_id,)),
-        ("SELECT id{extra} FROM albums WHERE title COLLATE NOCASE = ? AND artist_id = ? "
-         "AND server_source = 'soulsync'",
-         (album_name, artist_id)),
-    ):
-        rows = None
-        if source_id:
-            try:
-                cursor.execute(sql.format(extra=f", {source_col}"), params)
-                rows = cursor.fetchall()
-            except Exception as exc:
-                logger.debug("album release check skipped (%s): %s", source_col, exc)
-                source_id = ""
-        if rows is None:
-            cursor.execute(sql.format(extra=""), params)
-            rows = cursor.fetchall()
-        for row in rows:
-            if source_id:
-                stored = str(row[1] or "").strip()
-                if stored and stored.casefold() != source_id.casefold():
-                    continue  # another release that happens to share the name
-            return row[0]
+    for row in cursor.execute(
+        "SELECT id, musicbrainz_id FROM lib2_albums WHERE title COLLATE NOCASE = ? "
+        "  AND primary_artist_id = ? ORDER BY id",
+        (album_name, artist_id),
+    ).fetchall():
+        if _usable(row):
+            return int(row[0])
     return None

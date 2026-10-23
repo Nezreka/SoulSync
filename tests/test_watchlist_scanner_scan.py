@@ -1,6 +1,7 @@
 import sys
 import types
 from datetime import datetime, timedelta
+from pathlib import Path
 
 _RECENT_RELEASE_DATE = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
 
@@ -128,7 +129,9 @@ class _FakeDB:
         self.discovery_pool_calls = []
         self.discovery_pool_timestamp_calls = []
         self.discovery_recent_calls = []
-        self.db_albums = []
+        self._db_albums = []
+        self._real_db = None
+        self._tmp = None
 
     def get_watchlist_artists(self, profile_id=None):
         return list(self.artists)
@@ -161,34 +164,47 @@ class _FakeDB:
         self.discovery_pool_timestamp_calls.append((track_count, profile_id))
         return True
 
-    class _Cursor:
-        def __init__(self, parent):
-            self.parent = parent
+    # A REAL database, built on demand: the scanner's own SQL runs against it,
+    # so a column or join that does not exist fails here instead of being
+    # answered by a stub that never looked at the query (§50.4.4.20).
+    @property
+    def db_albums(self):
+        return list(self._db_albums)
 
-        def execute(self, *args, **kwargs):
-            return None
+    @db_albums.setter
+    def db_albums(self, rows):
+        self._db_albums = list(rows)
+        from core.library2.importer import normalize_name
+        conn = self._library()._get_connection()
+        try:
+            for row in self._db_albums:
+                artist = conn.execute(
+                    "INSERT INTO lib2_artists(name, name_key) VALUES(?,?)",
+                    (row["artist_name"], normalize_name(row["artist_name"]))
+                ).lastrowid
+                album = conn.execute(
+                    "INSERT INTO lib2_albums(primary_artist_id, title, origin)"
+                    " VALUES(?,?,'library')", (artist, row["title"])).lastrowid
+                track = conn.execute(
+                    "INSERT INTO lib2_tracks(album_id, title) VALUES(?,?)",
+                    (album, f'{row["title"]} Track')).lastrowid
+                conn.execute(
+                    "INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)",
+                    (track, f'/music/{track}.flac'))
+            conn.commit()
+        finally:
+            conn.close()
 
-        def fetchall(self):
-            return list(self.parent.db_albums)
-
-        def fetchone(self):
-            return {"count": 0}
-
-    class _Conn:
-        def __init__(self, cursor):
-            self._cursor = cursor
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def cursor(self):
-            return self._cursor
+    def _library(self):
+        if self._real_db is None:
+            import tempfile
+            from database.music_database import MusicDatabase
+            self._tmp = tempfile.TemporaryDirectory()
+            self._real_db = MusicDatabase(str(Path(self._tmp.name) / "scan.db"))
+        return self._real_db
 
     def _get_connection(self):
-        return self._Conn(self._Cursor(self))
+        return self._library()._get_connection()
 
 
 def _build_artist(name="Artist One", profile_id=11):

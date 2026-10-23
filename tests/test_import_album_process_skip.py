@@ -30,16 +30,11 @@ class _FakeDB:
 def db_path(tmp_path):
     path = str(tmp_path / "library.db")
     conn = sqlite3.connect(path)
-    conn.execute("CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT NOT NULL)")
-    conn.execute(
-        """CREATE TABLE tracks (
-            id INTEGER PRIMARY KEY,
-            album_id INTEGER,
-            spotify_track_id TEXT, itunes_track_id TEXT, deezer_id TEXT,
-            tidal_id TEXT, qobuz_id TEXT, musicbrainz_recording_id TEXT,
-            audiodb_id TEXT, soul_id TEXT, isrc TEXT, file_path TEXT
-        )"""
-    )
+    conn.execute("CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, title TEXT NOT NULL)")
+    conn.execute("CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, album_id INTEGER, "
+                 "spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT DEFAULT '{}', soul_id TEXT, isrc TEXT)")
+    conn.execute("CREATE TABLE lib2_track_files (id INTEGER PRIMARY KEY, track_id INTEGER, path TEXT, "
+                 "is_primary INTEGER DEFAULT 1, file_state TEXT DEFAULT 'active', owner_profile_id INTEGER)")
     conn.commit()
     conn.close()
     return path
@@ -47,13 +42,11 @@ def db_path(tmp_path):
 
 def _add_owned(db_path, mbid, file_path, album_title="Test Album"):
     conn = sqlite3.connect(db_path)
-    cur = conn.execute("INSERT INTO albums (title) VALUES (?)", (album_title,))
+    cur = conn.execute("INSERT INTO lib2_albums (title) VALUES (?)", (album_title,))
     album_id = cur.lastrowid
-    conn.execute(
-        "INSERT INTO tracks (album_id, musicbrainz_recording_id, file_path)"
-        " VALUES (?, ?, ?)",
-        (album_id, mbid, file_path),
-    )
+    tid = conn.execute(
+        "INSERT INTO lib2_tracks (album_id, musicbrainz_id) VALUES (?, ?)", (album_id, mbid)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files (track_id, path) VALUES (?, ?)", (tid, file_path))
     conn.commit()
     conn.close()
 
