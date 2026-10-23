@@ -293,7 +293,7 @@ TRIGGERS: list[dict] = [
      "has_conditions": True,
      "condition_fields": ["title", "kind", "error"],
      "variables": ["kind", "title", "error", "dest_path"]},
-    {"type": "video_upgrade_completed", "label": "Quality Upgrade Landed", "icon": "trending-up", "scope": "video",
+    {"type": "video_upgrade_completed", "label": "Quality Upgrade Landed", "icon": "bar-chart", "scope": "video",
      "description": "When a download REPLACED an existing library copy with a better one", "available": True,
      "has_conditions": True,
      "condition_fields": ["title", "kind"],
@@ -349,6 +349,7 @@ ACTIONS: list[dict] = [
          {"key": "match_catalog", "type": "checkbox", "label": "Find catalogue matches after scanning", "default": True},
          {"key": "match_batch_size", "type": "number", "label": "Books to match per run", "default": 25, "min": 1, "max": 100},
      ]},
+    {"type": "metasync_refresh_charts", "label": "Refresh MetaSync Charts", "icon": "bar-chart", "description": "Fetch the SoulSync network's weekly charts from MetaSync and match them, ready to open. Never syncs or downloads.", "available": True},
     {"type": "scan_library", "label": "Scan Library", "icon": "refresh", "description": "Trigger media server library scan", "available": True},
     {"type": "refresh_mirrored", "label": "Refresh Mirrored Playlist", "icon": "copy", "description": "Re-fetch playlist from source and update mirror", "available": True,
      "config_fields": [
@@ -694,7 +695,9 @@ _CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
                      "recycle", "extto_fresh")),
     ("Wishlist", ("wishlist",)),
     ("Watchlist", ("watchlist", "author", "new_release")),
-    ("Playlists", ("playlist", "mirrored", "discover", "collections", "personalized")),
+    ("Playlists", ("playlist", "mirrored", "discover", "collections", "personalized",
+                   # MetaSync's SIN charts arrive as playlists
+                   "metasync")),
     ("Downloads", ("download", "grab", "batch", "import", "rss", "seeding",
                    "quarantine", "request", "search_and", "upgrade")),
     ("Library", ("scan", "database", "library", "enrich", "airing", "retag", "youtube", "issue",

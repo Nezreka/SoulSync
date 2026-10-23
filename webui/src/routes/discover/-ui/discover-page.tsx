@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { fetchSinCharts, type SinChart } from '@/features/metasync/charts';
 import { getShellProfileContext } from '@/platform/shell/bridge';
 
 import type { WebLens } from '../-discover.artist-web';
@@ -121,6 +122,7 @@ import { LastfmRadioSection, ListenBrainzSection } from './radio-sections';
 import { RecipeEditor } from './recipe-editor';
 import { RecommendedModal } from './recommended-modal';
 import { RecommendedShelf } from './recommended-shelf';
+import { SinChartsShelf } from './sin-charts-shelf';
 import { YourAlbumsSourcesModal, YourArtistsSourcesModal } from './sources-modals';
 import { StationModal } from './station-modal';
 import { StationsRow } from './stations-row';
@@ -264,6 +266,22 @@ export function DiscoverPage() {
   const albums = useYourAlbums((t) => toast(t.message, t.level));
   const blacklist = useBlacklist((t) => toast(t.message, t.level));
   const lastfm = useLastfmRadio((t) => toast(t.message, t.level));
+
+  // MetaSync's SIN charts: fetched here because their count decides whether
+  // the shelf shows at all (no MetaSync, or nothing charted, hides it)
+  const [sinCharts, setSinCharts] = useState<SinChart[]>([]);
+  const [sinChartsLoaded, setSinChartsLoaded] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void fetchSinCharts().then((charts) => {
+      if (!live) return;
+      setSinCharts(charts);
+      setSinChartsLoaded(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const lb = useListenBrainz((t) => toast(t.message, t.level));
   const bp = useBuildPlaylist((t) => toast(t.message, t.level));
   const map = useArtistMap((t) => toast(t.message, t.level));
@@ -957,6 +975,7 @@ export function DiscoverPage() {
       if (id === 'lastfm-radio') return lastfm.configured === true;
       if (id === 'listenbrainz') return true; // renders its own load/error states
       if (id === 'deezer-editorial') return true; // fetches and empties itself
+      if (id === 'sin-charts') return sinCharts.length > 0;
       if (id === 'build-a-playlist') return true; // a control, like adv-wave
       // always: 'Build a mix' lives in its header, so it must be reachable
       // before there is a single mix
@@ -966,7 +985,7 @@ export function DiscoverPage() {
       if (id === 'discover-bylt-sections') return byltRows.length > 0;
       return page.hasContent(id);
     },
-    [lastfm.configured, mixes, byltRows.length, page],
+    [lastfm.configured, mixes, byltRows.length, page, sinCharts.length],
   );
 
   const cacheShelf = (id: DiscoverSectionId) => {
@@ -1200,6 +1219,14 @@ export function DiscoverPage() {
         );
       case 'deezer-editorial':
         return <DeezerEditorialShelf onToast={(m) => toast(m, 'error')} />;
+      case 'sin-charts':
+        return (
+          <SinChartsShelf
+            charts={sinCharts}
+            loaded={sinChartsLoaded}
+            onToast={(m) => toast(m, 'error')}
+          />
+        );
       case 'build-a-playlist':
         return (
           <BuildPlaylistSection
