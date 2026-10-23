@@ -55,7 +55,9 @@ def prepare_startup_upgrade(database_path: Path) -> StartupUpgrade | None:
     temporary = snapshot.with_suffix('.db.tmp')
     try:
         db_integrity.safe_backup(str(path), str(temporary), verify_source=True, verify_result=True)
-        with temporary.open('rb') as handle:
+        # Opened for writing: Windows refuses to flush a read-only handle
+        # (EBADF), which failed every snapshot and so every upgrade there.
+        with temporary.open('r+b') as handle:
             os.fsync(handle.fileno())
         os.replace(temporary, snapshot)
         # Make the published filename durable before schema changes can commit.

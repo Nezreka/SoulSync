@@ -167,7 +167,8 @@ def scan_production_tree() -> TreeUsage:
     upgrade_by_file: Dict[str, Usage] = {}
     for path in _production_files():
         source = path.read_text(encoding="utf-8", errors="replace")
-        relative = str(path.relative_to(_ROOT))
+        # posix on every OS: UPGRADE_ONLY_FILES is spelled with slashes
+        relative = path.relative_to(_ROOT).as_posix()
         if relative in UPGRADE_ONLY_FILES:
             usage = count_legacy_usage(source)
             if usage:
