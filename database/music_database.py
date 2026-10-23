@@ -7884,7 +7884,7 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(f"""
-                SELECT DATE(played_at) AS day, COUNT(*) AS plays
+                SELECT DATE(played_at, 'localtime') AS day, COUNT(*) AS plays
                 FROM listening_history
                 {where}
                 GROUP BY day
@@ -8060,7 +8060,7 @@ class MusicDatabase:
                 date_fmt = '%Y-%m-%d'
 
             cursor.execute(f"""
-                SELECT strftime('{date_fmt}', played_at) as period, COUNT(*) as plays
+                SELECT strftime('{date_fmt}', played_at, 'localtime') as period, COUNT(*) as plays
                 FROM listening_history
                 {where}
                 GROUP BY period
@@ -8277,15 +8277,9 @@ class MusicDatabase:
     # seven of its twelve slots. The period label states the real range so
     # nothing is implied that the data does not cover.
     #
-    # TIMEZONE: unlike the range filters (which compare local `played_at`
-    # against SQLite's UTC `datetime('now')` and are skewed by the server's
-    # offset — see STATS_PAGE_PLAN.md), this window is computed from the
-    # LOCAL clock and compared with `date(played_at)`. That matches the local
-    # wall-clock the column actually stores, so the year is skew-free. Using
-    # date() rather than a raw string compare also means both stored shapes
-    # parse — the web player writes an ISO 'T' separator and plex_client
-    # writes a space, and a lexicographic compare orders those differently at
-    # the boundary.
+    # TIMEZONE: played_at is stored utc. this window is computed from the
+    # LOCAL clock, so every day and month here reads played_at with
+    # 'localtime'. a utc day puts a late evening play on tomorrow (#1840).
 
     _MONTH_LABELS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
@@ -8375,7 +8369,7 @@ class MusicDatabase:
             scope = owner_clause(self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            window = f"WHERE date(played_at) >= ? AND date(played_at) <= ? AND {scope}"
+            window = f"WHERE date(played_at, 'localtime') >= ? AND date(played_at, 'localtime') <= ? AND {scope}"
             span = (start_date, end_date)
 
             cursor.execute(f"""
@@ -8384,7 +8378,7 @@ class MusicDatabase:
                        COUNT(DISTINCT LOWER(artist)),
                        COUNT(DISTINCT LOWER(album)),
                        COUNT(DISTINCT LOWER(title) || '|||' || LOWER(COALESCE(artist, ''))),
-                       COUNT(DISTINCT date(played_at))
+                       COUNT(DISTINCT date(played_at, 'localtime'))
                 FROM listening_history {window}
             """, span)
             row = cursor.fetchone() or (0, 0, 0, 0, 0, 0)
@@ -8405,7 +8399,7 @@ class MusicDatabase:
 
             # Per-month plays + minutes, folded onto the dense strip.
             cursor.execute(f"""
-                SELECT strftime('%Y-%m', played_at) AS ym,
+                SELECT strftime('%Y-%m', played_at, 'localtime') AS ym,
                        COUNT(*), COALESCE(SUM({play_duration_sql()}), 0)
                 FROM listening_history {window}
                 GROUP BY ym
@@ -8419,7 +8413,7 @@ class MusicDatabase:
             # rows is nothing to walk, and a tie breaks on the lower-cased
             # name so the same month never renders two different leaders.
             cursor.execute(f"""
-                SELECT strftime('%Y-%m', played_at) AS ym, artist, COUNT(*) AS plays
+                SELECT strftime('%Y-%m', played_at, 'localtime') AS ym, artist, COUNT(*) AS plays
                 FROM listening_history {window}
                   AND artist IS NOT NULL AND artist != ''
                 GROUP BY ym, LOWER(artist)
@@ -8483,7 +8477,7 @@ class MusicDatabase:
             cursor.execute(f"""
                 SELECT artist, first_play, plays FROM (
                     SELECT artist,
-                           MIN(date(played_at)) AS first_play,
+                           MIN(date(played_at, 'localtime')) AS first_play,
                            COUNT(*) AS plays
                     FROM listening_history
                     WHERE artist IS NOT NULL AND artist != '' AND {scope}
@@ -8497,7 +8491,7 @@ class MusicDatabase:
                            for r in cursor.fetchall()]
 
             cursor.execute(f"""
-                SELECT date(played_at) AS d, COUNT(*) AS plays
+                SELECT date(played_at, 'localtime') AS d, COUNT(*) AS plays
                 FROM listening_history {window}
                 GROUP BY d ORDER BY plays DESC, d DESC LIMIT 1
             """, span)
