@@ -350,6 +350,7 @@
 .voe-layer-row:hover { background: var(--white-a04); }
 .voe-layer-row--sel { background: rgba(var(--a),.15); border-color: rgba(var(--a),.4); }
 .voe-lr-grip { color: var(--white-a30); cursor: grab; flex: 0 0 auto; display: grid; place-items: center; }
+/* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
 .voe-lr-grip svg { width: 13px; height: 13px; }
 .voe-lr-ic { flex: 0 0 auto; width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center;
     background: var(--white-a06); color: var(--white-a70); }
@@ -675,6 +676,7 @@ select.voe-input option { background: #17171d; }
 .voe-filter-count { font-size: 11px; color: var(--white-a45); font-variant-numeric: tabular-nums; }
 
 /* ── gallery grouped by template type; episode cards in true 16:9 ────────── */
+/* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
 .voe-grid { display: block; }
 .voe-grid-row {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

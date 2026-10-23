@@ -3175,6 +3175,7 @@
 }
 
 /* mood cards drift through their colour */
+/* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
 .discover-mix-card[data-mix-key^="mood_"] .mix-card-cover::after {
     background:
         linear-gradient(160deg, rgba(var(--mood-rgb), 0.8) 0%, rgba(var(--mood-rgb), 0.3) 50%, rgba(var(--mood-rgb), 0.75) 100%);
@@ -3811,6 +3812,7 @@ a.dsc-now-artist:hover {
    its centre, set by the banner as the pointer moves */
 .dsc-promo--feature { --tilt: 2.2deg; }
 .dsc-promo--tile { --tilt: 3.5deg; }
+/* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
 .dsc-promo--portrait { --tilt: 7deg; }
 
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {

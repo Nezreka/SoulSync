@@ -1867,7 +1867,9 @@ body.max-performance .nav-button.active:hover {
 }
 
 @keyframes tourTargetPulse {
+    /* stylelint-disable-next-line keyframe-declaration-no-important -- browsers drop !important inside @keyframes; left as is so the tour highlight looks the same */
     0%, 100% { box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.5), 0 0 30px rgba(var(--accent-rgb), 0.15) !important; }
+    /* stylelint-disable-next-line keyframe-declaration-no-important -- browsers drop !important inside @keyframes; left as is so the tour highlight looks the same */
     50% { box-shadow: 0 0 0 6px rgba(var(--accent-rgb), 0.3), 0 0 40px rgba(var(--accent-rgb), 0.25) !important; }
 }
 
@@ -60066,6 +60068,7 @@ body.max-performance #page-particles-canvas {
 .wl-orb:hover { transform: scale(1.1); }
 .wl-orb-group.expanded .wl-orb { transform: scale(1.05); }
 
+/* stylelint-disable-next-line function-calc-no-unspaced-operator -- this calc() is invalid, so the glow never rendered; fixing it would turn it on */
 .wl-orb-glow { position: absolute; inset: -4px; border-radius: var(--radius-circle); background: conic-gradient(from 0deg, hsla(var(--orb-hue),70%,55%,0.4), hsla(calc(var(--orb-hue)+60),70%,55%,0.2), hsla(var(--orb-hue),70%,55%,0.4)); z-index: 0; filter: blur(3px); }
 /* the glow sits still. a blurred spin on every orb pinned the main thread on
    big wishlists and the page flickered with raster seams (wishlist flicker report) */

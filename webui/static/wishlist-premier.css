@@ -651,6 +651,7 @@
   .wlp-sheet-callout { margin: 16px 18px 0; }
   .wlp-sheet-actions { padding: 14px 18px 0; }
   .wlp-sheet-actions .wlp-btn { flex: 1 1 auto; min-height: 44px; }
+  /* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
   .wlp-sheet-body { padding-left: 18px; padding-right: 18px; }
   .wlp-sheet-chip, .wlp-sheet-x { height: 40px; }
   .wlp-sheet-x { width: 40px; }
