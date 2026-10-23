@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from utils.logging_config import get_logger
 from core.quality.schema import normalize_release_import_mode
+from database import connection_pool
 
 logger = get_logger("music_database")
 
@@ -42,10 +43,15 @@ _planner_stats_lock = threading.Lock()
 _planner_stats_threads = {}
 
 
+_CONNECTION_PLUMBING = frozenset({'_open_connection', '_get_connection', 'acquire'})
+
+
 def _calling_functions(depth: int = 3) -> str:
     """'caller <- its caller <- ...' from just above _get_connection."""
     names = []
-    frame = sys._getframe(2)
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_code.co_name in _CONNECTION_PLUMBING:
+        frame = frame.f_back
     while frame is not None and len(names) < depth:
         names.append(frame.f_code.co_name)
         frame = frame.f_back
@@ -521,13 +527,21 @@ class MusicDatabase:
             logger.warning("wal mode check failed for %s: %s", self.database_path, e)
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Get a NEW database connection for each operation (thread-safe)"""
+        """A connection for one operation. It behaves like a new sqlite3.Connection
+        (close it, use ``with``, or let it go); under the hood an idle one is reused
+        when there is one, see database/connection_pool.py."""
+        return connection_pool.acquire(self.database_path, self._open_connection)
+
+    def _open_connection(self, check_same_thread: bool = True) -> sqlite3.Connection:
+        """Open and set up a NEW database connection (thread-safe). Pooled ones are
+        opened with check_same_thread=False, they move between threads."""
         last_error = None
         for attempt in range(4):
             connection = None
             _t_open = time.perf_counter()
             try:
-                connection = sqlite3.connect(str(self.database_path), timeout=30.0)
+                connection = sqlite3.connect(str(self.database_path), timeout=30.0,
+                                             check_same_thread=check_same_thread)
                 _t_connected = time.perf_counter()
                 connection.row_factory = sqlite3.Row
                 # Register Unicode-normalizing function for diacritics-aware LIKE queries
@@ -10016,9 +10030,9 @@ class MusicDatabase:
             logger.error(f"Error in recovery-question migration: {e}")
 
     def close(self):
-        """Close database connection (no-op since we create connections per operation)"""
-        # Each operation creates and closes its own connection, so nothing to do here
-        pass
+        """Close database connection (connections are per operation; this only
+        drops the idle ones kept for reuse, see connection_pool.py)"""
+        connection_pool.discard(self.database_path)
     
     def get_statistics(self) -> Dict[str, int]:
         """Get database statistics for all servers (legacy method)"""
