@@ -24,10 +24,13 @@ around one, so the callers' existing code (``conn.close()``, ``with conn:``,
   database file is still the same file (a restored or replaced file is reopened),
   and only after what a caller can leave behind is undone: an open transaction,
   TEMP tables, views and triggers, row_factory, text_factory, foreign_keys,
-  isolation_level, and the authorizer, progress and trace hooks. Anything else a
-  caller changes on a connection it gets from here (an ATTACHed database, another
-  PRAGMA, create_function) would outlive the call; nothing in the code base does.
-- The pool is small and shared by all threads (MAX_IDLE), so it costs a few open
+  busy_timeout, analysis_limit, isolation_level, and the authorizer, progress
+  and trace hooks. Anything else a caller changes on a connection it gets from
+  here (an ATTACHed database, another PRAGMA) would outlive the call; nothing in
+  the code base does. create_function re-registers the same function, so it is
+  harmless.
+- The pool is small and shared by all threads (MAX_IDLE per file, MAX_IDLE_TOTAL
+  across files, least recently used file evicted first), so it costs a few open
   file descriptors and under 4 MB however many threads the server runs. Pooled
   connections are opened with check_same_thread=False because they move between
   threads; each is used by one thread at a time, which is what SQLite's serialized
@@ -42,16 +45,29 @@ import os
 import sqlite3
 import threading
 import weakref
-from typing import Any, Callable, Dict, List, Optional
+from collections import OrderedDict
+from typing import Any, Callable, List, Optional
 
 ENABLED = os.environ.get("SOULSYNC_DB_POOL", "1").strip().lower() not in ("0", "false", "no", "off")
 try:
     MAX_IDLE = max(1, int(os.environ.get("SOULSYNC_DB_POOL_MAX", "8")))
 except ValueError:
     MAX_IDLE = 8
+# across every file: a process that opens many databases (the test suite makes
+# hundreds of temp ones) must not keep 8 idle connections to each of them
+try:
+    MAX_IDLE_TOTAL = max(1, int(os.environ.get("SOULSYNC_DB_POOL_MAX_TOTAL", "16")))
+except ValueError:
+    MAX_IDLE_TOTAL = 16
 
 _lock = threading.Lock()
-_idle: Dict[str, List["_Slot"]] = {}
+# least recently returned file first, so the cap evicts the one nobody is using
+_idle: "OrderedDict[str, List[_Slot]]" = OrderedDict()
+
+# PRAGMAs a caller sets on its connection that would otherwise carry over to the
+# next one: insert_or_update_media_track drops busy_timeout to 10s, the planner
+# stats refresh sets analysis_limit
+_RESET_PRAGMAS = ("busy_timeout", "analysis_limit")
 
 # plain counters for diagnostics and tests; not locked on purpose, approximate is fine
 stats = {"hits": 0, "misses": 0, "discarded": 0, "kept_by_cursor": 0, "overflow_closed": 0}
@@ -60,7 +76,7 @@ stats = {"hits": 0, "misses": 0, "discarded": 0, "kept_by_cursor": 0, "overflow_
 class _Slot:
     """A connection and what it must still look like to be handed out again."""
 
-    __slots__ = ("raw", "ident", "row_factory", "isolation_level", "text_factory")
+    __slots__ = ("raw", "ident", "row_factory", "isolation_level", "text_factory", "pragmas")
 
     def __init__(self, raw: sqlite3.Connection, ident: Optional[tuple]):
         self.raw = raw
@@ -68,6 +84,7 @@ class _Slot:
         self.row_factory = raw.row_factory
         self.isolation_level = raw.isolation_level
         self.text_factory = raw.text_factory
+        self.pragmas = {name: raw.execute(f"PRAGMA {name}").fetchone()[0] for name in _RESET_PRAGMAS}
 
 
 def _file_ident(path: str) -> Optional[tuple]:
@@ -191,17 +208,32 @@ class PooledConnection:
                 raw.text_factory = slot.text_factory
             if raw.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
                 raw.execute("PRAGMA foreign_keys = ON")
+            for name, value in slot.pragmas.items():
+                if raw.execute(f"PRAGMA {name}").fetchone()[0] != value:
+                    raw.execute(f"PRAGMA {name} = {int(value)}")
         except sqlite3.Error:
             stats["discarded"] += 1
             _close_quietly(raw)
             return
+        evicted: List[_Slot] = []
         with _lock:
             bucket = _idle.setdefault(self._path, [])
-            if len(bucket) < MAX_IDLE:
+            _idle.move_to_end(self._path)
+            if len(bucket) >= MAX_IDLE:
+                evicted.append(slot)
+            else:
                 bucket.append(slot)
-                return
-        stats["overflow_closed"] += 1
-        _close_quietly(raw)
+                total = sum(len(b) for b in _idle.values())
+                while total > MAX_IDLE_TOTAL:
+                    oldest_path = next(iter(_idle))
+                    oldest = _idle[oldest_path]
+                    evicted.append(oldest.pop(0))
+                    total -= 1
+                    if not oldest:
+                        del _idle[oldest_path]
+        for gone in evicted:
+            stats["overflow_closed"] += 1
+            _close_quietly(gone.raw)
 
     def __del__(self) -> None:
         try:
@@ -229,6 +261,8 @@ def acquire(path: Any, opener: Callable[[bool], sqlite3.Connection]):
         with _lock:
             bucket = _idle.get(p)
             slot = bucket.pop() if bucket else None
+            if bucket is not None and not bucket:
+                del _idle[p]
         if slot is None:
             break
         if slot.ident is not None and slot.ident == ident:

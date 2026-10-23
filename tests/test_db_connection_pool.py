@@ -268,3 +268,33 @@ def test_the_temp_key_helper_can_run_twice_on_one_thread(db):
             cur = conn.cursor()
             MusicDatabase._temp_key_set(cur, "tmp_keys", {"x", "y"})
             assert cur.execute("SELECT COUNT(*) FROM tmp_keys").fetchone()[0] == 2
+
+
+def test_a_caller_lowered_busy_timeout_does_not_carry_over(db):
+    # insert_or_update_media_track drops busy_timeout to 10s on its connection;
+    # pooled, every later caller waited 10s on a locked db instead of 30s
+    c = db._get_connection()
+    fresh = c.execute("PRAGMA busy_timeout").fetchone()[0]
+    c.close()
+    c = db._get_connection()
+    c.cursor().execute("PRAGMA busy_timeout = 10000")
+    c.execute("PRAGMA analysis_limit = 400")
+    c.close()
+    c2 = db._get_connection()
+    assert _hits() and c2.execute("PRAGMA busy_timeout").fetchone()[0] == fresh == 30000
+    assert c2.execute("PRAGMA analysis_limit").fetchone()[0] == 0
+    c2.close()
+
+
+def test_idle_connections_are_capped_across_files(tmp_path, monkeypatch):
+    # hundreds of temp databases in one process must not each keep an idle connection
+    monkeypatch.setattr(cp, "MAX_IDLE_TOTAL", 3)
+    cp._idle.clear()
+    dbs = [MusicDatabase(str(tmp_path / f"{i}.db")) for i in range(6)]
+    for d in dbs:
+        d._get_connection().close()
+    assert sum(len(b) for b in cp._idle.values()) == 3
+    # the least recently returned files were the ones let go
+    assert list(cp._idle) == [str(d.database_path) for d in dbs[3:]]
+    for d in dbs:
+        d.close()
