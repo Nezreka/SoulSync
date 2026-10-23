@@ -408,3 +408,82 @@ def test_disconnect_with_node_down_still_clears_and_says_so(client, cfg, node):
     assert data["success"] is True and data["node_notified"] is False
     assert not cfg.get("metasync.local_api_key")
     assert cfg.get("api_keys") == []
+
+
+# ---------------------------------------------------------------------------
+# auto-detect
+# ---------------------------------------------------------------------------
+
+_HEALTH = {"ok": True, "service": "metasync-node", "version": "0.2.0"}
+
+
+def test_detect_finds_the_node_on_localhost(client, cfg, node):
+    node.routes[("GET", "/health")] = _FakeResponse(200, _HEALTH)
+    data = client.post("/api/metasync/detect").get_json()
+    assert data["success"] is True and data["found"] is True
+    assert data["node_url"] == "http://localhost:8790"
+    assert data["version"] == "0.2.0"
+    # the first answering candidate wins — probing stops there
+    assert [c["url"] for c in node.calls] == ["http://localhost:8790/health"]
+
+
+def test_detect_tries_the_request_host(client, cfg, node):
+    # SoulSync reached over the LAN: the node usually sits on that same
+    # machine, so the request's own host is probed ahead of loopback.
+    node.routes[("GET", "/health")] = _FakeResponse(200, _HEALTH)
+    data = client.post("/api/metasync/detect",
+                       base_url="http://192.168.1.50:8000").get_json()
+    assert data["found"] is True
+    assert data["node_url"] == "http://192.168.1.50:8790"
+    assert node.calls[0]["url"] == "http://192.168.1.50:8790/health"
+
+
+def test_detect_rejects_a_responder_that_is_not_metasync(client, cfg, node):
+    # Something else squatting on 8790 must never be taken for the node.
+    node.routes[("GET", "/health")] = _FakeResponse(
+        200, {"ok": True, "service": "some-other-service", "version": "9.9"})
+    data = client.post("/api/metasync/detect").get_json()
+    assert data["success"] is True and data["found"] is False
+    probed = {c["url"] for c in node.calls}
+    assert probed == {"http://localhost:8790/health",
+                      "http://127.0.0.1:8790/health",
+                      "http://host.docker.internal:8790/health"}
+    assert not cfg.get("metasync.node_url")
+
+
+def test_detect_nothing_answering_is_found_false_not_an_error(client, cfg, node):
+    node.routes[("GET", "/health")] = requests.ConnectionError("down")
+    resp = client.post("/api/metasync/detect")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["success"] is True and data["found"] is False
+    assert not cfg.get("metasync.node_url")
+
+
+def test_detect_probes_the_stored_url_first(client, cfg, monkeypatch):
+    probed = []
+
+    def fake_request(method, url, json=None, headers=None, timeout=None):
+        probed.append((url, timeout))
+        if url.startswith("http://stored-node:8790"):
+            raise requests.ConnectionError("down")
+        return _FakeResponse(200, _HEALTH)
+
+    monkeypatch.setattr(ms.requests, "request", fake_request)
+    cfg.set("metasync.node_url", "http://stored-node:8790")
+    data = client.post("/api/metasync/detect").get_json()
+    assert data["found"] is True
+    # the stored URL got the first probe; the winner replaced it in config
+    assert probed[0][0] == "http://stored-node:8790/health"
+    assert data["node_url"] == "http://localhost:8790"
+    assert cfg.get("metasync.node_url") == "http://localhost:8790"
+    # every probe runs on the short detect timeout, never the 10s node one
+    assert probed and all(t == ms._DETECT_TIMEOUT_SECONDS for _, t in probed)
+
+
+def test_detect_stores_the_found_url(client, cfg, node):
+    node.routes[("GET", "/health")] = _FakeResponse(200, _HEALTH)
+    client.post("/api/metasync/detect")
+    assert cfg.get("metasync.node_url") == "http://localhost:8790"
+    view = client.get("/api/metasync").get_json()
+    assert view["node_url"] == "http://localhost:8790"

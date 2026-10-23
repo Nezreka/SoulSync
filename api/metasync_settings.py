@@ -15,6 +15,10 @@ from Settings > Advanced > MetaSync:
   source of truth) and handed to the node on demand; the node exchanges it
   with the pool itself.
 * Status / disconnect proxy the node's /local/status and /local/disconnect.
+* Auto-detect (POST /api/metasync/detect): probes a short fixed list of
+  places the node usually lives (see _detect_candidates) and stores the
+  first one whose /health answers as a MetaSync node, so most users never
+  type the node URL at all. The manual field stays as the fallback.
 
 Auth model (matches the sidebar-weather posture): the GETs are undecorated
 (they expose no secrets — keys are reported as set/not-set only), the writes
@@ -48,6 +52,7 @@ create / sync). If a narrower scope ever exists, mint that instead.
 from __future__ import annotations
 
 import threading
+from urllib.parse import urlparse
 
 import requests
 from flask import Blueprint, jsonify, request
@@ -64,6 +69,11 @@ bp = Blueprint("metasync_settings", __name__)
 config_manager = None
 
 _NODE_TIMEOUT_SECONDS = 10
+
+# Auto-detect probes: the node's port is fixed, and each probe gets a short
+# leash — five dead candidates at the 10s node timeout would feel hung.
+_NODE_PORT = 8790
+_DETECT_TIMEOUT_SECONDS = 1.5
 
 # The one pending pairing, if any: {session_id, pairing_code,
 # node_fingerprint, node_url}. Module memory on purpose (see docstring).
@@ -120,8 +130,9 @@ class _NodeUnreachable(Exception):
     """The node could not be reached at all (no answer, not a bad answer)."""
 
 
-def _node_request(method, node_url, path, *, local_key=None, json_body=None):
-    """One call to the node's /local/* surface.
+def _node_request(method, node_url, path, *, local_key=None, json_body=None,
+                  timeout=_NODE_TIMEOUT_SECONDS):
+    """One call to the node (its /local/* surface, or /health for probing).
 
     Returns (status_code, payload dict). Raises _NodeUnreachable when no
     answer came back — the caller decides what that means, because for the
@@ -137,7 +148,7 @@ def _node_request(method, node_url, path, *, local_key=None, json_body=None):
             node_url.rstrip("/") + path,
             json=json_body,
             headers=headers,
-            timeout=_NODE_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except requests.RequestException as exc:
         raise _NodeUnreachable(str(exc)) from exc
@@ -198,6 +209,64 @@ def put_metasync_settings():
     if local_key:
         cfg.set("metasync.local_api_key", local_key)
     return jsonify(_settings_view())
+
+
+def _detect_candidates():
+    """Where the node might live, best guess first, deduplicated.
+
+    SSRF posture: this list is fixed by construction — the stored URL, the
+    host of this very request, two loopback aliases and the Docker host
+    alias, all on the node's one fixed port. Nothing user-supplied reaches
+    it: the detect endpoint takes no URL or host input in its body.
+    """
+    candidates = []
+
+    def _add(url):
+        url = str(url or "").strip().rstrip("/")
+        if url and url not in candidates:
+            candidates.append(url)
+
+    # A stored URL is the user's own statement of where their node is —
+    # verify it before guessing anywhere else.
+    _add(_stored("node_url"))
+    # The address the admin's browser used to reach SoulSync: MetaSync
+    # normally runs on that same machine (localhost and LAN access alike).
+    host = urlparse(request.host_url).hostname
+    if host:
+        _add(f"http://{host}:{_NODE_PORT}")
+    _add(f"http://localhost:{_NODE_PORT}")
+    _add(f"http://127.0.0.1:{_NODE_PORT}")
+    # SoulSync in Docker, MetaSync on the host machine.
+    _add(f"http://host.docker.internal:{_NODE_PORT}")
+    return candidates
+
+
+@bp.route("/api/metasync/detect", methods=["POST"])
+@admin_only
+def post_detect():
+    """Probe the candidate list for a live MetaSync node.
+
+    A candidate counts only when its /health answers 200 AND names the
+    service "metasync-node" — any other program that happens to sit on
+    port 8790 must never be mistaken for the node. Finding nothing is a
+    normal outcome, not an error: the manual URL field is the fallback.
+    """
+    for candidate in _detect_candidates():
+        try:
+            status, payload = _node_request(
+                "GET", candidate, "/health", timeout=_DETECT_TIMEOUT_SECONDS)
+        except _NodeUnreachable:
+            continue
+        if status == 200 and payload.get("service") == "metasync-node":
+            _cfg().set("metasync.node_url", candidate)
+            logger.info(f"metasync detect: node found at {candidate}")
+            return jsonify({
+                "success": True,
+                "found": True,
+                "node_url": candidate,
+                "version": str(payload.get("version") or ""),
+            })
+    return jsonify({"success": True, "found": False})
 
 
 @bp.route("/api/metasync/pair/request", methods=["POST"])
