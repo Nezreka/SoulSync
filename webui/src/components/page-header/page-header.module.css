@@ -89,7 +89,7 @@
   margin: 0;
   font-size: 26px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-1);
   line-height: 1.15;
 }
 

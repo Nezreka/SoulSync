@@ -19,7 +19,7 @@
 }
 
 .reportButton:hover {
-  color: #fff;
+  color: var(--text-1);
   background: var(--white-a08);
   border-color: var(--white-a18);
 }

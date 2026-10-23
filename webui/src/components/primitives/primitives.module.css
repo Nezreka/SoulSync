@@ -114,7 +114,7 @@
 
 :where(.spinner[data-tone='light']) {
   border-color: var(--white-a30);
-  border-top-color: #fff;
+  border-top-color: var(--text-1);
 }
 
 :where(.skeleton) {
