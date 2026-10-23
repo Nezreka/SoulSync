@@ -25180,15 +25180,18 @@ class MusicDatabase:
             logger.error(f"API: Error listing albums: {e}")
             return {"albums": [], "total": 0}
 
-    def api_download_activity(self, since: str = "") -> List[Dict[str, Any]]:
+    def api_download_activity(self, since: str = "", until: str = "") -> List[Dict[str, Any]]:
         """Per-album completed-download aggregates for the MetaSync node.
 
         One row per library album (keyed by its MusicBrainz release id) with
         at least one completed download in track_downloads, joined through
         the library tracks' file paths. Only IDs and counts leave the box —
-        no titles, no paths. ``since`` (ISO-8601) drives ``completed_since``:
-        how many of the album's downloads completed at or after that
-        instant; with no ``since`` it equals ``completed_downloads``.
+        no titles, no paths. ``since`` / ``until`` (ISO-8601) bound
+        ``completed_since``: how many of the album's downloads completed at
+        or after ``since`` and before ``until``. Without ``since`` the
+        window is open at the start, without ``until`` at the end; with
+        neither it equals ``completed_downloads``. The node reports a
+        closed week, so it passes both.
 
         Albums whose tracks have left the library no longer join and drop
         out of the result. That is by design: the node accumulates its own
@@ -25200,10 +25203,12 @@ class MusicDatabase:
             cursor = conn.cursor()
             scope_sql, scope_params = self._current_scope_sql('al.owner_profile_id')
             since_norm = self._normalize_since(since) if since else ""
+            until_norm = self._normalize_since(until) if until else ""
             cursor.execute(
                 f"""SELECT al.musicbrainz_release_id AS musicbrainz_release_id,
                            COUNT(*) AS completed_downloads,
-                           SUM(CASE WHEN ? = '' OR td.created_at >= ?
+                           SUM(CASE WHEN (? = '' OR td.created_at >= ?)
+                                     AND (? = '' OR td.created_at < ?)
                                     THEN 1 ELSE 0 END) AS completed_since,
                            MIN(td.created_at) AS first_downloaded_at,
                            MAX(td.created_at) AS last_downloaded_at
@@ -25217,11 +25222,60 @@ class MusicDatabase:
                       AND {scope_sql}
                     GROUP BY al.musicbrainz_release_id
                     ORDER BY al.musicbrainz_release_id""",
-                [since_norm, since_norm] + scope_params,
+                [since_norm, since_norm, until_norm, until_norm] + scope_params,
             )
             return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"API: Error reading download activity: {e}")
+            return []
+
+    def api_listening_activity(self, since: str, until: str) -> List[Dict[str, Any]]:
+        """Per-album listening aggregates for one window, for the MetaSync node.
+
+        One row per library album (keyed by its MusicBrainz release id) that
+        was played in ``[since, until)``: how many plays, how many distinct
+        tracks, on how many distinct days. Only IDs and counts leave the box —
+        no titles, no individual play times, no profile, no media server.
+
+        Only the SHARED pile (core.listening_scope.SHARED_OWNER) is read: the
+        plays the admin's own stats read. A profile with its own listening
+        account keeps its pile out of the admin's view, and out of this too —
+        the admin opting in to MetaSync never shares a housemate's personal
+        history. Plays that matched no library track (db_track_id NULL)
+        cannot be keyed and are skipped. See MetaSync DESIGN-LISTEN-SIGNALS.md;
+        the node applies the per-album threshold and the weekly cap, this
+        only counts.
+        """
+        from core.listening_scope import SHARED_OWNER
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            scope_sql, scope_params = self._current_scope_sql('al.owner_profile_id')
+            # played_at is stored canonical ("YYYY-MM-DD HH:MM:SS", UTC —
+            # core.listening_import.dedup.canonical_played_at) and both
+            # bounds are normalized to the same shape, so the range
+            # compares instants and can walk idx_listening_played_at.
+            cursor.execute(
+                f"""SELECT al.musicbrainz_release_id AS musicbrainz_release_id,
+                           COUNT(*) AS plays,
+                           COUNT(DISTINCT lh.db_track_id) AS distinct_tracks,
+                           COUNT(DISTINCT substr(lh.played_at, 1, 10)) AS distinct_days
+                    FROM listening_history lh
+                    JOIN tracks t ON t.id = lh.db_track_id
+                    JOIN albums al ON al.id = t.album_id
+                    WHERE lh.played_at >= ? AND lh.played_at < ?
+                      AND lh.profile_id = ?
+                      AND al.musicbrainz_release_id IS NOT NULL
+                      AND al.musicbrainz_release_id != ''
+                      AND {scope_sql}
+                    GROUP BY al.musicbrainz_release_id
+                    ORDER BY al.musicbrainz_release_id""",
+                [self._normalize_since(since), self._normalize_since(until), SHARED_OWNER]
+                + scope_params,
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"API: Error reading listening activity: {e}")
             return []
 
     # ── MetaSync export ──────────────────────────────────────────────────
