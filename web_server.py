@@ -15398,6 +15398,23 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
     return slsk_track_meta # Fallback to original
 
 
+def _import_pipeline_runtime():
+    """The live controller dependencies for core.imports.pipeline.
+
+    The builder there takes them as keyword arguments, all defaulting to None,
+    so a bare call hands the pipeline an empty runtime: no track_downloaded or
+    download_quarantined event, no completion callback, no scan after a simple
+    download, no repair folder registration. Read at call time, because
+    repair_worker is only created later in this module.
+    """
+    return _build_import_pipeline_runtime(
+        automation_engine=automation_engine,
+        on_download_completed=_on_download_completed,
+        web_scan_manager=web_scan_manager,
+        repair_worker=repair_worker,
+    )
+
+
 def _post_process_matched_download_with_verification(context_key, context, file_path, task_id, batch_id):
     """
     NEW VERIFICATION WORKFLOW: Enhanced post-processing with file verification.
@@ -15410,7 +15427,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         file_path,
         task_id,
         batch_id,
-        _build_import_pipeline_runtime(),
+        _import_pipeline_runtime(),
         _build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
@@ -15536,7 +15553,7 @@ def _post_process_matched_download(context_key, context, file_path):
         context_key,
         context,
         file_path,
-        _build_import_pipeline_runtime(),
+        _import_pipeline_runtime(),
         metadata_runtime=_build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
