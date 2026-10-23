@@ -13752,10 +13752,23 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .import-file-format-hints {
-    display: flex;
+    /* a 2x2 grid since the newpipe card made four: a row of four at this
+       width left each card a few words wide */
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     width: 100%;
-    max-width: 520px;
+    max-width: 620px;
+}
+@media (max-width: 600px) {
+    .import-file-format-hints { grid-template-columns: minmax(0, 1fr); }
+}
+
+.newpipe-import-note {
+    margin: 10px 2px 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--white-a40);
 }
 
 .import-file-hint {

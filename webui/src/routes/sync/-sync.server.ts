@@ -257,6 +257,7 @@ export const COMPARE_SOURCE_ICONS: Readonly<Record<string, string>> = {
   beatport: '🎛️',
   deezer: '🟣',
   file: '📄',
+  newpipe: '▶️',
 };
 
 /** The server-column icons (314) — a third, smaller table. */
@@ -286,6 +287,7 @@ export function compareSourceLabel(
   hasMirrored: boolean,
 ): string {
   if (!hasMirrored) return 'Source';
+  if (source === 'newpipe') return 'NewPipe';
   const s = source || 'source';
   return s.charAt(0).toUpperCase() + s.slice(1);
 }

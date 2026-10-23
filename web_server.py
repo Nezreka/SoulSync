@@ -21238,6 +21238,38 @@ def get_active_media_server():
 
 # ── Mirrored Playlists ────────────────────────────────────────────────
 
+@app.route('/api/import/newpipe', methods=['POST'])
+def import_newpipe_backup():
+    """Read the playlists out of a NewPipe backup (the export .zip or newpipe.db).
+
+    parse only: the page shows them, the user picks, and each picked one is
+    saved through /api/mirror-playlist as source 'newpipe', keyed by its
+    newpipe uid so a later import of a newer backup overwrites it."""
+    upload = request.files.get('file')
+    if upload is None or not upload.filename:
+        return jsonify({"success": False, "error": "no file uploaded"}), 400
+    import tempfile
+    from core.playlists.newpipe_backup import NotANewPipeBackup, read_newpipe_backup
+    fd, tmp_path = tempfile.mkstemp(prefix='newpipe_upload_')
+    try:
+        with os.fdopen(fd, 'wb') as fh:
+            upload.save(fh)
+        result = read_newpipe_backup(tmp_path, clean_youtube_artist, clean_youtube_track_title)
+        logger.info("[NewPipe] parsed %d playlists (%d bookmarked skipped) from %s",
+                    len(result['playlists']), result['bookmarked'], upload.filename)
+        return jsonify({"success": True, **result})
+    except NotANewPipeBackup as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"[NewPipe] import failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "could not read that backup"}), 500
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
 @app.route('/api/mirror-playlist', methods=['POST'])
 def mirror_playlist_endpoint():
     """Save or update a mirrored playlist."""
