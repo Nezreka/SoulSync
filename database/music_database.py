@@ -25166,6 +25166,50 @@ class MusicDatabase:
             logger.error(f"API: Error listing albums: {e}")
             return {"albums": [], "total": 0}
 
+    def api_download_activity(self, since: str = "") -> List[Dict[str, Any]]:
+        """Per-album completed-download aggregates for the MetaSync node.
+
+        One row per library album (keyed by its MusicBrainz release id) with
+        at least one completed download in track_downloads, joined through
+        the library tracks' file paths. Only IDs and counts leave the box —
+        no titles, no paths. ``since`` (ISO-8601) drives ``completed_since``:
+        how many of the album's downloads completed at or after that
+        instant; with no ``since`` it equals ``completed_downloads``.
+
+        Albums whose tracks have left the library no longer join and drop
+        out of the result. That is by design: the node accumulates its own
+        download history from weekly reads, so a row disappearing is part
+        of the signal (see MetaSync DESIGN-DOWNLOAD-SIGNALS.md), not a gap.
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            scope_sql, scope_params = self._current_scope_sql('al.owner_profile_id')
+            since_norm = self._normalize_since(since) if since else ""
+            cursor.execute(
+                f"""SELECT al.musicbrainz_release_id AS musicbrainz_release_id,
+                           COUNT(*) AS completed_downloads,
+                           SUM(CASE WHEN ? = '' OR td.created_at >= ?
+                                    THEN 1 ELSE 0 END) AS completed_since,
+                           MIN(td.created_at) AS first_downloaded_at,
+                           MAX(td.created_at) AS last_downloaded_at
+                    FROM track_downloads td
+                    JOIN tracks t ON t.file_path = td.file_path
+                    JOIN albums al ON al.id = t.album_id
+                    WHERE td.status = 'completed'
+                      AND td.file_path IS NOT NULL
+                      AND al.musicbrainz_release_id IS NOT NULL
+                      AND al.musicbrainz_release_id != ''
+                      AND {scope_sql}
+                    GROUP BY al.musicbrainz_release_id
+                    ORDER BY al.musicbrainz_release_id""",
+                [since_norm, since_norm] + scope_params,
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"API: Error reading download activity: {e}")
+            return []
+
     # ── MetaSync export ──────────────────────────────────────────────────
 
     @staticmethod

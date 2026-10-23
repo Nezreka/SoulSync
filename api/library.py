@@ -2,6 +2,8 @@
 Library endpoints — browse artists, albums, tracks, genres, and stats.
 """
 
+from datetime import datetime
+
 from flask import request, current_app
 from database.music_database import get_database
 from .auth import require_api_key
@@ -445,6 +447,36 @@ def register_routes(bp):
             }[table]
 
             return api_success({entity_type: serializer(result, fields)})
+        except Exception as e:
+            return api_error("LIBRARY_ERROR", str(e), 500)
+
+    @bp.route("/library/download-activity", methods=["GET"])
+    @require_api_key
+    def download_activity():
+        """Per-album completed-download aggregates for the MetaSync node.
+
+        MusicBrainz release ids + counts only (see
+        db.api_download_activity); the node bridges release ids to release
+        groups itself. ``since`` (ISO-8601) adds a per-album
+        ``completed_since`` count.
+        """
+        since = (request.args.get("since") or "").strip()
+        if since:
+            # Validated here rather than passed through: an unparseable
+            # string would silently compare as text in SQLite and quietly
+            # return the wrong counts instead of a 400.
+            try:
+                datetime.fromisoformat(since.replace("Z", "+00:00"))
+            except ValueError:
+                return api_error(
+                    "BAD_REQUEST",
+                    "since must be an ISO-8601 timestamp (e.g. 2026-10-19T00:00:00).",
+                    400,
+                )
+        try:
+            db = get_database()
+            albums = db.api_download_activity(since=since)
+            return api_success({"albums": albums})
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
