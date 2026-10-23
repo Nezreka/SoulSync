@@ -60,6 +60,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'run_repair_job',
     'apply_quality_upgrades',
     'backup_database',
+    'check_deezer_signin',
     'refresh_beatport_cache',
     'clean_search_history',
     'clean_completed_downloads',

@@ -1047,6 +1047,8 @@ const TRIGGER_LABELS: Record<string, string> = {
   database_update_completed: 'Database Updated',
   download_failed: 'Download Failed',
   download_quarantined: 'File Quarantined',
+  deezer_signin_failed: 'Deezer Sign-in Failed',
+  deezer_signin_restored: 'Deezer Sign-in Restored',
   wishlist_item_added: 'Wishlist Item Added',
   watchlist_artist_added: 'Artist Watched',
   watchlist_artist_removed: 'Artist Unwatched',

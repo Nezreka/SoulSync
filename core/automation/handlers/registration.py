@@ -47,6 +47,7 @@ from core.automation.handlers.download_cleanup import (
     auto_full_cleanup,
 )
 from core.automation.handlers.run_script import auto_run_script
+from core.automation.handlers.deezer_signin import auto_check_deezer_signin
 from core.automation.handlers.search_and_download import auto_search_and_download
 from core.automation.handlers.complete_incomplete_albums import auto_complete_incomplete_albums
 from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes_all_profiles, is_airing_already_running
@@ -259,6 +260,10 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'backup_database',
         lambda config: auto_backup_database(config, deps),
+    )
+    engine.register_action_handler(
+        'check_deezer_signin',
+        lambda config: auto_check_deezer_signin(config, deps),
     )
     engine.register_action_handler(
         'refresh_beatport_cache',

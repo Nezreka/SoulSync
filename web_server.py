@@ -22717,6 +22717,16 @@ except Exception as e:
     logger.error(f"Repair worker initialization failed: {e}")
     repair_worker = None
 
+# Deezer sign-in events ('Deezer Sign-in Failed' / 'Restored' triggers): the
+# download client sends them itself once it knows where to.
+if automation_engine is not None and download_orchestrator is not None:
+    try:
+        _deezer_dl = download_orchestrator.client('deezer_dl')
+        if _deezer_dl is not None and hasattr(_deezer_dl, 'set_event_emitter'):
+            _deezer_dl.set_event_emitter(automation_engine.emit)
+    except Exception as e:
+        logger.debug(f"Deezer sign-in events not wired: {e}")
+
 # --- Repair Worker API Endpoints: lifted to api/repair.py (wired near the
 # chat/labels/beatport blueprints below) ---
 # ================================================================================================
