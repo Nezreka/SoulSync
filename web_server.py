@@ -18198,7 +18198,9 @@ def get_server_playlist_tracks(playlist_id):
                         server_tracks.append({
                             'id': str(item.ratingKey),
                             'title': item.title,
-                            'artist': grandparent,
+                            # originalTitle is plex's per-track artist; grandparent is the
+                            # album artist ('Various Artists' on a compilation)
+                            'artist': getattr(item, 'originalTitle', None) or grandparent,
                             'album': parent,
                             'duration': item.duration or 0,
                             'thumb': thumb,
@@ -18329,7 +18331,16 @@ def get_server_playlist_tracks(playlist_id):
 
         _override_pairs = resolve_match_overrides(source_tracks, server_tracks, _override_lookup)
 
-        combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs)
+        # pairings the user unmatched here: never auto-paired again
+        try:
+            _rejected_pairs = _db_for_overrides.get_server_match_rejections(
+                _ov_profile, active_server,
+                [s.get('source_track_id') for s in source_tracks if isinstance(s, dict)])
+        except Exception as _rej_err:   # noqa: BLE001 - never fail the view over it
+            logger.debug("rejected-pair lookup failed: %s", _rej_err)
+            _rejected_pairs = set()
+
+        combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs, _rejected_pairs)
 
         # A durable manual match whose library track isn't in THIS playlist yet
         # can't be applied above, so its row renders as a plain "missing" with
@@ -18663,6 +18674,12 @@ def _persist_find_and_add_match(source_track_id, server_source, server_track_id,
             "revert on the next compare load.", server_track_title or source_title or server_track_id)
         return
     db = get_database()
+    # picking the very track the user once unmatched means it is right after all
+    try:
+        db.clear_server_match_rejection(get_current_profile_id(), server_source,
+                                        source_track_id, server_track_id)
+    except Exception as e:
+        logger.debug(f"[ServerPlaylist] rejection clear failed: {e}")
     try:
         from core.sync.match_overrides import record_manual_match
         ok = record_manual_match(
@@ -18898,6 +18915,40 @@ def server_playlist_add_track(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/server/playlist/<playlist_id>/unmatch-track', methods=['POST'])
+def server_playlist_unmatch_track(playlist_id):
+    """Break a wrong source/server pairing without touching the playlist.
+
+    the source row goes back to missing (Find & add), the server track stays
+    in the playlist as an extra, and the pairing is filed as rejected so the
+    compare view and the sync never auto-match the two again."""
+    try:
+        data = request.get_json(silent=True) or {}
+        source_track_id = str(data.get('source_track_id') or '').strip()
+        server_track_id = str(data.get('server_track_id') or '').strip()
+        playlist_name = data.get('playlist_name', '')
+        if not source_track_id or not server_track_id:
+            return jsonify({"success": False,
+                            "error": "source_track_id and server_track_id required"}), 400
+
+        active_server = config_manager.get_active_media_server()
+        # #1414: same guard as every other write here
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
+
+        from core.sync.match_overrides import reject_match
+        if not reject_match(get_database(), get_current_profile_id(), active_server,
+                            source_track_id, server_track_id):
+            return jsonify({"success": False, "error": "Could not save the unmatch"}), 500
+        logger.info(f"[ServerPlaylist] Unmatched {source_track_id} from {server_track_id} ({active_server})")
+        return jsonify({"success": True, "message": "Match removed"})
+    except Exception as e:
+        logger.error(f"Error unmatching server playlist track: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/server/playlist/<playlist_id>/remove-track', methods=['POST'])
 def server_playlist_remove_track(playlist_id):
     """Remove a track from a server playlist by its server track ID."""
@@ -19130,7 +19181,10 @@ def library_search_tracks():
             tracks.append({
                 'id': t.id,
                 'title': t.title,
-                'artist_name': t.artist_name,
+                # the track's own credit, not the album's: on a compilation
+                # every row read 'Various Artists' and remixes were unpickable
+                'artist_name': getattr(t, 'track_artist', None) or t.artist_name,
+                'album_artist': t.artist_name,
                 'album_title': getattr(t, 'album_title', ''),
                 'album_thumb_url': _resolve_search_thumb(getattr(t, 'album_thumb_url', '')),
                 'file_path': getattr(t, 'file_path', ''),

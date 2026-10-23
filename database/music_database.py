@@ -3745,6 +3745,21 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_cache_lookup ON sync_match_cache (spotify_track_id, server_source)")
 
+            # pairings a user unmatched on the server playlist compare view.
+            # the auto matcher may never pair this source track with this
+            # library track again; picking it by hand clears the row.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS server_match_rejections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL,
+                    server_source TEXT NOT NULL,
+                    source_track_id TEXT NOT NULL,
+                    server_track_id TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(profile_id, server_source, source_track_id, server_track_id)
+                )
+            """)
+
             # Download blacklist — tracks users have rejected as wrong matches
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS download_blacklist (
@@ -21463,6 +21478,54 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error deleting sync match cache row: {e}")
             return 0
+
+    def add_server_match_rejection(self, profile_id: int, server_source: str,
+                                   source_track_id: str, server_track_id: str) -> bool:
+        """Remember that this source track is NOT this library track."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO server_match_rejections "
+                    "(profile_id, server_source, source_track_id, server_track_id) VALUES (?, ?, ?, ?)",
+                    (profile_id, server_source or '', str(source_track_id), str(server_track_id)))
+            return True
+        except Exception as e:
+            logger.error(f"add_server_match_rejection error: {e}")
+            return False
+
+    def clear_server_match_rejection(self, profile_id: int, server_source: str,
+                                     source_track_id: str, server_track_id: str) -> int:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM server_match_rejections WHERE profile_id = ? AND server_source = ?"
+                    " AND source_track_id = ? AND server_track_id = ?",
+                    (profile_id, server_source or '', str(source_track_id), str(server_track_id)))
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"clear_server_match_rejection error: {e}")
+            return 0
+
+    def get_server_match_rejections(self, profile_id: int, server_source: str,
+                                    source_track_ids) -> set:
+        """{(source_track_id, server_track_id)} rejected for these source ids."""
+        ids = [str(i) for i in (source_track_ids or []) if i]
+        if not ids:
+            return set()
+        out = set()
+        try:
+            with self._get_connection() as conn:
+                for start in range(0, len(ids), 500):
+                    chunk = ids[start:start + 500]
+                    rows = conn.execute(
+                        "SELECT source_track_id, server_track_id FROM server_match_rejections"
+                        " WHERE profile_id = ? AND server_source = ?"
+                        f" AND source_track_id IN ({','.join('?' for _ in chunk)})",
+                        [profile_id, server_source or ''] + chunk).fetchall()
+                    out.update((str(r[0]), str(r[1])) for r in rows)
+        except Exception as e:
+            logger.error(f"get_server_match_rejections error: {e}")
+        return out
 
     def invalidate_sync_match_cache(self, server_source: str = None) -> int:
         """Clear sync match cache entries. If server_source given, only clear that server's entries."""
