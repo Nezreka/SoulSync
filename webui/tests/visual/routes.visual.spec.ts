@@ -1,6 +1,5 @@
-import type { RequestHandler } from 'msw';
-
 import { expect, test, type Page } from '@playwright/test';
+import { http, type RequestHandler } from 'msw';
 
 import { routeHandlers, shellHandlers, stateHandlers } from './fixtures';
 import { installShell, ORIGIN } from './harness';
@@ -15,7 +14,7 @@ interface Shot {
   name: string;
   path: string;
   /** API handlers on top of `shellHandlers`; defaults to `routeHandlers[name]`. */
-  handlers?: RequestHandler[];
+  handlers?: RequestHandler[] | ((page: Page) => RequestHandler[]);
   /** Runs before the page loads (localStorage, say). */
   init?: (page: Page) => Promise<unknown>;
   /** Runs once the page has settled, before the shot (open a modal, say). */
@@ -38,7 +37,18 @@ const ROUTES: Shot[] = [
     },
   },
   { name: 'library', path: '/library' },
-  { name: 'artist-detail', path: '/artist-detail/library/42' },
+  {
+    name: 'artist-detail',
+    path: '/artist-detail/library/42',
+    // The Back label is a race in the app. On a cold load, init.js awaits its
+    // snapshot hydration and then calls navigateToArtistDetail, which pushes
+    // onto the label stack: the artist itself once React has synced it into
+    // the vanilla state, a Library page origin if not yet. The React page reads
+    // the stack only on mount and when the payload lands, so it showed
+    // "← Back" or, when init.js won, "← Back to Library". Hold init.js until
+    // React has read it.
+    handlers: (page) => [afterArtistSynced(page), ...routeHandlers['artist-detail']],
+  },
   { name: 'watchlist', path: '/watchlist' },
   { name: 'wishlist', path: '/wishlist' },
   {
@@ -187,6 +197,34 @@ async function freezeAnimations(page: Page) {
   });
 }
 
+/**
+ * Holds init.js's first snapshot hydration (it awaits that before calling
+ * navigateToArtistDetail) until the artist-detail page has synced its artist
+ * into the vanilla state. That sync is the effect after the one that sets the
+ * Back label, so by then the label has been read from the stack init.js has
+ * not touched yet (see the artist-detail shot).
+ */
+function afterArtistSynced(page: Page): RequestHandler {
+  return http.all('*/api/artist_bubbles/hydrate', async () => {
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (window as { artistDetailPageState?: { currentArtistName?: string | null } })
+                .artistDetailPageState?.currentArtistName ?? null,
+          ),
+        {
+          message: 'artist-detail never synced its artist into the vanilla state',
+          intervals: [50],
+          timeout: 15_000,
+        },
+      )
+      .not.toBeNull();
+    // Returning nothing hands the request on (here, to the `{}` default).
+  });
+}
+
 async function settle(page: Page) {
   await expect
     .poll(() => page.evaluate(() => document.querySelector('.page.active')?.id ?? ''), {
@@ -200,6 +238,10 @@ async function settle(page: Page) {
     timeout: 15_000,
   });
   await page.waitForLoadState('networkidle');
+  // networkidle only covers the first quiet moment. On a loaded machine a
+  // page's own fetch can start after it, and the shot catches a loading state.
+  // Wait for those to land too.
+  await networkQuiet(page);
   await page.evaluate(() => document.fonts.ready);
   await freezeAnimations(page);
 }
@@ -269,7 +311,9 @@ async function shoot(page: Page, viewport: string, shot: Shot) {
   await stabilise(page);
   await shot.init?.(page);
   const missing = await installShell(page, [
-    ...(shot.handlers ?? routeHandlers[shot.name] ?? []),
+    ...((typeof shot.handlers === 'function' ? shot.handlers(page) : shot.handlers) ??
+      routeHandlers[shot.name] ??
+      []),
     ...shellHandlers,
   ]);
   await page.goto(`${ORIGIN}${shot.path}`);
