@@ -9274,7 +9274,7 @@ async function _msMaybeAutoDetect(view) {
     if (!field || field.value.trim()) return;
     _msAutoDetectTried = true;
     const found = await metasyncDetect();
-    if (found) _msStatus('MetaSync found at ' + found);
+    if (found) _msStatus('Found MetaSync on this machine at ' + found + ' — click Connect to pair with it.');
 }
 
 async function loadMetaSyncSettings() {
@@ -9297,7 +9297,7 @@ async function loadMetaSyncSettings() {
         const state = document.getElementById('metasync-connect-state');
         if (state) {
             state.textContent = data.local_key_set
-                ? 'Connected' + (data.node_fingerprint ? ' — node ' + data.node_fingerprint : '')
+                ? 'Connected' + (data.node_fingerprint ? ' — MetaSync ID ' + data.node_fingerprint : '')
                 : 'Not connected';
         }
         await refreshMetaSyncStatus();
@@ -9427,17 +9427,18 @@ async function refreshMetaSyncStatus() {
             return;
         }
         const s = data.status || {};
-        _msStatus('Connected — MetaSync ' + (s.version || '') +
-            (s.soulsync_connected ? ', reading this SoulSync' : ', not reading this SoulSync yet'));
+        _msStatus('Step 1: connected — MetaSync ' + (s.version || '') +
+            (s.soulsync_connected ? ' is reading this SoulSync' : ' is not reading this SoulSync yet'));
         const lines = [];
-        if (s.node_fingerprint) lines.push('Node fingerprint: ' + _msEscape(s.node_fingerprint));
+        if (s.node_fingerprint) lines.push('MetaSync ID: ' + _msEscape(s.node_fingerprint) +
+            ' (the same ID MetaSync shows in its dashboard)');
         const pools = Array.isArray(s.pools) ? s.pools : [];
         if (!pools.length) {
-            lines.push('No pools on MetaSync yet — send your pool key to add one.');
+            lines.push('Step 2: no pool joined yet — send your pool key above to join one.');
         }
         pools.forEach(p => {
             const binding = _MS_BINDING_TEXT[p.binding_status] || p.binding_status || 'Unknown';
-            let line = _msEscape(p.name || p.id || 'Pool') + ' (' + _msEscape(p.url || '') + '): ' +
+            let line = 'Pool — ' + _msEscape(p.name || p.id || 'Pool') + ' (' + _msEscape(p.url || '') + '): ' +
                 _msEscape(binding);
             if (p.last_exchange_error) line += ' — last error: ' + _msEscape(p.last_exchange_error);
             lines.push(line);
