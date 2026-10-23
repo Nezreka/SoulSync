@@ -148,16 +148,25 @@ def flattened_numbering_history(db):
                     continue
                 seen.add(identity)
                 history[identity] = details
+            if (details.get('numbering_mode') == 'digital'
+                    and (details.get('release_disc_count') or 0) > 1
+                    and details.get('fingerprint_key') and details.get('album_id')
+                    and details.get('source') and details.get('release_id')):
+                identity = ('audio', str(details['album_id']), details['source'],
+                            details['release_id'], details['fingerprint_key'])
+                history.setdefault(identity, details)
         return history
     finally:
         conn.close()
 
 
-def recovers_flattened_numbering(history, file):
+def recovers_flattened_numbering(history, file, *, album_id=None, source='', release_id=''):
     # A library rescan can replace a track row while leaving the file intact.
-    # The path fallback still requires the exact same audio fingerprint.
+    # A moved and reindexed file needs the same album, release and fingerprint.
     previous = (history.get(('track', str((file.get('db') or {}).get('id'))))
-                or history.get(('path', file.get('path'))))
+                or history.get(('path', file.get('path')))
+                or history.get(('audio', str(album_id), source, release_id,
+                                (file.get('acoustid') or {}).get('fingerprint_key'))))
     return bool(previous and previous.get('numbering_mode') == 'digital'
                 and (previous.get('release_disc_count') or 0) > 1
                 and previous.get('fingerprint_key')

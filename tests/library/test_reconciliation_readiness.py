@@ -146,6 +146,7 @@ def test_numbering_recovery_survives_reindexing_but_not_replacement(tmp_path):
     db = MusicDatabase(str(tmp_path / 'music.db'))
     worker = RepairWorker(database=db)
     details = {'numbering_mode': 'digital', 'release_disc_count': 2,
+               'album_id': 'album', 'source': 'musicbrainz', 'release_id': 'release',
                'fingerprint_key': 'same-audio', 'changes': {'disc_number': {'old': 2, 'new': 1}}}
     worker._create_finding(job_id='library_reconciliation', finding_type='reconciliation_metadata',
         severity='info', entity_type='track', entity_id='old-id', file_path='/music/song.flac',
@@ -155,14 +156,21 @@ def test_numbering_recovery_survives_reindexing_but_not_replacement(tmp_path):
     file = {'db': {'id': 'new-id'}, 'path': '/music/song.flac',
             'acoustid': {'fingerprint_key': 'same-audio'}}
     assert recovers_flattened_numbering(flattened_numbering_history(db), file)
+    file['path'] = '/music/moved/song.flac'
+    context = {'album_id': 'album', 'source': 'musicbrainz', 'release_id': 'release'}
+    assert recovers_flattened_numbering(flattened_numbering_history(db), file, **context)
+    assert not recovers_flattened_numbering(flattened_numbering_history(db), file,
+        **{**context, 'release_id': 'another-release'})
+    assert not recovers_flattened_numbering(flattened_numbering_history(db), file,
+        **{**context, 'album_id': 'another-album'})
     file['acoustid']['fingerprint_key'] = 'replacement'
-    assert not recovers_flattened_numbering(flattened_numbering_history(db), file)
+    assert not recovers_flattened_numbering(flattened_numbering_history(db), file, **context)
     # A later, explicitly applied source-numbering correction supersedes it.
     details['numbering_mode'] = 'release'
     with db._get_connection() as conn:
         conn.execute('UPDATE repair_findings SET details_json=?', (json.dumps(details),))
     file['acoustid']['fingerprint_key'] = 'same-audio'
-    assert not recovers_flattened_numbering(flattened_numbering_history(db), file)
+    assert not recovers_flattened_numbering(flattened_numbering_history(db), file, **context)
 
 
 @pytest.mark.parametrize('kind', ['cosmetic', 'version', 'material'])

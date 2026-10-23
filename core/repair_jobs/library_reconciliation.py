@@ -2951,7 +2951,9 @@ class LibraryReconciliationJob(RepairJob):
                                    'match_reasons': pair['reasons'],
                                    'confidence': pair['confidence'],
                                    'routine_numbering': routine_numbering and not filename_conflict,
-                                   'numbering_recovery': review_choices.recovers_flattened_numbering(numbering_history, file),
+                                   'numbering_recovery': review_choices.recovers_flattened_numbering(
+                                       numbering_history, file, album_id=album_id,
+                                       source=source, release_id=release_id),
                                    'title_difference_kind': title_kind,
                                    'assignment_options': assignment_options,
                                    'saved_assignment': file['path'] in {files[i]['path'] for i in forced_pairs},
