@@ -722,20 +722,22 @@ class RepairWorker:
                 logger.info("Removed queued job %s from the run queue", job_id)
         return {'stopped': was_running or dequeued, 'was_running': was_running, 'dequeued': dequeued}
 
-    def set_job_enabled(self, job_id: str, enabled: bool):
-        """Enable or disable a specific job."""
+    def set_job_enabled(self, job_id: str, enabled: bool, bridge: bool = True):
+        """Enable or disable a specific job. bridge=False when the automation
+        row was the one flipped and already holds the new state."""
         if self._config_manager:
             self._config_manager.set(f'repair.jobs.{job_id}.enabled', enabled)
         # #1289 item 12: bridge to the system automation row so the engine's
         # scheduler honors the toggle. The row's enabled flag is the source of
         # truth for scheduling; the legacy config remains for the worker's
         # respect_enabled check on manual/Run Now paths.
-        try:
-            from core.automation.migrate_repair_jobs import set_system_job_enabled
-            set_system_job_enabled(self.db, getattr(self, '_automation_engine', None),
-                                   job_id, enabled)
-        except Exception as e:
-            logger.debug("Could not bridge job toggle to automation for %s: %s", job_id, e)
+        if bridge:
+            try:
+                from core.automation.migrate_repair_jobs import set_system_job_enabled
+                set_system_job_enabled(self.db, getattr(self, '_automation_engine', None),
+                                       job_id, enabled)
+            except Exception as e:
+                logger.debug("Could not bridge job toggle to automation for %s: %s", job_id, e)
         # Turning a job OFF must also stop it if it's mid-run — otherwise the toggle
         # only affects the NEXT scheduled run and the current scan keeps going (#970).
         if not enabled:

@@ -165,13 +165,14 @@ Top 100 and Hype charts with full track listings. Each track can be manually mat
         {
             id: 'sync-import-file',
             title: 'Import from File',
-            lede: 'Turn a CSV, M3U, or plain text track list into a mirrored playlist.',
+            lede: 'Turn a CSV, M3U, plain text track list, or NewPipe backup into mirrored playlists.',
             body: `
-Import track lists from **CSV, TSV, M3U/M3U8, or plain text files**. Drag and drop a file or click to browse. SoulSync parses the file, lets you preview and map columns, then creates a mirrored playlist for discovery and download.
+Import track lists from **CSV, TSV, M3U/M3U8, or plain text files**, or your playlists from a **NewPipe backup**. Drag and drop a file or click to browse. SoulSync parses the file, lets you preview and map columns, then creates a mirrored playlist for discovery and download.
 
 - **CSV/TSV** — auto-detects columns; map Artist, Title, and Album from dropdowns
 - **M3U/M3U8** — read automatically: artist, title, and duration come from \`#EXTINF\` lines (or the file name for simple playlists). Round-trips with SoulSync's own M3U export
 - **Text files** — one track per line; choose Artist–Title or Title–Artist order and separator (dash, tab, pipe, etc.)
+- **NewPipe backup** — the ZIP from NewPipe's *Settings → Backup and restore → Export* (or the \`newpipe.db\` inside it). Every local playlist is listed; tick the ones you want and each becomes its own mirrored playlist. Importing a newer backup later **updates** those mirrors instead of adding copies. Bookmarked YouTube playlists are only a link in the backup, so add those from the YouTube tab
 - Preview parsed tracks before importing
 - Name your playlist and it becomes a mirrored playlist for sync
 `

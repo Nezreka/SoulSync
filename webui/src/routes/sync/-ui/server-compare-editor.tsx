@@ -36,6 +36,8 @@ import {
   alignServerPlaylist,
   applyPickedTrack,
   applyRemovedTrack,
+  applyUnmatchedTrack,
+  canUnmatch,
   downloadM3u,
   compareConfidenceBadge,
   compareFilterLabel,
@@ -57,6 +59,7 @@ import {
   removeServerTrack,
   replaceServerTrack,
   serverM3uTracks,
+  unmatchServerTrack,
 } from '../-sync.server';
 import { ServerOrderModal } from './server-order-modal';
 import { ServerSearchOverlay } from './server-search-overlay';
@@ -133,6 +136,7 @@ function ServerRow({
   highlighted,
   onSelect,
   onSwap,
+  onUnmatch,
   onRemove,
   onFindAndAdd,
 }: {
@@ -142,6 +146,7 @@ function ServerRow({
   highlighted: boolean;
   onSelect: () => void;
   onSwap: (index: number) => void;
+  onUnmatch: (index: number) => void;
   onRemove: (index: number, serverTrackId: string) => void;
   onFindAndAdd: (index: number) => void;
 }) {
@@ -243,6 +248,31 @@ function ServerRow({
               strokeLinecap="round"
             >
               <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
+            </svg>
+          </button>
+        )}
+        {/* a wrong pairing: break it, keep the track in the playlist. */}
+        {canUnmatch(track) && (
+          <button
+            type="button"
+            className="server-track-unmatch-btn"
+            title="Remove match (keep in playlist)"
+            aria-label="Remove match (keep in playlist)"
+            onClick={(event) => {
+              event.stopPropagation();
+              onUnmatch(index);
+            }}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 4 8M8 12h3M2 2l20 20" />
             </svg>
           </button>
         )}
@@ -472,6 +502,38 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
         window.showToast?.(response.message || 'Track removed', 'success');
         playlistIdRef.current = response.new_playlist_id || playlistIdRef.current;
         setTracks((current) => applyRemovedTrack(current, index));
+      } catch (error) {
+        window.showToast?.(
+          `Error: ${error instanceof Error ? error.message : 'unknown error'}`,
+          'error',
+        );
+      }
+    },
+    [playlist.name, tracks],
+  );
+
+  /**
+   * Break a wrong pairing. The playlist is not edited: the source row goes back
+   * to missing and the server track stays as an extra, and the backend files
+   * the pairing as rejected so it is never auto-matched again.
+   */
+  const unmatchTrack = useCallback(
+    async (index: number) => {
+      const track = tracks[index];
+      if (!track || !canUnmatch(track)) return;
+      try {
+        const response = await unmatchServerTrack(
+          playlistIdRef.current,
+          playlist.name,
+          track.source_track?.source_track_id ?? '',
+          track.server_track?.id ?? '',
+        );
+        if (!response.success) {
+          window.showToast?.(response.error || 'Failed to remove the match', 'error');
+          return;
+        }
+        window.showToast?.('Match removed. The track stays in the playlist.', 'success');
+        setTracks((current) => applyUnmatchedTrack(current, index));
       } catch (error) {
         window.showToast?.(
           `Error: ${error instanceof Error ? error.message : 'unknown error'}`,
@@ -795,6 +857,7 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
                   highlighted={highlighted === index}
                   onSelect={() => selectPair(index, 'server')}
                   onSwap={(i) => openSearch(i, 'replace')}
+                  onUnmatch={(i) => void unmatchTrack(i)}
                   onRemove={(i, id) => void removeTrack(i, id)}
                   onFindAndAdd={(i) => openSearch(i, 'add')}
                 />

@@ -3487,6 +3487,21 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_cache_lookup ON sync_match_cache (spotify_track_id, server_source)")
 
+            # pairings a user unmatched on the server playlist compare view.
+            # the auto matcher may never pair this source track with this
+            # library track again; picking it by hand clears the row.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS server_match_rejections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL,
+                    server_source TEXT NOT NULL,
+                    source_track_id TEXT NOT NULL,
+                    server_track_id TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(profile_id, server_source, source_track_id, server_track_id)
+                )
+            """)
+
             # Download blacklist — tracks users have rejected as wrong matches
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS download_blacklist (
@@ -6597,7 +6612,7 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(f"""
-                SELECT DATE(played_at) AS day, COUNT(*) AS plays
+                SELECT DATE(played_at, 'localtime') AS day, COUNT(*) AS plays
                 FROM listening_history
                 {where}
                 GROUP BY day
@@ -6773,7 +6788,7 @@ class MusicDatabase:
                 date_fmt = '%Y-%m-%d'
 
             cursor.execute(f"""
-                SELECT strftime('{date_fmt}', played_at) as period, COUNT(*) as plays
+                SELECT strftime('{date_fmt}', played_at, 'localtime') as period, COUNT(*) as plays
                 FROM listening_history
                 {where}
                 GROUP BY period
@@ -6992,15 +7007,9 @@ class MusicDatabase:
     # seven of its twelve slots. The period label states the real range so
     # nothing is implied that the data does not cover.
     #
-    # TIMEZONE: unlike the range filters (which compare local `played_at`
-    # against SQLite's UTC `datetime('now')` and are skewed by the server's
-    # offset — see STATS_PAGE_PLAN.md), this window is computed from the
-    # LOCAL clock and compared with `date(played_at)`. That matches the local
-    # wall-clock the column actually stores, so the year is skew-free. Using
-    # date() rather than a raw string compare also means both stored shapes
-    # parse — the web player writes an ISO 'T' separator and plex_client
-    # writes a space, and a lexicographic compare orders those differently at
-    # the boundary.
+    # TIMEZONE: played_at is stored utc. this window is computed from the
+    # LOCAL clock, so every day and month here reads played_at with
+    # 'localtime'. a utc day puts a late evening play on tomorrow (#1840).
 
     _MONTH_LABELS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
@@ -7090,7 +7099,7 @@ class MusicDatabase:
             scope = owner_clause(self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            window = f"WHERE date(played_at) >= ? AND date(played_at) <= ? AND {scope}"
+            window = f"WHERE date(played_at, 'localtime') >= ? AND date(played_at, 'localtime') <= ? AND {scope}"
             span = (start_date, end_date)
 
             cursor.execute(f"""
@@ -7099,7 +7108,7 @@ class MusicDatabase:
                        COUNT(DISTINCT LOWER(artist)),
                        COUNT(DISTINCT LOWER(album)),
                        COUNT(DISTINCT LOWER(title) || '|||' || LOWER(COALESCE(artist, ''))),
-                       COUNT(DISTINCT date(played_at))
+                       COUNT(DISTINCT date(played_at, 'localtime'))
                 FROM listening_history {window}
             """, span)
             row = cursor.fetchone() or (0, 0, 0, 0, 0, 0)
@@ -7120,7 +7129,7 @@ class MusicDatabase:
 
             # Per-month plays + minutes, folded onto the dense strip.
             cursor.execute(f"""
-                SELECT strftime('%Y-%m', played_at) AS ym,
+                SELECT strftime('%Y-%m', played_at, 'localtime') AS ym,
                        COUNT(*), COALESCE(SUM({play_duration_sql()}), 0)
                 FROM listening_history {window}
                 GROUP BY ym
@@ -7134,7 +7143,7 @@ class MusicDatabase:
             # rows is nothing to walk, and a tie breaks on the lower-cased
             # name so the same month never renders two different leaders.
             cursor.execute(f"""
-                SELECT strftime('%Y-%m', played_at) AS ym, artist, COUNT(*) AS plays
+                SELECT strftime('%Y-%m', played_at, 'localtime') AS ym, artist, COUNT(*) AS plays
                 FROM listening_history {window}
                   AND artist IS NOT NULL AND artist != ''
                 GROUP BY ym, LOWER(artist)
@@ -7198,7 +7207,7 @@ class MusicDatabase:
             cursor.execute(f"""
                 SELECT artist, first_play, plays FROM (
                     SELECT artist,
-                           MIN(date(played_at)) AS first_play,
+                           MIN(date(played_at, 'localtime')) AS first_play,
                            COUNT(*) AS plays
                     FROM listening_history
                     WHERE artist IS NOT NULL AND artist != '' AND {scope}
@@ -7212,7 +7221,7 @@ class MusicDatabase:
                            for r in cursor.fetchall()]
 
             cursor.execute(f"""
-                SELECT date(played_at) AS d, COUNT(*) AS plays
+                SELECT date(played_at, 'localtime') AS d, COUNT(*) AS plays
                 FROM listening_history {window}
                 GROUP BY d ORDER BY plays DESC, d DESC LIMIT 1
             """, span)
@@ -19901,6 +19910,54 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error deleting sync match cache row: {e}")
             return 0
+
+    def add_server_match_rejection(self, profile_id: int, server_source: str,
+                                   source_track_id: str, server_track_id: str) -> bool:
+        """Remember that this source track is NOT this library track."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO server_match_rejections "
+                    "(profile_id, server_source, source_track_id, server_track_id) VALUES (?, ?, ?, ?)",
+                    (profile_id, server_source or '', str(source_track_id), str(server_track_id)))
+            return True
+        except Exception as e:
+            logger.error(f"add_server_match_rejection error: {e}")
+            return False
+
+    def clear_server_match_rejection(self, profile_id: int, server_source: str,
+                                     source_track_id: str, server_track_id: str) -> int:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM server_match_rejections WHERE profile_id = ? AND server_source = ?"
+                    " AND source_track_id = ? AND server_track_id = ?",
+                    (profile_id, server_source or '', str(source_track_id), str(server_track_id)))
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"clear_server_match_rejection error: {e}")
+            return 0
+
+    def get_server_match_rejections(self, profile_id: int, server_source: str,
+                                    source_track_ids) -> set:
+        """{(source_track_id, server_track_id)} rejected for these source ids."""
+        ids = [str(i) for i in (source_track_ids or []) if i]
+        if not ids:
+            return set()
+        out = set()
+        try:
+            with self._get_connection() as conn:
+                for start in range(0, len(ids), 500):
+                    chunk = ids[start:start + 500]
+                    rows = conn.execute(
+                        "SELECT source_track_id, server_track_id FROM server_match_rejections"
+                        " WHERE profile_id = ? AND server_source = ?"
+                        f" AND source_track_id IN ({','.join('?' for _ in chunk)})",
+                        [profile_id, server_source or ''] + chunk).fetchall()
+                    out.update((str(r[0]), str(r[1])) for r in rows)
+        except Exception as e:
+            logger.error(f"get_server_match_rejections error: {e}")
+        return out
 
     def invalidate_sync_match_cache(self, server_source: str = None) -> int:
         """Clear sync match cache entries. If server_source given, only clear that server's entries."""

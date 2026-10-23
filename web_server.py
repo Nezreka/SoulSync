@@ -1841,7 +1841,13 @@ def _register_automation_handlers():
     # Idempotent — existing rows are never clobbered.
     if automation_engine is not None:
         try:
-            from core.automation.migrate_repair_jobs import ensure_repair_job_automations
+            from core.automation.migrate_repair_jobs import (
+                ensure_repair_job_automations, register_job_toggle_sink)
+            from core.video.repair.worker import get_video_repair_worker
+            register_job_toggle_sink(
+                'video_run_repair_job',
+                lambda job_id, enabled: get_video_repair_worker().set_job_config(
+                    job_id, enabled=enabled))
             try:
                 from api.video import get_video_db
                 _video_db = get_video_db()
@@ -17353,7 +17359,9 @@ def get_server_playlist_tracks(playlist_id):
                         server_tracks.append({
                             'id': str(item.ratingKey),
                             'title': item.title,
-                            'artist': grandparent,
+                            # originalTitle is plex's per-track artist; grandparent is the
+                            # album artist ('Various Artists' on a compilation)
+                            'artist': getattr(item, 'originalTitle', None) or grandparent,
                             'album': parent,
                             'duration': item.duration or 0,
                             'thumb': thumb,
@@ -17484,7 +17492,16 @@ def get_server_playlist_tracks(playlist_id):
 
         _override_pairs = resolve_match_overrides(source_tracks, server_tracks, _override_lookup)
 
-        combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs)
+        # pairings the user unmatched here: never auto-paired again
+        try:
+            _rejected_pairs = _db_for_overrides.get_server_match_rejections(
+                _ov_profile, active_server,
+                [s.get('source_track_id') for s in source_tracks if isinstance(s, dict)])
+        except Exception as _rej_err:   # noqa: BLE001 - never fail the view over it
+            logger.debug("rejected-pair lookup failed: %s", _rej_err)
+            _rejected_pairs = set()
+
+        combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs, _rejected_pairs)
 
         # A durable manual match whose library track isn't in THIS playlist yet
         # can't be applied above, so its row renders as a plain "missing" with
@@ -17818,6 +17835,12 @@ def _persist_find_and_add_match(source_track_id, server_source, server_track_id,
             "revert on the next compare load.", server_track_title or source_title or server_track_id)
         return
     db = get_database()
+    # picking the very track the user once unmatched means it is right after all
+    try:
+        db.clear_server_match_rejection(get_current_profile_id(), server_source,
+                                        source_track_id, server_track_id)
+    except Exception as e:
+        logger.debug(f"[ServerPlaylist] rejection clear failed: {e}")
     try:
         from core.sync.match_overrides import record_manual_match
         ok = record_manual_match(
@@ -18038,6 +18061,40 @@ def server_playlist_add_track(playlist_id):
         return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
     except Exception as e:
         logger.error(f"Error adding track to server playlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/unmatch-track', methods=['POST'])
+def server_playlist_unmatch_track(playlist_id):
+    """Break a wrong source/server pairing without touching the playlist.
+
+    the source row goes back to missing (Find & add), the server track stays
+    in the playlist as an extra, and the pairing is filed as rejected so the
+    compare view and the sync never auto-match the two again."""
+    try:
+        data = request.get_json(silent=True) or {}
+        source_track_id = str(data.get('source_track_id') or '').strip()
+        server_track_id = str(data.get('server_track_id') or '').strip()
+        playlist_name = data.get('playlist_name', '')
+        if not source_track_id or not server_track_id:
+            return jsonify({"success": False,
+                            "error": "source_track_id and server_track_id required"}), 400
+
+        active_server = config_manager.get_active_media_server()
+        # #1414: same guard as every other write here
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
+
+        from core.sync.match_overrides import reject_match
+        if not reject_match(get_database(), get_current_profile_id(), active_server,
+                            source_track_id, server_track_id):
+            return jsonify({"success": False, "error": "Could not save the unmatch"}), 500
+        logger.info(f"[ServerPlaylist] Unmatched {source_track_id} from {server_track_id} ({active_server})")
+        return jsonify({"success": True, "message": "Match removed"})
+    except Exception as e:
+        logger.error(f"Error unmatching server playlist track: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -18273,7 +18330,10 @@ def library_search_tracks():
             tracks.append({
                 'id': t.id,
                 'title': t.title,
-                'artist_name': t.artist_name,
+                # the track's own credit, not the album's: on a compilation
+                # every row read 'Various Artists' and remixes were unpickable
+                'artist_name': getattr(t, 'track_artist', None) or t.artist_name,
+                'album_artist': t.artist_name,
                 'album_title': getattr(t, 'album_title', ''),
                 'album_thumb_url': _resolve_search_thumb(getattr(t, 'album_thumb_url', '')),
                 'file_path': getattr(t, 'file_path', ''),
@@ -20546,6 +20606,38 @@ def get_active_media_server():
 
 # ── Mirrored Playlists ────────────────────────────────────────────────
 
+@app.route('/api/import/newpipe', methods=['POST'])
+def import_newpipe_backup():
+    """Read the playlists out of a NewPipe backup (the export .zip or newpipe.db).
+
+    parse only: the page shows them, the user picks, and each picked one is
+    saved through /api/mirror-playlist as source 'newpipe', keyed by its
+    newpipe uid so a later import of a newer backup overwrites it."""
+    upload = request.files.get('file')
+    if upload is None or not upload.filename:
+        return jsonify({"success": False, "error": "no file uploaded"}), 400
+    import tempfile
+    from core.playlists.newpipe_backup import NotANewPipeBackup, read_newpipe_backup
+    fd, tmp_path = tempfile.mkstemp(prefix='newpipe_upload_')
+    try:
+        with os.fdopen(fd, 'wb') as fh:
+            upload.save(fh)
+        result = read_newpipe_backup(tmp_path, clean_youtube_artist, clean_youtube_track_title)
+        logger.info("[NewPipe] parsed %d playlists (%d bookmarked skipped) from %s",
+                    len(result['playlists']), result['bookmarked'], upload.filename)
+        return jsonify({"success": True, **result})
+    except NotANewPipeBackup as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"[NewPipe] import failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "could not read that backup"}), 500
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
 @app.route('/api/mirror-playlist', methods=['POST'])
 def mirror_playlist_endpoint():
     """Save or update a mirrored playlist."""
@@ -22040,6 +22132,11 @@ try:
     if automation_engine is not None:
         repair_worker._event_emit = automation_engine.emit
         repair_worker._automation_engine = automation_engine
+    # Automations-page toggles on a [System] job row land in Tools too
+    from core.automation.migrate_repair_jobs import register_job_toggle_sink
+    register_job_toggle_sink(
+        'run_repair_job',
+        lambda job_id, enabled: repair_worker.set_job_enabled(job_id, enabled, bridge=False))
     defer_or_start(repair_worker, repair_db)
     logger.info("Repair worker initialized and started")
 except Exception as e:
@@ -22488,13 +22585,190 @@ def _emit_server_activity_loop():
 
 # --- Socket.IO event handlers ---
 
+# --- #1837: session revocation for sockets ---------------------------------
+# The HTTP gate drops a session server-side when it is revoked: logout (or an
+# admin) revokes the session's device row, and "sign out everywhere" / a
+# password change bumps the profile's session epoch. A replayed cookie keeps
+# its login/PIN flags, so on HTTP it now gets a 401 — but the WS gate only
+# ever read those flags, so the same replayed cookie still opened a socket,
+# and a socket opened before the revocation kept receiving everything.
+# Snapshot what each socket connected under and apply the same two checks.
+_ws_session_by_sid = {}
+_ws_session_by_sid_lock = threading.Lock()
+
+
+def _ws_snapshot_revoked(snapshot):
+    """True when the session in `snapshot` has been revoked — the same two
+    checks the HTTP profile gate applies (session epoch, device row), read
+    through the same fail-open helpers: a db hiccup signs nobody out. A
+    snapshot with no profile has nothing to revoke. NEVER raises: this is an
+    auxiliary check beside the gate, so any unexpected failure (no request
+    context, a broken db handle) reads as "not revoked" and the gate's own
+    fail-closed path decides, exactly as it did before revocation was added."""
+    try:
+        # Match HTTP's resolve: a missing/invalid profile id is no profile
+        # session at all, not a revocation.
+        try:
+            pid = int((snapshot or {}).get('profile_id'))
+        except (TypeError, ValueError):
+            return False
+        if pid <= 0:
+            return False
+        # A profile that no longer exists (or was disabled, for a non-admin)
+        # is revoked too: HTTP pops such a session and 401s it. A failed read
+        # is NOT a missing profile — that path stays fail-open below.
+        profile = None
+        profile_read = False
+        try:
+            profile = get_database().get_profile(pid)
+            profile_read = True
+        except Exception:  # noqa: BLE001 - unreadable ≠ deleted
+            profile_read = False
+        if profile_read:
+            if profile is None:
+                return True
+            if profile.get('disabled') and not profile.get('is_admin'):
+                return True
+        from core.security import devices as _devices
+        from core.security.session_epoch import session_is_current
+        from core.security.ws_gate import is_session_revoked
+        epoch_current = session_is_current(
+            pid, snapshot.get('profile_epoch', 0),
+            lambda p: (get_database().get_profile(p) or {}).get('session_epoch', 0))
+        device_live = _devices.device_is_live(
+            snapshot.get('device_id'),
+            lambda d: get_database().get_profile_device(d))
+        return is_session_revoked(has_profile_session=True,
+                                  epoch_current=epoch_current,
+                                  device_live=device_live)
+    except Exception as e:  # noqa: BLE001 - fail open, see docstring
+        logger.debug(f"[WS gate] revocation check failed, treating as live: {e}")
+        return False
+
+
+def _ws_current_session_revoked():
+    """_ws_snapshot_revoked for the session of the request being handled.
+    Also never raises: with no usable session there is nothing to revoke."""
+    try:
+        snapshot = {
+            'profile_id': session.get('profile_id'),
+            'profile_epoch': session.get('profile_epoch', 0),
+            'device_id': session.get('device_id'),
+        }
+    except Exception:  # noqa: BLE001 - no session context ⇒ no profile session
+        return False
+    return _ws_snapshot_revoked(snapshot)
+
+
+def _ws_store_snapshot():
+    """Remember the session the current socket is acting under, so the
+    revocation sweep can re-check exactly that session later. Never raises:
+    a failed store just leaves the sweep nothing to check for this sid."""
+    try:
+        with _ws_session_by_sid_lock:
+            _ws_session_by_sid[request.sid] = {
+                'profile_id': session.get('profile_id'),
+                'profile_epoch': session.get('profile_epoch', 0),
+                'device_id': session.get('device_id'),
+            }
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[WS gate] session snapshot store failed: {e}")
+
+
+def _forget_sid(sid):
+    """Drop every per-sid trace (connected set, revocation snapshot, the
+    activity and log-live subscription sets). Shared by the disconnect
+    handler and the revocation sweep; all operations are idempotent."""
+    with _connected_sids_lock:
+        _connected_sids.discard(sid)
+    with _ws_session_by_sid_lock:
+        _ws_session_by_sid.pop(sid, None)
+    with _activity_sids_lock:
+        _activity_sids.discard(sid)
+    with _log_live_sids_lock:
+        _log_live_sids.discard(sid)
+
+
+def _drop_sid(sid, snapshot=None):
+    """Forget + disconnect one socket, with the reason in the log.
+    Forget BEFORE disconnecting, deliberately: disconnect can trigger the
+    disconnect handler synchronously (it forgets again — harmless), and on
+    a half-dead transport the handler may never run at all, in which case
+    an orphaned sid must not linger in any registry (a stale _activity_sids
+    entry would keep the activity poll loop fed forever)."""
+    logger.info("Disconnecting WebSocket client %s (profile %s) — session revoked (#1837)",
+                sid, (snapshot or {}).get('profile_id'))
+    _forget_sid(sid)
+    try:
+        socketio.server.disconnect(sid, namespace='/')
+    except Exception as e:  # noqa: BLE001 - already gone is fine
+        logger.debug(f"[WS gate] disconnect of revoked socket failed: {e}")
+
+
+def _disconnect_revoked_sockets():
+    """Drop already-connected sockets whose session has been revoked since
+    they connected, so delivery stops instead of streaming on to a
+    signed-out browser until it happens to reconnect.
+    (_ws_snapshot_revoked never raises — its contract is fail-open.)"""
+    with _ws_session_by_sid_lock:
+        items = list(_ws_session_by_sid.items())
+    # one check per distinct session: tabs of one browser share it
+    verdicts = {}
+    for sid, snapshot in items:
+        key = (snapshot.get('profile_id'), snapshot.get('profile_epoch'), snapshot.get('device_id'))
+        if key not in verdicts:
+            verdicts[key] = _ws_snapshot_revoked(snapshot)
+        if not verdicts[key]:
+            continue
+        # drop only on the evidence we checked: a sid whose snapshot was
+        # replaced or forgotten since the copy is left to the next sweep
+        with _ws_session_by_sid_lock:
+            if _ws_session_by_sid.get(sid) is not snapshot:
+                continue
+        _drop_sid(sid, snapshot)
+
+
+def _ws_drop_sid_if_revoked():
+    """Inbound-event re-gate for the current socket: True when its session
+    has been revoked — it is dropped now, not left to act (join rooms,
+    subscribe to admin streams) until the sweep notices."""
+    try:
+        sid = request.sid
+    except Exception:  # noqa: BLE001 - no socket context ⇒ nothing to drop
+        return False
+    with _ws_session_by_sid_lock:
+        snapshot = _ws_session_by_sid.get(sid)
+    if snapshot is None or not _ws_snapshot_revoked(snapshot):
+        return False
+    _drop_sid(sid, snapshot)
+    return True
+
+
+def _ws_revocation_loop():
+    """Re-check connected sockets against revocation state. The epoch/device
+    helpers cache their reads for a few seconds, so a 2s sweep is cheap and
+    a revoked socket is dropped within seconds of the revocation becoming
+    visible — the same visibility window HTTP has."""
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(2)
+        if not _has_connected_clients():
+            continue
+        try:
+            _disconnect_revoked_sockets()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Error in WebSocket revocation loop: {e}")
+
+
 def _ws_connection_blocked():
     """#852: mirror the HTTP launch-PIN / login gate for the socketio handshake
     (before_request doesn't run for it). Fails CLOSED on unexpected errors (#GHSA-j7g5-8j44-jqhm)."""
     try:
+        # #1837: revocation reads server-side state, not the cookie, and it
+        # applies even when neither gate is on — the same as HTTP.
+        revoked = _ws_current_session_revoked()
         require_login = _require_login_enabled()
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
-        if not require_login and not require_pin:
+        if not require_login and not require_pin and not revoked:
             return False
         proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
         from core.security.auth_proxy import trusted_proxy_user
@@ -22506,6 +22780,7 @@ def _ws_connection_blocked():
             require_pin=require_pin,
             pin_verified=bool(session.get('launch_pin_verified', False)),
             proxy_authed=proxy_authed,
+            session_revoked=revoked,
         )
     except Exception as e:
         logger.error(f"[WS gate] check failed, blocking unverified connection (fail-closed): {e}")
@@ -22522,26 +22797,26 @@ def handle_connect():
         return False
     with _connected_sids_lock:
         _connected_sids.add(request.sid)
+    # #1837: remember the session this socket connected under so the
+    # revocation sweep can drop it if that session is later revoked.
+    _ws_store_snapshot()
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    # Drop this client from the server-activity live set so the push loop goes
-    # idle again once the last drawer closes / navigates away.
+    # Drop this client from every per-sid set (activity live set included) so
+    # the push loops go idle again once the last drawer closes / navigates away.
     try:
-        with _activity_sids_lock:
-            _activity_sids.discard(request.sid)
-        with _log_live_sids_lock:
-            _log_live_sids.discard(request.sid)
+        _forget_sid(request.sid)
     except Exception:   # noqa: BLE001, S110 - cleanup only; a missing sid is fine
         pass
-    with _connected_sids_lock:
-        _connected_sids.discard(request.sid)
     logger.info("WebSocket client disconnected")
 
 @socketio.on('activity:subscribe')
 def handle_activity_subscribe():
     """A drawer opened → join the live room so the push loop starts feeding it."""
+    if _ws_drop_sid_if_revoked():
+        return
     join_room('activity:live')
     with _activity_sids_lock:
         _activity_sids.add(request.sid)
@@ -22557,6 +22832,8 @@ def handle_activity_unsubscribe():
 @socketio.on('downloads:subscribe')
 def handle_download_subscribe(data):
     """Client subscribes to download batch updates by joining rooms."""
+    if _ws_drop_sid_if_revoked():
+        return
     batch_ids = data.get('batch_ids', [])
     for bid in batch_ids:
         join_room(f'batch:{bid}')
@@ -22585,6 +22862,9 @@ def handle_profile_join(data):
     if pid is None:
         return
     target = requested if (is_admin and requested) else pid
+    # #1837: the connect snapshot stays the socket's credential. joining
+    # another profile's room (admins only) must not swap it for a
+    # device-less one, or logout / device revoke would stop reaching it.
     if target != requested and requested:
         logger.warning("profile:join — client asked for profile %s but session is %s; "
                        "joining the session's room", requested, pid)
@@ -22600,6 +22880,12 @@ def _ws_session_profile():
     truth for room joins. Fail-closed to the session profile; profile 1 or an
     is_admin-flagged profile counts as admin. no profile in the session is
     (None, False) except on a single-profile install, same rule as http."""
+    # #1837: a revoked session may not keep acting through inbound events
+    # while it waits for the sweep — drop it here, at the choke point the
+    # profile-scoped handlers (profile:join, logs/sync/discovery subscribe)
+    # all resolve their identity through.
+    if _ws_drop_sid_if_revoked():
+        return None, False
     from core.security.session_profile import resolve_session_profile
     _session_pid = session.get('profile_id')
     _count = 2
@@ -23389,6 +23675,13 @@ app.register_blueprint(_create_audiobooks_blueprint())
 from api.sidebar_weather import configure as _cfg_sw, create_blueprint as _bp_sw
 _cfg_sw(config_manager=config_manager)
 app.register_blueprint(_bp_sw())
+
+# MetaSync connection (api/metasync_settings.py): pairing with the local
+# MetaSync node, pool-key handoff, status and disconnect for
+# Settings > Advanced > MetaSync. Blank metasync.node_url = not set up.
+from api.metasync_settings import configure as _cfg_ms, create_blueprint as _bp_ms
+_cfg_ms(config_manager=config_manager)
+app.register_blueprint(_bp_ms())
 
 # NOTE: the audiobook wishlist is NOT started here. It is drained by the shared
 # automation engine as the 'audiobook_process_wishlist' system automation, the same
@@ -24733,6 +25026,8 @@ def start_runtime_services():
         socketio.start_background_task(_chat_auto_prove_loop)
         # Server Activity — subscriber-gated live push (idle when no drawer open)
         socketio.start_background_task(_emit_server_activity_loop)
+        # #1837: drop sockets whose session gets revoked while connected
+        socketio.start_background_task(_ws_revocation_loop)
         # Phase 2: Dashboard pollers
         socketio.start_background_task(_emit_system_stats_loop)
         socketio.start_background_task(_emit_activity_feed_loop)

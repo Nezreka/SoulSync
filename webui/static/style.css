@@ -13752,10 +13752,23 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .import-file-format-hints {
-    display: flex;
+    /* a 2x2 grid since the newpipe card made four: a row of four at this
+       width left each card a few words wide */
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
     width: 100%;
-    max-width: 520px;
+    max-width: 620px;
+}
+@media (max-width: 600px) {
+    .import-file-format-hints { grid-template-columns: minmax(0, 1fr); }
+}
+
+.newpipe-import-note {
+    margin: 10px 2px 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--white-a40);
 }
 
 .import-file-hint {
@@ -55847,7 +55860,7 @@ tr.tag-diff-same {
     color: #ffb74d;
 }
 
-/* Track action buttons (swap + remove) */
+/* Track action buttons (swap + unmatch + remove) */
 .server-track-actions {
     display: flex;
     align-items: center;
@@ -55858,7 +55871,8 @@ tr.tag-diff-same {
 }
 .server-track-item:hover .server-track-actions { opacity: 1; }
 
-.server-track-swap-btn {
+.server-track-swap-btn,
+.server-track-unmatch-btn {
     width: 22px;
     height: 22px;
     border-radius: var(--radius-sm);
@@ -55877,6 +55891,12 @@ tr.tag-diff-same {
     background: rgba(var(--accent-rgb), 0.12);
     border-color: rgba(var(--accent-rgb), 0.25);
     color: var(--accent);
+}
+
+.server-track-unmatch-btn:hover {
+    background: rgba(255, 183, 77, 0.12);
+    border-color: rgba(255, 183, 77, 0.25);
+    color: #ffb74d;
 }
 
 .server-track-remove-btn {

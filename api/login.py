@@ -333,6 +333,12 @@ def auth_logout():
     try:
         if session.get('device_id') and session.get('profile_id'):
             get_database().revoke_profile_device(session['profile_id'], session['device_id'])
+            # drop the in-process live cache too (the admin revoke endpoint
+            # does the same), so the revocation is visible at once — a
+            # replayed cookie or a still-open socket must not ride the
+            # cache's few-second TTL past the logout (#1837)
+            from core.security.devices import forget
+            forget(session['device_id'])
         session.pop('login_authenticated', None)
         session.pop('profile_id', None)
         session.pop('profile_epoch', None)

@@ -128,13 +128,21 @@ def reconcile_playlist(
     source_tracks: List[Dict[str, Any]],
     server_tracks: List[Dict[str, Any]],
     override_pairs: Optional[Dict[int, int]] = None,
+    rejected_pairs: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """Return the combined matched/missing/extra view (list of dicts).
 
     Each combined entry has ``source_track``, ``server_track``,
     ``match_status`` ('matched'|'missing'|'extra'), ``confidence``, and
-    ``override: True`` on override hits."""
+    ``override: True`` on override hits.
+
+    ``rejected_pairs`` is ``{(source_track_id, server_track_id)}`` the user
+    unmatched; passes 1 and 2 never pair those two again."""
     override_pairs = override_pairs or {}
+    rejected_pairs = rejected_pairs or set()
+
+    def _rejected(src_id: str, j: int) -> bool:
+        return bool(src_id) and (src_id, str(server_tracks[j].get('id'))) in rejected_pairs
     combined: List[Dict[str, Any]] = []
     used_server_indices: set[int] = set()
     unmatched_source: List[tuple[int, Dict[str, Any], str]] = []
@@ -178,6 +186,8 @@ def reconcile_playlist(
             if j in used_server_indices:
                 continue
             if svr_norm not in candidates:
+                continue
+            if _rejected(src_entry['source_track_id'], j):
                 continue
             svr_artist = server_tracks[j].get('artist', '')
             if _artists_agree(src_artist, svr_artist) or (
@@ -239,6 +249,8 @@ def reconcile_playlist(
         artist_agreements = {}
         for j, sm in enumerate(server_matchers):
             if j in used_server_indices:
+                continue
+            if _rejected(src_entry['source_track_id'], j):
                 continue
             sm.set_seq1(src_key)
             if sm.real_quick_ratio() < _FUZZY_THRESHOLD or sm.quick_ratio() < _FUZZY_THRESHOLD:
