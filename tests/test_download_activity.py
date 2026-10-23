@@ -168,3 +168,22 @@ def test_empty_library_is_an_empty_list(db, client):
     resp = _get(client)
     assert resp.status_code == 200
     assert resp.get_json()["data"]["albums"] == []
+
+
+def test_until_closes_the_window(db, client):
+    _seed(db)
+    # The node reports a closed week: [since, until). a2 completed at
+    # 2026-10-21 09:30:00, so a window ending exactly then excludes it.
+    albums = _get(client, since="2026-10-19T00:00:00",
+                  until="2026-10-21T09:30:00").get_json()["data"]["albums"]
+    assert albums[0]["completed_since"] == 0
+    albums = _get(client, since="2026-10-19T00:00:00",
+                  until="2026-10-21T09:30:01").get_json()["data"]["albums"]
+    assert albums[0]["completed_since"] == 1
+    # completed_downloads stays the all-time total either way.
+    assert albums[0]["completed_downloads"] == 2
+
+
+def test_malformed_until_is_a_400(db, client):
+    _seed(db)
+    assert _get(client, until="next-friday").status_code == 400

@@ -823,7 +823,8 @@ Library statistics (counts and database info).
 Per-album completed-download aggregates, used by the MetaSync node to build its download-based signals. One row per library album that has at least one completed download, keyed by the album's MusicBrainz release ID (an opaque text identifier). Only IDs, counts, and timestamps are returned — no titles or file paths. Albums without a MusicBrainz release ID do not appear.
 
 **Parameters:**
-- `since` (optional): ISO-8601 timestamp. Each row's `completed_since` counts only downloads completed at or after this instant. Without `since`, `completed_since` equals `completed_downloads`.
+- `since` (optional): ISO-8601 timestamp. Each row's `completed_since` counts only downloads completed at or after this instant.
+- `until` (optional): ISO-8601 timestamp. `completed_since` counts only downloads completed before this instant, so `since` + `until` count one closed window. Without either, `completed_since` equals `completed_downloads`.
 
 ```json
 {
@@ -835,6 +836,31 @@ Per-album completed-download aggregates, used by the MetaSync node to build its 
         "completed_since": 3,
         "first_downloaded_at": "2026-08-02 14:03:11",
         "last_downloaded_at": "2026-10-21 09:30:00"
+      }
+    ]
+  }
+}
+```
+
+#### `GET /api/v1/library/listening-activity`
+
+Per-album listening aggregates for one time window, used by the MetaSync node for its opt-in listening signal. One row per library album played in `[since, until)`, keyed by the album's MusicBrainz release ID: how many plays, how many distinct tracks, and on how many distinct (UTC) days. Only IDs and counts are returned — no titles, no individual play times, no profile or media-server details. Albums without a MusicBrainz release ID, and plays that matched no library track, do not appear.
+
+Only the **shared** listening history is read — the plays the admin's own stats show. A profile with its own ListenBrainz, Last.fm, or media-server account keeps its own history, and that history is never included here.
+
+**Parameters:**
+- `since` (required): ISO-8601 timestamp, window start (inclusive).
+- `until` (required): ISO-8601 timestamp, window end (exclusive). At most 31 days after `since`.
+
+```json
+{
+  "data": {
+    "albums": [
+      {
+        "musicbrainz_release_id": "b1392450-e666-3926-a536-22c65f834433",
+        "plays": 14,
+        "distinct_tracks": 9,
+        "distinct_days": 3
       }
     ]
   }
