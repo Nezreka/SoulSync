@@ -32,6 +32,9 @@ describe('the section order', () => {
       'listening-recs-section',
       'recommended-artists-section',
       'discover-bylt-sections',
+      // NEW since the port: the SoulSync network's weekly charts (MetaSync),
+      // first in New & Missing because they are this week's news.
+      'sin-charts',
       'recent-releases',
       'cache-genre-releases',
       'seasonal-albums-section',
@@ -157,6 +160,8 @@ describe('the empty policy is NOT uniform', () => {
       'listening-recs-section',
       'mood-mixes-section',
       'recommended-artists-section',
+      // no MetaSync, or nothing matched yet: nothing to offer, nothing to do
+      'sin-charts',
       'your-albums-section',
       'your-artists-section',
     ]);

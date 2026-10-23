@@ -82,6 +82,17 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'process_wishlist',
         'initial_delay': 60,  # 1 minute after startup
     },
+    # MetaSync's SIN charts: pulled from the MetaSync node once a day and
+    # matched in the background, then offered on the dashboard and Discover.
+    # Nothing is synced or downloaded. Skips quietly when MetaSync is not
+    # connected.
+    {
+        'name': 'Refresh MetaSync Charts',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 24, 'unit': 'hours'},
+        'action_type': 'metasync_refresh_charts',
+        'initial_delay': 420,  # 7 minutes after startup
+    },
     {
         'name': 'Auto-Scan Watchlist',
         'trigger_type': 'schedule',

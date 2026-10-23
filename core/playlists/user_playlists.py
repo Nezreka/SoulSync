@@ -46,7 +46,9 @@ LIKED_NAME = 'Liked Songs'
 # pipeline still runs identify / sync / download on them. beatport isn't one:
 # a beatport mirror keyed by its list ref refreshes like any other source,
 # only an old random-hash mirror or a release doesn't (has_upstream).
-NO_UPSTREAM_SOURCES = ('file', USER_PLAYLIST_SOURCE, 'newpipe')
+# 'metasync' charts are pushed by the MetaSync node each week
+# (core/metasync_charts.py updates every copy), never pulled.
+NO_UPSTREAM_SOURCES = ('file', USER_PLAYLIST_SOURCE, 'newpipe', 'metasync')
 
 # sources the pipeline won't run at all (it 400s them). user playlists are
 # NOT in here, they get the whole pipeline. beatport is decided per mirror
