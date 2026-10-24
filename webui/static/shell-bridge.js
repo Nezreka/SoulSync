@@ -28,7 +28,8 @@ function setActivePageChrome(pageId) {
         btn.classList.remove('active');
         btn.removeAttribute('aria-current');
     });
-    const navButton = document.querySelector(`[data-page="${pageId}"]`);
+    const navPage = pageId === 'review' && document.getElementById('album-review-nav')?.hidden ? 'tools' : pageId;
+    const navButton = document.querySelector(`[data-page="${navPage}"]`);
     if (navButton) {
         navButton.classList.add('active');
         navButton.setAttribute('aria-current', 'page');

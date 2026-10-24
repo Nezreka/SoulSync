@@ -47,6 +47,23 @@ def test_failed_intent_write_rolls_back_wishlist(tmp_path, monkeypatch):
         assert conn.execute('SELECT COUNT(*) FROM wishlist_tracks').fetchone()[0] == 0
 
 
+def test_requested_replacement_stays_visible_when_the_old_file_is_already_matched(tmp_path, monkeypatch):
+    album = build_album(tmp_path, monkeypatch, 'supported')
+    case = scan_case(album)
+    item = next(row for row in case['items'] if row.get('file_path') == str(album.paths[0]))
+    result = album.worker._fix_reconciliation_extra('track', 1, str(album.paths[0]),
+        {**item['details'], '_fix_action': 'request_missing'})
+    assert result['success'], result
+    case = scan_case(album)
+    waiting = [row for row in case['items'] if row['details'].get('replacement_request')]
+    assert len(waiting) == 1
+    assert waiting[0]['category'] == 'pending_fulfillment'
+    assert waiting[0]['details']['fulfillment_state'] == 'wishlisted'
+    assert case['album_plan']['counts'].get('missing', 0) == 0
+    with album.db._get_connection() as conn:
+        assert conn.execute('SELECT state FROM reconcile_fulfillment').fetchone()[0] == 'requested'
+
+
 @pytest.mark.parametrize('mode', ['keep', 'quarantine'])
 def test_existing_file_choice_is_staged_then_applied_with_both_files_guarded(tmp_path, monkeypatch, mode):
     album = build_album(tmp_path, monkeypatch, 'supported')

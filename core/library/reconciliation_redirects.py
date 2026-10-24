@@ -26,14 +26,17 @@ def record_relocation(db, old_folder: str, new_case: str) -> None:
             return
         conn.execute('INSERT OR REPLACE INTO reconcile_case_redirects SELECT case_id, ? FROM reconcile_album_plans WHERE album_folder = ? AND case_id != ? AND profile_id=?', (new_case, old_folder, new_case, target[4]))
         if target and conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_fulfillment'").fetchone():
+            from core.library.reconciliation_fulfillment import ensure_schema
+            ensure_schema(conn)
             # Rebind exact acquisition targets only when the selected release
             # survives the move. A link redirect alone cannot settle a download.
             conn.execute('''INSERT INTO reconcile_fulfillment
-                (case_id,profile_id,album_id,album_folder,source,release_id,source_track_id,state,published_path,refresh_needed,updated_at)
-                SELECT ?,profile_id,?,?,source,release_id,source_track_id,state,published_path,1,updated_at
+                (case_id,profile_id,album_id,album_folder,source,release_id,source_track_id,state,published_path,refresh_needed,updated_at,replacement_request)
+                SELECT ?,profile_id,?,?,source,release_id,source_track_id,state,published_path,1,updated_at,replacement_request
                 FROM reconcile_fulfillment WHERE album_folder=? AND source=? AND release_id=? AND case_id!=? AND profile_id=?
                 ON CONFLICT(case_id,source,release_id,source_track_id) DO UPDATE SET
                     state=excluded.state, published_path=excluded.published_path,
+                    replacement_request=excluded.replacement_request,
                     refresh_needed=1, updated_at=excluded.updated_at
                 WHERE excluded.updated_at > reconcile_fulfillment.updated_at
                    OR (excluded.updated_at = reconcile_fulfillment.updated_at

@@ -5507,7 +5507,8 @@ class RepairWorker:
                     'disc_number': slot.get('disc_number') or 1,
                     'reason': 'library_reconciliation_wrong_audio',
                 },
-                user_initiated=True, reconciliation_request={'details': details, 'slot': slot},
+                user_initiated=True, reconciliation_request={
+                    'details': {**details, 'replacement_request': True}, 'slot': slot},
             )
             if not outcome.get('applied'):
                 return {'success': False, 'error': outcome.get('reason') or

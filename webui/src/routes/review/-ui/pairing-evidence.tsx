@@ -28,8 +28,8 @@ export function PairingEvidence({ checks, reasons }: { checks: unknown; reasons?
               {rows.map((row) => (
                 <tr key={textValue(row.check)} data-result={textValue(row.result)}>
                   <th scope="row">{textValue(row.check)}</th>
-                  <td>{textValue(row.local) || '—'}</td>
-                  <td>{textValue(row.release) || '—'}</td>
+                  <td data-label="Local evidence">{textValue(row.local) || '—'}</td>
+                  <td data-label="Release">{textValue(row.release) || '—'}</td>
                   <td>
                     <strong>{outcomes[textValue(row.result)] || 'Context'}</strong>
                     {Boolean(row.detail) && <small>{textValue(row.detail)}</small>}

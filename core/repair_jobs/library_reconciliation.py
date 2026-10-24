@@ -45,7 +45,7 @@ from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
 from core.metadata.album_tracks import get_album_for_source, get_album_tracks_for_source
 from core.repair_jobs import register_job
 from core.repair_jobs.base import RepairJob, JobContext, JobResult, all_library_roots, walk_library, watchlist_artist_names
-from core.repair_review_identity import missing_slot_key
+from core.repair_review_identity import missing_slot_key, review_case_key
 from core.text.fold import fold_title
 from utils.logging_config import get_logger
 
@@ -2066,6 +2066,9 @@ class LibraryReconciliationJob(RepairJob):
             from core.library.reconciliation_fulfillment import backfill_requests, outstanding
             backfill_requests(conn)
             durable = outstanding(conn)
+            replacements = conn.execute('''SELECT case_id, source, release_id, source_track_id, state, published_path
+                FROM reconcile_fulfillment WHERE replacement_request=1
+                  AND state IN ('requested', 'published', 'cancelled')''').fetchall()
             cancelled = conn.execute("SELECT profile_id, source, source_track_id, release_id FROM reconcile_fulfillment WHERE state='cancelled'").fetchall()
             rows = conn.execute('''
                 SELECT profile_id, spotify_track_id, spotify_data
@@ -2079,6 +2082,10 @@ class LibraryReconciliationJob(RepairJob):
         by_profile: dict[int, set[tuple[str, str, str]]] = defaultdict(set)
         self._published_by_profile = defaultdict(set)
         self._cancelled_by_profile = defaultdict(set)
+        self._replacement_requests = defaultdict(list)
+        for case_id, source, release_id, track_id, state, path in replacements:
+            self._replacement_requests[(case_id, source, release_id)].append({
+                'source_track_id': track_id, 'state': state, 'published_path': path, 'replacement_request': True})
         for profile_id, source, track_id, release_id in cancelled:
             self._cancelled_by_profile[int(profile_id or 1)].add((source, track_id, release_id))
         for profile_id, track_id, release_id, state, source in durable:
@@ -3141,6 +3148,21 @@ class LibraryReconciliationJob(RepairJob):
 
                     missing = [{**slots[i], 'wanted_key': _wanted_slot_key(slots[i])}
                                for i in plan['missing_slots']]
+                    # Kept files still occupy their release slots while another
+                    # copy is requested. Preserve that acquisition without
+                    # presenting those occupied slots as missing from coverage.
+                    from core.library.reconciliation_fulfillment import assignment_fulfills_request
+                    replacement_requests = getattr(self, '_replacement_requests', {}).get(
+                        (review_case_key(common, None), source, str(exact_release_id)), [])
+                    replacement_by_id = {request['source_track_id']: request for request in replacement_requests}
+                    occupied_requests = []
+                    if replacement_requests:
+                        request_assignments, _ = _album_plan_assignments(files, slots, plan)
+                        for slot in slots:
+                            request = replacement_by_id.get(str(slot.get('source_track_id') or ''))
+                            if (request and slot not in [slots[i] for i in plan['missing_slots']] and
+                                    not any(assignment_fulfills_request(request, row) for row in request_assignments)):
+                                occupied_requests.append(slot)
                     for file_index in plan['extra_files']:
                         if file_index in duplicate_indexes and file_index not in duplicate_groups:
                             continue
@@ -3287,7 +3309,7 @@ class LibraryReconciliationJob(RepairJob):
                     if missing and not undecided_missing and not intent_scope:
                         intent_scope = 'partial'
                         wanted_slots.update(_wanted_slot_key(slot) for slot in missing)
-                    if missing and album_id is not None:
+                    if (missing or occupied_requests) and album_id is not None:
                         if not intent_scope and assignment_settled and undecided_missing:
                             if emit(
                                 job_id=self.job_id, finding_type='reconciliation_intent',
@@ -3297,8 +3319,9 @@ class LibraryReconciliationJob(RepairJob):
                                 details={**common, 'missing_tracks': undecided_missing,
                                          'suggested_scope': 'partial' if len(files) == 1 and files[0].get('playlists') else 'complete'}):
                                 result.findings_created += 1
-                        for slot in missing:
+                        for slot in [*missing, *occupied_requests]:
                             key = missing_slot_key(album_id, source, release_id, slot)
+                            replacement_request = replacement_by_id.get(str(slot.get('source_track_id') or ''))
                             fulfillment_state = (
                                 'wishlisted' if
                                 (source, str(slot.get('source_track_id') or ''),
@@ -3315,9 +3338,12 @@ class LibraryReconciliationJob(RepairJob):
                             if emit(
                                 job_id=self.job_id, finding_type='reconciliation_missing',
                                 severity='info', entity_type='album_slot', entity_id=key,
-                                file_path=None, title=f'Missing: {slot["title"]}',
-                                description=('Acquisition was cancelled. Request this track again or deliberately change the album completeness choice.' if fulfillment_state == 'cancelled' else 'This track is absent from the intended complete release.'),
+                                file_path=None, title=f'{"Requested copy" if replacement_request else "Missing"}: {slot["title"]}',
+                                description=('Acquisition was cancelled. Request this track again or deliberately change the album completeness choice.' if fulfillment_state == 'cancelled' else
+                                             'Another copy has been requested. The current file is kept while the new copy is acquired and checked.' if slot in occupied_requests else
+                                             'This track is absent from the intended complete release.'),
                                 details={**common, 'fulfillment_state': fulfillment_state,
+                                         **({'replacement_request': True} if replacement_request else {}),
                                          'missing_tracks': [{
                                     'name': slot['title'], 'track_number': slot['track_number'],
                                     'disc_number': slot['disc_number'],

@@ -314,8 +314,9 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                            f'{"s are" if len(rows) != 1 else " is"} absent from the '
                            'intended complete album.')
         elif category == 'pending_fulfillment':
-            decision_label = 'Waiting for missing tracks'
-            summary = (f'{len(rows)} missing track'
+            replacement = any((row.get('details') or {}).get('replacement_request') for row in rows)
+            decision_label = 'Waiting for requested copies' if replacement else 'Waiting for missing tracks'
+            summary = (f'{len(rows)} {"requested" if replacement else "missing"} track'
                        f'{"s are" if len(rows) != 1 else " is"} on the wishlist.')
         elif category == 'extra_files':
             summary = (f'{len(rows)} local file'
@@ -656,12 +657,16 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                              assignment.get('changes') or {})):
                     assignment['numbering_preview'] = True
                 finding = finding_by_path.get(assignment.get('file_path'))
+                slot_key = (str(assignment.get('source_track_id') or ''),
+                            str(assignment.get('slot_disc_number') or 1),
+                            str(assignment.get('slot_track_number') or 0),
+                            str(assignment.get('slot_title') or ''))
+                request = missing_findings.get(slot_key)
+                if request and (request.get('details') or {}).get('replacement_request'):
+                    assignment['fulfillment_state'] = request['details'].get('fulfillment_state')
+                    finding = finding or request
                 if not finding and assignment.get('status') == 'missing':
-                    key = (str(assignment.get('source_track_id') or ''),
-                           str(assignment.get('slot_disc_number') or 1),
-                           str(assignment.get('slot_track_number') or 0),
-                           str(assignment.get('slot_title') or ''))
-                    finding = missing_findings.get(key)
+                    finding = request
                 if (not finding and assignment.get('status') == 'missing' and
                         assignment.get('relationship') == 'version_conflict'):
                     # The actionable finding belongs to the local file, while

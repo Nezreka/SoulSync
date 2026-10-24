@@ -80,6 +80,49 @@ def test_request_identity_includes_provider_when_numeric_ids_overlap(tmp_path):
         assert outstanding(conn) == []
 
 
+def test_replacement_requires_the_published_copy_to_be_assigned(tmp_path):
+    db = Database(tmp_path / 'replacement.db')
+    old, new = tmp_path / 'old.flac', tmp_path / 'new.flac'
+    old.write_bytes(b'old audio')
+    new.write_bytes(b'new audio')
+    details = {'album_id': 2, 'profile_id': 1, 'album_folder': str(tmp_path),
+               'source': 'musicbrainz', 'release_id': 'release', 'replacement_request': True}
+    record_request(db, details, {'source_track_id': 'slot'})
+    key = review_case_key(details, None)
+    assignment = {'source_track_id': 'slot', 'status': 'confirmed', 'file_path': str(old)}
+    settle_assignments(db, key, [assignment], 'release', 'musicbrainz')
+    with db._get_connection() as conn:
+        assert outstanding(conn)[0][3] == 'requested'
+        payload = json.dumps({'id': 'slot', 'provider': 'musicbrainz', 'album': {'id': 'release'}})
+        conn.execute('INSERT INTO wishlist_tracks VALUES(1, ?, ?)', ('slot', payload))
+    published_wishlist_track(db, 'slot', [1], str(new))
+    settle_assignments(db, key, [assignment], 'release', 'musicbrainz')
+    with db._get_connection() as conn:
+        assert outstanding(conn)[0][3] == 'published'
+    alias = tmp_path / 'alias.flac'
+    alias.symlink_to(new)
+    settle_assignments(db, key, [{**assignment, 'file_path': str(alias)}], 'release', 'musicbrainz')
+    with db._get_connection() as conn:
+        assert outstanding(conn) == []
+
+
+def test_migration_preserves_an_active_legacy_replacement_request(tmp_path):
+    from core.library.reconciliation_fulfillment import ensure_schema
+    db = Database(tmp_path / 'migration.db')
+    details = {'album_id': 2, 'profile_id': 1, 'album_folder': str(tmp_path),
+               'source': 'musicbrainz', 'release_id': 'release'}
+    record_request(db, details, {'source_track_id': 'slot'})
+    with db._get_connection() as conn:
+        conn.execute('ALTER TABLE reconcile_fulfillment DROP COLUMN replacement_request')
+        conn.execute("UPDATE reconcile_fulfillment SET state='fulfilled'")
+        conn.execute('ALTER TABLE wishlist_tracks ADD COLUMN source_info TEXT')
+        conn.execute('INSERT INTO wishlist_tracks VALUES(1, ?, ?, ?)', ('slot',
+            json.dumps({'id': 'slot', 'provider': 'musicbrainz', 'album': {'id': 'release'}}),
+            json.dumps({'reason': 'library_reconciliation_wrong_audio'})))
+        ensure_schema(conn)
+        assert conn.execute('SELECT replacement_request, state FROM reconcile_fulfillment').fetchone() == (1, 'requested')
+
+
 def test_legacy_wishlist_history_does_not_resurrect_completed_or_cancelled_requests(tmp_path):
     from core.library.reconciliation_fulfillment import backfill_requests
 

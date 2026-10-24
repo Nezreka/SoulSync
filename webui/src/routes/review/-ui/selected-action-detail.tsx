@@ -232,6 +232,15 @@ export function SelectedActionDetail({
                   </Button>
                   {canApply && canAssign && Boolean(replacement.source_track_id) && (
                     <ReplacementChoice
+                      key={JSON.stringify([
+                        finding.id,
+                        finding.evidence_token,
+                        finding.file_path,
+                        details.source,
+                        details.release_id,
+                        replacement,
+                        details.replacement_files,
+                      ])}
                       target={replacement}
                       files={records(details.replacement_files)}
                       busy={busy}

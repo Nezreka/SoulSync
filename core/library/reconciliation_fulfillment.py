@@ -12,10 +12,25 @@ def ensure_schema(conn):
         case_id TEXT NOT NULL, profile_id INTEGER NOT NULL, album_id TEXT NOT NULL,
         album_folder TEXT NOT NULL, source TEXT NOT NULL, release_id TEXT NOT NULL,
         source_track_id TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'requested',
+        replacement_request INTEGER NOT NULL DEFAULT 0,
         published_path TEXT NOT NULL DEFAULT '', refresh_needed INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY(case_id, source, release_id, source_track_id)
     )''')
+    if 'replacement_request' not in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_fulfillment)')}:
+        conn.execute('ALTER TABLE reconcile_fulfillment ADD COLUMN replacement_request INTEGER NOT NULL DEFAULT 0')
+        if 'source_info' in {row[1] for row in conn.execute('PRAGMA table_info(wishlist_tracks)')}:
+            # Preserve requests made by earlier versions of the remediation UI.
+            conn.execute('''UPDATE reconcile_fulfillment SET replacement_request=1
+                WHERE EXISTS (SELECT 1 FROM wishlist_tracks w
+                    WHERE w.profile_id=reconcile_fulfillment.profile_id
+                      AND json_valid(w.source_info) AND json_valid(w.spotify_data)
+                      AND json_extract(w.source_info, '$.reason')='library_reconciliation_wrong_audio'
+                      AND json_extract(w.spotify_data, '$.provider')=reconcile_fulfillment.source
+                      AND json_extract(w.spotify_data, '$.album.id')=reconcile_fulfillment.release_id
+                      AND json_extract(w.spotify_data, '$.id')=reconcile_fulfillment.source_track_id)''')
+            conn.execute("""UPDATE reconcile_fulfillment SET state='requested'
+                WHERE replacement_request=1 AND state='fulfilled' AND published_path=''""")
 
 
 def record_request_on_connection(conn, details, slot):
@@ -35,13 +50,20 @@ def record_request_on_connection(conn, details, slot):
     conn.execute('INSERT OR REPLACE INTO reconcile_wanted_slots VALUES (?, ?, ?, ?)',
                  (album, source, release, json.dumps(sorted(wanted))))
     conn.execute("""INSERT INTO reconcile_fulfillment
-        (case_id, profile_id, album_id, album_folder, source, release_id, source_track_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET
-            state='requested', published_path='', refresh_needed=0, updated_at=CURRENT_TIMESTAMP
+        (case_id, profile_id, album_id, album_folder, source, release_id, source_track_id, replacement_request)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET
+            state='requested', published_path='', refresh_needed=0, updated_at=CURRENT_TIMESTAMP,
+            replacement_request=excluded.replacement_request
             WHERE reconcile_fulfillment.state IN ('fulfilled', 'untracked', 'cancelled') """, (
             review_case_key(details, None), int(details.get('profile_id') or 1),
             album, details.get('album_folder') or '', source,
-            details.get('exact_release_id') or release, str(slot.get('source_track_id') or '')))
+            details.get('exact_release_id') or release, str(slot.get('source_track_id') or ''),
+            int(bool(details.get('replacement_request')))))
+    if details.get('replacement_request'):
+        conn.execute('''UPDATE reconcile_fulfillment SET replacement_request=1
+            WHERE case_id=? AND source=? AND release_id=? AND source_track_id=?''',
+            (review_case_key(details, None), source, details.get('exact_release_id') or release,
+             str(slot.get('source_track_id') or '')))
 
 
 def record_request(db, details, slot):
@@ -99,20 +121,39 @@ def cancel_request(conn, profile_id, payload):
         (profile_id, source, release_id, track_id))
 
 
+def assignment_fulfills_request(request, assignment):
+    """An old kept copy cannot complete a request for another file."""
+    if (assignment.get('status') not in ('confirmed', 'change', 'settled') or
+            not assignment.get('file_path') or
+            str(assignment.get('source_track_id') or '') != str(request.get('source_track_id') or '')):
+        return False
+    if not request.get('replacement_request'):
+        return True
+    if request.get('state') != 'published' or not request.get('published_path'):
+        return False
+    try:
+        return os.path.samefile(request['published_path'], assignment['file_path'])
+    except OSError:
+        return False
+
+
 def settle_assignments(db, case_id, assignments, release_id, source):
     """A published file stays pending until reconciliation assigns its exact slot."""
-    ids = {str(row.get('source_track_id')) for row in assignments
-           if row.get('status') in ('confirmed', 'change', 'settled') and row.get('file_path')
-           and row.get('source_track_id')}
-    if not ids:
+    if not assignments:
         return
     conn = db._get_connection()
     try:
         ensure_schema(conn)
-        for track_id in ids:
+        rows = conn.execute('''SELECT source_track_id, state, published_path, replacement_request
+            FROM reconcile_fulfillment WHERE case_id=? AND release_id=? AND source=?
+              AND state IN ('requested', 'published')''', (case_id, str(release_id), source)).fetchall()
+        for row in rows:
+            request = dict(zip(('source_track_id', 'state', 'published_path', 'replacement_request'), row))
+            if not any(assignment_fulfills_request(request, assignment) for assignment in assignments):
+                continue
             conn.execute('''UPDATE reconcile_fulfillment SET state='fulfilled', refresh_needed=0,
                 updated_at=CURRENT_TIMESTAMP WHERE case_id=? AND release_id=? AND source_track_id=? AND source=?''',
-                (case_id, str(release_id), track_id, source))
+                (case_id, str(release_id), row[0], source))
         conn.commit()
     finally:
         conn.close()

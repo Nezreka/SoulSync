@@ -1130,7 +1130,13 @@ setInterval(() => {
 
 function handleServiceStatusUpdate(data) {
     const reviewNav = document.getElementById('album-review-nav');
-    if (reviewNav && data._experimental) reviewNav.hidden = data._experimental.album_review_enabled !== true;
+    if (reviewNav && data._experimental) {
+        const hidden = data._experimental.album_review_enabled !== true || !isPageAllowed('tools');
+        if (reviewNav.hidden !== hidden) {
+            reviewNav.hidden = hidden;
+            if (currentPage === 'review') setActivePageChrome('review');
+        }
+    }
     // Re-broadcast for the React dashboard's service cards + library card
     // (tools-seam rule: in the handler, so any future HTTP caller counts too).
     window.dispatchEvent(new CustomEvent('ss:service-status', { detail: data }));

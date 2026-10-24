@@ -3382,11 +3382,13 @@
 
 .evidenceTable {
   overflow-x: auto;
+  container-type: inline-size;
 }
 .evidenceTable table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.45;
   table-layout: fixed;
 }
 .evidenceTable th,
@@ -3418,6 +3420,48 @@
 }
 .evidenceTable tr[data-result='unavailable'] {
   color: var(--text-2);
+}
+
+@container (max-width: 560px) {
+  .evidenceTable thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .evidenceTable table,
+  .evidenceTable tbody {
+    display: block;
+  }
+  .evidenceTable tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .evidenceTable th,
+  .evidenceTable td {
+    padding: 0;
+    border: 0;
+  }
+  .evidenceTable th:first-child {
+    grid-column: 1 / -1;
+    width: auto;
+    font-size: 14px;
+  }
+  .evidenceTable td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--text-2);
+    font-size: 11px;
+    margin-bottom: 3px;
+  }
+  .evidenceTable td:last-child {
+    grid-column: 1 / -1;
+    margin-top: 2px;
+  }
 }
 
 .actionNote {

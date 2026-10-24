@@ -14,6 +14,7 @@ import {
 describe('shellRouteManifest', () => {
   it('resolves page ids from explicit paths', () => {
     expect(resolveShellPageFromPath('/issues')).toBe('issues');
+    expect(resolveShellPageFromPath('/review')).toBe('review');
     expect(resolveShellPageFromPath('/discover')).toBe('discover');
     expect(resolveShellPageFromPath('/watchlist')).toBe('watchlist');
     expect(resolveShellPageFromPath('/active-downloads')).toBe('active-downloads');
@@ -79,6 +80,7 @@ describe('shellRouteManifest', () => {
       'import',
       'library',
       'tools',
+      'review',
       'artist-detail',
       'label-detail',
       'stats',

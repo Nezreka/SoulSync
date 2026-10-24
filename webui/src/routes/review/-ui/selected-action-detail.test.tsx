@@ -294,3 +294,15 @@ it('offers exact-target remediation for a small duration difference and keeps it
   fireEvent.click(screen.getByRole('button', { name: 'Save choice' }));
   expect(onAct).toHaveBeenCalledWith('fix', 'existing:quarantine:copy');
 });
+
+it('discards a replacement draft when its evidence changes', () => {
+  const onAct = vi.fn();
+  const { rerender } = render(detail(repeatedRecording, onAct));
+  fireEvent.click(screen.getByRole('button', { name: 'Replace file…' }));
+  fireEvent.click(screen.getByRole('radio', { name: /Move it to quarantine/ }));
+  rerender(detail({ ...repeatedRecording, evidence_token: 'fresh-evidence' }, onAct));
+  expect(onAct).not.toHaveBeenCalled();
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Replace file…' }));
+  expect(screen.getByRole('radio', { name: /Keep it/ })).toBeChecked();
+});

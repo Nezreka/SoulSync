@@ -22685,7 +22685,9 @@ def _build_status_payload():
     except Exception as e:
         logger.debug("active download count failed: %s", e)
 
+    from core.metadata.registry import experimental_status
     return {
+        '_experimental': {**experimental_status(), 'album_review_enabled': config_manager.get('experimental.album_review_enabled', False) is True},
         'metadata_source': metadata_status['metadata_source'],
         'spotify': _spotify_status_with_availability(metadata_status['spotify']),
         'media_server': _status_cache.get('media_server', {}),

@@ -175,7 +175,7 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
         return 'manual', 'The previous apply attempt failed'
     if (finding_type == 'reconciliation_missing' and
             details.get('fulfillment_state') in ('wishlisted', 'downloading', 'downloaded')):
-        return 'blocked', ('Downloaded; waiting for a verified library assignment' if details.get('fulfillment_state') == 'downloaded' else 'The missing track is already on the wishlist')
+        return 'blocked', ('Downloaded; waiting for a verified library assignment' if details.get('fulfillment_state') == 'downloaded' else 'Another copy is already on the wishlist' if details.get('replacement_request') else 'The missing track is already on the wishlist')
     if finding_type == 'reconciliation_unresolved' and (details.get('plan_approved') or details.get('plan_keep')):
         return ('blocked', 'Choose the intended release first') if global_blocked else ('ready', 'File action saved in the album plan')
     if finding_type in _DESTRUCTIVE_TYPES:
