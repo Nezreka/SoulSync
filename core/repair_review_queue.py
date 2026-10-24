@@ -569,6 +569,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                     and not item['details'].get('plan_keep')):
                 item['planned_file_action'] = _ready_action_description(
                     item, item['file_path'], item['title'])
+                item['file_decision'] = _ready_file_decision(item, item['file_path'])
         tier_rank = {'manual': 0, 'destructive': 1, 'blocked': 2, 'ready': 3}
         items.sort(key=lambda item: (tier_rank.get(item.get('review_tier'), 9), item['id']))
         first = items[0]
@@ -789,6 +790,46 @@ def _ready_action_description(item: dict, file_path: str | None, title: str | No
     return f'Move {filename} to recoverable quarantine and remove its library entry'
 
 
+def _ready_file_decision(item, file_path):
+    details = item['details']
+    action = (details.get('planned_choice') or {}).get('fix_action') or ''
+    if item['finding_type'] == 'reconciliation_metadata' or details.get('plan_keep'):
+        return None
+    keep, quarantine = [], []
+    if item['finding_type'] == 'reconciliation_duplicate':
+        keeper = action.split(':', 1)[-1]
+        for copy in details.get('duplicate_copies') or details.get('competing_copies') or []:
+            if isinstance(copy, dict) and copy.get('file_path'):
+                (keep if str(copy.get('track_id') or copy.get('id')) == keeper else quarantine).append(copy['file_path'])
+    elif file_path:
+        (keep if action == 'request_missing' else quarantine).append(file_path)
+    requested = details.get('replacement_track') or {}
+    return {'title': (details.get('current_tags') or {}).get('title') or details.get('expected_title') or os.path.basename(file_path or ''),
+            'keep': keep, 'quarantine': quarantine,
+            'request': (requested.get('name') or requested.get('title') or details.get('expected_title') or '')
+                       if action in ('replace', 'request_missing') else ''}
+
+
+def _ready_action_changes(details):
+    """Deduplicate matching tag/library effects for the review confirmation."""
+    aliases = {'library_title': 'title', 'library_track_artist': 'track_artist',
+               'library_recording_mbid': 'musicbrainz_recording_id',
+               'library_track_number': 'track_number', 'library_disc_number': 'disc_number'}
+    changes, seen = [], set()
+    for field, value in (details.get('changes') or {}).items():
+        field = aliases.get(field, field)
+        key = json.dumps([field, value.get('old'), value.get('new')], sort_keys=True, default=str)
+        if key in seen:
+            continue
+        seen.add(key)
+        kind = ('album' if field == 'library_album_title' else 'filenames' if field == 'filename'
+                else 'numbering' if field in ('track_number', 'disc_number')
+                else 'fills' if value.get('old') in (None, '', [], {}) else 'corrections')
+        changes.append({'field': field, 'old': value.get('old_label', value.get('old')),
+                        'new': value.get('new_label', value.get('new')), 'kind': kind})
+    return changes
+
+
 def ready_batch_preview(db, *, case_id: str = '', include_snapshot: bool = False) -> dict:
     """Reviewable, immutable batch selection used by confirmation and execution."""
     conn = db._get_connection()
@@ -807,6 +848,10 @@ def ready_batch_preview(db, *, case_id: str = '', include_snapshot: bool = False
                 row = conn.execute('SELECT file_path, title FROM repair_findings WHERE id = ?', (item['id'],)).fetchone()
                 description = _ready_action_description(item, row[0] if row else '', row[1] if row else '')
                 actions.append({'id': item['id'], 'description': description,
+                                'file_path': row[0] if row else '',
+                                'title': (details.get('current_tags') or {}).get('title') or '',
+                                'changes': _ready_action_changes(details),
+                                'file_decision': _ready_file_decision(item, row[0] if row else ''),
                                 'file_action': item['finding_type'] != 'reconciliation_metadata' and not details.get('plan_keep')})
             actions.sort(key=lambda action: not action['file_action'])
             albums.append({'case_id': key, 'album': next((item['details'].get('album_title') for item in value['items'] if item['details'].get('album_title')), key), 'actions': actions})

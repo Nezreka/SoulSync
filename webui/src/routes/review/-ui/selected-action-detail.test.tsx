@@ -24,6 +24,36 @@ const finding = {
   },
 } as unknown as ReviewFinding;
 
+it('offers a release-version replacement when the recording ID agrees but the length differs', () => {
+  const onAct = vi.fn();
+  render(
+    <SelectedActionDetail
+      finding={{
+        ...finding,
+        finding_type: 'reconciliation_unresolved',
+        review_tier: 'manual',
+        details: {
+          expected_title: 'Faith',
+          file_duration_ms: 239560,
+          expected_duration_ms: 269707,
+          recording_mbid: 'same-recording',
+          replacement_track: { title: 'Faith', source_track_id: 'same-recording' },
+        },
+      }}
+      itemIndex={0}
+      itemCount={1}
+      busy={false}
+      compact
+      onAct={onAct}
+      onSelect={vi.fn()}
+      typeInfo={{ fixable: true } as FindingTypeInfo}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /Keep local.*request/i }));
+  expect(onAct).toHaveBeenCalledWith('fix', 'request_missing');
+  expect(screen.getByRole('button', { name: /Replace.*release/i })).toBeVisible();
+});
+
 it('keeps accept and keep choices visible while allowing alternative reassignment', () => {
   const onAct = vi.fn();
   render(

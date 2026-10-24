@@ -5,7 +5,7 @@ import { Button, Select, TextInput } from '@/components/form/form';
 import { PageHeader } from '@/components/page-header';
 import { Notice } from '@/components/primitives';
 import { ProviderReleaseId } from '@/components/provider-reference/provider-reference';
-import { ReleaseBadges } from '@/components/release-metadata/release-metadata';
+import { HelpHint, ReleaseBadges } from '@/components/release-metadata/release-metadata';
 
 import type { FindingTypeInfo } from '../../tools/-tools.groups';
 
@@ -38,9 +38,12 @@ import {
 } from '../-review.api';
 import { fetchFindingTypes } from '../../tools/-tools.api';
 import { usePolledStatus } from '../../tools/-tools.polling';
+import { ApplyPlanPreview, type ReadyPreview } from './apply-plan-preview';
 import { AssignmentRow } from './assignment-row';
 import { CompletenessChoice } from './completeness-choice';
+import { FileDecisions } from './file-decisions';
 import { MissingTracksChoice } from './missing-tracks-choice';
+import { NumberingChoice } from './numbering-choice';
 import { AssignmentEvidence, ReleaseComparison, StatusChip } from './reconciliation-evidence';
 import {
   buildAlbumModel,
@@ -210,6 +213,7 @@ export function ReviewPage() {
   const [busyDecision, setBusyDecision] = useState('');
   const [scanBusy, setScanBusy] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
+  const [operationCases, setOperationCases] = useState<string[]>([]);
   const [applyProgress, setApplyProgress] = useState('');
   const [operationCase, setOperationCase] = useState<string | null>(
     window.sessionStorage.getItem('review-operation-case'),
@@ -418,7 +422,10 @@ export function ReviewPage() {
   const albumNumber =
     queue && caseIndex >= 0 ? (queue.case_ids ? 0 : page * queue.limit) + caseIndex + 1 : null;
   const typeInfo = active ? catalog[active.finding_type] : undefined;
-  const mutationBusy = busy || reanalyzing || applyBusy || reviewCase?.refresh?.state === 'running';
+  const applyingThisAlbum =
+    applyBusy && (operationCase === caseId || operationCases.includes(caseId));
+  const mutationBusy =
+    busy || reanalyzing || applyingThisAlbum || reviewCase?.refresh?.state === 'running';
   const plan = reviewCase?.plan || emptyPlan;
   const folderFinding = !reviewCase?.album_plan
     ? reviewCase?.items.find((item) => item.details?.folder_issue)
@@ -737,6 +744,7 @@ export function ReviewPage() {
 
   const operationRef = useRef<string | null>(window.sessionStorage.getItem('review-operation'));
   const rememberOperation = (id?: string, albumCase?: string) => {
+    setOperationCases(albumCase ? [albumCase] : []);
     setOperationCase(albumCase || null);
     if (albumCase) window.sessionStorage.setItem('review-operation-case', albumCase);
     else window.sessionStorage.removeItem('review-operation-case');
@@ -761,6 +769,7 @@ export function ReviewPage() {
           window.sessionStorage.setItem('review-operation', operationRef.current);
         }
         if (!operationRef.current) return;
+        setOperationCases(status.review_case_ids || []);
         const reportCase =
           status.review_scope === 'global'
             ? null
@@ -792,9 +801,11 @@ export function ReviewPage() {
               ? 'Waiting for reconciliation to finish before applying…'
               : status.phase === 'queueing_organization'
                 ? 'Queueing folder organization…'
-                : status.phase === 'queueing_reanalysis'
-                  ? 'Queueing album reanalysis…'
-                  : `Processing ${status.done || 0} of ${status.total || 0} album actions…`,
+                : status.phase === 'organizing'
+                  ? 'Organizing album files…'
+                  : status.phase === 'reanalyzing' || status.phase === 'queueing_reanalysis'
+                    ? 'Checking the completed album and refreshing its plan…'
+                    : `Processing ${status.done || 0} of ${status.total || 0} album actions…`,
           );
           return;
         } else if (status.error || status.failed || status.stopped) {
@@ -803,7 +814,7 @@ export function ReviewPage() {
             reportCase,
           );
         } else {
-          const message = `${status.fixed || 0} album action${status.fixed === 1 ? '' : 's'} completed.${status.organize_queued ? ' Folder organization was queued.' : ''}${status.reconciliation_queued ? ' Updating the album plan…' : ''}`;
+          const message = `${status.fixed || 0} album action${status.fixed === 1 ? '' : 's'} completed.${status.organize_queued ? ' Album files organized.' : ''}${status.reconciliation_queued ? ' Album plan refreshed.' : ''}`;
           const targetCase =
             status.review_scope === 'album' ? status.review_case_ids?.[0] : operationCase;
           if (status.review_scope === 'global' || !targetCase) setGlobalNotice(message);
@@ -860,7 +871,11 @@ export function ReviewPage() {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'tags' }),
+        body: JSON.stringify({
+          mode: 'tags',
+          review_case_id: reviewCase.case_id,
+          plan_signature: reviewCase.plan_signature,
+        }),
         signal: controller.signal,
       },
     )
@@ -934,44 +949,15 @@ export function ReviewPage() {
         { cache: 'no-store' },
       );
       if (!response.ok) throw new Error('Could not load the ready album plans.');
-      const preview = (await response.json()) as {
-        signature: string;
-        action_count: number;
-        file_actions: number;
-        albums: Array<{ album: string; actions: Array<{ description: string }> }>;
-      };
+      const preview = (await response.json()) as ReadyPreview;
       if (!preview.action_count)
         throw new Error('No fully decided album plans are ready to apply.');
       const message = (
-        <div className={styles.applyPreview}>
-          <p>
-            Apply {preview.action_count} planned actions across {preview.albums.length} fully
-            decided album{preview.albums.length === 1 ? '' : 's'}?
-          </p>
-          {preview.file_actions > 0 && (
-            <Notice tone="warning">
-              {preview.file_actions} file action{preview.file_actions === 1 ? ' is' : 's are'}{' '}
-              included. Files moved to quarantine remain recoverable.
-            </Notice>
-          )}
-          {preview.albums.map((album, index) => (
-            <details key={`${album.album}-${index}`} open={Boolean(scopeCaseId)}>
-              <summary>
-                {album.album} · {album.actions.length} action{album.actions.length === 1 ? '' : 's'}
-              </summary>
-              <ul>
-                {album.actions.map((action, i) => (
-                  <li key={i}>{action.description}</li>
-                ))}
-              </ul>
-            </details>
-          ))}
-          {organize && <p>Then organize into: {organizationMoves.join(', ')}</p>}
-          <p>
-            Albums with open decisions are excluded. These plans will be checked again before
-            execution. If a plan changes, review a fresh preview before applying.
-          </p>
-        </div>
+        <ApplyPlanPreview
+          preview={preview}
+          expanded={Boolean(scopeCaseId)}
+          destinations={organize ? organizationMoves : []}
+        />
       );
       const confirmed = await confirm({
         title: 'Apply ready album plans',
@@ -1179,7 +1165,7 @@ export function ReviewPage() {
         <Button
           type="button"
           variant="primary"
-          disabled={mutationBusy}
+          disabled={mutationBusy || applyBusy}
           onClick={() => void applyReady(reviewCase.case_id)}
         >
           Apply {plan.ready} ready change
@@ -1191,7 +1177,7 @@ export function ReviewPage() {
           reviewCase.album_id != null && (
             <Button
               type="button"
-              disabled={mutationBusy}
+              disabled={mutationBusy || applyBusy}
               onClick={() => void applyReady(reviewCase.case_id, true)}
             >
               Apply ready edits, then organize folder
@@ -1208,7 +1194,12 @@ export function ReviewPage() {
             key={group.key}
             type="button"
             onClick={() => {
-              showTrackList(group.key);
+              if (group.key === 'library_album_title') {
+                setAlbumView('plan');
+                document
+                  .getElementById('review-shared-album-title')
+                  ?.scrollIntoView?.({ block: 'nearest' });
+              } else showTrackList(group.key);
             }}
           >
             <span>
@@ -1216,7 +1207,9 @@ export function ReviewPage() {
               <small>{group.valueSummary}</small>
             </span>
             <b>
-              {group.count} track{group.count === 1 ? '' : 's'}
+              {group.key === 'library_album_title'
+                ? 'Whole album'
+                : `${group.count} track${group.count === 1 ? '' : 's'}`}
             </b>
           </Button>
         ))}
@@ -1360,7 +1353,9 @@ export function ReviewPage() {
               type="button"
               variant="primary"
               className={styles.safeAction}
-              disabled={mutationBusy || !(queueTotals?.ready_total ?? queue?.ready_total)}
+              disabled={
+                mutationBusy || applyBusy || !(queueTotals?.ready_total ?? queue?.ready_total)
+              }
               onClick={() => void applyReady()}
             >
               {applyBusy && !operationCase
@@ -1657,7 +1652,8 @@ export function ReviewPage() {
                     <p>{reviewCase.artist || 'Artist not established'}</p>
                     {albumTitleChange && (
                       <p className={styles.plannedAlbumTitle}>
-                        Album title after apply: <strong>{textValue(albumTitleChange.new)}</strong>
+                        Library album title after apply:{' '}
+                        <strong>{textValue(albumTitleChange.new)}</strong>
                       </p>
                     )}
                   </div>
@@ -1776,7 +1772,12 @@ export function ReviewPage() {
                 </Notice>
               )}
               {notice && !reanalyzing && reviewCase.refresh?.state !== 'running' && (
-                <Notice tone="info" role="status" aria-live="polite">
+                <Notice
+                  tone="info"
+                  className={styles.dismissibleNotice}
+                  role="status"
+                  aria-live="polite"
+                >
                   <span>{notice}</span>
                   <Button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')}>
                     ×
@@ -1857,36 +1858,13 @@ export function ReviewPage() {
                           <p>Choose a field to inspect the affected tracks and exact values.</p>
                         )}
                         {readySummaryList}
-                        {reviewCase.items.some((item) => item.planned_file_action) && (
-                          <Notice
-                            tone="warning"
-                            aria-label="Planned file actions"
-                            className={styles.plannedFileActions}
-                          >
-                            <div>
-                              <h4>File decisions included</h4>
-                              <ul>
-                                {reviewCase.items
-                                  .filter((item) => item.planned_file_action)
-                                  .map((item) => (
-                                    <li key={item.id}>
-                                      <p>{item.planned_file_action}</p>
-                                      <Button
-                                        type="button"
-                                        onClick={() => {
-                                          const decision = decisionsByFinding.get(item.id);
-                                          if (decision)
-                                            openDecision({ ...decision, finding_ids: [item.id] });
-                                        }}
-                                      >
-                                        Review file decision
-                                      </Button>
-                                    </li>
-                                  ))}
-                              </ul>
-                            </div>
-                          </Notice>
-                        )}
+                        <FileDecisions
+                          items={reviewCase.items}
+                          onReview={(id) => {
+                            const decision = decisionsByFinding.get(id);
+                            if (decision) openDecision({ ...decision, finding_ids: [id] });
+                          }}
+                        />
                         {active &&
                           activeDecision?.risk === 'ready' &&
                           !activeAssignment &&
@@ -1981,13 +1959,42 @@ export function ReviewPage() {
                                       </b>
                                     )}
                                   </Button>
+                                  {decision.category === 'audio_conflicts' &&
+                                    decision.finding_ids.length > 0 &&
+                                    decision.finding_ids.every((id) =>
+                                      reviewCase.items.some(
+                                        (item) =>
+                                          item.id === id && item.details?.catalogue_disagreement,
+                                      ),
+                                    ) && (
+                                      <div className={styles.decisionActions}>
+                                        <p>
+                                          File tags and the selected release agree. AcoustID credits
+                                          these recordings differently. Inspect the tracks, or
+                                          confirm these proposed assignments together.
+                                        </p>
+                                        <Button
+                                          type="button"
+                                          variant="primary"
+                                          disabled={mutationBusy || releaseChoicePending}
+                                          onClick={() =>
+                                            void actGroup(
+                                              { ...decision, category: 'catalogue_assignments' },
+                                              'fix',
+                                            )
+                                          }
+                                        >
+                                          Use these {decision.finding_ids.length} assignments
+                                        </Button>
+                                      </div>
+                                    )}
                                   {hasGroupActions && (
                                     <div className={styles.decisionActions}>
                                       <Button
                                         type="button"
                                         disabled={
                                           busy ||
-                                          applyBusy ||
+                                          applyingThisAlbum ||
                                           releaseChoicePending ||
                                           reviewCase.refresh?.state === 'running'
                                         }
@@ -2013,7 +2020,7 @@ export function ReviewPage() {
                                         type="button"
                                         disabled={
                                           busy ||
-                                          applyBusy ||
+                                          applyingThisAlbum ||
                                           releaseChoicePending ||
                                           reviewCase.refresh?.state === 'running'
                                         }
@@ -2052,7 +2059,7 @@ export function ReviewPage() {
                                           <Button
                                             type="button"
                                             disabled={
-                                              applyBusy ||
+                                              applyingThisAlbum ||
                                               busy ||
                                               reviewCase.refresh?.state === 'running'
                                             }
@@ -2646,6 +2653,7 @@ export function ReviewPage() {
                       )}
                       <ReleaseComparison
                         decisionReason={reviewCase.album_plan?.release_decision_reason}
+                        libraryRelease={reviewCase.album_plan?.current_release}
                         candidates={releaseCandidates}
                         view="list"
                         selected={previewCandidate}
@@ -2722,6 +2730,11 @@ export function ReviewPage() {
                             <dt>Selected release</dt>
                             <dd>
                               {primaryCandidate?.release_title || 'Release title unavailable'}
+                              {primaryCandidate?.release_artist && (
+                                <span className={styles.releaseArtist}>
+                                  {primaryCandidate.release_artist}
+                                </span>
+                              )}
                               {primaryCandidate && (
                                 <ReleaseBadges
                                   format={primaryCandidate.format}
@@ -2738,7 +2751,14 @@ export function ReviewPage() {
                             </dd>
                           </div>
                           <div>
-                            <dt>Track coverage</dt>
+                            <dt>
+                              Track coverage
+                              <HelpHint label="track coverage">
+                                Assigned slots have a proposed local file. A match can still need
+                                review; coverage does not mean that every file is verified or will
+                                be changed.
+                              </HelpHint>
+                            </dt>
                             <dd>
                               {mappedSlots} of {totalSlots || '?'} release slots assigned
                             </dd>
@@ -2758,6 +2778,30 @@ export function ReviewPage() {
                                       : 'Full release coverage')}
                             </dd>
                           </div>
+                          {albumTitleChange && (
+                            <div>
+                              <dt id="review-shared-album-title">Shared album title</dt>
+                              <dd>
+                                <span className={styles.muted}>
+                                  {textValue(albumTitleChange.old)}
+                                </span>
+                                {' → '}
+                                <strong>{textValue(albumTitleChange.new)}</strong>
+                                <p className={styles.muted}>
+                                  Updates the album’s shared library title once.
+                                  {assignments
+                                    .filter((row) => row.file_path)
+                                    .every(
+                                      (row) =>
+                                        textValue(row.current_tags?.album) ===
+                                        textValue(albumTitleChange.new),
+                                    )
+                                    ? ' The file album tags already use this title.'
+                                    : ' Changes to individual file album tags are listed with their tracks.'}
+                                </p>
+                              </dd>
+                            </div>
+                          )}
                           {wishlistedCount > 0 && (
                             <div>
                               <dt>Acquisition</dt>
@@ -2797,18 +2841,21 @@ export function ReviewPage() {
                                       'library_disc_number',
                                     ].some((field) => field in record(item.details?.changes)),
                                 ) && (
-                                  <Button
-                                    type="button"
-                                    disabled={mutationBusy || releaseChoicePending}
-                                    onClick={() =>
+                                  <NumberingChoice
+                                    key={caseId}
+                                    assignments={assignments}
+                                    scheme={numberingSchemeLabel(
+                                      releaseHasMultipleDiscs,
+                                      reviewCase.album_plan.numbering_mode,
+                                    )}
+                                    busy={mutationBusy || releaseChoicePending}
+                                    onChoose={(choice) =>
                                       void actGroup(
                                         { category: 'numbering' } as ReviewDecision,
-                                        'dismiss',
+                                        choice,
                                       )
                                     }
-                                  >
-                                    Keep current numbering
-                                  </Button>
+                                  />
                                 )}
                             </dd>
                           </div>
@@ -2870,7 +2917,8 @@ export function ReviewPage() {
                                 key={group.key}
                                 type="button"
                                 onClick={() => {
-                                  showTrackList(group.key);
+                                  if (group.key === 'library_album_title') setAlbumView('plan');
+                                  else showTrackList(group.key);
                                 }}
                               >
                                 <span>
@@ -2878,7 +2926,10 @@ export function ReviewPage() {
                                   <small>{group.valueSummary}</small>
                                 </span>
                                 <b>
-                                  {group.count} track{group.count === 1 ? '' : 's'} →
+                                  {group.key === 'library_album_title'
+                                    ? 'Whole album'
+                                    : `${group.count} track${group.count === 1 ? '' : 's'}`}{' '}
+                                  →
                                 </b>
                               </Button>
                             ))}

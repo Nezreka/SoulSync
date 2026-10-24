@@ -82,7 +82,7 @@ def test_queue_modes_partition_albums_with_mixed_decisions():
 
 
 def test_release_candidate_can_be_pinned_without_release_finding():
-    class AlbumDatabase:
+    class AlbumDatabase(_Database):
         selected = None
 
         def set_album_canonical(self, album_id, source, release_id, *, score, locked):
@@ -108,6 +108,8 @@ def test_release_candidate_can_be_pinned_without_release_finding():
 
     assert result['success'] and result['refresh_queued']
     assert worker.db.selected == (7, 'musicbrainz', 'new', True)
+    from core.library.reconciliation_choices import load_release_choices
+    assert load_release_choices(worker.db) == {'7': ('musicbrainz', 'new')}
     stale = worker.pin_review_release(
         'case', source='musicbrainz', release_id='new',
         expected_source='itunes', expected_release_id='stale')
@@ -116,7 +118,7 @@ def test_release_candidate_can_be_pinned_without_release_finding():
 
 def test_manual_musicbrainz_release_is_previewed_before_pinning(monkeypatch, tmp_path):
     release_id = '301434dc-e59a-467d-b950-abfa9a2ad32e'
-    class AlbumDatabase:
+    class AlbumDatabase(_Database):
         selected = None
         def set_album_canonical(self, album_id, source, selected_id, *, score, locked):
             self.selected = (album_id, source, selected_id, locked)

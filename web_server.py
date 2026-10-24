@@ -10593,6 +10593,26 @@ def reorganize_album_preview(album_id):
             or config_root_path(
                 config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer')
         )
+        review_inputs = {}
+        if data.get('review_case_id'):
+            from core.repair_review_queue import ready_batch_preview
+            case = repair_worker.get_review_case(data['review_case_id']) if repair_worker else None
+            if (not case or str(case.get('album_id')) != str(album_id)
+                    or case.get('plan_signature') != data.get('plan_signature')
+                    or not (case.get('plan') or {}).get('can_organize')
+                    or not (case.get('plan') or {}).get('can_apply_ready')
+                    or (case.get('refresh') or {}).get('state') == 'running'):
+                return jsonify({'success': False, 'error': 'The album plan changed; refresh the preview'}), 409
+            reviewed = ready_batch_preview(db, case_id=case['case_id'], include_snapshot=True)
+            updates, excluded = {}, set()
+            for album in reviewed['albums']:
+                for action in album['actions']:
+                    details = json.loads(reviewed['reviewed_details'][action['id']])
+                    if details.get('db_data') and action.get('file_path'):
+                        updates[action['file_path']] = details['db_data']
+                    excluded.update((action.get('file_decision') or {}).get('quarantine') or [])
+            metadata_source = 'tags'
+            review_inputs = {'planned_tag_updates': updates, 'excluded_paths': excluded}
         result = preview_album_reorganize(
             album_id=album_id,
             db=db,
@@ -10603,6 +10623,7 @@ def reorganize_album_preview(album_id):
             strict_source=bool(chosen_source),
             metadata_source=metadata_source,
             profile_id=profile_id,
+            **review_inputs,
         )
         if result.get('status') == 'no_album':
             return jsonify({"success": False, "error": "Album not found"}), 404

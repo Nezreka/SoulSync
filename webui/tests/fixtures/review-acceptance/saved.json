@@ -23,6 +23,11 @@
           "album_id": "10",
           "album_title": "Northbound",
           "library_album_title": "Northbound",
+          "current_release": {
+            "source": "musicbrainz",
+            "release_id": "11111111-1111-4111-8111-111111111111",
+            "locked": true
+          },
           "artist_name": "Acceptance Artist",
           "release_artist_names": [
             "Acceptance Artist"
@@ -212,6 +217,11 @@
           "album_id": "10",
           "album_title": "Northbound",
           "library_album_title": "Northbound",
+          "current_release": {
+            "source": "musicbrainz",
+            "release_id": "11111111-1111-4111-8111-111111111111",
+            "locked": true
+          },
           "artist_name": "Acceptance Artist",
           "release_artist_names": [
             "Acceptance Artist"
@@ -437,6 +447,11 @@
       "intent_scope": "",
       "intent_inferred": false,
       "release_decision_reason": "",
+      "current_release": {
+        "source": "musicbrainz",
+        "release_id": "11111111-1111-4111-8111-111111111111",
+        "locked": true
+      },
       "numbering_mode": "release",
       "inventory": {
         "version": 1,
@@ -669,6 +684,7 @@
           "date": "2001-01-01",
           "disambiguation": "",
           "format": "Digital Media",
+          "release_artist": "Acceptance Artist",
           "image_url": "https://coverartarchive.org/release/11111111-1111-4111-8111-111111111111/front-250",
           "matched": 2,
           "total_slots": 2,
@@ -814,11 +830,45 @@
           {
             "id": 1,
             "description": "Update 01 - Home.flac: musicbrainz recording id, library recording mbid",
+            "file_path": "/music/Acceptance Artist/Northbound/01 - Home.flac",
+            "title": "Home",
+            "changes": [
+              {
+                "field": "musicbrainz_recording_id",
+                "old": "",
+                "new": "00000000-0000-4000-8000-000000000001",
+                "kind": "fills"
+              }
+            ],
+            "file_decision": null,
             "file_action": false
           },
           {
             "id": 2,
             "description": "Update 02 - Open Water.flac: album, musicbrainz recording id, musicbrainz release id, library recording mbid",
+            "file_path": "/music/Acceptance Artist/Northbound/02 - Open Water.flac",
+            "title": "Open Water",
+            "changes": [
+              {
+                "field": "album",
+                "old": "Northbound (Deluxe)",
+                "new": "Northbound",
+                "kind": "corrections"
+              },
+              {
+                "field": "musicbrainz_recording_id",
+                "old": "",
+                "new": "00000000-0000-4000-8000-000000000002",
+                "kind": "fills"
+              },
+              {
+                "field": "musicbrainz_release_id",
+                "old": "22222222-2222-4222-8222-222222222222",
+                "new": "11111111-1111-4111-8111-111111111111",
+                "kind": "corrections"
+              }
+            ],
+            "file_decision": null,
             "file_action": false
           }
         ]

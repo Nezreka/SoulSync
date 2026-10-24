@@ -1010,6 +1010,7 @@ def _plan_from_tags(
     album_data: dict,
     tracks: List[dict],
     resolve_file_path_fn: Optional[Callable[[Optional[str]], Optional[str]]],
+    planned_tag_updates: Optional[dict] = None,
 ) -> dict:
     """Tag-mode planner: build per-track ``api_track`` shapes from each
     file's own embedded metadata instead of a live source API call.
@@ -1059,7 +1060,9 @@ def _plan_from_tags(
             })
             continue
 
-        album_meta, track_meta, err = read_album_track_from_file(resolved)
+        updates = (planned_tag_updates or {}).get(resolved) or (planned_tag_updates or {}).get(db_path)
+        album_meta, track_meta, err = read_album_track_from_file(
+            resolved, **({'planned_metadata': updates} if updates else {}))
         if err is not None or track_meta is None or album_meta is None:
             items.append({
                 'track': track, 'api_track': None, 'api_album': None,
@@ -1104,6 +1107,32 @@ def _plan_from_tags(
             'items': items,
         }
 
+    # A single album needs one folder context. Different tag containers often
+    # omit album-level fields (notably ID3 release secondary types). Combine
+    # complementary fields only when the embedded album identity agrees;
+    # distinct tagged albums in a library grouping retain their own contexts.
+    album_metadata = [it['api_album'] for it in items if it['matched']]
+    identities = {(str(meta.get('name') or '').casefold(),
+                   str(meta.get('album_artist') or '').casefold())
+                  for meta in album_metadata}
+    release_ids = {meta['release_mbid'] for meta in album_metadata if meta.get('release_mbid')}
+    if len(identities) == 1 and len(release_ids) <= 1:
+        from collections import Counter
+        common_album = dict(first_album_meta or {})
+        for field in ('release_date', 'album_type', 'release_mbid'):
+            values = [meta[field] for meta in album_metadata if meta.get(field)]
+            if values:
+                common_album[field] = Counter(values).most_common(1)[0][0]
+        common_album['secondary_types'] = sorted({
+            value for meta in album_metadata for value in meta.get('secondary_types') or []})
+        common_album['total_discs'] = max_disc
+        common_album['total_tracks'] = max(
+            int(meta.get('total_tracks') or 0) for meta in album_metadata)
+        for item in items:
+            if item['matched']:
+                item['api_album'] = common_album
+        first_album_meta = common_album
+
     raw_db_type = str(album_data.get('record_type') or '').strip().lower()
     tag_album_type = str((first_album_meta or {}).get('album_type') or '').strip().lower()
     tag_api_tracks = [it['api_track'] for it in items if it.get('api_track')]
@@ -1144,6 +1173,7 @@ def plan_album_reorganize(
     metadata_source: str = 'api',
     resolve_file_path_fn: Optional[Callable[[Optional[str]], Optional[str]]] = None,
     on_better_edition: Optional[Callable[[str, str, float], None]] = None,
+    planned_tag_updates: Optional[dict] = None,
 ) -> dict:
     """Compute the per-track plan for an album reorganize without doing
     any file IO. Both the actual reorganize orchestrator and the preview
@@ -1186,7 +1216,7 @@ def plan_album_reorganize(
 
     if metadata_source == 'tags':
         return _with_release_disambiguation(
-            _plan_from_tags(album_data, tracks, resolve_file_path_fn),
+            _plan_from_tags(album_data, tracks, resolve_file_path_fn, planned_tag_updates),
             tracks, resolve_file_path_fn)
 
     if primary_source is None:
@@ -1584,6 +1614,8 @@ def preview_album_reorganize(
     strict_source: bool = False,
     metadata_source: str = 'api',
     profile_id: Optional[int] = None,
+    planned_tag_updates: Optional[dict] = None,
+    excluded_paths: Optional[set] = None,
 ) -> dict:
     """Compute the planned destination paths for a reorganize WITHOUT
     moving any files. The preview UI uses this to show users what the
@@ -1628,6 +1660,11 @@ def preview_album_reorganize(
     if album_data is None:
         return {'success': False, 'status': 'no_album', 'tracks': []}
 
+    if excluded_paths:
+        tracks = [track for track in tracks
+                  if track.get('file_path') not in excluded_paths
+                  and resolve_file_path_fn(track.get('file_path')) not in excluded_paths]
+
     if not tracks:
         return {
             'success': False, 'status': 'no_tracks',
@@ -1641,6 +1678,7 @@ def preview_album_reorganize(
         primary_source=primary_source, strict_source=strict_source,
         metadata_source=metadata_source,
         resolve_file_path_fn=resolve_file_path_fn,
+        **({'planned_tag_updates': planned_tag_updates} if planned_tag_updates else {}),
     )
     artist_name = album_data.get('artist_name') or 'Unknown Artist'
     album_title = album_data.get('title') or 'Unknown Album'

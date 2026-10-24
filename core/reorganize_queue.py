@@ -336,6 +336,16 @@ class ReorganizeQueue:
             logger.info(f"[Queue] Bulk-cancelled {cancelled} queued items")
         return cancelled
 
+    def wait_for(self, queue_id: str, *, timeout: float = 1.0) -> dict:
+        """Observe completion without racing the runner's final path updates."""
+        with self._cond:
+            item = next((item for item in self._items if item.queue_id == queue_id), None)
+            if item is None:
+                return {'status': 'failed', 'error': 'Organization operation is unavailable'}
+            self._cond.wait_for(
+                lambda: item.status not in ('queued', 'running'), timeout=timeout)
+            return item.to_snapshot()
+
     def snapshot(self) -> dict:
         """Current queue state for the status panel. Returns:
 
@@ -517,6 +527,7 @@ class ReorganizeQueue:
                     item.error = str(e)
                     item.finished_at = time.time()
                     self._persist(item)
+                    self._cond.notify_all()
                 continue
 
             with self._cond:
@@ -539,6 +550,7 @@ class ReorganizeQueue:
                 item.progress_processed = 0
                 # terminal: drops the row, so the table only ever holds the backlog
                 self._persist(item)
+                self._cond.notify_all()
 
             logger.info(
                 f"[Queue] Finished '{item.album_title}' — status={item.status}, "

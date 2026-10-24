@@ -617,9 +617,47 @@ class _MatchFacts:
                         if float(recording.get('score') or 0) >= .80))
         return self._memo('metadata_support', (id(file), id(slot)), supported)
 
+    def specific_metadata_supports(self, file, slot):
+        """Independent evidence which distinguishes repeated release versions."""
+        tags = file.get('tags') or {}
+        delta = self.delta(file, slot)
+        credit = str(tags.get('track_artist') or tags.get('artist') or '')
+        unique_named_version = sum(
+            fold_title(str(other.get('title') or ''), drop_brackets=False) ==
+            fold_title(str(slot.get('title') or ''), drop_brackets=False)
+            for other in self.slots) == 1
+        return bool(tags.get('mbid') and tags['mbid'] == _recording_id(slot)
+            and (_full_credit_agrees(credit, slot) or (unique_named_version
+                and _artist_credit_supports(credit, str(slot.get('artist') or ''))))
+            and (tags.get('disc_number') or 1, tags.get('track_number')) ==
+                (slot.get('disc_number') or 1, slot.get('track_number'))
+            and self.title_score(str(tags.get('title') or ''), str(slot.get('title') or '')) >= .95
+            and self.title_score(_local_filename_title(file), str(slot.get('title') or '')) >= .95
+            and delta is not None and delta <= 1000 and self.compatible(file, slot)
+            and any(recording_supports_file_slot(recording, file, slot)
+                    for recording in self.strong_recordings(file)))
+
+    def catalogue_disagreement(self, file, slot):
+        """A reviewable credit disagreement on an explicitly chosen edition."""
+        tags = file.get('tags') or {}
+        recordings = self.strong_recordings(file)
+        delta = self.delta(file, slot)
+        return bool(recordings
+            and _full_credit_agrees(str(tags.get('track_artist') or tags.get('artist') or ''), slot)
+            and fold_title(str(tags.get('title') or ''), drop_brackets=False) ==
+                fold_title(str(slot.get('title') or ''), drop_brackets=False)
+            and self.title_score(_local_filename_title(file), str(slot.get('title') or '')) >= .95
+            and (tags.get('disc_number') or 1, tags.get('track_number')) ==
+                (slot.get('disc_number') or 1, slot.get('track_number'))
+            and delta is not None and delta <= 3000 and self.compatible(file, slot)
+            and all(self.title_score(str(recording.get('title') or ''), str(slot.get('title') or '')) >= .95
+                    and _recording_duration_fits(recording, int(tags.get('duration_ms') or 0))
+                    for recording in recordings)
+            and not any(self.supports(recording, slot) for recording in recordings))
+
 
 def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None,
-                 facts: _MatchFacts | None = None) -> tuple[int, list[str]]:
+                 facts: _MatchFacts | None = None, *, catalogue_review=False) -> tuple[int, list[str]]:
     if file.get('companion_of'):
         return 0, []
     facts = facts or _MatchFacts([file], slots or [slot])
@@ -695,7 +733,9 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None,
     ):
         # A convincing fingerprint for another song must not become a match
         # merely because both the filename and embedded tags are wrong.
-        return 0, []
+        if not catalogue_review or not facts.catalogue_disagreement(file, slot):
+            return 0, []
+        reasons.append('File tags and release credits agree; AcoustID links a differently credited recording')
     current_delta = facts.delta(file, slot)
     if current_delta is not None and current_delta > 30000 and slots:
         # A tied AcoustID result can link one fingerprint to several recordings.
@@ -770,13 +810,15 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None,
 
 
 def reconcile_folder(files: list[dict], slots: list[dict],
-                     forced_pairs: dict[int, int] | None = None) -> dict[str, Any]:
+                     forced_pairs: dict[int, int] | None = None, *,
+                     catalogue_review=False) -> dict[str, Any]:
     """Assign every file at most one slot and explain uncertain leftovers."""
     if not files:
         return {'pairs': [], 'extra_files': [], 'competing_files': {},
                 'missing_slots': list(range(len(slots)))}
     facts = _MatchFacts(files, slots)
-    weighted = [[_pair_weight(file, slot, slots, facts) for slot in slots] for file in files]
+    weighted = [[_pair_weight(file, slot, slots, facts, catalogue_review=catalogue_review)
+                 for slot in slots] for file in files]
     forced_pairs = forced_pairs or {}
     if len(set(forced_pairs.values())) != len(forced_pairs):
         raise ValueError('Two manual assignments cannot use the same release slot')
@@ -789,6 +831,28 @@ def reconcile_folder(files: list[dict], slots: list[dict],
     assigned = assign_max_weight([[weight for weight, _ in row] for row in weighted])
     assigned_by_slot = {slot_index: file_index for file_index, slot_index in assigned}
     assigned_by_file = {file_index: slot_index for file_index, slot_index in assigned}
+    assignment_total = sum(weighted[i][j][0] for i, j in assigned)
+    joint_owners = {}
+
+    def joint_owner(file_index, slot_index):
+        """Compare feasible album arrangements, not independent rival scores.
+
+        Exact embedded identity, version, position, full credit and duration
+        must corroborate this owner. It remains uncertain if removing its edge
+        permits a near-equivalent joint arrangement. This cannot settle a
+        duplicate with no independently supported slot of its own.
+        """
+        key = file_index, slot_index
+        if key not in joint_owners:
+            established = False
+            if (assigned_by_file.get(file_index) == slot_index
+                    and facts.specific_metadata_supports(files[file_index], slots[slot_index])):
+                alternatives = [[value for value, _ in row] for row in weighted]
+                alternatives[file_index][slot_index] = 0
+                alternative_total = sum(alternatives[i][j] for i, j in assign_max_weight(alternatives))
+                established = assignment_total - alternative_total >= weighted[file_index][slot_index][0] * .25
+            joint_owners[key] = established
+        return joint_owners[key]
     largest_slot_number = max((int(item.get('track_number') or 0)
                                for item in slots), default=0)
     has_multiple_discs = len({item.get('disc_number') or 1 for item in slots}) > 1
@@ -870,10 +934,11 @@ def reconcile_folder(files: list[dict], slots: list[dict],
                 return True
             # Top-score links resolve an alternative slot only when its owner
             # independently agrees; the competing-file check below uses .80.
-            return not facts.owner_is_established(
+            return not ((joint_owner(candidate_file_index, assigned_slot_index)
+                         and joint_owner(owner_index, other_index)) or facts.owner_is_established(
                 files[owner_index], other, top_only=True,
                 owner_weight=weighted[owner_index][other_index][0],
-                contender_weight=weighted[candidate_file_index][other_index][0])
+                contender_weight=weighted[candidate_file_index][other_index][0]))
 
         competing_release_slot = any(
             unresolved_alternative(other_index, other)
@@ -888,10 +953,13 @@ def reconcile_folder(files: list[dict], slots: list[dict],
                  (artist_agrees and position_agrees and corroborating_metadata >= 1))
         )
         ambiguous = ambiguous_fingerprint and not fingerprint_context_resolves
-        close_alternative = any(
+        alternative_slots = [other_index for other_index, (contender, _) in enumerate(weighted[file_index]) if
             other_index != slot_index and contender >= weight * .92
             and not facts.credit_distinguishes(files[file_index], slot, slots[other_index])
-            for other_index, (contender, _) in enumerate(weighted[file_index]))
+            and not (joint_owner(file_index, slot_index)
+                and other_index in assigned_by_slot
+                and joint_owner(assigned_by_slot[other_index], other_index))]
+        close_alternative = bool(alternative_slots)
         # A duplicate copy can have a poorer filename or stale tags while
         # sharing the same strong AcoustID identity. Leave room for those
         # weaker metadata layers before declaring either copy the keeper.
@@ -905,27 +973,29 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             owner_slot_index = assigned_by_file.get(other_index)
             if owner_slot_index is None or owner_slot_index == assigned_slot_index:
                 return True
-            return not facts.owner_is_established(
+            return not ((joint_owner(assigned_file_index, assigned_slot_index)
+                         and joint_owner(other_index, owner_slot_index)) or facts.owner_is_established(
                 files[other_index], slots[owner_slot_index], top_only=False,
                 owner_weight=weighted[other_index][owner_slot_index][0],
-                contender_weight=contender_weight)
+                contender_weight=contender_weight))
 
-        competing_file = any(
-            unresolved_competing_file(other_index)
-            for other_index in range(len(files))
-        )
+        competing_file_indices = [index for index in range(len(files)) if unresolved_competing_file(index)]
+        competing_file = bool(competing_file_indices)
+        catalogue_disagreement = catalogue_review and facts.catalogue_disagreement(files[file_index], slot)
         version_wording_review = bool(file_version_markers(files[file_index])) and not versions_compatible(
             files[file_index], slot)
         ambiguity_reasons = []
+        if catalogue_disagreement:
+            ambiguity_reasons.append('File tags and release credits agree; AcoustID links a differently credited recording')
         if version_wording_review:
             ambiguity_reasons.append('Recording identity agrees, but the local and release version wording differs')
         if ambiguous:
             ambiguity_reasons.append(
                 'AcoustID returned competing identities not resolved by the other evidence')
         if close_alternative:
-            ambiguity_reasons.append('another release track fits nearly as well')
+            ambiguity_reasons.append('Another release track fits nearly as well')
         if competing_file:
-            ambiguity_reasons.append('another local file fits this release track')
+            ambiguity_reasons.append('Another local file fits this release track')
         # A high numbered file outside this release can belong to a different
         # album even when AcoustID links the fingerprint to this song too.
         # Versioned top recordings make that provenance conflict actionable.
@@ -958,8 +1028,19 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             'score': weight, 'reasons': reasons,
             'duration_delta_ms': assigned_duration_delta,
             'ambiguity_reasons': ambiguity_reasons,
+            'catalogue_disagreement': bool(catalogue_disagreement),
+            'competitors': [
+                {'kind': 'release_slot', 'slot_title': slots[index].get('title'),
+                 'disc_number': slots[index].get('disc_number') or 1,
+                 'track_number': slots[index].get('track_number')}
+                for index in alternative_slots] + [
+                {'kind': 'local_file', 'file_path': files[index]['path'],
+                 'current_title': (files[index].get('tags') or {}).get('title'),
+                 'assigned_title': slots[assigned_by_file[index]].get('title')
+                    if index in assigned_by_file else None}
+                for index in competing_file_indices],
             'confidence': 'manual' if forced_pairs.get(file_index) == slot_index else
-                          'ambiguous' if ambiguous or close_alternative or competing_file or outlying_version or version_wording_review
+                          'ambiguous' if catalogue_disagreement or ambiguous or close_alternative or competing_file or outlying_version or version_wording_review
                           else 'clear' if weight >= 4500 or metadata_clear else 'likely',
         })
     # A fingerprint can still name the predominant song when audio from the

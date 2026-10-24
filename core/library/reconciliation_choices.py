@@ -183,13 +183,40 @@ def same_relocated_evidence(previous, current):
             {k: v for k, v in current.items() if k not in volatile})
 
 
+def remember_release_choice(db, album_id, source, release_id):
+    """Distinguish a reviewer's edition choice from an older canonical lock."""
+    conn = db._get_connection()
+    try:
+        conn.execute('''CREATE TABLE IF NOT EXISTS reconcile_release_decisions (
+            album_id TEXT PRIMARY KEY, source TEXT NOT NULL, release_id TEXT NOT NULL)''')
+        conn.execute('INSERT OR REPLACE INTO reconcile_release_decisions VALUES (?, ?, ?)',
+                     (str(album_id), source, str(release_id)))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_release_choices(db):
+    conn = db._get_connection()
+    try:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_release_decisions'").fetchone():
+            return {}
+        return {row[0]: (row[1], row[2]) for row in conn.execute(
+            'SELECT album_id, source, release_id FROM reconcile_release_decisions')}
+    finally:
+        conn.close()
+
+
 def same_annotated_evidence(previous, current):
     """Adding explanations alone preserves an otherwise exact saved choice."""
     annotations = {'assignment_evidence', 'recording_identity', 'numbering_mode',
                    'recommended_keeper', 'keeper_reason', 'tool_checks', 'match_reasons',
                    'expected_artist_names', 'artist_aliases', 'routine_numbering',
-                   'numbering_recovery', 'title_difference_kind'}
-    empty_defaults = {'metadata_review_reason', 'album_consistency', 'companion_count', 'recording_id_conflict'}
+                   'numbering_recovery', 'title_difference_kind', 'competitors', 'current_release'}
+    if previous and not previous.get('file_identity'):
+        annotations.add('file_identity')
+    empty_defaults = {'metadata_review_reason', 'album_consistency', 'companion_count',
+                      'recording_id_conflict', 'catalogue_disagreement'}
     def substantive(details):
         result = {key: value for key, value in details.items()
                   if key not in annotations and (key not in empty_defaults or value)}

@@ -23,6 +23,11 @@
           "album_id": "10",
           "album_title": "Northbound",
           "library_album_title": "Northbound",
+          "current_release": {
+            "source": "musicbrainz",
+            "release_id": "11111111-1111-4111-8111-111111111111",
+            "locked": true
+          },
           "artist_name": "Acceptance Artist",
           "release_artist_names": [
             "Acceptance Artist"
@@ -109,6 +114,11 @@
           "album_id": "10",
           "album_title": "Northbound",
           "library_album_title": "Northbound",
+          "current_release": {
+            "source": "musicbrainz",
+            "release_id": "11111111-1111-4111-8111-111111111111",
+            "locked": true
+          },
           "artist_name": "Acceptance Artist",
           "release_artist_names": [
             "Acceptance Artist"
@@ -320,6 +330,11 @@
       "intent_scope": "",
       "intent_inferred": false,
       "release_decision_reason": "",
+      "current_release": {
+        "source": "musicbrainz",
+        "release_id": "11111111-1111-4111-8111-111111111111",
+        "locked": true
+      },
       "numbering_mode": "release",
       "inventory": {
         "version": 1,
@@ -489,6 +504,7 @@
           "date": "2001-01-01",
           "disambiguation": "",
           "format": "Digital Media",
+          "release_artist": "Acceptance Artist",
           "image_url": "https://coverartarchive.org/release/11111111-1111-4111-8111-111111111111/front-250",
           "matched": 1,
           "total_slots": 3,

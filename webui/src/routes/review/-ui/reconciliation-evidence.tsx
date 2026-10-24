@@ -6,7 +6,7 @@ import { Badge } from '@/components/primitives';
 import { musicBrainzBrowserUrl } from '@/components/provider-reference/musicbrainz-links';
 import { ProviderReleaseId } from '@/components/provider-reference/provider-reference';
 import { RecordInspector } from '@/components/record-inspector/record-inspector';
-import { ReleaseBadges } from '@/components/release-metadata/release-metadata';
+import { HelpHint, ReleaseBadges } from '@/components/release-metadata/release-metadata';
 
 import type {
   AlbumAssignment,
@@ -429,6 +429,12 @@ function DuplicateCopies({
 }
 
 function AudioEvidence({ details, explain = false }: { details: Data; explain?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const [expandedLinks, setExpandedLinks] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setExpanded(false);
+    setExpandedLinks(new Set());
+  }, [details.file_path, details.expected_title, details.recording_mbid]);
   const audio = object(details.acoustid);
   const grouped = new Map<string, Data>();
   for (const recording of objects(audio.recordings)) {
@@ -449,11 +455,18 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
       ids,
     });
   }
-  const recordings = [...grouped.values()];
+  const recordings = [...grouped.values()].sort(
+    (a, b) =>
+      Number((b.ids as string[]).includes(label(details.recording_mbid))) -
+      Number((a.ids as string[]).includes(label(details.recording_mbid))),
+  );
   const status = label(audio.status || details.acoustid_status);
   const reasons =
     explain && Array.isArray(details.ambiguity_reasons)
-      ? details.ambiguity_reasons.map(label).filter(Boolean)
+      ? details.ambiguity_reasons
+          .map(label)
+          .filter(Boolean)
+          .map((reason) => reason[0].toUpperCase() + reason.slice(1))
       : [];
   const expected = label(details.expected_title || object(details.replacement_track).name);
   const wrong = explain && details.audio_conflict === 'different_recording';
@@ -487,6 +500,12 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
           : reasons.length
             ? 'Why this needs review'
             : 'Audio identity'}
+        <HelpHint label="AcoustID audio evidence">
+          AcoustID compares an audio fingerprint with submitted recordings. The percentage measures
+          fingerprint similarity. Several MusicBrainz recordings can share one fingerprint, so equal
+          scores do not rank them. SoulSync also checks the title, artists, version, length and the
+          other files on this release. “Selected recording” identifies the recording in this plan.
+        </HelpHint>
       </h4>
       {(wrong || unsupported) && (
         <p>
@@ -497,6 +516,44 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
       {reasons.map((reason) => (
         <p key={reason}>{reason}</p>
       ))}
+      {details.catalogue_disagreement === true && (
+        <p>
+          File tags and the selected release credit{' '}
+          <strong>{label(details.expected_artist)}</strong>. Fingerprint links credit{' '}
+          <strong>{[...new Set(recordings.map((row) => label(row.artist)))].join('; ')}</strong>.
+          Confirm the proposed assignment or choose another release track below.
+        </p>
+      )}
+      {explain && objects(details.competitors).length > 0 && (
+        <ul className={styles.assignmentCompetitors} aria-label="Competing assignments">
+          {objects(details.competitors).map((rival, index) => (
+            <li key={index}>
+              {rival.kind === 'local_file' ? (
+                <>
+                  <strong>{label(rival.file_path).split('/').pop()}</strong>
+                  <span>
+                    {rival.assigned_title
+                      ? `Currently paired with ${label(rival.assigned_title)}`
+                      : 'Currently unassigned'}
+                  </span>
+                  <details>
+                    <summary>File location</summary>
+                    <code>{label(rival.file_path)}</code>
+                  </details>
+                </>
+              ) : (
+                <>
+                  <strong>{label(rival.slot_title)}</strong>
+                  <span>
+                    Release position{' '}
+                    {formatTrackPosition(count(rival.disc_number), count(rival.track_number))}
+                  </span>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
       {explain && delta > 3000 && (
         <div className={styles.durationWarning}>
           <strong>Length differs by {(delta / 1000).toFixed(1)} seconds</strong>
@@ -507,12 +564,8 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
       )}
       {recordings.length > 0 ? (
         <>
-          <p className={styles.muted}>
-            Fingerprint similarity is not recording certainty.
-            {recordings.length > 1 && ' Equal scores do not rank these recordings.'}
-          </p>
           <ul className={styles.audioCandidates}>
-            {recordings.map((recording, index) => (
+            {(expanded ? recordings : recordings.slice(0, 5)).map((recording, index) => (
               <li key={index}>
                 <div className={styles.audioCandidateHeading}>
                   <strong>{label(recording.title) || 'Unnamed recording'}</strong>
@@ -522,22 +575,65 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
                 </div>
                 <span>{label(recording.artist) || 'Artist not supplied'}</span>
                 <div className={styles.audioRecordingLinks}>
-                  {(recording.ids as string[]).map((id) => (
-                    <a
-                      key={id}
-                      href={musicBrainzBrowserUrl('recording', id)}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={`MusicBrainz recording ${id}`}
+                  {(recording.ids as string[])
+                    .slice()
+                    .sort(
+                      (a, b) =>
+                        Number(b === details.recording_mbid) - Number(a === details.recording_mbid),
+                    )
+                    .slice(
+                      0,
+                      expandedLinks.has(label(recording.title) + label(recording.artist))
+                        ? undefined
+                        : 3,
+                    )
+                    .map((id) => (
+                      <a
+                        key={id}
+                        href={musicBrainzBrowserUrl('recording', id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={`MusicBrainz recording ${id}`}
+                      >
+                        {id === details.recording_mbid ? 'Selected recording' : 'Recording'} ·{' '}
+                        {id.slice(0, 8)} ↗
+                      </a>
+                    ))}
+                  {(recording.ids as string[]).length > 3 && (
+                    <button
+                      type="button"
+                      className={styles.inlineEvidenceButton}
+                      aria-expanded={expandedLinks.has(
+                        label(recording.title) + label(recording.artist),
+                      )}
+                      onClick={() =>
+                        setExpandedLinks((current) => {
+                          const next = new Set(current),
+                            key = label(recording.title) + label(recording.artist);
+                          if (next.has(key)) next.delete(key);
+                          else next.add(key);
+                          return next;
+                        })
+                      }
                     >
-                      {id === details.recording_mbid ? 'Selected recording' : 'Recording'} ·{' '}
-                      {id.slice(0, 8)} ↗
-                    </a>
-                  ))}
+                      {expandedLinks.has(label(recording.title) + label(recording.artist))
+                        ? 'Fewer recording links'
+                        : `Show ${(recording.ids as string[]).length - 3} more recording links`}
+                    </button>
+                  )}
                 </div>
               </li>
             ))}
           </ul>
+          {recordings.length > 5 && (
+            <Button
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((value) => !value)}
+            >
+              {expanded ? 'Show fewer recordings' : `Show ${recordings.length - 5} more recordings`}
+            </Button>
+          )}
         </>
       ) : (
         status && (
@@ -580,6 +676,7 @@ export function ReleaseComparison({
   onPin,
   busy = false,
   currentRelease,
+  libraryRelease,
   numberingMode,
   decisionReason,
   view = 'all',
@@ -590,6 +687,7 @@ export function ReleaseComparison({
   onPin?: (index: number) => void;
   busy?: boolean;
   currentRelease?: Data;
+  libraryRelease?: Data | null;
   numberingMode?: string;
   decisionReason?: string;
   view?: 'all' | 'list' | 'detail';
@@ -598,6 +696,16 @@ export function ReleaseComparison({
   useEffect(() => setInspectedPair(null), [selected]);
   if (!candidates.length) return null;
   const active = candidates[Math.min(selected, candidates.length - 1)];
+  const isLibraryEdition = (candidate: Data) =>
+    Boolean(libraryRelease?.release_id) &&
+    libraryRelease?.source === candidate.source &&
+    String(libraryRelease?.release_id) === String(candidate.release_id);
+  const libraryCandidate = candidates.find(isLibraryEdition);
+  const editionChanged =
+    libraryRelease?.release_id &&
+    currentRelease?.release_id &&
+    (libraryRelease.source !== currentRelease.source ||
+      libraryRelease.release_id !== currentRelease.release_id);
   const pairs = [...objects(active.pairs), ...objects(active.missing_slots)].sort(
     (left, right) =>
       count(left.disc_number) - count(right.disc_number) ||
@@ -625,6 +733,41 @@ export function ReleaseComparison({
     >
       {view !== 'detail' && (
         <>
+          {editionChanged && (
+            <div className={styles.editionComparison} aria-label="Current and planned editions">
+              <div>
+                <small>Current library edition</small>
+                <strong>
+                  {label(libraryCandidate?.release_title) || 'Previously assigned release'}
+                </strong>
+                <ReleaseBadges
+                  format={label(libraryCandidate?.format)}
+                  country={label(libraryCandidate?.country)}
+                  disambiguation={label(libraryCandidate?.disambiguation)}
+                />
+                <ProviderReleaseId
+                  source={label(libraryRelease?.source)}
+                  releaseId={label(libraryRelease?.release_id)}
+                />
+              </div>
+              <div>
+                <small>Selected for this plan</small>
+                <strong>
+                  {label(
+                    candidates.find(
+                      (candidate) =>
+                        candidate.source === currentRelease?.source &&
+                        candidate.release_id === currentRelease?.release_id,
+                    )?.release_title,
+                  ) || 'Selected release'}
+                </strong>
+                <ProviderReleaseId
+                  source={label(currentRelease?.source)}
+                  releaseId={label(currentRelease?.release_id)}
+                />
+              </div>
+            </div>
+          )}
           <div className={styles.sectionHeading}>
             <div>
               <h4>
@@ -677,6 +820,11 @@ export function ReleaseComparison({
                     />
                     <span>
                       <strong>{label(candidate.release_title) || `Candidate ${index + 1}`}</strong>
+                      {label(candidate.release_artist) && (
+                        <span className={styles.releaseArtist}>
+                          {label(candidate.release_artist)}
+                        </span>
+                      )}
                       <small>
                         {[candidate.source, candidate.date].map(label).filter(Boolean).join(' · ')}
                       </small>
@@ -686,6 +834,7 @@ export function ReleaseComparison({
                         disambiguation={label(candidate.disambiguation)}
                       />
                       {isCurrent && <small>Selected for this album plan</small>}
+                      {isLibraryEdition(candidate) && <small>Current library edition</small>}
                       {label(candidate.difference_summary) && (
                         <small>{label(candidate.difference_summary)}</small>
                       )}
@@ -714,6 +863,9 @@ export function ReleaseComparison({
           <div className={styles.releaseDetailHeader}>
             <div>
               <strong>{label(active.release_title) || `Candidate ${selected + 1}`}</strong>
+              {label(active.release_artist) && (
+                <p className={styles.releaseArtist}>{label(active.release_artist)}</p>
+              )}
               {label(active.difference_summary) && <p>{label(active.difference_summary)}</p>}
               <ReleaseBadges
                 format={label(active.format)}
@@ -1209,7 +1361,10 @@ export function ReconciliationEvidence({
 }) {
   const details = object(finding.details);
   const changes = object(details.changes);
-  const shownChanges = displayChanges(changes);
+  const shownChanges = displayChanges(changes).filter(
+    (change) =>
+      !(change.field === 'album' && change.locations.every((location) => location === 'library')),
+  );
   const identifierAdditions = shownChanges.filter(
     (change) =>
       isIdentifierField(change.field) && changeOperation(change.old, change.next) === 'add',

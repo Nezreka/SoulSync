@@ -20,7 +20,7 @@ MAX_BYTES = 128 * 1024 * 1024
 MAX_RESULT = 1024 * 1024
 MAX_MEMORY = 32 * 1024 * 1024
 RETENTION = 30 * 86400
-SCHEMA = 1  # Bump for incompatible key/output formats. Storage mechanics are not matching policy.
+SCHEMA = 2  # Explicit competitors and catalogue disagreement are part of each pair.
 log = logging.getLogger(__name__)
 
 
@@ -109,8 +109,18 @@ def decode(raw, files, slots, forced_pairs):
         raise ValueError('Invalid pairs')
     used_files, used_slots = [], []
     for pair in pairs:
-        if not isinstance(pair, dict) or set(pair) != {'file_index', 'slot_index', 'score', 'reasons', 'duration_delta_ms', 'ambiguity_reasons', 'confidence'}:
+        if not isinstance(pair, dict) or set(pair) != {'file_index', 'slot_index', 'score', 'reasons', 'duration_delta_ms', 'ambiguity_reasons', 'confidence', 'competitors', 'catalogue_disagreement'}:
             raise ValueError('Invalid pair schema')
+        if type(pair['catalogue_disagreement']) is not bool or not isinstance(pair['competitors'], list):
+            raise ValueError('Invalid assignment explanation')
+        for rival in pair['competitors']:
+            if not isinstance(rival, dict):
+                raise ValueError('Invalid assignment competitor')
+            expected = ({'kind', 'slot_title', 'disc_number', 'track_number'}
+                        if rival.get('kind') == 'release_slot' else
+                        {'kind', 'file_path', 'current_title', 'assigned_title'})
+            if set(rival) != expected or rival['kind'] not in ('release_slot', 'local_file'):
+                raise ValueError('Invalid assignment competitor')
         used_files.append(pair['file_index'])
         used_slots.append(pair['slot_index'])
         if type(pair['score']) is not int or pair['score'] <= 0:

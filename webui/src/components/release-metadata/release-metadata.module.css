@@ -12,7 +12,7 @@
   color: var(--text-2);
   padding: 3px 7px;
   gap: 5px;
-  cursor: help;
+  cursor: default;
 }
 .flag {
   width: 18px;
@@ -21,16 +21,34 @@
   border-radius: 1px;
 }
 .tooltipPosition {
-  z-index: 10000;
+  z-index: var(--z-tooltip, 100000);
 }
 .tooltip {
   max-width: min(300px, calc(100vw - 24px));
   padding: 8px 10px;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
-  background: var(--surface-2, #262626);
+  background: var(--surface-overlay, #18181d);
   color: var(--text-1, #eee);
   font-size: 12px;
   line-height: 1.5;
   box-shadow: 0 4px 16px #0005;
+}
+.help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-inline-start: 6px;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
 }

@@ -27,7 +27,7 @@ from core.library.reconciliation_inventory import (
     known_membership_agrees, discovery_roots, inventory_record, directory_observations,
 )
 from core.library.reconciliation_evidence import (
-    ReconciliationEvidence, album_folders_audio_path_digest,
+    ReconciliationEvidence, album_folders_audio_path_digest, file_identity,
 )
 from core.library.reconciliation_plan import (
     audio_contradicts_local_title, reconcile_folder, _title_score,
@@ -118,6 +118,7 @@ def _suggest_filename(path: str, slot: dict, *, absolute_number: int | None = No
         return ''
     stem, extension = os.path.splitext(os.path.basename(path))
     from core.text.track_prefix import parse_track_prefix
+    from core.imports.paths import sanitize_filename
     parsed = parse_track_prefix(stem)
     if parsed.number is not None:
         prefix = stem[:-len(parsed.remainder)]
@@ -137,7 +138,7 @@ def _suggest_filename(path: str, slot: dict, *, absolute_number: int | None = No
             for match, value in reversed(list(zip(numbers, values))):
                 prefix = prefix[:match.start()] + str(value).zfill(len(match[0])) + prefix[match.end():]
         title = (parsed.remainder if display_title_compatible(parsed.remainder, slot)
-                 else _safe_filename(slot['title']))
+                 else sanitize_filename(slot['title']))
         proposed = f'{prefix}{title}{extension}'
     else:
         # Preserve an unrecognized numeric prefix (for example a year). It is
@@ -145,7 +146,7 @@ def _suggest_filename(path: str, slot: dict, *, absolute_number: int | None = No
         unknown = re.match(r'^(\d{4,}\s*[-_.]\s*)(.+)$', stem)
         current = unknown[2] if unknown else stem
         title = (current if display_title_compatible(current, slot)
-                 else _safe_filename(slot['title']))
+                 else sanitize_filename(slot['title']))
         proposed = f'{unknown[1] if unknown else ""}{title}{extension}'
     return os.path.join(os.path.dirname(path), proposed) if proposed != os.path.basename(path) else ''
 
@@ -631,9 +632,10 @@ def _normalize_slot(item: dict, source: str) -> dict:
     }
 
 
-def _match_release(files, slots, *, source, release_id, forced_pairs=None):
-    plan = cached_match(files, slots, source=source, release_id=release_id,
-                        forced_pairs=forced_pairs, compute=reconcile_folder)
+def _match_release(files, slots, *, source, release_id, forced_pairs=None, catalogue_review=False):
+    plan = (reconcile_folder(files, slots, forced_pairs=forced_pairs, catalogue_review=True)
+            if catalogue_review else cached_match(files, slots, source=source, release_id=release_id,
+                        forced_pairs=forced_pairs, compute=reconcile_folder))
     # The cached solver retains a complete partition. Intentional companions
     # share their source's assignment without consuming another release slot.
     assigned_paths = {files[pair['file_index']]['path'] for pair in plan['pairs']}
@@ -810,6 +812,42 @@ def _release_metadata(scored: tuple, cache: dict, exact_releases: set[str]) -> d
         cache[key] = ((get_album_for_source(source, release_id, exact_release=True)
                        if exact else get_album_for_source(source, release_id)) or {})
     return cache[key]
+
+
+def _release_display_metadata(source, release_id, meta):
+    """Use the provider adapters for covers and complete release credits."""
+    from core.metadata.types import Album
+    converter = getattr(Album, f'from_{source}_dict', None)
+    adapted = converter(meta) if converter else None
+    credits = meta.get('artists') or meta.get('artist-credit') or []
+    names = [str(artist.get('name') or (artist.get('artist') or {}).get('name') or '')
+             if isinstance(artist, dict) else str(artist) for artist in credits]
+    names = [name for name in names if name]
+    if not names and adapted:
+        names = [name for name in adapted.artists if name and name != 'Unknown Artist']
+    return {
+        'release_artist': ' & '.join(names),
+        'image_url': meta.get('image_url') or meta.get('thumb_url') or
+            next((image.get('url') for image in meta.get('images') or []
+                  if isinstance(image, dict) and image.get('url')), '') or
+            (adapted.image_url if adapted else '') or
+            (f'https://coverartarchive.org/release/{release_id}/front-250' if source == 'musicbrainz' else ''),
+    }
+
+
+def _supported_current_edition(files, album, candidates):
+    """Retain a coherent existing edition supported by every owned file."""
+    if not album or album.get('canonical_locked'):
+        return None
+    identity = album.get('canonical_source'), str(album.get('canonical_album_id') or '')
+    members = [file for file in files if not file.get('companion_of')]
+    if identity[0] != 'musicbrainz' or not members or not all(
+        (file.get('tags') or {}).get('musicbrainz_release_id') == identity[1]
+        for file in members):
+        return None
+    return next((row for row in candidates if (row.source, row.release_id) == identity
+                 and row.clear == row.matched == len(members)
+                 and not row.plan['extra_files'] and not row.plan['missing_slots']), None)
 
 
 def _edition_preference(meta: dict) -> tuple[int, int]:
@@ -1149,6 +1187,8 @@ def _candidate_evidence(files: list[dict], scored: tuple,
             'confidence': pair['confidence'],
             'reasons': pair['reasons'],
             'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
+            'competitors': pair.get('competitors') or [],
+            'catalogue_disagreement': pair.get('catalogue_disagreement') or False,
             'playlists': list(file.get('playlists') or []),
         })
     release_meta = release_meta or {}
@@ -1164,11 +1204,7 @@ def _candidate_evidence(files: list[dict], scored: tuple,
     return {
         'source': source, 'release_id': release_id,
         'release_title': release_meta.get('name') or release_meta.get('title') or '',
-        'image_url': (release_meta.get('image_url') or release_meta.get('thumb_url') or
-                      next((image.get('url') for image in (release_meta.get('images') or [])
-                            if isinstance(image, dict) and image.get('url')), '') or
-                      (f'https://coverartarchive.org/release/{release_id}/front-250'
-                       if source == 'musicbrainz' else '')),
+        **_release_display_metadata(source, release_id, release_meta),
         **release_catalog_details(release_meta),
         'country': release_meta.get('country') or '',
         'disambiguation': release_meta.get('disambiguation') or '',
@@ -1193,6 +1229,12 @@ def _audio_conflicts_with_slot(file: dict, slot: dict) -> bool:
         recording_supports_file_slot(recording, file, slot)
         for recording in recordings
     )
+
+
+def _pair_audio_conflict(file, slot, pair):
+    # An explicitly selected release's naming disagreement has its own review
+    # decision. Once confirmed, it must not reopen as an unreviewed audio veto.
+    return not pair.get('catalogue_disagreement') and _audio_conflicts_with_slot(file, slot)
 
 
 @timed('assignment_preparation')
@@ -1220,7 +1262,7 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict) ->
             if proposed is not None and current != proposed:
                 changes[field] = {'old': current, 'new': proposed}
                 categories.add('numbering')
-        different_recording = _audio_conflicts_with_slot(file, slot)
+        different_recording = _pair_audio_conflict(file, slot, pair)
         if pair['confidence'] not in ('clear', 'manual') or different_recording:
             status = 'uncertain'
             categories.add('audio_conflicts')
@@ -1324,9 +1366,7 @@ def candidate_preview(files: list[dict], row: tuple, release_meta: dict) -> dict
         'date': release_meta.get('date') or release_meta.get('release_date') or '',
         'disambiguation': release_meta.get('disambiguation') or '',
         'format': ', '.join(dict.fromkeys(formats)) or release_meta.get('format') or '',
-        'image_url': (release_meta.get('image_url') or release_meta.get('thumb_url') or
-                      (f'https://coverartarchive.org/release/{candidate.release_id}/front-250'
-                       if candidate.source == 'musicbrainz' else '')),
+        **_release_display_metadata(candidate.source, candidate.release_id, release_meta),
         'matched': candidate.matched, 'total_slots': len(release_slots),
         'excluded_video_tracks': max((slot.get('excluded_video_tracks', 0)
                                       for slot in release_slots), default=0),
@@ -1430,6 +1470,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
             'intent_scope': intent_scope,
             'intent_inferred': intent_inferred,
             'release_decision_reason': common.get('release_decision_reason') or '',
+            'current_release': common.get('current_release'),
             'numbering_mode': numbering_mode,
             'inventory': inventory,
             'release_track_count': len(slots), 'local_file_count': len(files),
@@ -2106,6 +2147,7 @@ class LibraryReconciliationJob(RepairJob):
         assignment_overrides = self._assignment_overrides(context)
         from core.library import reconciliation_choices as review_choices
         kept_numbering = review_choices.applied_numbering_choices(context.db)
+        reviewed_releases = review_choices.load_release_choices(context.db)
         numbering_history = review_choices.flattened_numbering_history(context.db)
         playlist_membership = {}
         if context.playlist_membership:
@@ -2240,7 +2282,8 @@ class LibraryReconciliationJob(RepairJob):
                                      if db_row else [])
                         files.append(cache.file_evidence(path, _read_reconciliation_tags, audio=audio,
                             library_fields={'db': db_row, 'playlists': playlists,
-                                            'size_bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns}))
+                                            'size_bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns,
+                                            'file_identity': file_identity(stat)}))
                         result.scanned += 1
                     # The evidence cache uses its own SQLite connection. Release
                     # its write lock before create_finding opens another one.
@@ -2461,6 +2504,10 @@ class LibraryReconciliationJob(RepairJob):
                         intents.get(str(album_id)), watched_artists,
                         lambda row: _release_metadata(row, release_meta_cache, exact_musicbrainz_releases))
                     ranked_candidates = list(scored)
+                    retained_current = _supported_current_edition(files, album, scored)
+                    if retained_current:
+                        scored.remove(retained_current)
+                        scored.insert(0, retained_current)
                     pinned_row = None
                     best_unpinned_rank = rank_candidate(scored[0])
                     if album and album.get('canonical_locked'):
@@ -2470,13 +2517,21 @@ class LibraryReconciliationJob(RepairJob):
                                             str(album.get('canonical_album_id') or ''))), None)
                         if pinned_row:
                             scored.remove(pinned_row)
+                            reviewed_plan = _match_release(files, pinned_row.slots,
+                                source=pinned_row.source, release_id=pinned_row.release_id,
+                                catalogue_review=True)
+                            pinned_row = ScoredCandidate(
+                                sum(pair['confidence'] in ('clear', 'manual') for pair in reviewed_plan['pairs']),
+                                len(reviewed_plan['pairs']), -len(reviewed_plan['extra_files']),
+                                pinned_row.source, pinned_row.release_id, pinned_row.slots, reviewed_plan)
                             scored.insert(0, pinned_row)
                     clear, matched, _extras, source, release_id, slots, plan = scored[0]
+                    # An explicitly selected, loaded release stays selected.
+                    # Any catalogue disagreement belongs to its track decisions.
+                    explicit_release = reviewed_releases.get(str(album_id)) == (source, release_id)
                     locked_conflict = bool(album and album.get('canonical_locked') and
-                                           (not pinned_row or
-                                            (pinned_row.matched == 0 and
-                                             rank_candidate(pinned_row) !=
-                                             best_unpinned_rank)))
+                        (not pinned_row or (not explicit_release and pinned_row.matched == 0
+                         and rank_candidate(pinned_row) != best_unpinned_rank)))
                     tied_rows = [row for row in scored
                                  if rank_candidate(row) == rank_candidate(scored[0])]
                     # Digital format resolves otherwise identical audio ties,
@@ -2496,7 +2551,7 @@ class LibraryReconciliationJob(RepairJob):
                     # cannot erase a real edition decision when equally fitting
                     # candidates contain different tracklists or positions.
                     tied = (len(tied_rows) > 1 and not equivalent_tie)
-                    if retained_partial or (pinned_row and not locked_conflict):
+                    if retained_partial or retained_current or (pinned_row and not locked_conflict):
                         tied = False
                     pinned = bool(album and album.get('canonical_source') == source
                                   and str(album.get('canonical_album_id') or '') == release_id)
@@ -2514,7 +2569,7 @@ class LibraryReconciliationJob(RepairJob):
                         not (album and album.get('canonical_locked')) and
                         _distinctive_position_conflict(files, scored[0], scored[1:]))
                     digital_edition_choice = bool(
-                        album_id is not None and album and not album.get('canonical_locked') and
+                        album_id is not None and album and not retained_current and not album.get('canonical_locked') and
                         _full_coverage_digital_alternative(
                             scored[0], ranked_candidates, len(files),
                             lambda row: _release_metadata(
@@ -2628,7 +2683,7 @@ class LibraryReconciliationJob(RepairJob):
                     if forced_pairs:
                         try:
                             plan = _match_release(files, slots, source=source, release_id=release_id,
-                                                  forced_pairs=forced_pairs)
+                                                  forced_pairs=forced_pairs, catalogue_review=bool(pinned_row))
                         except ValueError as exc:
                             logger.warning('Ignoring conflicting manual assignments for %s: %s',
                                            folder, exc)
@@ -2670,6 +2725,9 @@ class LibraryReconciliationJob(RepairJob):
                     common = {
                         'album_id': album_id, 'album_title': display_release_title,
                         'library_album_title': library_album_title,
+                        'current_release': {'source': album.get('canonical_source') or '',
+                            'release_id': str(album.get('canonical_album_id') or ''),
+                            'locked': bool(album.get('canonical_locked'))} if album else None,
                         'artist_name': release_artist or (album.get('artist_name') if album else ''),
                         'release_artist_names': release_artist_names,
                         'album_consistency': consistency,
@@ -2743,7 +2801,7 @@ class LibraryReconciliationJob(RepairJob):
                         len(set(positions)) == len(slots) and
                         all(disc > 0 and track is not None and track > 0 for disc, track in positions) and
                         all(pair['confidence'] in ('clear', 'manual') and
-                            not _audio_conflicts_with_slot(files[pair['file_index']], slots[pair['slot_index']])
+                            not _pair_audio_conflict(files[pair['file_index']], slots[pair['slot_index']], pair)
                             for pair in plan['pairs']))
                     planned_paths = {}
                     for pair in _review_pairs(files, plan):
@@ -2761,14 +2819,14 @@ class LibraryReconciliationJob(RepairJob):
                         slot = slots[pair['slot_index']]
                         tags = file['tags']
                         if (pair['confidence'] not in ('clear', 'manual') or
-                                _audio_conflicts_with_slot(file, slot)):
+                                _pair_audio_conflict(file, slot, pair)):
                             competing_paths = [files[extra_index]['path']
                                                for extra_index, rivals in
                                                plan.get('competing_files', {}).items()
                                                if pair['file_index'] in rivals]
                             if (pair['file_index'] in duplicate_indexes and
                                     pair.get('ambiguity_reasons') == [
-                                        'another local file fits this release track']):
+                                        'Another local file fits this release track']):
                                 # The duplicate decision below owns both copies;
                                 # emitting a second "confirm this match" card makes
                                 # one problem look like two unrelated problems.
@@ -2779,12 +2837,12 @@ class LibraryReconciliationJob(RepairJob):
                                 entity_id=str(file['db']['id']) if file.get('db') else file['path'],
                                 file_path=file['path'], title=f'Confirm: {slot["title"]}',
                                 description=('The fingerprint identifies audio outside this release slot.'
-                                             if _audio_conflicts_with_slot(file, slot) else
+                                             if _pair_audio_conflict(file, slot, pair) else
                                              'This file fits a release slot, but the evidence is not decisive.'),
                                 details={**common, 'current_tags': tags, 'acoustid': file['acoustid'],
                                          'tool_checks': file.get('tool_checks') or [],
                                          'audio_conflict': ('different_recording'
-                                                            if _audio_conflicts_with_slot(file, slot)
+                                                            if _pair_audio_conflict(file, slot, pair)
                                                             else ''),
                                          'fingerprint_key': file['acoustid'].get('fingerprint_key'),
                                          'expected_title': slot['title'], 'match_reasons': pair['reasons'],
@@ -2805,6 +2863,8 @@ class LibraryReconciliationJob(RepairJob):
                                          },
                                          'expected_preview_url': slot.get('preview_url') or '',
                                          'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
+                                         'competitors': pair.get('competitors') or [],
+                                         'catalogue_disagreement': pair.get('catalogue_disagreement') or False,
                                          'competing_copies': competing_paths,
                                          'expected_recording_disambiguation':
                                          slot.get('recording_disambiguation') or '',
@@ -2814,6 +2874,7 @@ class LibraryReconciliationJob(RepairJob):
                                          'assignment_options': assignment_options,
                                          'size_bytes': file['size_bytes'],
                                          'mtime_ns': file['mtime_ns'],
+                                         'file_identity': file.get('file_identity'),
                                          'playlists': list(file.get('playlists') or [])}):
                                 result.findings_created += 1
                             continue
@@ -3011,6 +3072,7 @@ class LibraryReconciliationJob(RepairJob):
                                         'album_id')},
                                    'fingerprint_key': file['acoustid'].get('fingerprint_key'),
                                    'size_bytes': file['size_bytes'], 'mtime_ns': file['mtime_ns'],
+                                   'file_identity': file.get('file_identity'),
                                    'match_reasons': pair['reasons'],
                                    'confidence': pair['confidence'],
                                    'routine_numbering': routine_numbering and not filename_conflict,
@@ -3124,6 +3186,7 @@ class LibraryReconciliationJob(RepairJob):
                                    'file_duration_ms': file['tags'].get('duration_ms') or 0,
                                    'fingerprint_key': audio.get('fingerprint_key'),
                                    'size_bytes': file['size_bytes'], 'mtime_ns': file['mtime_ns'],
+                                   'file_identity': file.get('file_identity'),
                                    'track_id': file['db']['id'] if file.get('db') else None,
                                    'competing_copies': competing_paths,
                                    'same_audio_copies': same_audio_paths,
@@ -3183,7 +3246,7 @@ class LibraryReconciliationJob(RepairJob):
                     assignment_settled = (
                         not plan['extra_files'] and
                         all(pair['confidence'] in ('clear', 'manual') and
-                            not _audio_conflicts_with_slot(files[pair['file_index']], slots[pair['slot_index']])
+                            not _pair_audio_conflict(files[pair['file_index']], slots[pair['slot_index']], pair)
                             for pair in plan['pairs'])
                     )
                     intent_inferred = bool(missing) and assignment_settled and _inferred_partial(

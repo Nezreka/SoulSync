@@ -19,6 +19,7 @@ import threading
 import time
 import uuid
 from difflib import SequenceMatcher
+from functools import wraps
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -37,6 +38,32 @@ from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_worker")
+
+
+def review_plan_mutation(method):
+    """Serialize saved choices without waiting for another album's file moves."""
+    @wraps(method)
+    def guarded(self, case_id, *args, **kwargs):
+        with self._review_apply_lock:
+            bulk = getattr(self, '_bulk_fix_state', {})
+            case = self.get_review_case(case_id)
+            album_id = (case or {}).get('album_id')
+            affected_albums = {str(snapshot.get('album_id')) for snapshot in
+                               getattr(self, '_review_operation_snapshots', {}).values() if snapshot}
+            if bulk.get('running') and (case_id in bulk.get('review_case_ids', [])
+                                       or (album_id is not None and str(album_id) in affected_albums)):
+                return {'success': False, 'busy': True,
+                        'error': 'This album is being applied. Its plan will refresh when the operation finishes.'}
+            from core.library.maintenance_lock import mutation_lock
+            with mutation_lock.planning(album_id):
+                return method(self, case_id, *args, **kwargs)
+    return guarded
+
+
+def _reviewed_length_conflict(details):
+    local = details.get('file_duration_ms') or 0
+    expected = details.get('expected_duration_ms') or 0
+    return bool(local and expected and abs(local - expected) > 15000)
 
 
 def _same_reviewed_file(current_path: str, reviewed_path: str) -> bool:
@@ -486,7 +513,7 @@ class RepairWorker:
         self._bulk_fix_lock = threading.Lock()
         self._bulk_fix_stop_event = threading.Event()
         self._bulk_fix_state: Dict[str, Any] = {'running': False}
-        self._review_apply_lock = threading.Lock()
+        self._review_apply_lock = threading.RLock()
         self._reconciliation_scan_lock = threading.Lock()
         self._album_refresh_lock = threading.Lock()
         self._album_refreshes: Dict[str, dict] = {}
@@ -1753,6 +1780,11 @@ class RepairWorker:
         with self._album_refresh_lock:
             running = [(key, state.get('snapshot')) for key, state in self._album_refreshes.items()
                        if state.get('state') == 'running' and state.get('snapshot')]
+        if getattr(self, '_bulk_fix_state', {}).get('running'):
+            existing = {key for key, _ in running}
+            running.extend((key, snapshot) for key, snapshot in
+                getattr(self, '_review_operation_snapshots', {}).items()
+                if key not in existing and snapshot)
         return [(key, snapshot) for key, snapshot in running
                 if (not q or q.casefold() in
                     f"{snapshot.get('album') or ''} {snapshot.get('artist') or ''}".casefold())
@@ -1781,6 +1813,10 @@ class RepairWorker:
                         job_id: str = '') -> Optional[dict]:
         from core.library.reconciliation_redirects import resolve_case
         case_id = resolve_case(self.db, case_id)
+        bulk = getattr(self, '_bulk_fix_state', {})
+        snapshot = getattr(self, '_review_operation_snapshots', {}).get(case_id)
+        if status == 'pending' and bulk.get('running') and snapshot:
+            return {**snapshot, 'refresh': {'state': 'running', 'phase': bulk.get('phase')}}
         case = repair_review_queue.get_case(self.db, case_id, status=status, job_id=job_id)
         if case is None and status == 'pending' and hasattr(self, '_album_refresh_lock'):
             with self._album_refresh_lock:
@@ -1835,6 +1871,10 @@ class RepairWorker:
 
     def refresh_moved_review_album(self, album_id) -> None:
         """Organization updates paths first; then rediscover exact saved members."""
+        bulk = getattr(self, '_bulk_fix_state', {})
+        if bulk.get('running') and str(album_id) in bulk.get('organizing_album_ids', []):
+            # The apply operation owns the final refresh after ALL moves finish.
+            return
         conn = self.db._get_connection()
         try:
             rows = conn.execute("SELECT case_id, album_folder, plan_json FROM reconcile_album_plans WHERE state != 'retired'").fetchall()
@@ -1875,6 +1915,10 @@ class RepairWorker:
             self._album_refreshes[case_id] = {
                 'state': 'running', 'again': False, 'snapshot': snapshot, 'scope': scope,
                 'refresh_catalogue': refresh_catalogue}
+            if not hasattr(self, '_album_refresh_events'):
+                self._album_refresh_events = {}
+            completed_event = threading.Event()
+            self._album_refresh_events[case_id] = completed_event
 
         def refresh_one_album():
             from core.repair_jobs.library_reconciliation import LibraryReconciliationJob
@@ -1921,13 +1965,14 @@ class RepairWorker:
                         'state': 'error' if error else 'complete',
                         'error': error, 'metrics': metrics,
                     }
+                    completed_event.set()
                 break
 
         threading.Thread(target=refresh_one_album, daemon=True,
                          name='reconcile-album-review').start()
         return True
 
-    @maintenance_mutation
+    @review_plan_mutation
     def apply_review_decision(self, case_id: str, finding_id: int, *,
                               evidence_token: str, action: str,
                               fix_action: str = None,
@@ -1938,177 +1983,221 @@ class RepairWorker:
         card before any writer runs, and serialize queue submissions so a double
         click cannot start two fixes for the same finding in this worker.
         """
-        with self._review_apply_lock:
-            case = self.get_review_case(case_id)
-            item = next((f for f in case['items'] if f['id'] == finding_id), None) if case else None
-            if not item:
-                return {'success': False, 'stale': True,
-                        'error': 'This finding is no longer pending in this album. Refresh the case.'}
-            if not evidence_token or evidence_token != item['evidence_token']:
-                return {'success': False, 'stale': True,
-                        'error': 'The evidence changed since this card was opened. Review it again.'}
-            if (item.get('finding_type') == 'reconciliation_metadata' and
-                    action in ('fix', 'dismiss') and not fix_action):
-                return self._stage_review_decision_group(case_id, 'metadata', action=action,
-                                                        selected_ids={finding_id})
-            if ((item.get('finding_type') in ('reconciliation_extra', 'reconciliation_duplicate') or
-                     (item.get('finding_type') == 'reconciliation_unresolved' and fix_action in ('quarantine', 'replace', 'request_missing')))
-                    and action in ('fix', 'dismiss') and not (fix_action or '').startswith('assign:')):
-                details = item.get('details') or {}
-                if action == 'fix':
-                    if item['finding_type'] == 'reconciliation_duplicate':
-                        allowed_actions = {str(row.get('track_id')) for row in details.get('duplicate_copies') or [] if row.get('track_id')}
-                    else:
-                        allowed_actions = {'quarantine'}
-                        if details.get('replacement_track'):
-                            allowed_actions.add('request_missing')
-                            if details.get('audio_conflict') == 'different_recording' or details.get('version_conflict'):
-                                allowed_actions.add('replace')
-                    if not fix_action or fix_action not in allowed_actions:
-                        return {'success': False, 'error': 'Choose a current file action before saving the plan'}
-                return self._stage_review_decision_group(case_id, item['category'], action=action,
-                    selected_ids={finding_id}, fix_action=fix_action or '')
-            if action == 'dismiss':
-                ok = self.dismiss_finding(finding_id)
-                queued = (self._schedule_review_refresh(case_id, case.get('folder') or '', case)
-                          if ok and schedule_refresh else False)
-                return {'success': ok, 'action': 'dismiss',
-                        'refresh_queued': queued,
-                        'error': None if ok else 'Could not dismiss this finding'}
-            if action == 'fix' and fix_action and fix_action.startswith('assign:'):
-                details = {**item.get('details', {}), '_fix_action': fix_action}
-                result = self._fix_reconciliation_assignment(
-                    'track', item.get('entity_id'), item.get('file_path'), details)
-                if result.get('success'):
-                    result['refresh_queued'] = self._schedule_review_refresh(
-                        case_id, case.get('folder') or '', case)
-                return result
+        case = self.get_review_case(case_id)
+        item = next((f for f in case['items'] if f['id'] == finding_id), None) if case else None
+        if not item:
+            return {'success': False, 'stale': True,
+                    'error': 'This finding is no longer pending in this album. Refresh the case.'}
+        if not evidence_token or evidence_token != item['evidence_token']:
+            return {'success': False, 'stale': True,
+                    'error': 'The evidence changed since this card was opened. Review it again.'}
+        if (item.get('finding_type') == 'reconciliation_metadata' and
+                action in ('fix', 'dismiss') and not fix_action):
+            return self._stage_review_decision_group(case_id, 'metadata', action=action,
+                                                    selected_ids={finding_id})
+        if ((item.get('finding_type') in ('reconciliation_extra', 'reconciliation_duplicate') or
+                 (item.get('finding_type') == 'reconciliation_unresolved' and fix_action in ('quarantine', 'replace', 'request_missing')))
+                and action in ('fix', 'dismiss') and not (fix_action or '').startswith('assign:')):
+            details = item.get('details') or {}
             if action == 'fix':
-                result = self.fix_finding(finding_id, fix_action=fix_action,
-                                          review_approved=True)
-                if result.get('refresh_required') and schedule_refresh:
-                    result['refresh_queued'] = self._schedule_review_refresh(
-                        case_id, case.get('folder') or '', case, scope='discovery')
-                if ((result.get('success') or result.get('partial')) and schedule_refresh
-                        and result.get('action') != 'wishlisted'):
-                    scope = refresh_scope_for_finding(item)
-                    result['refresh_queued'] = self._schedule_review_refresh(
-                        case_id, case.get('folder') or '', case, scope=scope)
-                return result
-            return {'success': False, 'error': 'Unsupported review action'}
+                if item['finding_type'] == 'reconciliation_duplicate':
+                    allowed_actions = {str(row.get('track_id')) for row in details.get('duplicate_copies') or [] if row.get('track_id')}
+                else:
+                    allowed_actions = {'quarantine'}
+                    if details.get('replacement_track'):
+                        allowed_actions.add('request_missing')
+                        if (details.get('audio_conflict') == 'different_recording'
+                                or details.get('version_conflict') or _reviewed_length_conflict(details)):
+                            allowed_actions.add('replace')
+                if not fix_action or fix_action not in allowed_actions:
+                    return {'success': False, 'error': 'Choose a current file action before saving the plan'}
+            return self._stage_review_decision_group(case_id, item['category'], action=action,
+                selected_ids={finding_id}, fix_action=fix_action or '')
+        if action == 'dismiss':
+            ok = self.dismiss_finding(finding_id)
+            queued = (self._schedule_review_refresh(case_id, case.get('folder') or '', case)
+                      if ok and schedule_refresh else False)
+            return {'success': ok, 'action': 'dismiss',
+                    'refresh_queued': queued,
+                    'error': None if ok else 'Could not dismiss this finding'}
+        if action == 'fix' and fix_action and fix_action.startswith('assign:'):
+            details = {**item.get('details', {}), '_fix_action': fix_action}
+            result = self._fix_reconciliation_assignment(
+                'track', item.get('entity_id'), item.get('file_path'), details)
+            if result.get('success'):
+                result['refresh_queued'] = self._schedule_review_refresh(
+                    case_id, case.get('folder') or '', case)
+            return result
+        if action == 'fix':
+            result = self.fix_finding(finding_id, fix_action=fix_action,
+                                      review_approved=True)
+            if result.get('refresh_required') and schedule_refresh:
+                result['refresh_queued'] = self._schedule_review_refresh(
+                    case_id, case.get('folder') or '', case, scope='discovery')
+            if ((result.get('success') or result.get('partial')) and schedule_refresh
+                    and result.get('action') != 'wishlisted'):
+                scope = refresh_scope_for_finding(item)
+                result['refresh_queued'] = self._schedule_review_refresh(
+                    case_id, case.get('folder') or '', case, scope=scope)
+            return result
+        return {'success': False, 'error': 'Unsupported review action'}
 
-    @maintenance_mutation
+    @review_plan_mutation
     def pin_review_release(self, case_id: str, *, source: str, release_id: str,
                            expected_source: str, expected_release_id: str,
                            manual: bool = False, preview: bool = False) -> dict:
         """Pin a displayed candidate even when no release ambiguity was emitted."""
-        with self._review_apply_lock:
-            case = self.get_review_case(case_id, job_id='library_reconciliation')
-            plan = (case or {}).get('album_plan') or {}
-            album_id = (case or {}).get('album_id')
-            if not case or album_id is None or not plan:
-                return {'success': False, 'stale': True,
-                        'error': 'This album plan changed; refresh before choosing a release'}
-            if (plan.get('source'), str(plan.get('release_id') or '')) != (
-                    expected_source, expected_release_id):
-                return {'success': False, 'stale': True,
-                        'error': 'The selected release changed; review the candidates again'}
-            candidate = next((row for row in plan.get('candidates') or []
-                              if row.get('source') == source and
-                              str(row.get('release_id') or '') == release_id), None)
-            if manual or preview:
-                import re
-                if source != 'musicbrainz' or not re.fullmatch(
-                        r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}',
-                        release_id):
-                    return {'success': False, 'error': 'Enter a MusicBrainz release MBID'}
-                release = self.mb_client.get_release(
-                    release_id, includes=['recordings', 'artist-credits']) if self.mb_client else None
-                if not release or str(release.get('id') or '').lower() != release_id.lower():
-                    return {'success': False, 'error': 'That MusicBrainz release could not be loaded'}
-                tracks = [track for medium in release.get('media') or []
-                          for track in medium.get('tracks') or []]
-                if not tracks:
-                    return {'success': False, 'error': 'That release has no track list'}
-                if preview:
-                    from core.repair_jobs.library_reconciliation import (
-                        candidate_preview, _score_release_candidates, _read_file_tags, _mark_lossy_companions,
-                    )
-                    from core.library.reconciliation_evidence import ReconciliationEvidence
-                    paths = list(dict.fromkeys(row['file_path'] for row in plan.get('assignments') or []
-                                               if row.get('file_path')))
-                    if not paths:
-                        return {'success': False, 'error': 'Reanalyze this album before comparing another edition'}
-                    cache = ReconciliationEvidence(self.db, self.acoustid_client)
-                    files = []
-                    try:
-                        for path in paths:
-                            resolved = _resolve_file_path(path, self.transfer_folder,
-                                                          config_manager=self._config_manager)
-                            if not resolved:
-                                return {'success': False, 'error': 'Album files changed; reanalyze before comparing editions'}
-                            files.append(cache.file_evidence(resolved, _read_file_tags))
-                    finally:
-                        cache.close()
-                    from core.library.duplicate_rules import lossy_companion_exts
-                    _mark_lossy_companions(files, lossy_companion_exts(self._config_manager, self.db))
-                    scored = _score_release_candidates(files, [(source, release_id)], {}, {release_id})
-                    if not scored:
-                        return {'success': False, 'error': 'Could not analyze this release track list'}
-                    return {'success': True, 'candidate': candidate_preview(
-                        files, scored[0], release)}
-                candidate = candidate or {'source': source, 'release_id': release_id,
-                                          'clear': 0, 'matched': 1}
-            if not candidate:
-                return {'success': False, 'stale': True,
-                        'error': 'That release is no longer a candidate for this album'}
-            score = int(candidate.get('clear') or 0) / max(1, int(candidate.get('matched') or 0))
-            if not self.db.set_album_canonical(album_id, source, release_id,
-                                               score=score, locked=True):
-                return {'success': False, 'error': 'Could not pin that album release'}
-            queued = self._schedule_review_refresh(
-                case_id, case.get('folder') or '', case, scope='discovery')
-            return {'success': True, 'message': 'Release pinned; updating this album plan',
-                    'refresh_queued': queued}
+        case = self.get_review_case(case_id, job_id='library_reconciliation')
+        plan = (case or {}).get('album_plan') or {}
+        album_id = (case or {}).get('album_id')
+        if not case or album_id is None or not plan:
+            return {'success': False, 'stale': True,
+                    'error': 'This album plan changed; refresh before choosing a release'}
+        if (plan.get('source'), str(plan.get('release_id') or '')) != (
+                expected_source, expected_release_id):
+            return {'success': False, 'stale': True,
+                    'error': 'The selected release changed; review the candidates again'}
+        candidate = next((row for row in plan.get('candidates') or []
+                          if row.get('source') == source and
+                          str(row.get('release_id') or '') == release_id), None)
+        if manual or preview:
+            import re
+            if source != 'musicbrainz' or not re.fullmatch(
+                    r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}',
+                    release_id):
+                return {'success': False, 'error': 'Enter a MusicBrainz release MBID'}
+            release = self.mb_client.get_release(
+                release_id, includes=['recordings', 'artist-credits']) if self.mb_client else None
+            if not release or str(release.get('id') or '').lower() != release_id.lower():
+                return {'success': False, 'error': 'That MusicBrainz release could not be loaded'}
+            tracks = [track for medium in release.get('media') or []
+                      for track in medium.get('tracks') or []]
+            if not tracks:
+                return {'success': False, 'error': 'That release has no track list'}
+            if preview:
+                from core.repair_jobs.library_reconciliation import (
+                    candidate_preview, _score_release_candidates, _read_file_tags, _mark_lossy_companions,
+                )
+                from core.library.reconciliation_evidence import ReconciliationEvidence
+                paths = list(dict.fromkeys(row['file_path'] for row in plan.get('assignments') or []
+                                           if row.get('file_path')))
+                if not paths:
+                    return {'success': False, 'error': 'Reanalyze this album before comparing another edition'}
+                cache = ReconciliationEvidence(self.db, self.acoustid_client)
+                files = []
+                try:
+                    for path in paths:
+                        resolved = _resolve_file_path(path, self.transfer_folder,
+                                                      config_manager=self._config_manager)
+                        if not resolved:
+                            return {'success': False, 'error': 'Album files changed; reanalyze before comparing editions'}
+                        files.append(cache.file_evidence(resolved, _read_file_tags))
+                finally:
+                    cache.close()
+                from core.library.duplicate_rules import lossy_companion_exts
+                _mark_lossy_companions(files, lossy_companion_exts(self._config_manager, self.db))
+                scored = _score_release_candidates(files, [(source, release_id)], {}, {release_id})
+                if not scored:
+                    return {'success': False, 'error': 'Could not analyze this release track list'}
+                return {'success': True, 'candidate': candidate_preview(
+                    files, scored[0], release)}
+            candidate = candidate or {'source': source, 'release_id': release_id,
+                                      'clear': 0, 'matched': 1}
+        if not candidate:
+            return {'success': False, 'stale': True,
+                    'error': 'That release is no longer a candidate for this album'}
+        score = int(candidate.get('clear') or 0) / max(1, int(candidate.get('matched') or 0))
+        if not self.db.set_album_canonical(album_id, source, release_id,
+                                           score=score, locked=True):
+            return {'success': False, 'error': 'Could not pin that album release'}
+        review_choices.remember_release_choice(self.db, album_id, source, release_id)
+        queued = self._schedule_review_refresh(
+            case_id, case.get('folder') or '', case, scope='discovery')
+        return {'success': True, 'message': 'Release pinned; updating this album plan',
+                'refresh_queued': queued}
 
-    @maintenance_mutation
+    @review_plan_mutation
     def reopen_review_assignment(self, case_id: str, finding_id: int) -> dict:
         """Reconsider a recorded decision; never undo an applied file write."""
-        with self._review_apply_lock:
-            conn = self.db._get_connection()
-            try:
-                row = conn.execute('''SELECT file_path, details_json, status
-                    FROM repair_findings WHERE id = ? AND review_case_key = ?
-                      AND job_id = 'library_reconciliation' ''',
-                    (finding_id, case_id)).fetchone()
-                if not row or row[2] not in ('resolved', 'dismissed'):
-                    return {'success': False, 'stale': True,
-                            'error': 'This decision is no longer available to reopen'}
-                details = json.loads(row[1] or '{}')
-                folder = details.get('album_folder') or os.path.dirname(row[0] or '')
-                if not self.reopen_finding(finding_id):
-                    return {'success': False, 'error': 'Could not reopen this decision'}
-                review_choices.ensure_schema(conn)
-                conn.execute('DELETE FROM reconcile_review_choices WHERE finding_id=?', (finding_id,))
+        conn = self.db._get_connection()
+        try:
+            row = conn.execute('''SELECT file_path, details_json, status
+                FROM repair_findings WHERE id = ? AND review_case_key = ?
+                  AND job_id = 'library_reconciliation' ''',
+                (finding_id, case_id)).fetchone()
+            if not row or row[2] not in ('resolved', 'dismissed'):
+                return {'success': False, 'stale': True,
+                        'error': 'This decision is no longer available to reopen'}
+            details = json.loads(row[1] or '{}')
+            folder = details.get('album_folder') or os.path.dirname(row[0] or '')
+            if not self.reopen_finding(finding_id):
+                return {'success': False, 'error': 'Could not reopen this decision'}
+            review_choices.ensure_schema(conn)
+            conn.execute('DELETE FROM reconcile_review_choices WHERE finding_id=?', (finding_id,))
+            conn.commit()
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_track_assignment'").fetchone():
+                conn.execute('''DELETE FROM reconcile_track_assignment
+                    WHERE album_id = ? AND source = ? AND release_id = ? AND file_path = ?''',
+                    (str(details.get('album_id')), details.get('source'),
+                     details.get('release_id'), row[0]))
                 conn.commit()
-                if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_track_assignment'").fetchone():
-                    conn.execute('''DELETE FROM reconcile_track_assignment
-                        WHERE album_id = ? AND source = ? AND release_id = ? AND file_path = ?''',
-                        (str(details.get('album_id')), details.get('source'),
-                         details.get('release_id'), row[0]))
-                    conn.commit()
-            finally:
-                conn.close()
-            queued = self._schedule_album_refresh(case_id, folder)
-            return {'success': True, 'refresh_queued': queued,
-                    'message': 'Decision reopened. Updating the album plan; applied file changes are retained.'}
+        finally:
+            conn.close()
+        queued = self._schedule_album_refresh(case_id, folder)
+        return {'success': True, 'refresh_queued': queued,
+                'message': 'Decision reopened. Updating the album plan; applied file changes are retained.'}
 
-    @maintenance_mutation
+    @review_plan_mutation
     def apply_review_decision_group(self, case_id: str, category: str, *,
                                     action: str) -> dict:
         """Save one album-level convention without applying file changes."""
-        with self._review_apply_lock:
-            return self._stage_review_decision_group(case_id, category, action=action)
+        if category == 'catalogue_assignments' and action == 'fix':
+            return self._confirm_catalogue_assignments(case_id)
+        return self._stage_review_decision_group(case_id, category, action=action)
+
+    def _confirm_catalogue_assignments(self, case_id):
+        case = self.get_review_case(case_id, job_id='library_reconciliation')
+        findings = [item for item in (case or {}).get('items', [])
+                    if item.get('finding_type') == 'reconciliation_unresolved'
+                    and (item.get('details') or {}).get('catalogue_disagreement')]
+        if not findings or (case.get('album_plan') or {}).get('state') == 'release_conflict':
+            return {'success': False, 'stale': True, 'error': 'Review the current album assignments first'}
+        rows, slots = [], set()
+        from core.repair_jobs.library_reconciliation import _wanted_slot_key
+        for item in findings:
+            details = item['details']
+            error = (self._reconciliation_file_guard(item['file_path'], details)
+                     or self._reconciliation_release_guard(details))
+            if error:
+                return {'success': False, 'stale': True, 'error': error}
+            key = _wanted_slot_key(details.get('replacement_track') or {})
+            if key in slots or key not in {option['key'] for option in details.get('assignment_options') or []}:
+                return {'success': False, 'stale': True, 'error': 'The proposed assignments are no longer one-to-one'}
+            slots.add(key)
+            rows.append((str(details['album_id']), details['source'], details['release_id'],
+                         item['file_path'], key, details['size_bytes'], details['mtime_ns'],
+                         details.get('fingerprint_key') or ''))
+        with self.db._get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            for item in findings:
+                current = conn.execute('SELECT details_json FROM repair_findings WHERE id=? AND status=\'pending\'',
+                                       (item['id'],)).fetchone()
+                if not current or json.loads(current[0]) != item['details']:
+                    return {'success': False, 'stale': True, 'error': 'The evidence changed; review this album again'}
+            for album_id, source, release_id, path, key, *_ in rows:
+                occupied = conn.execute('''SELECT file_path FROM reconcile_track_assignment
+                    WHERE album_id=? AND source=? AND release_id=? AND slot_key=? AND file_path!=?''',
+                    (album_id, source, release_id, key, path)).fetchone()
+                if occupied:
+                    return {'success': False, 'error': 'Another reviewed file already uses a proposed release track'}
+            conn.executemany('''INSERT INTO reconcile_track_assignment
+                (album_id, source, release_id, file_path, slot_key, size_bytes, mtime_ns, fingerprint_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(album_id, source, release_id, file_path)
+                DO UPDATE SET slot_key=excluded.slot_key, size_bytes=excluded.size_bytes,
+                    mtime_ns=excluded.mtime_ns, fingerprint_key=excluded.fingerprint_key''', rows)
+        queued = self._schedule_review_refresh(case_id, case.get('folder') or '', case)
+        return {'success': True, 'saved': len(rows), 'refresh_queued': queued,
+                'message': 'Assignments confirmed. Updating the proposed metadata changes.'}
 
     def _stage_review_decision_group(self, case_id, category, *, action, selected_ids=None, fix_action=''):
         allowed = {'numbering', 'title_conventions', 'metadata'}
@@ -2183,59 +2272,57 @@ class RepairWorker:
         return {'success': True, 'saved': len(findings), 'total': len(findings),
                 'message': 'Album plan saved. File changes will run only when you apply it.'}
 
-    @maintenance_mutation
+    @review_plan_mutation
     def reset_review_scope(self, case_id):
         """Reopen completeness as a plan choice without cancelling acquisitions."""
-        with self._review_apply_lock:
-            case = self.get_review_case(case_id, job_id='library_reconciliation')
-            plan = (case or {}).get('album_plan') or {}
-            if not case or case.get('album_id') is None or not plan:
-                return {'success': False, 'error': 'Reanalyze this album before changing scope'}
-            conn = self.db._get_connection()
-            try:
-                for table in ('reconcile_album_intent', 'reconcile_wanted_slots'):
-                    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
-                        conn.execute(f'DELETE FROM {table} WHERE album_id=? AND source=? AND release_id=?',
-                            (str(case['album_id']), plan.get('source'), plan.get('release_id')))
-                # Explicit reconsideration must survive inferred playlist
-                # ownership on the next scan. It requests a question, not tracks.
-                conn.execute('''INSERT INTO reconcile_album_intent(album_id,scope,source,release_id)
-                    VALUES (?,'review',?,?) ON CONFLICT(album_id) DO UPDATE SET
-                    scope='review',source=excluded.source,release_id=excluded.release_id''',
-                    (str(case['album_id']), plan.get('source'), plan.get('release_id')))
-                # An old accepted intent must not suppress this explicit reconsideration.
-                conn.execute("""UPDATE repair_findings SET status='pending', user_action=NULL,
-                    resolved_at=NULL WHERE id=(SELECT MAX(id) FROM repair_findings
-                    WHERE review_case_key=? AND finding_type='reconciliation_intent'
-                    AND status IN ('resolved','dismissed'))""", (case_id,))
-                conn.commit()
-            finally:
-                conn.close()
-            queued = self._schedule_review_refresh(case_id, case.get('folder') or '', case)
-            return {'success': True, 'refresh_queued': queued,
-                    'message': 'Album scope reopened. Existing wishlist requests are retained.'}
+        case = self.get_review_case(case_id, job_id='library_reconciliation')
+        plan = (case or {}).get('album_plan') or {}
+        if not case or case.get('album_id') is None or not plan:
+            return {'success': False, 'error': 'Reanalyze this album before changing scope'}
+        conn = self.db._get_connection()
+        try:
+            for table in ('reconcile_album_intent', 'reconcile_wanted_slots'):
+                if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                    conn.execute(f'DELETE FROM {table} WHERE album_id=? AND source=? AND release_id=?',
+                        (str(case['album_id']), plan.get('source'), plan.get('release_id')))
+            # Explicit reconsideration must survive inferred playlist
+            # ownership on the next scan. It requests a question, not tracks.
+            conn.execute('''INSERT INTO reconcile_album_intent(album_id,scope,source,release_id)
+                VALUES (?,'review',?,?) ON CONFLICT(album_id) DO UPDATE SET
+                scope='review',source=excluded.source,release_id=excluded.release_id''',
+                (str(case['album_id']), plan.get('source'), plan.get('release_id')))
+            # An old accepted intent must not suppress this explicit reconsideration.
+            conn.execute("""UPDATE repair_findings SET status='pending', user_action=NULL,
+                resolved_at=NULL WHERE id=(SELECT MAX(id) FROM repair_findings
+                WHERE review_case_key=? AND finding_type='reconciliation_intent'
+                AND status IN ('resolved','dismissed'))""", (case_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        queued = self._schedule_review_refresh(case_id, case.get('folder') or '', case)
+        return {'success': True, 'refresh_queued': queued,
+                'message': 'Album scope reopened. Existing wishlist requests are retained.'}
 
-    @maintenance_mutation
+    @review_plan_mutation
     def save_review_plan(self, case_id, signature):
         """Approve the current, resolved plan for a later bulk operation."""
-        with self._review_apply_lock:
-            case = self.get_review_case(case_id, job_id='library_reconciliation')
-            if not case or not signature or case.get('plan_signature') != signature or (case.get('refresh') or {}).get('state') == 'running':
-                return {'success': False, 'stale': True, 'error': 'The plan changed; review it again'}
-            if not case['plan']['can_apply_ready']:
-                return {'success': False, 'error': 'Resolve the remaining choices before saving for bulk apply'}
-            if not case['plan']['ready']:
-                return {'success': False, 'error': 'No changes remain to apply'}
-            conn = self.db._get_connection()
-            try:
-                review_choices.ensure_schema(conn)
-                conn.execute("""INSERT INTO reconcile_saved_plans(case_id, signature)
-                    VALUES (?, ?) ON CONFLICT(case_id) DO UPDATE SET signature=excluded.signature,
-                    updated_at=CURRENT_TIMESTAMP""", (case_id, signature))
-                conn.commit()
-            finally:
-                conn.close()
-            return {'success': True, 'message': 'Plan saved for bulk apply. No file changes applied.'}
+        case = self.get_review_case(case_id, job_id='library_reconciliation')
+        if not case or not signature or case.get('plan_signature') != signature or (case.get('refresh') or {}).get('state') == 'running':
+            return {'success': False, 'stale': True, 'error': 'The plan changed; review it again'}
+        if not case['plan']['can_apply_ready']:
+            return {'success': False, 'error': 'Resolve the remaining choices before saving for bulk apply'}
+        if not case['plan']['ready']:
+            return {'success': False, 'error': 'No changes remain to apply'}
+        conn = self.db._get_connection()
+        try:
+            review_choices.ensure_schema(conn)
+            conn.execute("""INSERT INTO reconcile_saved_plans(case_id, signature)
+                VALUES (?, ?) ON CONFLICT(case_id) DO UPDATE SET signature=excluded.signature,
+                updated_at=CURRENT_TIMESTAMP""", (case_id, signature))
+            conn.commit()
+        finally:
+            conn.close()
+        return {'success': True, 'message': 'Plan saved for bulk apply. No file changes applied.'}
 
     def saved_review_plans(self):
         conn = self.db._get_connection()
@@ -2253,7 +2340,6 @@ class RepairWorker:
                               'file_actions': sum(item['finding_type'] != 'reconciliation_metadata' and item['review_tier'] == 'ready' and not item['details'].get('plan_keep') for item in case['items'])})
         return cases
 
-    @maintenance_mutation
     def start_saved_review_plans(self, plans):
         with self._review_apply_lock:
             current = {row['case_id']: row for row in self.saved_review_plans()}
@@ -4780,7 +4866,7 @@ class RepairWorker:
         return {'success': True, 'action': 'deleted_expired', 'message': f'Expired download — {verb}'}
 
     def _reconciliation_file_guard(self, file_path, details):
-        """Prove the reviewed file still has the same audio before touching it."""
+        """Reuse reviewed audio only while the file's identity and stat agree."""
         if not file_path or not os.path.isfile(file_path):
             return 'The reviewed file is no longer at this path'
         try:
@@ -4788,8 +4874,14 @@ class RepairWorker:
             if (stat.st_size != details.get('size_bytes') or
                     stat.st_mtime_ns != details.get('mtime_ns')):
                 return 'The file changed after the scan; rescan before applying'
+            from core.library.reconciliation_evidence import file_identity
+            identity = details.get('file_identity')
+            if identity and identity != file_identity(stat):
+                return 'The file changed after the scan; rescan before applying'
             expected = details.get('fingerprint_key')
-            if expected:
+            # Older persisted plans lack identity/ctime. Validate those once;
+            # new scans have enough evidence to avoid decoding unchanged files.
+            if expected and not identity:
                 started = time.perf_counter()
                 result = self.acoustid_client.fingerprint_audio_file(file_path)
                 self._record_review_timing('fingerprinting', time.perf_counter() - started)
@@ -4842,6 +4934,10 @@ class RepairWorker:
 
     @staticmethod
     def _refresh_reconciliation_assignment(cursor, file_path, final_path, details):
+        from core.library.reconciliation_evidence import preserve_audio_evidence
+        preserve_audio_evidence(cursor, file_path, final_path,
+            size_bytes=details.get('size_bytes'), mtime_ns=details.get('mtime_ns'),
+            fingerprint_key=details.get('fingerprint_key'))
         # A guarded tag/name change preserves a manual audio assignment, only
         # when its original evidence was current before this write.
         if cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_track_assignment'").fetchone():
@@ -5115,6 +5211,7 @@ class RepairWorker:
         if not self.db.set_album_canonical(album_id, source, release_id,
                                            score=score, locked=True):
             return {'success': False, 'error': 'Could not pin that album release'}
+        review_choices.remember_release_choice(self.db, album_id, source, release_id)
         return {'success': True, 'action': 'reconciliation_release',
                 'message': 'Release choice saved.'}
 
@@ -5126,7 +5223,8 @@ class RepairWorker:
             return self._fix_reconciliation_extra(entity_type, entity_id,
                                                   file_path, details)
         if (choice == 'replace' and
-                details.get('audio_conflict') == 'different_recording' and
+                (details.get('audio_conflict') == 'different_recording'
+                 or details.get('version_conflict') or _reviewed_length_conflict(details)) and
                 isinstance(details.get('replacement_track'), dict)):
             return self._fix_reconciliation_extra(entity_type, entity_id,
                                                   file_path, details)
@@ -5318,6 +5416,7 @@ class RepairWorker:
         if action in ('replace', 'request_missing'):
             if (details.get('audio_conflict') != 'different_recording' and
                     not details.get('version_conflict') and
+                    not _reviewed_length_conflict(details) and
                     not (action == 'request_missing' and
                          details.get('replacement_available'))):
                 return {'success': False, 'error': 'No reviewed version conflict is available'}
@@ -7817,7 +7916,7 @@ class RepairWorker:
 
         Returns ``{'started': True, 'total': N}`` or
         ``{'started': False, 'error': ..., 'already_running': bool}``."""
-        with self._bulk_fix_lock:
+        with getattr(self, '_review_apply_lock', threading.RLock()), self._bulk_fix_lock:
             if self._bulk_fix_thread is not None and self._bulk_fix_thread.is_alive():
                 return {'started': False, 'already_running': True,
                         'error': 'A bulk fix is already running'}
@@ -7862,13 +7961,16 @@ class RepairWorker:
             # writes are value updates, never key insertions — get_bulk_fix_status
             # copies this dict from another thread, and a concurrent key insert
             # could make that copy raise mid-iteration.
+            self._review_operation_snapshots = {key: self.get_review_case(key)
+                for key, _ in review_case_folders or []}
             self._bulk_fix_state = {
                 'running': True,
                 'operation_id': uuid.uuid4().hex,
                 'phase': 'metadata',
                 'review_case_ids': [key for key, _ in review_case_folders or []] or ([review_case_id] if review_case_id else []),
                 'review_scope': review_scope,
-                'timings_seconds': {'waiting_for_scan': 0.0, 'fingerprinting': 0.0, 'applying': 0.0},
+                'timings_seconds': {'waiting_for_scan': 0.0, 'fingerprinting': 0.0,
+                                   'applying': 0.0, 'organizing': 0.0, 'reanalyzing': 0.0},
                 'total': len(ids),
                 'done': 0,
                 'fixed': 0,
@@ -7879,6 +7981,7 @@ class RepairWorker:
                 'safe_only': bool(safe_only),
                 'review_approved': bool(review_approved),
                 'organize_album_ids': list(organize_album_ids or []),
+                'organizing_album_ids': [],
                 'reconciliation_queued': False,
                 'organize_queued': 0,
                 'errors': [],
@@ -8011,10 +8114,13 @@ class RepairWorker:
                         if effective != json.loads(reviewed_details.get(fid) or '{}'):
                             raise ValueError('The proposed action changed during reconciliation; review the updated plan before applying.')
                     if review_approved:
-                        result = self._apply_reviewed_finding(
-                            fid, fix_action=fix_action, reviewed_details=reviewed_details,
-                            remaining_ids=(remaining_by_case.get(case_by_finding.get(fid))
-                                           if review_case_folders else None))
+                        from core.library.maintenance_lock import mutation_lock
+                        snapshot = getattr(self, '_review_operation_snapshots', {}).get(case_by_finding.get(fid)) or {}
+                        with mutation_lock.for_album(snapshot.get('album_id')):
+                            result = self._apply_reviewed_finding(
+                                fid, fix_action=fix_action, reviewed_details=reviewed_details,
+                                remaining_ids=(remaining_by_case.get(case_by_finding.get(fid))
+                                               if review_case_folders else None))
                     else:
                         # Preserve the longstanding two-argument call for
                         # ordinary bulk runs and test/deployment wrappers.
@@ -8048,8 +8154,10 @@ class RepairWorker:
             if (organize_album_ids and not state['failed'] and not state['stopped'] and
                     not state.get('error')):
                 state['phase'] = 'queueing_organization'
+                state['organizing_album_ids'] = list(dict.fromkeys(str(a) for a in organize_album_ids))
                 from core.reorganize_queue import get_queue
                 queue = get_queue()
+                organization_ids = []
                 for album_id in dict.fromkeys(organize_album_ids):
                     meta = self.db.get_album_display_meta(album_id)
                     if not meta:
@@ -8064,32 +8172,50 @@ class RepairWorker:
                     )
                     if queued.get('queued') or queued.get('reason') == 'already_queued':
                         state['organize_queued'] += 1
+                        organization_ids.append(queued['queue_id'])
                     else:
                         state['error'] = ('Metadata changes applied, but folder organization '
                                           'could not be queued: ' + str(queued.get('reason') or queued.get('error') or 'unknown reason'))
                         break
-            if state['fixed'] and review_case_folders:
-                state['phase'] = 'queueing_reanalysis'
-                valid_cases = [(key, folder) for key, folder in review_case_folders if folder]
-                if len(valid_cases) <= 3:
-                    queued = [self._schedule_album_refresh(key, folder, scope='discovery')
-                              for key, folder in valid_cases]
-                    state['reconciliation_queued'] = any(queued)
-                else:
-                    # Keep albums pending until the queued sweep actually
-                    # finishes. A sweep already underway cannot certify edits
-                    # that happened after it visited an album.
-                    with self._album_refresh_lock:
-                        for key, _folder in valid_cases:
-                            self._album_refreshes[key] = {
-                                'state': 'running', 'global_requested_at': time.time()}
-                    state['reconciliation_queued'] = self.run_job_now(
-                        'library_reconciliation')
-                    if not state['reconciliation_queued']:
-                        with self._album_refresh_lock:
-                            for key, _folder in valid_cases:
-                                self._album_refreshes[key] = {
-                                    'state': 'error', 'error': 'Could not queue album reanalysis'}
+                state['phase'] = 'organizing'
+                self._save_bulk_fix_report(state)
+                organization_started = time.perf_counter()
+                for queue_id in organization_ids:
+                    while not self.should_stop:
+                        outcome = queue.wait_for(queue_id, timeout=1.0)
+                        if outcome['status'] not in ('queued', 'running'):
+                            if outcome['status'] != 'done':
+                                state['error'] = outcome.get('error') or 'Folder organization did not finish; review the album before retrying'
+                            break
+                self._record_review_timing('organizing', time.perf_counter() - organization_started)
+                if self.should_stop:
+                    state['stopped'] = True
+                    state['error'] = 'Organization was interrupted; refresh the album before retrying'
+            # No scan may see the intermediate paths. Release our scan lock
+            # only after organization, then keep this operation active until
+            # its new inventory is published.
+            if acquired:
+                scan_lock.release()
+                acquired = False
+            if state['fixed'] and review_case_folders and not self.should_stop:
+                state['phase'] = 'reanalyzing'
+                self._save_bulk_fix_report(state)
+                refresh_started = time.perf_counter()
+                for key, folder in review_case_folders:
+                    if not folder:
+                        continue
+                    queued = self._schedule_album_refresh(key, folder, scope='discovery')
+                    state['reconciliation_queued'] = state.get('reconciliation_queued', False) or queued
+                    completed = getattr(self, '_album_refresh_events', {}).get(key)
+                    if queued and completed:
+                        while not self.should_stop and not completed.wait(timeout=1.0):
+                            pass
+                        refresh = self._album_refreshes.get(key) or {}
+                        if refresh.get('error'):
+                            state['error'] = refresh['error']
+                    elif not queued:
+                        state['error'] = 'Could not refresh the album after applying'
+                self._record_review_timing('reanalyzing', time.perf_counter() - refresh_started)
         except Exception as e:
             logger.error("Background bulk fix crashed: %s", e, exc_info=True)
             state['error'] = str(e)
@@ -8121,7 +8247,7 @@ class RepairWorker:
             if review_approved and getattr(self, '_on_job_finish', None):
                 try:
                     self._on_job_finish('review_apply',
-                        'error' if state['failed'] or state.get('stopped') else 'finished',
+                        'error' if state['failed'] or state.get('stopped') or state.get('error') else 'finished',
                         JobResult(scanned=state['done'], auto_fixed=state['fixed'], errors=state['failed']))
                 except Exception:
                     logger.exception('Could not publish review operation completion')

@@ -307,6 +307,7 @@ def extract_album_meta_from_tags(tags: Dict[str, Any]) -> Dict[str, Any]:
     return {
         'id': '',
         'album_id': '',
+        'release_mbid': _stringify(tags.get('musicbrainz_release_id') or tags.get('musicbrainz_albumid')),
         'name': album_name,
         'title': album_name,
         'release_date': release_date,
@@ -326,6 +327,7 @@ def read_album_track_from_file(
     file_path: str,
     *,
     read_embedded_tags_fn=None,
+    planned_metadata=None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[str]]:
     """Read embedded tags from ``file_path`` and produce
     ``(album_meta, track_meta, error_reason)``.
@@ -352,7 +354,27 @@ def read_album_track_from_file(
         reason = (result or {}).get('reason') if isinstance(result, dict) else None
         return None, None, reason or 'Could not read embedded tags from file.'
 
-    tags = result.get('tags') or {}
+    tags = dict(result.get('tags') or {})
+    # A review preview uses the same tag planner with the approved writes
+    # overlaid in memory. The eventual organizer reads these values from disk.
+    planned_metadata = planned_metadata or {}
+    fields = {'title': 'title', 'album_title': 'album', 'artist_name': 'albumartist',
+              'track_artist': 'artist', 'track_number': 'tracknumber',
+              'disc_number': 'discnumber', 'track_count': 'totaltracks',
+              'year': 'date', 'musicbrainz_release_id': 'musicbrainz_release_id'}
+    for field, tag in fields.items():
+        if field in planned_metadata:
+            tags[tag] = planned_metadata[field]
+    if planned_metadata.get('artist_name') and not planned_metadata.get('track_artist'):
+        tags['artist'] = planned_metadata['artist_name']
+    if 'track_artist' in planned_metadata:
+        tags.pop('artists', None)
+    if planned_metadata.get('artists_list'):
+        tags['artists'] = '; '.join(planned_metadata['artists_list'])
+    for field in planned_metadata.get('clear_musicbrainz_ids') or []:
+        tags.pop(field, None)
+        if field == 'musicbrainz_release_id':
+            tags.pop('musicbrainz_albumid', None)
     track_meta = extract_track_meta_from_tags(tags)
     if track_meta is None:
         return None, None, 'Embedded tags missing required title or artist.'

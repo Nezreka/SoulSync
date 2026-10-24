@@ -3080,3 +3080,238 @@
   color: var(--text-2);
   overflow-wrap: anywhere;
 }
+.dismissibleNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.dismissibleNotice > button {
+  margin-inline-start: auto;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+.assignmentCompetitors {
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+.assignmentCompetitors > li {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.assignmentCompetitors span,
+.assignmentCompetitors summary {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.inlineEvidenceButton {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 2px 0;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+.releaseArtist {
+  display: block;
+  color: var(--text-2);
+  margin-block: 4px;
+  font-size: 13px;
+}
+.numberingExamples {
+  width: 100%;
+  border-collapse: collapse;
+  margin-block: 16px;
+  font-size: 13px;
+  text-align: left;
+}
+.numberingExamples th,
+.numberingExamples td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.applyTotals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  align-items: baseline;
+  padding-block: 4px 12px;
+}
+.applyTotals strong {
+  font-size: 20px;
+}
+.applyTotals span,
+.commonFolder span {
+  color: var(--text-2);
+}
+.applyAlbum,
+.applyCategory {
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  margin-block: 10px;
+  padding: 12px;
+}
+.applyAlbum > summary,
+.applyCategory > summary {
+  cursor: pointer;
+}
+.applyAlbum > summary > span,
+.applyCategory > summary > span {
+  margin-inline-start: 12px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.applyCategory {
+  border-inline-start: 3px solid var(--info);
+}
+.applyCategory[data-kind='fills'] {
+  border-inline-start-color: var(--success);
+}
+.applyCategory[data-kind='corrections'] {
+  border-inline-start-color: var(--warning);
+}
+.applyCategory[data-kind='filenames'] {
+  border-inline-start-color: #a78bfa;
+}
+.applyCategory[data-kind='album'] {
+  border-inline-start-color: #2dd4bf;
+}
+.applyCategory > ul {
+  padding: 0;
+  list-style: none;
+}
+.applyCategory li {
+  padding-block: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.applyCategory table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.applyCategory th,
+.applyCategory td {
+  padding: 6px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  text-align: left;
+}
+.applyCategory td:last-child {
+  color: var(--success);
+}
+.applyCategory th {
+  color: var(--text-2);
+}
+.organizationPreview {
+  padding: 12px;
+  background: var(--surface-1);
+  border-radius: 8px;
+}
+.organizationPreview code,
+.commonFolder code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.fileDecisionList {
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  margin-block: 12px;
+}
+.fileDecisionList h4 {
+  margin: 0 0 10px;
+}
+.fileDecisionScroll {
+  overflow-x: auto;
+}
+.fileDecisionList table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.fileDecisionList th {
+  color: var(--text-2);
+  font-weight: 500;
+}
+.fileDecisionList th,
+.fileDecisionList td {
+  padding: 6px;
+  vertical-align: top;
+}
+.fileDecisionList td:first-child {
+  overflow-wrap: anywhere;
+}
+.fileDecisionList small {
+  display: block;
+  margin-top: 4px;
+}
+.keepFormat,
+.quarantineFormat {
+  display: inline-block;
+  padding: 3px 6px;
+  border-radius: 6px;
+  margin: 2px;
+}
+.keepFormat {
+  color: var(--success);
+  background: rgb(34 197 94 / 0.1);
+}
+.quarantineFormat {
+  color: var(--warning);
+  background: rgb(234 179 8 / 0.1);
+}
+.commonFolder {
+  display: grid;
+  gap: 3px;
+}
+.filePaths {
+  border-bottom: 1px solid var(--line);
+  padding-block: 2px 8px;
+}
+.filePaths summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 11px;
+}
+.filePaths ul {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+.filePaths li {
+  display: grid;
+  gap: 3px;
+  padding: 5px 0;
+}
+.filePaths code {
+  overflow-wrap: anywhere;
+}
+.editionComparison {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.editionComparison > div {
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.editionComparison small {
+  color: var(--text-2);
+}

@@ -897,7 +897,9 @@ def test_unindexed_metadata_apply_rejects_changed_evidence(tmp_path, monkeypatch
     result = worker._fix_reconciliation_metadata(item['entity_type'], item['entity_id'],
                                                 str(paths[1]), item['details'])
     assert not result['success']
-    assert 'indexed' in result['error'] if changed.startswith('indexed') else 'changed' in result['error']
+    # Adding a hardlink also changes ctime, so the file identity guard can
+    # reject the stale evidence before the indexed-row guard is reached.
+    assert ('indexed' in result['error'] or 'changed' in result['error']) if changed.startswith('indexed') else 'changed' in result['error']
     assert paths[1].read_bytes() == before
 
 

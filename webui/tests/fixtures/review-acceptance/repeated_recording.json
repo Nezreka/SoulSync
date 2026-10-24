@@ -23,6 +23,11 @@
           "album_id": "10",
           "album_title": "Northbound",
           "library_album_title": "Northbound",
+          "current_release": {
+            "source": "musicbrainz",
+            "release_id": "11111111-1111-4111-8111-111111111111",
+            "locked": true
+          },
           "artist_name": "Acceptance Artist",
           "release_artist_names": [
             "Acceptance Artist"
@@ -103,8 +108,17 @@
           },
           "expected_preview_url": "",
           "ambiguity_reasons": [
-            "another release track fits nearly as well"
+            "Another release track fits nearly as well"
           ],
+          "competitors": [
+            {
+              "kind": "release_slot",
+              "slot_title": "Home",
+              "disc_number": 1,
+              "track_number": 3
+            }
+          ],
+          "catalogue_disagreement": false,
           "competing_copies": [],
           "expected_recording_disambiguation": "",
           "current_recording_disambiguation": "",
@@ -169,6 +183,11 @@
           "album_id": "10",
           "album_title": "Northbound",
           "library_album_title": "Northbound",
+          "current_release": {
+            "source": "musicbrainz",
+            "release_id": "11111111-1111-4111-8111-111111111111",
+            "locked": true
+          },
           "artist_name": "Acceptance Artist",
           "release_artist_names": [
             "Acceptance Artist"
@@ -249,8 +268,17 @@
           },
           "expected_preview_url": "",
           "ambiguity_reasons": [
-            "another release track fits nearly as well"
+            "Another release track fits nearly as well"
           ],
+          "competitors": [
+            {
+              "kind": "release_slot",
+              "slot_title": "Home",
+              "disc_number": 1,
+              "track_number": 1
+            }
+          ],
+          "catalogue_disagreement": false,
           "competing_copies": [],
           "expected_recording_disambiguation": "",
           "current_recording_disambiguation": "",
@@ -315,6 +343,11 @@
           "album_id": "10",
           "album_title": "Northbound",
           "library_album_title": "Northbound",
+          "current_release": {
+            "source": "musicbrainz",
+            "release_id": "11111111-1111-4111-8111-111111111111",
+            "locked": true
+          },
           "artist_name": "Acceptance Artist",
           "release_artist_names": [
             "Acceptance Artist"
@@ -527,6 +560,11 @@
       "intent_scope": "",
       "intent_inferred": false,
       "release_decision_reason": "",
+      "current_release": {
+        "source": "musicbrainz",
+        "release_id": "11111111-1111-4111-8111-111111111111",
+        "locked": true
+      },
       "numbering_mode": "release",
       "inventory": {
         "version": 1,
@@ -625,7 +663,7 @@
             "duration differs by 0.00s"
           ],
           "ambiguity_reasons": [
-            "another release track fits nearly as well"
+            "Another release track fits nearly as well"
           ],
           "duration_delta_ms": 0,
           "audio_title": "Home",
@@ -778,7 +816,7 @@
             "duration differs by 0.00s"
           ],
           "ambiguity_reasons": [
-            "another release track fits nearly as well"
+            "Another release track fits nearly as well"
           ],
           "duration_delta_ms": 0,
           "audio_title": "Home",
@@ -812,6 +850,7 @@
           "date": "2001-01-01",
           "disambiguation": "",
           "format": "Digital Media",
+          "release_artist": "Acceptance Artist",
           "image_url": "https://coverartarchive.org/release/11111111-1111-4111-8111-111111111111/front-250",
           "matched": 3,
           "total_slots": 3,

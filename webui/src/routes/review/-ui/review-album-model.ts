@@ -198,7 +198,9 @@ export function readyFieldGroup(field: string): { key: string; label: string } {
     return { key: 'recording_ids', label: 'Recording IDs' };
   }
   if (['title', 'library_title'].includes(field)) return { key: 'title', label: 'Track titles' };
-  if (['album', 'library_album_title'].includes(field)) {
+  if (field === 'library_album_title')
+    return { key: 'library_album_title', label: 'Library album title' };
+  if (field === 'album') {
     return { key: 'album', label: 'Album title' };
   }
   if (

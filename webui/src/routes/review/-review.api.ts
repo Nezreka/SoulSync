@@ -93,6 +93,8 @@ export interface AlbumAssignment {
   acoustid?: Record<string, unknown>;
   reasons?: string[];
   ambiguity_reasons?: string[];
+  competitors?: Record<string, unknown>[];
+  catalogue_disagreement?: boolean;
 }
 
 export interface AlbumReconciliationPlan {
@@ -112,6 +114,7 @@ export interface AlbumReconciliationPlan {
     settled?: number;
   };
   numbering_mode?: string;
+  current_release?: { source: string; release_id: string; locked?: boolean } | null;
   categories: string[];
   assignments: AlbumAssignment[];
   candidates?: Array<{
@@ -124,6 +127,7 @@ export interface AlbumReconciliationPlan {
     extra: number;
     continuous_numbering: boolean;
     release_title?: string;
+    release_artist?: string;
     difference_summary?: string;
     image_url?: string;
     country?: string;
@@ -187,6 +191,7 @@ export interface ReviewFinding extends RepairFinding {
   review_tier?: 'ready' | 'manual' | 'destructive' | 'blocked';
   review_reason?: string;
   planned_file_action?: string;
+  file_decision?: { title: string; keep: string[]; quarantine: string[]; request: string } | null;
 }
 
 export interface ReviewCase {

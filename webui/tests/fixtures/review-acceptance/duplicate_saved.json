@@ -23,6 +23,11 @@
           "album_id": "10",
           "album_title": "Northbound",
           "library_album_title": "Northbound",
+          "current_release": {
+            "source": "musicbrainz",
+            "release_id": "11111111-1111-4111-8111-111111111111",
+            "locked": true
+          },
           "artist_name": "Acceptance Artist",
           "release_artist_names": [
             "Acceptance Artist"
@@ -185,6 +190,11 @@
           "album_id": "10",
           "album_title": "Northbound",
           "library_album_title": "Northbound",
+          "current_release": {
+            "source": "musicbrainz",
+            "release_id": "11111111-1111-4111-8111-111111111111",
+            "locked": true
+          },
           "artist_name": "Acceptance Artist",
           "release_artist_names": [
             "Acceptance Artist"
@@ -387,7 +397,17 @@
         "review_tier": "ready",
         "review_reason": "File decision saved; it will run only when this album plan is applied",
         "category": "duplicates",
-        "planned_file_action": "Keep /music/Acceptance Artist/Northbound/01 - Home.flac; move to recoverable quarantine: /music/Acceptance Artist/Northbound/01 - Home.copy.flac"
+        "planned_file_action": "Keep /music/Acceptance Artist/Northbound/01 - Home.flac; move to recoverable quarantine: /music/Acceptance Artist/Northbound/01 - Home.copy.flac",
+        "file_decision": {
+          "title": "Home",
+          "keep": [
+            "/music/Acceptance Artist/Northbound/01 - Home.flac"
+          ],
+          "quarantine": [
+            "/music/Acceptance Artist/Northbound/01 - Home.copy.flac"
+          ],
+          "request": ""
+        }
       }
     ],
     "count": 2,
@@ -441,6 +461,11 @@
       "intent_scope": "",
       "intent_inferred": false,
       "release_decision_reason": "",
+      "current_release": {
+        "source": "musicbrainz",
+        "release_id": "11111111-1111-4111-8111-111111111111",
+        "locked": true
+      },
       "numbering_mode": "release",
       "inventory": {
         "version": 1,
@@ -539,7 +564,7 @@
             "duration differs by 0.00s"
           ],
           "ambiguity_reasons": [
-            "another local file fits this release track"
+            "Another local file fits this release track"
           ],
           "duration_delta_ms": 0,
           "audio_title": "Home",
@@ -712,6 +737,7 @@
           "date": "2001-01-01",
           "disambiguation": "",
           "format": "Digital Media",
+          "release_artist": "Acceptance Artist",
           "image_url": "https://coverartarchive.org/release/11111111-1111-4111-8111-111111111111/front-250",
           "matched": 2,
           "total_slots": 2,
@@ -881,11 +907,35 @@
           {
             "id": 2,
             "description": "Keep /music/Acceptance Artist/Northbound/01 - Home.flac; move to recoverable quarantine: /music/Acceptance Artist/Northbound/01 - Home.copy.flac",
+            "file_path": "/music/Acceptance Artist/Northbound/01 - Home.copy.flac",
+            "title": "Home",
+            "changes": [],
+            "file_decision": {
+              "title": "Home",
+              "keep": [
+                "/music/Acceptance Artist/Northbound/01 - Home.flac"
+              ],
+              "quarantine": [
+                "/music/Acceptance Artist/Northbound/01 - Home.copy.flac"
+              ],
+              "request": ""
+            },
             "file_action": true
           },
           {
             "id": 1,
             "description": "Update 02 - Open Water.flac: musicbrainz recording id, library recording mbid",
+            "file_path": "/music/Acceptance Artist/Northbound/02 - Open Water.flac",
+            "title": "Open Water",
+            "changes": [
+              {
+                "field": "musicbrainz_recording_id",
+                "old": "",
+                "new": "00000000-0000-4000-8000-000000000002",
+                "kind": "fills"
+              }
+            ],
+            "file_decision": null,
             "file_action": false
           }
         ]

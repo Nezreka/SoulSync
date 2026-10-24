@@ -665,7 +665,7 @@ def test_duration_does_not_hide_two_equally_plausible_slots():
     pair = reconcile_folder(files, slots)['pairs'][0]
 
     assert pair['confidence'] == 'ambiguous'
-    assert pair['ambiguity_reasons'] == ['another release track fits nearly as well']
+    assert pair['ambiguity_reasons'] == ['Another release track fits nearly as well']
 
 
 def test_tied_acoustid_links_are_resolved_by_complete_album_evidence():
@@ -868,7 +868,7 @@ def test_file_strongly_owned_by_another_slot_is_not_a_competing_copy():
     pairs = reconcile_folder(files, slots)['pairs']
 
     assert all(pair['confidence'] == 'clear' for pair in pairs)
-    assert all('another local file fits this release track'
+    assert all('Another local file fits this release track'
                not in pair['ambiguity_reasons'] for pair in pairs)
 
 

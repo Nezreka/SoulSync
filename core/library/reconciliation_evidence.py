@@ -26,6 +26,43 @@ _LOOKUP_CIRCUIT_THRESHOLD = 3
 _MIN_FINGERPRINT_LENGTH = 7
 
 
+def file_identity(stat) -> dict:
+    """Identity for reusing reviewed evidence without decoding the audio again."""
+    return {'device': stat.st_dev, 'inode': stat.st_ino, 'ctime_ns': stat.st_ctime_ns}
+
+
+def preserve_audio_evidence(cursor, old_path, new_path, *, size_bytes, mtime_ns,
+                            fingerprint_key=None):
+    """Carry audio through our own tag write or move; always invalidate tags.
+
+    Call only after a guarded operation which preserves the audio stream. The
+    source cache must describe the file immediately before that operation.
+    """
+    tables = {row[0] for row in cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    if 'reconcile_file_tags' in tables:
+        cursor.execute('DELETE FROM reconcile_file_tags WHERE file_path IN (?, ?)',
+                       (old_path, new_path))
+    if 'reconcile_file_fingerprints' not in tables:
+        return
+    row = cursor.execute('''SELECT duration_s, fingerprint
+        FROM reconcile_file_fingerprints
+        WHERE file_path=? AND size_bytes=? AND mtime_ns=?''',
+        (old_path, size_bytes, mtime_ns)).fetchone()
+    if not row:
+        return
+    key = hashlib.sha256(f'{float(row[0]):.6f}:{row[1]}'.encode()).hexdigest()
+    if fingerprint_key and fingerprint_key != key:
+        return
+    stat = os.stat(new_path)
+    cursor.execute('''INSERT OR REPLACE INTO reconcile_file_fingerprints
+        (file_path, size_bytes, mtime_ns, duration_s, fingerprint)
+        VALUES (?, ?, ?, ?, ?)''',
+        (new_path, stat.st_size, stat.st_mtime_ns, row[0], row[1]))
+    if old_path != new_path:
+        cursor.execute('DELETE FROM reconcile_file_fingerprints WHERE file_path=?', (old_path,))
+
+
 def _usable_fingerprint(fingerprint: object, duration: object) -> bool:
     """Reject empty Chromaprint payloads before they reach AcoustID.
 

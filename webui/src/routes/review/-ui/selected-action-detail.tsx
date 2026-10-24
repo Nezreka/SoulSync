@@ -67,6 +67,14 @@ export function SelectedActionDetail({
     textValue(finding.details?.fulfillment_state),
   );
   const replacement = record(finding.details?.replacement_track);
+  const localLength = Number(
+    finding.details?.file_duration_ms || record(finding.details?.current_tags).duration_ms || 0,
+  );
+  const releaseLength = Number(
+    finding.details?.expected_duration_ms || replacement.duration_ms || 0,
+  );
+  const lengthConflict =
+    localLength > 0 && releaseLength > 0 && Math.abs(localLength - releaseLength) > 15000;
   const canAssign = Boolean(finding.file_path) && !numberingPreview && !waitingForDownload;
   const proposedSlot =
     canAssign && !wrongAudio && !versionConflict && !duplicateChoice
@@ -212,7 +220,7 @@ export function SelectedActionDetail({
                   </Button>
                 )}
                 {!intentChoice &&
-                  versionConflict &&
+                  (versionConflict || lengthConflict) &&
                   canApply &&
                   Boolean(replacement.source_track_id) && (
                     <>
@@ -229,7 +237,7 @@ export function SelectedActionDetail({
                       </Button>
                     </>
                   )}
-                {!intentChoice && !versionConflict && wrongAudio && canApply && (
+                {!intentChoice && !versionConflict && !lengthConflict && wrongAudio && canApply && (
                   <>
                     {canReplaceWrongAudio && (
                       <Button

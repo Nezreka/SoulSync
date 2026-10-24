@@ -20,7 +20,7 @@ module load. That way a user changing their download path in settings
 takes effect on the next reorganize without needing a server restart.
 """
 
-from core.library.maintenance_lock import maintenance_mutation
+from core.library.maintenance_lock import album_maintenance_mutation
 import json
 import os
 from typing import Callable, Optional
@@ -115,7 +115,7 @@ def build_runner(
         except Exception as e:    # noqa: BLE001 — never break a reorganize
             logger.debug("[Reorganize] Could not re-point findings: %s", e)
 
-    def _update_track_path(track_id, new_path):
+    def _update_track_path(track_id, new_path, *, preserve_audio=False):
         """Repoint the catalogue at ``new_path``.
 
         This MUST raise when the catalogue was not updated. ``_finalize_track``
@@ -144,6 +144,13 @@ def build_runner(
                 "SELECT file_path FROM tracks WHERE id = ?", (str(track_id),)
             ).fetchone()
             old_path = row[0] if row else None
+            if preserve_audio and old_path and os.path.isfile(new_path):
+                from core.library.reconciliation_evidence import preserve_audio_evidence
+                # Rename-only organization preserves both bytes and mtime.
+                # Match the old cached stat to the moved file before reusing it.
+                stat = os.stat(new_path)
+                preserve_audio_evidence(conn.cursor(), old_path, new_path,
+                    size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
             cursor = conn.execute(
                 "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (new_path, str(track_id)),
@@ -206,7 +213,8 @@ def build_runner(
                 transfer_dir=transfer_dir,
                 resolve_file_path_fn=resolve_file_path_fn,
                 build_final_path_fn=build_final_path_fn,
-                update_track_path_fn=_update_track_path,
+                update_track_path_fn=lambda track_id, path: _update_track_path(
+                    track_id, path, preserve_audio=True),
                 cleanup_empty_dir_fn=_cleanup_empty,
                 on_progress=_on_progress,
                 primary_source=item.source,
@@ -245,7 +253,7 @@ def build_runner(
             profile_id=profile_id,
         )
 
-    @maintenance_mutation
+    @album_maintenance_mutation
     def notifying_runner(item):
         from core.library.reconciliation_authority import conflict
         db = get_database()

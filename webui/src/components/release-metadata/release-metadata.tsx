@@ -1,3 +1,4 @@
+import { Popover } from '@base-ui/react/popover';
 import { Tooltip } from '@base-ui/react/tooltip';
 import * as flags from 'country-flag-icons/react/3x2';
 import { useId, useState, type ReactNode } from 'react';
@@ -10,8 +11,17 @@ function ReleaseBadge({ children, description }: { children: ReactNode; descript
   const id = useId();
   const [open, setOpen] = useState(false);
   return (
-    <Tooltip.Root open={open} onOpenChange={setOpen}>
-      <Tooltip.Trigger render={<Badge tabIndex={0} />} aria-describedby={open ? id : undefined}>
+    <Tooltip.Root
+      open={open}
+      onOpenChange={(value, details) => {
+        if (details.reason !== 'trigger-press') setOpen(value);
+      }}
+    >
+      <Tooltip.Trigger
+        render={<Badge tabIndex={0} />}
+        aria-describedby={open ? id : undefined}
+        onClick={() => setOpen((value) => !value)}
+      >
         {children}
       </Tooltip.Trigger>
       <Tooltip.Portal>
@@ -22,6 +32,32 @@ function ReleaseBadge({ children, description }: { children: ReactNode; descript
         </Tooltip.Positioner>
       </Tooltip.Portal>
     </Tooltip.Root>
+  );
+}
+
+export function HelpHint({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Popover.Root>
+      <Popover.Trigger
+        openOnHover
+        delay={250}
+        render={<button type="button" className={styles.help} />}
+        aria-label={`About ${label}`}
+      >
+        <span aria-hidden="true">i</span>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Positioner sideOffset={6} className={styles.tooltipPosition}>
+          <Popover.Popup
+            aria-label={`About ${label}`}
+            initialFocus={false}
+            className={styles.tooltip}
+          >
+            {children}
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 

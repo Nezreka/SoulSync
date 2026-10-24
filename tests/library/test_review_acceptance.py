@@ -184,7 +184,10 @@ def assert_snapshot(name, case, tmp_path, album):
         if key == 'directory_observations':
             return {normalize(k): 1 for k in value}
         if isinstance(value, dict):
-            return {normalize(k): normalize(v, k) for k, v in value.items()}
+            # Filesystem identity is an apply guard, not display evidence.
+            # Its device/inode/ctime are specific to this temporary fixture.
+            return {normalize(k): normalize(v, k) for k, v in value.items()
+                    if k != 'file_identity'}
         if isinstance(value, list):
             return [normalize(v) for v in value]
         if isinstance(value, str):
