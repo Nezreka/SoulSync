@@ -1176,6 +1176,315 @@
 }
 
 /* --------------------------------------------------------------------------
+   One artist panel (#1822): overview, rules, sources in the drawer shell
+   -------------------------------------------------------------------------- */
+.watchlist-inspector-drawer.wap {
+  width: 480px;
+  gap: 16px;
+  padding-bottom: 0;
+}
+
+.wap-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wap-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-pill);
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--white-a06);
+}
+
+.wap-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.wap-name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--wl-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wap-sub {
+  font-size: 12px;
+  color: var(--wl-text-secondary);
+}
+
+.wap-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--black-a30);
+}
+
+.wap-tab {
+  border: 0;
+  background: transparent;
+  color: var(--wl-text-secondary);
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.wap-tab:hover {
+  color: var(--wl-text-primary);
+}
+
+.wap-tab.is-on {
+  background: var(--white-a12);
+  color: var(--wl-text-primary);
+}
+
+.wap-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-bottom: 20px;
+}
+
+.wap-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.wap-section h3,
+.wap-label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--wl-text-secondary);
+}
+
+.wap-hint {
+  font-size: 12px;
+  color: var(--wl-text-muted);
+  line-height: 1.45;
+}
+
+.wap-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wap-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 13px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--white-a04);
+  color: var(--wl-text-secondary);
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--dur-quick) var(--ease-emphasized);
+}
+
+.wap-chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.wap-chip:hover {
+  border-color: var(--white-a18);
+  color: var(--wl-text-primary);
+}
+
+.wap-chip.is-on {
+  background: rgba(var(--accent-rgb), 0.16);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  color: var(--wl-text-primary);
+}
+
+.wap-chip:focus-within {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+}
+
+.wap-advanced {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.wap-advanced summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--wl-text-secondary);
+}
+
+.wap-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.wap-advanced-body .wap-label:not(:first-child) {
+  margin-top: 8px;
+}
+
+.wap-stats {
+  display: flex;
+  gap: 24px;
+}
+
+.wap-stats div {
+  display: flex;
+  flex-direction: column;
+}
+
+.wap-stats b {
+  font-size: 18px;
+  color: var(--wl-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.wap-stats span {
+  font-size: 11.5px;
+  color: var(--wl-text-muted);
+}
+
+.wap-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wap-tags span {
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--white-a06);
+  color: var(--wl-text-secondary);
+  font-size: 12px;
+}
+
+.wap-tags--quiet span {
+  background: transparent;
+  border: 1px solid var(--line);
+}
+
+.wap-bio {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--wl-text-secondary);
+}
+
+.wap-releases {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 12px;
+}
+
+.wap-releases > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wap-releases img,
+.wap-cover-empty {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radius-control);
+  object-fit: cover;
+  background: var(--white-a06);
+}
+
+.wap-releases span {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--wl-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wap-releases small {
+  font-size: 11.5px;
+  color: var(--wl-text-muted);
+}
+
+.wap-discog {
+  align-self: flex-start;
+}
+
+.wap-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--wl-text-secondary);
+}
+
+.wap-note--warn {
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid rgba(var(--warning-strong-rgb), 0.3);
+  background: rgba(var(--warning-strong-rgb), 0.1);
+  color: rgb(var(--warning-strong-rgb));
+}
+
+.wap-savebar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -24px;
+  padding: 12px 24px calc(12px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--line);
+  background: var(--wl-surface-elevated);
+  backdrop-filter: blur(12px);
+}
+
+/* the panel's menu portals to the body; on phones the sheet sits at 10051 */
+.lib-menu.wap-menu {
+  z-index: 10070;
+}
+
+@media (max-width: 768px) {
+  .watchlist-inspector-drawer.wap .wap-savebar {
+    margin: 0 -18px;
+    padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.wap-savebar span {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--wl-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
    Watchlist Artist Full Detail Modal (Premier Mobile & Desktop)
    -------------------------------------------------------------------------- */
 .watchlist-artist-detail-overlay {

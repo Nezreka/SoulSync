@@ -17,7 +17,6 @@ import {
   startSimilarArtistsUpdate,
   startWatchlistScan,
   WATCHLIST_QUERY_KEY,
-  watchlistArtistConfigQueryOptions,
   watchlistArtistsQueryOptions,
   watchlistCountQueryOptions,
   watchlistGlobalConfigQueryOptions,
@@ -49,8 +48,7 @@ import {
   type WatchlistRecentReleaseRow,
 } from '../-watchlist.types';
 import { Route } from '../route';
-import { WatchlistArtistConfigModal } from './watchlist-artist-config-modal';
-import { WatchlistArtistDetail } from './watchlist-artist-detail';
+import { WatchlistArtistPanel } from './watchlist-artist-panel';
 import { WatchlistAudiobooksTab } from './watchlist-audiobooks-tab';
 import { WatchlistGlobalSettingsModal } from './watchlist-global-settings-modal';
 import { WatchlistLabelsTab } from './watchlist-labels-tab';
@@ -175,7 +173,6 @@ export function WatchlistPage() {
   type AttentionFilterKey = 'all' | 'fresh' | 'never' | 'stale' | 'custom';
   const [attentionFilter, setAttentionFilter] = useState<AttentionFilterKey>('all');
   const [isAddArtistOpen, setIsAddArtistOpen] = useState(false);
-  const [isInspectorOpen, setIsInspectorOpen] = useState(false);
 
   const filteredByAttention = useMemo(() => {
     if (attentionFilter === 'fresh') {
@@ -209,34 +206,8 @@ export function WatchlistPage() {
     () => sortArtists(filterArtists(filteredByAttention, search.q), search.sort),
     [filteredByAttention, search.q, search.sort],
   );
-  const [activeArtistId, setActiveArtistId] = useState<string | null>(null);
-
-  useEffect(() => {
-    setActiveArtistId((previous) => {
-      if (previous && visibleArtists.some((artist) => primaryArtistId(artist) === previous)) {
-        return previous;
-      }
-      const fallback = visibleArtists[0] ?? artists[0];
-      return fallback ? primaryArtistId(fallback) : null;
-    });
-  }, [artists, visibleArtists]);
-
-  useEffect(() => {
-    if (!isInspectorOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsInspectorOpen(false);
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isInspectorOpen]);
-
-  const activeArtist = useMemo(
-    () =>
-      artists.find((artist) => primaryArtistId(artist) === activeArtistId) ??
-      visibleArtists[0] ??
-      null,
-    [activeArtistId, artists, visibleArtists],
-  );
+  // the artist whose panel is open, highlighted in the roster
+  const panelArtistId = search.detailId ?? search.configId ?? null;
 
   const neverScanned = useMemo(
     () => artists.filter((artist) => !artist.last_scan_timestamp).length,
@@ -607,26 +578,15 @@ export function WatchlistPage() {
         />
       ) : null}
 
-      {search.configId ? (
-        <WatchlistArtistConfigModal
+      {panelArtistId ? (
+        <WatchlistArtistPanel
           profileId={profileId}
-          artistId={search.configId}
+          artistId={panelArtistId}
+          initialTab={search.configId ? 'rules' : 'overview'}
           globalOverrideActive={globalOverrideActive}
-          onClose={() => void navigate({ search: (prev) => ({ ...prev, configId: undefined }) })}
-        />
-      ) : null}
-
-      {search.detailId ? (
-        <WatchlistArtistDetail
-          profileId={profileId}
-          artistId={search.detailId}
-          onClose={() => void navigate({ search: (prev) => ({ ...prev, detailId: undefined }) })}
-          // Settings replaces the detail view with the config modal, so the
-          // panel cannot sit on top of it — the vanilla code removed the
-          // overlay before opening the modal for the same reason.
-          onOpenSettings={() =>
+          onClose={() =>
             void navigate({
-              search: (prev) => ({ ...prev, detailId: undefined, configId: search.detailId }),
+              search: (prev) => ({ ...prev, configId: undefined, detailId: undefined }),
             })
           }
         />
@@ -821,22 +781,38 @@ export function WatchlistPage() {
                           key={artist.id}
                           artist={artist}
                           selected={artistId !== null && selectedIds.has(artistId)}
-                          active={artistId !== null && artistId === activeArtistId}
+                          active={artistId !== null && artistId === panelArtistId}
                           audiobook={audiobookArtists.has(artist.artist_name)}
                           onToggleSelect={() => artistId && toggleArtist(artistId)}
                           onOpenConfig={() =>
                             artistId &&
-                            void navigate({ search: (prev) => ({ ...prev, configId: artistId }) })
+                            void navigate({
+                              search: (prev) => ({
+                                ...prev,
+                                configId: artistId,
+                                detailId: undefined,
+                              }),
+                            })
                           }
-                          onOpenDetail={() => {
-                            if (artistId) {
-                              setActiveArtistId(artistId);
-                              setIsInspectorOpen(true);
-                            }
-                          }}
+                          onOpenDetail={() =>
+                            artistId &&
+                            void navigate({
+                              search: (prev) => ({
+                                ...prev,
+                                detailId: artistId,
+                                configId: undefined,
+                              }),
+                            })
+                          }
                           onOpenFullDetail={() =>
                             artistId &&
-                            void navigate({ search: (prev) => ({ ...prev, detailId: artistId }) })
+                            void navigate({
+                              search: (prev) => ({
+                                ...prev,
+                                detailId: artistId,
+                                configId: undefined,
+                              }),
+                            })
                           }
                           onRemove={() => {
                             if (artistId) void onRemoveOne(artistId, artist.artist_name);
@@ -846,48 +822,6 @@ export function WatchlistPage() {
                     })}
                   </div>
                 </div>
-
-                {isInspectorOpen && activeArtist ? (
-                  <div
-                    className="watchlist-inspector-backdrop"
-                    onClick={() => setIsInspectorOpen(false)}
-                  >
-                    <div
-                      className="watchlist-inspector-drawer"
-                      onClick={(event) => event.stopPropagation()}
-                      role="dialog"
-                      aria-label={`Managing ${activeArtist.artist_name}`}
-                    >
-                      <div className="watchlist-inspector-header">
-                        <span className="watchlist-panel-kicker">Artist Inspector</span>
-                        <button
-                          type="button"
-                          className="watchlist-inspector-close-btn"
-                          aria-label="Close inspector"
-                          onClick={() => setIsInspectorOpen(false)}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                      <WatchlistArtistInspector
-                        profileId={profileId}
-                        artist={activeArtist}
-                        globalOverrideActive={globalOverrideActive}
-                        onOpenConfig={(artistId) =>
-                          void navigate({ search: (prev) => ({ ...prev, configId: artistId }) })
-                        }
-                        onOpenDetail={(artistId) =>
-                          void navigate({ search: (prev) => ({ ...prev, detailId: artistId }) })
-                        }
-                        onRemove={(artistId) => {
-                          const name = activeArtist?.artist_name ?? 'this artist';
-                          void onRemoveOne(artistId, name);
-                          setIsInspectorOpen(false);
-                        }}
-                      />
-                    </div>
-                  </div>
-                ) : null}
               </div>
             </>
           )}
@@ -1374,138 +1308,6 @@ function WatchlistRecentReleasesPanel({
         </div>
       )}
     </div>
-  );
-}
-
-function WatchlistArtistInspector({
-  profileId,
-  artist,
-  globalOverrideActive,
-  onOpenConfig,
-  onOpenDetail,
-  onRemove,
-}: {
-  profileId: number;
-  artist: WatchlistArtist | null;
-  globalOverrideActive: boolean;
-  onOpenConfig: (artistId: string) => void;
-  onOpenDetail: (artistId: string) => void;
-  onRemove: (artistId: string) => void;
-}) {
-  const artistId = artist ? primaryArtistId(artist) : null;
-  const configQuery = useQuery({
-    ...watchlistArtistConfigQueryOptions(profileId, artistId ?? ''),
-    enabled: Boolean(artistId),
-  });
-  const payload = configQuery.data;
-  const releases = payload?.recent_releases ?? [];
-  const pills = artist ? artistPills(artist) : [];
-  const sources = artist ? artistSourceKeys(artist) : [];
-
-  if (!artist || !artistId) {
-    return (
-      <aside className="watchlist-inspector">
-        <div className="watchlist-inspector-empty">Select an artist to manage watch rules.</div>
-      </aside>
-    );
-  }
-
-  return (
-    <aside className="watchlist-inspector">
-      <div className="watchlist-inspector-hero">
-        <ArtistImage
-          url={artist.image_url || payload?.artist?.image_url || null}
-          name={artist.artist_name}
-        />
-        <div>
-          <span className="watchlist-panel-kicker">Selected artist</span>
-          <h3 title={artist.artist_name} data-artist-name={artist.artist_name}>
-            Managing
-          </h3>
-          <small>{formatRelativeScanTime(artist.last_scan_timestamp)}</small>
-        </div>
-      </div>
-
-      <div className="watchlist-inspector-actions">
-        <button
-          type="button"
-          className="wl-chip wl-chip--cta"
-          onClick={() => onOpenConfig(artistId)}
-        >
-          Edit Rules
-        </button>
-        <button
-          type="button"
-          className="wl-chip wl-chip--slate"
-          onClick={() => onOpenDetail(artistId)}
-        >
-          Full Profile
-        </button>
-        <button type="button" className="wl-chip wl-chip--red" onClick={() => onRemove(artistId)}>
-          Remove
-        </button>
-      </div>
-
-      {globalOverrideActive ? (
-        <div className="watchlist-inspector-warning">
-          Artist-specific release rules are currently ignored during scans.
-        </div>
-      ) : null}
-
-      <div className="watchlist-inspector-section">
-        <div className="watchlist-panel-head compact">
-          <h4>Watch rules</h4>
-          <span>{releaseTypeText(artist)}</span>
-        </div>
-        <div className="watchlist-card-pills inspector-pills">
-          {pills.length > 0 ? (
-            pills.map((pill) => (
-              <span key={pill.label} className={`watchlist-pill watchlist-pill-${pill.kind}`}>
-                {pill.label} rule
-              </span>
-            ))
-          ) : (
-            <span className="watchlist-card-meta">No release types enabled</span>
-          )}
-        </div>
-      </div>
-
-      <div className="watchlist-inspector-section">
-        <div className="watchlist-panel-head compact">
-          <h4>Provider links</h4>
-          <span>{sources.length} matched</span>
-        </div>
-        <div className="watchlist-inspector-sources">
-          {sources.map((key) => (
-            <span
-              key={key}
-              className={`watchlist-source-badge ${WATCHLIST_SOURCE_BADGES[key].className}`}
-            >
-              {WATCHLIST_SOURCE_BADGES[key].label} match
-            </span>
-          ))}
-        </div>
-      </div>
-
-      <div className="watchlist-inspector-section">
-        <div className="watchlist-panel-head compact">
-          <h4>Recent releases</h4>
-          <span>{configQuery.isFetching ? 'Loading...' : `${releases.length}`}</span>
-        </div>
-        <div className="watchlist-inspector-releases">
-          {releases.slice(0, 4).map((release) => (
-            <div key={`${release.album_name}-${release.release_date ?? ''}`}>
-              {release.album_cover_url ? <img src={release.album_cover_url} alt="" /> : null}
-              <span>{release.album_name}</span>
-              <small>{release.release_date || 'Unknown date'}</small>
-            </div>
-          ))}
-          {!configQuery.isFetching && releases.length === 0 ? (
-            <span className="watchlist-card-meta">No cached releases for this artist yet.</span>
-          ) : null}
-        </div>
-      </div>
-    </aside>
   );
 }
 

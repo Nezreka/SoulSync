@@ -460,7 +460,9 @@ describe('watchlist route', () => {
     // The menu must not also trip the artist detail click.
     expect(router.state.location.search).not.toMatchObject({ detailId: 'sp-aphex' });
 
-    fireEvent.click(screen.getByText('Aphex Twin'));
+    // the panel names the artist too, so click the one in the roster
+    const roster = document.querySelector('.watchlist-roster-panel') as HTMLElement;
+    fireEvent.click(within(roster).getByText('Aphex Twin'));
     await waitFor(() => {
       expect(router.state.location.search).toMatchObject({ detailId: 'sp-aphex' });
     });
@@ -762,15 +764,12 @@ describe('watchlist route', () => {
       expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('1,234,567')).toBeInTheDocument();
-    expect(screen.getByText('71/100')).toBeInTheDocument();
-    // Genres cap at three even when the payload carries four.
-    expect(screen.getByText('braindance')).toBeInTheDocument();
-    expect(screen.queryByText('electronic')).not.toBeInTheDocument();
+    // configId opens the one artist panel on its Rules tab
+    expect(screen.getByRole('tab', { name: 'Rules' })).toHaveAttribute('aria-selected', 'true');
 
     // Stored config, not defaults: EPs off, singles on, lookback 90.
-    expect(screen.getByRole('checkbox', { name: /Extended plays/ })).not.toBeChecked();
-    expect(screen.getByRole('checkbox', { name: /Single tracks and/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'EPs' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Singles' })).toBeChecked();
     expect(screen.getByLabelText('Scan lookback')).toHaveValue('90');
   });
 
@@ -801,6 +800,7 @@ describe('watchlist route', () => {
       expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Sources' }));
     // Matched on Spotify + Deezer only.
     expect(screen.getByRole('button', { name: 'Spotify' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Deezer' })).toBeInTheDocument();
@@ -819,8 +819,8 @@ describe('watchlist route', () => {
       expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /Extended plays/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'EPs' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
       expect(calls.filter((url) => url.includes('/config')).length).toBeGreaterThan(1);
@@ -882,7 +882,7 @@ describe('watchlist route', () => {
     fireEvent.change(screen.getByLabelText('New releases from this artist'), {
       target: { value: 'never' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
       expect(bodies.some((call) => call.url.includes('/config'))).toBe(true);
@@ -903,8 +903,8 @@ describe('watchlist route', () => {
       expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /Extended plays/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'EPs' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
       expect(bodies.some((call) => call.url.includes('/config'))).toBe(true);
@@ -925,9 +925,9 @@ describe('watchlist route', () => {
       expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /Full-length studio albums/ }));
-    fireEvent.click(screen.getByRole('checkbox', { name: /Single tracks and/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Albums' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Singles' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
       expect(window.showToast).toHaveBeenCalledWith(
@@ -947,6 +947,7 @@ describe('watchlist route', () => {
       expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Sources' }));
     // Matched rows offer Fix + clear; unmatched offer Match.
     expect(screen.getAllByRole('button', { name: 'Fix' })).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: 'Match' })).toHaveLength(4);
@@ -971,6 +972,7 @@ describe('watchlist route', () => {
     const calls = stubFetch();
     renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
 
+    fireEvent.click(await screen.findByRole('tab', { name: 'Sources' }));
     await waitFor(() => {
       expect(screen.getByLabelText('Clear Spotify match')).toBeInTheDocument();
     });
@@ -993,7 +995,7 @@ describe('watchlist route', () => {
     });
   });
 
-  it('opens the artist detail panel with releases and watchlist info', async () => {
+  it('opens the artist panel on its overview, with every genre and the stats', async () => {
     stubFetch();
     renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
 
@@ -1003,50 +1005,62 @@ describe('watchlist route', () => {
       expect(screen.getByText('1,234,567')).toBeInTheDocument();
     });
 
-    expect(screen.getByRole('button', { name: '← Back to Watchlist' })).toBeInTheDocument();
-    // The detail hero shows ALL genres, unlike the config modal which caps at 3.
+    expect(screen.getByText('71/100')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
+    // the overview shows ALL genres
     expect(screen.getByText('electronic')).toBeInTheDocument();
-
-    // The grid stays mounted underneath, so "Albums" legitimately appears
-    // twice — scope the pill assertions to the panel itself.
-    const panel = document.querySelector('.watchlist-artist-detail-overlay');
-    expect(panel).not.toBeNull();
-    const inPanel = within(panel as HTMLElement);
-    expect(inPanel.getByText('Albums')).toBeInTheDocument();
-    expect(inPanel.getByText('Singles')).toBeInTheDocument();
-    expect(inPanel.queryByText('EPs')).not.toBeInTheDocument();
+    expect(screen.getByText('braindance')).toBeInTheDocument();
   });
 
-  it('Settings swaps the detail panel for the config modal', async () => {
+  it('switches to Rules inside the same panel (#1822: one artist view, not three)', async () => {
     stubFetch();
     const { router } = renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
-    });
+    fireEvent.click(await screen.findByRole('tab', { name: 'Rules' }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-
-    await waitFor(() => {
-      expect(router.state.location.search).toMatchObject({ configId: 'sp-aphex' });
-    });
-    // The panel must close, or it would sit on top of the modal.
-    expect(router.state.location.search).not.toMatchObject({ detailId: 'sp-aphex' });
+    expect(await screen.findByText('What to grab')).toBeInTheDocument();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    const panel = within(screen.getByRole('dialog'));
+    expect(panel.getByRole('checkbox', { name: 'Albums' })).toBeChecked();
+    expect(panel.getByRole('checkbox', { name: 'EPs' })).not.toBeChecked();
+    expect(router.state.location.search).toMatchObject({ detailId: 'sp-aphex' });
   });
 
-  it('removes the artist from the detail panel', async () => {
+  it('only shows a save bar once something changed', async () => {
+    stubFetch();
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'EPs' }));
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'EPs' })).not.toBeChecked();
+  });
+
+  it('removes the artist from the panel, after asking', async () => {
     const calls = stubFetch();
+    window.showConfirmDialog = vi.fn(async () => true);
     renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Remove from Watchlist' })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Remove from Watchlist' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Artist actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from watchlist' }));
 
     await waitFor(() => {
       expect(calls.some((url) => url.includes('/api/watchlist/remove'))).toBe(true);
     });
+    expect(window.showConfirmDialog).toHaveBeenCalled();
+  });
+
+  it('keeps the artist when the remove is declined', async () => {
+    const calls = stubFetch();
+    window.showConfirmDialog = vi.fn(async () => false);
+    renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Artist actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from watchlist' }));
+
+    await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
+    expect(calls.some((url) => url.includes('/api/watchlist/remove'))).toBe(false);
   });
 
   it('disables View Discography for an artist with no provider ids', async () => {
