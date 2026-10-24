@@ -2131,6 +2131,7 @@ const _autoIcons = {
     wishlist_processing_completed: '\u2705', watchlist_scan_completed: '\u2705',
     database_update_completed: '\uD83D\uDDC4\uFE0F', download_failed: '\u274C',
     download_quarantined: '\u26A0\uFE0F', wishlist_item_added: '\u2795',
+    deezer_signin_failed: '\uD83D\uDEAB', deezer_signin_restored: '\u2705',
     watchlist_artist_added: '\uD83D\uDC64', watchlist_artist_removed: '\uD83D\uDC64',
     import_completed: '\uD83D\uDCE5', import_needs_attention: '\uD83D\uDCE5', audiobook_grab_started: '\u2B07\uFE0F', audiobook_download_failed: '\u274C', audiobook_import_needs_attention: '\u26A0\uFE0F', audiobook_wishlist_item_added: '\u2795', audiobook_wishlist_processing_completed: '\u2705', audiobook_new_release: '\uD83D\uDD14', audiobook_watchlist_scan_completed: '\u2705', audiobook_author_followed: '\uD83D\uDC64', audiobook_author_unfollowed: '\uD83D\uDC64', audiobook_library_scan_completed: '\uD83C\uDFA7', mirrored_playlist_created: '\uD83D\uDCC2',
     quality_scan_completed: '\uD83D\uDCCA', duplicate_scan_completed: '\uD83D\uDDC2\uFE0F', library_scan_completed: '\uD83D\uDCE1',
@@ -2140,6 +2141,7 @@ const _autoIcons = {
     update_discovery_pool: '\uD83E\uDDED', start_quality_scan: '\uD83D\uDCCA',
     run_repair_job: '\uD83D\uDD27',
     backup_database: '\uD83D\uDCBE',
+    check_deezer_signin: '\uD83D\uDD11',
     refresh_beatport_cache: '\uD83C\uDFB5',
     clean_search_history: '\uD83D\uDDD1\uFE0F',
     clean_completed_downloads: '\u2705',
@@ -2496,6 +2498,8 @@ const AUTO_HUB_REFERENCE = {
                 { type: 'batch_complete', label: 'Batch Complete', desc: 'Fires when a batch download job finishes' },
                 { type: 'download_failed', label: 'Download Failed', desc: 'Fires when a download fails or errors out' },
                 { type: 'download_quarantined', label: 'File Quarantined', desc: 'Fires when a downloaded file is quarantined for quality issues' },
+                { type: 'deezer_signin_failed', label: 'Deezer Sign-in Failed', desc: 'Fires once when Deezer rejects the ARL (expired or signed out)' },
+                { type: 'deezer_signin_restored', label: 'Deezer Sign-in Restored', desc: 'Fires when an ARL signs in again after a failure, or a new ARL signs in' },
             ]
         },
         {
@@ -2551,6 +2555,7 @@ const AUTO_HUB_REFERENCE = {
                 { type: 'run_repair_job', label: 'Run Maintenance Job', desc: 'Run one (or all enabled) Library Maintenance jobs, e.g. the Corrupt File Detector' },
                 { type: 'start_database_update', label: 'Update Database', desc: 'Run a database update/maintenance operation' },
                 { type: 'backup_database', label: 'Backup Database', desc: 'Create a backup of the music database' },
+                { type: 'check_deezer_signin', label: 'Check Deezer Sign-in', desc: 'Ask Deezer whether the ARL still signs in' },
             ]
         },
         {
@@ -3796,6 +3801,7 @@ function _autoFormatTrigger(type, config) {
         wishlist_processing_completed: 'Wishlist Processed', watchlist_scan_completed: 'Watchlist Scan Done',
         database_update_completed: 'Database Updated', download_failed: 'Download Failed',
         download_quarantined: 'File Quarantined', wishlist_item_added: 'Wishlist Item Added',
+        deezer_signin_failed: 'Deezer Sign-in Failed', deezer_signin_restored: 'Deezer Sign-in Restored',
         watchlist_artist_added: 'Artist Watched', watchlist_artist_removed: 'Artist Unwatched',
         import_completed: 'Import Complete', mirrored_playlist_created: 'Playlist Mirrored',
         quality_scan_completed: 'Quality Scan Done', duplicate_scan_completed: 'Duplicate Scan Done',
@@ -3832,6 +3838,7 @@ function _autoFormatAction(type) {
         update_discovery_pool: 'Update Discovery', start_quality_scan: 'Run Quality Scan',
         run_repair_job: 'Run Maintenance Job',
         backup_database: 'Backup Database',
+        check_deezer_signin: 'Check Deezer Sign-in',
         refresh_beatport_cache: 'Refresh Beatport Cache', clean_search_history: 'Clean Search History',
         clean_completed_downloads: 'Clean Completed Downloads',
         full_cleanup: 'Full Cleanup',

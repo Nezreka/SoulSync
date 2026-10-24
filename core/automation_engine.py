@@ -259,6 +259,17 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'full_cleanup',
         'initial_delay': 900,  # 15 min after startup
     },
+    # A dead Deezer ARL is silent until a download needs Deezer, and then that
+    # download quietly falls back to another source. This asks Deezer every few
+    # hours; the client fires 'Deezer Sign-in Failed' / 'Restored'. Does
+    # nothing without an ARL.
+    {
+        'name': 'Check Deezer Sign-in',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'action_type': 'check_deezer_signin',
+        'initial_delay': 1200,  # 20 min after startup, after the boot-time sign-in
+    },
     # ── Video side (isolated app, shared engine) ──────────────────────────
     # owned_by='video' keeps these OFF the music automations page (it filters
     # them out) and ON the video Automations page (it shows only these).
