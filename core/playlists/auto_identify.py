@@ -1,5 +1,9 @@
 """keep your own playlists identified, so they are always ready to sync.
 
+this covers playlists you make (every edit), mirrors of playlists from
+spotify, tidal and the rest (first mirror and every refresh brings new
+tracks), and MetaSync charts.
+
 a synced mirror is identified when you ask (Identify, or the pipeline). a
 playlist you make is different: you add songs one at a time from all over
 the app and expect Sync to just work. so every edit to one asks for a quiet
@@ -18,6 +22,7 @@ picks up what the first one lost.
 
 from __future__ import annotations
 
+import json
 import threading
 from typing import Any, Callable, Dict, Optional, Set
 
@@ -27,6 +32,12 @@ logger = get_logger("playlists.auto_identify")
 
 # a burst of adds (an album, a few quick taps) settles into one run
 DEBOUNCE_SECONDS = 3.0
+
+# "refresh all mirrors" can ask for many playlists at once; at most this
+# many identify together, the rest wait their turn, so a refresh never
+# turns into a burst of searches against spotify's rate limit
+MAX_CONCURRENT_RUNS = 2
+_slots = threading.BoundedSemaphore(MAX_CONCURRENT_RUNS)
 
 _lock = threading.Lock()
 _pending: Set[int] = set()
@@ -66,6 +77,31 @@ def request(playlist_id: int, *, delay: float = DEBOUNCE_SECONDS) -> bool:
     return True
 
 
+def _unmatched(track: dict) -> bool:
+    # the discovery worker's own gate, so "unmatched" means the same here,
+    # except a Wing It stub: the worker retries those on every pass, but one
+    # alone must not start a pass, or a song no source has would be searched
+    # again on every refresh. a pass started for anything else retries it.
+    from core.discovery.manual_match import should_rediscover
+    extra = (track or {}).get('extra_data')
+    if isinstance(extra, str):
+        try:
+            extra = json.loads(extra)
+        except (ValueError, TypeError):
+            extra = {}
+    if not isinstance(extra, dict):
+        extra = {}
+    return should_rediscover(extra) and not extra.get('wing_it_fallback')
+
+
+def request_if_unmatched(playlist_id: int, tracks: list) -> bool:
+    """ask for an identify only when some track still needs one: a refresh
+    that brought nothing new costs nothing."""
+    if not any(_unmatched(t) for t in (tracks or [])):
+        return False
+    return request(playlist_id)
+
+
 def _run(pid: int) -> None:
     with _lock:
         _timers.pop(pid, None)
@@ -89,7 +125,8 @@ def _run(pid: int) -> None:
                 continue
             try:
                 logger.info("identifying playlist '%s' (%s) in the background", playlist.get('name'), pid)
-                _runner([playlist])
+                with _slots:
+                    _runner([playlist])
             except Exception as e:  # noqa: BLE001 - a failed pass leaves tracks for the next
                 logger.error("background identify of playlist %s failed: %s", pid, e)
     finally:
