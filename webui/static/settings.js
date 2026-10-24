@@ -3056,6 +3056,9 @@ async function loadSettingsData() {
             document.getElementById('metadata-fallback-source').value = 'jiosaavn';
         }
 
+        const _albumReviewExp = document.getElementById('experimental-album-review-enabled');
+        if (_albumReviewExp) _albumReviewExp.checked = settings.experimental?.album_review_enabled === true;
+
         const _bandcampExp = document.getElementById('experimental-bandcamp-enabled');
         if (_bandcampExp) _bandcampExp.checked = settings.experimental?.bandcamp_enabled === true;
 
@@ -6456,6 +6459,7 @@ async function saveSettings(quiet = false) {
         experimental: {
             jiosaavn_enabled: _cfgBool('experimental-jiosaavn-enabled'),
             bandcamp_enabled: _cfgBool('experimental-bandcamp-enabled'),
+            album_review_enabled: _cfgBool('experimental-album-review-enabled'),
         },
         image_cache: {
             // Server-side resizing is opt-in; the cache itself keeps whatever

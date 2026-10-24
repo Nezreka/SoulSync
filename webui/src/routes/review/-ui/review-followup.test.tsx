@@ -6,6 +6,7 @@ import type { AlbumAssignment, ReviewFinding } from '../-review.api';
 import { ApplyPlanPreview } from './apply-plan-preview';
 import { FileDecisions } from './file-decisions';
 import { NumberingChoice } from './numbering-choice';
+import { PairingEvidence } from './pairing-evidence';
 import { ReconciliationEvidence, ReleaseComparison } from './reconciliation-evidence';
 
 afterEach(cleanup);
@@ -156,7 +157,7 @@ it('groups overlapping changes while retaining one action total and exact values
   expect(screen.getByLabelText('Destination folders')).toHaveTextContent('Artist/Album');
 });
 
-it('keeps long file-decision lists compact and retains full paths', () => {
+it('keeps long file-decision lists compact with track review owning the full paths', () => {
   const items = Array.from({ length: 7 }, (_, id) => ({
     id,
     file_decision: {
@@ -170,6 +171,32 @@ it('keeps long file-decision lists compact and retains full paths', () => {
   expect(screen.getAllByText('FLAC')).toHaveLength(5);
   fireEvent.click(screen.getByRole('button', { name: 'Show 2 more file decisions' }));
   expect(screen.getAllByText('FLAC')).toHaveLength(7);
-  fireEvent.click(screen.getAllByText('File paths')[0]);
-  expect(screen.getByText('/music/album/0.mp3')).toBeVisible();
+  expect(screen.queryByText('File paths')).toBeNull();
+  expect(screen.queryByText('/music/album/0.mp3')).toBeNull();
+});
+
+it('shows matcher checks with their actual decision explanation', () => {
+  render(
+    <PairingEvidence
+      checks={[
+        {
+          check: 'Artist credit',
+          local: 'Noah Kahan',
+          release: 'Noah Kahan & Hozier',
+          result: 'conflicts',
+        },
+        {
+          check: 'Album assignment',
+          local: '3 files',
+          release: '3 slots',
+          result: 'resolved',
+          detail: 'Other files fit their own slots',
+        },
+        { check: 'Decision', result: 'conflicts', detail: 'Listen for a track boundary error' },
+      ]}
+    />,
+  );
+  expect(screen.getByRole('table')).toHaveTextContent('Noah Kahan & Hozier');
+  expect(screen.getByText('Other files fit their own slots')).toBeVisible();
+  expect(screen.getByText('Listen for a track boundary error')).toBeVisible();
 });

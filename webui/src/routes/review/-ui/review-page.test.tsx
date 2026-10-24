@@ -750,10 +750,9 @@ describe('library reconciliation review queue', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /Confirm 1 uncertain track assignment/ }));
 
-    expect(
-      screen.getByRole('button', { name: 'Plan replacement with correct track' }),
-    ).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Plan quarantine of wrong file' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Replace file…' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Replace file…' }));
+    expect(screen.getByRole('radio', { name: /Move it to quarantine/ })).toBeTruthy();
     expect(
       screen.getByText(
         'Requests the exact track from the selected release, then moves this file to recoverable quarantine.',

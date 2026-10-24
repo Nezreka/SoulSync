@@ -43,7 +43,8 @@ def test_same_size_and_mtime_cannot_hide_a_replaced_file(tmp_path):
     assert 'changed after the scan' in worker._reconciliation_file_guard(str(path), details)
 
 
-def test_organization_reuses_audio_when_database_and_scan_use_different_mount_paths(tmp_path, monkeypatch):
+@pytest.mark.parametrize('live_alias', [False, True])
+def test_organization_reuses_audio_when_database_and_scan_use_different_mount_paths(tmp_path, monkeypatch, live_alias):
     from types import SimpleNamespace
     from core.reorganize_runner import build_runner
     from core.library.reconciliation_evidence import ReconciliationEvidence
@@ -53,7 +54,10 @@ def test_organization_reuses_audio_when_database_and_scan_use_different_mount_pa
         assert album.worker._apply_reviewed_finding(item['id'])['success']
     client = album.context.acoustid_client
     decoded = client.fingerprints
-    aliases = {f'/other-mount/{path.name}': str(path) for path in album.paths}
+    alias = tmp_path / 'other-mount'
+    if live_alias:
+        alias.symlink_to(album.root, target_is_directory=True)
+    aliases = {str(alias / path.relative_to(album.root)): str(path) for path in album.paths}
     with album.db._get_connection() as conn:
         for old, actual in aliases.items():
             conn.execute('UPDATE tracks SET file_path=? WHERE file_path=?', (old, actual))
@@ -63,7 +67,7 @@ def test_organization_reuses_audio_when_database_and_scan_use_different_mount_pa
     monkeypatch.setattr('core.reorganize_queue.get_queue', lambda: SimpleNamespace(update_active_progress=lambda **k: None))
     runner = build_runner(
         get_database=lambda: album.db,
-        resolve_file_path_fn=lambda path: aliases.get(path, path),
+        resolve_file_path_fn=lambda path: path if live_alias else aliases.get(path, path),
         post_process_fn=lambda *a: None,
         cleanup_empty_directories_fn=lambda *a: None,
         is_shutting_down_fn=lambda: False,

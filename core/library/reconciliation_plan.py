@@ -1027,6 +1027,34 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             'file_index': file_index, 'slot_index': slot_index,
             'score': weight, 'reasons': reasons,
             'duration_delta_ms': assigned_duration_delta,
+            'checks': [
+                {'check': 'Audio identity', 'local': ', '.join(dict.fromkeys(str(r.get('title') or r.get('mbid') or '') for r in top_recordings)),
+                 'release': slot.get('title'), 'result': 'resolved' if fingerprint_context_resolves else 'conflicts' if ambiguous else 'agrees' if top_supports_slot else 'unavailable',
+                 'detail': 'Competing catalogue links resolved by title, artist, duration and album assignments' if fingerprint_context_resolves else 'Top fingerprint catalogue identities'},
+                {'check': 'Embedded title', 'local': tags.get('title'), 'release': slot.get('title'),
+                 'result': 'unavailable' if not tags.get('title') else 'agrees' if facts.title_score(str(tags.get('title')), str(slot.get('title') or '')) >= .83 else 'conflicts'},
+                {'check': 'Filename', 'local': _local_filename_title(files[file_index]), 'release': slot.get('title'),
+                 'result': 'agrees' if facts.title_score(_local_filename_title(files[file_index]), str(slot.get('title') or '')) >= .83 else 'conflicts'},
+                {'check': 'Artist credit', 'local': local_artist, 'release': slot.get('artist'),
+                 'result': 'unavailable' if not local_artist or not slot.get('artist') else 'agrees' if artist_agrees else 'conflicts'},
+                {'check': 'Embedded recording ID', 'local': tags.get('mbid'), 'release': _recording_id(slot),
+                 'result': 'unavailable' if not tags.get('mbid') or not _recording_id(slot) else 'agrees' if tags['mbid'] == _recording_id(slot) else 'conflicts'},
+                {'check': 'Audio length', 'local': f'{local_duration / 1000:.2f} s' if local_duration else '',
+                 'release': f"{int(slot.get('duration_ms') or 0) / 1000:.2f} s" if slot.get('duration_ms') else '',
+                 'result': 'unavailable' if assigned_duration_delta is None else 'agrees' if assigned_duration_delta <= 3000 else 'conflicts',
+                 'detail': f'{assigned_duration_delta / 1000:.2f} s difference' if assigned_duration_delta is not None else 'No comparable length'},
+                {'check': 'Version', 'local': ', '.join(sorted(facts.file_markers(files[file_index]))) or 'No qualifier',
+                 'release': ', '.join(sorted(facts.slot_markers(slot))) or 'No qualifier',
+                 'result': 'agrees' if facts.compatible(files[file_index], slot) else 'conflicts' if version_wording_review else 'resolved',
+                 'detail': 'Release version compared with local qualifiers and recording identity'},
+                {'check': 'Disc / track position', 'local': f"{tags.get('disc_number') or 1}.{tags.get('track_number') or '?'}",
+                 'release': f"{slot.get('disc_number') or 1}.{slot.get('track_number') or '?'}",
+                 'result': 'unavailable' if not tags.get('track_number') else 'agrees' if position_agrees or continuous_position_agrees else 'conflicts',
+                 'detail': 'Supporting context; numbering alone does not establish audio identity'},
+                {'check': 'Album assignment', 'local': f'{len(files)} local files', 'release': f'{len(slots)} release tracks',
+                 'result': 'conflicts' if competing_file or close_alternative else 'resolved' if joint_owners.get((file_index, slot_index)) else 'agrees',
+                 'detail': 'One-to-one assignment considers competing local copies and release slots together'},
+            ],
             'ambiguity_reasons': ambiguity_reasons,
             'catalogue_disagreement': bool(catalogue_disagreement),
             'competitors': [
@@ -1142,6 +1170,13 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             f'Audio length differs from the release track by '
             f'{abs(actual - expected) / 1000:.1f} seconds; listen for a '
             'different version or a track boundary error')
+    for pair in pairs:
+        pair['checks'].append({
+            'check': 'Decision', 'local': '', 'release': '',
+            'result': 'manual' if pair['confidence'] == 'manual' else 'conflicts' if pair['ambiguity_reasons'] else 'agrees' if pair['confidence'] == 'clear' else 'unavailable',
+            'detail': 'Saved track assignment' if pair['confidence'] == 'manual' else
+                      '; '.join(pair['ambiguity_reasons']) or ('Evidence supports this pairing' if pair['confidence'] == 'clear' else 'More evidence is needed'),
+        })
     competing_files = {
         extra_index: [
             pair['file_index'] for pair in pairs

@@ -458,6 +458,10 @@
                             </svg></span>
                         <span class="nav-text">Library</span>
                     </a>
+                    <a class="nav-button" data-page="review" href="/review" id="album-review-nav" hidden>
+                        <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg></span>
+                        <span class="nav-text">Album Review <small class="review-preview-badge">Preview</small></span>
+                    </a>
                     <a class="nav-button" data-page="watchlist" href="/watchlist">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -10474,6 +10478,10 @@
                                             <p class="settings-experimental-intro">Features in this section are
                                                 optional, may change without notice, and are not held to the same
                                                 support standard as core metadata sources.</p>
+                                            <div class="form-group">
+                                                <label><input type="checkbox" id="experimental-album-review-enabled"> Show Album Review in navigation</label>
+                                                <small>Preview an album-by-album alternative to maintenance findings. Tools keeps the specialized jobs and scan controls.</small>
+                                            </div>
                                             <div class="form-group">
                                                 <div class="setting-row" style="flex:1;min-width:0;">
                                                     <label

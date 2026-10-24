@@ -59,11 +59,14 @@ export function ReviewQueueEntry({ job, progress, onScanStarted }: ReviewQueueEn
   return (
     <section className="review-queue-entry" aria-label="Album review status">
       <div className="review-queue-entry-copy">
-        <span className="review-queue-entry-eyebrow">Album review</span>
-        <h3>{totals?.review ? `${totals.review} albums need decisions` : 'Review album plans'}</h3>
+        <h3>
+          Album Review <small className="review-preview-badge">Preview</small>
+        </h3>
         <p>
-          Compare local tracks with a release, decide album wide changes, then apply the approved
-          plan.
+          An album-by-album alternative to findings.{' '}
+          {totals
+            ? `${totals.review} albums need input · ${totals.ready} ready to apply`
+            : 'Review your album plans.'}
         </p>
         <span className="review-queue-entry-scan">
           {progress?.status === 'running' || (job?.is_running && progress?.status !== 'finished')
@@ -78,14 +81,8 @@ export function ReviewQueueEntry({ job, progress, onScanStarted }: ReviewQueueEn
         ) : null}
       </div>
       <div className="review-queue-entry-actions">
-        <a href="/review?mode=review" className="btn btn--primary">
-          Needs input {totals ? `(${totals.review})` : ''}
-        </a>
-        <a href="/review?mode=ready" className="btn btn--secondary">
-          Ready to apply {totals ? `(${totals.ready})` : ''}
-        </a>
-        <a href="/review?mode=files" className="btn btn--secondary">
-          File actions {totals ? `(${totals.files})` : ''}
+        <a href="/review?mode=review" className="btn btn--secondary">
+          Open Album Review
         </a>
         <button
           className="btn btn--secondary"

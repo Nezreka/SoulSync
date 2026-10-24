@@ -1125,6 +1125,7 @@ class ConfigManager:
             "experimental": {
                 # JioSaavn is opt-in only — see Settings → Advanced → Experimental.
                 "jiosaavn_enabled": False,
+                "album_review_enabled": False,
             },
         }
 

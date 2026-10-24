@@ -1185,7 +1185,7 @@ def _candidate_evidence(files: list[dict], scored: tuple,
             'disc_number': slot.get('disc_number'),
             'duration_delta_ms': pair.get('duration_delta_ms'),
             'confidence': pair['confidence'],
-            'reasons': pair['reasons'],
+            'reasons': pair['reasons'], 'pairing_checks': pair.get('checks') or [],
             'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
             'competitors': pair.get('competitors') or [],
             'catalogue_disagreement': pair.get('catalogue_disagreement') or False,
@@ -1287,7 +1287,7 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict) ->
             'display_track_number': slot.get('track_number'),
             'title_difference': title_kind, 'changes': changes,
             'current_tags': tags, 'acoustid': file.get('acoustid') or {},
-            'confidence': pair['confidence'], 'reasons': pair.get('reasons') or [],
+            'confidence': pair['confidence'], 'reasons': pair.get('reasons') or [], 'pairing_checks': pair.get('checks') or [],
             'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
             'duration_delta_ms': pair.get('duration_delta_ms'),
             'audio_title': audio.get('title') or '',
@@ -1467,6 +1467,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
     try:
         payload = {
             'source': source, 'release_id': release_id, 'state': state,
+            'library_root': common.get('library_root') or '',
             'intent_scope': intent_scope,
             'intent_inferred': intent_inferred,
             'release_decision_reason': common.get('release_decision_reason') or '',
@@ -2029,6 +2030,10 @@ class LibraryReconciliationJob(RepairJob):
                                     THEN w.slots_json ELSE '[]' END
                         FROM reconcile_album_intent i
                         LEFT JOIN reconcile_wanted_slots w ON w.album_id = i.album_id
+                        UNION ALL
+                        SELECT w.album_id, '', w.source, w.release_id, w.slots_json
+                        FROM reconcile_wanted_slots w
+                        WHERE NOT EXISTS (SELECT 1 FROM reconcile_album_intent i WHERE i.album_id=w.album_id AND i.source=w.source AND i.release_id=w.release_id)
                     ''')}
         finally:
             conn.close()
@@ -2741,6 +2746,7 @@ class LibraryReconciliationJob(RepairJob):
                         'release_disambiguation': release_meta.get('disambiguation') or '',
                         'profile_id': album.get('owner_profile_id') if album else 1,
                         'album_folder': folder,
+                        'library_root': next((root for root in sorted(roots, key=len, reverse=True) if os.path.commonpath([folder, root]) == root), ''),
                         'album_folders': sorted({os.path.dirname(file['path']) for file in files}),
                         'source': source, 'release_id': release_id,
                         'numbering_mode': numbering_mode,
@@ -2757,6 +2763,15 @@ class LibraryReconciliationJob(RepairJob):
                              'playlists': list(file.get('playlists') or [])}
                             for file in files if file.get('playlists')],
                     }
+                    replacement_files = [{
+                        'track_id': str(member['db']['id']), 'file_path': member['path'],
+                        'title': member['tags'].get('title') or os.path.basename(member['path']),
+                        'artist': member['tags'].get('artist') or '',
+                        'duration_ms': member['tags'].get('duration_ms') or 0,
+                        'size_bytes': member['size_bytes'], 'mtime_ns': member['mtime_ns'],
+                        'file_identity': member.get('file_identity'),
+                        'fingerprint_key': member['acoustid'].get('fingerprint_key') or '',
+                    } for index, member in enumerate(files) if index in plan['extra_files'] and member.get('db') and not member.get('companion_of')]
                     assignment_options = [{
                         'key': _wanted_slot_key(slot), 'title': slot['title'],
                         'artist': slot.get('artist') or '',
@@ -2852,7 +2867,7 @@ class LibraryReconciliationJob(RepairJob):
                                                             if _pair_audio_conflict(file, slot, pair)
                                                             else ''),
                                          'fingerprint_key': file['acoustid'].get('fingerprint_key'),
-                                         'expected_title': slot['title'], 'match_reasons': pair['reasons'],
+                                         'expected_title': slot['title'], 'match_reasons': pair['reasons'], 'pairing_checks': pair.get('checks') or [],
                                          'expected_artist': slot.get('artist') or common['artist_name'],
                                          'expected_artist_names': slot.get('artist_names') or [],
                                          'recording_mbid': slot.get('recording_mbid') or '',
@@ -2878,7 +2893,7 @@ class LibraryReconciliationJob(RepairJob):
                                          'current_recording_disambiguation':
                                          (file.get('db') or {}).get('recording_disambiguation') or '',
                                          'confidence': pair['confidence'],
-                                         'assignment_options': assignment_options,
+                                         'assignment_options': assignment_options, 'replacement_files': [member for member in replacement_files if member['file_path'] != file['path']],
                                          'size_bytes': file['size_bytes'],
                                          'mtime_ns': file['mtime_ns'],
                                          'file_identity': file.get('file_identity'),
@@ -3058,6 +3073,9 @@ class LibraryReconciliationJob(RepairJob):
                                        if id_conflict or set(consistency).intersection(changed) else ''),
                                    'recording_id_conflict': id_conflict,
                                    'recording_identity': recording,
+                                   'replacement_track': {'name': slot['title'], 'artist': slot.get('artist'),
+                                       'source_track_id': slot.get('source_track_id'), 'disc_number': slot.get('disc_number') or 1,
+                                       'track_number': slot.get('track_number'), 'duration_ms': slot.get('duration_ms') or 0},
                                    'expected_title': slot['title'],
                                    'expected_artist': slot['artist'],
                                    'expected_artist_names': slot.get('artist_names') or [],
@@ -3080,14 +3098,14 @@ class LibraryReconciliationJob(RepairJob):
                                    'fingerprint_key': file['acoustid'].get('fingerprint_key'),
                                    'size_bytes': file['size_bytes'], 'mtime_ns': file['mtime_ns'],
                                    'file_identity': file.get('file_identity'),
-                                   'match_reasons': pair['reasons'],
+                                   'match_reasons': pair['reasons'], 'pairing_checks': pair.get('checks') or [],
                                    'confidence': pair['confidence'],
                                    'routine_numbering': routine_numbering and not filename_conflict,
                                    'numbering_recovery': review_choices.recovers_flattened_numbering(
                                        numbering_history, file, album_id=album_id,
                                        source=source, release_id=release_id),
                                    'title_difference_kind': title_kind,
-                                   'assignment_options': assignment_options,
+                                   'assignment_options': assignment_options, 'replacement_files': [member for member in replacement_files if member['file_path'] != file['path']],
                                    'saved_assignment': file['path'] in {files[i]['path'] for i in forced_pairs},
                                    'changes': changed, 'db_data': tag_plan['db_data'],
                                    'db_track_updates': db_updates,
@@ -3215,6 +3233,7 @@ class LibraryReconciliationJob(RepairJob):
                                    'expected_artist': (replacement_track or {}).get('artist') or '',
                                    'replacement_track': replacement_track}
                         details['assignment_options'] = assignment_options
+                        details['replacement_files'] = [member for member in replacement_files if member['file_path'] != file['path']]
                         if emit(
                             job_id=self.job_id,
                             finding_type=('reconciliation_duplicate' if duplicate_copies else
@@ -3247,7 +3266,7 @@ class LibraryReconciliationJob(RepairJob):
                     intent_scope = (saved_intent[0] if saved_intent and
                                     saved_intent[0] in ('complete', 'partial') and
                                     saved_intent[1:3] == (source, release_id) else '')
-                    wanted_slots = (set(saved_intent[3]) if intent_scope == 'partial' else set())
+                    wanted_slots = (set(saved_intent[3]) if saved_intent and saved_intent[1:3] == (source, release_id) else set())
                     wishlisted_slots = wishlisted_by_profile.get(
                         int(common.get('profile_id') or 1), set())
                     assignment_settled = (
@@ -3260,14 +3279,22 @@ class LibraryReconciliationJob(RepairJob):
                         files, album, watched_artists, saved_intent)
                     if intent_inferred:
                         intent_scope = 'partial'
+                    # A requested slot is already decided. Asking about it again
+                    # must not depend on a broader whole-album scope choice.
+                    undecided_missing = [slot for slot in missing
+                        if _wanted_slot_key(slot) not in wanted_slots and
+                        (source, str(slot.get('source_track_id') or ''), str(exact_release_id)) not in wishlisted_slots]
+                    if missing and not undecided_missing and not intent_scope:
+                        intent_scope = 'partial'
+                        wanted_slots.update(_wanted_slot_key(slot) for slot in missing)
                     if missing and album_id is not None:
-                        if not intent_scope and assignment_settled:
+                        if not intent_scope and assignment_settled and undecided_missing:
                             if emit(
                                 job_id=self.job_id, finding_type='reconciliation_intent',
                                 severity='info', entity_type='album', entity_id=str(album_id),
                                 file_path=None, title=f'Is {common["album_title"]} meant to be complete?',
-                                description=f'{len(missing)} release track(s) are not in this folder.',
-                                details={**common, 'missing_tracks': missing,
+                                description=f'{len(undecided_missing)} release track(s) need a collection choice.',
+                                details={**common, 'missing_tracks': undecided_missing,
                                          'suggested_scope': 'partial' if len(files) == 1 and files[0].get('playlists') else 'complete'}):
                                 result.findings_created += 1
                         for slot in missing:
@@ -3276,7 +3303,7 @@ class LibraryReconciliationJob(RepairJob):
                                 'wishlisted' if
                                 (source, str(slot.get('source_track_id') or ''),
                                  str(exact_release_id)) in wishlisted_slots else '')
-                            wanted = intent_scope == 'complete' or (intent_scope == 'partial' and _wanted_slot_key(slot) in wanted_slots)
+                            wanted = intent_scope == 'complete' or _wanted_slot_key(slot) in wanted_slots
                             if not wanted and not fulfillment_state:
                                 continue
                             if not assignment_settled and not fulfillment_state:

@@ -150,7 +150,7 @@ def build_runner(
                 # Match the old cached stat to the moved file before reusing it.
                 stat = os.stat(new_path)
                 preserve_audio_evidence(conn.cursor(), audio_source_path, new_path,
-                    size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
+                    size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns, preserve_tags=True)
             cursor = conn.execute(
                 "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (new_path, str(track_id)),
@@ -213,9 +213,12 @@ def build_runner(
             def preview_with_sources(**kwargs):
                 from core.library_reorganize import preview_album_reorganize
                 preview = preview_album_reorganize(**kwargs)
-                source_paths.update({str(track['track_id']): track['current_path_abs']
-                                     for track in preview.get('tracks') or []
-                                     if track.get('current_path_abs')})
+                from core.library.reconciliation_evidence import evidence_path_before_move
+                with get_database()._get_connection() as conn:
+                    for track in preview.get('tracks') or []:
+                        if track.get('current_path_abs'):
+                            source_paths[str(track['track_id'])] = evidence_path_before_move(
+                                conn.cursor(), track['current_path_abs'])
                 return preview
             return reorganize_album_rename_only(
                 album_id=item.album_id,

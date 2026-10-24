@@ -3324,3 +3324,138 @@
 .editionComparison small {
   color: var(--text-2);
 }
+
+/* Content sets row height; the list alone scrolls. */
+.assignmentChoices {
+  grid-auto-rows: max-content;
+}
+.assignmentChoices > button {
+  min-height: 58px;
+  height: auto;
+  align-items: center;
+}
+.assignmentChoices > button > span:nth-child(2) {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.assignmentChoices strong,
+.assignmentChoices small {
+  line-height: 1.4;
+}
+.disclosureFooter {
+  display: flex;
+  justify-content: center;
+  position: relative;
+  margin: 16px 0 -34px;
+  padding-bottom: 16px;
+}
+.disclosureFooter > button {
+  border-radius: 999px;
+  gap: 8px;
+  background: var(--surface-2, #252729);
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 6px #0003;
+}
+.applyAlbum > h3 {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  margin: 0 0 12px;
+}
+.applyAlbum > h3 > span {
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: normal;
+}
+.applyCategory[data-kind='organization'] {
+  border-left-color: var(--info);
+}
+.applyCategory > code {
+  display: block;
+  margin: 10px 4px;
+  overflow-wrap: anywhere;
+}
+.fileDecisionList {
+  margin-bottom: 20px;
+}
+
+.evidenceTable {
+  overflow-x: auto;
+}
+.evidenceTable table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  table-layout: fixed;
+}
+.evidenceTable th,
+.evidenceTable td {
+  text-align: left;
+  vertical-align: top;
+  padding: 9px 7px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.evidenceTable th:first-child {
+  width: 20%;
+}
+.evidenceTable small {
+  display: block;
+  color: var(--text-2);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.evidenceTable tr[data-result='agrees'] td:last-child strong {
+  color: var(--success);
+}
+.evidenceTable tr[data-result='conflicts'] td:last-child strong {
+  color: var(--warning);
+}
+.evidenceTable tr[data-result='resolved'] td:last-child strong,
+.evidenceTable tr[data-result='manual'] td:last-child strong {
+  color: var(--info);
+}
+.evidenceTable tr[data-result='unavailable'] {
+  color: var(--text-2);
+}
+
+.actionNote {
+  color: var(--text-2);
+  font-size: 12px;
+  margin: 0 0 12px;
+}
+.remediationChoices {
+  border: 0;
+  padding: 0;
+  margin: 12px 0 20px;
+  display: grid;
+  gap: 8px;
+}
+.remediationChoices legend {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.remediationChoices label {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 5px 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.remediationChoices small {
+  grid-column: 2;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.remediationChoices label:has(input:checked) {
+  border-color: var(--success);
+  background: rgba(var(--success-rgb), 0.05);
+}
+.remediationSummary {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}

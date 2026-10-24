@@ -31,33 +31,55 @@ def file_identity(stat) -> dict:
     return {'device': stat.st_dev, 'inode': stat.st_ino, 'ctime_ns': stat.st_ctime_ns}
 
 
-def preserve_audio_evidence(cursor, old_path, new_path, *, size_bytes, mtime_ns,
-                            fingerprint_key=None):
-    """Carry audio through our own tag write or move; always invalidate tags.
+def evidence_path_before_move(cursor, path):
+    """Find the scanned cache key while both mount aliases still exist."""
+    if not cursor.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_file_fingerprints'").fetchone():
+        return path
+    stat = os.stat(path)
+    candidates = cursor.execute("""SELECT file_path FROM reconcile_file_fingerprints
+        WHERE size_bytes=? AND mtime_ns=?""", (stat.st_size, stat.st_mtime_ns)).fetchall()
+    for (candidate,) in candidates:
+        try:
+            if os.path.samefile(path, candidate):
+                return candidate
+        except OSError:
+            continue
+    return path
 
-    Call only after a guarded operation which preserves the audio stream. The
-    source cache must describe the file immediately before that operation.
+
+def preserve_audio_evidence(cursor, old_path, new_path, *, size_bytes, mtime_ns,
+                            fingerprint_key=None, preserve_tags=False):
+    """Carry evidence through our own guarded audio-preserving operation.
+
+    Only a byte-preserving rename may retain native tag evidence. Tag writes
+    invalidate it; unchanged size/mtime alone never authorizes an external edit.
     """
     tables = {row[0] for row in cursor.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
+    stat = os.stat(new_path)
     if 'reconcile_file_tags' in tables:
+        tags = cursor.execute("""SELECT tags_json FROM reconcile_file_tags
+            WHERE file_path=? AND size_bytes=? AND mtime_ns=?""",
+            (old_path, size_bytes, mtime_ns)).fetchone() if preserve_tags else None
         cursor.execute('DELETE FROM reconcile_file_tags WHERE file_path IN (?, ?)',
                        (old_path, new_path))
+        if tags:
+            cursor.execute('INSERT INTO reconcile_file_tags VALUES (?, ?, ?, ?)',
+                           (new_path, stat.st_size, stat.st_mtime_ns, tags[0]))
     if 'reconcile_file_fingerprints' not in tables:
         return
-    row = cursor.execute('''SELECT duration_s, fingerprint
+    row = cursor.execute("""SELECT duration_s, fingerprint
         FROM reconcile_file_fingerprints
-        WHERE file_path=? AND size_bytes=? AND mtime_ns=?''',
+        WHERE file_path=? AND size_bytes=? AND mtime_ns=?""",
         (old_path, size_bytes, mtime_ns)).fetchone()
     if not row:
         return
     key = hashlib.sha256(f'{float(row[0]):.6f}:{row[1]}'.encode()).hexdigest()
     if fingerprint_key and fingerprint_key != key:
         return
-    stat = os.stat(new_path)
-    cursor.execute('''INSERT OR REPLACE INTO reconcile_file_fingerprints
+    cursor.execute("""INSERT OR REPLACE INTO reconcile_file_fingerprints
         (file_path, size_bytes, mtime_ns, duration_s, fingerprint)
-        VALUES (?, ?, ?, ?, ?)''',
+        VALUES (?, ?, ?, ?, ?)""",
         (new_path, stat.st_size, stat.st_mtime_ns, row[0], row[1]))
     if old_path != new_path:
         cursor.execute('DELETE FROM reconcile_file_fingerprints WHERE file_path=?', (old_path,))

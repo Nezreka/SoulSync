@@ -53,6 +53,7 @@ import {
 } from './review-album-model';
 import { ReviewArtwork } from './review-artwork';
 import styles from './review-page.module.css';
+import { libraryRelativePath } from './review-presentation';
 import { assignmentKey, record, records, textValue } from './review-presentation';
 import { SelectedActionDetail } from './selected-action-detail';
 
@@ -1519,6 +1520,19 @@ export function ReviewPage() {
                 ))}
               </Select>
             </label>
+            {(searchInput || query || category) && (
+              <Button
+                type="button"
+                onClick={() => {
+                  setSearchInput('');
+                  setQuery('');
+                  setCategory('');
+                  setPage(0);
+                }}
+              >
+                Clear filters
+              </Button>
+            )}
             <div className={styles.caseList} ref={caseListRef} aria-busy={!queue}>
               {!queue && <p role="status">Loading albums…</p>}
               {queue?.items.map((item) => (
@@ -1826,7 +1840,12 @@ export function ReviewPage() {
                         Check the album tags and folder placement below. Correct the conflicting
                         membership, then reanalyze this album.
                       </p>
-                      <p className={styles.muted}>{reviewCase.folder}</p>
+                      <p className={styles.muted}>
+                        {libraryRelativePath(
+                          reviewCase.folder || '',
+                          reviewCase.album_plan?.library_root,
+                        )}
+                      </p>
                       <ul className={styles.folderFiles}>
                         {records(folderFinding.details?.checked_files).map((file) => (
                           <li key={textValue(file.file_path)}>
@@ -2873,7 +2892,12 @@ export function ReviewPage() {
                             <ul>
                               {sourceFolders.map((folder) => (
                                 <li key={folder}>
-                                  <code>{folder}</code>
+                                  <code title={folder}>
+                                    {libraryRelativePath(
+                                      folder,
+                                      reviewCase.album_plan?.library_root,
+                                    )}
+                                  </code>
                                 </li>
                               ))}
                             </ul>

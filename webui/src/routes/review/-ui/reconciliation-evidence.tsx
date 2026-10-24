@@ -15,10 +15,13 @@ import type {
   ReviewFinding,
 } from '../-review.api';
 
+import { DisclosureFooter } from './disclosure-footer';
+import { PairingEvidence } from './pairing-evidence';
 import { ReviewArtwork } from './review-artwork';
 import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';
 import { formatTrackPosition } from './review-position';
+import { libraryRelativePath } from './review-presentation';
 import {
   record as object,
   records as objects,
@@ -626,13 +629,12 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
             ))}
           </ul>
           {recordings.length > 5 && (
-            <Button
-              type="button"
-              aria-expanded={expanded}
-              onClick={() => setExpanded((value) => !value)}
-            >
-              {expanded ? 'Show fewer recordings' : `Show ${recordings.length - 5} more recordings`}
-            </Button>
+            <DisclosureFooter
+              expanded={expanded}
+              onToggle={() => setExpanded((value) => !value)}
+              more={`Show ${recordings.length - 5} more recordings`}
+              fewer="Show fewer recordings"
+            />
           )}
         </>
       ) : (
@@ -1134,7 +1136,7 @@ function Facts({
           {folder && (
             <div>
               <dt>Folder</dt>
-              <dd>{folder}</dd>
+              <dd title={folder}>{libraryRelativePath(folder, label(details.library_root))}</dd>
             </div>
           )}
           {Boolean(details.file_duration_ms || tags.duration_ms) && (
@@ -1266,6 +1268,7 @@ export function AssignmentEvidence({
     expected_title: row.slot_title,
     file_duration_ms: row.file_duration_ms,
     expected_duration_ms: row.slot_duration_ms,
+    library_root: album.album_plan?.library_root,
     album_folder: row.file_path?.split('/').slice(0, -1).join('/') || album.folder,
     expected_artist: row.slot_artist,
     source: album.album_plan?.source,
@@ -1330,12 +1333,7 @@ export function AssignmentEvidence({
         release={release}
         caseId={album.case_id}
       />
-      {Boolean(row.reasons?.length) && (
-        <section className={styles.technicalCard}>
-          <h5>Why this track was paired</h5>
-          <p>{row.reasons?.join(' · ')}</p>
-        </section>
-      )}
+      <PairingEvidence checks={row.pairing_checks} reasons={row.reasons} />
     </section>
   );
 }
@@ -1503,26 +1501,14 @@ export function ReconciliationEvidence({
           <Facts finding={finding} details={details} release={release} caseId={caseId} />
         </div>
       )}
-      {prominent && reasons.length > 0 && (
-        <section className={styles.technicalCard}>
-          <h5>Why this track was paired</h5>
-          <p>{reasons.join(' · ')}</p>
-          {Boolean(details.confidence) && <p>Confidence: {label(details.confidence)}</p>}
-        </section>
-      )}
+      {prominent && <PairingEvidence checks={details.pairing_checks} reasons={reasons} />}
       {(!prominent || objects(details.checked_files).length > 0) && (
         <div className={styles.technicalGrid}>
           {!prominent && (
             <Facts finding={finding} details={details} release={release} caseId={caseId} />
           )}
           <CheckedFiles details={details} />
-          {!prominent && reasons.length > 0 && (
-            <section className={styles.technicalCard}>
-              <h5>Why this track was paired</h5>
-              <p>{reasons.join(' · ')}</p>
-              {Boolean(details.confidence) && <p>Confidence: {label(details.confidence)}</p>}
-            </section>
-          )}
+          {!prominent && <PairingEvidence checks={details.pairing_checks} reasons={reasons} />}
         </div>
       )}
       {finding.last_error && <p className={styles.error}>Last attempt: {finding.last_error}</p>}

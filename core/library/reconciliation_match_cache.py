@@ -20,7 +20,7 @@ MAX_BYTES = 128 * 1024 * 1024
 MAX_RESULT = 1024 * 1024
 MAX_MEMORY = 32 * 1024 * 1024
 RETENTION = 30 * 86400
-SCHEMA = 2  # Explicit competitors and catalogue disagreement are part of each pair.
+SCHEMA = 3  # Structured matcher checks accompany each pair.
 log = logging.getLogger(__name__)
 
 
@@ -109,8 +109,10 @@ def decode(raw, files, slots, forced_pairs):
         raise ValueError('Invalid pairs')
     used_files, used_slots = [], []
     for pair in pairs:
-        if not isinstance(pair, dict) or set(pair) != {'file_index', 'slot_index', 'score', 'reasons', 'duration_delta_ms', 'ambiguity_reasons', 'confidence', 'competitors', 'catalogue_disagreement'}:
+        if not isinstance(pair, dict) or set(pair) != {'file_index', 'slot_index', 'score', 'reasons', 'duration_delta_ms', 'ambiguity_reasons', 'confidence', 'competitors', 'catalogue_disagreement', 'checks'}:
             raise ValueError('Invalid pair schema')
+        if not isinstance(pair['checks'], list) or any(not isinstance(row, dict) for row in pair['checks']):
+            raise ValueError('Invalid structured checks')
         if type(pair['catalogue_disagreement']) is not bool or not isinstance(pair['competitors'], list):
             raise ValueError('Invalid assignment explanation')
         for rival in pair['competitors']:

@@ -772,7 +772,7 @@ def _ready_action_description(item: dict, file_path: str | None, title: str | No
     filename = os.path.basename(file_path or '')
     if details.get('plan_keep'):
         return f'Keep current values: {filename or title or "track"}'
-    if item['finding_type'] == 'reconciliation_metadata':
+    if item['finding_type'] == 'reconciliation_metadata' and not action:
         fields = ', '.join(name.replace('_', ' ') for name in details.get('changes') or {})
         return f'Update {filename}: {fields}'
     if item['finding_type'] == 'reconciliation_duplicate':
@@ -783,6 +783,10 @@ def _ready_action_description(item: dict, file_path: str | None, title: str | No
         removed = [copy.get('file_path') or str(copy.get('track_id')) for copy in copies
                    if str(copy.get('track_id') or copy.get('id')) != keeper]
         return f'Keep {keep_path}; move to recoverable quarantine: {", ".join(removed) or "the other duplicate copies"}'
+    if action.startswith('existing:'):
+        mode, track_id = action.split(':', 2)[1:]
+        chosen = next((row for row in details.get('replacement_files') or [] if str(row.get('track_id')) == track_id), {})
+        return f"Use {os.path.basename(chosen.get('file_path') or '')} for {details.get('expected_title') or filename}; {'keep' if mode == 'keep' else 'quarantine'} the current file"
     if action == 'replace':
         return f'Move {filename} to recoverable quarantine and request its release-track replacement'
     if action == 'request_missing':
@@ -793,7 +797,7 @@ def _ready_action_description(item: dict, file_path: str | None, title: str | No
 def _ready_file_decision(item, file_path):
     details = item['details']
     action = (details.get('planned_choice') or {}).get('fix_action') or ''
-    if item['finding_type'] == 'reconciliation_metadata' or details.get('plan_keep'):
+    if (item['finding_type'] == 'reconciliation_metadata' and not action) or details.get('plan_keep'):
         return None
     keep, quarantine = [], []
     if item['finding_type'] == 'reconciliation_duplicate':
@@ -802,7 +806,14 @@ def _ready_file_decision(item, file_path):
             if isinstance(copy, dict) and copy.get('file_path'):
                 (keep if str(copy.get('track_id') or copy.get('id')) == keeper else quarantine).append(copy['file_path'])
     elif file_path:
-        (keep if action == 'request_missing' else quarantine).append(file_path)
+        if action.startswith('existing:'):
+            mode, track_id = action.split(':', 2)[1:]
+            chosen = next((row for row in details.get('replacement_files') or [] if str(row.get('track_id')) == track_id), {})
+            if chosen.get('file_path'):
+                keep.append(chosen['file_path'])
+            (keep if mode == 'keep' else quarantine).append(file_path)
+        else:
+            (keep if action == 'request_missing' else quarantine).append(file_path)
     requested = details.get('replacement_track') or {}
     return {'title': (details.get('current_tags') or {}).get('title') or details.get('expected_title') or os.path.basename(file_path or ''),
             'keep': keep, 'quarantine': quarantine,
@@ -852,7 +863,7 @@ def ready_batch_preview(db, *, case_id: str = '', include_snapshot: bool = False
                                 'title': (details.get('current_tags') or {}).get('title') or '',
                                 'changes': _ready_action_changes(details),
                                 'file_decision': _ready_file_decision(item, row[0] if row else ''),
-                                'file_action': item['finding_type'] != 'reconciliation_metadata' and not details.get('plan_keep')})
+                                'file_action': bool(_ready_file_decision(item, row[0] if row else ''))})
             actions.sort(key=lambda action: not action['file_action'])
             albums.append({'case_id': key, 'album': next((item['details'].get('album_title') for item in value['items'] if item['details'].get('album_title')), key), 'actions': actions})
         signature = hashlib.sha256(json.dumps(snapshot, sort_keys=True, default=str).encode()).hexdigest()

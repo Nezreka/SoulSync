@@ -92,12 +92,14 @@ export interface AlbumAssignment {
   current_tags?: Record<string, unknown>;
   acoustid?: Record<string, unknown>;
   reasons?: string[];
+  pairing_checks?: Array<Record<string, unknown>>;
   ambiguity_reasons?: string[];
   competitors?: Record<string, unknown>[];
   catalogue_disagreement?: boolean;
 }
 
 export interface AlbumReconciliationPlan {
+  library_root?: string;
   state: 'confirmed' | 'changes' | 'review' | 'release_conflict';
   source?: string;
   release_id?: string;

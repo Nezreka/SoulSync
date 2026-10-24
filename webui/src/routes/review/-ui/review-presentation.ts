@@ -177,3 +177,8 @@ export function displayChanges(changes: unknown) {
   }
   return rows;
 }
+
+export function libraryRelativePath(path: string, root?: string): string {
+  const prefix = root?.replace(/\/+$/, '');
+  return prefix && path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : path;
+}

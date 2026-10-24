@@ -1129,6 +1129,8 @@ setInterval(() => {
 }, 2000);
 
 function handleServiceStatusUpdate(data) {
+    const reviewNav = document.getElementById('album-review-nav');
+    if (reviewNav && data._experimental) reviewNav.hidden = data._experimental.album_review_enabled !== true;
     // Re-broadcast for the React dashboard's service cards + library card
     // (tools-seam rule: in the handler, so any future HTTP caller counts too).
     window.dispatchEvent(new CustomEvent('ss:service-status', { detail: data }));

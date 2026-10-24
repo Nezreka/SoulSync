@@ -15526,6 +15526,7 @@ class MusicDatabase:
         track_data: Dict[str, Any] = None,
         user_initiated: bool = False,
         quality_profile_id: Optional[int] = None,
+        reconciliation_request: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """Add a failed track to the wishlist for retry.
 
@@ -15562,6 +15563,13 @@ class MusicDatabase:
 
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+
+                def commit_request():
+                    if reconciliation_request:
+                        from core.library.reconciliation_fulfillment import record_request_on_connection
+                        record_request_on_connection(conn, reconciliation_request['details'],
+                                                     reconciliation_request['slot'])
+                    conn.commit()
 
                 # Use track ID as unique identifier. Field name stays legacy-compatible.
                 track_id = spotify_track_data.get('id')
@@ -15616,7 +15624,7 @@ class MusicDatabase:
                     logger.debug("Wishlist ignore-list check skipped (fail-open): %s", _ignore_exc)
 
                 from core.library import manual_library_match as _mlm
-                if _mlm.get_match_for_track(self, profile_id, spotify_track_data):
+                if not reconciliation_request and _mlm.get_match_for_track(self, profile_id, spotify_track_data):
                     logger.info(
                         "Skipping wishlist add for manually matched track: '%s' (%s:%s)",
                         spotify_track_data.get('name', 'Unknown Track'),
@@ -15722,7 +15730,7 @@ class MusicDatabase:
                                         f"UPDATE wishlist_tracks SET {', '.join(updates)} WHERE id=?",
                                         params,
                                     )
-                                    conn.commit()
+                                    commit_request()
                                     logger.info(
                                         "Refreshed existing wishlist entry: '%s' by %s",
                                         track_name,
@@ -15791,7 +15799,7 @@ class MusicDatabase:
                         f"UPDATE wishlist_tracks SET {', '.join(updates)} WHERE id=?",
                         params,
                     )
-                    conn.commit()
+                    commit_request()
                     logger.debug(
                         "Wishlist entry already present; refreshed context for '%s'",
                         track_name,
@@ -15810,7 +15818,7 @@ class MusicDatabase:
                 """, (insert_track_id, spotify_json, failure_reason, source_type, source_json, profile_id,
                       resolved_qp_id))
 
-                conn.commit()
+                commit_request()
 
                 logger.info(f"Added track to wishlist: '{track_name}' by {artist_name}")
                 return self._wishlist_outcome("created", insert_track_id)

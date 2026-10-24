@@ -67,14 +67,6 @@ export function SelectedActionDetail({
     textValue(finding.details?.fulfillment_state),
   );
   const replacement = record(finding.details?.replacement_track);
-  const localLength = Number(
-    finding.details?.file_duration_ms || record(finding.details?.current_tags).duration_ms || 0,
-  );
-  const releaseLength = Number(
-    finding.details?.expected_duration_ms || replacement.duration_ms || 0,
-  );
-  const lengthConflict =
-    localLength > 0 && releaseLength > 0 && Math.abs(localLength - releaseLength) > 15000;
   const canAssign = Boolean(finding.file_path) && !numberingPreview && !waitingForDownload;
   const proposedSlot =
     canAssign && !wrongAudio && !versionConflict && !duplicateChoice
@@ -207,85 +199,50 @@ export function SelectedActionDetail({
                 This numbering change is a preview. Choose the album numbering on Plan first.
               </p>
             )}
-            {!waitingForDownload && (
-              <div className={styles.actions}>
-                {proposedSlot && (
-                  <Button
-                    type="button"
-                    variant="primary"
-                    disabled={busy}
-                    onClick={() => onAct('fix', `assign:${textValue(proposedSlot.key)}`)}
-                  >
-                    Use assignment in plan: {textValue(proposedSlot.title)}
-                  </Button>
-                )}
-                {!intentChoice &&
-                  (versionConflict || lengthConflict) &&
-                  canApply &&
-                  Boolean(replacement.source_track_id) && (
-                    <>
-                      <Button
-                        type="button"
-                        disabled={busy}
-                        variant="primary"
-                        onClick={() => onAct('fix', 'request_missing')}
-                      >
-                        Plan to keep local and request release version
-                      </Button>
-                      <Button type="button" disabled={busy} onClick={() => onAct('fix', 'replace')}>
-                        Plan replacement with release version
-                      </Button>
-                    </>
-                  )}
-                {!intentChoice && !versionConflict && !lengthConflict && wrongAudio && canApply && (
-                  <>
-                    {canReplaceWrongAudio && (
-                      <Button
-                        type="button"
-                        disabled={busy}
-                        variant="primary"
-                        onClick={() => onAct('fix', 'replace')}
-                      >
-                        {busy ? 'Saving…' : 'Plan replacement with correct track'}
-                      </Button>
-                    )}
+            {!waitingForDownload && !intentChoice && (
+              <>
+                <div className={styles.actions}>
+                  {directRepair && !wrongAudio && !versionConflict ? (
                     <Button
                       type="button"
+                      variant="primary"
                       disabled={busy}
-                      onClick={() => onAct('fix', 'quarantine')}
+                      onClick={() => onAct('fix')}
                     >
-                      Plan quarantine of wrong file
+                      {busy ? 'Saving…' : 'Accept changes'}
                     </Button>
-                  </>
-                )}
-                {directRepair && !versionConflict && !wrongAudio && (
-                  <Button
-                    type="button"
-                    disabled={busy}
-                    variant="primary"
-                    onClick={() => onAct('fix')}
-                  >
-                    {finding.finding_type === 'reconciliation_metadata'
-                      ? busy
-                        ? 'Saving…'
-                        : 'Use proposed change'
-                      : busy
-                        ? 'Applying…'
-                        : suggested
-                          ? typeInfo?.verb || 'Apply repair'
-                          : 'Apply this change'}
-                  </Button>
-                )}
-                {!intentChoice && (
+                  ) : (
+                    proposedSlot && (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        disabled={busy}
+                        onClick={() => onAct('fix', `assign:${textValue(proposedSlot.key)}`)}
+                      >
+                        Accept match
+                      </Button>
+                    )
+                  )}
                   <Button
                     type="button"
                     disabled={busy || numberingPreview}
                     onClick={() => onAct('dismiss')}
                   >
-                    {versionConflict ? 'Keep local version' : 'Keep current values'}
+                    Leave as-is
                   </Button>
-                )}
-              </div>
+                  {canApply && canAssign && Boolean(replacement.source_track_id) && (
+                    <ReplacementChoice
+                      target={replacement}
+                      files={records(details.replacement_files)}
+                      busy={busy}
+                      onAct={onAct}
+                    />
+                  )}
+                </div>
+                <p className={styles.actionNote}>
+                  Choices are saved in this plan. Files change when you apply it.
+                </p>
+              </>
             )}
 
             {canAssign && assignmentOptions.length > 0 && (
@@ -314,18 +271,16 @@ export function SelectedActionDetail({
               finding.file_path &&
               Boolean(details.track_id) &&
               details.album_id != null &&
-              !wrongAudio &&
-              !versionConflict &&
               !duplicateChoice &&
               !(details.competing_copies as unknown[] | undefined)?.length && (
                 <details className={styles.extraAction}>
-                  <summary>Move this file out of the album</summary>
+                  <summary>Remove from album…</summary>
                   <span>
                     If this copy does not belong here, move it to recoverable quarantine and remove
                     its library entry.
                   </span>
                   <Button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
-                    Plan move to quarantine
+                    Move to quarantine
                   </Button>
                 </details>
               )}
@@ -409,7 +364,7 @@ function AssignmentChoice({
   return (
     <>
       <Button type="button" disabled={busy} onClick={() => changeOpen(true)}>
-        Change track assignment
+        Change matched track…
       </Button>
       <DialogFrame open={open} onOpenChange={changeOpen}>
         <DialogHeader title="Change track assignment">Local file: {local}</DialogHeader>
@@ -464,6 +419,136 @@ function AssignmentChoice({
           <Button onClick={() => changeOpen(false)}>Cancel</Button>
           <Button variant="primary" disabled={busy || !slot} onClick={() => save(`assign:${slot}`)}>
             Save plan assignment
+          </Button>
+        </DialogFooter>
+      </DialogFrame>
+    </>
+  );
+}
+
+function ReplacementChoice({
+  target,
+  files,
+  busy,
+  onAct,
+}: {
+  target: Record<string, unknown>;
+  files: Record<string, unknown>[];
+  busy: boolean;
+  onAct: (action: 'fix', choice: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [source, setSource] = useState('new');
+  const [disposition, setDisposition] = useState('keep');
+  const [file, setFile] = useState('');
+  const changeOpen = (next: boolean) => {
+    setOpen(next);
+    if (!next) {
+      setSource('new');
+      setDisposition('keep');
+      setFile('');
+    }
+  };
+  const choice =
+    source === 'existing'
+      ? `existing:${disposition}:${file}`
+      : disposition === 'keep'
+        ? 'request_missing'
+        : 'replace';
+  return (
+    <>
+      <Button disabled={busy} onClick={() => changeOpen(true)}>
+        Replace file…
+      </Button>
+      <DialogFrame open={open} onOpenChange={changeOpen}>
+        <DialogHeader title="Replace file">
+          Choose a copy of {textValue(target.name || target.title)} for this release.
+        </DialogHeader>
+        <DialogBody>
+          <fieldset className={styles.remediationChoices}>
+            <legend>Replacement</legend>
+            <label>
+              <input
+                type="radio"
+                name="replacement-source"
+                checked={source === 'new'}
+                onChange={() => setSource('new')}
+              />
+              Find another copy<small>Request the exact track from the selected release.</small>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="replacement-source"
+                checked={source === 'existing'}
+                onChange={() => setSource('existing')}
+              />
+              Use an existing file<small>Choose an unassigned file already in this album.</small>
+            </label>
+          </fieldset>
+          {source === 'existing' && (
+            <div className={styles.assignmentChoices} aria-label="Existing album files">
+              {files.map((candidate) => (
+                <Button
+                  key={textValue(candidate.track_id)}
+                  aria-pressed={file === textValue(candidate.track_id)}
+                  onClick={() => setFile(textValue(candidate.track_id))}
+                >
+                  <span aria-hidden="true">♪</span>
+                  <span>
+                    <strong>{textValue(candidate.title)}</strong>
+                    <small>{textValue(candidate.file_path).split('/').at(-1)}</small>
+                  </span>
+                  <small>{shortDuration(Number(candidate.duration_ms))}</small>
+                </Button>
+              ))}
+              {!files.length && (
+                <p>
+                  No unassigned indexed files are available in this album. Add a local file through
+                  Import, then reanalyze the album.
+                </p>
+              )}
+            </div>
+          )}
+          <fieldset className={styles.remediationChoices}>
+            <legend>Current file</legend>
+            <label>
+              <input
+                type="radio"
+                name="replacement-disposition"
+                checked={disposition === 'keep'}
+                onChange={() => setDisposition('keep')}
+              />
+              Keep it<small>Keep the current file alongside the selected copy.</small>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="replacement-disposition"
+                checked={disposition === 'quarantine'}
+                onChange={() => setDisposition('quarantine')}
+              />
+              Move it to quarantine<small>Remove it from this album and keep it recoverable.</small>
+            </label>
+          </fieldset>
+          <p className={styles.remediationSummary}>
+            {source === 'new' ? 'Request a new copy' : 'Use the selected existing file'} and{' '}
+            {disposition === 'keep'
+              ? 'keep the current file.'
+              : 'move the current file to recoverable quarantine when you apply the plan.'}
+          </p>
+        </DialogBody>
+        <DialogFooter>
+          <Button onClick={() => changeOpen(false)}>Cancel</Button>
+          <Button
+            variant="primary"
+            disabled={busy || (source === 'existing' && !file)}
+            onClick={() => {
+              changeOpen(false);
+              onAct('fix', choice);
+            }}
+          >
+            Save choice
           </Button>
         </DialogFooter>
       </DialogFrame>

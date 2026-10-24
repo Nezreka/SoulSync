@@ -36,6 +36,7 @@
           "release_disambiguation": "",
           "profile_id": null,
           "album_folder": "/music/Acceptance Artist/Northbound",
+          "library_root": "/music",
           "album_folders": [
             "/music/Acceptance Artist/Northbound"
           ],
@@ -60,6 +61,14 @@
             "title": "Open Water",
             "artist": "Acceptance Artist",
             "score": 0.99
+          },
+          "replacement_track": {
+            "name": "Open Water",
+            "artist": "Acceptance Artist",
+            "source_track_id": "00000000-0000-4000-8000-000000000002",
+            "disc_number": 1,
+            "track_number": 2,
+            "duration_ms": 210000
           },
           "expected_title": "Open Water",
           "expected_artist": "Acceptance Artist",
@@ -120,6 +129,74 @@
             "filename agrees",
             "duration differs by 0.00s"
           ],
+          "pairing_checks": [
+            {
+              "check": "Audio identity",
+              "local": "Open Water",
+              "release": "Open Water",
+              "result": "agrees",
+              "detail": "Top fingerprint catalogue identities"
+            },
+            {
+              "check": "Embedded title",
+              "local": "Open Water",
+              "release": "Open Water",
+              "result": "agrees"
+            },
+            {
+              "check": "Filename",
+              "local": "Open Water",
+              "release": "Open Water",
+              "result": "agrees"
+            },
+            {
+              "check": "Artist credit",
+              "local": "Acceptance Artist",
+              "release": "Acceptance Artist",
+              "result": "agrees"
+            },
+            {
+              "check": "Embedded recording ID",
+              "local": "",
+              "release": "00000000-0000-4000-8000-000000000002",
+              "result": "unavailable"
+            },
+            {
+              "check": "Audio length",
+              "local": "210.00 s",
+              "release": "210.00 s",
+              "result": "agrees",
+              "detail": "0.00 s difference"
+            },
+            {
+              "check": "Version",
+              "local": "No qualifier",
+              "release": "No qualifier",
+              "result": "agrees",
+              "detail": "Release version compared with local qualifiers and recording identity"
+            },
+            {
+              "check": "Disc / track position",
+              "local": "1.2",
+              "release": "1.2",
+              "result": "agrees",
+              "detail": "Supporting context; numbering alone does not establish audio identity"
+            },
+            {
+              "check": "Album assignment",
+              "local": "3 local files",
+              "release": "2 release tracks",
+              "result": "agrees",
+              "detail": "One-to-one assignment considers competing local copies and release slots together"
+            },
+            {
+              "check": "Decision",
+              "local": "",
+              "release": "",
+              "result": "agrees",
+              "detail": "Evidence supports this pairing"
+            }
+          ],
           "confidence": "clear",
           "routine_numbering": false,
           "numbering_recovery": false,
@@ -146,6 +223,18 @@
               "preview_url": ""
             }
           ],
+          "replacement_files": [
+            {
+              "track_id": "3",
+              "file_path": "/music/Acceptance Artist/Northbound/01 - Home.copy.flac",
+              "title": "Home",
+              "artist": "Acceptance Artist",
+              "duration_ms": 200000,
+              "size_bytes": 1284,
+              "mtime_ns": 1,
+              "fingerprint_key": "duplicate_saved:fingerprint_key:4"
+            }
+          ],
           "saved_assignment": false,
           "changes": {
             "musicbrainz_recording_id": {
@@ -170,7 +259,7 @@
         "created_at": "2025-01-13 10:00:00",
         "updated_at": "2025-01-13 10:00:00",
         "last_error": null,
-        "evidence_token": "duplicate_saved:evidence_token:4",
+        "evidence_token": "duplicate_saved:evidence_token:5",
         "review_tier": "ready",
         "review_reason": "Audio and release evidence support this metadata repair",
         "category": "metadata"
@@ -203,6 +292,7 @@
           "release_disambiguation": "",
           "profile_id": null,
           "album_folder": "/music/Acceptance Artist/Northbound",
+          "library_root": "/music",
           "album_folders": [
             "/music/Acceptance Artist/Northbound"
           ],
@@ -246,10 +336,10 @@
                 "score": 0.99
               }
             ],
-            "fingerprint_key": "duplicate_saved:fingerprint_key:5"
+            "fingerprint_key": "duplicate_saved:fingerprint_key:4"
           },
           "file_duration_ms": 200000,
-          "fingerprint_key": "duplicate_saved:fingerprint_key:5",
+          "fingerprint_key": "duplicate_saved:fingerprint_key:4",
           "size_bytes": 1284,
           "mtime_ns": 1,
           "track_id": "3",
@@ -264,7 +354,7 @@
               "artist": "Acceptance Artist",
               "album": "Northbound",
               "file_path": "/music/Acceptance Artist/Northbound/01 - Home.copy.flac",
-              "fingerprint_key": "duplicate_saved:fingerprint_key:5",
+              "fingerprint_key": "duplicate_saved:fingerprint_key:4",
               "size_bytes": 1284,
               "mtime_ns": 1,
               "bitrate": 0,
@@ -313,7 +403,7 @@
               "artist": "Acceptance Artist",
               "album": "Northbound",
               "file_path": "/music/Acceptance Artist/Northbound/01 - Home.copy.flac",
-              "fingerprint_key": "duplicate_saved:fingerprint_key:5",
+              "fingerprint_key": "duplicate_saved:fingerprint_key:4",
               "size_bytes": 1284,
               "mtime_ns": 1,
               "bitrate": 0,
@@ -382,6 +472,7 @@
               "preview_url": ""
             }
           ],
+          "replacement_files": [],
           "planned_choice": {
             "category": "duplicates",
             "action": "fix",
@@ -458,6 +549,7 @@
       "source": "musicbrainz",
       "release_id": "11111111-1111-4111-8111-111111111111",
       "state": "review",
+      "library_root": "/music",
       "intent_scope": "",
       "intent_inferred": false,
       "release_decision_reason": "",
@@ -563,6 +655,74 @@
             "filename agrees",
             "duration differs by 0.00s"
           ],
+          "pairing_checks": [
+            {
+              "check": "Audio identity",
+              "local": "Home",
+              "release": "Home",
+              "result": "agrees",
+              "detail": "Top fingerprint catalogue identities"
+            },
+            {
+              "check": "Embedded title",
+              "local": "Home",
+              "release": "Home",
+              "result": "agrees"
+            },
+            {
+              "check": "Filename",
+              "local": "Home",
+              "release": "Home",
+              "result": "agrees"
+            },
+            {
+              "check": "Artist credit",
+              "local": "Acceptance Artist",
+              "release": "Acceptance Artist",
+              "result": "agrees"
+            },
+            {
+              "check": "Embedded recording ID",
+              "local": "",
+              "release": "00000000-0000-4000-8000-000000000001",
+              "result": "unavailable"
+            },
+            {
+              "check": "Audio length",
+              "local": "200.00 s",
+              "release": "200.00 s",
+              "result": "agrees",
+              "detail": "0.00 s difference"
+            },
+            {
+              "check": "Version",
+              "local": "No qualifier",
+              "release": "No qualifier",
+              "result": "agrees",
+              "detail": "Release version compared with local qualifiers and recording identity"
+            },
+            {
+              "check": "Disc / track position",
+              "local": "1.1",
+              "release": "1.1",
+              "result": "agrees",
+              "detail": "Supporting context; numbering alone does not establish audio identity"
+            },
+            {
+              "check": "Album assignment",
+              "local": "3 local files",
+              "release": "2 release tracks",
+              "result": "conflicts",
+              "detail": "One-to-one assignment considers competing local copies and release slots together"
+            },
+            {
+              "check": "Decision",
+              "local": "",
+              "release": "",
+              "result": "conflicts",
+              "detail": "Another local file fits this release track"
+            }
+          ],
           "ambiguity_reasons": [
             "Another local file fits this release track"
           ],
@@ -649,6 +809,74 @@
             "filename agrees",
             "duration differs by 0.00s"
           ],
+          "pairing_checks": [
+            {
+              "check": "Audio identity",
+              "local": "Open Water",
+              "release": "Open Water",
+              "result": "agrees",
+              "detail": "Top fingerprint catalogue identities"
+            },
+            {
+              "check": "Embedded title",
+              "local": "Open Water",
+              "release": "Open Water",
+              "result": "agrees"
+            },
+            {
+              "check": "Filename",
+              "local": "Open Water",
+              "release": "Open Water",
+              "result": "agrees"
+            },
+            {
+              "check": "Artist credit",
+              "local": "Acceptance Artist",
+              "release": "Acceptance Artist",
+              "result": "agrees"
+            },
+            {
+              "check": "Embedded recording ID",
+              "local": "",
+              "release": "00000000-0000-4000-8000-000000000002",
+              "result": "unavailable"
+            },
+            {
+              "check": "Audio length",
+              "local": "210.00 s",
+              "release": "210.00 s",
+              "result": "agrees",
+              "detail": "0.00 s difference"
+            },
+            {
+              "check": "Version",
+              "local": "No qualifier",
+              "release": "No qualifier",
+              "result": "agrees",
+              "detail": "Release version compared with local qualifiers and recording identity"
+            },
+            {
+              "check": "Disc / track position",
+              "local": "1.2",
+              "release": "1.2",
+              "result": "agrees",
+              "detail": "Supporting context; numbering alone does not establish audio identity"
+            },
+            {
+              "check": "Album assignment",
+              "local": "3 local files",
+              "release": "2 release tracks",
+              "result": "agrees",
+              "detail": "One-to-one assignment considers competing local copies and release slots together"
+            },
+            {
+              "check": "Decision",
+              "local": "",
+              "release": "",
+              "result": "agrees",
+              "detail": "Evidence supports this pairing"
+            }
+          ],
           "ambiguity_reasons": [],
           "duration_delta_ms": 0,
           "audio_title": "Open Water",
@@ -699,7 +927,7 @@
                 "score": 0.99
               }
             ],
-            "fingerprint_key": "duplicate_saved:fingerprint_key:5"
+            "fingerprint_key": "duplicate_saved:fingerprint_key:4"
           },
           "audio_title": "Home",
           "audio_artist": "Acceptance Artist",

@@ -1,3 +1,7 @@
+import type { ReactNode } from 'react';
+
+import { MetadataComparison } from '@/components/metadata-comparison/metadata-comparison';
+
 import { FileDecisions, type FileDecision } from './file-decisions';
 import styles from './review-page.module.css';
 import { changeFieldLabel, changeValue } from './review-presentation';
@@ -19,6 +23,37 @@ export type ReadyPreview = {
     }>;
   }>;
 };
+function AlbumSection({
+  title,
+  count,
+  single,
+  expanded,
+  children,
+}: {
+  title: string;
+  count: number;
+  single: boolean;
+  expanded: boolean;
+  children: ReactNode;
+}) {
+  const heading = (
+    <>
+      <strong>{title}</strong>
+      <span>{count} actions</span>
+    </>
+  );
+  return single ? (
+    <section className={styles.applyAlbum}>
+      <h3>{heading}</h3>
+      {children}
+    </section>
+  ) : (
+    <details className={styles.applyAlbum} open={expanded}>
+      <summary>{heading}</summary>
+      {children}
+    </details>
+  );
+}
 const categories = [
   ['numbering', 'Disc and track numbering'],
   ['fills', 'Metadata fills'],
@@ -56,11 +91,13 @@ export function ApplyPlanPreview({
         the action total.
       </p>
       {preview.albums.map((album) => (
-        <details className={styles.applyAlbum} key={album.case_id || album.album} open={expanded}>
-          <summary>
-            <strong>{album.album}</strong>
-            <span>{album.actions.length} actions</span>
-          </summary>
+        <AlbumSection
+          key={album.case_id || album.album}
+          title={album.album}
+          count={album.actions.length}
+          single={preview.albums.length === 1}
+          expanded={expanded}
+        >
           {categories.map(([key, title]) => {
             const actions = album.actions.filter((action) =>
               action.changes?.some((change) => change.kind === key),
@@ -76,41 +113,26 @@ export function ApplyPlanPreview({
                       : `${actions.length} track${actions.length === 1 ? '' : 's'}`}
                   </span>
                 </summary>
-                <ul>
-                  {actions.map((action) => (
-                    <li key={action.id}>
-                      {key !== 'album' && (
-                        <strong>
-                          {action.title || action.file_path?.split('/').pop() || 'Track'}
-                        </strong>
-                      )}
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Field</th>
-                            <th>Current</th>
-                            <th>Planned</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {action
-                            .changes!.filter((change) => change.kind === key)
-                            .map((change, index) => (
-                              <tr key={index}>
-                                <td>
-                                  {change.field === 'library_album_title'
-                                    ? 'Library album title'
-                                    : changeFieldLabel(change.field)}
-                                </td>
-                                <td>{changeValue(change.old) || '—'}</td>
-                                <td>{changeValue(change.new) || '—'}</td>
-                              </tr>
-                            ))}
-                        </tbody>
-                      </table>
-                    </li>
-                  ))}
-                </ul>
+                <MetadataComparison
+                  compact
+                  rows={actions.flatMap((action) =>
+                    action
+                      .changes!.filter((change) => change.kind === key)
+                      .map((change) => ({
+                        group: String(action.id),
+                        track:
+                          key === 'album'
+                            ? undefined
+                            : action.title || action.file_path?.split('/').pop() || 'Track',
+                        field:
+                          change.field === 'library_album_title'
+                            ? 'Library album title'
+                            : changeFieldLabel(change.field),
+                        current: changeValue(change.old),
+                        planned: changeValue(change.new),
+                      })),
+                  )}
+                />
               </details>
             );
           })}
@@ -120,21 +142,30 @@ export function ApplyPlanPreview({
             .map((action) => (
               <p key={action.id}>{action.description}</p>
             ))}
-        </details>
+          {preview.albums.length === 1 && folders.length > 0 && (
+            <details
+              className={styles.applyCategory}
+              data-kind="organization"
+              aria-label="Destination folders"
+            >
+              <summary>
+                <strong>Organize after applying</strong>
+                <span>
+                  {folders.length} folder{folders.length === 1 ? '' : 's'}
+                </span>
+              </summary>
+              {parent && <code>{parent}</code>}
+              <ul>
+                {folders.map((folder) => (
+                  <li key={folder}>
+                    <code>{parent ? folder.slice(parent.length + 1) : folder}</code>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </AlbumSection>
       ))}
-      {folders.length > 0 && (
-        <section className={styles.organizationPreview} aria-label="Destination folders">
-          <h4>Organize after applying</h4>
-          {parent && <code>{parent}</code>}
-          <ul>
-            {folders.map((folder) => (
-              <li key={folder}>
-                <code>{parent ? folder.slice(parent.length + 1) : folder}</code>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
       <p className={styles.muted}>
         Albums with open decisions are excluded. Each plan is checked again before execution.
       </p>

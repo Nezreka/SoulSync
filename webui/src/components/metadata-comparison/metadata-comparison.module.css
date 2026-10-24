@@ -73,7 +73,7 @@
   }
 }
 
-.comparison thead th:nth-child(3),
+.comparison thead th[aria-label='Change'],
 .comparison .direction {
   width: 28px;
   padding-inline: 2px;
@@ -99,5 +99,22 @@
   }
   .comparison .direction::before {
     content: none;
+  }
+}
+
+.comparison[data-compact] th,
+.comparison[data-compact] td {
+  padding: 7px 8px;
+}
+.comparison[data-compact] th[scope='rowgroup'] {
+  color: var(--text-1);
+}
+.comparison[data-compact] del {
+  text-decoration: none;
+}
+@container (max-width: 520px) {
+  .comparison[data-compact] th[scope='rowgroup'],
+  .comparison[data-compact] th[scope='row'] {
+    grid-column: 1 / -1;
   }
 }

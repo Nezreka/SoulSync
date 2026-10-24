@@ -45,7 +45,7 @@ def _clear_musicbrainz_ids(audio, fields):
             del tags[key]
 
 
-def read_file_tags(file_path: str) -> Dict[str, Any]:
+def read_file_tags(file_path: str, *, opened_audio=None) -> Dict[str, Any]:
     """
     Read current tags from an audio file. Returns a dict of tag values
     that can be compared against DB metadata.
@@ -82,7 +82,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         return result
 
     try:
-        audio = MutagenFile(file_path)
+        audio = opened_audio if opened_audio is not None else MutagenFile(file_path)
         if audio is None:
             result['error'] = 'Could not read file with Mutagen'
             return result
@@ -463,7 +463,7 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
         # only the placeholder-over-real fields (legit values, incl. a genuine
         # compilation's Various Artists, still write — see guard docstring).
         try:
-            _current = read_file_tags(file_path)
+            _current = read_file_tags(file_path, opened_audio=audio)
         except Exception:
             _current = {}
         if not _current.get('error'):

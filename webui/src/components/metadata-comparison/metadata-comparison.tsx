@@ -9,6 +9,8 @@ export interface MetadataChange {
   current?: unknown;
   planned?: unknown;
   changed?: boolean;
+  track?: string;
+  group?: string;
 }
 function valueText(value: unknown): string {
   return value == null || value === ''
@@ -21,17 +23,20 @@ export function MetadataComparison({
   rows,
   currentLabel = 'Current',
   plannedLabel = 'Planned',
+  compact = false,
 }: {
   rows: MetadataChange[];
+  compact?: boolean;
   currentLabel?: string;
   plannedLabel?: string;
 }) {
   const [copied, setCopied] = useState('');
   return (
-    <div className={styles.comparison}>
+    <div className={styles.comparison} data-compact={compact || undefined}>
       <table>
         <thead>
           <tr>
+            {rows.some((row) => row.track) && <th>Track</th>}
             <th>Field</th>
             <th>{currentLabel}</th>
             <th aria-label="Change" />
@@ -39,8 +44,20 @@ export function MetadataComparison({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.field} data-changed={row.changed !== false}>
+          {rows.map((row, index) => (
+            <tr
+              key={`${row.group || row.track || ''}:${row.field}:${index}`}
+              data-changed={row.changed !== false}
+            >
+              {rows.some((item) => item.track) &&
+                (index === 0 || rows[index - 1].group !== row.group) && (
+                  <th
+                    scope="rowgroup"
+                    rowSpan={rows.filter((item) => item.group === row.group).length}
+                  >
+                    {row.track}
+                  </th>
+                )}
               <th scope="row">{row.field}</th>
               {[row.current, row.planned].map((value, index) => {
                 const text = valueText(value);

@@ -15,7 +15,12 @@ for (const width of [1800, 390]) {
     const dialog = page.getByRole('dialog', { name: 'Apply ready album plans' });
     await expect(dialog).toContainText('2 planned actions');
     await dialog.locator('summary').filter({ hasText: 'Metadata fills' }).click();
-    await expect(dialog.getByRole('columnheader', { name: 'Current', exact: true })).toBeVisible();
+    if (width > 520) {
+      const current = dialog.getByRole('columnheader', { name: 'Current', exact: true });
+      await expect(current).toBeVisible();
+      expect((await current.boundingBox())!.width).toBeGreaterThan(100);
+    }
+    else await expect(dialog.locator('td[data-label=Current]').first()).toBeVisible();
     await expect(
       dialog.getByRole('columnheader', { name: 'Quarantine', exact: true }),
     ).toBeVisible();
@@ -26,10 +31,7 @@ for (const width of [1800, 390]) {
         height: getComputedStyle(el).height,
       })),
     ).toEqual({ width: '18px', height: '18px' });
-    await dialog.getByText('File paths', { exact: true }).click();
-    await expect(
-      dialog.getByText('/music/Acceptance Artist/Northbound/01 - Home.copy.flac', { exact: true }),
-    ).toBeVisible();
+    await expect(dialog.getByText('File paths', { exact: true })).toHaveCount(0);
     expect(await dialog.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
     const box = await dialog.boundingBox();
     expect(box!.x).toBeGreaterThanOrEqual(0);
@@ -75,6 +77,10 @@ for (const width of [1800, 390]) {
     await expect(evidence.getByRole('link', { name: /recording/i })).toHaveCount(5);
     await expect(evidence.getByRole('link', { name: /Selected recording/ })).toBeVisible();
     await expect(evidence.getByText('15 - Home [DLX].flac', { exact: true })).toBeVisible();
+    const footer = await evidence.getByRole('button', { name: 'Show 3 more recordings' }).boundingBox();
+    const card = await evidence.boundingBox();
+    expect(Math.abs(footer!.x + footer!.width / 2 - card!.x - card!.width / 2)).toBeLessThan(2);
+    expect(footer!.y + footer!.height).toBeGreaterThan(card!.y + card!.height);
     await evidence.getByRole('button', { name: 'Show 3 more recordings' }).click();
     await expect(evidence.getByRole('link', { name: /recording/i })).toHaveCount(8);
     await evidence.getByRole('button', { name: 'Show fewer recordings' }).click();
@@ -124,9 +130,54 @@ test('another album stays editable while an apply operation is running', async (
   await page.getByRole('tab', { name: /^Tracks/ }).click();
   await page.locator('[data-review-assignment]').first().click();
   await expect(
-    page.getByRole('button', { name: 'Use proposed change', exact: true }),
+    page.getByRole('button', { name: 'Accept changes', exact: true }),
   ).toBeEnabled();
   await expect(
-    page.getByRole('button', { name: 'Keep current values', exact: true }),
+    page.getByRole('button', { name: 'Leave as-is', exact: true }),
   ).toBeEnabled();
+});
+
+for (const width of [1800, 390]) {
+  test(`${width}px track actions and assignment rows have room for their content`, async ({page}, info) => {
+    await page.setViewportSize({width, height: 1000});
+    await installShell(page, reviewFixture(false, review => {
+      ambiguousReview(review);
+      review.items[0].details = { ...review.items[0].details,
+        expected_title: 'Reflections', file_duration_ms: 162190, expected_duration_ms: 156000,
+        replacement_track: {name: 'Reflections', source_track_id: 'reflections'},
+        assignment_options: Array.from({length: 20}, (_, i) => ({ key: `slot-${i}`, title: `Long release track title ${i}`, artist: 'Daft Punk & another credited artist', duration_ms: 156000, track_number: i + 1, disc_number: 1 })),
+      };
+    }));
+    await page.goto(`${ORIGIN}/review?mode=all`);
+    await page.getByRole('tab', {name: /^Tracks/}).click();
+    await page.locator('[data-review-assignment]').first().click();
+    await page.getByRole('button', {name: 'Replace file…'}).click();
+    const replacement = page.getByRole('dialog', {name: 'Replace file', exact: true});
+    await expect(replacement.getByRole('radio', {name: /Keep it/})).toBeChecked();
+    await replacement.getByRole('radio', {name: /Move it to quarantine/}).check();
+    await expect(replacement).toContainText('recoverable quarantine when you apply the plan');
+    await page.screenshot({path: info.outputPath('replacement.png')});
+    await replacement.getByRole('button', {name: 'Cancel', exact: true}).click();
+    await page.getByRole('button', {name: 'Change matched track…'}).click();
+    const assignment = page.getByRole('dialog', {name: 'Change track assignment'});
+    const rows = assignment.locator('[aria-label="Release tracks"] > button');
+    await expect(rows).toHaveCount(20);
+    const first = await rows.first().boundingBox(), second = await rows.nth(1).boundingBox();
+    expect(first!.height).toBeGreaterThanOrEqual(56);
+    expect(second!.y).toBeGreaterThanOrEqual(first!.y + first!.height);
+    expect(await assignment.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+    await page.screenshot({path: info.outputPath('assignments.png')});
+  });
+}
+
+test('clearing queue filters preserves the selected queue mode', async ({page}) => {
+  await page.setViewportSize({width: 1800, height: 1000});
+  await installShell(page, reviewFixture(false));
+  await page.goto(`${ORIGIN}/review?mode=ready`);
+  await page.getByLabel('Find album or track').fill('Northbound');
+  await page.getByLabel('Filter by type').selectOption('metadata');
+  await page.getByRole('button', {name: 'Clear filters', exact: true}).click();
+  await expect(page.getByLabel('Find album or track')).toHaveValue('');
+  await expect(page.getByLabel('Filter by type')).toHaveValue('');
+  await expect(page.getByRole('navigation', {name: 'Queue view'}).getByRole('button', {name: /Ready to apply/})).toHaveAttribute('aria-current', 'page');
 });

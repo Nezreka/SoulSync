@@ -65,7 +65,7 @@ for (const width of [1800, 1280, 390]) {
       await page.getByText('Proposed changes', { exact: true }).scrollIntoViewIfNeeded();
       await page.screenshot({ path: info.outputPath('identity-edits.png') });
       if (!ready) {
-        const accept = page.getByRole('button', { name: 'Use proposed change', exact: true });
+        const accept = page.getByRole('button', { name: 'Accept changes', exact: true });
         await accept.scrollIntoViewIfNeeded();
         await expect(accept).toBeEnabled();
       }

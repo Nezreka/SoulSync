@@ -18,22 +18,36 @@ def ensure_schema(conn):
     )''')
 
 
+def record_request_on_connection(conn, details, slot):
+    """Persist exact collection intent in the wishlist transaction."""
+    from core.repair_jobs.library_reconciliation import _wanted_slot_key
+    ensure_schema(conn)
+    conn.execute("""CREATE TABLE IF NOT EXISTS reconcile_wanted_slots (
+        album_id TEXT PRIMARY KEY, source TEXT NOT NULL,
+        release_id TEXT NOT NULL, slots_json TEXT NOT NULL)""")
+    source = details.get('source') or ''
+    release = details.get('release_id') or ''
+    album = str(details['album_id'])
+    row = conn.execute('SELECT source, release_id, slots_json FROM reconcile_wanted_slots WHERE album_id=?',
+                       (album,)).fetchone()
+    wanted = set(json.loads(row[2])) if row and tuple(row[:2]) == (source, release) else set()
+    wanted.add(_wanted_slot_key(slot))
+    conn.execute('INSERT OR REPLACE INTO reconcile_wanted_slots VALUES (?, ?, ?, ?)',
+                 (album, source, release, json.dumps(sorted(wanted))))
+    conn.execute("""INSERT INTO reconcile_fulfillment
+        (case_id, profile_id, album_id, album_folder, source, release_id, source_track_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET
+            state='requested', published_path='', refresh_needed=0, updated_at=CURRENT_TIMESTAMP
+            WHERE reconcile_fulfillment.state IN ('fulfilled', 'untracked', 'cancelled') """, (
+            review_case_key(details, None), int(details.get('profile_id') or 1),
+            album, details.get('album_folder') or '', source,
+            details.get('exact_release_id') or release, str(slot.get('source_track_id') or '')))
+
+
 def record_request(db, details, slot):
-    conn = db._get_connection()
-    try:
-        ensure_schema(conn)
-        conn.execute('''INSERT INTO reconcile_fulfillment
-            (case_id, profile_id, album_id, album_folder, source, release_id, source_track_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET
-                state='requested', published_path='', refresh_needed=0, updated_at=CURRENT_TIMESTAMP
-                WHERE reconcile_fulfillment.state IN ('fulfilled', 'untracked', 'cancelled') ''', (
-                review_case_key(details, None), int(details.get('profile_id') or 1),
-                str(details['album_id']), details.get('album_folder') or '',
-                details.get('source') or '', details.get('exact_release_id') or details.get('release_id') or '',
-                str(slot.get('source_track_id') or '')))
+    with db._get_connection() as conn:
+        record_request_on_connection(conn, details, slot)
         conn.commit()
-    finally:
-        conn.close()
 
 
 def published_wishlist_track(db, stored_id, profiles, path):

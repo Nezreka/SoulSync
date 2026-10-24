@@ -77,6 +77,8 @@ def project(details, saved, *, case_id=None, raw_json=None):
         result['plan_keep'] = not bool(result.get('changes'))
     if category != 'numbering' and choice == 'fix':
         result['plan_approved'] = True
+        if result['planned_choice']['fix_action'] in ('replace', 'request_missing') or result['planned_choice']['fix_action'].startswith('existing:'):
+            result['changes'] = {}
     elif category != 'numbering' and choice == 'dismiss':
         result['plan_keep'] = True
         result['changes'] = {}
@@ -209,10 +211,13 @@ def load_release_choices(db):
 
 def same_annotated_evidence(previous, current):
     """Adding explanations alone preserves an otherwise exact saved choice."""
-    annotations = {'assignment_evidence', 'recording_identity', 'numbering_mode',
+    annotations = {'library_root', 'pairing_checks', 'assignment_evidence', 'recording_identity', 'numbering_mode',
                    'recommended_keeper', 'keeper_reason', 'tool_checks', 'match_reasons',
                    'expected_artist_names', 'artist_aliases', 'routine_numbering',
                    'numbering_recovery', 'title_difference_kind', 'competitors', 'current_release'}
+    for added in ('replacement_files', 'replacement_track'):
+        if previous and added not in previous:
+            annotations.add(added)
     if previous and not previous.get('file_identity'):
         annotations.add('file_identity')
     empty_defaults = {'metadata_review_reason', 'album_consistency', 'companion_count',

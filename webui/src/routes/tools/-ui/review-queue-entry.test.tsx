@@ -22,16 +22,12 @@ it('shows album counts from the queue and links each kind of work to its view', 
 
   render(<ReviewQueueEntry onScanStarted={vi.fn()} />);
 
-  expect(await screen.findByText('3 albums need decisions')).not.toBeNull();
-  expect(screen.getByRole('link', { name: 'Needs input (3)' }).getAttribute('href')).toBe(
+  expect(await screen.findByText(/3 albums need input · 2 ready to apply/)).not.toBeNull();
+  expect(screen.getByRole('link', { name: 'Open Album Review' })).toHaveAttribute(
+    'href',
     '/review?mode=review',
   );
-  expect(screen.getByRole('link', { name: 'Ready to apply (2)' }).getAttribute('href')).toBe(
-    '/review?mode=ready',
-  );
-  expect(screen.getByRole('link', { name: 'File actions (1)' }).getAttribute('href')).toBe(
-    '/review?mode=files',
-  );
+  expect(screen.getByText('Preview')).toBeVisible();
   expect(screen.getByText('No completed album scan yet')).not.toBeNull();
 });
 

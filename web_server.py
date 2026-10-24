@@ -3542,7 +3542,7 @@ def get_status():
         }
         try:
             from core.metadata.registry import experimental_status
-            status_data['_experimental'] = experimental_status()
+            status_data['_experimental'] = {**experimental_status(), 'album_review_enabled': config_manager.get('experimental.album_review_enabled', False) is True}
         except Exception:
             status_data['_experimental'] = {}
         return jsonify(status_data)
@@ -4819,7 +4819,7 @@ def settings_config_status_endpoint():
             for service in SERVICE_CONFIG_REGISTRY
             if not experimental_source_rejected(service)
         }
-        result['_experimental'] = experimental_status()
+        result['_experimental'] = {**experimental_status(), 'album_review_enabled': config_manager.get('experimental.album_review_enabled', False) is True}
         # Spotify Free: Spotify metadata can be available without credentials
         # (opt-in no-creds source). Surface that separately so the search source
         # picker offers Spotify, while `configured` (the Connections indicator)

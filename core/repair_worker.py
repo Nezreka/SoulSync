@@ -1996,7 +1996,7 @@ class RepairWorker:
             return self._stage_review_decision_group(case_id, 'metadata', action=action,
                                                     selected_ids={finding_id})
         if ((item.get('finding_type') in ('reconciliation_extra', 'reconciliation_duplicate') or
-                 (item.get('finding_type') == 'reconciliation_unresolved' and fix_action in ('quarantine', 'replace', 'request_missing')))
+                 (item.get('finding_type') in ('reconciliation_unresolved', 'reconciliation_metadata') and (action == 'dismiss' or fix_action in ('quarantine', 'replace', 'request_missing') or (fix_action or '').startswith('existing:'))))
                 and action in ('fix', 'dismiss') and not (fix_action or '').startswith('assign:')):
             details = item.get('details') or {}
             if action == 'fix':
@@ -2004,10 +2004,13 @@ class RepairWorker:
                     allowed_actions = {str(row.get('track_id')) for row in details.get('duplicate_copies') or [] if row.get('track_id')}
                 else:
                     allowed_actions = {'quarantine'}
+                    if (details.get('replacement_track') or {}).get('source_track_id'):
+                        allowed_actions.update(f"existing:{mode}:{row['track_id']}"
+                            for row in details.get('replacement_files') or []
+                            for mode in ('keep', 'quarantine'))
                     if details.get('replacement_track'):
                         allowed_actions.add('request_missing')
-                        if (details.get('audio_conflict') == 'different_recording'
-                                or details.get('version_conflict') or _reviewed_length_conflict(details)):
+                        if details['replacement_track'].get('source_track_id'):
                             allowed_actions.add('replace')
                 if not fix_action or fix_action not in allowed_actions:
                     return {'success': False, 'error': 'Choose a current file action before saving the plan'}
@@ -2234,12 +2237,29 @@ class RepairWorker:
                          .intersection((item.get('details') or {}).get('changes') or {})))]
         if not findings:
             return {'success': False, 'stale': True, 'error': 'Decision is no longer current'}
+        linked_ids = set()
+        if action == 'fix' and fix_action.startswith('existing:'):
+            replacement_id = fix_action.split(':', 2)[2]
+            target = next((member for member in findings[0]['details'].get('replacement_files') or []
+                           if member['track_id'] == replacement_id), None)
+            if not target:
+                return {'success': False, 'error': 'Choose a current replacement file'}
+            linked = [item for item in case['items'] if item.get('file_path') == target['file_path']
+                      and item['id'] not in {row['id'] for row in findings}]
+            if any(str((item.get('details', {}).get('planned_choice') or {}).get('fix_action', '')).startswith('used_by:')
+                   and (item['details']['planned_choice']['fix_action'] != f"used_by:{findings[0]['id']}") for item in linked):
+                return {'success': False, 'error': 'This replacement file is already used by another saved choice'}
+            linked_ids = {item['id'] for item in linked}
+            findings.extend(linked)
         # Transactional staging only: retain findings until explicit application.
         conn = self.db._get_connection()
         try:
             review_choices.ensure_schema(conn)
             conn.execute('BEGIN IMMEDIATE')
             for item in findings:
+                if item['id'] not in linked_ids:
+                    conn.execute('DELETE FROM reconcile_review_choices WHERE case_id=? AND fix_action=?',
+                                 (case_id, f"used_by:{item['id']}"))
                 row = conn.execute("""SELECT id, job_id, finding_type, severity, status,
                     entity_type, entity_id, file_path, title, description, details_json,
                     user_action, created_at, updated_at, last_error FROM repair_findings
@@ -2262,7 +2282,9 @@ class RepairWorker:
                     category=excluded.category, choice=excluded.choice, fix_action=excluded.fix_action,
                     numbering_choice=excluded.numbering_choice,
                     updated_at=CURRENT_TIMESTAMP""",
-                    (item['id'], case_id, row[10], category, action, fix_action, numbering))
+                    (item['id'], case_id, row[10], category,
+                     'dismiss' if item['id'] in linked_ids else action,
+                     f"used_by:{findings[0]['id']}" if item['id'] in linked_ids else fix_action, numbering))
                 # A newly reviewed choice may retry a failed apply. The file and
                 # release guards still run when the saved plan is applied.
                 conn.execute('UPDATE repair_findings SET last_error=NULL WHERE id=?', (item['id'],))
@@ -4988,6 +5010,8 @@ class RepairWorker:
             conn.close()
 
     def _fix_reconciliation_metadata(self, entity_type, entity_id, file_path, details):
+        if details.get('_fix_action') in ('replace', 'request_missing') or str(details.get('_fix_action') or '').startswith('existing:'):
+            return self._fix_reconciliation_extra(entity_type, entity_id, file_path, details)
         if details.get('file_only'):
             return self._fix_reconciliation_file_tags(file_path, details)
         error = (self._reconciliation_file_guard(file_path, details) or
@@ -5059,8 +5083,10 @@ class RepairWorker:
                     return {'success': False, 'error': 'Album metadata changed; rescan before applying'}
             if db_data:
                 from core.repair_jobs.library_retag import apply_track_plans
+                tag_started = time.perf_counter()
                 outcome = apply_track_plans([{'file_path': file_path,
                                               'db_data': db_data}])
+                self._record_review_timing('tag_writes', time.perf_counter() - tag_started)
                 if outcome['written'] != 1 or outcome['failed'] or outcome['skipped']:
                     return {'success': False, 'error': 'Tag writer did not complete', **outcome}
                 wrote_tags = True
@@ -5217,17 +5243,11 @@ class RepairWorker:
 
     def _fix_reconciliation_assignment(self, entity_type, entity_id, file_path, details):
         choice = details.get('_fix_action') or ''
-        if (choice == 'request_missing' and
-                (details.get('version_conflict') or details.get('replacement_available')) and
-                isinstance(details.get('replacement_track'), dict)):
-            return self._fix_reconciliation_extra(entity_type, entity_id,
-                                                  file_path, details)
-        if (choice == 'replace' and
-                (details.get('audio_conflict') == 'different_recording'
-                 or details.get('version_conflict') or _reviewed_length_conflict(details)) and
-                isinstance(details.get('replacement_track'), dict)):
-            return self._fix_reconciliation_extra(entity_type, entity_id,
-                                                  file_path, details)
+        if str(choice).startswith('existing:'):
+            return self._fix_reconciliation_extra(entity_type, entity_id, file_path, details)
+        if (choice in ('request_missing', 'replace') and
+                (details.get('replacement_track') or {}).get('source_track_id')):
+            return self._fix_reconciliation_extra(entity_type, entity_id, file_path, details)
         if (choice == 'quarantine' and details.get('track_id') and
                 details.get('album_id') is not None and
                 not details.get('version_conflict') and
@@ -5275,7 +5295,10 @@ class RepairWorker:
                   AND slot_key = ? AND file_path != ?
             ''', (str(album_id), source, release_id, slot_key, file_path)).fetchone()
             if other:
-                return {'success': False, 'error': 'Another reviewed file already uses this release track'}
+                if other[0] != details.get('_replace_assignment_path'):
+                    return {'success': False, 'error': 'Another reviewed file already uses this release track'}
+                conn.execute('DELETE FROM reconcile_track_assignment WHERE album_id=? AND source=? AND release_id=? AND file_path=?',
+                             (str(album_id), source, release_id, other[0]))
             conn.execute('''
                 INSERT INTO reconcile_track_assignment (
                     album_id, source, release_id, file_path, slot_key,
@@ -5309,9 +5332,8 @@ class RepairWorker:
             return {'success': False, 'error': str(exc)}
         finally:
             conn.close()
-        if (not row or row[1] != details.get('source') or
-                row[2] != details.get('release_id') or row[0] not in ('complete', 'partial')):
-            return {'success': False, 'error': 'Album intent is no longer active'}
+        active_scope = (row[0] if row and row[1] == details.get('source') and
+                        row[2] == details.get('release_id') else '')
         from core.library.reconciliation_evidence import (
             album_folders_audio_path_digest, folder_audio_path_digest,
         )
@@ -5325,7 +5347,7 @@ class RepairWorker:
         if len(slots) != 1:
             return {'success': False, 'error': 'Expected exactly one release slot'}
         slot = slots[0]
-        if row[0] == 'partial':
+        if active_scope != 'complete':
             from core.repair_jobs.library_reconciliation import _wanted_slot_key
             conn = self.db._get_connection()
             try:
@@ -5371,19 +5393,55 @@ class RepairWorker:
                          'track_number': slot.get('track_number'),
                          'disc_number': slot.get('disc_number') or 1,
                          'reason': 'library_reconciliation'},
-            user_initiated=True)
+            user_initiated=True, reconciliation_request={'details': details, 'slot': slot})
         if outcome.get('applied'):
-            from core.library.reconciliation_fulfillment import record_request
-            record_request(self.db, details, slot)
             return {'success': True, 'action': 'wishlisted',
                     'message': f'{name} requested from the selected release'}
         return {'success': False, 'error': outcome.get('reason') or
                 f'Wishlist did not accept this track ({outcome.get("status")})'}
 
+    def _fix_reconciliation_existing(self, file_path, details):
+        """Use an explicitly reviewed file already in this album, without copying it."""
+        parts = str(details.get('_fix_action') or '').split(':', 2)
+        if len(parts) != 3 or parts[1] not in ('keep', 'quarantine'):
+            return {'success': False, 'error': 'Choose how to keep the current file'}
+        candidate = next((row for row in details.get('replacement_files') or []
+                          if str(row.get('track_id')) == parts[2]), None)
+        target = details.get('replacement_track') or {}
+        if not candidate or not target.get('source_track_id'):
+            return {'success': False, 'error': 'That replacement is no longer available; reanalyze the album'}
+        path = candidate['file_path']
+        error = (self._reconciliation_file_guard(file_path, details) or
+                 self._reconciliation_file_guard(path, candidate) or
+                 self._reconciliation_release_guard(details))
+        if error:
+            return {'success': False, 'error': error}
+        with self.db._get_connection() as conn:
+            row = conn.execute('SELECT album_id, file_path FROM tracks WHERE id=?', (parts[2],)).fetchone()
+        if not row or str(row[0]) != str(details.get('album_id')) or not _same_reviewed_file(
+                _resolve_file_path(row[1], self.transfer_folder, config_manager=self._config_manager) or '', path):
+            return {'success': False, 'error': 'The replacement file moved or changed albums; reanalyze first'}
+        if parts[1] == 'quarantine' and _server_playlist_membership().get(str(details.get('track_id'))):
+            return {'success': False, 'error': 'The current file is in a playlist; review that reference first'}
+        from core.repair_jobs.library_reconciliation import _wanted_slot_key
+        assigned = self._fix_reconciliation_assignment('track', parts[2], path, {
+            **details, **candidate, '_replace_assignment_path': file_path, '_fix_action': 'assign:' + _wanted_slot_key(target)})
+        if not assigned.get('success'):
+            return assigned
+        if parts[1] == 'quarantine':
+            result = self._fix_reconciliation_extra('track', details.get('track_id'), file_path,
+                                                   {**details, '_fix_action': 'quarantine'})
+            if not result.get('success'):
+                return {**result, 'partial': True, 'error': 'Replacement assignment saved, but current file was not moved: ' + result.get('error', '')}
+        return {'success': True, 'action': 'reconciliation_assignment',
+                'message': 'Existing file assigned to the selected release track; the album will be reanalyzed.'}
+
     def _fix_reconciliation_extra(self, entity_type, entity_id, file_path, details):
         action = details.get('_fix_action')
         if isinstance(action, str) and action.startswith('assign:'):
             return self._fix_reconciliation_assignment(entity_type, entity_id, file_path, details)
+        if str(action or '').startswith('existing:'):
+            return self._fix_reconciliation_existing(file_path, details)
         if action not in ('quarantine', 'replace', 'request_missing'):
             return {'success': False,
                     'error': 'Choose a version action explicitly'}
@@ -5414,12 +5472,6 @@ class RepairWorker:
                             'error': 'This copy is in a playlist; review that reference first'}
         replacement_name = ''
         if action in ('replace', 'request_missing'):
-            if (details.get('audio_conflict') != 'different_recording' and
-                    not details.get('version_conflict') and
-                    not _reviewed_length_conflict(details) and
-                    not (action == 'request_missing' and
-                         details.get('replacement_available'))):
-                return {'success': False, 'error': 'No reviewed version conflict is available'}
             slot = details.get('replacement_track')
             if not isinstance(slot, dict) or not slot.get('source_track_id'):
                 return {'success': False,
@@ -5455,13 +5507,11 @@ class RepairWorker:
                     'disc_number': slot.get('disc_number') or 1,
                     'reason': 'library_reconciliation_wrong_audio',
                 },
-                user_initiated=True,
+                user_initiated=True, reconciliation_request={'details': details, 'slot': slot},
             )
             if not outcome.get('applied'):
                 return {'success': False, 'error': outcome.get('reason') or
                         f'Replacement request was not accepted ({outcome.get("status")})'}
-            from core.library.reconciliation_fulfillment import record_request
-            record_request(self.db, details, slot)
             if action == 'request_missing':
                 return {'success': True, 'action': 'version_requested',
                         'message': f'{replacement_name} requested; the local version was kept'}
