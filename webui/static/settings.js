@@ -1075,7 +1075,8 @@ document.addEventListener('change', (e) => {
     if (e.target.closest?.('#settings-page')) refreshLibrarySummaries();
 });
 document.addEventListener('input', (e) => {
-    if (e.target.closest?.('#settings-page [data-stg="library"]')) refreshLibrarySummaries();
+    // the summarised sections now live on more than the Library tab (#1822)
+    if (e.target.closest?.('#settings-page [data-stg]')) refreshLibrarySummaries();
 });
 
 // ── Collapsible section headers: keyboard + screen reader ──────────────────
@@ -1178,10 +1179,11 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadImageCacheStatus === 'function') {
         try { loadImageCacheStatus(); } catch (e) { }
     }
-    if (tab === 'advanced' && typeof loadSidebarWeatherSettings === 'function') {
+    // #1822: sidebar weather lives on Appearance, MetaSync on Connections
+    if (tab === 'appearance' && typeof loadSidebarWeatherSettings === 'function') {
         try { loadSidebarWeatherSettings(); } catch (e) { }
     }
-    if (tab === 'advanced' && typeof loadMetaSyncSettings === 'function') {
+    if (tab === 'connections' && typeof loadMetaSyncSettings === 'function') {
         try { loadMetaSyncSettings(); } catch (e) { }
     }
     // First time the Downloads tab is shown, auto-probe source status so the
@@ -1213,13 +1215,14 @@ function switchSettingsTab(tab) {
 
     // Update active section title & subtitle in the detail header
     const titles = {
-        connections: { title: 'Connections', sub: 'Accounts, media servers, and API keys SoulSync connects to' },
+        connections: { title: 'Connections', sub: 'Media servers, accounts, Soulseek, MetaSync and notifications' },
         sources: { title: 'Sources', sub: 'Configure and prioritize acquisition sources and indexers' },
-        downloads: { title: 'Downloads', sub: 'Download sources, queue behavior, and transfer preferences' },
+        downloads: { title: 'Downloads', sub: 'Queue behavior, retries, publishing, and what gets filtered out' },
         quality: { title: 'Quality', sub: 'Audio and video formats, release profiles, and ladders' },
-        library: { title: 'Library', sub: 'Folders, file organization, tagging, and collection preferences' },
-        appearance: { title: 'Appearance', sub: 'Visual themes, accents, GPU animations, and interface controls' },
-        advanced: { title: 'Advanced', sub: 'Database tools, cache management, networking, and system diagnostics' },
+        library: { title: 'Library', sub: 'Folders, file organization, tagging, and import' },
+        discovery: { title: 'Discovery', sub: 'Playlists, listening stats, recommendations and import lists' },
+        appearance: { title: 'Appearance', sub: 'Visual themes, accents, animations, and the sidebar weather' },
+        advanced: { title: 'System', sub: 'Security, database tools, caches, logging, the API and experimental features' },
         logs: { title: 'Logs', sub: 'Live streaming logs and real-time operational diagnostics' }
     };
     const titleEl = document.getElementById('stg-active-title');
@@ -1282,6 +1285,58 @@ function filterSettings(query) {
     });
 }
 window.filterSettings = filterSettings;
+
+// #1822: what a setting does, said under it. 204 settings hid that behind an
+// "i" you had to click. the first sentence of each help shows as a quiet line;
+// the icon stays only where there is more to read.
+function settingHelpFirstLine(text) {
+    const clean = (text || '').replace(/\s+/g, ' ').trim();
+    if (!clean) return { line: '', rest: false };
+    const match = clean.match(/^(.+?[.!?])(\s|$)/);
+    let line = match ? match[1] : clean;
+    if (line.length > 140) {
+        const cut = line.slice(0, 140);
+        line = cut.slice(0, Math.max(cut.lastIndexOf(' '), 80)).replace(/[,;:\s]+$/, '') + '…';
+    }
+    return { line, rest: line.length < clean.length };
+}
+
+function initSettingHelpLines(root) {
+    const scope = root || document.getElementById('settings-page');
+    if (!scope) return;
+    scope.querySelectorAll('.info-icon[onclick*="toggleSettingHelp"]').forEach(icon => {
+        if (icon.dataset.helpLine) return;
+        icon.dataset.helpLine = '1';
+        const body = _settingHelpBody(icon);
+        if (!body) return;
+        const { line, rest } = settingHelpFirstLine(body.textContent);
+        if (!line) return;
+        const small = document.createElement('small');
+        small.className = 'stg-help-line';
+        small.textContent = line;
+        body.before(small);
+        if (!rest) icon.hidden = true;
+    });
+}
+window.initSettingHelpLines = initSettingHelpLines;
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => initSettingHelpLines());
+} else {
+    initSettingHelpLines();
+}
+
+// Ctrl/Cmd+K jumps to settings search while the settings page is open
+document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || (e.key || '').toLowerCase() !== 'k') return;
+    const page = document.getElementById('settings-page');
+    const input = document.getElementById('stg-search-input');
+    if (!page || !input || !page.offsetParent) return;
+    e.preventDefault();
+    input.focus();
+    input.select();
+});
+
 
 
 // ── Settings → Connections: per-service status gradient + verify wiring ──
@@ -4354,8 +4409,8 @@ function onUpgradePolicyChange() {
 // the icon's row to the next .setting-help-body sibling, so it works whether the
 // body is the immediate next element or sits after a control (e.g. a <select>),
 // and regardless of any wrapping container.
-function toggleSettingHelp(iconEl) {
-    // Locate the help body to toggle. Search order:
+function _settingHelpBody(iconEl) {
+    // Locate the help body an info icon belongs to. Search order:
     //  1) the next .setting-help-body sibling after the icon's row (icon + body
     //     both inside the same .form-group / .setting-row),
     //  2) the element right after the enclosing .form-group (help wall that sits
@@ -4372,6 +4427,12 @@ function toggleSettingHelp(iconEl) {
         // into the next setting/group.
         if (sib && sib.classList.contains('setting-help-body')) el = sib;
     }
+    return el || null;
+}
+
+function toggleSettingHelp(iconEl) {
+    const row = iconEl.closest('.setting-row') || iconEl;
+    const el = _settingHelpBody(iconEl);
     if (el) {
         el.hidden = !el.hidden;
         // Reflect open state on the icon itself (filled badge) so it's clear

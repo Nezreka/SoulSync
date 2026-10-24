@@ -584,13 +584,14 @@ function createSearchController({
 
 // Navigate to Settings → relevant tab and scroll to the service card that
 // matches the picker's source id. Called when a user clicks an unconfigured
-// source icon. Soulseek is special-cased to land on the Downloads tab where
-// its slskd URL field lives (gated behind the download-source-mode select);
+// source icon. Soulseek is special-cased to land on the Sources tab where
+// its slskd URL field lives;
 // every other source has a card on Connections.
 function openSettingsForSource(src) {
     if (typeof navigateToPage !== 'function') return;
     navigateToPage('settings');
-    const targetTab = src === 'soulseek' ? 'downloads' : 'connections';
+    // the Soulseek card (and its #soulseek-url field) is on Sources
+    const targetTab = src === 'soulseek' ? 'sources' : 'connections';
     setTimeout(() => {
         try {
             if (typeof switchSettingsTab === 'function') switchSettingsTab(targetTab);

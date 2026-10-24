@@ -4799,7 +4799,7 @@ SoulSync can act as an MCP server, so an AI app like Claude can search for music
 
 ## Turn it on
 
-Go to **Settings > Advanced > SoulSync API > MCP for AI Clients** and tick **Answer MCP requests at /mcp**. While it's off, \`/mcp\` answers \`404\`.
+Go to **Settings > System > SoulSync API > MCP for AI Clients** and tick **Answer MCP requests at /mcp**. While it's off, \`/mcp\` answers \`404\`.
 
 ## Connect a client
 
@@ -4845,7 +4845,7 @@ Some request apps only know how to talk to Lidarr. SoulSync can answer as Lidarr
 
 ## Turn it on
 
-Go to **Settings > Advanced > SoulSync API > Lidarr Compatible API**:
+Go to **Settings > System > SoulSync API > Lidarr Compatible API**:
 
 1. Tick **Answer as Lidarr at /lidarr**. While it's off, every \`/lidarr\` route answers \`404\`.
 2. Pick **Requests go to profile**. Requested albums land on that profile's wishlist.

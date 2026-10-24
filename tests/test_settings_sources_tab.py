@@ -712,10 +712,13 @@ def test_the_library_tab_speaks_one_card_language():
         # files & folders
         "Folders", "Organization",
         # processing
-        "Post-Processing", "Import", "Filtering",
-        # your library
-        "Playlists", "Listening Stats", "Discovery", "Video Preferences",
+        "Post-Processing", "Import",
+        # video
+        "Video Preferences",
     ], titles
+    # #1822: playlists, listening stats and discovery have their own Discovery
+    # tab now, and filtering (explicit content, genre whitelist) is a download
+    # rule, so it sits on Downloads
 
     # ...and they sit under three labelled groups. ten identical cards in a flat
     # column is a list you scan by reading every label; three groups is a list
@@ -726,7 +729,7 @@ def test_the_library_tab_speaks_one_card_language():
         re.search(r'<span class="stg-cardgroup-label">(.*?)</span>', markup[m.end():m.end() + 300]).group(1)
         for m in re.finditer(r'<div class="stg-cardgroup"[^>]*data-stg="library"[^>]*>', markup)
     ]
-    assert groups == ["Files &amp; folders", "Processing", "Your library"], groups
+    assert groups == ["Files &amp; folders", "Processing", "Video"], groups
 
     # no bare settings-group left stranded outside a card on this tab
     for m in re.finditer(r'<div class="settings-group"[^>]*data-stg="library"[^>]*>', markup):

@@ -168,7 +168,8 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
 
     for pid, tab in (("video-download-path", "library"),
                      ("video-seeding-goals", "sources"),
-                     ("video-import-lists", "advanced")):
+                     # #1822: import lists add to what you discover
+                     ("video-import-lists", "discovery")):
         at = index.index(f'id="{pid}"')
         stg = index.rfind('data-stg=', 0, at)
         found = re.search(r'data-stg="([a-z]+)"', index[stg:stg + 30]).group(1)
@@ -239,14 +240,19 @@ def test_the_downloads_tab_holds_only_download_settings():
         t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 900], re.S)
         if t:
             titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
-    assert titles == ["Source Settings", "Download Behaviour", "Retry Logic", "Album Publishing"], titles
+    # #1822: Filtering (explicit content, genre whitelist) decides what gets
+    # downloaded, so it joined the download cards
+    assert titles == ["Source Settings", "Download Behaviour", "Retry Logic", "Album Publishing",
+                      "Filtering"], titles
 
     # the two that moved must not have crept back
-    for stray in ("video-notifications", "video-import-lists"):
+    # #1822: notifications sit with the other connected services, import lists
+    # on Discovery; neither belongs on Downloads
+    for stray, home in (("video-notifications", "connections"), ("video-import-lists", "discovery")):
         at = markup.index(f'id="{stray}"')
         stg = markup.rfind('data-stg="', 0, at)
         tab = re.search(r'data-stg="([a-z]+)"', markup[stg:stg + 32]).group(1)
-        assert tab == "advanced", f"{stray} is back on the {tab} tab"
+        assert tab == home, f"{stray} is on the {tab} tab, expected {home}"
 
 
 def test_the_video_save_button_cannot_write_a_retired_form():

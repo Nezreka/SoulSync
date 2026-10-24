@@ -60,7 +60,7 @@ You need a running SoulSync and somewhere to run MetaSync: the same machine, or 
 ::: steps
 1. **Get a pool key.** Sign in at metasync.ssync.net and create a key. It is shown **once**, so copy it somewhere safe. The portal only stores a hash of it.
 2. **Run MetaSync.** Start the node (Docker, or \`python3 run.py\` on bare metal), open http://localhost:8790, and set an admin password on first run.
-3. **Connect it to SoulSync.** In SoulSync go to **Settings → Advanced → MetaSync → Connect**. SoulSync looks for the node and shows a pairing code. Approve the code on the MetaSync dashboard and the two programs swap keys automatically. Pasting the keys by hand works too.
+3. **Connect it to SoulSync.** In SoulSync go to **Settings → Connections → MetaSync → Connect**. SoulSync looks for the node and shows a pairing code. Approve the code on the MetaSync dashboard and the two programs swap keys automatically. Pasting the keys by hand works too.
 4. **Join the pool.** Paste your pool key into the same MetaSync settings. SoulSync hands it to your node; SoulSync never contacts the pool itself. You can also add the pool on the node's Pools page.
 5. **Approve your node.** The first time your node uses the key, it shows **waiting for approval**. Go back to the portal and approve it, and check that the fingerprint matches the one on your node's dashboard. Only a node you approved can ever use your key.
 6. **Check the report, then send it.** The node starts in **Dry run**: it builds the exact weekly report and shows it on the **Payload preview** page, but sends nothing. When you're happy with it, turn Dry run off and run it. After that the node reports once a week on its own.
@@ -75,7 +75,7 @@ Nothing else to set up. The system automation **Refresh MetaSync Charts** runs o
 
 ## Disconnecting
 
-**Settings → Advanced → MetaSync → Disconnect** removes the connection and revokes the key SoulSync issued to the node. To leave the network completely, also revoke your pool key or unbind your node on the portal. That cuts access on the very next request.
+**Settings → Connections → MetaSync → Disconnect** removes the connection and revokes the key SoulSync issued to the node. To leave the network completely, also revoke your pool key or unbind your node on the portal. That cuts access on the very next request.
 `
         },
         {
@@ -233,7 +233,7 @@ Charts also come in **genre and decade editions** ("Trending: Hip Hop", "Trendin
 
 | Message | Meaning and fix |
 |---|---|
-| \`MetaSync is not connected\` (skipped) | No node set up in **Settings → Advanced → MetaSync**. Normal if you don't use MetaSync. |
+| \`MetaSync is not connected\` (skipped) | No node set up in **Settings → Connections → MetaSync**. Normal if you don't use MetaSync. |
 | \`MetaSync is unreachable at …\` | The node is off, or the URL changed. Start it, or reconnect. |
 | \`MetaSync rejected the stored local key\` | The node was reset or re-paired elsewhere. **Reconnect MetaSync**. |
 | \`This MetaSync is too old to offer charts\` | Update the MetaSync node. |

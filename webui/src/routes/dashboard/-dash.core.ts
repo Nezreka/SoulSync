@@ -242,7 +242,7 @@ export function jiosaavnPill(data: ProviderStatusPayload): PillView {
 
   let current: string | null = null;
   const name = itemName(data.current_item);
-  if (!data.enabled) current = 'Enable in Settings → Advanced → Experimental';
+  if (!data.enabled) current = 'Enable in Settings → System → Experimental';
   else if (data.idle) current = 'All items processed';
   else if (data.current_item && name) current = `Now: ${name}`;
 
@@ -492,7 +492,7 @@ export function bandcampPill(data: ProviderStatusPayload): PillView {
 
   let current: string | null = null;
   const name = itemName(data.current_item);
-  if (disabled) current = 'Enable in Settings → Advanced → Experimental';
+  if (disabled) current = 'Enable in Settings → System → Experimental';
   // No auth ternary here — Bandcamp's paused copy is unconditional.
   else if (data.paused) current = 'Click to resume';
   else if (data.idle) current = 'All items processed';

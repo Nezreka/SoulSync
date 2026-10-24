@@ -176,7 +176,7 @@ describe('jiosaavnPill', () => {
     const view = jiosaavnPill({ enabled: false, idle: true, running: true });
     expect(view.stateClass).toBe('paused');
     expect(view.status).toBe('Disabled');
-    expect(view.current).toBe('Enable in Settings → Advanced → Experimental');
+    expect(view.current).toBe('Enable in Settings → System → Experimental');
   });
 
   it('behaves like Deezer once enabled', () => {
@@ -414,7 +414,7 @@ describe('bandcampPill', () => {
 
   it('maps disabled to the no-auth CLASS with the experimental copy', () => {
     const view = bandcampPill({ enabled: false, progress: {}, stats: { pending: 9 } });
-    expect(view.current).toBe('Enable in Settings → Advanced → Experimental');
+    expect(view.current).toBe('Enable in Settings → System → Experimental');
     expect(view.progress).toBe('Pending: 9 items');
   });
 

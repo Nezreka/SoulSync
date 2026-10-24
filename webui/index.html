@@ -3006,7 +3006,7 @@
                                         <path
                                             d="M21.71 20.29l-5.4-5.4a8 8 0 1 0-1.42 1.42l5.4 5.4a1 1 0 0 0 1.42-1.42zM4 10a6 6 0 1 1 6 6 6 6 0 0 1-6-6z" />
                                     </svg>
-                                    <input type="text" id="stg-search-input" placeholder="Search settings..."
+                                    <input type="text" id="stg-search-input" placeholder="Search settings  (Ctrl K)"
                                         aria-label="Search settings" autocomplete="off"
                                         aria-controls="stg-search-results"
                                         onkeydown="if(event.key==='Escape'){this.value='';filterSettings('')}"
@@ -3064,6 +3064,15 @@
                                     </span>
                                     <span class="stg-tab-label">Library</span>
                                 </button>
+                                <button type="button" class="stg-tab" data-tab="discovery"
+                                    onclick="switchSettingsTab('discovery')">
+                                    <span class="stg-tab-badge badge-discovery">
+                                        <svg viewBox="0 0 24 24">
+                                            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm4.24 5.76-2.12 6.36-6.36 2.12 2.12-6.36zM12 13a1 1 0 1 0-1-1 1 1 0 0 0 1 1z" />
+                                        </svg>
+                                    </span>
+                                    <span class="stg-tab-label">Discovery</span>
+                                </button>
                                 <button type="button" class="stg-tab" data-tab="appearance"
                                     onclick="switchSettingsTab('appearance')">
                                     <span class="stg-tab-badge badge-appearance">
@@ -3082,7 +3091,7 @@
                                                 d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54A.48.48 0 0 0 13.9 2h-3.8a.49.49 0 0 0-.49.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.73 8.47c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.48.48 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.8c.24 0 .44-.17.49-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
                                         </svg>
                                     </span>
-                                    <span class="stg-tab-label">Advanced</span>
+                                    <span class="stg-tab-label">System</span>
                                 </button>
                                 <button type="button" class="stg-tab" data-tab="logs"
                                     onclick="switchSettingsTab('logs')">
@@ -9143,7 +9152,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="settings-section-header collapsed" data-stg="library"
+                                    <div class="settings-section-header collapsed" data-stg="downloads"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -9152,8 +9161,8 @@
                                             data-stg-fallback="Explicit content &amp; genre whitelist">Explicit content
                                             &amp; genre whitelist</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="library">
-                                        <div class="settings-group" data-stg="library">
+                                    <div class="settings-section-body collapsed" data-stg="downloads">
+                                        <div class="settings-group" data-stg="downloads">
                                             <div class="form-group">
                                                 <label class="checkbox-label">
                                                     <input type="checkbox" id="allow-explicit" checked
@@ -9265,12 +9274,12 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="stg-cardgroup" data-stg="library">
-                                        <span class="stg-cardgroup-label">Your library</span>
+                                    <div class="stg-cardgroup" data-stg="discovery">
+                                        <span class="stg-cardgroup-label">Discovery &amp; playlists</span>
                                         <span class="stg-cardgroup-sub">Playlists, history and how recommendations
                                             behave</span>
                                     </div>
-                                    <div class="settings-section-header collapsed" data-stg="library"
+                                    <div class="settings-section-header collapsed" data-stg="discovery"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -9279,8 +9288,8 @@
                                             data-stg-fallback="M3U export &amp; server playlist sync">M3U export &amp;
                                             server playlist sync</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="library">
-                                        <div class="settings-group" data-stg="library">
+                                    <div class="settings-section-body collapsed" data-stg="discovery">
+                                        <div class="settings-group" data-stg="discovery">
                                             <div class="form-group">
                                                 <label class="checkbox-label">
                                                     <input type="checkbox" id="m3u-export-enabled">
@@ -9381,7 +9390,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="settings-section-header collapsed" data-stg="library"
+                                    <div class="settings-section-header collapsed" data-stg="discovery"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -9390,8 +9399,8 @@
                                             data-stg-fallback="Play history from your media server">Play history from
                                             your media server</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="library">
-                                        <div class="settings-group" data-stg="library">
+                                    <div class="settings-section-body collapsed" data-stg="discovery">
+                                        <div class="settings-group" data-stg="discovery">
                                             <div class="form-group">
                                                 <label class="checkbox-label">
                                                     <input type="checkbox" id="listening-stats-enabled">
@@ -9413,7 +9422,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="settings-section-header collapsed" data-stg="library"
+                                    <div class="settings-section-header collapsed" data-stg="discovery"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -9422,9 +9431,9 @@
                                             data-stg-fallback="How adventurous your recommendations are">How adventurous
                                             your recommendations are</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="library"
+                                    <div class="settings-section-body collapsed" data-stg="discovery"
                                         style="display:none">
-                                        <div class="settings-group" data-stg="library">
+                                        <div class="settings-group" data-stg="discovery">
                                             <div class="form-group">
                                                 <label>Adventurousness</label>
                                                 <div style="display:flex; align-items:center; gap:12px; margin-top:8px">
@@ -9444,6 +9453,10 @@
                                                 </div>
                                             </div>
                                         </div>
+                                    </div>
+                                    <div class="stg-cardgroup" data-stg="library">
+                                        <span class="stg-cardgroup-label">Video</span>
+                                        <span class="stg-cardgroup-sub">Where to watch and what detail pages show</span>
                                     </div>
                                     <div class="settings-section-header collapsed" data-stg="library"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
@@ -9865,15 +9878,15 @@
 
                                     <!-- Discovery Settings -->
                                     <!-- Discovery Pool Settings (collapsible tile) -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced" data-music-only
+                                    <div class="settings-section-header collapsed" data-stg="discovery" data-music-only
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
                                         <h3>Discovery Pool Settings</h3>
                                         <span class="settings-section-hint">Lookback &amp; hemisphere</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced" data-music-only>
-                                        <div class="settings-group" data-stg="advanced" data-music-only>
+                                    <div class="settings-section-body collapsed" data-stg="discovery" data-music-only>
+                                        <div class="settings-group" data-stg="discovery" data-music-only>
 
                                             <div class="form-group">
                                                 <label>Lookback Period:</label>
@@ -10366,15 +10379,15 @@
                                     </div><!-- end Artwork Cache body -->
 
                                     <!-- Sidebar Weather (collapsible tile) -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                    <div class="settings-section-header collapsed" data-stg="appearance"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
                                         <h3>Sidebar Weather</h3>
                                         <span class="settings-section-hint">Time, temp &amp; forecast line</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced">
-                                        <div class="settings-group" data-stg="advanced">
+                                    <div class="settings-section-body collapsed" data-stg="appearance">
+                                        <div class="settings-group" data-stg="appearance">
 
                                             <div class="form-group">
                                                 <label>Location:</label>
@@ -10440,7 +10453,7 @@
                                     </div><!-- end Sidebar Weather body -->
 
                                     <!-- MetaSync (collapsible tile) -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                    <div class="settings-section-header collapsed" data-stg="connections"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -10448,8 +10461,8 @@
                                         <span class="settings-section-hint">Join SIN, the signal network,
                                             through the MetaSync companion</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced">
-                                        <div class="settings-group" data-stg="advanced">
+                                    <div class="settings-section-body collapsed" data-stg="connections">
+                                        <div class="settings-group" data-stg="connections">
 
                                             <div class="help-text" style="margin-bottom:12px;">
                                                 MetaSync is a small companion program that runs next to
@@ -10700,15 +10713,15 @@
                                  would do nothing on the music side. The retired video source picker
                                  rides along inside: it is hidden, and video-settings.js still reads its
                                  ids on load, so it has to stay somewhere in the page. -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced" data-video-only
+                                    <div class="settings-section-header collapsed" data-stg="connections" data-video-only
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
                                         <h3>Notifications</h3>
                                         <span class="settings-section-hint">Discord, webhooks &amp; Telegram</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced" data-video-only>
-                                        <div class="settings-group" data-stg="advanced" data-video-only>
+                                    <div class="settings-section-body collapsed" data-stg="connections" data-video-only>
+                                        <div class="settings-group" data-stg="connections" data-video-only>
                                             <!-- Was "Download Source". The source picker below is retired: the shared
                                      download-chain widget (Source Settings) is the one editor for the video
                                      chain now, and it carries a Video tab. The select and its arrow list stay
@@ -10758,7 +10771,7 @@
                                  background machinery lives. Still data-video-only - the endpoints are
                                  /api/video/downloads/config/import-lists and it feeds the VIDEO
                                  wishlist, so it would do nothing on the music side. -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced" data-video-only
+                                    <div class="settings-section-header collapsed" data-stg="discovery" data-video-only
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -10766,8 +10779,8 @@
                                         <span class="settings-section-hint">Auto-add movies &amp; shows from a
                                             list</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced" data-video-only>
-                                        <div class="settings-group" data-stg="advanced" data-video-only>
+                                    <div class="settings-section-body collapsed" data-stg="discovery" data-video-only>
+                                        <div class="settings-group" data-stg="discovery" data-video-only>
                                             <!-- Import lists (arr-parity P6) -->
                                             <div class="form-group" id="video-import-lists">
                                                 <label>Import lists:</label>

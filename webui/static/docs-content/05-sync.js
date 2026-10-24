@@ -221,7 +221,7 @@ Export any mirrored playlist as an **M3U file** for use in external media player
 
 M3U files reference the actual file paths in your library, so they work with any M3U-compatible player.
 
-- **Auto-Save** — enable **Auto-save M3U file when downloading playlists** in Settings → Library → Playlists ("M3U export & server playlist sync") and M3U files regenerate automatically when downloading playlists
+- **Auto-Save** — enable **Auto-save M3U file when downloading playlists** in Settings → Discovery → Playlists ("M3U export & server playlist sync") and M3U files regenerate automatically when downloading playlists
 - **Manual Export** — the export button in the download-missing modal creates an M3U file on demand, even when auto-save is disabled
 
 > [!NOTE]
