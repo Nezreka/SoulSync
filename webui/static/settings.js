@@ -523,6 +523,7 @@ function resetFileOrganizationTemplates() {
     document.getElementById('template-sample-path').value = defaults.sample;
 
     debouncedAutoSaveSettings();
+    refreshPathPreview(0);
 }
 
 function validateFileOrganizationTemplates() {
@@ -1338,6 +1339,199 @@ if (document.readyState === 'loading') {
 } else {
     initSettingHelpLines();
 }
+
+// #1868: what each naming template makes, under it, as you type. the server
+// renders it through the real path builder against a made-up release, so the
+// preview is what the importer would write, not a guess made in here.
+const PATH_PREVIEW_FIELDS = {
+    'template-album-path': 'album_path',
+    'template-compilation-path': 'compilation_path',
+    'template-single-path': 'single_path',
+    'template-playlist-item': 'playlist_item',
+    'template-video-path': 'video_path',
+    'template-sample-path': 'sample_path',
+    'disc-label': 'disc_label',
+};
+const PATH_PREVIEW_TOGGLES = ['auto-disambiguation', 'collab-artist-mode',
+    'artistletter-symbol-fallback', 'unicode-substitution', 'file-organization-enabled'];
+const PATH_PREVIEW_SCENARIOS = [
+    ['standard', 'Standard'],
+    ['explicit', 'Explicit'],
+    ['multidisc', 'Multi-disc'],
+    ['samename', 'Shared artist name'],
+];
+let _pathPreviewScenario = 'standard';
+let _pathPreviewTimer = null;
+let _pathPreviewSeq = 0;
+
+try {
+    const saved = localStorage.getItem('soulsync.pathPreviewScenario');
+    if (PATH_PREVIEW_SCENARIOS.some(([key]) => key === saved)) _pathPreviewScenario = saved;
+} catch (e) { /* storage blocked, standard it is */ }
+
+function _pathPreviewSlot(id) {
+    const input = document.getElementById(id);
+    const group = input?.closest('.form-group');
+    if (!group) return null;
+    let slot = group.querySelector(':scope > .path-preview');
+    if (!slot) {
+        slot = document.createElement('div');
+        slot.className = 'path-preview';
+        slot.setAttribute('aria-live', 'polite');
+        input.after(slot);
+    }
+    return slot;
+}
+
+function initPathPreview() {
+    const album = document.getElementById('template-album-path');
+    const group = album?.closest('.form-group');
+    if (!group || document.getElementById('path-preview-scenarios')) return;
+    const bar = document.createElement('div');
+    bar.id = 'path-preview-scenarios';
+    bar.className = 'path-preview-scenarios';
+    bar.setAttribute('role', 'radiogroup');
+    bar.setAttribute('aria-label', 'Preview the templates with');
+    const label = document.createElement('span');
+    label.className = 'path-preview-scenarios-label';
+    label.textContent = 'Preview with';
+    bar.append(label);
+    PATH_PREVIEW_SCENARIOS.forEach(([key, text]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.scenario = key;
+        button.setAttribute('role', 'radio');
+        button.textContent = text;
+        button.addEventListener('click', () => {
+            _pathPreviewScenario = key;
+            try { localStorage.setItem('soulsync.pathPreviewScenario', key); } catch (e) { /* fine */ }
+            refreshPathPreview(0);
+        });
+        bar.append(button);
+    });
+    group.before(bar);
+    Object.keys(PATH_PREVIEW_FIELDS).forEach(_pathPreviewSlot);
+}
+window.initPathPreview = initPathPreview;
+
+function refreshPathPreview(delay = 250) {
+    clearTimeout(_pathPreviewTimer);
+    _pathPreviewTimer = setTimeout(_fetchPathPreview, delay);
+}
+window.refreshPathPreview = refreshPathPreview;
+
+async function _fetchPathPreview() {
+    const bar = document.getElementById('path-preview-scenarios');
+    if (!bar) return;
+    bar.querySelectorAll('button').forEach(button => {
+        button.setAttribute('aria-checked', String(button.dataset.scenario === _pathPreviewScenario));
+    });
+    const on = document.getElementById('file-organization-enabled')?.checked !== false;
+    bar.hidden = !on;
+    Object.keys(PATH_PREVIEW_FIELDS).forEach(id => {
+        const slot = _pathPreviewSlot(id);
+        if (slot) slot.hidden = !on;
+    });
+    if (!on) return;
+
+    const value = (id) => document.getElementById(id)?.value ?? '';
+    const checked = (id) => document.getElementById(id)?.checked === true;
+    const body = {
+        scenario: _pathPreviewScenario,
+        templates: {
+            album_path: value('template-album-path'),
+            compilation_path: value('template-compilation-path'),
+            single_path: value('template-single-path'),
+            playlist_item: value('template-playlist-item'),
+            video_path: value('template-video-path'),
+            sample_path: value('template-sample-path'),
+        },
+        settings: {
+            auto_disambiguation: checked('auto-disambiguation'),
+            collab_artist_mode: value('collab-artist-mode') || 'first',
+            artistletter_symbol_fallback: checked('artistletter-symbol-fallback'),
+            unicode_substitution: checked('unicode-substitution'),
+            disc_label: value('disc-label') || 'Disc',
+        },
+    };
+    const seq = ++_pathPreviewSeq;
+    let data;
+    try {
+        const response = await fetch('/api/settings/path-preview', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || `HTTP ${response.status}`);
+    } catch (e) {
+        if (seq !== _pathPreviewSeq) return;
+        Object.keys(PATH_PREVIEW_FIELDS).forEach(id => {
+            _renderPathPreview(_pathPreviewSlot(id), { error: `Preview unavailable: ${e.message}` });
+        });
+        return;
+    }
+    // a slower answer to an older keystroke never paints over a newer one
+    if (seq !== _pathPreviewSeq) return;
+    Object.entries(PATH_PREVIEW_FIELDS).forEach(([id, key]) => {
+        const slot = _pathPreviewSlot(id);
+        let note = '';
+        if (key === 'disc_label') {
+            note = data.disc_label_used
+                ? 'Disc 2 of a two-disc album'
+                : 'Not used: your album template places the disc itself';
+        }
+        _renderPathPreview(slot, data.paths?.[key], note);
+        if (key === 'single_path' && data.paths?.single_as_album) {
+            _renderPathPreview(slot, data.paths.single_as_album,
+                'A release the source calls a single uses the album template until you change this one',
+                true);
+        }
+    });
+}
+
+function _renderPathPreview(slot, result, note = '', append = false) {
+    if (!slot) return;
+    if (!append) slot.replaceChildren();
+    const row = document.createElement('div');
+    row.className = 'path-preview-row';
+    if (!result || typeof result === 'object') {
+        row.classList.add('path-preview-error');
+        row.textContent = result?.error || 'Nothing to preview';
+        slot.append(row);
+        return;
+    }
+    const path = document.createElement('code');
+    path.className = 'path-preview-path';
+    const parts = String(result).split('/');
+    parts.forEach((part, index) => {
+        if (index) {
+            const sep = document.createElement('span');
+            sep.className = 'path-preview-sep';
+            sep.textContent = '/';
+            path.append(sep);
+        }
+        const seg = document.createElement('span');
+        seg.className = index === parts.length - 1 ? 'path-preview-file' : 'path-preview-folder';
+        seg.textContent = part;
+        path.append(seg);
+    });
+    path.title = result;
+    row.append(path);
+    if (note) {
+        const small = document.createElement('span');
+        small.className = 'path-preview-note';
+        small.textContent = note;
+        row.append(small);
+    }
+    slot.append(row);
+}
+
+document.addEventListener('input', (e) => {
+    if (PATH_PREVIEW_FIELDS[e.target.id]) refreshPathPreview();
+});
+document.addEventListener('change', (e) => {
+    if (PATH_PREVIEW_FIELDS[e.target.id] || PATH_PREVIEW_TOGGLES.includes(e.target.id)) refreshPathPreview(0);
+});
 
 // Ctrl/Cmd+K jumps to settings search while the settings page is open
 document.addEventListener('keydown', (e) => {
@@ -3817,6 +4011,11 @@ async function loadSettingsData() {
         // their static descriptions rather than reporting an empty form as
         // "nothing enabled".
         if (typeof refreshLibrarySummaries === 'function') refreshLibrarySummaries();
+        // the template previews render the loaded values, same reason
+        if (typeof initPathPreview === 'function') {
+            initPathPreview();
+            refreshPathPreview(0);
+        }
         // the service tiles report which credentials are actually filled in, so
         // they are only truthful once the form holds them. same reason as above:
         // summarising an empty form would report every service as "not set up".

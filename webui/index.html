@@ -7436,8 +7436,10 @@
                                      normally into Artist/Album and the Playlists/ folder is a symlink
                                      view that mirrors the real library filename, so this template no
                                      longer drives playlist-file naming. Kept in the DOM (display:none)
-                                     so settings load/save still round-trips the stored value. -->
-                                                <div class="form-group" style="display: none;">
+                                     so settings load/save still round-trips the stored value.
+                                     hidden, not style="display: none": the media card's
+                                     display:block !important beat the inline style. -->
+                                                <div class="form-group" hidden>
                                                     <label>Playlist Path Template:</label>
                                                     <input type="text" id="template-playlist-path"
                                                         placeholder="$playlist/$artist - $title">

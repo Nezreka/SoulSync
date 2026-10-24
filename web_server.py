@@ -4573,6 +4573,22 @@ def prowlarr_indexers_endpoint():
         return jsonify({"success": False, "error": str(e), "indexers": []}), 500
 
 
+@app.route('/api/settings/path-preview', methods=['POST'])
+@admin_only
+def settings_path_preview():
+    """example paths for the naming templates as they stand in the form (#1868)."""
+    from core.imports.path_preview import preview_paths
+    data = request.get_json(silent=True) or {}
+    templates = data.get('templates') if isinstance(data.get('templates'), dict) else {}
+    settings = data.get('settings') if isinstance(data.get('settings'), dict) else {}
+    try:
+        result = preview_paths(templates, settings, str(data.get('scenario') or 'standard'))
+    except Exception as e:
+        logger.error(f"path preview failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": True, **result})
+
+
 @app.route('/api/settings/log-level', methods=['GET', 'POST'])
 @admin_only
 def handle_log_level():
