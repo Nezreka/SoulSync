@@ -742,13 +742,14 @@ describe('watchlist route', () => {
     });
   });
 
-  it('the Global Settings button reports an active override', async () => {
+  it('the menu reports an active override', async () => {
     stubFetch({ globalOverride: true });
     renderWatchlistRoute();
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Global Override ON/ })).toBeInTheDocument();
-    });
+    const more = await screen.findByRole('button', { name: 'More watchlist actions' });
+    await waitFor(() => expect(more).toHaveClass('watchlist-global-settings-active'));
+    fireEvent.click(more);
+    expect(screen.getByRole('menuitem', { name: /override on/ })).toBeInTheDocument();
   });
 
   it('opens artist config from the URL with the stored values', async () => {
@@ -1064,9 +1065,9 @@ describe('watchlist route', () => {
     renderWatchlistRoute();
 
     await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: /Cancel Scan/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Stop scan/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Scan for New Releases/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Scan now/ }));
     await waitFor(() => {
       expect(calls.some((url) => url.endsWith('/api/watchlist/scan'))).toBe(true);
     });
@@ -1108,7 +1109,7 @@ describe('watchlist route', () => {
     expect(screen.getByText('Dandelion')).toBeInTheDocument();
     expect(screen.getByText('Roygbiv')).toBeInTheDocument();
     // Cancel appears only while scanning.
-    expect(screen.getByRole('button', { name: /Cancel Scan/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Stop scan/ })).toBeInTheDocument();
   });
 
   it('shows the completion summary and the track ledger when a scan finishes', async () => {
@@ -1153,7 +1154,7 @@ describe('watchlist route', () => {
     expect(screen.getByText(/already queued or blocklisted \(1\)/)).toBeInTheDocument();
   });
 
-  it('opens the shared vanilla modals from the action bar', async () => {
+  it('opens the shared vanilla modals from the menu', async () => {
     stubFetch();
     window.openDownloadOriginsModal = vi.fn();
     window.openWatchlistHistoryModal = vi.fn();
@@ -1162,9 +1163,12 @@ describe('watchlist route', () => {
 
     await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: /Download Origins/ }));
-    fireEvent.click(screen.getByRole('button', { name: /History/ }));
-    fireEvent.click(screen.getByRole('button', { name: /Blocklist/ }));
+    // monthly jobs live behind ⋯ (#1822); each pick closes the menu
+    const more = screen.getByRole('button', { name: 'More watchlist actions' });
+    for (const name of ['Download origins', 'Scan history', 'Blocklist']) {
+      fireEvent.click(more);
+      fireEvent.click(screen.getByRole('menuitem', { name }));
+    }
 
     // These modals live in other vanilla files and are shared with other
     // pages, so the React page invokes them rather than reimplementing them.
@@ -1179,7 +1183,8 @@ describe('watchlist route', () => {
 
     await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: /Update Similar Artists/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'More watchlist actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Update similar artists/ }));
 
     await waitFor(() => {
       expect(calls.some((url) => url.includes('/api/watchlist/update-similar-artists'))).toBe(true);
@@ -1187,7 +1192,7 @@ describe('watchlist route', () => {
 
     // Both drive the same worker, so Scan is disabled until it reports done.
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Scan for New Releases/ })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /Updating similar artists/ })).toBeDisabled();
     });
   });
 

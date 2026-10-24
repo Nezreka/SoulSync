@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { AudiobookRouteBadge } from '@/features/audiobook-routes/audiobook-route-badge';
 import { useRoutedArtists } from '@/features/audiobook-routes/audiobook-routes.queries';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
+import { ActionMenu } from '@/routes/artist-detail/-ui/action-menu';
 
 import {
   addWatchlistArtist,
@@ -466,43 +467,15 @@ export function WatchlistPage() {
             <span className="wl-meta-chip wl-meta-chip--accent">{formatCountdown(countdown)}</span>
           </div>
         </div>
-      </div>
 
-      <div className="watchlist-page-actions">
-        <button
-          type="button"
-          className={`wl-chip wl-chip--cta${isScanning ? ' btn-processing' : ''}`}
-          // Also blocked while similar-artists runs: both drive the same worker.
-          disabled={isScanning || startScan.isPending || similarRunning}
-          onClick={() => startScan.mutate()}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <polyline points="12 6 12 12 16 14" />
-          </svg>
-          {startScan.isPending
-            ? 'Starting scan...'
-            : isScanning
-              ? 'Scanning...'
-              : 'Scan for New Releases'}
-          <span className="wl-chip-shimmer" />
-        </button>
-
-        {isScanning ? (
+        {/* #1822: one loud action. scan is why you come here; adding an artist
+            is the other everyday job. everything monthly sits in the menu. */}
+        <div className="watchlist-page-actions">
           <button
             type="button"
-            className="wl-chip wl-chip--red"
-            disabled={cancelScan.isPending}
-            onClick={() => cancelScan.mutate()}
+            className={`wl-chip wl-chip--slate${isAddArtistOpen ? ' wl-chip--active' : ''}`}
+            aria-expanded={isAddArtistOpen}
+            onClick={() => setIsAddArtistOpen((prev) => !prev)}
           >
             <svg
               width="16"
@@ -514,156 +487,117 @@ export function WatchlistPage() {
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="15" y1="9" x2="9" y2="15" />
-              <line x1="9" y1="9" x2="15" y2="15" />
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            {cancelScan.isPending ? 'Cancelling...' : 'Cancel Scan'}
+            {isAddArtistOpen ? 'Close search' : 'Add artist'}
           </button>
-        ) : null}
 
-        <button
-          type="button"
-          className={`wl-chip wl-chip--slate${isAddArtistOpen ? ' wl-chip--active' : ''}`}
-          onClick={() => setIsAddArtistOpen((prev) => !prev)}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          {isAddArtistOpen ? 'Close Search' : 'Add Artist'}
-        </button>
+          {isScanning ? (
+            <button
+              type="button"
+              className="wl-chip wl-chip--red"
+              disabled={cancelScan.isPending}
+              onClick={() => cancelScan.mutate()}
+            >
+              {cancelScan.isPending ? 'Stopping…' : 'Stop scan'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="wl-chip wl-chip--cta"
+              // Also blocked while similar-artists runs: both drive the same worker.
+              disabled={startScan.isPending || similarRunning}
+              title="Check every watched artist for new releases"
+              onClick={() => startScan.mutate()}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              {startScan.isPending
+                ? 'Starting…'
+                : similarRunning
+                  ? 'Updating similar artists…'
+                  : 'Scan now'}
+              <span className="wl-chip-shimmer" />
+            </button>
+          )}
 
-        <button
-          type="button"
-          className={`wl-chip wl-chip--slate${similarRunning ? ' btn-processing' : ''}`}
-          disabled={similarRunning || startSimilar.isPending || isScanning}
-          onClick={() => startSimilar.mutate()}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-            <circle cx="9" cy="7" r="4" />
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-          </svg>
-          {similarRunning ? 'Updating...' : 'Update Similar Artists'}
-        </button>
-
-        <button
-          type="button"
-          className={`wl-chip wl-chip--slate${
-            globalOverrideActive ? ' watchlist-global-settings-active' : ''
-          }`}
-          onClick={() => void navigate({ search: (prev) => ({ ...prev, settings: true }) })}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-          {globalOverrideActive ? 'Global Override ON' : 'Global Settings'}
-        </button>
-
-        {/* These three open modals owned by other vanilla files
-            (origin-history.js, watchlist-history.js, blocklist.js) and shared
-            with other pages. They stay where they are and are invoked as
-            globals — unlike `socket`, top-level `function` declarations in a
-            classic script ARE window properties. Porting them belongs to
-            whichever page migration owns those modals. */}
-        <button
-          type="button"
-          className="wl-chip wl-chip--slate"
-          title="See every track your watchlist downloaded"
-          onClick={() => window.openDownloadOriginsModal?.('watchlist')}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          Download Origins
-        </button>
-
-        <button
-          type="button"
-          className="wl-chip wl-chip--slate"
-          title="Every past scan and the tracks it added to the wishlist"
-          onClick={() => window.openWatchlistHistoryModal?.()}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M3 3v5h5" />
-            <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
-            <polyline points="12 7 12 12 15 15" />
-          </svg>
-          History
-        </button>
-
-        <button
-          type="button"
-          className="wl-chip wl-chip--red"
-          title="Block artists, albums or tracks from ever being downloaded"
-          onClick={() => window.openBlocklistModal?.('artist')}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <line x1="4.9" y1="4.9" x2="19.1" y2="19.1" />
-          </svg>
-          Blocklist
-        </button>
+          {/* Origins, History and Blocklist open modals owned by other vanilla
+              files (origin-history.js, watchlist-history.js, blocklist.js) and
+              shared with other pages, so they are invoked as globals. */}
+          <ActionMenu
+            className="wl-more-menu"
+            items={[
+              {
+                key: 'similar',
+                label: similarRunning ? 'Updating similar artists…' : 'Update similar artists',
+                disabled: similarRunning || startSimilar.isPending || isScanning,
+                onSelect: () => startSimilar.mutate(),
+              },
+              {
+                key: 'settings',
+                label: globalOverrideActive
+                  ? 'Watchlist defaults (override on)'
+                  : 'Watchlist defaults',
+                onSelect: () => void navigate({ search: (prev) => ({ ...prev, settings: true }) }),
+              },
+              {
+                key: 'origins',
+                label: 'Download origins',
+                title: 'See every track your watchlist downloaded',
+                onSelect: () => window.openDownloadOriginsModal?.('watchlist'),
+              },
+              {
+                key: 'history',
+                label: 'Scan history',
+                title: 'Every past scan and the tracks it added to the wishlist',
+                onSelect: () => window.openWatchlistHistoryModal?.(),
+              },
+              {
+                key: 'blocklist',
+                label: 'Blocklist',
+                title: 'Block artists, albums or tracks from ever being downloaded',
+                onSelect: () => window.openBlocklistModal?.('artist'),
+              },
+            ]}
+            trigger={(props) => (
+              <button
+                type="button"
+                className={`wl-chip wl-chip--slate wl-chip--more${
+                  globalOverrideActive ? ' watchlist-global-settings-active' : ''
+                }`}
+                aria-label="More watchlist actions"
+                title="Similar artists, defaults, origins, history, blocklist"
+                {...props}
+                ref={props.ref as (el: HTMLButtonElement | null) => void}
+              >
+                ⋯
+              </button>
+            )}
+          />
+        </div>
       </div>
+
+      {isAddArtistOpen ? (
+        <WatchlistAddArtistSearch
+          profileId={profileId}
+          onAddArtist={(artistId, artistName, source) =>
+            addArtist.mutate({ artistId, artistName, source })
+          }
+          adding={addArtist.isPending}
+        />
+      ) : null}
 
       {search.settings ? (
         <WatchlistGlobalSettingsModal
@@ -791,22 +725,11 @@ export function WatchlistPage() {
                 staleArtists={staleArtists}
                 customRuleArtists={customRuleArtists}
                 recentCount={recentReleases.length}
-                globalOverrideActive={globalOverrideActive}
                 activeFilter={attentionFilter}
                 onSelectFilter={(next) =>
                   setAttentionFilter((prev) => (prev === next ? 'all' : next))
                 }
               />
-
-              {isAddArtistOpen ? (
-                <WatchlistAddArtistSearch
-                  profileId={profileId}
-                  onAddArtist={(artistId, artistName, source) =>
-                    addArtist.mutate({ artistId, artistName, source })
-                  }
-                  adding={addArtist.isPending}
-                />
-              ) : null}
 
               <WatchlistRecentReleasesPanel
                 releases={recentReleases}
@@ -1188,7 +1111,6 @@ function WatchlistAttentionStrip({
   staleArtists,
   customRuleArtists,
   recentCount,
-  globalOverrideActive,
   activeFilter = 'all',
   onSelectFilter,
 }: {
@@ -1197,7 +1119,6 @@ function WatchlistAttentionStrip({
   staleArtists: number;
   customRuleArtists: number;
   recentCount: number;
-  globalOverrideActive: boolean;
   activeFilter?: 'all' | 'fresh' | 'never' | 'stale' | 'custom';
   onSelectFilter?: (filter: 'all' | 'fresh' | 'never' | 'stale' | 'custom') => void;
 }) {
@@ -1207,8 +1128,8 @@ function WatchlistAttentionStrip({
     value: number;
     tone: string;
   }[] = [
-    { id: 'all', label: 'Watched artists', value: total, tone: 'neutral' },
-    { id: 'fresh', label: 'Fresh releases', value: recentCount, tone: 'green' },
+    { id: 'all', label: 'All', value: total, tone: 'neutral' },
+    { id: 'fresh', label: 'Fresh', value: recentCount, tone: 'green' },
     {
       id: 'never',
       label: 'Never scanned',
@@ -1217,13 +1138,13 @@ function WatchlistAttentionStrip({
     },
     {
       id: 'stale',
-      label: 'Stale scans',
+      label: 'Stale',
       value: staleArtists,
       tone: staleArtists > 0 ? 'amber' : 'neutral',
     },
     {
       id: 'custom',
-      label: 'Custom rules',
+      label: 'Custom',
       value: customRuleArtists,
       tone: customRuleArtists > 0 ? 'blue' : 'neutral',
     },
@@ -1250,12 +1171,6 @@ function WatchlistAttentionStrip({
           <span className="watchlist-attention-value">{item.value}</span>
         </div>
       ))}
-      {globalOverrideActive ? (
-        <div className="watchlist-attention-card is-amber watchlist-attention-card--wide">
-          <span className="watchlist-attention-label">Global override active</span>
-          <span className="watchlist-attention-value">ON</span>
-        </div>
-      ) : null}
     </div>
   );
 }

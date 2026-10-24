@@ -61,7 +61,11 @@ function stubFetch(
       const method = input instanceof Request ? input.method : init?.method;
       if (method === 'POST') {
         const raw =
-          input instanceof Request ? await input.clone().text() : String(init?.body ?? '');
+          input instanceof Request
+            ? await input.clone().text()
+            : typeof init?.body === 'string'
+              ? init.body
+              : '';
         posts.push([url, raw ? JSON.parse(raw) : null]);
         if (url.includes('/api/wishlist/download_missing'))
           return res({ success: true, batch_id: 'new-run' });

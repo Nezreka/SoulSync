@@ -98,6 +98,18 @@
   margin-bottom: 20px;
 }
 
+/* #1822: the actions sit in the header row, scan is the one loud thing */
+.watchlist-page-container .watchlist-page-header .watchlist-page-actions {
+  margin-bottom: 0;
+  justify-content: flex-end;
+}
+
+.watchlist-page-container .wl-chip--more {
+  padding: 9px 14px;
+  font-size: 16px;
+  line-height: 1;
+}
+
 .watchlist-page-container .wl-chip {
   display: inline-flex;
   align-items: center;
