@@ -201,3 +201,34 @@ def test_album_id_migration_retains_inferred_scope_without_overriding_new_choice
             conn.execute('INSERT INTO reconcile_album_intent VALUES("new",?,"musicbrainz","release")',(new_scope,))
         migrate_album(conn,'old','new')
         assert conn.execute('SELECT scope FROM reconcile_album_intent WHERE album_id="new"').fetchone()[0]==expected
+
+
+@pytest.mark.parametrize('profile,indexed_elsewhere,ambiguous,merged',[
+    (1,False,False,True),(2,False,False,False),(1,True,False,False),(1,False,True,False)])
+def test_delivered_disc_fragment_joins_only_its_requested_album(tmp_path,profile,indexed_elsewhere,ambiguous,merged):
+    from core.library.reconciliation_fulfillment import group_delivered_files
+    db=Database(tmp_path/'fragment.db')
+    old=str(tmp_path/'Original album'/'01.flac');new=str(tmp_path/'New pressing'/'Disc 2'/'07.flac')
+    details={'album_id':'album','profile_id':profile,'source':'musicbrainz','release_id':'release'}
+    record_request(db,details,{'source_track_id':'recording'})
+    if ambiguous:
+        record_request(db,{**details,'album_id':'another'},{'source_track_id':'recording'})
+    with db._get_connection() as conn:
+        conn.execute('UPDATE reconcile_fulfillment SET state="published",published_path=?',(new,))
+    folders={str(tmp_path/'Original album'):[old],str(tmp_path/'New pressing'/'Disc 2'):[new]}
+    tracks={old:{'id':'old','album_id':'album'}}
+    if indexed_elsewhere:tracks[new]={'id':'new','album_id':'another'}
+    trusted={};albums={'album':{'owner_profile_id':1,'album_title':'Grace (Legacy Edition)'}}
+    result=group_delivered_files(db,folders,tracks,albums,trusted)
+    assert (new in result[str(tmp_path/'Original album')]) is merged
+    assert sum(len(paths)for paths in result.values())==2
+    with db._get_connection() as conn:
+        assert all(row[0]=='published'for row in conn.execute('SELECT state FROM reconcile_fulfillment'))
+
+
+@pytest.mark.parametrize('stored,changed', [('The Steve Miller Band',False),('Fred the Godson',True)])
+def test_secondary_artist_list_ignores_article_spelling_but_corrects_other_artists(stored,changed):
+    from core.library.retag_planner import plan_track
+    plan=plan_track({'artist':'Steve Miller Band','artists_list':[stored]},
+        {'artists':[{'name':'Steve Miller Band'}]}, {})
+    assert ('artists_list' in plan['changes']) is changed

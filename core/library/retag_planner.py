@@ -295,9 +295,17 @@ def plan_track(current_tags: Dict[str, Any], source_track: Any, album_meta: Dict
         db_data['track_artist'] = target_track_artist
 
     stored_artists = current_tags.get('artists_list') or []
+    stored_credit = '; '.join(stored_artists)
+    # A secondary artist list often retains a leading article (for example
+    # "The Steve Miller Band") after the primary credit was canonicalized.
+    # That spelling variation is not conflicting artist identity.
+    without_articles = lambda value: re.sub(r'(^|;\s*)the\s+', r'\1', value, flags=re.IGNORECASE)
+    artist_list_agrees = (_artist_credit_includes(stored_credit, target_track_artist)
+        or (_artist_credit_includes(current_track_artist, target_track_artist)
+            and _artist_credit_includes(without_articles(stored_credit), without_articles(target_track_artist))))
     if (stored_artists and target_track_artist and mode != MODE_FILL_MISSING
-            and not _artist_credit_includes('; '.join(stored_artists), target_track_artist)):
-        changes['artists_list'] = {'old': '; '.join(stored_artists), 'new': target_track_artist}
+            and not artist_list_agrees):
+        changes['artists_list'] = {'old': stored_credit, 'new': target_track_artist}
         db_data['track_artist'] = target_track_artist
 
     # Always carry track_count alongside a track_number write (writers want both).

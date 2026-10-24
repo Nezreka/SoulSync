@@ -185,6 +185,55 @@ def requested_folder(db, *, profile_id, source, release_id, track_id, disc_numbe
         conn.close()
 
 
+def group_delivered_files(db, folders, tracks, albums, trusted):
+    """A verified delivery belongs in its requested album's audio review.
+
+    Old imports may have created a separate folder before exact request routing
+    existed. This establishes collection context, never a recording match.
+    """
+    with db._get_connection() as conn:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_fulfillment'").fetchone():
+            return folders
+        deliveries = conn.execute("SELECT DISTINCT album_id,profile_id,published_path FROM reconcile_fulfillment "
+            "WHERE state IN ('published','fulfilled') AND published_path!=''").fetchall()
+    groups = {folder: list(paths) for folder, paths in folders.items()}
+    album_keys = {str(key): key for key in albums}
+    anchors, locations, requests = {}, {}, {}
+    for folder, paths in groups.items():
+        ids = {str(tracks[os.path.normpath(path)]['album_id']) for path in paths
+               if os.path.normpath(path) in tracks and tracks[os.path.normpath(path)].get('album_id') is not None}
+        owner = trusted.get(folder)
+        if owner is None and len(ids) == 1:
+            owner = next(iter(ids))
+        if owner is not None:
+            anchors.setdefault(str(owner), []).append(folder)
+        for path in paths:
+            locations[os.path.normpath(path)] = (folder, path)
+    for album, profile, path in deliveries:
+        requests.setdefault(os.path.normpath(path), set()).add((str(album), int(profile or 1)))
+    for path, owners in requests.items():
+        if len(owners) != 1 or path not in locations:
+            continue
+        album, profile = next(iter(owners))
+        targets = anchors.get(album, [])
+        album_key = album_keys.get(album)
+        metadata = albums.get(album_key) or {}
+        indexed = tracks.get(path) or {}
+        if (len(targets) != 1 or not metadata or int(metadata.get('owner_profile_id') or 1) != profile
+                or (indexed.get('album_id') is not None and str(indexed['album_id']) != album)):
+            continue
+        folder, original = locations[path]
+        anchor = targets[0]
+        if folder == anchor:
+            continue
+        groups[folder].remove(original)
+        groups[anchor].append(original)
+        trusted[anchor] = album_key
+        if not groups[folder]:
+            del groups[folder]
+    return groups
+
+
 def cancel_request(conn, profile_id, payload):
     """Cancel acquisition only; collection intent is a separate user decision."""
     if not isinstance(payload, dict):

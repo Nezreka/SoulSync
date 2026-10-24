@@ -2193,6 +2193,8 @@ class LibraryReconciliationJob(RepairJob):
                             folders[dirpath].append(os.path.join(dirpath, name))
             folders = _group_disc_folders(folders, tracks, roots)
             folders, trusted_logical_groups = _group_logical_albums(folders, tracks, albums)
+            from core.library.reconciliation_fulfillment import group_delivered_files
+            folders = group_delivered_files(context.db, folders, tracks, albums, trusted_logical_groups)
             discovery_cache = ReconciliationEvidence(context.db, client)
             try:
                 folders = _group_unassigned_downloads(
