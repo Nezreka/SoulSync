@@ -28,7 +28,6 @@ _GLOBALS = {
     "automation_engine": "automation_engine",
     "on_download_completed": "_on_download_completed",
     "web_scan_manager": "web_scan_manager",
-    "repair_worker": "repair_worker",
 }
 
 
@@ -63,6 +62,8 @@ def test_runtime_helper_carries_every_live_dependency(tree):
     runtime = _load(tree, "_import_pipeline_runtime", scope)()
     for field, glob in _GLOBALS.items():
         assert getattr(runtime, field) is sentinels[glob], field
+    # the batch track number repair stays dormant (see the helper)
+    assert runtime.repair_worker is None
 
 
 def test_no_bare_builder_call_left_in_web_server(tree):
@@ -104,6 +105,7 @@ def test_both_post_process_wrappers_pass_the_live_runtime(tree, monkeypatch, wra
 
     for field, glob in _GLOBALS.items():
         assert getattr(seen["runtime"], field) is sentinels[glob], field
+    assert seen["runtime"].repair_worker is None
 
 
 def test_track_downloaded_reaches_the_engine_through_the_runtime(tree):

@@ -15423,14 +15423,17 @@ def _import_pipeline_runtime():
     The builder there takes them as keyword arguments, all defaulting to None,
     so a bare call hands the pipeline an empty runtime: no track_downloaded or
     download_quarantined event, no completion callback, no scan after a simple
-    download, no repair folder registration. Read at call time, because
-    repair_worker is only created later in this module.
+    download. Read at call time.
+
+    repair_worker stays None on purpose: registering a batch's folder runs the
+    track number repair over the whole album folder, existing files included.
+    that seam has been dormant since april and waking it is its own decision.
     """
     return _build_import_pipeline_runtime(
         automation_engine=automation_engine,
         on_download_completed=_on_download_completed,
         web_scan_manager=web_scan_manager,
-        repair_worker=repair_worker,
+        repair_worker=None,
     )
 
 
