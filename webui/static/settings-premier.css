@@ -101,8 +101,11 @@
     color: var(--text-bright); padding: 10px 12px; font: inherit; font-size: 13px;
 }
 /* #1822: each setting says what it does, the "i" holds the rest */
-#settings-page .stg-help-line { display: block; font-size: 12px; line-height: 1.5; color: var(--stg-text-secondary); margin-top: 4px; }
-#settings-page .form-group + .stg-help-line { margin-top: -14px; margin-bottom: 18px; }
+#settings-page .stg-help-line {
+    display: block; flex-basis: 100%; grid-column: 1 / -1; order: 99;
+    font-size: 12px; line-height: 1.5; color: var(--stg-text-secondary); margin-top: 6px;
+}
+#settings-page .stg-help-line .info-icon { margin-left: 6px; vertical-align: middle; }
 #settings-page input[type="checkbox"] { accent-color: var(--accent); }
 #settings-page button:focus-visible, #settings-page input:focus-visible,
 #settings-page select:focus-visible, #settings-page textarea:focus-visible {

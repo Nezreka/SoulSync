@@ -103,11 +103,16 @@ describe('help under each setting', () => {
       </div>`;
     help.initSettingHelpLines();
     help.initSettingHelpLines(); // idempotent
-    const lines = [...document.querySelectorAll('.stg-help-line')].map((el) => el.textContent);
+    const lines = [...document.querySelectorAll('.stg-help-text')].map((el) => el.textContent);
     expect(lines).toEqual(['Short and done.', 'First part.']);
     const icons = document.querySelectorAll<HTMLElement>('.info-icon');
     expect(icons[0].hidden).toBe(true);
     expect(icons[1].hidden).toBe(false);
+    // the icon moved to the end of its line and still finds its help
+    expect(icons[1].closest('.stg-help-line')).not.toBeNull();
+    expect((icons[1] as HTMLElement & { __helpBody?: Element }).__helpBody?.textContent).toBe(
+      'First part. And a second part.',
+    );
   });
 
   it('finds a body for every info icon on the real page', () => {

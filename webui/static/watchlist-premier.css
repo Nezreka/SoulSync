@@ -1459,7 +1459,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 -24px;
+  margin: auto -24px 0;
   padding: 12px 24px calc(12px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--line);
   background: var(--wl-surface-elevated);
@@ -1491,11 +1491,56 @@
 }
 
 .wap-follow input {
-  width: 34px;
-  height: 20px;
-  accent-color: rgb(var(--accent-rgb));
+  appearance: none;
+  position: relative;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: var(--radius-pill);
+  background: var(--white-a12);
   flex-shrink: 0;
   cursor: pointer;
+  transition: background var(--dur-quick) var(--ease-emphasized);
+}
+
+.wap-follow input::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--wl-text-primary);
+  transition: transform var(--dur-quick) var(--ease-emphasized);
+}
+
+.wap-follow input:checked {
+  background: rgb(var(--accent-rgb));
+}
+
+.wap-follow input:checked::after {
+  transform: translateX(16px);
+}
+
+.wap-follow input:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+}
+
+.wap .form-select {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: var(--black-a30);
+  color: var(--wl-text-primary);
+  font-size: 13px;
+}
+
+.wap .form-select:focus {
+  outline: none;
+  border-color: rgba(var(--accent-rgb), 0.55);
 }
 
 .wap-pill {
@@ -1509,10 +1554,16 @@
   font-weight: 700;
 }
 
-.wap-pill--custom,
-.watchlist-page-container .watchlist-pill-custom {
+.wap-pill--custom {
   background: rgba(167, 139, 250, 0.16);
   color: #c4b5fd;
+}
+
+.watchlist-page-container .watchlist-card-pills .watchlist-pill.watchlist-pill-custom {
+  /* the base pill rule above is !important throughout */
+  background: rgba(167, 139, 250, 0.16) !important;
+  border-color: rgba(167, 139, 250, 0.35) !important;
+  color: #c4b5fd !important;
 }
 
 .wl-defaults-custom {
@@ -1535,7 +1586,7 @@
 
 @media (max-width: 768px) {
   .watchlist-inspector-drawer.wap .wap-savebar {
-    margin: 0 -18px;
+    margin: auto -18px 0;
     padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px));
   }
 }

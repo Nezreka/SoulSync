@@ -1307,15 +1307,28 @@ function initSettingHelpLines(root) {
     scope.querySelectorAll('.info-icon[onclick*="toggleSettingHelp"]').forEach(icon => {
         if (icon.dataset.helpLine) return;
         icon.dataset.helpLine = '1';
-        const body = _settingHelpBody(icon);
+        // only settings rows; a service card title keeps its icon as it is
+        const group = icon.closest('.form-group');
+        const body = group ? _settingHelpBody(icon) : null;
         if (!body) return;
         const { line, rest } = settingHelpFirstLine(body.textContent);
         if (!line) return;
+        // a full-width last row of the setting itself, so it lines up with the
+        // label whatever the row's layout
         const small = document.createElement('small');
         small.className = 'stg-help-line';
-        small.textContent = line;
-        body.before(small);
-        if (!rest) icon.hidden = true;
+        const text = document.createElement('span');
+        text.className = 'stg-help-text';
+        text.textContent = line;
+        small.append(text);
+        group.append(small);
+        if (rest) {
+            // the "i" sits at the end of the line and still opens the rest
+            icon.__helpBody = body;
+            small.append(icon);
+        } else {
+            icon.hidden = true;
+        }
     });
 }
 window.initSettingHelpLines = initSettingHelpLines;
@@ -4415,6 +4428,8 @@ function _settingHelpBody(iconEl) {
     //     both inside the same .form-group / .setting-row),
     //  2) the element right after the enclosing .form-group (help wall that sits
     //     as a sibling just below the group — the common always-visible case).
+    // An icon moved into its one-line summary remembers its body (#1822).
+    if (iconEl.__helpBody) return iconEl.__helpBody;
     const row = iconEl.closest('.setting-row') || iconEl;
     let el = row.nextElementSibling;
     while (el && !el.classList.contains('setting-help-body')) {
