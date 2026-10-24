@@ -1351,6 +1351,7 @@ class MusicDatabase:
             self._add_profile_plex_home_user(cursor)
             self._add_profile_oidc_identity(cursor)
             self._add_profile_controls(cursor)
+            self._add_device_oidc_session(cursor)
             self._add_own_library_columns(cursor)
             self._repair_own_jellyfin_artist_ids(cursor)
             self._add_service_credential_sets(cursor)
@@ -9961,6 +9962,108 @@ class MusicDatabase:
         except Exception as e:
             logger.debug("revoke_profile_device failed: %s", e)
             return False
+
+    # ── oidc session clock on the device row (#1838) ─────────────────────
+    _DEVICE_OIDC_COLUMNS = (
+        ("oidc_identity", "TEXT DEFAULT NULL"),       # the account this browser signed in as
+        ("oidc_expires_at", "REAL DEFAULT NULL"),     # unix time the session must be renewed by
+        ("oidc_refresh_token", "TEXT DEFAULT NULL"),  # fernet token, NULL when the provider gave none
+    )
+
+    def _add_device_oidc_columns(self, cursor):
+        cursor.execute("PRAGMA table_info(profile_devices)")
+        cols = {c[1] for c in cursor.fetchall()}
+        if not cols:
+            return
+        for col, decl in self._DEVICE_OIDC_COLUMNS:
+            if col not in cols:
+                cursor.execute(f"ALTER TABLE profile_devices ADD COLUMN {col} {decl}")
+
+    def _add_device_oidc_session(self, cursor):
+        """the oidc session clock (#1838): which account a browser signed in
+        as, when that session has to be renewed, and the refresh token to do
+        it with. sessions signed in before this have no clock, so once, every
+        profile with an oidc link signs out everywhere and signs in again
+        (whatever method each of its browsers used: old sessions don't say)."""
+        try:
+            self._add_device_oidc_columns(cursor)
+            cursor.execute("SELECT value FROM metadata WHERE key = 'oidc_session_lifetime_v1' LIMIT 1")
+            if cursor.fetchone():
+                return
+            cursor.execute("PRAGMA table_info(profiles)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if 'oidc_identity' in cols and 'session_epoch' in cols:
+                cursor.execute("UPDATE profiles SET session_epoch = COALESCE(session_epoch, 0) + 1 "
+                               "WHERE oidc_identity IS NOT NULL")
+                if cursor.rowcount:
+                    logger.info("OIDC session lifetime: signed out %s oidc-linked profile(s) once", cursor.rowcount)
+            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('oidc_session_lifetime_v1', '1')")
+            self._record_migration(cursor, 'oidc_session_lifetime_v1')
+        except Exception as e:
+            logger.error(f"Error in device oidc session migration: {e}")
+
+    def set_profile_device_oidc(self, device_id: str, *, identity: Optional[str] = None,
+                                expires_at: float, refresh_token: Optional[str] = None,
+                                keep_refresh_token: bool = False) -> bool:
+        """record (or move on) a device's oidc clock. ``identity`` only on the
+        sign-in itself; ``keep_refresh_token`` leaves the stored one when the
+        provider didn't rotate it. the token is stored fernet-encrypted."""
+        try:
+            from core.settings import config_manager
+            enc = None
+            if refresh_token:
+                enc = config_manager._encrypt_value(refresh_token)
+                if not enc:
+                    return False
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._add_profile_controls(cursor)
+                self._add_device_oidc_columns(cursor)
+                sets = ["oidc_expires_at = ?"]
+                args: List[Any] = [float(expires_at)]
+                if identity is not None:
+                    sets.append("oidc_identity = ?")
+                    args.append(str(identity))
+                if not keep_refresh_token:
+                    sets.append("oidc_refresh_token = ?")
+                    args.append(enc)
+                cursor.execute(f"UPDATE profile_devices SET {', '.join(sets)} "
+                               "WHERE id = ? AND revoked_at IS NULL", (*args, device_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving the oidc session for a device: {e}")
+            return False
+
+    def get_profile_device_oidc(self, device_id: str) -> Optional[Dict[str, Any]]:
+        """{'owner_id', 'identity', 'expires_at', 'refresh_token', 'revoked',
+        'profile_identity'} for a device row, the refresh token decrypted
+        ('' when there is none or it can't be read), the profile's current
+        oidc link beside it. None when there is no such row. raises on a read
+        error: the caller decides what a failed read means."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(profile_devices)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if 'oidc_identity' not in cols:
+                return None
+            cursor.execute(
+                "SELECT d.owner_id, d.oidc_identity, d.oidc_expires_at, d.oidc_refresh_token, d.revoked_at, "
+                "p.oidc_identity AS profile_identity FROM profile_devices d "
+                "LEFT JOIN profiles p ON p.id = d.owner_id WHERE d.id = ?", (device_id,))
+            row = cursor.fetchone()
+        if not row:
+            return None
+        token = ''
+        if row['oidc_refresh_token']:
+            from core.settings import config_manager
+            raw = row['oidc_refresh_token']
+            dec = config_manager._decrypt_value(raw)
+            # a key that no longer matches hands the ciphertext back: no token
+            token = dec if isinstance(dec, str) and dec != raw else ''
+        return {'owner_id': row['owner_id'], 'identity': row['oidc_identity'],
+                'expires_at': row['oidc_expires_at'], 'refresh_token': token,
+                'revoked': bool(row['revoked_at']), 'profile_identity': row['profile_identity']}
 
     # ── admin audit log ──────────────────────────────────────────────────
     _AUDIT_KEEP = 5000
