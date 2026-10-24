@@ -272,21 +272,30 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
     # must remain disjoint to avoid merging coincidentally named copies.
     trusted: dict[str, object] = {}
     # A media-server rescan can split a single physical album into several
-    # library rows. Accept one exact title/artist/owner with one authoritative
-    # release and disjoint positions; conflicting editions remain unresolved.
+    # library rows. Require an exact title/artist/owner and disjoint positions.
+    # A shared provider ID can connect rows whose preferred sources differ;
+    # conflicting authoritative identities from the same source cannot.
     for folder, paths in groups.items():
         ids = album_ids(paths)
         if len(ids) < 2:
             continue
         rows = [albums.get(album_id) or {} for album_id in ids]
         identities = {release_identity(row) for row in rows if release_identity(row)}
+        shared_catalog_id = any(rows[0].get(column) and
+                                all(row.get(column) == rows[0][column] for row in rows)
+                                for column in _SOURCES)
+        compatible_sources = len({source for source, _ in identities}) == len(identities)
         names = {(fold_title(row.get('album_title') or '', drop_brackets=False),
                   fold_title(row.get('artist_name') or '', drop_brackets=False),
                   row.get('owner_profile_id') or 1) for row in rows}
-        if (len(names) == 1 and all(next(iter(names))[:2]) and len(identities) == 1
+        if (len(names) == 1 and all(next(iter(names))[:2])
+                and (len(identities) == 1 or (shared_catalog_id and compatible_sources))
                 and len(positions(paths)) == len(paths)):
             anchors = [album_id for album_id in ids if release_identity(albums.get(album_id) or {})]
-            trusted[folder] = sorted(anchors, key=str)[0]
+            trusted[folder] = min(anchors, key=lambda album_id: (
+                not albums[album_id].get('canonical_locked'),
+                not albums[album_id].get('canonical_source'),
+                not albums[album_id].get('musicbrainz_release_id'), str(album_id)))
     for child in sorted(list(groups)):
         if child not in groups or not _DISC_FOLDER.match(os.path.basename(child)):
             continue

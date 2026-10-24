@@ -464,7 +464,8 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
     recordings.length > 0 &&
     !recordings.some(
       (row) =>
-        (label(row.mbid) === label(details.recording_mbid) && Boolean(details.recording_mbid)) ||
+        ((row.ids as string[]).includes(label(details.recording_mbid)) &&
+          Boolean(details.recording_mbid)) ||
         baseVersionTitle(label(row.title)) === baseVersionTitle(expected),
     );
   const localLength = count(details.file_duration_ms || object(details.current_tags).duration_ms);

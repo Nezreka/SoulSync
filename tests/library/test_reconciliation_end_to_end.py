@@ -968,9 +968,20 @@ def test_explanatory_annotations_keep_saved_choice_but_new_conflict_reopens_it(t
     assert not LibraryReconciliationJob().scan(context).errors
     case_id = worker.get_review_cases()['items'][0]['case_id']
     item = worker.get_review_case(case_id)['items'][0]
+    # A decision saved before the assignment picker gained full artist labels
+    # remains bound to the same release slots after the scan is refreshed.
+    current_details = item['details']
+    previous_details = json.loads(json.dumps(current_details))
+    for option in previous_details['assignment_options']:
+        option.pop('artist', None)
+    with db._get_connection() as conn:
+        conn.execute('UPDATE repair_findings SET details_json=? WHERE id=?',
+                     (json.dumps(previous_details), item['id']))
+        conn.commit()
+    item = next(row for row in worker.get_review_case(case_id)['items'] if row['id'] == item['id'])
     result = worker.apply_review_decision(case_id, item['id'], evidence_token=item['evidence_token'], action='fix')
     assert result['success'], result
-    details = {**item['details'], 'assignment_evidence': 'audio', 'tool_checks': [{'title': 'Additional context'}]}
+    details = {**current_details, 'assignment_evidence': 'audio', 'tool_checks': [{'title': 'Additional context'}]}
     # Removing the obsolete display mode alone does not revoke an unrelated
     # metadata decision; actual changes/source/identity still must match.
     details['numbering_mode'] = 'digital'
@@ -990,6 +1001,32 @@ def test_explanatory_annotations_keep_saved_choice_but_new_conflict_reopens_it(t
     changed = refresh()
     assert not changed['details'].get('plan_approved')
     assert changed['review_tier'] == 'manual'
+
+
+@pytest.mark.parametrize('substantive_change', [None, 'assignment', 'target', 'numbering', 'recording'])
+def test_new_display_labels_do_not_hide_changed_saved_choice_targets(substantive_change):
+    from copy import deepcopy
+    from core.library.reconciliation_choices import same_annotated_evidence
+    previous = {
+        'recording_mbid': 'recording-a',
+        'assignment_options': [{'key': 'slot-a', 'title': 'Song', 'track_number': 1}],
+        'changes': {'library_album_assignment': {'old': 'album-a', 'new': 'album-b'}},
+        'db_data': {'track_number': 1},
+    }
+    current = deepcopy(previous)
+    current['assignment_options'][0]['artist'] = 'Artist & Guest'
+    current['changes']['library_album_assignment'].update(
+        old_label='Separate library entry', new_label='Reviewed album')
+    if substantive_change == 'assignment':
+        current['assignment_options'][0]['key'] = 'slot-b'
+    elif substantive_change == 'target':
+        current['changes']['library_album_assignment']['new'] = 'album-c'
+    elif substantive_change == 'numbering':
+        current['db_data']['track_number'] = 2
+    elif substantive_change == 'recording':
+        current['recording_mbid'] = 'recording-b'
+    assert same_annotated_evidence(previous, current) is (substantive_change is None)
+    assert same_annotated_evidence(current, previous) is (substantive_change is None)
 
 
 def test_configured_lossy_companion_shares_assignment_without_duplicate_decision(tmp_path, monkeypatch):
@@ -3122,8 +3159,9 @@ def test_nested_pressing_qualifier_uses_unanimous_clean_file_title():
     assert _display_album_title(files, 'Precambrian (deluxe limited edition (black disc))', 'Precambrian') != 'Precambrian'
 
 
-@pytest.mark.parametrize('conflict', ['', 'release', 'artist', 'title', 'position', 'owner'])
-def test_same_folder_library_split_has_one_compatible_owner(conflict):
+@pytest.mark.parametrize('shared_provider', [False, True])
+@pytest.mark.parametrize('conflict', ['', 'release', 'artist', 'title', 'position', 'owner', 'unlinked_provider'])
+def test_same_folder_library_split_has_one_compatible_owner(conflict, shared_provider):
     folder = '/music/Ghost/Prequelle'
     paths = [f'{folder}/{number:02}.flac' for number in range(1, 11)]
     tracks = {path: {'album_id': 2 if number == 3 else 1, 'track_number': number, 'disc_number': 1}
@@ -3131,10 +3169,15 @@ def test_same_folder_library_split_has_one_compatible_owner(conflict):
     albums = {1: {'album_title': 'Prequelle', 'artist_name': 'Ghost', 'owner_profile_id': 1},
               2: {'album_title': 'Prequelle', 'artist_name': 'Ghost', 'owner_profile_id': 1,
                   'musicbrainz_release_id': 'release'}}
+    if shared_provider:
+        for album in albums.values():
+            album['itunes_album_id'] = 'shared-itunes'
+        albums[2].update(canonical_source='musicbrainz', canonical_album_id='release', canonical_locked=True)
     if conflict == 'release': albums[1]['musicbrainz_release_id'] = 'another-release'
     if conflict == 'artist': albums[1]['artist_name'] = 'Another Artist'
     if conflict == 'title': albums[1]['album_title'] = 'Prequelle (Live)'
     if conflict == 'position': tracks[paths[0]]['track_number'] = 3
     if conflict == 'owner': albums[1]['owner_profile_id'] = 2
+    if conflict == 'unlinked_provider': albums[1]['itunes_album_id'] = 'unrelated-itunes'
     _, trusted = _group_logical_albums({folder: paths}, tracks, albums)
     assert trusted == ({} if conflict else {folder: 2})

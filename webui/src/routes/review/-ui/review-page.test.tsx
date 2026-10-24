@@ -128,6 +128,11 @@ describe('library reconciliation review queue', () => {
         ids = ['first', 'last'];
         return Promise.resolve(reply({ queued: true }));
       }
+      if (parsed.pathname === '/api/repair/review-queue/last/reanalyze') {
+        expect(options?.method).toBe('POST');
+        ids = ['first'];
+        return Promise.resolve(reply({ queued: true }));
+      }
       const id = parsed.pathname.split('/').at(-1);
       if (['first', 'middle', 'last'].includes(id || ''))
         return Promise.resolve(
@@ -164,6 +169,67 @@ describe('library reconciliation review queue', () => {
     fireEvent.click(screen.getByRole('button', { name: /Previous album/ }));
     await screen.findByRole('heading', { name: 'first' });
     await screen.findByText('Page 1 of 2');
+    fireEvent.click(screen.getByRole('button', { name: /Next album/ }));
+    await screen.findByRole('heading', { name: 'last' });
+    fireEvent.click(screen.getByRole('button', { name: 'Reanalyze album' }));
+    await screen.findByText('Page 1 of 1');
+    expect(screen.getByRole('button', { name: /Next album/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Previous album/ })).not.toBeDisabled();
+  });
+
+  it('advances to the adjacent album when reanalysis completes the only item on the last page', async () => {
+    window.history.replaceState(null, '', '/review?mode=all&case=album30');
+    let complete = false;
+    fetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
+      const parsed = new URL(url, 'http://localhost');
+      const ids = Array.from({ length: complete ? 30 : 31 }, (_, i) => `album${i}`);
+      if (parsed.pathname === '/api/repair/review-queue') {
+        const page = Math.min(Number(parsed.searchParams.get('page')), complete ? 0 : 1);
+        return Promise.resolve(
+          reply({
+            items: ids.slice(page * 30, page * 30 + 30).map((id) => ({
+              case_id: id,
+              album: id,
+              pending: 1,
+              finding_types: [],
+              priority: 1,
+              error_count: 0,
+            })),
+            case_ids: ids,
+            total: ids.length,
+            page,
+            limit: 30,
+          }),
+        );
+      }
+      if (parsed.pathname.endsWith('/reanalyze')) {
+        expect(options?.method).toBe('POST');
+        complete = true;
+        return Promise.resolve(reply({ queued: true }));
+      }
+      const id = parsed.pathname.split('/').at(-1);
+      if (id?.startsWith('album'))
+        return Promise.resolve(
+          reply({
+            case_id: id,
+            album: id,
+            count: 1,
+            status: complete && id === 'album30' ? 'completed' : 'pending',
+            items: [],
+            refresh: { state: 'complete' },
+          }),
+        );
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<ReviewPage />);
+    await screen.findByRole('heading', { name: 'album30' });
+    await screen.findByText('Page 2 of 2');
+    fireEvent.click(screen.getByRole('button', { name: 'Reanalyze album' }));
+    await screen.findByRole('heading', { name: 'album29' });
+    await screen.findByText('Page 1 of 1');
+    expect(screen.getByRole('button', { name: /Next album/ })).toBeDisabled();
   });
 
   it('offers one album completeness choice with individually wanted tracks', async () => {

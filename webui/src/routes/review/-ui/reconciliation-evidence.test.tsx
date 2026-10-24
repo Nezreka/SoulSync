@@ -64,6 +64,41 @@ function releaseSection() {
   return within(screen.getByText('Release track', { exact: true }).closest('section')!);
 }
 
+it('retains exact recording support when several IDs share one displayed identity', () => {
+  render(
+    <ReconciliationEvidence
+      finding={{
+        ...finding,
+        details: {
+          ...finding.details,
+          expected_title: 'Original song title',
+          recording_mbid: 'selected-recording',
+          acoustid: {
+            status: 'ok',
+            recordings: [
+              {
+                title: 'Alternate catalog title',
+                artist: 'Artist',
+                mbid: 'selected-recording',
+                score: 1,
+              },
+              {
+                title: 'Alternate catalog title',
+                artist: 'Artist',
+                mbid: 'another-recording',
+                score: 1,
+              },
+            ],
+          },
+        },
+      }}
+      prominent
+    />,
+  );
+  expect(screen.queryByText(/No AcoustID candidate names/)).toBeNull();
+  expect(screen.getByRole('link', { name: /Selected recording/ })).toBeVisible();
+});
+
 it('opens fresh embedded file metadata using the enclosing album case', async () => {
   const fetch = vi.fn().mockResolvedValue({
     json: async () => ({

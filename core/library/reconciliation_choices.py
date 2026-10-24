@@ -191,8 +191,20 @@ def same_annotated_evidence(previous, current):
                    'numbering_recovery', 'title_difference_kind'}
     empty_defaults = {'metadata_review_reason', 'album_consistency', 'companion_count', 'recording_id_conflict'}
     def substantive(details):
-        return {key: value for key, value in details.items()
-                if key not in annotations and (key not in empty_defaults or value)}
+        result = {key: value for key, value in details.items()
+                  if key not in annotations and (key not in empty_defaults or value)}
+        # These labels explain existing targets; the option identities and
+        # actual old/new values still have to match exactly.
+        if 'assignment_options' in result:
+            result['assignment_options'] = [
+                {key: value for key, value in option.items() if key != 'artist'}
+                for option in result['assignment_options']]
+        if 'changes' in result:
+            result['changes'] = {
+                field: {key: value for key, value in change.items()
+                        if key not in {'old_label', 'new_label'}}
+                for field, change in result['changes'].items()}
+        return result
     return bool(previous) and substantive(previous) == substantive(current)
 
 

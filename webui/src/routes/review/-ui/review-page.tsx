@@ -297,6 +297,7 @@ export function ReviewPage() {
       const result = await fetchReviewQueue(page, query, category, risk);
       if (!current()) return null;
       setQueue(result);
+      if (result.page !== page) setPage(result.page);
       return result;
     } catch (cause) {
       if (!current()) return null;
@@ -406,10 +407,7 @@ export function ReviewPage() {
     orderedCaseIds[
       caseIndex >= 0 ? caseIndex - 1 : Math.min(detachedIndex - 1, orderedCaseIds.length - 1)
     ];
-  const nextCaseId =
-    orderedCaseIds[
-      caseIndex >= 0 ? caseIndex + 1 : Math.min(detachedIndex, orderedCaseIds.length - 1)
-    ];
+  const nextCaseId = orderedCaseIds[caseIndex >= 0 ? caseIndex + 1 : detachedIndex];
   useEffect(() => {
     if (!queue?.case_ids || !caseId) return;
     const index = queue.case_ids.indexOf(caseId);
@@ -694,17 +692,15 @@ export function ReviewPage() {
         !updated.album_plan?.assignments.some((row) => row.fulfillment_state) &&
         updated.refresh?.state !== 'error'
       ) {
-        const previousIndex = queue?.items.findIndex((item) => item.case_id === requestedId) ?? 0;
-        const following = queue?.items.slice(Math.max(0, previousIndex + 1)) || [];
+        const previousIds = queue?.case_ids || queue?.items.map((item) => item.case_id) || [];
+        const currentIds = updatedQueue.case_ids || updatedQueue.items.map((item) => item.case_id);
+        const previousIndex = Math.max(0, previousIds.indexOf(requestedId));
+        const following = previousIds.slice(previousIndex + 1);
         const next =
-          following.find((item) =>
-            updatedQueue.items.some((current) => current.case_id === item.case_id),
-          ) ||
-          updatedQueue.items[Math.max(0, previousIndex)] ||
-          updatedQueue.items[0];
+          following.find((id) => currentIds.includes(id)) ||
+          currentIds[Math.min(previousIndex, currentIds.length - 1)];
         setReviewCase(null);
-        selectCase(next?.case_id || '');
-        if (!next && updatedQueue.total > 0 && page > 0) setPage(page - 1);
+        selectCase(next || '');
         setNotice('Album review completed.');
       } else {
         setReviewCase(updated);
