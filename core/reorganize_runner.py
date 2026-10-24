@@ -212,6 +212,8 @@ def build_runner(
             source_paths = {}
             def preview_with_sources(**kwargs):
                 from core.library_reorganize import preview_album_reorganize
+                if getattr(item, 'review_context', None):
+                    kwargs['review_context'] = item.review_context
                 preview = preview_album_reorganize(**kwargs)
                 from core.library.reconciliation_evidence import evidence_path_before_move
                 with get_database()._get_connection() as conn:

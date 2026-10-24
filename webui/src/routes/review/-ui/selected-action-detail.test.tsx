@@ -51,7 +51,7 @@ it('offers a release-version replacement when the recording ID agrees but the le
   );
   fireEvent.click(screen.getByRole('button', { name: 'Replace file…' }));
   fireEvent.click(screen.getByRole('button', { name: 'Save choice' }));
-  expect(onAct).toHaveBeenCalledWith('fix', 'request_missing');
+  expect(onAct).toHaveBeenCalledWith('fix', 'replace');
   expect(screen.getByRole('button', { name: 'Replace file…' })).toBeVisible();
 });
 
@@ -74,7 +74,7 @@ it('keeps accept and keep choices visible while allowing alternative reassignmen
   fireEvent.click(screen.getByRole('button', { name: 'Leave as-is' }));
   expect(onAct).toHaveBeenCalledWith('dismiss');
   expect(screen.queryByRole('dialog')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Change matched track…' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Change match…' }));
   fireEvent.click(screen.getByRole('button', { name: /Other/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Save plan assignment' }));
   expect(onAct).toHaveBeenCalledWith('fix', 'assign:id:other:1:2');
@@ -217,24 +217,24 @@ it.each([
 
 it('exposes no assignment mutation from a numbering preview or a missing file', () => {
   const { rerender } = render(detail(repeatedRecording, vi.fn(), true));
-  expect(screen.queryByText('Change matched track…')).toBeNull();
+  expect(screen.queryByText('Change match…')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Accept match' })).toBeNull();
   rerender(detail({ ...repeatedRecording, file_path: null }));
-  expect(screen.queryByText('Change matched track…')).toBeNull();
+  expect(screen.queryByText('Change match…')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Accept match' })).toBeNull();
 });
 
 it('clears a draft assignment when the same finding receives another release or options', () => {
   const onAct = vi.fn();
   const { rerender } = render(detail(finding, onAct));
-  fireEvent.click(screen.getByRole('button', { name: 'Change matched track…' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Change match…' }));
   fireEvent.click(screen.getByRole('button', { name: /Other/ }));
   expect(screen.getByRole('button', { name: 'Save plan assignment' })).not.toBeDisabled();
   rerender(
     detail({ ...finding, details: { ...finding.details, release_id: 'another-release' } }, onAct),
   );
   expect(screen.queryByRole('dialog')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Change matched track…' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Change match…' }));
   expect(screen.getByRole('button', { name: 'Save plan assignment' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Save plan assignment' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: /Other/ }));
@@ -252,7 +252,7 @@ it('clears a draft assignment when the same finding receives another release or 
   );
   expect(onAct).not.toHaveBeenCalled();
   expect(screen.queryByRole('dialog')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Change matched track…' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Change match…' }));
   expect(screen.getByRole('button', { name: 'Save plan assignment' })).toBeDisabled();
 });
 
@@ -290,7 +290,6 @@ it('offers exact-target remediation for a small duration difference and keeps it
   fireEvent.click(screen.getByRole('radio', { name: /Use an existing file/ }));
   expect(screen.getByRole('button', { name: 'Save choice' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: /Reflections.*other.flac/ }));
-  fireEvent.click(screen.getByRole('radio', { name: /Move it to quarantine/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Save choice' }));
   expect(onAct).toHaveBeenCalledWith('fix', 'existing:quarantine:copy');
 });
@@ -299,10 +298,40 @@ it('discards a replacement draft when its evidence changes', () => {
   const onAct = vi.fn();
   const { rerender } = render(detail(repeatedRecording, onAct));
   fireEvent.click(screen.getByRole('button', { name: 'Replace file…' }));
-  fireEvent.click(screen.getByRole('radio', { name: /Move it to quarantine/ }));
   rerender(detail({ ...repeatedRecording, evidence_token: 'fresh-evidence' }, onAct));
   expect(onAct).not.toHaveBeenCalled();
   expect(screen.queryByRole('dialog')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Replace file…' }));
-  expect(screen.getByRole('radio', { name: /Keep it/ })).toBeChecked();
+  expect(screen.getByRole('radio', { name: /Find another copy/ })).toBeChecked();
+});
+
+it('shows a saved replacement with edit and undo instead of repeating the replacement flow', () => {
+  const onReset = vi.fn();
+  const onAct = vi.fn();
+  render(
+    <SelectedActionDetail
+      finding={{
+        ...repeatedRecording,
+        details: {
+          ...repeatedRecording.details,
+          planned_choice: { action: 'fix', fix_action: 'replace' },
+        },
+      }}
+      itemIndex={0}
+      itemCount={1}
+      busy={false}
+      compact
+      onAct={onAct}
+      onSelect={vi.fn()}
+      onReset={onReset}
+      typeInfo={{ fixable: true } as FindingTypeInfo}
+    />,
+  );
+  expect(screen.getByRole('status')).toHaveTextContent('Replacement planned');
+  expect(screen.queryByRole('button', { name: 'Replace file…' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Edit choice' }));
+  expect(screen.getByRole('button', { name: 'Replace file…' })).toBeVisible();
+  expect(onAct).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Undo choice' }));
+  expect(onReset).toHaveBeenCalledOnce();
 });

@@ -39,6 +39,9 @@ export function CompletenessChoice({
         missing.map(slotKey),
       ])}
       missing={missing}
+      selected={
+        Array.isArray(finding.details?.wanted_slots) ? finding.details.wanted_slots.map(String) : []
+      }
       busy={busy}
       onChoose={onChoose}
     />
@@ -47,14 +50,20 @@ export function CompletenessChoice({
 
 function CompletenessOptions({
   missing,
+  selected,
   busy,
   onChoose,
 }: {
   missing: Record<string, unknown>[];
+  selected: string[];
   busy: boolean;
   onChoose: (choice: string) => void;
 }) {
-  const [wanted, setWanted] = useState<string[]>([]);
+  const [wanted, setWanted] = useState<string[]>(() =>
+    missing
+      .filter((slot) => slot.requested === true || selected.includes(slotKey(slot)))
+      .map(slotKey),
+  );
   return (
     <div className={styles.completenessChoice}>
       <p>
@@ -67,7 +76,7 @@ function CompletenessOptions({
           return (
             <label key={`${key}-${index}`}>
               <Checkbox
-                disabled={busy}
+                disabled={busy || slot.requested === true}
                 checked={wanted.includes(key)}
                 onCheckedChange={(checked) =>
                   setWanted((current) =>
@@ -75,7 +84,10 @@ function CompletenessOptions({
                   )
                 }
               />
-              <span>{textValue(slot.title || slot.name) || `Track ${index + 1}`}</span>
+              <span>
+                {textValue(slot.title || slot.name) || `Track ${index + 1}`}
+                {slot.requested === true && <small> · Already requested</small>}
+              </span>
             </label>
           );
         })}

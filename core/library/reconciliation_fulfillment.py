@@ -101,8 +101,88 @@ def published_wishlist_track(db, stored_id, profiles, path):
 
 def outstanding(conn):
     ensure_schema(conn)
+    repair_request_payloads(conn)
     return conn.execute('''SELECT profile_id, source_track_id, release_id, state, source
         FROM reconcile_fulfillment WHERE state IN ('requested', 'published') ''').fetchall()
+
+
+def retain_request_context(conn, payload, source_info, profile_id):
+    """A generic download retry must retain the exact reviewed acquisition target."""
+    if not isinstance(payload, dict) or not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='reconcile_fulfillment'").fetchone():
+        return payload, source_info
+    album = payload.get('album') or {}
+    rows = conn.execute('''SELECT source, replacement_request FROM reconcile_fulfillment
+        WHERE profile_id=? AND release_id=? AND source_track_id=?
+          AND state IN ('requested', 'published')''',
+        (int(profile_id or 1), str(album.get('id') or ''), str(payload.get('id') or ''))).fetchall()
+    sources = {row[0] for row in rows}
+    if len(sources) != 1 or (payload.get('provider') and payload['provider'] not in sources):
+        return payload, source_info
+    source = next(iter(sources))
+    payload = {**payload, 'provider': source, 'album': dict(album)}
+    if source == 'musicbrainz':
+        payload['album']['musicbrainz_release_id'] = album['id']
+    info = dict(source_info) if isinstance(source_info, dict) else {}
+    info.update(source=source, source_track_id=payload['id'], source_album_id=album['id'],
+                is_album=True, reason='library_reconciliation_wrong_audio' if any(r[1] for r in rows)
+                else 'library_reconciliation')
+    return payload, info
+
+
+def repair_request_payloads(conn):
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='wishlist_tracks'").fetchone():
+        return
+    if not {'id', 'source_info', 'spotify_data', 'profile_id'} <= {r[1] for r in conn.execute('PRAGMA table_info(wishlist_tracks)')}:
+        return
+    for row_id, raw, info, profile in conn.execute(
+            'SELECT id, spotify_data, source_info, profile_id FROM wishlist_tracks').fetchall():
+        try:
+            before, previous = json.loads(raw or '{}'), json.loads(info or '{}')
+            payload, context = retain_request_context(conn, before, previous, profile)
+            if payload != before or context != previous:
+                conn.execute('UPDATE wishlist_tracks SET spotify_data=?, source_info=? WHERE id=?',
+                             (json.dumps(payload), json.dumps(context), row_id))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    conn.commit()
+
+
+def requested_folder(db, *, profile_id, source, release_id, track_id, disc_number, root):
+    """Route an exact requested slot to its reviewed album, including disc folders."""
+    from core.library.path_resolver import resolve_library_file_path
+    conn = db._get_connection()
+    try:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_fulfillment'").fetchone():
+            return None
+        requests = conn.execute('''SELECT DISTINCT album_id, album_folder FROM reconcile_fulfillment
+            WHERE profile_id=? AND source=? AND release_id=? AND source_track_id=?
+              AND state IN ('requested', 'published')''',
+            (int(profile_id or 1), source, str(release_id), str(track_id))).fetchall()
+        if len(requests) != 1:
+            return None
+        album_id, anchor = requests[0]
+        paths = conn.execute('SELECT file_path, disc_number FROM tracks WHERE album_id=?',
+                             (album_id,)).fetchall()
+        folders = set()
+        for path, disc in paths:
+            resolved = resolve_library_file_path(path, transfer_folder=root)
+            if not resolved or not os.path.isfile(resolved):
+                continue
+            folder = os.path.dirname(resolved)
+            if os.path.commonpath([os.path.realpath(root), os.path.realpath(folder)]) != os.path.realpath(root):
+                continue
+            if int(disc or 1) == int(disc_number or 1):
+                folders.add(folder)
+        # The saved anchor wins when the old album was flat; disc directories
+        # are selected only by existing files with the requested disc number.
+        if anchor in folders:
+            return anchor
+        if len(folders) == 1:
+            return next(iter(folders))
+        return None
+    finally:
+        conn.close()
 
 
 def cancel_request(conn, profile_id, payload):

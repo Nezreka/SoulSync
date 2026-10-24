@@ -752,10 +752,10 @@ describe('library reconciliation review queue', () => {
 
     expect(screen.getByRole('button', { name: 'Replace file…' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Replace file…' }));
-    expect(screen.getByRole('radio', { name: /Move it to quarantine/ })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /Find another copy/ })).toBeChecked();
     expect(
       screen.getByText(
-        'Requests the exact track from the selected release, then moves this file to recoverable quarantine.',
+        'Request a new copy and move the current file to recoverable quarantine when you apply the plan.',
       ),
     ).toBeTruthy();
   });
@@ -788,7 +788,7 @@ describe('library reconciliation review queue', () => {
     render(<ReviewPage />);
     await screen.findByText(/Last reconciliation stopped/);
     expect(screen.getByText(/2539 files checked/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Scan library' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reanalyze library' }));
     await waitFor(() => expect(screen.getByText(/Library reconciliation queued/)).toBeTruthy());
   });
 
@@ -1447,7 +1447,7 @@ it('discards a delayed manual refresh and totals after changing filters', async 
   render(<ReviewPage />);
   await screen.findByText('1 album');
   delay = true;
-  fireEvent.click(screen.getByRole('button', { name: 'Reload queue' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh view' }));
   await waitFor(() => expect(pending).toHaveLength(2));
   fireEvent.change(screen.getByPlaceholderText('Search findings'), { target: { value: 'new' } });
   await screen.findByText('2 albums in this view');
@@ -1459,7 +1459,7 @@ it('discards a delayed manual refresh and totals after changing filters', async 
   expect(screen.queryByText(/99 albums/)).toBeNull();
 });
 
-it('clears search and category when opening the global ready batch', async () => {
+it('preserves search and category when filtering ready albums', async () => {
   fetchMock.mockImplementation((url: string) => {
     if (url.startsWith('/api/repair/review-queue?'))
       return Promise.resolve(reply({ items: [], total: 0, page: 0, limit: 30 }));
@@ -1471,17 +1471,19 @@ it('clears search and category when opening the global ready batch', async () =>
     target: { value: 'old search' },
   });
   fireEvent.change(screen.getByLabelText('Filter by type'), { target: { value: 'numbering' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Review ready batch' }));
+  fireEvent.click(screen.getByRole('button', { name: /^Ready to apply/ }));
   await waitFor(() => {
     const calls = fetchMock.mock.calls.filter(([url]) =>
       String(url).startsWith('/api/repair/review-queue?'),
     );
     const params = new URL(calls.at(-1)![0], 'http://localhost').searchParams;
     expect(params.get('risk')).toBe('ready');
-    expect(params.get('q') || '').toBe('');
-    expect(params.get('category') || '').toBe('');
+    expect(params.get('q')).toBe('old search');
+    expect(params.get('category')).toBe('numbering');
   });
-  expect((screen.getByPlaceholderText('Search findings') as HTMLInputElement).value).toBe('');
+  expect((screen.getByPlaceholderText('Search findings') as HTMLInputElement).value).toBe(
+    'old search',
+  );
 });
 
 it('keeps an album selected when reopening the already visible ready batch', async () => {
@@ -1522,6 +1524,6 @@ it('keeps an album selected when reopening the already visible ready batch', asy
   });
   render(<ReviewPage />);
   await screen.findByRole('heading', { name: 'Ready Album' });
-  fireEvent.click(screen.getByRole('button', { name: 'Review ready batch' }));
+  fireEvent.click(screen.getByRole('button', { name: /^Ready to apply/ }));
   expect(screen.getByRole('heading', { name: 'Ready Album' })).toBeTruthy();
 });

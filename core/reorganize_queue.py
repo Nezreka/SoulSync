@@ -92,6 +92,7 @@ class QueueItem:
     # Rename-only mode (#875): move files to the current naming scheme WITHOUT the
     # copy + post-processing (re-tag / quality / AcoustID) the full flow runs.
     rename_only: bool = False
+    review_context: Optional[dict] = None
     status: str = 'queued'              # queued | running | done | failed | cancelled
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
@@ -119,6 +120,7 @@ class QueueItem:
             'source': self.source,
             'metadata_source': self.metadata_source,
             'rename_only': self.rename_only,
+            'review_context': self.review_context,
             'enqueued_at': self.enqueued_at,
             'started_at': self.started_at,
             'finished_at': self.finished_at,
@@ -194,6 +196,7 @@ class ReorganizeQueue:
         source: Optional[str] = None,
         metadata_source: str = 'api',
         rename_only: bool = False,
+        review_context: Optional[dict] = None,
     ) -> dict:
         """Add an album to the queue. Returns a result dict:
 
@@ -224,6 +227,7 @@ class ReorganizeQueue:
                 enqueued_at=time.time(),
                 metadata_source=metadata_source or 'api',
                 rename_only=bool(rename_only),
+                review_context=review_context,
             )
             self._items.append(item)
             self._persist(item)
@@ -434,6 +438,7 @@ class ReorganizeQueue:
                         enqueued_at=float(snap.get('enqueued_at') or time.time()),
                         metadata_source=snap.get('metadata_source') or 'api',
                         rename_only=bool(snap.get('rename_only')),
+                        review_context=snap.get('review_context'),
                     )
                 except (KeyError, TypeError, ValueError):
                     continue

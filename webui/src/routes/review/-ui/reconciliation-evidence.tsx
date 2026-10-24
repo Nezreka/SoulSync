@@ -528,34 +528,39 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
         </p>
       )}
       {explain && objects(details.competitors).length > 0 && (
-        <ul className={styles.assignmentCompetitors} aria-label="Competing assignments">
-          {objects(details.competitors).map((rival, index) => (
-            <li key={index}>
-              {rival.kind === 'local_file' ? (
-                <>
-                  <strong>{label(rival.file_path).split('/').pop()}</strong>
-                  <span>
-                    {rival.assigned_title
-                      ? `Currently paired with ${label(rival.assigned_title)}`
-                      : 'Currently unassigned'}
-                  </span>
-                  <details>
-                    <summary>File location</summary>
-                    <code>{label(rival.file_path)}</code>
-                  </details>
-                </>
-              ) : (
-                <>
-                  <strong>{label(rival.slot_title)}</strong>
-                  <span>
-                    Release position{' '}
-                    {formatTrackPosition(count(rival.disc_number), count(rival.track_number))}
-                  </span>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
+        <section className={styles.ambiguitySection}>
+          <h5>Other possible assignments</h5>
+          <ul className={styles.assignmentCompetitors} aria-label="Competing assignments">
+            {objects(details.competitors).map((rival, index) => (
+              <li key={index}>
+                {rival.kind === 'local_file' ? (
+                  <>
+                    <small>Competing local file</small>
+                    <strong>{label(rival.file_path).split('/').pop()}</strong>
+                    <span>
+                      {rival.assigned_title
+                        ? `Currently paired with ${label(rival.assigned_title)}`
+                        : 'Currently unassigned'}
+                    </span>
+                    <details>
+                      <summary>File location</summary>
+                      <code>{label(rival.file_path)}</code>
+                    </details>
+                  </>
+                ) : (
+                  <>
+                    <small>Alternative release track</small>
+                    <strong>{label(rival.slot_title)}</strong>
+                    <span>
+                      Release position{' '}
+                      {formatTrackPosition(count(rival.disc_number), count(rival.track_number))}
+                    </span>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
       {explain && delta > 3000 && (
         <div className={styles.durationWarning}>
@@ -567,6 +572,7 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
       )}
       {recordings.length > 0 ? (
         <>
+          {explain && <h5 className={styles.evidenceSectionHeading}>Audio fingerprint results</h5>}
           <ul className={styles.audioCandidates}>
             {(expanded ? recordings : recordings.slice(0, 5)).map((recording, index) => (
               <li key={index}>
@@ -1296,7 +1302,10 @@ export function AssignmentEvidence({
           Review again
         </Button>
       )}
-      <p>
+      <p
+        className={styles.assignmentStatus}
+        data-tone={row.status === 'confirmed' ? 'success' : undefined}
+      >
         {row.status === 'missing'
           ? row.fulfillment_state === 'cancelled'
             ? 'The request was cancelled. This track is still wanted; you can request it again or change album completeness.'

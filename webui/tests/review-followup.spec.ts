@@ -71,7 +71,7 @@ for (const width of [1800, 390]) {
     await page.locator('[data-review-assignment]').first().click();
     const evidence = page.getByRole('region', { name: 'Why this track was paired' });
     await evidence.scrollIntoViewIfNeeded();
-    const heading = evidence.getByRole('rowheader', { name: 'Embedded recording ID' });
+    const heading = evidence.locator('summary').filter({ hasText: 'Embedded recording ID' });
     expect((await heading.boundingBox())!.height).toBeLessThan(45);
     expect(await evidence.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
     await page.screenshot({ path: info.outputPath('pairing-evidence.png') });
@@ -202,13 +202,12 @@ for (const width of [1800, 390]) {
     await page.locator('[data-review-assignment]').first().click();
     await page.getByRole('button', { name: 'Replace file…' }).click();
     const replacement = page.getByRole('dialog', { name: 'Replace file', exact: true });
-    await expect(replacement.getByRole('radio', { name: /Keep it/ })).toBeChecked();
-    await replacement.getByRole('radio', { name: /Move it to quarantine/ }).check();
+    await expect(replacement.getByRole('radio', { name: /Find another copy/ })).toBeChecked();
     await expect(replacement).toContainText('recoverable quarantine when you apply the plan');
     await page.screenshot({ path: info.outputPath('replacement.png') });
     await replacement.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await page.getByRole('button', { name: 'Change matched track…' }).click();
-    const assignment = page.getByRole('dialog', { name: 'Change track assignment' });
+    await page.getByRole('button', { name: 'Change match…' }).click();
+    const assignment = page.getByRole('dialog', { name: 'Change match' });
     const rows = assignment.locator('[aria-label="Release tracks"] > button');
     await expect(rows).toHaveCount(20);
     const first = await rows.first().boundingBox(),

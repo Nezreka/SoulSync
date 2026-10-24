@@ -340,13 +340,13 @@ it('opens a requested decision, then returns to a filtered list with matching de
   const inspector = screen.getByLabelText('Selected track details');
   expect(inspector).toHaveAttribute('data-open', 'true');
   expect(within(inspector).getByText('Evidence for track 7')).toBeTruthy();
-  expect(within(inspector).getByRole('button', { name: /Next decision/ })).toBeDisabled();
+  expect(within(inspector).getByRole('button', { name: /Next decision/ })).not.toBeDisabled();
   fireEvent.click(screen.getByRole('tab', { name: /^Plan/ }));
   fireEvent.click(within(screen.getByLabelText('Proposed metadata by field')).getByRole('button'));
   expect(screen.getByLabelText('Selected track details')).not.toHaveAttribute('data-open');
   const selected = screen.getByLabelText('Selected action detail');
   expect(within(selected).getByText('Evidence for track 8')).toBeTruthy();
-  fireEvent.click(within(selected).getByRole('button', { name: /Next decision/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Next decision/ }));
   expect(screen.getByText('Evidence for track 9')).toBeTruthy();
   expect(screen.getByRole('button', { name: /Next decision/ })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: /Previous decision/ }));
@@ -376,4 +376,62 @@ it('does not replace a newly selected album when release pinning finishes late',
   await act(async () => finish());
   expect(screen.queryByRole('heading', { name: 'First album' })).toBeNull();
   expect(screen.getByRole('heading', { name: 'Another album' })).toBeTruthy();
+});
+
+it('advances after saving a track choice and keeps navigation when returning to the decided track', async () => {
+  const items = [7, 8].map((id) => ({
+    id,
+    title: `Track ${id}`,
+    file_path: `/music/First/${id}.flac`,
+    finding_type: 'reconciliation_metadata',
+    review_tier: 'ready',
+    evidence_token: `token-${id}`,
+    details: { changes: { title: { old: `track ${id}`, new: `Track ${id}` } } },
+  }));
+  const current = {
+    ...album,
+    count: 2,
+    items,
+    album_plan: {
+      ...album.album_plan,
+      assignments: items.map((item) => ({
+        status: 'change',
+        finding_id: item.id,
+        file_path: item.file_path,
+        file: `${item.id}.flac`,
+        current_title: `Track ${item.id}`,
+        slot_title: `Track ${item.id}`,
+        changes: item.details.changes,
+      })),
+    },
+  };
+  setup(current);
+  const read = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (input: string, options?: RequestInit) => {
+    if (input === '/api/repair/finding-types')
+      return reply({ types: [{ finding_type: 'reconciliation_metadata', fixable: true }] });
+    if (input.endsWith('/findings/7/apply')) {
+      Object.assign(current.items[0].details, {
+        planned_choice: { action: 'dismiss', fix_action: '' },
+      });
+      return reply({ success: true, message: 'Choice saved.', refresh_queued: true });
+    }
+    if (decodeURIComponent(input.split('?')[0]).endsWith('/album:1:first'))
+      return reply(structuredClone(current));
+    return read(input, options);
+  });
+  render(<ReviewPage />);
+  await screen.findByRole('heading', { name: 'First album' });
+  fireEvent.click(screen.getByRole('tab', { name: /^Tracks/ }));
+  fireEvent.click(screen.getAllByRole('button', { name: /Track 7/ })[0]);
+  fireEvent.click(screen.getByRole('button', { name: 'Leave as-is' }));
+  await waitFor(() =>
+    expect(
+      within(screen.getByLabelText('Selected action detail')).getByRole('heading', { level: 3 }),
+    ).toHaveTextContent('Track 8'),
+  );
+  expect(screen.queryByText(/Updating this album plan/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /Previous decision/ }));
+  expect(screen.getByRole('status')).toHaveTextContent('Leave as-is planned');
+  expect(screen.getByRole('button', { name: /Next decision/ })).toBeEnabled();
 });

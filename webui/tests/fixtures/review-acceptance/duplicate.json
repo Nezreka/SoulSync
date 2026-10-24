@@ -68,7 +68,8 @@
             "duration_ms": 200000,
             "spotify_track_id": "",
             "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
-            "release_disambiguation": ""
+            "release_disambiguation": "",
+            "artists_list": []
           },
           "acoustid": {
             "status": "ok",
@@ -316,7 +317,8 @@
             "duration_ms": 210000,
             "spotify_track_id": "",
             "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
-            "release_disambiguation": ""
+            "release_disambiguation": "",
+            "artists_list": []
           },
           "acoustid": {
             "status": "ok",
@@ -619,7 +621,8 @@
             "duration_ms": 200000,
             "spotify_track_id": "",
             "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
-            "release_disambiguation": ""
+            "release_disambiguation": "",
+            "artists_list": []
           },
           "acoustid": {
             "status": "ok",
@@ -769,7 +772,8 @@
             "duration_ms": 210000,
             "spotify_track_id": "",
             "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
-            "release_disambiguation": ""
+            "release_disambiguation": "",
+            "artists_list": []
           },
           "acoustid": {
             "status": "ok",
@@ -896,7 +900,8 @@
             "duration_ms": 200000,
             "spotify_track_id": "",
             "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
-            "release_disambiguation": ""
+            "release_disambiguation": "",
+            "artists_list": []
           },
           "acoustid": {
             "status": "ok",

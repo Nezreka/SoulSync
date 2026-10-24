@@ -23,6 +23,7 @@ export function SelectedActionDetail({
   busy,
   onAct,
   onSelect,
+  onReset,
   previousId,
   nextId,
   comparisonPath,
@@ -39,6 +40,7 @@ export function SelectedActionDetail({
   busy: boolean;
   onAct: (action: 'fix' | 'dismiss', choice?: string) => void;
   onSelect: (findingId: number | null) => void;
+  onReset?: () => void;
   previousId?: number;
   nextId?: number;
   comparisonPath?: string;
@@ -84,6 +86,20 @@ export function SelectedActionDetail({
       ? finding.description || finding.review_reason
       : finding.review_reason || finding.description;
   const details = record(finding.details);
+  const planned = record(details.planned_choice);
+  const [editing, setEditing] = useState(false);
+  const hasPlan = Boolean(planned.action || details.saved_assignment);
+  const plannedAction = textValue(planned.fix_action);
+  const plannedLabel =
+    planned.action === 'dismiss'
+      ? 'Leave as-is planned'
+      : plannedAction === 'replace' || plannedAction.startsWith('existing:')
+        ? 'Replacement planned'
+        : plannedAction === 'quarantine'
+          ? 'Removal planned'
+          : plannedAction === 'request_missing'
+            ? 'New copy requested in this plan'
+            : 'Changes planned';
   const localDurationMs = Number(
     details.file_duration_ms || record(details.current_tags).duration_ms || 0,
   );
@@ -107,6 +123,26 @@ export function SelectedActionDetail({
         </div>
       )}
       <h3>{findingHeading(finding)}</h3>
+      {hasPlan && (
+        <div className={styles.plannedStatus} role="status">
+          <strong>{plannedLabel}</strong>
+          <span>
+            {plannedAction === 'replace'
+              ? `Request ${textValue(replacement.name || details.expected_title)} and quarantine the current file when applied.`
+              : 'Saved in this album plan. Files change when you apply it.'}
+          </span>
+          <div className={styles.inlineActions}>
+            <Button disabled={busy} onClick={() => setEditing(!editing)}>
+              {editing ? 'Done editing' : 'Edit choice'}
+            </Button>
+            {onReset && (
+              <Button disabled={busy} onClick={onReset}>
+                Undo choice
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
       <p className={styles.description}>
         {versionConflict
           ? 'The local audio and release track may be different versions. Listen before choosing how to keep them.'
@@ -114,22 +150,24 @@ export function SelectedActionDetail({
             ? compactReason || 'Review the supporting evidence.'
             : finding.description || 'Review the evidence below.'}
       </p>
-      <nav className={styles.decisionNavigation} aria-label="Decision navigation">
-        <Button
-          type="button"
-          disabled={busy || previousId == null}
-          onClick={() => onSelect(previousId ?? null)}
-        >
-          ← Previous decision
-        </Button>
-        <Button
-          type="button"
-          disabled={busy || nextId == null}
-          onClick={() => onSelect(nextId ?? null)}
-        >
-          Next decision →
-        </Button>
-      </nav>
+      {!compact && (
+        <nav className={styles.decisionNavigation} aria-label="Decision navigation">
+          <Button
+            type="button"
+            disabled={busy || previousId == null}
+            onClick={() => onSelect(previousId ?? null)}
+          >
+            ← Previous decision
+          </Button>
+          <Button
+            type="button"
+            disabled={busy || nextId == null}
+            onClick={() => onSelect(nextId ?? null)}
+          >
+            Next decision →
+          </Button>
+        </nav>
+      )}
       {!compact && (
         <section
           className={styles.suggestion}
@@ -199,7 +237,7 @@ export function SelectedActionDetail({
                 This numbering change is a preview. Choose the album numbering on Plan first.
               </p>
             )}
-            {!waitingForDownload && !intentChoice && (
+            {!waitingForDownload && !intentChoice && (!hasPlan || editing) && (
               <>
                 <div className={styles.actions}>
                   {directRepair && !wrongAudio && !versionConflict ? (
@@ -230,19 +268,51 @@ export function SelectedActionDetail({
                   >
                     Leave as-is
                   </Button>
-                  {canApply && canAssign && Boolean(replacement.source_track_id) && (
-                    <ReplacementChoice
+                  {canApply &&
+                    canAssign &&
+                    (Boolean(replacement.source_track_id) ||
+                      (['reconciliation_extra', 'reconciliation_unresolved'].includes(
+                        finding.finding_type,
+                      ) &&
+                        Boolean(details.track_id) &&
+                        !duplicateChoice &&
+                        !records(details.competing_copies).length)) && (
+                      <ReplacementChoice
+                        key={JSON.stringify([
+                          finding.id,
+                          finding.evidence_token,
+                          finding.file_path,
+                          details.source,
+                          details.release_id,
+                          replacement,
+                          details.replacement_files,
+                        ])}
+                        target={replacement}
+                        canRemove={['reconciliation_extra', 'reconciliation_unresolved'].includes(
+                          finding.finding_type,
+                        )}
+                        files={records(details.replacement_files)}
+                        busy={busy}
+                        onAct={onAct}
+                      />
+                    )}
+                  {(!hasPlan || editing) && canAssign && assignmentOptions.length > 0 && (
+                    <AssignmentChoice
                       key={JSON.stringify([
                         finding.id,
-                        finding.evidence_token,
                         finding.file_path,
                         details.source,
                         details.release_id,
-                        replacement,
-                        details.replacement_files,
+                        assignmentOptions.map((slot) => slot.key),
                       ])}
-                      target={replacement}
-                      files={records(details.replacement_files)}
+                      options={assignmentOptions}
+                      current={textValue(details.expected_title || replacement.name)}
+                      local={
+                        finding.file_path?.split('/').at(-1) ||
+                        textValue(record(details.current_tags).title)
+                      }
+                      numberingMode={textValue(details.numbering_mode)}
+                      saved={details.saved_assignment === true}
                       busy={busy}
                       onAct={onAct}
                     />
@@ -253,46 +323,6 @@ export function SelectedActionDetail({
                 </p>
               </>
             )}
-
-            {canAssign && assignmentOptions.length > 0 && (
-              <AssignmentChoice
-                key={JSON.stringify([
-                  finding.id,
-                  finding.file_path,
-                  details.source,
-                  details.release_id,
-                  assignmentOptions.map((slot) => slot.key),
-                ])}
-                options={assignmentOptions}
-                current={textValue(details.expected_title || replacement.name)}
-                local={
-                  finding.file_path?.split('/').at(-1) ||
-                  textValue(record(details.current_tags).title)
-                }
-                numberingMode={textValue(details.numbering_mode)}
-                saved={details.saved_assignment === true}
-                busy={busy}
-                onAct={onAct}
-              />
-            )}
-
-            {['reconciliation_extra', 'reconciliation_unresolved'].includes(finding.finding_type) &&
-              finding.file_path &&
-              Boolean(details.track_id) &&
-              details.album_id != null &&
-              !duplicateChoice &&
-              !(details.competing_copies as unknown[] | undefined)?.length && (
-                <details className={styles.extraAction}>
-                  <summary>Remove from album…</summary>
-                  <span>
-                    If this copy does not belong here, move it to recoverable quarantine and remove
-                    its library entry.
-                  </span>
-                  <Button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
-                    Move to quarantine
-                  </Button>
-                </details>
-              )}
           </>
         }
         audio={
@@ -373,10 +403,12 @@ function AssignmentChoice({
   return (
     <>
       <Button type="button" disabled={busy} onClick={() => changeOpen(true)}>
-        Change matched track…
+        Change match…
       </Button>
       <DialogFrame open={open} onOpenChange={changeOpen}>
-        <DialogHeader title="Change track assignment">Local file: {local}</DialogHeader>
+        <DialogHeader title="Change match">
+          Keep {local} and choose which release track it represents.
+        </DialogHeader>
         <DialogBody>
           <p>
             {saved ? 'Planned' : 'Proposed'} release track:{' '}
@@ -440,60 +472,77 @@ function ReplacementChoice({
   files,
   busy,
   onAct,
+  canRemove,
 }: {
   target: Record<string, unknown>;
   files: Record<string, unknown>[];
   busy: boolean;
+  canRemove: boolean;
   onAct: (action: 'fix', choice: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [source, setSource] = useState('new');
-  const [disposition, setDisposition] = useState('keep');
+  const canRequest = Boolean(target.source_track_id);
+  const [source, setSource] = useState(canRequest ? 'new' : 'remove');
   const [file, setFile] = useState('');
   const changeOpen = (next: boolean) => {
     setOpen(next);
     if (!next) {
-      setSource('new');
-      setDisposition('keep');
+      setSource(canRequest ? 'new' : 'remove');
       setFile('');
     }
   };
   const choice =
     source === 'existing'
-      ? `existing:${disposition}:${file}`
-      : disposition === 'keep'
-        ? 'request_missing'
+      ? `existing:quarantine:${file}`
+      : source === 'remove'
+        ? 'quarantine'
         : 'replace';
   return (
     <>
-      <Button disabled={busy} onClick={() => changeOpen(true)}>
+      <Button variant="danger" disabled={busy} onClick={() => changeOpen(true)}>
         Replace file…
       </Button>
       <DialogFrame open={open} onOpenChange={changeOpen}>
         <DialogHeader title="Replace file">
-          Choose a copy of {textValue(target.name || target.title)} for this release.
+          Choose different audio for {textValue(target.name || target.title)} on this release.
         </DialogHeader>
         <DialogBody>
           <fieldset className={styles.remediationChoices}>
             <legend>Replacement</legend>
-            <label>
-              <input
-                type="radio"
-                name="replacement-source"
-                checked={source === 'new'}
-                onChange={() => setSource('new')}
-              />
-              Find another copy<small>Request the exact track from the selected release.</small>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="replacement-source"
-                checked={source === 'existing'}
-                onChange={() => setSource('existing')}
-              />
-              Use an existing file<small>Choose an unassigned file already in this album.</small>
-            </label>
+            {canRequest && (
+              <label>
+                <input
+                  type="radio"
+                  name="replacement-source"
+                  checked={source === 'new'}
+                  onChange={() => setSource('new')}
+                />
+                Find another copy<small>Request this exact track from the selected release.</small>
+              </label>
+            )}
+            {files.length > 0 && (
+              <label>
+                <input
+                  type="radio"
+                  name="replacement-source"
+                  checked={source === 'existing'}
+                  onChange={() => setSource('existing')}
+                />
+                Use an existing file
+                <small>Use another unassigned file already in this album.</small>
+              </label>
+            )}
+            {canRemove && (
+              <label>
+                <input
+                  type="radio"
+                  name="replacement-source"
+                  checked={source === 'remove'}
+                  onChange={() => setSource('remove')}
+                />
+                Remove without replacement<small>This file does not belong in the album.</small>
+              </label>
+            )}
           </fieldset>
           {source === 'existing' && (
             <div className={styles.assignmentChoices} aria-label="Existing album files">
@@ -511,46 +560,21 @@ function ReplacementChoice({
                   <small>{shortDuration(Number(candidate.duration_ms))}</small>
                 </Button>
               ))}
-              {!files.length && (
-                <p>
-                  No unassigned indexed files are available in this album. Add a local file through
-                  Import, then reanalyze the album.
-                </p>
-              )}
             </div>
           )}
-          <fieldset className={styles.remediationChoices}>
-            <legend>Current file</legend>
-            <label>
-              <input
-                type="radio"
-                name="replacement-disposition"
-                checked={disposition === 'keep'}
-                onChange={() => setDisposition('keep')}
-              />
-              Keep it<small>Keep the current file alongside the selected copy.</small>
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="replacement-disposition"
-                checked={disposition === 'quarantine'}
-                onChange={() => setDisposition('quarantine')}
-              />
-              Move it to quarantine<small>Remove it from this album and keep it recoverable.</small>
-            </label>
-          </fieldset>
           <p className={styles.remediationSummary}>
-            {source === 'new' ? 'Request a new copy' : 'Use the selected existing file'} and{' '}
-            {disposition === 'keep'
-              ? 'keep the current file.'
-              : 'move the current file to recoverable quarantine when you apply the plan.'}
+            {source === 'new'
+              ? 'Request a new copy and move'
+              : source === 'existing'
+                ? 'Use the selected file and move'
+                : 'Move'}{' '}
+            the current file to recoverable quarantine when you apply the plan.
           </p>
         </DialogBody>
         <DialogFooter>
           <Button onClick={() => changeOpen(false)}>Cancel</Button>
           <Button
-            variant="primary"
+            variant="danger"
             disabled={busy || (source === 'existing' && !file)}
             onClick={() => {
               changeOpen(false);

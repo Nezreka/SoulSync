@@ -1616,6 +1616,7 @@ def preview_album_reorganize(
     profile_id: Optional[int] = None,
     planned_tag_updates: Optional[dict] = None,
     excluded_paths: Optional[set] = None,
+    review_context: Optional[dict] = None,
 ) -> dict:
     """Compute the planned destination paths for a reorganize WITHOUT
     moving any files. The preview UI uses this to show users what the
@@ -1765,6 +1766,9 @@ def preview_album_reorganize(
         # to the shared api_album in API mode (where every plan item
         # shares the same one).
         per_item_album = plan_item.get('api_album') or api_album
+        if review_context and review_context.get('album_title'):
+            per_item_album = {**per_item_album, 'name': review_context['album_title'],
+                              'disambiguation': ''}
         context = _build_post_process_context(
             per_item_album, api_track, artist_name, album_title, total_discs,
             local_title=title,
@@ -1787,6 +1791,11 @@ def preview_album_reorganize(
             new_full, _ok = build_final_path_fn(
                 context, spotify_artist, album_info, file_ext, create_dirs=False
             )
+            reviewed_name = (review_context or {}).get('filenames', {}).get(str(track.get('id')))
+            if new_full and reviewed_name:
+                if reviewed_name != os.path.basename(reviewed_name) or reviewed_name in ('.', '..'):
+                    raise ValueError('Invalid reviewed filename')
+                new_full = os.path.join(os.path.dirname(new_full), reviewed_name)
             item['new_path_abs'] = new_full or ''
             item['new_path'] = _display_relative_to_root(new_full, transfer_dir)
             if resolved and new_full and os.path.normpath(resolved) == os.path.normpath(new_full):

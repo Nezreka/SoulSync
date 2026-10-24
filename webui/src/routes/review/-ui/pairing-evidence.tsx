@@ -1,9 +1,10 @@
 import styles from './review-page.module.css';
 import { records, textValue } from './review-presentation';
+
 const outcomes: Record<string, string> = {
   agrees: 'Agrees',
-  conflicts: 'Needs review',
-  unavailable: 'Unavailable',
+  conflicts: 'Differs',
+  unavailable: 'Not available',
   resolved: 'Resolved by album context',
   manual: 'Your choice',
 };
@@ -11,43 +12,34 @@ export function PairingEvidence({ checks, reasons }: { checks: unknown; reasons?
   const rows = records(checks);
   if (!rows.length && !reasons?.length) return null;
   return (
-    <section className={styles.technicalCard} aria-label="Why this track was paired">
-      <h5>Why this track was paired</h5>
+    <section className={styles.pairingChecks} aria-label="Why this track was paired">
+      <h4>Why this track was paired</h4>
       {rows.length ? (
-        <div className={styles.evidenceTable}>
-          <table>
-            <thead>
-              <tr>
-                <th>Check</th>
-                <th>Local evidence</th>
-                <th>Release</th>
-                <th>Result</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={textValue(row.check)} data-result={textValue(row.result)}>
-                  <th scope="row">{textValue(row.check)}</th>
-                  <td data-label="Local evidence">{textValue(row.local) || '—'}</td>
-                  <td data-label="Release">{textValue(row.release) || '—'}</td>
-                  <td>
-                    <strong>{outcomes[textValue(row.result)] || 'Context'}</strong>
-                    {Boolean(row.detail) && <small>{textValue(row.detail)}</small>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        rows.map((row) => (
+          <details key={textValue(row.check)} data-result={textValue(row.result)}>
+            <summary>
+              <span>{textValue(row.check)}</span>
+              <strong>{outcomes[textValue(row.result)] || 'Context'}</strong>
+            </summary>
+            <dl>
+              <div>
+                <dt>Local evidence</dt>
+                <dd>{textValue(row.local) || 'Not available'}</dd>
+              </div>
+              <div>
+                <dt>Release</dt>
+                <dd>{textValue(row.release) || 'Not available'}</dd>
+              </div>
+            </dl>
+            {Boolean(row.detail) && <p>{textValue(row.detail)}</p>}
+          </details>
+        ))
       ) : (
-        <>
-          <ul>
-            {reasons?.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-          <p>Reanalyze this album for the full evidence table.</p>
-        </>
+        <ul>
+          {reasons?.map((reason) => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
       )}
     </section>
   );

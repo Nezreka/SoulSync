@@ -2282,7 +2282,7 @@ def test_complete_digital_edition_stays_reviewable_when_one_track_is_ambiguous()
         14, metadata)
 
 
-def test_wrong_audio_defers_completion_intent_until_assignment_is_settled(tmp_path, monkeypatch):
+def test_wrong_audio_exposes_completeness_before_assignment_is_settled(tmp_path, monkeypatch):
     import core.repair_jobs.library_reconciliation as module
 
     root = tmp_path / 'music'
@@ -2314,7 +2314,7 @@ def test_wrong_audio_defers_completion_intent_until_assignment_is_settled(tmp_pa
     case_id = worker.get_review_cases()['items'][0]['case_id']
     findings = worker.get_review_case(case_id)['items']
     assert {finding['finding_type'] for finding in findings} == {
-        'reconciliation_extra'}
+        'reconciliation_extra', 'reconciliation_intent'}
     assert path.exists()  # scanning never edits a file
     extra = next(finding for finding in findings if finding['finding_type'] == 'reconciliation_extra')
     assert worker.fix_finding(extra['id'], fix_action='quarantine')['success'] is False
@@ -2381,7 +2381,8 @@ def test_wrong_audio_can_request_exact_replacement_before_quarantine(tmp_path, m
     LibraryReconciliationJob().scan(context)
 
     case_id = worker.get_review_cases()['items'][0]['case_id']
-    extra = worker.get_review_case(case_id)['items'][0]
+    extra = next(item for item in worker.get_review_case(case_id)['items']
+                 if item['finding_type'] == 'reconciliation_extra')
     assert extra['finding_type'] == 'reconciliation_extra'
     assert extra['details']['audio_conflict'] == 'different_recording'
     assert extra['details']['replacement_track']['source_track_id'] == 'wanted-id'

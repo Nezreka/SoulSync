@@ -41,7 +41,7 @@ import { usePolledStatus } from '../../tools/-tools.polling';
 import { ApplyPlanPreview, type ReadyPreview } from './apply-plan-preview';
 import { AssignmentRow } from './assignment-row';
 import { CompletenessChoice } from './completeness-choice';
-import { FileDecisions } from './file-decisions';
+import { TrackRequests, FileDecisions } from './file-decisions';
 import { MissingTracksChoice } from './missing-tracks-choice';
 import { NumberingChoice } from './numbering-choice';
 import { AssignmentEvidence, ReleaseComparison, StatusChip } from './reconciliation-evidence';
@@ -226,6 +226,7 @@ export function ReviewPage() {
     setErrorCase(value ? (scope === undefined ? selectedCaseRef.current || null : scope) : null);
   }, []);
   const [notice, setNotice] = useState('');
+  const advanceAfterSave = useRef<{ caseId: string; from: number; ids: number[] } | null>(null);
   const [globalNotice, setGlobalNotice] = useState('');
   const [reloadBusy, setReloadBusy] = useState(false);
   const [scanStatus, setScanStatus] = useState<ReconciliationScanStatus | null>(null);
@@ -686,6 +687,7 @@ export function ReviewPage() {
         return true;
       }
       setReviewCase(updated);
+      setNotice((value) => (value.includes('Updating this album plan') ? '' : value));
       const updatedQueue = await refreshQueue();
       if (!updatedQueue) return true;
       if (selectedCaseRef.current !== requestedId || requestVersion !== caseRequestVersion.current)
@@ -798,15 +800,19 @@ export function ReviewPage() {
         } else if (status.running) {
           setApplyBusy(true);
           setApplyProgress(
-            status.phase === 'waiting_for_scan'
-              ? 'Waiting for reconciliation to finish before applying…'
-              : status.phase === 'queueing_organization'
-                ? 'Queueing folder organization…'
-                : status.phase === 'organizing'
-                  ? 'Organizing album files…'
-                  : status.phase === 'reanalyzing' || status.phase === 'queueing_reanalysis'
-                    ? 'Checking the completed album and refreshing its plan…'
-                    : `Processing ${status.done || 0} of ${status.total || 0} album actions…`,
+            status.phase === 'requests'
+              ? 'Adding requested tracks to the wishlist…'
+              : status.phase === 'file_actions'
+                ? 'Saving replacement requests and moving selected files to quarantine…'
+                : status.phase === 'waiting_for_scan'
+                  ? 'Waiting for reconciliation to finish before applying…'
+                  : status.phase === 'queueing_organization'
+                    ? 'Queueing folder organization…'
+                    : status.phase === 'organizing'
+                      ? 'Organizing album files…'
+                      : status.phase === 'reanalyzing' || status.phase === 'queueing_reanalysis'
+                        ? 'Checking the completed album and refreshing its plan…'
+                        : `Processing ${status.done || 0} of ${status.total || 0} album actions…`,
           );
           return;
         } else if (status.error || status.failed || status.stopped) {
@@ -857,7 +863,9 @@ export function ReviewPage() {
     }
   };
 
-  const [organizationMoves, setOrganizationMoves] = useState<string[]>([]);
+  const [organizationMoves, setOrganizationMoves] = useState<
+    Array<{ current: string; planned: string }>
+  >([]);
   useEffect(() => {
     setOrganizationMoves([]);
     if (
@@ -898,13 +906,12 @@ export function ReviewPage() {
             track.current_path?.split('/').slice(0, -1).join('/') !==
               track.new_path.split('/').slice(0, -1).join('/'),
         );
-        setOrganizationMoves([
-          ...new Set<string>(
-            moves.map((track: { new_path: string }) =>
-              track.new_path.split('/').slice(0, -1).join('/'),
-            ),
-          ),
-        ]);
+        setOrganizationMoves(
+          moves.map((track: { current_path: string; new_path: string }) => ({
+            current: track.current_path.split('/').slice(0, -1).join('/'),
+            planned: track.new_path.split('/').slice(0, -1).join('/'),
+          })),
+        );
       })
       .catch(() => {
         /* An unavailable preview must not advertise a move. */
@@ -1002,6 +1009,52 @@ export function ReviewPage() {
     }
   };
 
+  const undoChoice = async (findingId: number) => {
+    if (!reviewCase) return;
+    setBusy(true);
+    setNotice('');
+    try {
+      const result = await reopenReviewAssignment(reviewCase.case_id, findingId);
+      if (!result.success) throw new Error(result.error || 'Could not undo this choice');
+      await refresh();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    const pending = advanceAfterSave.current;
+    if (
+      !pending ||
+      !reviewCase ||
+      reviewCase.case_id !== pending.caseId ||
+      reviewCase.refresh?.state === 'running'
+    )
+      return;
+    const current = reviewCase.items.find((item) => item.id === pending.from);
+    if (current && !current.details?.planned_choice && !current.details?.saved_assignment) return;
+    advanceAfterSave.current = null;
+    setNotice('');
+    const next = pending.ids.find((id) =>
+      reviewCase.items.some(
+        (item) =>
+          item.id === id && !item.details?.planned_choice && !item.details?.saved_assignment,
+      ),
+    );
+    if (next != null) {
+      setActiveId(next);
+      const row = reviewCase.album_plan?.assignments.find((entry) => entry.finding_id === next);
+      setActiveRowKey(row ? assignmentKey(row) : null);
+    } else {
+      setInspectorOpen(false);
+      setActiveId(null);
+      setActiveRowKey(null);
+      setAlbumView('plan');
+    }
+  }, [reviewCase]);
+
   const act = async (finding: ReviewFinding, action: 'fix' | 'dismiss', override?: string) => {
     let fixAction: string | null = override || null;
     if (action === 'fix' && finding.finding_type === 'reconciliation_extra' && !fixAction) {
@@ -1025,6 +1078,17 @@ export function ReviewPage() {
         setNotice(
           `${result.message || (action === 'dismiss' ? 'Accepted as-is' : 'Repair applied')}${result.refresh_queued ? ' Updating this album plan…' : ''}`,
         );
+      if (!result.partial && finding.file_path) {
+        const ids = (reviewCase?.items || [])
+          .filter((item) => item.file_path)
+          .map((item) => item.id);
+        const index = ids.indexOf(finding.id);
+        advanceAfterSave.current = {
+          caseId,
+          from: finding.id,
+          ids: [...ids.slice(index + 1), ...ids.slice(0, index)],
+        };
+      }
       await refresh();
     } catch (cause) {
       setError((cause as Error).message);
@@ -1263,6 +1327,7 @@ export function ReviewPage() {
         busy={mutationBusy}
         onAct={(action, choice) => void act(active, action, choice)}
         onSelect={selectFinding}
+        onReset={() => void undoChoice(active.id)}
         previousId={navigationIds[navigationIndex - 1]}
         nextId={navigationIds[navigationIndex + 1]}
         comparisonPath={comparisonPath || undefined}
@@ -1307,6 +1372,7 @@ export function ReviewPage() {
         ← Library Maintenance
       </a>
       <PageHeader
+        className={styles.queueHeader}
         title="Review Queue"
         subtitle={
           <>
@@ -1338,20 +1404,6 @@ export function ReviewPage() {
             </div>
             <Button
               type="button"
-              onClick={() => {
-                setQueueExpanded(true);
-                setSearchInput('');
-                setQuery('');
-                setCategory('');
-                setQueueMode('ready');
-                setPage(0);
-                if (queueMode !== 'ready' || page !== 0 || query || category) setCaseId('');
-              }}
-            >
-              Review ready batch
-            </Button>
-            <Button
-              type="button"
               variant="primary"
               className={styles.safeAction}
               disabled={
@@ -1368,6 +1420,7 @@ export function ReviewPage() {
             <div className={styles.inlineActions} aria-label="Queue actions">
               <Button
                 type="button"
+                title="Recheck files and matching evidence, then rebuild album plans"
                 disabled={scanBusy || scanStatus?.current_job?.job_id === 'library_reconciliation'}
                 onClick={() => {
                   void runScan();
@@ -1377,10 +1430,11 @@ export function ReviewPage() {
                   ? 'Queuing…'
                   : scanStatus?.current_job?.job_id === 'library_reconciliation'
                     ? 'Scanning…'
-                    : 'Scan library'}
+                    : 'Reanalyze library'}
               </Button>
               <Button
                 type="button"
+                title="Load the latest saved queue without starting analysis"
                 disabled={reloadBusy}
                 onClick={() => {
                   setReloadBusy(true);
@@ -1392,7 +1446,7 @@ export function ReviewPage() {
                     .finally(() => setReloadBusy(false));
                 }}
               >
-                {reloadBusy ? 'Reloading…' : 'Reload queue'}
+                {reloadBusy ? 'Refreshing…' : 'Refresh view'}
               </Button>
             </div>
           </div>
@@ -1486,6 +1540,7 @@ export function ReviewPage() {
                   type="button"
                   aria-current={queueMode === mode.value ? 'page' : undefined}
                   onClick={() => {
+                    if (queueMode === mode.value) return;
                     setQueueMode(mode.value);
                     setPage(0);
                     setCaseId('');
@@ -1807,6 +1862,43 @@ export function ReviewPage() {
                   </Notice>
                 )}
 
+              {albumView === 'plan' &&
+                !releaseChoicePending &&
+                reviewCase.album_plan?.assignments.some((row) =>
+                  ['missing', 'not_owned'].includes(row.status),
+                ) && (
+                  <section className={styles.completenessSummary} aria-label="Album completeness">
+                    <div>
+                      <h4>Album completeness</h4>
+                      <p>
+                        {intentFinding
+                          ? 'Not decided'
+                          : reviewCase.album_plan.intent_scope === 'complete'
+                            ? 'Collect the complete album'
+                            : reviewCase.album_plan.intent_scope === 'partial'
+                              ? 'Keep a partial album'
+                              : 'Not decided'}
+                      </p>
+                    </div>
+                    {intentFinding ? (
+                      <Button
+                        disabled={mutationBusy}
+                        onClick={() => {
+                          setAlbumView('tracks');
+                          setTrackFilter('missing');
+                          setInspectorOpen(false);
+                        }}
+                      >
+                        Choose missing tracks
+                      </Button>
+                    ) : (
+                      <Button disabled={mutationBusy} onClick={() => void reconsiderScope()}>
+                        Change completeness…
+                      </Button>
+                    )}
+                  </section>
+                )}
+
               {albumView === 'tracks' && albumReady && (
                 <Notice tone="info" className={styles.albumNotice} role="status">
                   <span>All decisions are planned. This album is ready to apply.</span>
@@ -1877,6 +1969,7 @@ export function ReviewPage() {
                           <p>Choose a field to inspect the affected tracks and exact values.</p>
                         )}
                         {readySummaryList}
+                        <TrackRequests items={reviewCase.items} />
                         <FileDecisions
                           items={reviewCase.items}
                           onReview={(id) => {
@@ -2562,6 +2655,43 @@ export function ReviewPage() {
                           ← Back to tracks
                         </Button>
                         {activeRowKey &&
+                          (() => {
+                            const rows = assignments.filter(
+                              (row) =>
+                                row.finding_id != null ||
+                                row.historical_finding_id != null ||
+                                row.planned_choice,
+                            );
+                            const index = rows.findIndex(
+                              (row) => assignmentKey(row) === activeRowKey,
+                            );
+                            const go = (row: AlbumAssignment | undefined) => {
+                              if (!row) return;
+                              setActiveId(row.finding_id ?? null);
+                              setActiveRowKey(assignmentKey(row));
+                              setInspectorOpen(true);
+                            };
+                            return (
+                              <nav
+                                className={styles.decisionNavigation}
+                                aria-label="Track decision navigation"
+                              >
+                                <Button
+                                  disabled={mutationBusy || index <= 0}
+                                  onClick={() => go(rows[index - 1])}
+                                >
+                                  ← Previous decision
+                                </Button>
+                                <Button
+                                  disabled={mutationBusy || index < 0 || index >= rows.length - 1}
+                                  onClick={() => go(rows[index + 1])}
+                                >
+                                  Next decision →
+                                </Button>
+                              </nav>
+                            );
+                          })()}
+                        {activeRowKey &&
                         assignmentsByKey.get(activeRowKey)?.status === 'missing' ? (
                           <>
                             <AssignmentEvidence
@@ -2601,7 +2731,12 @@ export function ReviewPage() {
                                       Choose missing tracks →
                                     </Button>
                                   ) : (
-                                    <Button onClick={() => setAlbumView('plan')}>
+                                    <Button
+                                      onClick={() => {
+                                        setAlbumView('plan');
+                                        void reconsiderScope();
+                                      }}
+                                    >
                                       Review album completeness →
                                     </Button>
                                   )}
@@ -2842,7 +2977,7 @@ export function ReviewPage() {
                           </div>
                           <div>
                             <dt>Planned numbering</dt>
-                            <dd>
+                            <dd className={styles.numberingSummary}>
                               {numberingSchemeLabel(
                                 releaseHasMultipleDiscs,
                                 reviewCase.album_plan.numbering_mode,

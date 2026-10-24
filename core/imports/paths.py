@@ -1446,8 +1446,20 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         # compute "destination == current location" and no-op (the template-change
         # complaint from TheHomeGuy).
         reuse_folder = None
+        if filename_base and not context.get('_no_album_folder_reuse'):
+            try:
+                from core.library.reconciliation_fulfillment import requested_folder
+                from core.imports.context import get_import_source_ids
+                from database.music_database import get_database
+                identities = get_import_source_ids(context)
+                reuse_folder = requested_folder(get_database(),
+                    profile_id=import_profile_id(context), source=source,
+                    release_id=identities['album_id'], track_id=identities['track_id'],
+                    disc_number=disc_number, root=transfer_dir)
+            except Exception as exc:
+                logger.debug('Reviewed acquisition folder unavailable: %s', exc)
         _multi_disc_album = total_discs > 1 or disc_number > 1
-        if (filename_base and not _multi_disc_album
+        if (not reuse_folder and filename_base and not _multi_disc_album
                 and raw_album_type not in ("compilation", "compile", "compilations")
                 and not context.get("_no_album_folder_reuse")):
             try:

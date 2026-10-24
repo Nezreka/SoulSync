@@ -227,6 +227,9 @@ def same_annotated_evidence(previous, current):
                   if key not in annotations and (key not in empty_defaults or value)}
         # These labels explain existing targets; the option identities and
         # actual old/new values still have to match exactly.
+        if 'current_tags' in result:
+            result['current_tags'] = {k: v for k, v in result['current_tags'].items()
+                                      if k != 'artists_list' or v}
         if 'assignment_options' in result:
             result['assignment_options'] = [
                 {key: value for key, value in option.items() if key != 'artist'}
@@ -284,3 +287,49 @@ def assignment_for_file(overrides, album_id, source, release_id, file, files, *,
                 overrides[(*prefix, file['path'])] = recovered
         return recovered
     return None
+
+
+def remember_applied_releases(db, details):
+    """Applying a reviewed plan also accepts its release context."""
+    selected = {}
+    for item in details:
+        if item.get('album_id') is not None and item.get('source') and item.get('release_id'):
+            selected[str(item['album_id'])] = (item['source'], str(item['release_id']))
+    for album_id, (source, release_id) in selected.items():
+        remember_release_choice(db, album_id, source, release_id)
+
+
+def backfill_applied_releases(db):
+    """Recover release acceptance from successful, explicitly approved operations."""
+    conn = db._get_connection()
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {'repair_operation_reports', 'repair_findings', 'albums'} <= tables:
+            return
+        existing = load_release_choices(db)
+        accepted = []
+        for raw, in conn.execute('SELECT report FROM repair_operation_reports ORDER BY updated_at DESC'):
+            report = json.loads(raw or '{}')
+            if (not report.get('review_approved') or report.get('running') or report.get('failed')
+                    or report.get('error') or report.get('stopped') or not report.get('fixed')):
+                continue
+            for key in report.get('review_case_ids') or []:
+                from core.library.reconciliation_redirects import resolve_case
+                key = resolve_case(db, key)
+                rows = conn.execute("SELECT details_json FROM repair_findings WHERE review_case_key=? "
+                    "AND status='resolved' AND user_action IN ('reconciliation_metadata', 'replacement_requested', 'wishlisted') "
+                    "ORDER BY id DESC", (key,)).fetchall()
+                for value, in rows:
+                    item = json.loads(value or '{}')
+                    album_id = str(item.get('album_id') or '')
+                    if not album_id or album_id in existing or not item.get('source') or not item.get('release_id'):
+                        continue
+                    album = conn.execute('SELECT canonical_locked, canonical_source, canonical_album_id '
+                                         'FROM albums WHERE id=?', (album_id,)).fetchone()
+                    if not album or (album[0] and (album[1], str(album[2])) != (item['source'], str(item['release_id']))):
+                        continue
+                    accepted.append(item)
+                    existing[album_id] = (item['source'], str(item['release_id']))
+    finally:
+        conn.close()
+    remember_applied_releases(db, accepted)

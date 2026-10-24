@@ -50,16 +50,28 @@ def identity_from_tags(tags) -> Tuple[str, str]:
             _first_text(tags.get("musicbrainz_albumcomment")))
 
 
-def read_release_identity(file_path: str) -> Tuple[str, str]:
-    """``(release mbid, disambiguation)`` from a file's tags, "" where absent."""
+def read_release_evidence(file_path: str) -> dict:
+    """Read release identity and the separate artist list in one file read."""
+    result = {'musicbrainz_release_id': '', 'release_disambiguation': '', 'artists_list': []}
     try:
         from mutagen import File as MutagenFile
-
+        from mutagen.id3 import ID3
         audio = MutagenFile(file_path)
-        return identity_from_tags(getattr(audio, "tags", None) if audio is not None else None)
-    except Exception as e:
-        logger.debug("release identity read failed for %s: %s", file_path, e)
-        return "", ""
+        tags = getattr(audio, 'tags', None) if audio is not None else None
+        result['musicbrainz_release_id'], result['release_disambiguation'] = identity_from_tags(tags)
+        if isinstance(tags, ID3):
+            values = [value for frame in tags.getall('TXXX:Artists') for value in frame.text]
+        else:
+            values = tags.get('artists', []) if tags is not None else []
+        result['artists_list'] = [str(value).strip() for value in values if str(value).strip()]
+    except Exception as exc:
+        logger.debug('release identity read failed for %s: %s', file_path, exc)
+    return result
+
+
+def read_release_identity(file_path: str) -> Tuple[str, str]:
+    evidence = read_release_evidence(file_path)
+    return evidence['musicbrainz_release_id'], evidence['release_disambiguation']
 
 
 __all__ = ["identity_from_tags", "read_release_identity"]

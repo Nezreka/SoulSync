@@ -53,13 +53,13 @@ logger = get_logger('repair_job.library_reconciliation')
 
 
 def _read_reconciliation_tags(path):
-    from core.library.release_identity import read_release_identity
+    from core.library.release_identity import read_release_evidence
     tags = dict(_read_file_tags(path))
-    tags['musicbrainz_release_id'], tags['release_disambiguation'] = read_release_identity(path)
+    tags.update(read_release_evidence(path))
     return tags
 
 
-_read_reconciliation_tags.required_cache_keys = ('musicbrainz_release_id',)
+_read_reconciliation_tags.required_cache_keys = ('musicbrainz_release_id', 'artists_list')
 
 
 def _release_identity_target(files, album, source, release_id):
@@ -2128,6 +2128,8 @@ class LibraryReconciliationJob(RepairJob):
         if not roots or any(not os.path.isdir(root) for root in roots):
             result.stopped_early = 'A configured library root is unavailable'
             return result
+        from core.library.reconciliation_migration import repair_legacy_ids
+        repair_legacy_ids(context.db)
         inventory_request = load_inventory_request(context.db, target_folder, ScanScope(scope), roots=roots)
         def selection_for(request):
             return track_selection(context.db, request, title_key=_album_identity_title,
@@ -2161,6 +2163,7 @@ class LibraryReconciliationJob(RepairJob):
         assignment_overrides = self._assignment_overrides(context)
         from core.library import reconciliation_choices as review_choices
         kept_numbering = review_choices.applied_numbering_choices(context.db)
+        review_choices.backfill_applied_releases(context.db)
         reviewed_releases = review_choices.load_release_choices(context.db)
         numbering_history = review_choices.flattened_numbering_history(context.db)
         playlist_membership = {}
@@ -2366,6 +2369,11 @@ class LibraryReconciliationJob(RepairJob):
                     candidates = self._release_candidates(
                         files, album, context,
                         exact_musicbrainz_releases=exact_musicbrainz_releases)
+                    reviewed_release = reviewed_releases.get(str(album_id))
+                    if reviewed_release and reviewed_release not in candidates:
+                        candidates.insert(0, reviewed_release)
+                    if reviewed_release and reviewed_release[0] == 'musicbrainz':
+                        exact_musicbrainz_releases.add(reviewed_release[1])
                     linked_candidates = list(candidates)
                     scored = _score_release_candidates(
                         files, candidates, release_cache, exact_musicbrainz_releases)
@@ -2529,11 +2537,11 @@ class LibraryReconciliationJob(RepairJob):
                         scored.insert(0, retained_current)
                     pinned_row = None
                     best_unpinned_rank = rank_candidate(scored[0])
-                    if album and album.get('canonical_locked'):
+                    if reviewed_release or (album and album.get('canonical_locked')):
+                        chosen_release = reviewed_release or (album.get('canonical_source'),
+                                                             str(album.get('canonical_album_id') or ''))
                         pinned_row = next((row for row in scored
-                                           if (row.source, row.release_id) ==
-                                           (album.get('canonical_source'),
-                                            str(album.get('canonical_album_id') or ''))), None)
+                                           if (row.source, row.release_id) == chosen_release), None)
                         if pinned_row:
                             scored.remove(pinned_row)
                             reviewed_plan = _match_release(files, pinned_row.slots,
@@ -2575,20 +2583,20 @@ class LibraryReconciliationJob(RepairJob):
                     pinned = bool(album and album.get('canonical_source') == source
                                   and str(album.get('canonical_album_id') or '') == release_id)
                     edition_conflict = bool(
-                        album_id is not None and album and not album.get('canonical_locked') and
+                        not explicit_release and album_id is not None and album and not album.get('canonical_locked') and
                         _has_unexplained_identified_extras(files, scored[0])
                     )
                     symmetric_mismatch = bool(
-                        album_id is not None and not pinned and
+                        not explicit_release and album_id is not None and not pinned and
                         plan['extra_files'] and plan['missing_slots'] and
                         len(plan['extra_files']) >= 2 and
                         len(plan['missing_slots']) >= 2
                     )
                     position_conflict = bool(
-                        not (album and album.get('canonical_locked')) and
+                        not explicit_release and not (album and album.get('canonical_locked')) and
                         _distinctive_position_conflict(files, scored[0], scored[1:]))
                     digital_edition_choice = bool(
-                        album_id is not None and album and not retained_current and not album.get('canonical_locked') and
+                        not explicit_release and album_id is not None and album and not retained_current and not album.get('canonical_locked') and
                         _full_coverage_digital_alternative(
                             scored[0], ranked_candidates, len(files),
                             lambda row: _release_metadata(
@@ -3306,17 +3314,23 @@ class LibraryReconciliationJob(RepairJob):
                     undecided_missing = [slot for slot in missing
                         if _wanted_slot_key(slot) not in wanted_slots and
                         (source, str(slot.get('source_track_id') or ''), str(exact_release_id)) not in wishlisted_slots]
-                    if missing and not undecided_missing and not intent_scope:
+                    reconsidering = bool(saved_intent and saved_intent[0] == 'review' and
+                                         saved_intent[1:3] == (source, release_id))
+                    if missing and not undecided_missing and not intent_scope and not reconsidering:
                         intent_scope = 'partial'
                         wanted_slots.update(_wanted_slot_key(slot) for slot in missing)
                     if (missing or occupied_requests) and album_id is not None:
-                        if not intent_scope and assignment_settled and undecided_missing:
+                        if not intent_scope and (undecided_missing or reconsidering):
                             if emit(
                                 job_id=self.job_id, finding_type='reconciliation_intent',
                                 severity='info', entity_type='album', entity_id=str(album_id),
                                 file_path=None, title=f'Is {common["album_title"]} meant to be complete?',
                                 description=f'{len(undecided_missing)} release track(s) need a collection choice.',
-                                details={**common, 'missing_tracks': undecided_missing,
+                                details={**common, 'missing_tracks': [
+                                    {**slot, 'requested': (source, str(slot.get('source_track_id') or ''),
+                                                          str(exact_release_id)) in wishlisted_slots}
+                                    for slot in (missing if reconsidering else undecided_missing)],
+                                         'wanted_slots': sorted(wanted_slots),
                                          'suggested_scope': 'partial' if len(files) == 1 and files[0].get('playlists') else 'complete'}):
                                 result.findings_created += 1
                         for slot in [*missing, *occupied_requests]:

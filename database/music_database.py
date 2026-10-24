@@ -11061,6 +11061,9 @@ class MusicDatabase:
                     cursor.execute("UPDATE tracks SET album_id = ? WHERE album_id = ?", (album_id, old_id))
                     migrated_tracks = cursor.rowcount
 
+                    from core.library.reconciliation_migration import migrate_album
+                    migrate_album(conn, old_id, album_id)
+
                     # Safely delete old album (verify no remaining references first)
                     cursor.execute("SELECT COUNT(*) FROM tracks WHERE album_id = ?", (old_id,))
                     remaining = cursor.fetchone()[0]
@@ -15673,6 +15676,9 @@ class MusicDatabase:
 
                 # Convert data once; existing rows and inserts use the same
                 # newest payload/context.
+                from core.library.reconciliation_fulfillment import retain_request_context
+                spotify_track_data, source_info = retain_request_context(
+                    conn, spotify_track_data, source_info, profile_id)
                 spotify_json = json.dumps(spotify_track_data)
                 source_json = json.dumps(source_info or {})
                 resolved_qp_id = self._resolve_quality_profile_id(

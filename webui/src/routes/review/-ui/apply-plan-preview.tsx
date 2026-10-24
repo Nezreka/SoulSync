@@ -2,7 +2,12 @@ import type { ReactNode } from 'react';
 
 import { MetadataComparison } from '@/components/metadata-comparison/metadata-comparison';
 
-import { FileDecisions, type FileDecision } from './file-decisions';
+import {
+  FileDecisions,
+  TrackRequests,
+  type TrackRequest,
+  type FileDecision,
+} from './file-decisions';
 import styles from './review-page.module.css';
 import { changeFieldLabel, changeValue } from './review-presentation';
 
@@ -20,6 +25,7 @@ export type ReadyPreview = {
       title?: string;
       changes?: Array<{ field: string; old: unknown; new: unknown; kind: string }>;
       file_decision?: FileDecision | null;
+      requests?: TrackRequest[];
     }>;
   }>;
 };
@@ -69,13 +75,17 @@ export function ApplyPlanPreview({
 }: {
   preview: ReadyPreview;
   expanded: boolean;
-  destinations: string[];
+  destinations: Array<string | { current: string; planned: string }>;
 }) {
-  const folders = [...new Set(destinations)];
-  const common = folders.length ? folders[0].split('/').slice(0, -1) : [];
-  while (common.length && !folders.every((folder) => folder.startsWith(`${common.join('/')}/`)))
-    common.pop();
-  const parent = common.join('/');
+  const moves = [
+    ...new Map(
+      destinations.map((entry) => {
+        const move = typeof entry === 'string' ? { current: '', planned: entry } : entry;
+        return [`${move.current}→${move.planned}`, move] as const;
+      }),
+    ).values(),
+  ];
+  const folders = [...new Set(moves.map((move) => move.planned))];
   return (
     <div className={styles.applyPreview}>
       <div className={styles.applyTotals}>
@@ -136,6 +146,7 @@ export function ApplyPlanPreview({
               </details>
             );
           })}
+          <TrackRequests items={album.actions} />
           <FileDecisions items={album.actions} />
           {album.actions
             .filter((action) => !action.changes?.length && !action.file_decision)
@@ -154,14 +165,27 @@ export function ApplyPlanPreview({
                   {folders.length} folder{folders.length === 1 ? '' : 's'}
                 </span>
               </summary>
-              {parent && <code>{parent}</code>}
-              <ul>
-                {folders.map((folder) => (
-                  <li key={folder}>
-                    <code>{parent ? folder.slice(parent.length + 1) : folder}</code>
-                  </li>
-                ))}
-              </ul>
+              <p>Move files into these folders after applying the planned changes.</p>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Current folder</th>
+                    <th>Planned folder</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {moves.map((move) => (
+                    <tr key={`${move.current}→${move.planned}`}>
+                      <td>
+                        <code>{move.current || 'Current album folder'}</code>
+                      </td>
+                      <td>
+                        <code>{move.planned}</code>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </details>
           )}
         </AlbumSection>

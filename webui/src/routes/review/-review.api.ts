@@ -193,6 +193,7 @@ export interface ReviewFinding extends RepairFinding {
   review_tier?: 'ready' | 'manual' | 'destructive' | 'blocked';
   review_reason?: string;
   planned_file_action?: string;
+  requests?: Array<{ title: string; release?: string; state?: string }>;
   file_decision?: { title: string; keep: string[]; quarantine: string[]; request: string } | null;
 }
 

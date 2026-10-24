@@ -2128,15 +2128,16 @@ class RepairWorker:
                 FROM repair_findings WHERE id = ? AND review_case_key = ?
                   AND job_id = 'library_reconciliation' ''',
                 (finding_id, case_id)).fetchone()
-            if not row or row[2] not in ('resolved', 'dismissed'):
+            if not row or row[2] not in ('pending', 'resolved', 'dismissed'):
                 return {'success': False, 'stale': True,
                         'error': 'This decision is no longer available to reopen'}
             details = json.loads(row[1] or '{}')
             folder = details.get('album_folder') or os.path.dirname(row[0] or '')
-            if not self.reopen_finding(finding_id):
+            if row[2] != 'pending' and not self.reopen_finding(finding_id):
                 return {'success': False, 'error': 'Could not reopen this decision'}
             review_choices.ensure_schema(conn)
-            conn.execute('DELETE FROM reconcile_review_choices WHERE finding_id=?', (finding_id,))
+            conn.execute('DELETE FROM reconcile_review_choices WHERE finding_id=? OR (case_id=? AND fix_action=?)',
+                         (finding_id, case_id, f'used_by:{finding_id}'))
             conn.commit()
             if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_track_assignment'").fetchone():
                 conn.execute('''DELETE FROM reconcile_track_assignment
@@ -2303,7 +2304,7 @@ class RepairWorker:
             return {'success': False, 'error': 'Reanalyze this album before changing scope'}
         conn = self.db._get_connection()
         try:
-            for table in ('reconcile_album_intent', 'reconcile_wanted_slots'):
+            for table in ('reconcile_album_intent',):
                 if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                     conn.execute(f'DELETE FROM {table} WHERE album_id=? AND source=? AND release_id=?',
                         (str(case['album_id']), plan.get('source'), plan.get('release_id')))
@@ -5379,6 +5380,7 @@ class RepairWorker:
             'artists': [{'name': details.get('artist_name') or 'Unknown Artist'}],
             'album': {'name': details.get('album_title') or 'Unknown Album',
                       'id': exact_release_id, 'images': [], 'album_type': 'album',
+                      **({'musicbrainz_release_id': exact_release_id} if source == 'musicbrainz' else {}),
                       'total_tracks': details.get('release_track_count') or 0},
             'track_number': slot.get('track_number'),
             'disc_number': slot.get('disc_number') or 1,
@@ -5491,6 +5493,7 @@ class RepairWorker:
                              details.get('artist_name') or 'Unknown Artist'}],
                 'album': {'name': details.get('album_title') or 'Unknown Album',
                           'id': exact_release_id, 'images': [], 'album_type': 'album',
+                      **({'musicbrainz_release_id': exact_release_id} if source == 'musicbrainz' else {}),
                           'total_tracks': details.get('release_track_count') or 0},
                 'track_number': slot.get('track_number'),
                 'disc_number': slot.get('disc_number') or 1,
@@ -8014,6 +8017,11 @@ class RepairWorker:
             # could make that copy raise mid-iteration.
             self._review_operation_snapshots = {key: self.get_review_case(key)
                 for key, _ in review_case_folders or []}
+            from core.library.reconciliation_organization import organization_context
+            self._review_organization_contexts = {str(album_id): organization_context(
+                self.db, album_id, [json.loads(raw) for raw in (reviewed_details or {}).values()
+                                   if str(json.loads(raw).get('album_id')) == str(album_id)])
+                for album_id in organize_album_ids or []}
             self._bulk_fix_state = {
                 'running': True,
                 'operation_id': uuid.uuid4().hex,
@@ -8087,6 +8095,17 @@ class RepairWorker:
                       reviewed_details: dict = None):
         state = self._bulk_fix_state
         types = self._types_for_findings(ids)
+        def apply_phase(fid):
+            if types.get(fid) == 'reconciliation_missing':
+                return 'requests'
+            detail = json.loads((reviewed_details or {}).get(fid) or '{}')
+            action = (detail.get('planned_choice') or {}).get('fix_action') or ''
+            if action in ('replace', 'request_missing', 'quarantine') or action.startswith('existing:') or types.get(fid) == 'reconciliation_duplicate':
+                return 'file_actions'
+            return 'metadata'
+        if review_approved:
+            # Request/relocation failures stop that album before tag writes.
+            ids = sorted(ids, key=lambda fid: ('requests', 'file_actions', 'metadata').index(apply_phase(fid)))
         scan_lock = getattr(self, '_reconciliation_scan_lock', None) if review_approved else None
         acquired = False
         try:
@@ -8144,6 +8163,7 @@ class RepairWorker:
             for fid, key in case_by_finding.items():
                 remaining_by_case.setdefault(key, set()).add(fid)
             for fid in ids:
+                state['phase'] = apply_phase(fid) if review_approved else 'metadata'
                 if self._bulk_fix_stop_event.is_set() or self.should_stop:
                     state['stopped'] = True
                     logger.info("Background bulk fix stopped at %d/%d",
@@ -8202,6 +8222,10 @@ class RepairWorker:
                     if len(state['errors']) < 20:
                         state['errors'].append({'id': fid, 'error': error_msg})
                 self._save_bulk_fix_report(state)
+            if review_approved and state['fixed'] and not state['stopped']:
+                review_choices.remember_applied_releases(self.db, [
+                    json.loads(raw) for fid, raw in (reviewed_details or {}).items()
+                    if case_by_finding.get(fid) not in failed_cases])
             if (organize_album_ids and not state['failed'] and not state['stopped'] and
                     not state.get('error')):
                 state['phase'] = 'queueing_organization'
@@ -8220,6 +8244,7 @@ class RepairWorker:
                         album_id=str(album_id), album_title=meta['album_title'],
                         artist_id=meta['artist_id'], artist_name=meta['artist_name'],
                         source=None, metadata_source='tags', rename_only=True,
+                        review_context=getattr(self, '_review_organization_contexts', {}).get(str(album_id)),
                     )
                     if queued.get('queued') or queued.get('reason') == 'already_queued':
                         state['organize_queued'] += 1

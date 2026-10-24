@@ -9,6 +9,82 @@
     "folder": "/music/Acceptance Artist/Northbound",
     "items": [
       {
+        "id": 3,
+        "job_id": "library_reconciliation",
+        "finding_type": "reconciliation_intent",
+        "severity": "info",
+        "status": "pending",
+        "entity_type": "album",
+        "entity_id": "10",
+        "file_path": null,
+        "title": "Is Northbound meant to be complete?",
+        "description": "1 release track(s) need a collection choice.",
+        "details": {
+          "album_id": "10",
+          "album_title": "Northbound",
+          "library_album_title": "Northbound",
+          "current_release": {
+            "source": "musicbrainz",
+            "release_id": "11111111-1111-4111-8111-111111111111",
+            "locked": true
+          },
+          "artist_name": "Acceptance Artist",
+          "release_artist_names": [
+            "Acceptance Artist"
+          ],
+          "album_consistency": {},
+          "release_disambiguation": "",
+          "profile_id": null,
+          "album_folder": "/music/Acceptance Artist/Northbound",
+          "library_root": "/music",
+          "album_folders": [
+            "/music/Acceptance Artist/Northbound"
+          ],
+          "source": "musicbrainz",
+          "release_id": "11111111-1111-4111-8111-111111111111",
+          "numbering_mode": "release",
+          "exact_release_id": "11111111-1111-4111-8111-111111111111",
+          "release_track_count": 2,
+          "local_file_count": 2,
+          "companion_count": 0,
+          "release_disc_count": 1,
+          "folder_audio_path_digest": "recording_conflict:folder_audio_path_digest:1",
+          "evidence_signature": "recording_conflict:evidence_signature:2",
+          "playlist_tracks": [],
+          "missing_tracks": [
+            {
+              "title": "Home",
+              "artist": "Acceptance Artist",
+              "artist_names": [
+                "Acceptance Artist"
+              ],
+              "track_number": 1,
+              "disc_number": 1,
+              "medium_format": "",
+              "release_track_id": "",
+              "duration_ms": 200000,
+              "preview_url": "",
+              "source_track_id": "00000000-0000-4000-8000-000000000001",
+              "recording_mbid": "00000000-0000-4000-8000-000000000001",
+              "recording_disambiguation": "",
+              "excluded_video_tracks": 0,
+              "wanted_key": "id:00000000-0000-4000-8000-000000000001:1:1",
+              "requested": false
+            }
+          ],
+          "wanted_slots": [],
+          "suggested_scope": "complete"
+        },
+        "user_action": null,
+        "created_at": "2025-01-13 10:00:00",
+        "updated_at": "2025-01-13 10:00:00",
+        "last_error": null,
+        "evidence_token": "recording_conflict:evidence_token:3",
+        "review_tier": "manual",
+        "review_reason": "Choose whether the album should be complete",
+        "category": "album_completeness"
+      },
+      {
         "id": 2,
         "job_id": "library_reconciliation",
         "finding_type": "reconciliation_extra",
@@ -68,7 +144,8 @@
             "duration_ms": 200000,
             "spotify_track_id": "",
             "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
-            "release_disambiguation": ""
+            "release_disambiguation": "",
+            "artists_list": []
           },
           "acoustid": {
             "status": "ok",
@@ -80,10 +157,10 @@
                 "score": 0.99
               }
             ],
-            "fingerprint_key": "recording_conflict:fingerprint_key:3"
+            "fingerprint_key": "recording_conflict:fingerprint_key:4"
           },
           "file_duration_ms": 200000,
-          "fingerprint_key": "recording_conflict:fingerprint_key:3",
+          "fingerprint_key": "recording_conflict:fingerprint_key:4",
           "size_bytes": 1284,
           "mtime_ns": 1,
           "track_id": "1",
@@ -137,7 +214,7 @@
         "created_at": "2025-01-13 10:00:00",
         "updated_at": "2025-01-13 10:00:00",
         "last_error": null,
-        "evidence_token": "recording_conflict:evidence_token:4",
+        "evidence_token": "recording_conflict:evidence_token:5",
         "review_tier": "destructive",
         "review_reason": "The fingerprint identifies different audio than the expected release track",
         "category": "audio_conflicts"
@@ -231,7 +308,8 @@
             "duration_ms": 210000,
             "spotify_track_id": "",
             "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
-            "release_disambiguation": ""
+            "release_disambiguation": "",
+            "artists_list": []
           },
           "acoustid": {
             "status": "ok",
@@ -243,7 +321,7 @@
                 "score": 0.99
               }
             ],
-            "fingerprint_key": "recording_conflict:fingerprint_key:5"
+            "fingerprint_key": "recording_conflict:fingerprint_key:6"
           },
           "current_library_metadata": {
             "title": "Open Water",
@@ -254,7 +332,7 @@
             "track_artist": null,
             "album_id": "10"
           },
-          "fingerprint_key": "recording_conflict:fingerprint_key:5",
+          "fingerprint_key": "recording_conflict:fingerprint_key:6",
           "size_bytes": 1290,
           "mtime_ns": 1,
           "match_reasons": [
@@ -366,7 +444,7 @@
               "duration_ms": 200000,
               "size_bytes": 1284,
               "mtime_ns": 1,
-              "fingerprint_key": "recording_conflict:fingerprint_key:3"
+              "fingerprint_key": "recording_conflict:fingerprint_key:4"
             }
           ],
           "saved_assignment": false,
@@ -393,34 +471,47 @@
         "created_at": "2025-01-13 10:00:00",
         "updated_at": "2025-01-13 10:00:00",
         "last_error": null,
-        "evidence_token": "recording_conflict:evidence_token:6",
+        "evidence_token": "recording_conflict:evidence_token:7",
         "review_tier": "ready",
         "review_reason": "Audio and release evidence support this metadata repair",
         "category": "metadata"
       }
     ],
-    "count": 2,
+    "count": 3,
     "status": "pending",
     "album_id": "10",
     "album_thumb_url": null,
     "plan": {
       "ready": 1,
-      "manual": 0,
+      "manual": 1,
       "destructive": 1,
       "blocked": 0,
-      "total": 2,
+      "total": 3,
       "status": "needs_review",
       "blocker_reasons": [
-        "The fingerprint identifies different audio than the expected release track"
+        "The fingerprint identifies different audio than the expected release track",
+        "Choose whether the album should be complete"
       ],
       "can_apply_ready": false,
       "can_organize": false,
-      "decision_count": 2,
+      "decision_count": 3,
       "categories": [
+        "album_completeness",
         "audio_conflicts",
         "metadata"
       ],
       "decisions": [
+        {
+          "id": "album_completeness",
+          "category": "album_completeness",
+          "label": "Album completeness",
+          "risk": "manual",
+          "summary": "Choose whether this album should be complete.",
+          "finding_ids": [
+            3
+          ],
+          "action_count": 1
+        },
         {
           "id": "audio_conflicts",
           "category": "audio_conflicts",
@@ -541,7 +632,8 @@
             "duration_ms": 210000,
             "spotify_track_id": "",
             "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
-            "release_disambiguation": ""
+            "release_disambiguation": "",
+            "artists_list": []
           },
           "acoustid": {
             "status": "ok",
@@ -553,7 +645,7 @@
                 "score": 0.99
               }
             ],
-            "fingerprint_key": "recording_conflict:fingerprint_key:5"
+            "fingerprint_key": "recording_conflict:fingerprint_key:6"
           },
           "confidence": "clear",
           "reasons": [
@@ -654,8 +746,11 @@
           "display_track_number": 1,
           "source_track_id": "00000000-0000-4000-8000-000000000001",
           "slot_duration_ms": 200000,
-          "action_state": "preview",
-          "preview_reason": "Resolve track assignments before deciding album scope"
+          "review_state": "pending",
+          "planned_choice": null,
+          "finding_id": 3,
+          "review_tier": "manual",
+          "action_state": "manual"
         },
         {
           "status": "extra",
@@ -682,7 +777,8 @@
             "duration_ms": 200000,
             "spotify_track_id": "",
             "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
-            "release_disambiguation": ""
+            "release_disambiguation": "",
+            "artists_list": []
           },
           "acoustid": {
             "status": "ok",
@@ -694,7 +790,7 @@
                 "score": 0.99
               }
             ],
-            "fingerprint_key": "recording_conflict:fingerprint_key:3"
+            "fingerprint_key": "recording_conflict:fingerprint_key:4"
           },
           "audio_title": "Unrelated Song",
           "audio_artist": "Another Artist",
@@ -784,6 +880,17 @@
     },
     "decisions": [
       {
+        "id": "album_completeness",
+        "category": "album_completeness",
+        "label": "Album completeness",
+        "risk": "manual",
+        "summary": "Choose whether this album should be complete.",
+        "finding_ids": [
+          3
+        ],
+        "action_count": 1
+      },
+      {
         "id": "audio_conflicts",
         "category": "audio_conflicts",
         "label": "Wrong audio",
@@ -814,33 +921,47 @@
     "items": [
       {
         "case_id": "album:10:acceptance",
-        "pending": 2,
+        "pending": 3,
         "priority": 1,
         "album": "Northbound",
         "artist": "Acceptance Artist",
         "finding_types": [
           "reconciliation_metadata",
-          "reconciliation_extra"
+          "reconciliation_extra",
+          "reconciliation_intent"
         ],
         "error_count": 0,
         "plan": {
           "ready": 1,
-          "manual": 0,
+          "manual": 1,
           "destructive": 1,
           "blocked": 0,
-          "total": 2,
+          "total": 3,
           "status": "needs_review",
           "blocker_reasons": [
-            "The fingerprint identifies different audio than the expected release track"
+            "The fingerprint identifies different audio than the expected release track",
+            "Choose whether the album should be complete"
           ],
           "can_apply_ready": false,
           "can_organize": false,
-          "decision_count": 2,
+          "decision_count": 3,
           "categories": [
+            "album_completeness",
             "audio_conflicts",
             "metadata"
           ],
           "decisions": [
+            {
+              "id": "album_completeness",
+              "category": "album_completeness",
+              "label": "Album completeness",
+              "risk": "manual",
+              "summary": "Choose whether this album should be complete.",
+              "finding_ids": [
+                null
+              ],
+              "action_count": 1
+            },
             {
               "id": "audio_conflicts",
               "category": "audio_conflicts",
@@ -886,7 +1007,7 @@
     "ready_albums_total": 0
   },
   "ready_preview": {
-    "signature": "recording_conflict:signature:7",
+    "signature": "recording_conflict:signature:8",
     "albums": [],
     "action_count": 0,
     "file_actions": 0
@@ -898,6 +1019,17 @@
       "verb": "Quarantine File",
       "fixable": true,
       "destructive": true,
+      "review_only": true,
+      "job_ids": [
+        "library_reconciliation"
+      ]
+    },
+    {
+      "type": "reconciliation_intent",
+      "label": "Album Completion Intent",
+      "verb": "Choose Intent",
+      "fixable": true,
+      "destructive": false,
       "review_only": true,
       "job_ids": [
         "library_reconciliation"

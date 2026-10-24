@@ -254,6 +254,8 @@ def group_wishlist_tracks_by_album(
                 album_artist = album_artist or 'Various Artists'
             album_context = {
                 'id': album.get('id') or key,
+                **({'musicbrainz_release_id': album['musicbrainz_release_id']}
+                   if album.get('musicbrainz_release_id') else {}),
                 'name': album_name.strip(),
                 'release_date': album.get('release_date', ''),
                 'total_tracks': album.get('total_tracks', 0),

@@ -294,6 +294,12 @@ def plan_track(current_tags: Dict[str, Any], source_track: Any, album_meta: Dict
         }
         db_data['track_artist'] = target_track_artist
 
+    stored_artists = current_tags.get('artists_list') or []
+    if (stored_artists and target_track_artist and mode != MODE_FILL_MISSING
+            and not _artist_credit_includes('; '.join(stored_artists), target_track_artist)):
+        changes['artists_list'] = {'old': '; '.join(stored_artists), 'new': target_track_artist}
+        db_data['track_artist'] = target_track_artist
+
     # Always carry track_count alongside a track_number write (writers want both).
     if 'track_number' in db_data and target.get('track_count'):
         db_data['track_count'] = target['track_count']

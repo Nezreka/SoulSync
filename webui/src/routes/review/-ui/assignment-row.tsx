@@ -46,11 +46,15 @@ export function AssignmentRow({
       data-review-assignment="true"
       className={styles.matrixRow}
       data-status={
-        row.status === 'settled' && ['extra', 'duplicate'].includes(row.evidence_status || '')
-          ? row.evidence_status
-          : metadataNeedsReview(row)
-            ? 'uncertain'
-            : row.status
+        row.audio_conflict === 'different_recording' &&
+        !row.planned_choice &&
+        row.status !== 'settled'
+          ? 'audio_conflict'
+          : row.status === 'settled' && ['extra', 'duplicate'].includes(row.evidence_status || '')
+            ? row.evidence_status
+            : metadataNeedsReview(row)
+              ? 'uncertain'
+              : row.status
       }
       data-selected={selected || undefined}
       aria-pressed={selected}

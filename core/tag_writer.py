@@ -646,6 +646,8 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
     if artist:
         audio.tags.delall('TPE1')
         audio.tags.add(TPE1(encoding=3, text=[artist]))
+        # A corrected display credit must not retain contradictory Picard artists.
+        audio.tags.delall('TXXX:Artists')
         written.append('artist')
         # TPE1 stays as the joined display string. When the caller
         # supplied a multi-value list AND the user has the
@@ -699,6 +701,7 @@ def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
         written.append('title')
     if artist:
         audio['artist'] = [artist]
+        audio.pop('artists', None)
         written.append('artist')
         # Vorbis-style multi-value: write the per-artist list to the
         # `artists` key (separate from `artist`, picard convention) when

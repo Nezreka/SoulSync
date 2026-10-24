@@ -196,7 +196,54 @@ it('shows matcher checks with their actual decision explanation', () => {
       ]}
     />,
   );
-  expect(screen.getByRole('table')).toHaveTextContent('Noah Kahan & Hozier');
+  expect(screen.queryByRole('table')).toBeNull();
+  expect(screen.getAllByText('Differs')).toHaveLength(2);
+  fireEvent.click(screen.getByText('Artist credit'));
+  expect(screen.getByText('Noah Kahan & Hozier')).toBeVisible();
+  fireEvent.click(screen.getByText('Album assignment'));
+  fireEvent.click(screen.getByText('Decision'));
   expect(screen.getByText('Other files fit their own slots')).toBeVisible();
   expect(screen.getByText('Listen for a track boundary error')).toBeVisible();
+});
+
+it('separates exact track requests from quarantine and labels both ends of a folder move', () => {
+  render(
+    <ApplyPlanPreview
+      expanded
+      destinations={[{ current: 'Artist/Old pressing', planned: 'Artist/Approved album' }]}
+      preview={{
+        signature: 'preview',
+        file_actions: 1,
+        action_count: 1,
+        albums: [
+          {
+            album: 'Approved album',
+            case_id: 'a',
+            actions: [
+              {
+                id: 1,
+                description: 'Replace Song',
+                title: 'Song',
+                requests: [{ title: 'Song (live)', release: 'Approved edition', state: 'planned' }],
+                file_decision: {
+                  title: 'Song',
+                  keep: [],
+                  quarantine: ['/library/song.mp3'],
+                  request: 'Song (live)',
+                },
+              },
+            ],
+          },
+        ],
+      }}
+    />,
+  );
+  const requests = screen.getByLabelText('Request tracks');
+  expect(requests).toHaveTextContent('Song (live)');
+  expect(requests).toHaveTextContent('Approved edition');
+  expect(requests).toHaveTextContent('Add to wishlist');
+  expect(screen.getByLabelText('File decisions included')).not.toHaveTextContent('Song (live)');
+  expect(screen.getByLabelText('Destination folders')).toHaveTextContent('Current folder');
+  expect(screen.getByLabelText('Destination folders')).toHaveTextContent('Planned folder');
+  expect(screen.getByLabelText('Destination folders')).toHaveTextContent('Artist/Approved album');
 });

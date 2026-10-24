@@ -10604,15 +10604,18 @@ def reorganize_album_preview(album_id):
                     or (case.get('refresh') or {}).get('state') == 'running'):
                 return jsonify({'success': False, 'error': 'The album plan changed; refresh the preview'}), 409
             reviewed = ready_batch_preview(db, case_id=case['case_id'], include_snapshot=True)
-            updates, excluded = {}, set()
+            updates, excluded, action_details = {}, set(), []
             for album in reviewed['albums']:
                 for action in album['actions']:
                     details = json.loads(reviewed['reviewed_details'][action['id']])
+                    action_details.append(details)
                     if details.get('db_data') and action.get('file_path'):
                         updates[action['file_path']] = details['db_data']
                     excluded.update((action.get('file_decision') or {}).get('quarantine') or [])
             metadata_source = 'tags'
-            review_inputs = {'planned_tag_updates': updates, 'excluded_paths': excluded}
+            from core.library.reconciliation_organization import organization_context
+            review_inputs = {'planned_tag_updates': updates, 'excluded_paths': excluded,
+                             'review_context': organization_context(db, album_id, action_details)}
         result = preview_album_reorganize(
             album_id=album_id,
             db=db,

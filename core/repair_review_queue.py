@@ -571,6 +571,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                 item['planned_file_action'] = _ready_action_description(
                     item, item['file_path'], item['title'])
                 item['file_decision'] = _ready_file_decision(item, item['file_path'])
+                item['requests'] = _ready_requests(item)
         tier_rank = {'manual': 0, 'destructive': 1, 'blocked': 2, 'ready': 3}
         items.sort(key=lambda item: (tier_rank.get(item.get('review_tier'), 9), item['id']))
         first = items[0]
@@ -706,7 +707,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                     # finding. The release slot remains visibly absent.
                     assignment['action_state'] = 'preview'
                     assignment['preview_reason'] = (
-                        'Resolve track assignments before deciding album scope'
+                        'Choose album completeness on Plan'
                         if not album_plan.get('intent_scope')
                         else 'Missing from the selected release')
                 elif assignment.get('status') in {
@@ -826,6 +827,17 @@ def _ready_file_decision(item, file_path):
                        if action in ('replace', 'request_missing') else ''}
 
 
+def _ready_requests(item):
+    details = item.get('details') or {}
+    action = (details.get('planned_choice') or {}).get('fix_action') or ''
+    slots = (details.get('missing_tracks') or []) if item['finding_type'] == 'reconciliation_missing' else (
+        [details.get('replacement_track') or {}] if action in ('replace', 'request_missing') else [])
+    return [{'title': slot.get('name') or slot.get('title') or details.get('expected_title'),
+             'release': details.get('album_title') or '', 'source': details.get('source'),
+             'release_id': details.get('exact_release_id') or details.get('release_id'),
+             'state': details.get('fulfillment_state') or 'planned'} for slot in slots]
+
+
 def _ready_action_changes(details):
     """Deduplicate matching tag/library effects for the review confirmation."""
     aliases = {'library_title': 'title', 'library_track_artist': 'track_artist',
@@ -868,6 +880,7 @@ def ready_batch_preview(db, *, case_id: str = '', include_snapshot: bool = False
                                 'title': (details.get('current_tags') or {}).get('title') or '',
                                 'changes': _ready_action_changes(details),
                                 'file_decision': _ready_file_decision(item, row[0] if row else ''),
+                                'requests': _ready_requests(item),
                                 'file_action': bool(_ready_file_decision(item, row[0] if row else ''))})
             actions.sort(key=lambda action: not action['file_action'])
             albums.append({'case_id': key, 'album': next((item['details'].get('album_title') for item in value['items'] if item['details'].get('album_title')), key), 'actions': actions})

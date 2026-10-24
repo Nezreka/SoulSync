@@ -7,6 +7,45 @@ import { DisclosureFooter } from './disclosure-footer';
 import styles from './review-page.module.css';
 
 export type FileDecision = { title: string; keep: string[]; quarantine: string[]; request: string };
+export type TrackRequest = { title: string; release?: string; state?: string };
+
+export function TrackRequests({
+  items,
+}: {
+  items: Array<{ requests?: TrackRequest[]; file_decision?: FileDecision | null }>;
+}) {
+  const requests = items.flatMap((item) =>
+    item.requests?.length
+      ? item.requests
+      : item.file_decision?.request
+        ? [{ title: item.file_decision.request }]
+        : [],
+  );
+  if (!requests.length) return null;
+  return (
+    <section className={styles.requestList} aria-label="Request tracks">
+      <h4>
+        Request tracks <span>{requests.length}</span>
+      </h4>
+      <ul>
+        {requests.map((request, index) => (
+          <li key={`${request.title}-${index}`}>
+            <div>
+              <strong>{request.title}</strong>
+              {request.release && <small>{request.release}</small>}
+            </div>
+            <span>
+              {request.state && request.state !== 'planned'
+                ? 'Already requested'
+                : 'Add to wishlist'}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 const format = (path: string) => path.split('.').pop()?.toUpperCase() || 'File';
 
 export function FileDecisions({
@@ -45,7 +84,6 @@ export function FileDecisions({
               <tr key={id}>
                 <td>
                   <strong>{decision!.title}</strong>
-                  {decision!.request && <small>Request: {decision!.request}</small>}
                 </td>
                 <td>
                   {decision!.keep.map((path) => (

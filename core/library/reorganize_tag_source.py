@@ -367,7 +367,7 @@ def read_album_track_from_file(
             tags[tag] = planned_metadata[field]
     if planned_metadata.get('artist_name') and not planned_metadata.get('track_artist'):
         tags['artist'] = planned_metadata['artist_name']
-    if 'track_artist' in planned_metadata:
+    if 'track_artist' in planned_metadata or 'artist_name' in planned_metadata:
         tags.pop('artists', None)
     if planned_metadata.get('artists_list'):
         tags['artists'] = '; '.join(planned_metadata['artists_list'])
