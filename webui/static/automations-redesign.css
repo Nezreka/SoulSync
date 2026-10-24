@@ -1037,6 +1037,7 @@
    Sections were bare headers over a grid: no order, no organisation, and a
    collapsed one told you nothing. Same container chassis as the tools page's
    job families — a glow per family, and a header that summarises itself. */
+/* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
 .automations-section {
     --tile-glow: 148, 163, 184;
     position: relative;

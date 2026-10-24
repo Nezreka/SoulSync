@@ -657,7 +657,7 @@ body:not(.video-admin) [data-video-collection-studio] { display: none !important
    The page body (stats, gallery, editor panels) already stacked fine.
    Desktop (>768px) untouched. */
 @media (max-width: 768px) {
-    .vce-topbar { flex-wrap: wrap; height: auto; padding: 8px 12px 0; row-gap: 0; gap: 10px; }
+    .vce-topbar { flex-wrap: wrap; height: auto; padding: 8px 12px 0; gap: 10px; }
     .vce-brand { order: 1; }
     .vce-top-spacer { order: 2; }
     .vce-top-actions { order: 3; }

@@ -56,7 +56,7 @@
   border: 1px solid var(--white-a08);
   border-radius: var(--radius-card);
   background: var(--white-a05);
-  color: #fff;
+  color: var(--text-1);
   font-size: 16px;
   cursor: pointer;
 }

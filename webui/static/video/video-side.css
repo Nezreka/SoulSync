@@ -624,7 +624,7 @@ body[data-side="video"] .dashboard-header-sweep {
     margin: 0 0 -42px 22px;
     display: inline-flex; align-items: center; gap: 7px;
     padding: 8px 15px; border-radius: var(--radius-pill);
-    background: rgba(10,10,14,0.92); backdrop-filter: blur(10px);
+    background: rgba(10,10,14,0.92);
     border: 1px solid var(--white-a14);
     color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
     backdrop-filter: blur(10px); transition: background var(--dur-base) ease, transform var(--dur-base) ease;
@@ -1244,7 +1244,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     box-shadow: 0 6px 18px var(--black-a45); border: 1px solid var(--white-a08); }
 .vd-sim-poster--ph { display: flex; align-items: center; justify-content: center; font-size: 34px;
     background: linear-gradient(135deg, rgba(var(--vd-accent-rgb), 0.28), var(--black-a50)); }
-.vd-sim-title { display: block; font-size: 12.5px; font-weight: 600; color: var(--white-a85); line-height: 1.3;
+.vd-sim-title { font-size: 12.5px; font-weight: 600; color: var(--white-a85); line-height: 1.3;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 .vd-trailer-overlay {
@@ -1273,7 +1273,6 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vd-rt-tag { font-size: 11px; font-weight: 900; padding: 1px 5px; border-radius: var(--radius-xs); letter-spacing: 0.02em; }
 .vd-rt-ic { font-size: 15px; line-height: 1; }
 .vd-rt--imdb .vd-rt-tag { background: #f5c518; color: #000; }
-.vd-rt--rt { }
 .vd-rt--mc .vd-rt-tag { background: #fff; color: #000; }
 .vd-rt--mc-good .vd-rt-tag { background: #6c3; color: #000; }
 .vd-rt--mc-mid .vd-rt-tag { background: #fc3; color: #000; }

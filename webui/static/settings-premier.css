@@ -153,6 +153,7 @@
 .main-content:has(#settings-page.active) { min-width: 0 !important; }
 
 /* Keep saving within reach while scrolling a long category. */
+/* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
 #settings-page .settings-nav-row {
     position: sticky !important; top: 0; z-index: 20;
     background: rgb(15, 15, 15) !important; padding: 12px 0 !important;
