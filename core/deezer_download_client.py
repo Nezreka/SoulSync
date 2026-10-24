@@ -103,6 +103,8 @@ class DeezerDownloadClient(DownloadSourcePlugin):
     _signin_lock = threading.Lock()
     _signin_failing = False
     _last_good_arl = None
+    # the sign-in check asks deezer from a session of its own (see check_signin)
+    _probe_session_factory = staticmethod(lambda: requests.Session())
 
     def __init__(self, download_path: str = None):
         from core.settings import config_manager
@@ -224,7 +226,16 @@ class DeezerDownloadClient(DownloadSourcePlugin):
     def _authenticate(self, arl: str) -> bool:
         """Authenticate with Deezer using ARL cookie token."""
         try:
-            self._session.cookies.set('arl', arl)
+            # a sign-in starts from nothing but the arl. the session keeps the
+            # 'sid' cookie deezer set at the last login, and while that is alive
+            # deezer answers as that account whatever arl is set, so a changed
+            # or dead arl would never actually be tried (it only took effect
+            # once the old session ended, often at the next restart)
+            cookies = self._session.cookies
+            clear = getattr(cookies, 'clear', None)
+            if callable(clear):
+                clear()
+            cookies.set('arl', arl)
             # The bootstrap must not present the previous session's token:
             # Deezer validates it before issuing a new one, so a dead token
             # would reject the very login meant to replace it (#1677). The
@@ -412,8 +423,8 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         Deezer Sign-in'). catches an arl that died while nothing needed it.
 
         returns {'status': 'ok'|'failed'|'unreachable'|'skipped', ...}. a
-        logged-in client is probed without touching its session; a logged-out
-        one gets a full sign-in, the same as its own retry would make."""
+        logged-in client is probed from a fresh session, its own left alone; a
+        logged-out one gets a full sign-in, the same as its own retry would make."""
         arl = self._config.get('deezer_download.arl', '')
         if not arl:
             return {'status': 'skipped', 'reason': 'no ARL set'}
@@ -427,11 +438,15 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 time.sleep(self._min_interval - elapsed)
             self._last_request = time.time()
         try:
-            # 'null' token, like the login's own bootstrap: the probe must not
-            # spend or disturb the session token downloads are using
-            resp = self._session.post(_GW_API, params={'method': 'deezer.getUserData',
-                                                       'api_version': '1.0', 'api_token': 'null'},
-                                      json={}, timeout=15)
+            # its own session holding only the arl: the live one carries deezer's
+            # 'sid', which would answer for the old login whatever the arl is,
+            # and the probe must not disturb the session downloads are using
+            probe = self._probe_session_factory()
+            probe.headers.update(dict(getattr(self._session, 'headers', None) or {}))
+            probe.cookies.set('arl', arl)
+            resp = probe.post(_GW_API, params={'method': 'deezer.getUserData',
+                                               'api_version': '1.0', 'api_token': 'null'},
+                              json={}, timeout=15)
             resp.raise_for_status()
             results = (resp.json() or {}).get('results') or {}
         except Exception as e:  # noqa: BLE001 - unreachable is not a dead arl

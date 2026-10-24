@@ -41,20 +41,57 @@ class _Resp:
         return self._data
 
 
-class _Gateway:
-    """answers deezer.getUserData with whoever ``user`` says, or raises"""
+class _Jar(dict):
+    """the bit of a cookie jar the client uses"""
+
+    def set(self, name, value):
+        self[name] = value
+
+
+class _Deezer:
+    """what deezer knows: which arls are good. shared by every session"""
 
     def __init__(self):
+        self.good = {"arl-1", "arl-2", "arl-old", "arl-new"}
         self.user = {"USER_ID": 7, "BLOG_NAME": "pb", "OPTIONS": {"web_lossless": True}}
         self.error = None
+
+
+class _Gateway:
+    """a session against the fake deezer. like the real one, a 'sid' from an
+    earlier good login keeps answering for that account whatever arl is set"""
+
+    def __init__(self, deezer=None):
+        self.deezer = deezer or _Deezer()
         self.calls = []
-        self.cookies = types.SimpleNamespace(set=lambda *a, **k: None)
+        self.cookies = _Jar()
+        self.headers = {"User-Agent": "test"}
+
+    @property
+    def user(self):
+        return self.deezer.user
+
+    @user.setter
+    def user(self, value):
+        self.deezer.user = value
+
+    @property
+    def error(self):
+        return self.deezer.error
+
+    @error.setter
+    def error(self, value):
+        self.deezer.error = value
 
     def post(self, url, params=None, json=None, timeout=None):
         self.calls.append(dict(params or {}))
-        if self.error:
-            raise self.error
-        return _Resp({"results": {"USER": self.user, "checkForm": "tok"}})
+        if self.deezer.error:
+            raise self.deezer.error
+        signed_in = self.cookies.get("arl") in self.deezer.good or self.cookies.get("sid")
+        if not signed_in or not self.deezer.user.get("USER_ID"):
+            return _Resp({"results": {"USER": {"USER_ID": 0}, "checkForm": ""}})
+        self.cookies["sid"] = "sid-1"
+        return _Resp({"results": {"USER": self.deezer.user, "checkForm": "tok"}})
 
 
 class _Config:
@@ -68,6 +105,13 @@ class _Config:
 def _client(arl="arl-1", last_good="arl-1"):
     c = DeezerDownloadClient.__new__(DeezerDownloadClient)
     c._session = _Gateway()
+    c._probes = []
+
+    def _probe():
+        g = _Gateway(c._session.deezer)
+        c._probes.append(g)
+        return g
+    c._probe_session_factory = _probe
     c._api_lock = threading.Lock()
     c._last_request = 0
     c._min_interval = 0
@@ -214,7 +258,9 @@ def test_a_signed_in_client_is_probed_without_touching_its_session():
     c._authenticated = True
     c._api_token = "live-token"
     assert c.check_signin() == {"status": "ok"}
-    assert c._session.calls[-1]["api_token"] == "null"
+    assert c._session.calls == []                       # its own session untouched
+    probe = c._probes[-1]
+    assert probe.calls[-1]["api_token"] == "null" and dict(probe.cookies) == {"arl": "arl-1", "sid": "sid-1"}
     assert c._api_token == "live-token" and c._authenticated is True
     assert c.events == []
 
@@ -299,3 +345,35 @@ def test_web_server_wires_the_events():
     calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
              and isinstance(n.func, ast.Attribute) and n.func.attr == "set_event_emitter"]
     assert calls, "web_server never hands the deezer client the automation engine"
+
+
+# -- a stale deezer session must not vouch for a changed arl --
+
+def test_a_changed_arl_is_really_tried_not_carried_by_the_old_session():
+    """found live: deezer's 'sid' from the last good login answered for the old
+    account, so saving a dead arl 'signed in' fine and nothing failed"""
+    c = _client()
+    assert c._authenticate("arl-1") is True          # leaves a sid in the jar
+    assert c._session.cookies.get("sid")
+    assert c._authenticate("dead-arl") is False      # the old sid must not carry it
+    assert _names(c) == ["deezer_signin_failed"]
+
+
+def test_putting_the_good_arl_back_after_that_says_restored():
+    c = _client()
+    c._authenticate("arl-1")
+    c._authenticate("dead-arl")
+    assert c._authenticate("arl-1") is True
+    assert _names(c) == ["deezer_signin_failed", "deezer_signin_restored"]
+
+
+def test_the_check_tests_the_saved_arl_not_the_live_session():
+    """the saved arl died (or was changed to a bad one) while the live session
+    still holds a good sid: the check must still say failed"""
+    c = _client()
+    c._authenticate("arl-1")
+    c._authenticated = True
+    c._config.arl = "dead-arl"
+    assert c.check_signin() == {"status": "failed"}
+    assert _names(c) == ["deezer_signin_failed"]
+    assert c._session.cookies.get("sid") == "sid-1"   # downloads' session left alone
