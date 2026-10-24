@@ -86,6 +86,7 @@ export function ApplyPlanPreview({
     ).values(),
   ];
   const folders = [...new Set(moves.map((move) => move.planned))];
+  const changesFolders = moves.some((move) => move.current !== move.planned);
   return (
     <div className={styles.applyPreview}>
       <div className={styles.applyTotals}>
@@ -149,7 +150,10 @@ export function ApplyPlanPreview({
           <TrackRequests items={album.actions} />
           <FileDecisions items={album.actions} />
           {album.actions
-            .filter((action) => !action.changes?.length && !action.file_decision)
+            .filter(
+              (action) =>
+                !action.changes?.length && !action.file_decision && !action.requests?.length,
+            )
             .map((action) => (
               <p key={action.id}>{action.description}</p>
             ))}
@@ -162,10 +166,16 @@ export function ApplyPlanPreview({
               <summary>
                 <strong>Organize after applying</strong>
                 <span>
-                  {folders.length} folder{folders.length === 1 ? '' : 's'}
+                  {changesFolders
+                    ? `${folders.length} folder${folders.length === 1 ? '' : 's'}`
+                    : 'No folder moves'}
                 </span>
               </summary>
-              <p>Move files into these folders after applying the planned changes.</p>
+              <p>
+                {changesFolders
+                  ? 'Move files into these folders after applying the planned changes.'
+                  : 'Folder locations stay the same. Planned filename changes are shown above.'}
+              </p>
               <table>
                 <thead>
                   <tr>
