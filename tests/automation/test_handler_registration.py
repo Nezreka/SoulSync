@@ -40,6 +40,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'audiobook_purge_recycle',
     'scan_library',
     'refresh_mirrored',
+    'metasync_refresh_charts',
     'sync_playlist',
     'sync_downloaded_playlists',
     'discover_playlist',

@@ -1,0 +1,307 @@
+{
+  "extends": [
+    "stylelint-config-standard"
+  ],
+  "rules": {
+    "alpha-value-notation": null,
+    "at-rule-empty-line-before": null,
+    "color-function-alias-notation": null,
+    "color-function-notation": null,
+    "color-hex-length": null,
+    "comment-empty-line-before": null,
+    "comment-whitespace-inside": null,
+    "custom-property-empty-line-before": null,
+    "declaration-block-no-redundant-longhand-properties": null,
+    "declaration-block-single-line-max-declarations": null,
+    "declaration-empty-line-before": null,
+    "font-family-name-quotes": null,
+    "function-url-quotes": null,
+    "length-zero-no-unit": null,
+    "media-feature-range-notation": null,
+    "no-descending-specificity": null,
+    "property-no-vendor-prefix": null,
+    "rule-empty-line-before": null,
+    "selector-not-notation": null,
+    "selector-pseudo-element-colon-notation": null,
+    "shorthand-property-no-redundant-values": null,
+    "hue-degree-notation": null,
+    "value-keyword-case": [
+      "lower",
+      {
+        "ignoreKeywords": [
+          "currentColor"
+        ],
+        "ignoreProperties": [
+          "/^--/",
+          "font",
+          "font-family"
+        ]
+      }
+    ],
+    "selector-pseudo-class-no-unknown": [
+      true,
+      {
+        "ignorePseudoClasses": [
+          "global",
+          "local"
+        ]
+      }
+    ],
+    "declaration-property-value-no-unknown": [
+      true,
+      {
+        "ignoreProperties": {
+          "/^animation/": [
+            "/global\\(/"
+          ]
+        }
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/**/*.module.css"
+      ],
+      "rules": {
+        "selector-class-pattern": [
+          "^[a-z][a-zA-Z0-9]*$",
+          {
+            "message": "Module classes are camelCase"
+          }
+        ],
+        "keyframes-name-pattern": [
+          "^[a-z][a-zA-Z0-9]*$",
+          {
+            "message": "Module keyframes are camelCase"
+          }
+        ],
+        "color-no-hex": [
+          true,
+          {
+            "message": "No hex colours in modules: use a token from static/tokens.css"
+          }
+        ],
+        "declaration-property-value-disallowed-list": [
+          {
+            "/.*/": [
+              "/(?:rgb|hsl)a?\\(\\s*[\\d.]/"
+            ]
+          },
+          {
+            "message": "No literal rgb()/hsl() colours in modules: use a token, or rgba(var(--x-rgb), a)"
+          }
+        ],
+        "declaration-property-value-allowed-list": [
+          {
+            "z-index": [
+              "auto",
+              "/^-?\\d$/",
+              "/^var\\(--z-[a-z-]+\\)$/"
+            ],
+            "border-radius": [
+              "inherit",
+              "/^(?:(?:0|var\\(--radius-[a-z-]+\\))\\s*)+$/"
+            ]
+          },
+          {
+            "message": "z-index must be var(--z-*) (or a single-digit local layer); border-radius must be var(--radius-*)"
+          }
+        ],
+        "declaration-no-important": [
+          true,
+          {
+            "message": "No !important in modules: raise specificity or fix the source rule"
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "static/**/*.css"
+      ],
+      "rules": {
+        "selector-class-pattern": null,
+        "keyframes-name-pattern": null,
+        "declaration-property-value-keyword-no-deprecated": null,
+        "property-no-deprecated": [
+          true,
+          {
+            "ignoreProperties": [
+              "clip"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "static/style.css",
+        "static/video/video-side.css"
+      ],
+      "rules": {
+        "no-duplicate-selectors": null
+      }
+    },
+    {
+      "files": [
+        "src/components/form/form.module.css",
+        "src/components/media-player-bar/media-player-bar.module.css",
+        "src/features/onboarding/checklist.module.css",
+        "src/features/onboarding/onboarding.module.css",
+        "src/features/playlists/add-to-playlist.module.css",
+        "src/routes/active-downloads/-ui/adl-match.module.css",
+        "src/routes/audiobooks/-ui/audiobook-library.module.css",
+        "src/routes/audiobooks/-ui/audiobooks-page.module.css",
+        "src/routes/import/-ui/import-page.module.css",
+        "src/routes/issues/-ui/issue-detail-modal.module.css",
+        "src/routes/issues/-ui/issue-status.module.css",
+        "src/routes/issues/-ui/issues-page.module.css",
+        "src/routes/podcasts/-ui/podcasts-page.module.css",
+        "src/routes/requests/-ui/requests-page.module.css",
+        "src/routes/sample-studio/-ui/sample-studio-page.module.css",
+        "src/routes/sample-studio/-ui/stems-panel.module.css",
+        "src/routes/search/-ui/basic.module.css",
+        "src/routes/search/-ui/download-chooser.module.css",
+        "src/routes/search/-ui/enriched-modal.module.css",
+        "src/routes/search/-ui/manual-modal.module.css",
+        "src/routes/search/-ui/search.module.css",
+        "src/routes/stats/-ui/stats-page.module.css",
+        "src/routes/stats/-ui/year-story.module.css",
+        "src/routes/watchlist/-ui/watchlist-page.module.css",
+        "src/routes/wishlist/-ui/wishlist-audiobooks.module.css"
+      ],
+      "rules": {
+        "color-no-hex": null
+      }
+    },
+    {
+      "files": [
+        "src/components/dialog/dialog.module.css",
+        "src/components/form/form.module.css",
+        "src/components/media-player-bar/media-player-bar.module.css",
+        "src/components/primitives/primitives.module.css",
+        "src/features/onboarding/checklist.module.css",
+        "src/features/onboarding/onboarding.module.css",
+        "src/features/playlists/add-to-playlist.module.css",
+        "src/routes/active-downloads/-ui/adl-match.module.css",
+        "src/routes/audiobooks/-ui/audiobooks-page.module.css",
+        "src/routes/import/-ui/import-page.module.css",
+        "src/routes/issues/-ui/issue-detail-modal.module.css",
+        "src/routes/issues/-ui/issue-status.module.css",
+        "src/routes/issues/-ui/issues-page.module.css",
+        "src/routes/podcasts/-ui/podcasts-page.module.css",
+        "src/routes/requests/-ui/requests-page.module.css",
+        "src/routes/sample-studio/-ui/sample-studio-page.module.css",
+        "src/routes/search/-ui/basic.module.css",
+        "src/routes/search/-ui/enriched-modal.module.css",
+        "src/routes/search/-ui/manual-modal.module.css",
+        "src/routes/search/-ui/search.module.css",
+        "src/routes/stats/-ui/stats-page.module.css",
+        "src/routes/stats/-ui/year-story.module.css",
+        "src/routes/sync/-ui/source-ref-modal.module.css",
+        "src/routes/watchlist/-ui/watchlist-page.module.css",
+        "src/routes/wishlist/-ui/wishlist-audiobooks.module.css"
+      ],
+      "rules": {
+        "declaration-property-value-disallowed-list": null
+      }
+    },
+    {
+      "files": [
+        "src/components/dialog/dialog.module.css",
+        "src/components/media-player-bar/media-player-bar.module.css",
+        "src/features/onboarding/checklist.module.css",
+        "src/features/onboarding/onboarding.module.css",
+        "src/features/playlists/add-to-playlist.module.css",
+        "src/routes/audiobooks/-ui/audiobook-library.module.css",
+        "src/routes/audiobooks/-ui/audiobooks-page.module.css",
+        "src/routes/import/-ui/import-page.module.css",
+        "src/routes/issues/-ui/issue-status.module.css",
+        "src/routes/issues/-ui/issues-page.module.css",
+        "src/routes/podcasts/-ui/podcasts-page.module.css",
+        "src/routes/sample-studio/-ui/sample-studio-page.module.css",
+        "src/routes/search/-ui/basic.module.css",
+        "src/routes/search/-ui/download-chooser.module.css",
+        "src/routes/search/-ui/enriched-modal.module.css",
+        "src/routes/search/-ui/manual-modal.module.css",
+        "src/routes/search/-ui/search.module.css",
+        "src/routes/stats/-ui/stats-page.module.css",
+        "src/routes/stats/-ui/year-story.module.css",
+        "src/routes/watchlist/-ui/watchlist-page.module.css"
+      ],
+      "rules": {
+        "declaration-property-value-allowed-list": null
+      }
+    },
+    {
+      "files": [
+        "src/features/playlists/add-to-playlist.module.css",
+        "src/routes/audiobooks/-ui/audiobook-library.module.css",
+        "src/routes/audiobooks/-ui/audiobooks-page.module.css",
+        "src/routes/podcasts/-ui/podcasts-page.module.css",
+        "src/routes/sample-studio/-ui/sample-studio-page.module.css",
+        "src/routes/search/-ui/basic.module.css",
+        "src/routes/search/-ui/download-chooser.module.css",
+        "src/routes/search/-ui/enriched-modal.module.css",
+        "src/routes/search/-ui/manual-modal.module.css",
+        "src/routes/search/-ui/search.module.css",
+        "src/routes/stats/-ui/stats-page.module.css",
+        "src/routes/stats/-ui/year-story.module.css"
+      ],
+      "rules": {
+        "declaration-no-important": null
+      }
+    },
+    {
+      "files": [
+        "src/routes/audiobooks/-ui/audiobooks-page.module.css",
+        "src/routes/import/-ui/import-page.module.css",
+        "src/routes/podcasts/-ui/podcasts-page.module.css",
+        "src/routes/search/-ui/search.module.css",
+        "src/routes/stats/-ui/stats-page.module.css",
+        "src/routes/stats/-ui/year-story.module.css"
+      ],
+      "rules": {
+        "selector-class-pattern": null
+      }
+    },
+    {
+      "files": [
+        "src/routes/audiobooks/-ui/audiobook-library.module.css",
+        "src/routes/audiobooks/-ui/audiobooks-page.module.css",
+        "src/routes/podcasts/-ui/podcasts-page.module.css",
+        "src/routes/sample-studio/-ui/stems-panel.module.css"
+      ],
+      "rules": {
+        "declaration-property-value-keyword-no-deprecated": null
+      }
+    },
+    {
+      "files": [
+        "src/features/onboarding/onboarding.module.css",
+        "src/features/playlists/add-to-playlist.module.css"
+      ],
+      "rules": {
+        "keyframes-name-pattern": null
+      }
+    },
+    {
+      "files": [
+        "src/routes/audiobooks/-ui/audiobook-library.module.css",
+        "src/routes/podcasts/-ui/podcasts-page.module.css"
+      ],
+      "rules": {
+        "no-duplicate-selectors": null
+      }
+    },
+    {
+      "files": [
+        "src/features/onboarding/onboarding.module.css"
+      ],
+      "rules": {
+        "property-no-deprecated": null
+      }
+    }
+  ]
+}

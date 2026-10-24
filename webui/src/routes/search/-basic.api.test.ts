@@ -89,13 +89,28 @@ describe('performBasicSearch', () => {
         HttpResponse.json({ results: [{ result_type: 'track', title: 'Xtal' }] }),
       ),
     );
-    const results = await performBasicSearch('aphex', null);
+    const { results } = await performBasicSearch('aphex', null);
     expect(results).toHaveLength(1);
   });
 
-  it('returns an empty list when the server sends no results key', async () => {
+  it('returns empty lists when the server sends no results key', async () => {
     server.use(http.post('/api/search', () => HttpResponse.json({})));
-    await expect(performBasicSearch('aphex', null)).resolves.toEqual([]);
+    await expect(performBasicSearch('aphex', null)).resolves.toEqual({
+      results: [],
+      warnings: [],
+    });
+  });
+
+  it('hands back the indexers that failed alongside the results (#1831)', async () => {
+    const warning = { source: 'torrent', indexer: 'BrokenTracker', error: 'HTTP 502' };
+    server.use(
+      http.post('/api/search', () =>
+        HttpResponse.json({ results: [{ result_type: 'track' }], warnings: [warning] }),
+      ),
+    );
+    const outcome = await performBasicSearch('aphex', null);
+    expect(outcome.results).toHaveLength(1);
+    expect(outcome.warnings).toEqual([warning]);
   });
 
   it('throws the server error message so the status bar can show it', async () => {

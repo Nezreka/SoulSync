@@ -79,6 +79,10 @@ def _end_device():
     if device_id and owner:
         try:
             get_database().revoke_profile_device(owner, device_id)
+            # clear the in-process live cache as the admin revoke endpoint
+            # does, so the sign-out is visible at once (#1837)
+            from core.security.devices import forget
+            forget(device_id)
         except Exception:  # noqa: BLE001
             logger.debug("device revoke on logout failed", exc_info=True)
 
@@ -1539,6 +1543,48 @@ def plex_connect_check():
     except Exception as e:
         logger.error(f"Plex connect failed: {e}")
         return jsonify({'success': False, 'error': 'Connecting with Plex failed. Try again.'}), 502
+
+
+@bp.route('/api/profiles/me/oidc', methods=['GET'])
+def my_oidc_status():
+    """my account's oidc card: whether sign in with oidc is on, whether this
+    profile is connected, and (once) how the last connect went"""
+    from core.security import oidc_signin
+    settings = oidc_signin.read_settings(config_manager)
+    methods = get_database().profile_sign_in_methods(get_current_profile_id())
+    return jsonify({'success': True, 'enabled': settings is not None,
+                    'label': settings.button_label if settings else oidc_signin.DEFAULT_BUTTON_LABEL,
+                    'icon': settings.icon_url if settings else '',
+                    'connected': methods['oidc'],
+                    'last': session.pop('oidc_connect_result', None)})
+
+
+@bp.route('/api/profiles/me/oidc-connect/start', methods=['GET'])
+def oidc_connect_start():
+    """connect with oidc from my account: the signed-in profile proves its
+    account at the provider, and oidc sign-in lands on it from then on. this
+    is the only way an admin profile gets oidc: claims never grant admin"""
+    from api.login import oidc_begin
+    return oidc_begin('connect', profile_id=get_current_profile_id())
+
+
+@bp.route('/api/profiles/me/oidc', methods=['DELETE'])
+def oidc_disconnect():
+    """stop oidc signing in as this profile. refused when it's the profile's
+    only way in: a profile made by oidc sign-in has no password, and dropping
+    the link would lock its owner out for good"""
+    try:
+        pid = get_current_profile_id()
+        methods = get_database().profile_sign_in_methods(pid)
+        if _require_login_enabled and _require_login_enabled() and not (methods['password'] or methods['plex']):
+            return jsonify({'success': False,
+                            'error': "This is the only way this profile can sign in. "
+                                     "Ask your admin to set a password first."}), 400
+        if not get_database().set_profile_oidc_identity(pid, None):
+            return jsonify({'success': False, 'error': 'Failed to remove the connection'}), 500
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @bp.route('/api/profiles/me/plex-home-user', methods=['DELETE'])

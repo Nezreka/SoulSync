@@ -70,19 +70,34 @@ _MIRRORED_KEYS = ('progress', 'release', 'speed', 'downloaded',
                   'size', 'seeders', 'grabs', 'count', 'failed', 'query')
 
 
+# Sources whose plugins implement ``download_album_to_staging``. YouTube is
+# only bundle-capable once ``download_source.youtube_album_bundle`` is on: it
+# changes how every YouTube album is fetched, so it is opt-in.
+_ALBUM_BUNDLE_SOURCES = frozenset(('torrent', 'usenet', 'soulseek'))
+
+
+def album_bundle_sources(config_get: Callable[..., Any]) -> frozenset:
+    """The sources that may run the album-bundle flow right now."""
+    if config_get('download_source.youtube_album_bundle', False):
+        return _ALBUM_BUNDLE_SOURCES | {'youtube'}
+    return _ALBUM_BUNDLE_SOURCES
+
+
 def is_eligible(
     *,
     mode: str,
     is_album: bool,
     album_name: str,
     artist_name: str,
+    youtube_album_bundle: bool = False,
 ) -> bool:
     """Pure predicate: does this batch even qualify for the album
     flow? Separate from the resolution+run step so tests can pin
     the gate logic without standing up a plugin."""
     if not is_album:
         return False
-    if (mode or '').lower() not in ('torrent', 'usenet', 'soulseek'):
+    capable = _ALBUM_BUNDLE_SOURCES | {'youtube'} if youtube_album_bundle else _ALBUM_BUNDLE_SOURCES
+    if (mode or '').lower() not in capable:
         return False
     if not (album_name or '').strip():
         return False
@@ -119,7 +134,8 @@ def try_dispatch(
     artist_name = (artist_context or {}).get('name') or ''
 
     if not is_eligible(mode=mode, is_album=is_album,
-                       album_name=album_name, artist_name=artist_name):
+                       album_name=album_name, artist_name=artist_name,
+                       youtube_album_bundle=bool(config_get('download_source.youtube_album_bundle', False))):
         return False
 
     album_name = album_name.strip()

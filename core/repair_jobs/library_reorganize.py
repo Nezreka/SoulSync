@@ -195,7 +195,7 @@ class LibraryReorganizeJob(RepairJob):
         for i in range(start, total):
             album_row = album_rows[i]
             if i > start:
-                last_done = str(album_rows[i - 1]['id'])
+                last_done = album_rows[i - 1]['id']
                 if (i - start) % 25 == 0:
                     save_progress()
             if context.check_stop():
@@ -466,7 +466,16 @@ class LibraryReorganizeJob(RepairJob):
         except Exception as e:  # noqa: BLE001 (a broken store means start at the top, not crash)
             logger.warning("Could not read reorganize checkpoint (starting at the top): %s", e)
             return 0
-        if not isinstance(saved, dict) or saved.get('scan') != scan_key:
+        if not isinstance(saved, dict):
+            return 0
+        if saved.get('scan') != scan_key:
+            # say what changed, so a scan that "reset itself" can be traced
+            old = str(saved.get('scan') or '').split('|')
+            new = scan_key.split('|')
+            changed = [name for n, name in enumerate(('dry run', 'recheck placed', 'naming settings', 'server'))
+                       if (old[n] if n < len(old) else None) != new[n]]
+            logger.info("Reorganize: starting at the top, %s changed since the last scan",
+                        ', '.join(changed) or 'the scan')
             return 0
         album_id = saved.get('album_id')
         if album_id is None:
@@ -474,10 +483,24 @@ class LibraryReorganizeJob(RepairJob):
         for idx, row in enumerate(album_rows):
             if str(row['id']) == str(album_id):
                 return idx + 1 if idx + 1 < len(album_rows) else 0
-        # the album is gone (deleted or rescanned under a new id). starting
-        # over re-plans albums, skipping ahead could miss some.
-        logger.info("Reorganize checkpoint album %s is gone, starting at the top", album_id)
+        # the album is gone: deleted, or the media server gave it a new id (a
+        # server update, or a rescan after a move). going back to the top
+        # threw away the whole pass (#1857), so carry on from the first album
+        # that sorts after it, the one this run would have reached next.
+        gone = self._id_sort_key(album_id)
+        for idx, row in enumerate(album_rows):
+            if self._id_sort_key(row['id']) > gone:
+                logger.info("Reorganize checkpoint album %s is gone, resuming at album %d",
+                            album_id, idx + 1)
+                return idx
         return 0
+
+    @staticmethod
+    def _id_sort_key(value):
+        # the order sqlite's ORDER BY al.id gives: integers before text
+        if isinstance(value, int) and not isinstance(value, bool):
+            return (0, value, '')
+        return (1, 0, str(value))
 
     def _save_checkpoint(self, context: JobContext, value) -> None:
         if not context.config_manager or not hasattr(context.config_manager, 'set'):

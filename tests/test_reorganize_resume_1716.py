@@ -167,13 +167,79 @@ def test_naming_change_starts_over(tmp_path, harness, monkeypatch):
     assert calls[0] == "a001"
 
 
-def test_checkpoint_album_gone_starts_over(tmp_path, harness):
+def test_a_dropped_checkpoint_says_what_changed(tmp_path, harness, monkeypatch):
+    import core.repair_jobs.library_reorganize as job_mod
+    lines = []
+    monkeypatch.setattr(job_mod.logger, "info", lambda msg, *a: lines.append(msg % a))
     calls, _queue, _ = harness
     db = _db(tmp_path, 6)
     cfg = _Cfg()
     LibraryReorganizeJob().scan(_ctx(db, cfg, stop_after=3, calls=calls))
-    cfg.settings[KEY] = {**cfg.settings[KEY], "album_id": "deleted"}
+
+    monkeypatch.setattr(lr, "naming_fingerprint", lambda: "fp2")
+    lines.clear()
+    LibraryReorganizeJob().scan(_ctx(db, cfg))
+    assert any("naming settings changed" in line for line in lines)
+
+
+def _drop_album(db, album_id):
+    conn = db._get_connection()
+    conn.execute("DELETE FROM tracks WHERE album_id = ?", (album_id,))
+    conn.execute("DELETE FROM albums WHERE id = ?", (album_id,))
+    conn.commit()
+    conn.close()
+
+
+def test_checkpoint_album_gone_carries_on_after_it(tmp_path, harness):
+    # #1857: the album the scan stopped on vanished (deleted, or the server
+    # gave it a new id). that used to send the scan back to album 1.
+    calls, _queue, _ = harness
+    db = _db(tmp_path, 6)
+    cfg = _Cfg()
+    LibraryReorganizeJob().scan(_ctx(db, cfg, stop_after=3, calls=calls))
+    assert cfg.settings[KEY]["album_id"] == "a003"
+    _drop_album(db, "a003")
+
+    calls.clear()
+    LibraryReorganizeJob().scan(_ctx(db, cfg))
+    assert calls == ["a004", "a005", "a006"]
+
+
+def test_checkpoint_album_reidentified_carries_on(tmp_path, harness):
+    # a media server update re-keyed the album the scan stopped on: same
+    # album, new id that sorts elsewhere. the scan keeps its place.
+    calls, _queue, _ = harness
+    db = _db(tmp_path, 6)
+    cfg = _Cfg()
+    LibraryReorganizeJob().scan(_ctx(db, cfg, stop_after=3, calls=calls))
+    conn = db._get_connection()
+    conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('z999', 'ar1', 'Album 3')")
+    conn.execute("UPDATE tracks SET album_id = 'z999' WHERE album_id = 'a003'")
+    conn.execute("DELETE FROM albums WHERE id = 'a003'")
+    conn.commit()
+    conn.close()
+
+    calls.clear()
+    LibraryReorganizeJob().scan(_ctx(db, cfg))
+    assert calls == ["a004", "a005", "a006", "z999"]
+
+
+def test_checkpoint_past_the_last_album_starts_the_next_pass(tmp_path, harness):
+    calls, _queue, _ = harness
+    db = _db(tmp_path, 4)
+    cfg = _Cfg({KEY: {"album_id": "a999", "scan": None}})
+    LibraryReorganizeJob().scan(_ctx(db, cfg, stop_after=1, calls=calls))
+    key = cfg.settings[KEY]["scan"]
+    cfg.settings[KEY] = {"album_id": "a999", "scan": key}
 
     calls.clear()
     LibraryReorganizeJob().scan(_ctx(db, cfg))
     assert calls[0] == "a001"
+
+
+def test_integer_ids_resume_in_sqlite_order():
+    job = LibraryReorganizeJob()
+    rows = [{"id": 2}, {"id": 10}, {"id": "a1"}]
+    ctx = JobContext(db=None, transfer_folder="/m",
+                     config_manager=_Cfg({KEY: {"album_id": 5, "scan": "k"}}))
+    assert job._resume_index(ctx, rows, "k") == 1      # 10, not "a1" or the top

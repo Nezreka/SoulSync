@@ -20,6 +20,9 @@ export function automationsListQueryOptions(profileId: number) {
   return queryOptions({
     queryKey: [...AUTOMATIONS_QUERY_KEY, 'list', profileId] as const,
     queryFn: () => readJson<AutomationsListResponse>(apiClient.get('automations')),
+    // tools flips the [System] job rows server-side, so a cached list can show
+    // a toggle that changed behind it. refetch on every visit.
+    refetchOnMount: 'always',
   });
 }
 

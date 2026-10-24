@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Callable, Optional
 
+from core.search.warnings import collect as collect_search_warnings
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,6 +46,7 @@ def run_basic_search(
     run_async: Callable,
     *,
     source: Optional[str] = None,
+    warnings: Optional[list] = None,
 ) -> list[dict]:
     """Search ``source`` (or the active/first hybrid source) for ``query``.
 
@@ -58,6 +61,10 @@ def run_basic_search(
         ``"soulseek"``, ``"tidal"``, ``"qobuz"``). When ``None``, behaviour
         is unchanged from before: orchestrator.search() picks the active
         source (single mode) or the first in chain (hybrid).
+    warnings:
+        Optional list the caller passes in. Filled with ``{source, indexer,
+        error}`` for each prowlarr indexer that failed while others answered,
+        so the page can say the results are incomplete (#1831).
     """
     # A pasted SoundCloud link only resolves on the SoundCloud source (its
     # share URL carries the access token; no other source can find an
@@ -89,12 +96,15 @@ def run_basic_search(
                 raise ValueError("SoundCloud isn't connected — enable it in "
                                  "Settings to resolve a SoundCloud link.")
             logger.warning("basic search: no client for source %r — falling back to orchestrator", source)
-            tracks, albums = run_async(download_orchestrator.search(query))
+            search = download_orchestrator.search(query)
         else:
             logger.info("basic search: targeting %r for %r", source, query)
-            tracks, albums = run_async(client.search(query))
+            search = client.search(query)
     else:
-        tracks, albums = run_async(download_orchestrator.search(query))
+        search = download_orchestrator.search(query)
+    (tracks, albums), noted = run_async(collect_search_warnings(search))
+    if warnings is not None:
+        warnings.extend(noted)
 
     processed_albums = []
     for album in albums:

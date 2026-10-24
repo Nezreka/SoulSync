@@ -194,3 +194,121 @@ def test_toggling_a_job_arms_and_cancels_its_timer():
     set_system_job_enabled(db, eng, "fake_job", False)
     assert db.rows[0]["enabled"] == 0 and eng.scheduled == []
     assert not set_system_job_enabled(db, eng, "other_job", True)
+
+
+# ── automations page -> tools toggle (storm's report: the two drifted) ──────
+
+class ToggleDB(FakeDB):
+    def get_automation(self, automation_id):
+        return next((r for r in self.rows if r["id"] == automation_id), None)
+
+    def toggle_automation(self, automation_id):
+        r = self.get_automation(automation_id)
+        if not r:
+            return False
+        r["enabled"] = 0 if r["enabled"] else 1
+        return True
+
+    def bulk_set_enabled(self, ids, enabled):
+        n = 0
+        for r in self.rows:
+            if r["id"] in ids:
+                r["enabled"] = 1 if enabled else 0
+                n += 1
+        return n
+
+
+class SetConfig(FakeConfig):
+    def set(self, key, value):
+        self.values[key] = value
+
+
+@pytest.fixture
+def sinks(monkeypatch):
+    import core.automation.migrate_repair_jobs as m
+    calls = []
+    monkeypatch.setattr(m, "_job_toggle_sinks", {
+        "run_repair_job": lambda job_id, en: calls.append(("music", job_id, en)),
+        "video_run_repair_job": lambda job_id, en: calls.append(("video", job_id, en)),
+    })
+    return calls
+
+
+def test_automations_page_toggle_reaches_the_tools_job(sinks):
+    from core.automation import api
+    db, eng = ToggleDB(), FakeEngine()
+    aid = _system_row(db, "suspect_album_tag", enabled=True)
+
+    assert api.toggle_automation(db, eng, aid)[1] == 200
+    assert sinks == [("music", "suspect_album_tag", False)]
+    api.toggle_automation(db, eng, aid)
+    assert sinks[-1] == ("music", "suspect_album_tag", True)
+
+
+def test_bulk_toggle_reaches_every_system_job(sinks):
+    from core.automation import api
+    db, eng = ToggleDB(), FakeEngine()
+    a = _system_row(db, "job_a")
+    b = db.create_automation(
+        name="[System] v", trigger_type="schedule", trigger_config="{}",
+        action_type="video_run_repair_job", action_config=json.dumps({"job_id": "vjob"}),
+        owned_by=_SYSTEM_OWNER, is_system=True)
+    user = db.create_automation(
+        name="mine", trigger_type="schedule", trigger_config="{}",
+        action_type="run_repair_job", action_config=json.dumps({"job_id": "job_a"}))
+
+    api.bulk_toggle(db, eng, [a, b, user], False)
+    # the user's own run_repair_job automation is not the job's toggle
+    assert sorted(sinks) == [("music", "job_a", False), ("video", "vjob", False)]
+
+
+def test_music_sink_writes_config_without_rebridging(monkeypatch):
+    from core.repair_worker import RepairWorker
+    w = RepairWorker.__new__(RepairWorker)
+    w._config_manager = SetConfig()
+    w._current_job_id = None
+    import core.automation.migrate_repair_jobs as m
+    bridged = []
+    monkeypatch.setattr(m, "set_system_job_enabled", lambda *a, **k: bridged.append(a))
+    monkeypatch.setattr(w, "stop_current_job", lambda job_id: None, raising=False)
+
+    w.set_job_enabled("suspect_album_tag", False, bridge=False)
+
+    assert w._config_manager.values["repair.jobs.suspect_album_tag.enabled"] is False
+    assert bridged == []
+
+
+def test_boot_heals_a_music_job_that_drifted_from_its_row(monkeypatch):
+    _patch_jobs(monkeypatch, music={"fake_job": FakeJob}, video={})
+    db, eng = FakeDB(), FakeEngine()
+    _system_row(db, "fake_job", enabled=False)
+    cfg = SetConfig({"repair.jobs.fake_job.enabled": True})
+
+    ensure_repair_job_automations(eng, db, cfg)
+
+    assert cfg.values["repair.jobs.fake_job.enabled"] is False
+
+
+def test_boot_heals_a_video_job_that_drifted_from_its_row(monkeypatch):
+    _patch_jobs(monkeypatch, music={}, video={"vfake": FakeJob})
+    import core.video.repair
+    monkeypatch.setattr(core.video.repair, "get_all_jobs", lambda: {"vfake": FakeJob})
+
+    class VideoDB:
+        def __init__(self):
+            self.s = {"video_repair.jobs.vfake": json.dumps({"enabled": True, "interval_hours": 12})}
+        def get_setting(self, k):
+            return self.s.get(k)
+        def set_setting(self, k, v):
+            self.s[k] = v
+
+    db, eng, vdb = FakeDB(), FakeEngine(), VideoDB()
+    db.create_automation(
+        name="[System] v", trigger_type="schedule", trigger_config="{}",
+        action_type="video_run_repair_job", action_config=json.dumps({"job_id": "vfake"}),
+        owned_by=_SYSTEM_OWNER, is_system=True, enabled=False)
+
+    ensure_repair_job_automations(eng, db, SetConfig(), video_db=vdb)
+
+    saved = json.loads(vdb.s["video_repair.jobs.vfake"])
+    assert saved == {"enabled": False, "interval_hours": 12}

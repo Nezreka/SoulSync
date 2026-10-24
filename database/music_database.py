@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from utils.logging_config import get_logger
 from core.quality.schema import normalize_release_import_mode
+from database import connection_pool
 
 logger = get_logger("music_database")
 
@@ -42,10 +43,15 @@ _planner_stats_lock = threading.Lock()
 _planner_stats_threads = {}
 
 
+_CONNECTION_PLUMBING = frozenset({'_open_connection', '_get_connection', 'acquire'})
+
+
 def _calling_functions(depth: int = 3) -> str:
     """'caller <- its caller <- ...' from just above _get_connection."""
     names = []
-    frame = sys._getframe(2)
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_code.co_name in _CONNECTION_PLUMBING:
+        frame = frame.f_back
     while frame is not None and len(names) < depth:
         names.append(frame.f_code.co_name)
         frame = frame.f_back
@@ -521,13 +527,21 @@ class MusicDatabase:
             logger.warning("wal mode check failed for %s: %s", self.database_path, e)
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Get a NEW database connection for each operation (thread-safe)"""
+        """A connection for one operation. It behaves like a new sqlite3.Connection
+        (close it, use ``with``, or let it go); under the hood an idle one is reused
+        when there is one, see database/connection_pool.py."""
+        return connection_pool.acquire(self.database_path, self._open_connection)
+
+    def _open_connection(self, check_same_thread: bool = True) -> sqlite3.Connection:
+        """Open and set up a NEW database connection (thread-safe). Pooled ones are
+        opened with check_same_thread=False, they move between threads."""
         last_error = None
         for attempt in range(4):
             connection = None
             _t_open = time.perf_counter()
             try:
-                connection = sqlite3.connect(str(self.database_path), timeout=30.0)
+                connection = sqlite3.connect(str(self.database_path), timeout=30.0,
+                                             check_same_thread=check_same_thread)
                 _t_connected = time.perf_counter()
                 connection.row_factory = sqlite3.Row
                 # Register Unicode-normalizing function for diacritics-aware LIKE queries
@@ -1333,6 +1347,7 @@ class MusicDatabase:
             self._add_profile_navidrome_login(cursor)
             self._add_profile_lastfm_username(cursor)
             self._add_profile_plex_home_user(cursor)
+            self._add_profile_oidc_identity(cursor)
             self._add_profile_controls(cursor)
             self._add_own_library_columns(cursor)
             self._repair_own_jellyfin_artist_ids(cursor)
@@ -1925,6 +1940,7 @@ class MusicDatabase:
 
             self._ensure_wishlist_quality_columns(cursor)
             self._ensure_library_quality_column(cursor)
+            self._add_release_group_columns(cursor)
 
             # One-time: materialize the current global quality/AcoustID/downsample
             # settings into the `quality_profiles` default row and backfill
@@ -2518,6 +2534,63 @@ class MusicDatabase:
                         logger.debug("wishlist column removal %s: %s", dead_col, e)
         except Exception as e:
             logger.error("Error adding wishlist quality-profile column: %s", e)
+
+    def _add_release_group_columns(self, cursor):
+        """MusicBrainz release-GROUP ids for albums and wishlist rows.
+
+        A release id names one edition (the 2011 remaster, the Japanese
+        pressing); its release group names the album across every edition.
+        MetaSync's SIN signals key on the group, so without it every node
+        looked the group up on MusicBrainz itself, one call per album, and
+        wishlist rows (Spotify-shaped, no MusicBrainz id at all) never
+        counted. The MusicBrainz worker fills both columns:
+
+        * albums: from the release it matches, or, for an album that
+          already has a release id (tags, a manual match, an import), one
+          release lookup — ``musicbrainz_release_group_attempted`` paces
+          the retries;
+        * wishlist_tracks: by matching the row's album + artist in the
+          background, like the library's own albums, with the usual
+          ``musicbrainz_match_status`` / ``musicbrainz_last_attempted``.
+
+        A trigger clears an album's group whenever its release id changes
+        to something the same UPDATE did not also give a group for, so a
+        retag or re-match can never leave a group from the old edition.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(albums)")
+            album_cols = {c[1] for c in cursor.fetchall()}
+            if 'musicbrainz_release_group_id' not in album_cols:
+                cursor.execute("ALTER TABLE albums ADD COLUMN musicbrainz_release_group_id TEXT")
+            if 'musicbrainz_release_group_attempted' not in album_cols:
+                cursor.execute("ALTER TABLE albums ADD COLUMN musicbrainz_release_group_attempted TIMESTAMP")
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS trg_albums_release_group_reset
+                AFTER UPDATE OF musicbrainz_release_id ON albums
+                WHEN OLD.musicbrainz_release_id IS NOT NEW.musicbrainz_release_id
+                 AND OLD.musicbrainz_release_group_id IS NEW.musicbrainz_release_group_id
+                BEGIN
+                    UPDATE albums
+                    SET musicbrainz_release_group_id = NULL,
+                        musicbrainz_release_group_attempted = NULL
+                    WHERE id = NEW.id;
+                END
+            """)
+            cursor.execute("PRAGMA table_info(wishlist_tracks)")
+            wish_cols = {c[1] for c in cursor.fetchall()}
+            if wish_cols:
+                for col, ddl in (
+                    ('musicbrainz_release_group_id', 'TEXT'),
+                    ('musicbrainz_match_status', 'TEXT'),
+                    ('musicbrainz_last_attempted', 'TIMESTAMP'),
+                ):
+                    if col not in wish_cols:
+                        cursor.execute(f"ALTER TABLE wishlist_tracks ADD COLUMN {col} {ddl}")
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_wishlist_mb_status "
+                    "ON wishlist_tracks (musicbrainz_match_status, id)")
+        except Exception as e:
+            logger.error(f"Error adding release-group columns: {e}")
 
     def _ensure_library_quality_column(self, cursor):
         """Give every library track a pointer to its own quality profile.
@@ -3743,6 +3816,21 @@ class MusicDatabase:
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_cache_lookup ON sync_match_cache (spotify_track_id, server_source)")
+
+            # pairings a user unmatched on the server playlist compare view.
+            # the auto matcher may never pair this source track with this
+            # library track again; picking it by hand clears the row.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS server_match_rejections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL,
+                    server_source TEXT NOT NULL,
+                    source_track_id TEXT NOT NULL,
+                    server_track_id TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(profile_id, server_source, source_track_id, server_track_id)
+                )
+            """)
 
             # Download blacklist — tracks users have rejected as wrong matches
             cursor.execute("""
@@ -6976,6 +7064,79 @@ class MusicDatabase:
             logger.error(f"Error reading {server} identity for profile {profile_id}: {e}")
         return None
 
+    def _add_profile_oidc_identity(self, cursor):
+        """who signs in with oidc as this profile: the provider's issuer and
+        the account's subject, as one ``<issuer>|<sub>`` string. set only by
+        oidc sign-in or by a signed-in profile connecting its own account,
+        never from an email address or any other claim a user can change"""
+        try:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN oidc_identity TEXT DEFAULT NULL")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+    def get_profile_by_oidc_identity(self, identity: str) -> Optional[Dict[str, Any]]:
+        """the profile an oidc account signs in as, or None.
+        {'id', 'name', 'is_admin', 'disabled'}"""
+        if not identity:
+            return None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(profiles)")
+                cols = {c[1] for c in cursor.fetchall()}
+                if 'oidc_identity' not in cols:
+                    return None
+                has_disabled = 'disabled' in cols
+                cursor.execute(
+                    f"SELECT id, name, is_admin{', disabled' if has_disabled else ''} FROM profiles "
+                    "WHERE oidc_identity = ? ORDER BY id LIMIT 1", (str(identity),))
+                row = cursor.fetchone()
+            if not row:
+                return None
+            return {'id': row['id'], 'name': row['name'], 'is_admin': bool(row['is_admin']),
+                    'disabled': bool(row['disabled']) if has_disabled else False}
+        except Exception as e:
+            logger.error(f"Error looking up profile by oidc identity: {e}")
+            return None
+
+    def set_profile_oidc_identity(self, profile_id: int, identity: Optional[str]) -> bool:
+        """record (or with None clear) which oidc account signs in as a profile"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET oidc_identity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (str(identity) if identity else None, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving oidc identity for profile {profile_id}: {e}")
+            return False
+
+    def profile_sign_in_methods(self, profile_id: int) -> Dict[str, bool]:
+        """how a profile can sign in: {'password', 'plex', 'oidc'}. lets a
+        disconnect refuse to strand a profile with no other way in"""
+        out = {'password': False, 'plex': False, 'oidc': False}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(profiles)")
+                cols = {c[1] for c in cursor.fetchall()}
+                picks = [c for c in ('password_hash', 'plex_account_id', 'oidc_identity') if c in cols]
+                if not picks:
+                    return out
+                cursor.execute(f"SELECT {', '.join(picks)} FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+            if not row:
+                return out
+            names = {'password_hash': 'password', 'plex_account_id': 'plex', 'oidc_identity': 'oidc'}
+            for c in picks:
+                out[names[c]] = row[c] is not None
+            return out
+        except Exception as e:
+            logger.error(f"Error reading sign-in methods for profile {profile_id}: {e}")
+            return out
+
     def get_profile_plex_home_user(self, profile_id: int) -> Optional[Dict[str, str]]:
         """{'id', 'title', 'token'} for the profile's linked plex home user,
         or None when it has none (act as the app account, as always)."""
@@ -7810,7 +7971,7 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(f"""
-                SELECT DATE(played_at) AS day, COUNT(*) AS plays
+                SELECT DATE(played_at, 'localtime') AS day, COUNT(*) AS plays
                 FROM listening_history
                 {where}
                 GROUP BY day
@@ -7986,7 +8147,7 @@ class MusicDatabase:
                 date_fmt = '%Y-%m-%d'
 
             cursor.execute(f"""
-                SELECT strftime('{date_fmt}', played_at) as period, COUNT(*) as plays
+                SELECT strftime('{date_fmt}', played_at, 'localtime') as period, COUNT(*) as plays
                 FROM listening_history
                 {where}
                 GROUP BY period
@@ -8203,15 +8364,9 @@ class MusicDatabase:
     # seven of its twelve slots. The period label states the real range so
     # nothing is implied that the data does not cover.
     #
-    # TIMEZONE: unlike the range filters (which compare local `played_at`
-    # against SQLite's UTC `datetime('now')` and are skewed by the server's
-    # offset — see STATS_PAGE_PLAN.md), this window is computed from the
-    # LOCAL clock and compared with `date(played_at)`. That matches the local
-    # wall-clock the column actually stores, so the year is skew-free. Using
-    # date() rather than a raw string compare also means both stored shapes
-    # parse — the web player writes an ISO 'T' separator and plex_client
-    # writes a space, and a lexicographic compare orders those differently at
-    # the boundary.
+    # TIMEZONE: played_at is stored utc. this window is computed from the
+    # LOCAL clock, so every day and month here reads played_at with
+    # 'localtime'. a utc day puts a late evening play on tomorrow (#1840).
 
     _MONTH_LABELS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
@@ -8301,7 +8456,7 @@ class MusicDatabase:
             scope = owner_clause(self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
-            window = f"WHERE date(played_at) >= ? AND date(played_at) <= ? AND {scope}"
+            window = f"WHERE date(played_at, 'localtime') >= ? AND date(played_at, 'localtime') <= ? AND {scope}"
             span = (start_date, end_date)
 
             cursor.execute(f"""
@@ -8310,7 +8465,7 @@ class MusicDatabase:
                        COUNT(DISTINCT LOWER(artist)),
                        COUNT(DISTINCT LOWER(album)),
                        COUNT(DISTINCT LOWER(title) || '|||' || LOWER(COALESCE(artist, ''))),
-                       COUNT(DISTINCT date(played_at))
+                       COUNT(DISTINCT date(played_at, 'localtime'))
                 FROM listening_history {window}
             """, span)
             row = cursor.fetchone() or (0, 0, 0, 0, 0, 0)
@@ -8331,7 +8486,7 @@ class MusicDatabase:
 
             # Per-month plays + minutes, folded onto the dense strip.
             cursor.execute(f"""
-                SELECT strftime('%Y-%m', played_at) AS ym,
+                SELECT strftime('%Y-%m', played_at, 'localtime') AS ym,
                        COUNT(*), COALESCE(SUM({play_duration_sql()}), 0)
                 FROM listening_history {window}
                 GROUP BY ym
@@ -8345,7 +8500,7 @@ class MusicDatabase:
             # rows is nothing to walk, and a tie breaks on the lower-cased
             # name so the same month never renders two different leaders.
             cursor.execute(f"""
-                SELECT strftime('%Y-%m', played_at) AS ym, artist, COUNT(*) AS plays
+                SELECT strftime('%Y-%m', played_at, 'localtime') AS ym, artist, COUNT(*) AS plays
                 FROM listening_history {window}
                   AND artist IS NOT NULL AND artist != ''
                 GROUP BY ym, LOWER(artist)
@@ -8409,7 +8564,7 @@ class MusicDatabase:
             cursor.execute(f"""
                 SELECT artist, first_play, plays FROM (
                     SELECT artist,
-                           MIN(date(played_at)) AS first_play,
+                           MIN(date(played_at, 'localtime')) AS first_play,
                            COUNT(*) AS plays
                     FROM listening_history
                     WHERE artist IS NOT NULL AND artist != '' AND {scope}
@@ -8423,7 +8578,7 @@ class MusicDatabase:
                            for r in cursor.fetchall()]
 
             cursor.execute(f"""
-                SELECT date(played_at) AS d, COUNT(*) AS plays
+                SELECT date(played_at, 'localtime') AS d, COUNT(*) AS plays
                 FROM listening_history {window}
                 GROUP BY d ORDER BY plays DESC, d DESC LIMIT 1
             """, span)
@@ -9933,9 +10088,9 @@ class MusicDatabase:
             logger.error(f"Error in recovery-question migration: {e}")
 
     def close(self):
-        """Close database connection (no-op since we create connections per operation)"""
-        # Each operation creates and closes its own connection, so nothing to do here
-        pass
+        """Close database connection (connections are per operation; this only
+        drops the idle ones kept for reuse, see connection_pool.py)"""
+        connection_pool.discard(self.database_path)
     
     def get_statistics(self) -> Dict[str, int]:
         """Get database statistics for all servers (legacy method)"""
@@ -12792,6 +12947,57 @@ class MusicDatabase:
                 best, best_confidence = candidate, confidence
         return (best, best_confidence) if best else None
     
+    def routed_album_owned_tracks(self, album: str, artist: str) -> int:
+        """How many tracks of ``album`` a routed artist has on disk.
+
+        The album twin of ``_routed_download_match``: a routed artist's albums
+        live in the audiobook library, so the ``albums`` table has no row for
+        them and the artist page listed every one as missing. The download
+        ledger knows them. Counts distinct files of completed downloads that
+        still exist; 0 for an artist that is not routed.
+        """
+        from core.audiobook_routing import existing_download_path, is_routed_artist, route_key
+        if not album or not is_routed_artist(artist, self):
+            return 0
+
+        def _title_key(value):
+            return ''.join(ch for ch in str(value or '').casefold() if ch.isalnum())
+
+        key, wanted = route_key(artist), _title_key(album)
+        with self._get_connection() as conn:
+            rows = conn.cursor().execute(
+                "SELECT file_path, track_artist, track_album FROM track_downloads "
+                "WHERE status = 'completed' AND file_path IS NOT NULL "
+                "AND track_artist IS NOT NULL AND track_album IS NOT NULL").fetchall()
+        files = set()
+        for row in rows:
+            if route_key(row['track_artist']) != key or _title_key(row['track_album']) != wanted:
+                continue
+            found = existing_download_path(row['file_path'])
+            if found:
+                files.add(found)
+        return max(len(files), self._audiobook_library_tracks(key, wanted, _title_key))
+
+    @staticmethod
+    def _audiobook_library_tracks(artist_key: str, album_key: str, title_key) -> int:
+        """File count of the audiobook library's copy of a routed album.
+
+        The library scan reads the same folder Audiobookshelf does, so a book
+        that arrived by hand (or before the artist was routed) is found here
+        even when the download ledger never heard of it.
+        """
+        from core.audiobook_routing import route_key
+        try:
+            from core.audiobook_database import get_audiobook_db
+            books = get_audiobook_db().get_library()
+        except Exception:  # noqa: BLE001 - the audiobook side being unavailable must not break the page
+            logger.debug("audiobook library lookup failed", exc_info=True)
+            return 0
+        return max(
+            (int(b.get('file_count') or 0) for b in books
+             if route_key(b.get('author')) == artist_key and title_key(b.get('title')) == album_key),
+            default=0)
+
     def check_album_exists(self, title: str, artist: str, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Check if an album exists in the database with fuzzy matching and confidence scoring.
@@ -16666,7 +16872,7 @@ class MusicDatabase:
                 query = """
                     SELECT id, spotify_track_id, spotify_data, failure_reason, retry_count,
                            last_attempted, date_added, source_type, source_info,
-                           quality_profile_id
+                           quality_profile_id, musicbrainz_release_group_id
                     FROM wishlist_tracks
                     WHERE profile_id = ?
                 """
@@ -16715,6 +16921,8 @@ class MusicDatabase:
                             'source_type': row['source_type'],
                             'source_info': source_info,
                             'quality_profile_id': row['quality_profile_id'],
+                            # filled in the background by the MusicBrainz worker
+                            'musicbrainz_release_group_id': row['musicbrainz_release_group_id'],
                         })
                     except json.JSONDecodeError as e:
                         logger.error(f"Error parsing wishlist track data: {e}")
@@ -21345,6 +21553,54 @@ class MusicDatabase:
             logger.error(f"Error deleting sync match cache row: {e}")
             return 0
 
+    def add_server_match_rejection(self, profile_id: int, server_source: str,
+                                   source_track_id: str, server_track_id: str) -> bool:
+        """Remember that this source track is NOT this library track."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO server_match_rejections "
+                    "(profile_id, server_source, source_track_id, server_track_id) VALUES (?, ?, ?, ?)",
+                    (profile_id, server_source or '', str(source_track_id), str(server_track_id)))
+            return True
+        except Exception as e:
+            logger.error(f"add_server_match_rejection error: {e}")
+            return False
+
+    def clear_server_match_rejection(self, profile_id: int, server_source: str,
+                                     source_track_id: str, server_track_id: str) -> int:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "DELETE FROM server_match_rejections WHERE profile_id = ? AND server_source = ?"
+                    " AND source_track_id = ? AND server_track_id = ?",
+                    (profile_id, server_source or '', str(source_track_id), str(server_track_id)))
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"clear_server_match_rejection error: {e}")
+            return 0
+
+    def get_server_match_rejections(self, profile_id: int, server_source: str,
+                                    source_track_ids) -> set:
+        """{(source_track_id, server_track_id)} rejected for these source ids."""
+        ids = [str(i) for i in (source_track_ids or []) if i]
+        if not ids:
+            return set()
+        out = set()
+        try:
+            with self._get_connection() as conn:
+                for start in range(0, len(ids), 500):
+                    chunk = ids[start:start + 500]
+                    rows = conn.execute(
+                        "SELECT source_track_id, server_track_id FROM server_match_rejections"
+                        " WHERE profile_id = ? AND server_source = ?"
+                        f" AND source_track_id IN ({','.join('?' for _ in chunk)})",
+                        [profile_id, server_source or ''] + chunk).fetchall()
+                    out.update((str(r[0]), str(r[1])) for r in rows)
+        except Exception as e:
+            logger.error(f"get_server_match_rejections error: {e}")
+        return out
+
     def invalidate_sync_match_cache(self, server_source: str = None) -> int:
         """Clear sync match cache entries. If server_source given, only clear that server's entries."""
         try:
@@ -24983,6 +25239,104 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"API: Error listing albums: {e}")
             return {"albums": [], "total": 0}
+
+    def api_download_activity(self, since: str = "", until: str = "") -> List[Dict[str, Any]]:
+        """Per-album completed-download aggregates for the MetaSync node.
+
+        One row per library album (keyed by its MusicBrainz release id) with
+        at least one completed download in track_downloads, joined through
+        the library tracks' file paths. Only IDs and counts leave the box —
+        no titles, no paths. ``since`` / ``until`` (ISO-8601) bound
+        ``completed_since``: how many of the album's downloads completed at
+        or after ``since`` and before ``until``. Without ``since`` the
+        window is open at the start, without ``until`` at the end; with
+        neither it equals ``completed_downloads``. The node reports a
+        closed week, so it passes both.
+
+        Albums whose tracks have left the library no longer join and drop
+        out of the result. That is by design: the node accumulates its own
+        download history from weekly reads, so a row disappearing is part
+        of the signal (see MetaSync DESIGN-DOWNLOAD-SIGNALS.md), not a gap.
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            scope_sql, scope_params = self._current_scope_sql('al.owner_profile_id')
+            since_norm = self._normalize_since(since) if since else ""
+            until_norm = self._normalize_since(until) if until else ""
+            cursor.execute(
+                f"""SELECT al.musicbrainz_release_id AS musicbrainz_release_id,
+                           COUNT(*) AS completed_downloads,
+                           SUM(CASE WHEN (? = '' OR td.created_at >= ?)
+                                     AND (? = '' OR td.created_at < ?)
+                                    THEN 1 ELSE 0 END) AS completed_since,
+                           MIN(td.created_at) AS first_downloaded_at,
+                           MAX(td.created_at) AS last_downloaded_at
+                    FROM track_downloads td
+                    JOIN tracks t ON t.file_path = td.file_path
+                    JOIN albums al ON al.id = t.album_id
+                    WHERE td.status = 'completed'
+                      AND td.file_path IS NOT NULL
+                      AND al.musicbrainz_release_id IS NOT NULL
+                      AND al.musicbrainz_release_id != ''
+                      AND {scope_sql}
+                    GROUP BY al.musicbrainz_release_id
+                    ORDER BY al.musicbrainz_release_id""",
+                [since_norm, since_norm, until_norm, until_norm] + scope_params,
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"API: Error reading download activity: {e}")
+            return []
+
+    def api_listening_activity(self, since: str, until: str) -> List[Dict[str, Any]]:
+        """Per-album listening aggregates for one window, for the MetaSync node.
+
+        One row per library album (keyed by its MusicBrainz release id) that
+        was played in ``[since, until)``: how many plays, how many distinct
+        tracks, on how many distinct days. Only IDs and counts leave the box —
+        no titles, no individual play times, no profile, no media server.
+
+        Only the SHARED pile (core.listening_scope.SHARED_OWNER) is read: the
+        plays the admin's own stats read. A profile with its own listening
+        account keeps its pile out of the admin's view, and out of this too —
+        the admin opting in to MetaSync never shares a housemate's personal
+        history. Plays that matched no library track (db_track_id NULL)
+        cannot be keyed and are skipped. See MetaSync DESIGN-LISTEN-SIGNALS.md;
+        the node applies the per-album threshold and the weekly cap, this
+        only counts.
+        """
+        from core.listening_scope import SHARED_OWNER
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            scope_sql, scope_params = self._current_scope_sql('al.owner_profile_id')
+            # played_at is stored canonical ("YYYY-MM-DD HH:MM:SS", UTC —
+            # core.listening_import.dedup.canonical_played_at) and both
+            # bounds are normalized to the same shape, so the range
+            # compares instants and can walk idx_listening_played_at.
+            cursor.execute(
+                f"""SELECT al.musicbrainz_release_id AS musicbrainz_release_id,
+                           COUNT(*) AS plays,
+                           COUNT(DISTINCT lh.db_track_id) AS distinct_tracks,
+                           COUNT(DISTINCT substr(lh.played_at, 1, 10)) AS distinct_days
+                    FROM listening_history lh
+                    JOIN tracks t ON t.id = lh.db_track_id
+                    JOIN albums al ON al.id = t.album_id
+                    WHERE lh.played_at >= ? AND lh.played_at < ?
+                      AND lh.profile_id = ?
+                      AND al.musicbrainz_release_id IS NOT NULL
+                      AND al.musicbrainz_release_id != ''
+                      AND {scope_sql}
+                    GROUP BY al.musicbrainz_release_id
+                    ORDER BY al.musicbrainz_release_id""",
+                [self._normalize_since(since), self._normalize_since(until), SHARED_OWNER]
+                + scope_params,
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"API: Error reading listening activity: {e}")
+            return []
 
     # ── MetaSync export ──────────────────────────────────────────────────
 

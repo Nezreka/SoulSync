@@ -127,6 +127,12 @@ class ConfigManager:
         # Other
         'hydrabase.api_key',
         'discogs.token',
+        # MetaSync (pool key is the user's SIN account key; the local API key
+        # is issued by their MetaSync node during pairing)
+        'metasync.pool_key',
+        'metasync.local_api_key',
+        # Sign in with OIDC
+        'security.oidc_client_secret',
     })
 
     def _get_fernet(self) -> Fernet:
@@ -575,6 +581,13 @@ class ConfigManager:
                 # editing source.
                 "album_bundle_poll_interval_seconds": 2.0,
                 "album_bundle_timeout_seconds": 6 * 60 * 60,    # 6 hours
+                # Let YouTube fetch a whole album from YouTube Music's own album
+                # playlist (artist + album must match) instead of searching for
+                # its songs one by one. Helps for albums whose songs the catalogue
+                # lists as unavailable. Off by default: it changes how every
+                # YouTube album is fetched. Only applies where YouTube is a
+                # source in the chain; a miss falls back to the per-track flow.
+                "youtube_album_bundle": False,
                 # Stalled-torrent handling (noldevin): abandon a torrent that
                 # makes zero download progress for this long (dead magnet
                 # stuck on "downloading metadata", no seeders) instead of

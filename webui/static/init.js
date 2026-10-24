@@ -1945,10 +1945,24 @@ function showProfileForgotPin(profile) {
 // the last select answer, so a failed pick can say why
 let _pfLastSelect = null;
 
+// Reconnect the socket so its new handshake carries the CURRENT session
+// cookie: Flask-SocketIO freezes the session at connect time, so after
+// anything that changes this browser's session server-side (profile
+// switch, own-password change, "sign out everywhere" — the server keeps
+// THIS browser signed in under a new epoch) the existing socket would
+// keep acting on, and being revocation-checked against, the stale
+// session (#1837). The connect handler re-joins rooms and re-subscribes.
+function pfReconnectSocket() {
+    if (!socket) return;
+    // the revocation sweep can drop the old socket before this runs, and a
+    // server-side drop never auto-reconnects, so connect either way
+    if (socket.connected) socket.disconnect();
+    socket.connect();
+}
+
 async function selectProfile(profileId) {
     _pfLastSelect = null;
     try {
-        const oldProfileId = currentProfile ? currentProfile.id : null;
         const res = await fetch('/api/profiles/select', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1958,10 +1972,9 @@ async function selectProfile(profileId) {
         _pfLastSelect = data;
         if (data.success) {
             setCurrentProfile(data.profile);
-            // Join profile-scoped WebSocket room for watchlist/wishlist count updates
-            if (socket && socket.connected) {
-                socket.emit('profile:join', { profile_id: profileId, old_profile_id: oldProfileId });
-            }
+            // New handshake for the switched profile's session (#1837);
+            // the connect handler re-joins the profile room.
+            pfReconnectSocket();
             // Invalidate ListenBrainz cache on profile switch (each profile has their own playlists)
             _invalidateListenBrainzCache();
         }
@@ -2848,6 +2861,9 @@ async function signOutProfileEverywhere(p) {
         const res = await fetch(`/api/profiles/${p.id}/sign-out-everywhere`, { method: 'POST' });
         const data = await pfReadJson(res);
         if (!res.ok || !data.success) throw new Error(data.error || "Couldn't sign out");
+        // self: the server kept THIS browser signed in under the new epoch —
+        // re-handshake so the socket isn't dropped as revoked (#1837)
+        if (isSelf) pfReconnectSocket();
         showToast(isSelf ? 'Other devices are signed out' : `${p.name} is signed out everywhere`, 'success');
         return true;
     } catch (e) {
@@ -3014,6 +3030,9 @@ function openProfilePasswordModal(p) {
         });
         const data = await pfReadJson(res);
         if (!res.ok || !data.success) throw new Error(data.error || "Couldn't save the password");
+        // own password changed: this browser stays signed in under a new
+        // epoch — re-handshake so the socket isn't dropped as revoked (#1837)
+        if (currentProfile && currentProfile.id === p.id) pfReconnectSocket();
     };
     if (p.has_password) {
         const remove = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--quiet', text: 'Remove password', style: 'margin-right:auto' });
@@ -3848,6 +3867,7 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
         if (isSelf && st.password) {
             try {
                 const data = await send(`/api/profiles/${targetId}/set-password`, 'POST', { password: st.password });
+                pfReconnectSocket();   // own password: new epoch, re-handshake (#1837)
                 saved.push('login password');
                 currentProfile.has_password = !!data.has_password;
             } catch (e) {

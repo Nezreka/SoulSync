@@ -66,6 +66,7 @@ import { URL_HISTORY_SOURCES } from '../-sync.urls';
 import { fetchAndHydrateState } from '../-sync.use-vertical';
 import { cardProgressLine } from './card-progress';
 import { playlistArtUrl } from './playlist-art';
+import { PlaylistSearch, noMatchText, playlistNameMatches } from './playlist-search';
 import { SourceCard } from './source-card';
 import { UrlHistoryBar, useUrlHistory } from './url-history-bar';
 
@@ -289,6 +290,7 @@ function LinkTabShell({
   onOpen: (sourceId: string, playlist: UrlTabPlaylist) => void;
   historyOps: ReturnType<typeof useUrlHistory>;
 }) {
+  const [query, setQuery] = useState('');
   return (
     <div>
       <UrlInputSection
@@ -316,11 +318,19 @@ function LinkTabShell({
         }}
         onRemove={historyOps.remove}
       />
+      {playlists.length > 0 && (
+        <div className="playlist-header">
+          <PlaylistSearch value={query} onChange={setQuery} />
+        </div>
+      )}
       <div className="playlist-scroll-container" id={chrome.containerId}>
         {playlists.length === 0 ? (
           <div className="playlist-placeholder">{chrome.emptyPlaceholder}</div>
+        ) : !playlists.some((p) => playlistNameMatches([p.name], query)) ? (
+          <div className="playlist-placeholder">{noMatchText(query)}</div>
         ) : (
           playlists.map((p) => {
+            if (!playlistNameMatches([p.name], query)) return null;
             const id = idOf(p);
             const state = vertical.states[id] ?? freshSourceState(config, id);
             const trackCount =
@@ -706,6 +716,7 @@ export function YouTubeTab({
   const [playlists, setPlaylists] = useRememberedPlaylists(urlTabCacheKey('youtube'));
   /** In-flight parses — each renders the vanilla's temp 'Parsing…' card (8879). */
   const [pendingUrls, setPendingUrls] = useState<string[]>([]);
+  const [query, setQuery] = useState('');
   const [input, setInput] = useState('');
   const historyOps = useUrlHistory('youtube');
   const playlistsRef = useRef(playlists);
@@ -843,12 +854,22 @@ export function YouTubeTab({
         }}
         onRemove={historyOps.remove}
       />
+      {playlists.length > 0 && (
+        <div className="playlist-header">
+          <PlaylistSearch value={query} onChange={setQuery} />
+        </div>
+      )}
       <div className="playlist-scroll-container" id="youtube-playlist-container">
         {playlists.length === 0 && pendingUrls.length === 0 ? (
           <div className="playlist-placeholder">Parsed YouTube playlists will appear here.</div>
         ) : (
           <>
+            {pendingUrls.length === 0 &&
+              !playlists.some((p) => playlistNameMatches([p.name], query)) && (
+                <div className="playlist-placeholder">{noMatchText(query)}</div>
+              )}
             {playlists.map((p) => {
+              if (!playlistNameMatches([p.name], query)) return null;
               const urlHash = String(p.url_hash);
               const state = vertical.states[urlHash] ?? freshSourceState(config, urlHash);
               const tracks = Array.isArray(p.tracks) ? (p.tracks as unknown[]) : [];

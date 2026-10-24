@@ -33,6 +33,7 @@ const SECTION_LABELS: Record<DiscoverSectionId, string> = {
   'lastfm-radio': 'Last.fm Radio',
   listenbrainz: 'ListenBrainz',
   'deezer-editorial': 'Deezer Editorial',
+  'sin-charts': 'SoulSync Charts',
   'build-a-playlist': 'Build a Playlist',
 };
 

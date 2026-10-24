@@ -109,6 +109,7 @@
             (opts.title ? '<div class="vreq-sheet-sub">' + esc(opts.title) + '</div>' : '') + '</div>' +
             (show ? '<div class="vreq-choices">' + choices + '</div>' : '') +
             qualitySelectHtml(opts.profiles, opts.quality) +
+            (show && opts.typeFor ? '<div data-vreq-type-row hidden></div>' : '') +
             '<div class="vreq-sheet-foot">' +
                 '<button type="button" class="vreq-btn vreq-btn--ghost" data-vreq-sheet-cancel>Cancel</button>' +
                 '<button type="button" class="vreq-btn vreq-btn--primary" data-vreq-sheet-go>' + esc(opts.confirm || 'Request') + '</button>' +
@@ -126,13 +127,43 @@
                 }
                 if (e.target.closest('[data-vreq-sheet-go]')) {
                     var sel = sheet.querySelector('[data-vreq-quality]');
-                    close({ monitor: picked, quality_profile_id: sel ? (Number(sel.value) || 0) : 0 });
+                    var typ = sheet.querySelector('[data-vreq-type]');
+                    var out = { monitor: picked, quality_profile_id: sel ? (Number(sel.value) || 0) : 0 };
+                    if (typ) out.series_type = typ.value;   // only when the File-as row showed
+                    close(out);
                 }
             });
+            if (show && opts.typeFor) fillTypeRow(sheet, opts.typeFor);
             var on = sheet.querySelector('.vreq-choice.is-on') || sheet.querySelector('[data-vreq-choice]') ||
                 sheet.querySelector('[data-vreq-quality]') || sheet.querySelector('[data-vreq-sheet-go]');
             if (on) on.focus();
         });
+    }
+
+    // Approve sheet (admin): for a show not in the library yet, which folder
+    // its episodes are filed in. Pre-set to the stored type (TMDB's suggestion,
+    // fetched now if there is none). Shown only when an Anime folder is set; a
+    // show in the library follows its library instead.
+    var TYPE_LABELS = { standard: 'TV', anime: 'Anime', daily: 'Daily' };
+    function fillTypeRow(sheet, tmdbId) {
+        fetch('/api/video/detail/tmdb/show/' + encodeURIComponent(tmdbId) + '/series-type?suggest=1',
+            { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (t) {
+                var row = sheet.querySelector('[data-vreq-type-row]');
+                if (!row || !t || t.owned || !t.anime_folder) return;
+                row.innerHTML =
+                    '<label class="vreq-sheet-label vreq-sheet-label--gap" for="vreq-type-in">File as' +
+                    (t.source === 'hint-tmdb' ? ' <span class="vreq-sheet-note">(TMDB\u2019s suggestion)</span>' : '') +
+                    '</label>' +
+                    '<select id="vreq-type-in" class="vreq-sheet-select" data-vreq-type>' +
+                    ['standard', 'anime', 'daily'].map(function (v) {
+                        return '<option value="' + v + '"' + (v === t.series_type ? ' selected' : '') + '>' +
+                            esc(TYPE_LABELS[v]) + '</option>';
+                    }).join('') + '</select>';
+                row.hidden = false;
+            })
+            .catch(function () { /* the server stores TMDB's suggestion on approve anyway */ });
     }
 
     // resolves the chosen monitor id, or null when cancelled
@@ -520,6 +551,7 @@
         var body = {};
         if (opts.monitor) body.monitor = opts.monitor;
         if (Number(opts.quality_profile_id) > 0) body.quality_profile_id = Number(opts.quality_profile_id);
+        if (opts.series_type) body.series_type = opts.series_type;
         return act('/api/video/requests/' + g.rows[0].id + '/approve', 'POST', body, function (j) {
             var who = (j.approved || 0) > 1 ? 'Everyone who asked' : (isAdmin() && g.rows[0].requester_name) || 'They';
             if (j.kind === 'movie') return 'Approved. ' + who + ' will hear when it lands';
@@ -675,7 +707,8 @@
             else if (which === 'seasons') {
                 pickRequest({ kind: g.kind, title: g.title, current: g.monitor || 'all',
                     heading: g.kind === 'show' ? 'Approve which seasons?' : 'Approve at which quality?',
-                    confirm: 'Approve', profiles: profilesCache.list, quality: g.quality_profile_id })
+                    confirm: 'Approve', profiles: profilesCache.list, quality: g.quality_profile_id,
+                    typeFor: g.kind === 'show' ? g.tmdb_id : null })
                     .then(function (res) { if (res) approve(g, res); });
             }
         });

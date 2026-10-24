@@ -78,6 +78,17 @@ function syncRetryConditionalRows() {
 }
 window.syncRetryConditionalRows = syncRetryConditionalRows;
 
+// Sign in with OIDC: the provider's settings (and the admin's connect row
+// inside them) only mean something while the toggle is on, so they hide when
+// it is off. Hidden fields keep their values and still save, so switching
+// OIDC off and on again loses nothing.
+function syncOidcProviderBlock() {
+    const toggle = document.getElementById('security-oidc-signin');
+    const block = document.getElementById('security-oidc-provider');
+    if (block) block.hidden = !(toggle && toggle.checked);
+}
+window.syncOidcProviderBlock = syncOidcProviderBlock;
+
 // Every Settings -> Quality control belongs to the profile currently shown in
 // the editor. Keep this list separate from ordinary app settings so a quality
 // edit uses the profile endpoint (and does not re-initialize every service
@@ -519,8 +530,8 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation', '$label'],
-        single: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality'],
+        album: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation', '$label', '$explicit', '$contentrating', '$contentratingfull', '$albumartistdisambiguation', '$albumartistcountry', '$albumartistgenre', '$albumartistinfo', '$albumartistclash', '$artistdisambiguation', '$artistcountry', '$artistgenre', '$artistinfo', '$artistclash'],
+        single: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality', '$explicit', '$contentrating', '$contentratingfull', '$albumartistdisambiguation', '$albumartistcountry', '$albumartistgenre', '$albumartistinfo', '$albumartistclash', '$artistdisambiguation', '$artistcountry', '$artistgenre', '$artistinfo', '$artistclash'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
         video: ['$artist', '$artistletter', '$title', '$year'],
         podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type'],
@@ -1169,6 +1180,9 @@ function switchSettingsTab(tab) {
     }
     if (tab === 'advanced' && typeof loadSidebarWeatherSettings === 'function') {
         try { loadSidebarWeatherSettings(); } catch (e) { }
+    }
+    if (tab === 'advanced' && typeof loadMetaSyncSettings === 'function') {
+        try { loadMetaSyncSettings(); } catch (e) { }
     }
     // First time the Downloads tab is shown, auto-probe source status so the
     // dots reflect real connection state without a manual "Test all sources".
@@ -3206,6 +3220,8 @@ async function loadSettingsData() {
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
         markUnsupportedCookieBrowsers(!!(settings._environment && settings._environment.windows));
         document.getElementById('youtube-download-delay').value = settings.youtube?.download_delay ?? 3;
+        const _ytAlbumBundle = document.getElementById('youtube-album-bundle');
+        if (_ytAlbumBundle) _ytAlbumBundle.checked = settings.download_source?.youtube_album_bundle === true;
         const _ytTranscode = document.getElementById('youtube-transcode');
         const _ytTranscodeOpts = document.getElementById('youtube-transcode-options');
         if (_ytTranscode) {
@@ -3642,6 +3658,30 @@ async function loadSettingsData() {
             if (plexCreate) plexCreate.checked = settings.security?.plex_signin_auto_create !== false;
             const plexDl = document.getElementById('security-plex-signin-can-download');
             if (plexDl) plexDl.checked = settings.security?.plex_signin_default_can_download || false;
+            const oidcOn = document.getElementById('security-oidc-signin');
+            if (oidcOn) oidcOn.checked = settings.security?.oidc_signin || false;
+            syncOidcProviderBlock();
+            for (const [id, key] of [
+                ['security-oidc-issuer', 'oidc_issuer'],
+                ['security-oidc-client-id', 'oidc_client_id'],
+                ['security-oidc-client-secret', 'oidc_client_secret'],
+                ['security-oidc-button-label', 'oidc_button_label'],
+                ['security-oidc-icon-url', 'oidc_icon_url'],
+                ['security-oidc-required-group', 'oidc_required_group'],
+                ['security-oidc-groups-claim', 'oidc_groups_claim'],
+                ['security-oidc-scopes', 'oidc_scopes'],
+                ['security-oidc-redirect-uri', 'oidc_redirect_uri'],
+            ]) {
+                const el = document.getElementById(id);
+                if (el) el.value = settings.security?.[key] || '';
+            }
+            const oidcCreate = document.getElementById('security-oidc-signin-auto-create');
+            if (oidcCreate) oidcCreate.checked = settings.security?.oidc_signin_auto_create !== false;
+            const oidcDl = document.getElementById('security-oidc-signin-can-download');
+            if (oidcDl) oidcDl.checked = settings.security?.oidc_signin_default_can_download || false;
+            // the address to register at the provider, as this browser sees it
+            const oidcCb = document.getElementById('security-oidc-callback-url');
+            if (oidcCb) oidcCb.textContent = window.location.origin + '/api/auth/oidc/callback';
             const signupSides = document.getElementById('security-signup-sides');
             if (signupSides) {
                 const sides = settings.security?.signup_sides;
@@ -6499,6 +6539,9 @@ async function saveSettings(quiet = false) {
             // downloads (#857). Rendered in the torrent/usenet client sections.
             torrent_download_path: _cfgStr('torrent-download-path'),
             usenet_download_path: _cfgStr('usenet-download-path'),
+            // #1851: fetch an album through its YouTube Music playlist. Rendered
+            // in the YouTube section; it lives here because the album flow reads it.
+            youtube_album_bundle: _cfgBool('youtube-album-bundle'),
         },
         tidal_download: {
             // quality derived from the global Quality Profile (ranked targets); allow_fallback always true
@@ -6804,6 +6847,18 @@ async function saveSettings(quiet = false) {
             plex_signin: _cfgBool('security-plex-signin'),
             plex_signin_auto_create: _cfgBool('security-plex-signin-auto-create'),
             plex_signin_default_can_download: _cfgBool('security-plex-signin-can-download'),
+            oidc_signin: _cfgBool('security-oidc-signin'),
+            oidc_issuer: _cfgStr('security-oidc-issuer', { trim: true }),
+            oidc_client_id: _cfgStr('security-oidc-client-id', { trim: true }),
+            oidc_client_secret: _cfgStr('security-oidc-client-secret'),
+            oidc_button_label: _cfgStr('security-oidc-button-label', { trim: true }),
+            oidc_icon_url: _cfgStr('security-oidc-icon-url', { trim: true }),
+            oidc_required_group: _cfgStr('security-oidc-required-group', { trim: true }),
+            oidc_groups_claim: _cfgStr('security-oidc-groups-claim', { trim: true }),
+            oidc_scopes: _cfgStr('security-oidc-scopes', { trim: true }),
+            oidc_redirect_uri: _cfgStr('security-oidc-redirect-uri', { trim: true }),
+            oidc_signin_auto_create: _cfgBool('security-oidc-signin-auto-create'),
+            oidc_signin_default_can_download: _cfgBool('security-oidc-signin-can-download'),
             signup_sides: _cfgStr('security-signup-sides', { fallback: 'music' }),
             signup_request_limit: _cfgInt('security-signup-request-limit', 0),
             signup_request_limit_days: _cfgInt('security-signup-request-limit-days', 7),
@@ -9160,6 +9215,273 @@ async function saveSidebarWeatherUnits() {
         }
     } catch (e) {
         if (typeof showToast === 'function') showToast('Could not update units: ' + e.message, 'error');
+    }
+}
+
+// == METASYNC (Advanced tab)               ==
+// Connection to the local MetaSync node: pairing (or a pasted local API
+// key), the pool key SoulSync holds and hands over, live status, and
+// disconnect. All calls go to SoulSync's own /api/metasync endpoints — the
+// server talks to the node, so the browser never has to reach it. Stored
+// secrets are never sent back here: the key fields only ever carry what
+// the user just typed, and an empty field on save means "unchanged".
+
+async function _msApi(method, path, body) {
+    const resp = await fetch('/api/metasync' + path, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    return resp.json();
+}
+
+function _msStatus(text) {
+    const el = document.getElementById('metasync-status');
+    if (el) el.textContent = text;
+}
+
+function _msDetail(html) {
+    const el = document.getElementById('metasync-status-detail');
+    if (el) el.innerHTML = html;
+}
+
+function _msEscape(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
+}
+
+let _msAutoDetectTried = false;
+
+// Ask SoulSync to probe the usual places for the MetaSync node. On a find,
+// fill the URL field and return the URL; on no find, return '' and stay
+// quiet — the manual field remains the fallback either way.
+async function metasyncDetect() {
+    try {
+        const data = await _msApi('POST', '/detect');
+        if (data && data.success && data.found && data.node_url) {
+            const field = document.getElementById('metasync-node-url');
+            if (field) field.value = data.node_url;
+            return data.node_url;
+        }
+    } catch (e) {
+        console.error('metasync detect failed', e);
+    }
+    return '';
+}
+
+// Auto-detect runs once per page load, and only while there is nothing to
+// lose: no connection stored yet and no URL typed or saved. A find fills
+// the field and says so; finding nothing changes nothing on screen.
+async function _msMaybeAutoDetect(view) {
+    if (_msAutoDetectTried || view.local_key_set) return;
+    const field = document.getElementById('metasync-node-url');
+    if (!field || field.value.trim()) return;
+    _msAutoDetectTried = true;
+    const found = await metasyncDetect();
+    if (found) _msStatus('Found MetaSync on this machine at ' + found + ' — click Connect to pair with it.');
+}
+
+async function loadMetaSyncSettings() {
+    try {
+        const data = await _msApi('GET', '');
+        if (!data || data.success !== true) {
+            _msStatus('Could not load MetaSync settings');
+            return;
+        }
+        const nodeUrl = document.getElementById('metasync-node-url');
+        if (nodeUrl && document.activeElement !== nodeUrl) nodeUrl.value = data.node_url || '';
+        const poolUrl = document.getElementById('metasync-pool-url');
+        if (poolUrl && document.activeElement !== poolUrl) poolUrl.value = data.pool_url || '';
+        const poolKey = document.getElementById('metasync-pool-key');
+        if (poolKey) {
+            poolKey.placeholder = data.pool_key_set
+                ? 'Saved — type a new key only to replace it'
+                : 'Your pool account key';
+        }
+        const state = document.getElementById('metasync-connect-state');
+        if (state) {
+            state.textContent = data.local_key_set
+                ? 'Connected' + (data.node_fingerprint ? ' — MetaSync ID ' + data.node_fingerprint : '')
+                : 'Not connected';
+        }
+        await refreshMetaSyncStatus();
+        await _msMaybeAutoDetect(data);
+    } catch (e) {
+        console.error('metasync settings load failed', e);
+        _msStatus('Could not load MetaSync settings');
+    }
+}
+
+async function saveMetaSyncSettings() {
+    const body = {
+        node_url: document.getElementById('metasync-node-url')?.value.trim() || '',
+        pool_url: document.getElementById('metasync-pool-url')?.value.trim() || '',
+    };
+    const poolKey = document.getElementById('metasync-pool-key')?.value.trim();
+    if (poolKey) body.pool_key = poolKey;
+    const localKey = document.getElementById('metasync-local-key')?.value.trim();
+    if (localKey) body.local_api_key = localKey;
+    try {
+        const data = await _msApi('PUT', '/settings', body);
+        if (data.success) {
+            if (typeof showToast === 'function') showToast('MetaSync settings saved', 'success');
+            const pk = document.getElementById('metasync-pool-key');
+            if (pk) pk.value = '';
+            const lk = document.getElementById('metasync-local-key');
+            if (lk) lk.value = '';
+            loadMetaSyncSettings();
+        } else if (typeof showToast === 'function') {
+            showToast(data.error || 'Could not save MetaSync settings', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not save MetaSync settings: ' + e.message, 'error');
+    }
+}
+
+async function metasyncPairRequest() {
+    // persist the node URL with the request so claim/handoff use the same one
+    let nodeUrl = document.getElementById('metasync-node-url')?.value.trim() || '';
+    if (!nodeUrl) {
+        // Nothing typed — try to find the node before asking the user for it.
+        nodeUrl = await metasyncDetect();
+    }
+    if (!nodeUrl) {
+        if (typeof showToast === 'function') showToast('Enter the MetaSync URL first', 'error');
+        return;
+    }
+    try {
+        const data = await _msApi('POST', '/pair/request', { node_url: nodeUrl });
+        if (!data.success) {
+            if (typeof showToast === 'function') showToast(data.error || 'Pairing request failed', 'error');
+            return;
+        }
+        const box = document.getElementById('metasync-pair-box');
+        if (box) box.style.display = '';
+        const code = document.getElementById('metasync-pair-code');
+        if (code) code.textContent = data.pairing_code || '';
+        const fp = document.getElementById('metasync-pair-fingerprint');
+        if (fp) fp.textContent = data.node_fingerprint || '';
+        if (typeof showToast === 'function') showToast('Approve the pairing in the MetaSync dashboard', 'success');
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Pairing request failed: ' + e.message, 'error');
+    }
+}
+
+async function metasyncPairClaim() {
+    try {
+        const data = await _msApi('POST', '/pair/claim');
+        if (data.success) {
+            if (typeof showToast === 'function') showToast('MetaSync connected', 'success');
+            const box = document.getElementById('metasync-pair-box');
+            if (box) box.style.display = 'none';
+            loadMetaSyncSettings();
+        } else if (typeof showToast === 'function') {
+            showToast(data.error || 'Could not finish connecting', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not finish connecting: ' + e.message, 'error');
+    }
+}
+
+async function metasyncHandoff() {
+    // unsaved field values ride along; the server persists what it used
+    const body = {
+        pool_url: document.getElementById('metasync-pool-url')?.value.trim() || '',
+    };
+    const poolKey = document.getElementById('metasync-pool-key')?.value.trim();
+    if (poolKey) body.pool_key = poolKey;
+    try {
+        const data = await _msApi('POST', '/handoff', body);
+        if (!data.success) {
+            if (typeof showToast === 'function') showToast(data.error || 'Handoff failed', 'error');
+            return;
+        }
+        if (data.exchange_status === 'bound') {
+            if (typeof showToast === 'function') showToast('Pool key handed over — MetaSync is bound to the pool', 'success');
+        } else if (data.exchange_status === 'binding_pending') {
+            if (typeof showToast === 'function') showToast('Pool key handed over — waiting for approval in the portal', 'warning');
+        } else if (data.exchange_status === 'error') {
+            if (typeof showToast === 'function') showToast('Pool key handed over, but the pool exchange failed: ' + (data.exchange_error || 'unknown error'), 'error');
+        } else {
+            if (typeof showToast === 'function') showToast('Pool key handed over to MetaSync', 'success');
+        }
+        loadMetaSyncSettings();
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Handoff failed: ' + e.message, 'error');
+    }
+}
+
+// The node's binding words, in plain language for the status readout.
+const _MS_BINDING_TEXT = {
+    bound: 'Bound to the pool',
+    pending_approval: 'Waiting for approval in the portal',
+    auth_failed: 'Pool authentication failed',
+    unbound: 'Not bound yet',
+    not_checked: 'Not checked yet',
+    not_connected: 'No pool key on MetaSync',
+    not_applicable: 'Direct key (no binding)',
+};
+
+async function refreshMetaSyncStatus() {
+    try {
+        const data = await _msApi('GET', '/status');
+        if (!data || data.success !== true) {
+            _msStatus((data && data.error) || 'MetaSync status unavailable');
+            _msDetail('');
+            return;
+        }
+        const s = data.status || {};
+        _msStatus('Step 1: connected — MetaSync ' + (s.version || '') +
+            (s.soulsync_connected ? ' is reading this SoulSync' : ' is not reading this SoulSync yet'));
+        const lines = [];
+        if (s.node_fingerprint) lines.push('MetaSync ID: ' + _msEscape(s.node_fingerprint) +
+            ' (the same ID MetaSync shows in its dashboard)');
+        const pools = Array.isArray(s.pools) ? s.pools : [];
+        if (!pools.length) {
+            lines.push('Step 2: no pool joined yet — send your pool key above to join one.');
+        }
+        pools.forEach(p => {
+            const binding = _MS_BINDING_TEXT[p.binding_status] || p.binding_status || 'Unknown';
+            let line = 'Pool — ' + _msEscape(p.name || p.id || 'Pool') + ' (' + _msEscape(p.url || '') + '): ' +
+                _msEscape(binding);
+            if (p.last_exchange_error) line += ' — last error: ' + _msEscape(p.last_exchange_error);
+            lines.push(line);
+        });
+        if (s.pairing_status === 'pending') lines.push('A pairing request is waiting for approval in the MetaSync dashboard.');
+        _msDetail(lines.join('<br>'));
+    } catch (e) {
+        _msStatus('MetaSync status unavailable');
+        _msDetail('');
+    }
+}
+
+async function metasyncDisconnect() {
+    const ok = await showConfirmDialog({
+        title: 'Disconnect MetaSync?',
+        message: 'The pool key on MetaSync is cleared and the SoulSync key it holds is revoked. ' +
+            'Your pool key stays saved here.',
+        confirmText: 'Disconnect',
+        cancelText: 'Cancel',
+        destructive: true
+    });
+    if (!ok) return;
+    try {
+        const data = await _msApi('POST', '/disconnect');
+        if (data.success) {
+            if (typeof showToast === 'function') {
+                showToast(data.node_notified
+                    ? 'MetaSync disconnected'
+                    : 'Disconnected here — MetaSync could not be reached, so clear its pool key from its dashboard too', 'success');
+            }
+            const box = document.getElementById('metasync-pair-box');
+            if (box) box.style.display = 'none';
+            loadMetaSyncSettings();
+        } else if (typeof showToast === 'function') {
+            showToast(data.error || 'Disconnect failed', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Disconnect failed: ' + e.message, 'error');
     }
 }
 

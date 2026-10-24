@@ -402,6 +402,19 @@ def _resolve_canonical_album_completion(db, db_album: Any,
     }
 
 
+def _routed_owned_tracks(db: Any, album_name: str, artist_name: str) -> int:
+    """Tracks on disk for an audiobook-routed artist's album, 0 when unknown."""
+    lookup = getattr(db, 'routed_album_owned_tracks', None)
+    if not callable(lookup):
+        return 0
+    try:
+        count = lookup(album_name, artist_name)
+    except Exception:
+        logger.debug("routed album ownership check failed", exc_info=True)
+        return 0
+    return count if isinstance(count, int) else 0
+
+
 def check_album_completion(
     db,
     album_data: Dict[str, Any],
@@ -490,6 +503,22 @@ def check_album_completion(
                         owned_tracks, expected_tracks, is_complete, formats = db.check_album_completeness(
                             _proven.id, total_tracks if total_tracks > 0 else None)
                 else:
+                    # An artist routed to the audiobook library has no album row
+                    # but a download ledger; credit what is still on disk.
+                    routed_owned = _routed_owned_tracks(db, album_name, artist_name)
+                    if routed_owned:
+                        expected = total_tracks or routed_owned
+                        return {
+                            "id": album_id,
+                            "name": album_name,
+                            "status": "completed" if routed_owned >= expected else "partial",
+                            "owned_tracks": routed_owned,
+                            "expected_tracks": expected,
+                            "completion_percentage": round(min(routed_owned / expected, 1) * 100, 1),
+                            "confidence": 1.0,
+                            "found_in_db": False,
+                            "formats": [],
+                        }
                     # Album is not in the library at all — mark missing immediately without
                     # making expensive external HTTP calls to count tracks on an unowned album.
                     return {

@@ -34,9 +34,9 @@ function makeWrapper() {
 }
 
 describe('defaultDiscoverLayout', () => {
-  it('is the current page order: 20 sections, all enabled', () => {
+  it('is the current page order: 21 sections, all enabled', () => {
     const entries = defaultDiscoverLayout();
-    expect(entries).toHaveLength(20);
+    expect(entries).toHaveLength(21);
     expect(entries.every((e) => e.enabled)).toBe(true);
     expect(entries.map((e) => e.id)).toEqual([
       'your-mixes-section',
@@ -45,6 +45,7 @@ describe('defaultDiscoverLayout', () => {
       'listening-recs-section',
       'recommended-artists-section',
       'discover-bylt-sections',
+      'sin-charts',
       'recent-releases',
       'cache-genre-releases',
       'seasonal-albums-section',
@@ -75,6 +76,7 @@ describe('layoutSectionsByZone', () => {
       'discover-bylt-sections',
     ]);
     expect(byZone['new-missing']).toEqual([
+      'sin-charts',
       'recent-releases',
       'cache-genre-releases',
       'seasonal-albums-section',

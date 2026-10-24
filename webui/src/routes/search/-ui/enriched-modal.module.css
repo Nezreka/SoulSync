@@ -180,7 +180,7 @@
 .error {
   margin: 0;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: rgba(248, 113, 113, 0.1);
   color: #fca5a5;
   font-size: 13px;
@@ -198,13 +198,13 @@
   min-width: 0;
   padding: 10px;
   border: 1px solid var(--white-a07);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--em-raised);
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease;
 }
 
 .candidate:hover {

@@ -532,9 +532,99 @@ def _first_album_artist_id(album_ctx) -> str:
     return str(first.get("id") or "").strip() if isinstance(first, dict) else ""
 
 
+def explicit_flag(value) -> Optional[bool]:
+    """True / False when the source said explicit or not, None when it didn't say.
+
+    sources spell it as a bool, 0/1, or apple's trackExplicitness words."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in ("true", "1", "yes", "explicit"):
+            return True
+        if word in ("false", "0", "no", "notexplicit", "cleaned", "clean"):
+            return False
+    return None
+
+
+# longest first: $contentratingfull starts with $contentrating
+_CONTENT_RATING_TOKENS = ("contentratingfull", "contentrating", "explicit")
+
+
+def _content_rating_values(flag: Optional[bool]) -> dict:
+    if flag is True:
+        return {"explicit": "[E]", "contentrating": "[E]", "contentratingfull": "[Explicit]"}
+    if flag is False:
+        return {"explicit": "", "contentrating": "[C]", "contentratingfull": "[Clean]"}
+    return {"explicit": "", "contentrating": "", "contentratingfull": ""}
+
+
+def apply_content_rating(template: str, track_explicit=None, album_explicit=None) -> str:
+    """Fill $explicit, $contentrating and $contentratingfull (#1860).
+
+    the filename reads the track's flag, folders read the album's: tracks of
+    one album can differ, and a per-track value in a folder would split the
+    album across two directories. unknown renders nothing, never a guess."""
+    if not template or "$" not in template:
+        return template
+    folder, sep, filename = template.rpartition("/")
+
+    def fill(part, flag):
+        values = _content_rating_values(explicit_flag(flag))
+        for name in _CONTENT_RATING_TOKENS:
+            part = part.replace("${" + name + "}", values[name]).replace("$" + name, values[name])
+        return part
+
+    if not sep:
+        return fill(template, track_explicit)
+    return fill(folder, album_explicit) + sep + fill(filename, track_explicit)
+
+
+# #1859: what tells same-named artists apart. replaced before $albumartist and
+# $artist, which would otherwise eat the front of these names.
+_ARTIST_FACT_NAMES = ("disambiguation", "country", "genre", "info", "clash")
+_ARTIST_FACT_RE = re.compile(r"\$\{?(?:albumartist|artist)(?:disambiguation|country|genre|info|clash)(?![a-z])")
+
+
+def apply_artist_facts(template: str, album_artist: str, track_artist: str, context: dict) -> str:
+    """Fill $albumartist{disambiguation,country,genre,info,clash} and the
+    $artist... set for the track artist.
+
+    info is the first of disambiguation, country, genre. clash is info, but
+    only when another artist in the library has the same name, so unique
+    artists keep a plain folder. all of it comes from what enrichment
+    stored; an artist the library doesn't know renders nothing."""
+    if not template or not _ARTIST_FACT_RE.search(template):
+        return template
+    from core.imports.artist_facts import artist_facts, info_chain
+    album = artist_facts(album_artist, mbid=context.get("_albumartist_mbid"),
+                         source=context.get("_albumartist_source"),
+                         source_id=context.get("_albumartist_source_id"))
+    same = str(track_artist or "").casefold() == str(album_artist or "").casefold()
+    track = album if same else artist_facts(track_artist)
+    result = template
+    for prefix, facts in (("albumartist", album), ("artist", track)):
+        info = info_chain(facts)
+        values = {
+            "disambiguation": facts.get("disambiguation", ""),
+            "country": facts.get("country", ""),
+            "genre": facts.get("genre", ""),
+            "info": info,
+            "clash": info if facts.get("clash") else "",
+        }
+        for name in _ARTIST_FACT_NAMES:
+            value = sanitize_filename(values[name]) if values[name] else ""
+            result = result.replace("${" + prefix + name + "}", value)
+            result = re.sub(r"\$" + prefix + name + r"(?![a-z])", lambda _m, v=value: v, result)
+    return result
+
+
 def _replace_template_variables(template: str, context: dict) -> str:
     clean_context = sanitize_context_values(context)
-    result = template
+    result = apply_content_rating(template, context.get("explicit"), context.get("album_explicit"))
+    template = result
 
     album_artist_value = clean_context.get("albumartist", clean_context.get("artist", "Unknown Artist"))
     collab_mode = _get_config_manager().get("file_organization.collab_artist_mode", "first")
@@ -590,6 +680,13 @@ def _replace_template_variables(template: str, context: dict) -> str:
     else:
         letter_artist_name = clean_context.get("artist", "U")
     artist_letter_value = artist_letter(letter_artist_name)
+
+    # the name the library knows the album artist by: the raw one, since the
+    # sanitized folder name ("AC_DC") isn't what the artists table holds
+    _facts_album_artist = (
+        str(context.get("albumartist") or context.get("artist") or "")
+        if album_artist_value == clean_context.get("albumartist") else album_artist_value)
+    result = apply_artist_facts(result, _facts_album_artist, context.get("artist"), context)
 
     bracket_map = {
         "albumartist": album_artist_value,
@@ -1076,6 +1173,17 @@ def _configured_root_dirs() -> set[str]:
     return roots
 
 
+def _artist_identity(artist_context, source) -> dict:
+    """the ids that pin down which library artist this is (#1859)."""
+    if not isinstance(artist_context, dict):
+        return {}
+    return {
+        "_albumartist_mbid": str(artist_context.get("musicbrainz_id") or ""),
+        "_albumartist_source": str(source or ""),
+        "_albumartist_source_id": str(artist_context.get("id") or ""),
+    }
+
+
 def build_final_path_for_track(context, artist_context, album_info, file_ext, create_dirs: bool = True):
     """Shared path builder used by both post-processing and verification.
 
@@ -1367,6 +1475,11 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             # Record label for $label (MusicBrainz label-info; empty when
             # the source didn't provide one).
             "label": str((album_context or {}).get("label") or "").strip(),
+            # #1860: $explicit / $contentrating
+            "explicit": (track_info or {}).get("explicit"),
+            "album_explicit": (album_context or {}).get("explicit"),
+            # #1859: who the album artist is, for $albumartistinfo and friends
+            **_artist_identity(artist_context, source),
         }
         # A caller that KNOWS the disc count is authoritative: re-deriving it from
         # a live provider tracklist made the destination depend on whether that
@@ -1559,6 +1672,10 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         "_itunes_artist_id": _itunes_aid,
         # #1536: recording disambiguation for the single filename.
         "track_disambiguation": str((track_info or {}).get("disambiguation") or "").strip(),
+        # #1860: $explicit / $contentrating
+        "explicit": (track_info or {}).get("explicit"),
+        "album_explicit": (_album_ctx or {}).get("explicit"),
+        **_artist_identity(artist_context, source),
     }
 
     folder_path, filename_base = get_file_path_from_template(template_context, "single_path")

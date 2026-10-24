@@ -107,6 +107,7 @@ import { AutoSyncWeeklyEditor } from './autosync-weekly';
 import { ExportModal, ExportStatusSpan } from './export-modal';
 import { MirroredDetailModal } from './mirrored-detail-modal';
 import { PlaylistCard, playlistCardPrimaryLabel } from './playlist-card';
+import { PlaylistSearch } from './playlist-search';
 import { ScheduleMenu } from './schedule-menu';
 import { SourceIcon } from './source-icon';
 import { SourceRefModal } from './source-ref-modal';
@@ -1049,33 +1050,7 @@ export function MirroredTab({
         {/* The gap between the heading and Update list was the widest empty
             space on the page, and finding one playlist among thirty-eight had
             no answer but scrolling. */}
-        {allRows.length > 0 && (
-          <div className="library-search">
-            <input
-              type="search"
-              className="library-search-input"
-              placeholder="Search playlists"
-              aria-label="Search playlists"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                // Escape clears rather than blurs: a search box you cannot empty
-                // without selecting the text is a box you have to fight.
-                if (e.key === 'Escape') setQuery('');
-              }}
-            />
-            {query && (
-              <button
-                type="button"
-                className="library-search-clear"
-                aria-label="Clear search"
-                onClick={() => setQuery('')}
-              >
-                &times;
-              </button>
-            )}
-          </div>
-        )}
+        {allRows.length > 0 && <PlaylistSearch value={query} onChange={setQuery} />}
         {(userScope || requestsScope) && (
           <button
             type="button"

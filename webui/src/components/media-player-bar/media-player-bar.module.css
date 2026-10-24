@@ -19,9 +19,9 @@
   -webkit-backdrop-filter: blur(28px);
   border: 1px solid var(--white-a14);
   border-top: 1px solid rgba(255, 255, 255, 0.24);
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   box-shadow:
-    0 20px 48px rgba(0, 0, 0, 0.75),
+    0 20px 48px var(--black-a75),
     0 0 28px rgba(var(--accent-rgb), 0.18);
   padding: 12px 24px;
   display: flex;
@@ -109,7 +109,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: all var(--dur-fast) ease;
 }
 
 .controlBtn:hover {
@@ -128,7 +128,7 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--dur-base) ease;
   box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.35);
 }
 
@@ -174,7 +174,7 @@
   border-radius: var(--radius-circle);
   background: rgb(var(--accent-rgb));
   cursor: pointer;
-  transition: transform 0.15s ease;
+  transition: transform var(--dur-fast) ease;
 }
 
 .scrubSlider:hover::-webkit-slider-thumb {
@@ -199,7 +199,7 @@
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--dur-fast) ease;
 }
 
 .speedToggleBtn:hover {
@@ -247,7 +247,7 @@
   font-size: 18px;
   display: flex;
   align-items: center;
-  transition: color 0.15s ease;
+  transition: color var(--dur-fast) ease;
 }
 
 .closePlayerBtn:hover {
