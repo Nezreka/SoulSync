@@ -41,7 +41,7 @@ export function HelpHint({ label, children }: { label: string; children: ReactNo
       <Popover.Trigger
         openOnHover
         delay={250}
-        render={<button type="button" className={styles.help} />}
+        render={<button type="button" className={styles.help} data-inline-help />}
         aria-label={`About ${label}`}
       >
         <span aria-hidden="true">i</span>

@@ -1638,7 +1638,7 @@
        protrude from their track (mobile CSS batch #2, RC1). The import
        page's pills are a CSS module (hashed class), so they are hooked by
        data attribute like the other import-page exclusions. */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not([data-import-page-pill]):not(.modal-track-play-btn):not(.cancel-track-btn):not(.dash-qs-swatch):not(.watchlist-filter-btn):not(.play-button):not(.stop-button):not(.mini-nav-btn):not(.mini-toggle-btn):not(.expand-hint):not(.sync-tab-button):not(.sync-tab-close) {
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not([data-inline-help]):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not([data-import-page-pill]):not(.modal-track-play-btn):not(.cancel-track-btn):not(.dash-qs-swatch):not(.watchlist-filter-btn):not(.play-button):not(.stop-button):not(.mini-nav-btn):not(.mini-toggle-btn):not(.expand-hint):not(.sync-tab-button):not(.sync-tab-close) {
         min-height: 38px;
     }
 

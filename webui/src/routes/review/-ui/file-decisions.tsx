@@ -31,6 +31,7 @@ export function FileDecisions({
     <section className={styles.fileDecisionList} aria-label="File decisions included">
       <h4>
         File decisions included
+        <span className={styles.fileDecisionCount}>{rows.length}</span>
         <HelpHint label="recoverable quarantine">
           Applying a quarantine decision moves the chosen file out of the active library into
           recoverable storage. Review the kept copy and any playlist references before applying. No
@@ -50,7 +51,7 @@ export function FileDecisions({
               <th>Track</th>
               <th>Keep</th>
               <th>Quarantine</th>
-              <th>Details</th>
+              {onReview && <th>Review</th>}
             </tr>
           </thead>
           <tbody>
@@ -75,8 +76,8 @@ export function FileDecisions({
                       </span>
                     ))}
                   </td>
-                  <td>
-                    {onReview && (
+                  {onReview && (
+                    <td>
                       <Button
                         type="button"
                         aria-label={`Review file decision for ${decision!.title}`}
@@ -84,11 +85,11 @@ export function FileDecisions({
                       >
                         Review
                       </Button>
-                    )}
-                  </td>
+                    </td>
+                  )}
                 </tr>
                 <tr>
-                  <td colSpan={4}>
+                  <td colSpan={onReview ? 4 : 3}>
                     <details className={styles.filePaths}>
                       <summary>File paths</summary>
                       <ul>

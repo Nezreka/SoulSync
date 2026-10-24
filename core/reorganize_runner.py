@@ -115,7 +115,7 @@ def build_runner(
         except Exception as e:    # noqa: BLE001 — never break a reorganize
             logger.debug("[Reorganize] Could not re-point findings: %s", e)
 
-    def _update_track_path(track_id, new_path, *, preserve_audio=False):
+    def _update_track_path(track_id, new_path, *, audio_source_path=None):
         """Repoint the catalogue at ``new_path``.
 
         This MUST raise when the catalogue was not updated. ``_finalize_track``
@@ -144,12 +144,12 @@ def build_runner(
                 "SELECT file_path FROM tracks WHERE id = ?", (str(track_id),)
             ).fetchone()
             old_path = row[0] if row else None
-            if preserve_audio and old_path and os.path.isfile(new_path):
+            if audio_source_path and os.path.isfile(new_path):
                 from core.library.reconciliation_evidence import preserve_audio_evidence
                 # Rename-only organization preserves both bytes and mtime.
                 # Match the old cached stat to the moved file before reusing it.
                 stat = os.stat(new_path)
-                preserve_audio_evidence(conn.cursor(), old_path, new_path,
+                preserve_audio_evidence(conn.cursor(), audio_source_path, new_path,
                     size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
             cursor = conn.execute(
                 "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -162,6 +162,8 @@ def build_runner(
                     f"old path"
                 )
             _repoint_findings(conn, old_path, new_path)
+            if audio_source_path and audio_source_path != old_path:
+                _repoint_findings(conn, audio_source_path, new_path)
             conn.commit()
 
     def runner(item):
@@ -207,6 +209,14 @@ def build_runner(
                     'total': 0, 'moved': 0, 'skipped': 0, 'failed': 0,
                     'errors': [{'error': 'Rename-only mode unavailable (no path builder)'}],
                 }
+            source_paths = {}
+            def preview_with_sources(**kwargs):
+                from core.library_reorganize import preview_album_reorganize
+                preview = preview_album_reorganize(**kwargs)
+                source_paths.update({str(track['track_id']): track['current_path_abs']
+                                     for track in preview.get('tracks') or []
+                                     if track.get('current_path_abs')})
+                return preview
             return reorganize_album_rename_only(
                 album_id=item.album_id,
                 db=get_database(),
@@ -214,7 +224,8 @@ def build_runner(
                 resolve_file_path_fn=resolve_file_path_fn,
                 build_final_path_fn=build_final_path_fn,
                 update_track_path_fn=lambda track_id, path: _update_track_path(
-                    track_id, path, preserve_audio=True),
+                    track_id, path, audio_source_path=source_paths.get(str(track_id))),
+                preview_fn=preview_with_sources,
                 cleanup_empty_dir_fn=_cleanup_empty,
                 on_progress=_on_progress,
                 primary_source=item.source,

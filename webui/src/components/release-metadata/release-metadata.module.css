@@ -40,6 +40,7 @@
   justify-content: center;
   width: 18px;
   height: 18px;
+  flex: none;
   margin-inline-start: 6px;
   padding: 0;
   border: 1px solid currentColor;

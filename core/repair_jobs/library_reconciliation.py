@@ -2122,7 +2122,7 @@ class LibraryReconciliationJob(RepairJob):
                 base_title_key=lambda title: normalize(re.split(r'\s*[\[(]', str(title or ''), maxsplit=1)[0]))
         selection = selection_for(inventory_request)
         if selection is None:
-            inventory_request = InventoryRequest(ScanScope.LIBRARY)
+            inventory_request = InventoryRequest(ScanScope.LIBRARY, inventory_request.saved)
         tracks, albums = (self._load_rows(context, roots, selection) if selection else
                           self._load_rows(context, roots))
         if (inventory_request.scope == ScanScope.ALBUM and
@@ -2130,14 +2130,16 @@ class LibraryReconciliationJob(RepairJob):
             inventory_request = InventoryRequest(ScanScope.DISCOVERY, inventory_request.saved)
             selection = selection_for(inventory_request)
             if selection is None:
-                inventory_request = InventoryRequest(ScanScope.LIBRARY)
+                inventory_request = InventoryRequest(ScanScope.LIBRARY, inventory_request.saved)
             tracks, albums = (self._load_rows(context, roots, selection) if selection else
                               self._load_rows(context, roots))
         walk_roots = roots
         if inventory_request.scope == ScanScope.DISCOVERY:
             walk_roots = discovery_roots(inventory_request, tracks, roots)
             if walk_roots is None:
-                inventory_request = InventoryRequest(ScanScope.LIBRARY)
+                # Broaden the walk without discarding the verified track IDs
+                # needed to follow an album whose old folders have moved.
+                inventory_request = InventoryRequest(ScanScope.LIBRARY, inventory_request.saved)
                 tracks, albums = self._load_rows(context, roots)
                 walk_roots = roots
         intents = self._intents(context)

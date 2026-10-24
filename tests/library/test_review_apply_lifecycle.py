@@ -40,6 +40,47 @@ def test_same_size_and_mtime_cannot_hide_a_replaced_file(tmp_path):
     assert 'changed after the scan' in worker._reconciliation_file_guard(str(path), details)
 
 
+def test_organization_reuses_audio_when_database_and_scan_use_different_mount_paths(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from core.reorganize_runner import build_runner
+    from core.library.reconciliation_evidence import ReconciliationEvidence
+    album = build_album(tmp_path, monkeypatch, 'supported')
+    case = scan_case(album)
+    for item in case['items']:
+        assert album.worker._apply_reviewed_finding(item['id'])['success']
+    client = album.context.acoustid_client
+    decoded = client.fingerprints
+    aliases = {f'/other-mount/{path.name}': str(path) for path in album.paths}
+    with album.db._get_connection() as conn:
+        for old, actual in aliases.items():
+            conn.execute('UPDATE tracks SET file_path=? WHERE file_path=?', (old, actual))
+    target = album.root / 'Moved'
+    monkeypatch.setattr('core.imports.paths.library_root_for_profile', lambda *a, **k: str(album.root))
+    monkeypatch.setattr('core.imports.paths.library_containing', lambda path: str(album.root))
+    monkeypatch.setattr('core.reorganize_queue.get_queue', lambda: SimpleNamespace(update_active_progress=lambda **k: None))
+    runner = build_runner(
+        get_database=lambda: album.db,
+        resolve_file_path_fn=lambda path: aliases.get(path, path),
+        post_process_fn=lambda *a: None,
+        cleanup_empty_directories_fn=lambda *a: None,
+        is_shutting_down_fn=lambda: False,
+        get_download_path=lambda: str(tmp_path / 'downloads'),
+        get_transfer_path=lambda: str(album.root),
+        build_final_path_fn=lambda context, *a, **kw: (str(target / f"{context['track_info']['track_number']}.flac"), True),
+    )
+    outcome = runner(SimpleNamespace(album_id='10', queue_id='test', source=None,
+                                     rename_only=True, metadata_source='tags'))
+    assert outcome['moved'] == 2, outcome
+    cache = ReconciliationEvidence(album.db, client)
+    try:
+        for path in target.glob('*.flac'):
+            assert cache.identify(str(path))['status'] == 'ok'
+        assert client.fingerprints == decoded
+        assert cache.metrics['fingerprint_hits'] == 2
+    finally:
+        cache.close()
+
+
 def test_organization_completion_waits_for_final_inventory():
     queue = ReorganizeQueue()
     entered, finish = threading.Event(), threading.Event()
@@ -156,6 +197,26 @@ def test_destination_preview_includes_planned_tags_without_writing_files(tmp_pat
         assert write_tags_to_file(path, updates[path], embed_cover=False)['success']
     actual = _plan_from_tags({}, tracks, lambda path: path)
     assert preview == actual
+
+
+def test_discovery_retains_known_members_when_moved_folders_require_a_full_walk(tmp_path, monkeypatch):
+    album = build_album(tmp_path, monkeypatch, 'supported')
+    case = scan_case(album)
+    for i, path in enumerate(album.paths):
+        target = album.root / f'New parent {i}' / 'Album'
+        target.mkdir(parents=True)
+        moved = target / path.name
+        path.rename(moved)
+        album.durations[str(moved)] = album.durations[str(path)]
+        with album.db._get_connection() as conn:
+            conn.execute('UPDATE tracks SET file_path=? WHERE file_path=?', (str(moved), str(path)))
+    album.folder.rmdir()
+    result = LibraryReconciliationJob().scan(album.context, target_folder=str(album.folder), scope='discovery')
+    assert not result.stopped_early, result.stopped_early
+    refreshed = album.worker.get_review_case(case['case_id'])
+    assert refreshed['case_id'] != case['case_id']
+    assert len(refreshed['album_plan']['assignments']) == 2
+    assert refreshed['album_plan']['counts']['missing'] == 0
 
 
 def test_apply_waits_for_all_moves_then_publishes_one_complete_scan(tmp_path, monkeypatch):

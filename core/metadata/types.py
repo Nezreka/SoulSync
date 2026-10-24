@@ -289,6 +289,9 @@ class Album:
 
         _el = raw.get('explicit_lyrics')
         explicit = bool(_el) if _el is not None else None
+        genres = raw.get('genres') or []
+        if isinstance(genres, dict):
+            genres = genres.get('data') or []
         return cls(
             id=_str(raw.get('id')),
             name=_str(raw.get('title')),
@@ -298,8 +301,8 @@ class Album:
             album_type=album_type,
             image_url=image_url,
             artist_id=artist_id or None,
-            genres=[g.get('name', '') for g in (raw.get('genres', {}) or {}).get('data', [])
-                    if isinstance(g, dict) and g.get('name')],
+            genres=[g['name'] if isinstance(g, dict) else g for g in genres
+                    if (isinstance(g, dict) and g.get('name')) or (isinstance(g, str) and g)],
             label=_str(raw.get('label')) or None,
             barcode=external_ids.get('upc'),
             explicit=explicit,

@@ -3231,6 +3231,15 @@
 }
 .fileDecisionList h4 {
   margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fileDecisionCount {
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
 }
 .fileDecisionScroll {
   overflow-x: auto;

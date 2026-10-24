@@ -91,6 +91,10 @@ def test_provider_display_uses_full_credit_and_native_artwork():
     deezer = _release_display_metadata('deezer', '2', {
         'title': 'Album', 'artist': {'name': 'Artist'}, 'cover_xl': 'https://example.com/cover.jpg'})
     assert deezer['image_url'] == 'https://example.com/cover.jpg'
+    cached = _release_display_metadata('deezer', '2', {
+        'name': 'Album', 'artists': [{'name': 'Artist'}],
+        'genres': ['Rock'], 'image_url': 'https://example.com/cached.jpg'})
+    assert cached == {'release_artist': 'Artist', 'image_url': 'https://example.com/cached.jpg'}
     mb = _release_display_metadata('musicbrainz', '3', {
         'title': 'Album', 'artist-credit': [{'name': 'Artist', 'joinphrase': ' & '}, {'name': 'Guest'}]})
     assert mb['release_artist'] == 'Artist & Guest'

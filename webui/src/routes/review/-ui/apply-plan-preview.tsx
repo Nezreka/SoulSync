@@ -102,8 +102,8 @@ export function ApplyPlanPreview({
                                     ? 'Library album title'
                                     : changeFieldLabel(change.field)}
                                 </td>
-                                <td>{changeValue(change.old)}</td>
-                                <td>{changeValue(change.new)}</td>
+                                <td>{changeValue(change.old) || '—'}</td>
+                                <td>{changeValue(change.new) || '—'}</td>
                               </tr>
                             ))}
                         </tbody>
