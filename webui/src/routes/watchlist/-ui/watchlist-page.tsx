@@ -27,6 +27,7 @@ import {
 } from '../-watchlist.api';
 import {
   artistPills,
+  hasCustomRules,
   artistSourceKeys,
   batchSelectionState,
   filterArtists,
@@ -188,16 +189,7 @@ export function WatchlistPage() {
       return artists.filter((a) => (daysSince(a.last_scan_timestamp) ?? 999) >= 30);
     }
     if (attentionFilter === 'custom') {
-      return artists.filter(
-        (a) =>
-          !a.include_albums ||
-          !a.include_eps ||
-          !a.include_singles ||
-          a.include_live ||
-          a.include_remixes ||
-          a.include_acoustic ||
-          a.include_compilations,
-      );
+      return artists.filter((a) => hasCustomRules(a));
     }
     return artists;
   }, [artists, attentionFilter, recentReleases]);
@@ -218,21 +210,10 @@ export function WatchlistPage() {
     [artists],
   );
   const customRuleArtists = useMemo(
-    () =>
-      artists.filter(
-        (artist) =>
-          !artist.include_albums ||
-          !artist.include_eps ||
-          !artist.include_singles ||
-          artist.include_live ||
-          artist.include_remixes ||
-          artist.include_acoustic ||
-          artist.include_compilations,
-      ).length,
+    () => artists.filter((artist) => hasCustomRules(artist)).length,
     [artists],
   );
 
-  const globalOverrideActive = Boolean(globalConfigQuery.data?.global_override_enabled);
   const isLabelsTab = search.tab === 'labels';
   const isPodcastsTab = search.tab === 'podcasts';
   const isAudiobooksTab = search.tab === 'audiobooks';
@@ -518,9 +499,7 @@ export function WatchlistPage() {
               },
               {
                 key: 'settings',
-                label: globalOverrideActive
-                  ? 'Watchlist defaults (override on)'
-                  : 'Watchlist defaults',
+                label: 'Watchlist defaults',
                 onSelect: () => void navigate({ search: (prev) => ({ ...prev, settings: true }) }),
               },
               {
@@ -545,9 +524,7 @@ export function WatchlistPage() {
             trigger={(props) => (
               <button
                 type="button"
-                className={`wl-chip wl-chip--slate wl-chip--more${
-                  globalOverrideActive ? ' watchlist-global-settings-active' : ''
-                }`}
+                className="wl-chip wl-chip--slate wl-chip--more"
                 aria-label="More watchlist actions"
                 title="Similar artists, defaults, origins, history, blocklist"
                 {...props}
@@ -583,22 +560,12 @@ export function WatchlistPage() {
           profileId={profileId}
           artistId={panelArtistId}
           initialTab={search.configId ? 'rules' : 'overview'}
-          globalOverrideActive={globalOverrideActive}
           onClose={() =>
             void navigate({
               search: (prev) => ({ ...prev, configId: undefined, detailId: undefined }),
             })
           }
         />
-      ) : null}
-
-      {globalOverrideActive ? (
-        <div className="watchlist-global-override-banner">
-          <span>⚠️</span>
-          <span>
-            Global override is active — per-artist settings are being ignored during scans.
-          </span>
-        </div>
       ) : null}
 
       <div className={styles.tabs} role="tablist" aria-label="Watchlist sections">
@@ -972,6 +939,14 @@ function WatchlistArtistCard({
                 {pill.label}
               </span>
             ))}
+            {hasCustomRules(artist) ? (
+              <span
+                className="watchlist-pill watchlist-pill-custom"
+                title="Own rules, not the defaults"
+              >
+                Custom
+              </span>
+            ) : null}
             {audiobook ? <AudiobookRouteBadge /> : null}
           </div>
         ) : (

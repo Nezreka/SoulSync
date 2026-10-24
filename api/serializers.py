@@ -426,6 +426,8 @@ def serialize_watchlist_artist(obj, fields: Optional[Set[str]] = None) -> dict:
         "include_remixes": bool(d.get("include_remixes", False)),
         "include_acoustic": bool(d.get("include_acoustic", False)),
         "include_compilations": bool(d.get("include_compilations", False)),
+        # #1822: true = the release rules come from the watchlist defaults
+        "follow_defaults": bool(d.get("follow_defaults", False)),
     }
     return filter_fields(result, fields)
 

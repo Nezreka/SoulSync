@@ -164,6 +164,24 @@ export type PillSource = Pick<
   | 'include_compilations'
 >;
 
+/**
+ * Does this artist have its own release rules (#1822)? The server says so
+ * with follow_defaults; an older server doesn't, so then it's guessed from
+ * rules that differ from a fresh install's.
+ */
+export function hasCustomRules(artist: PillSource & { follow_defaults?: boolean }): boolean {
+  if (typeof artist.follow_defaults === 'boolean') return !artist.follow_defaults;
+  return (
+    !artist.include_albums ||
+    !artist.include_eps ||
+    !artist.include_singles ||
+    Boolean(artist.include_live) ||
+    Boolean(artist.include_remixes) ||
+    Boolean(artist.include_acoustic) ||
+    Boolean(artist.include_compilations)
+  );
+}
+
 export function artistPills(artist: PillSource): WatchlistPill[] {
   const pills: WatchlistPill[] = [];
   if (artist.include_albums) pills.push({ label: 'Albums', kind: 'active' });

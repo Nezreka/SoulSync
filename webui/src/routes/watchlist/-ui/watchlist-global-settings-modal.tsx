@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { WatchlistGlobalConfig } from '../-watchlist.types';
 
 import {
+  resetWatchlistToDefaults,
   saveWatchlistGlobalConfig,
   WATCHLIST_QUERY_KEY,
   watchlistGlobalConfigQueryOptions,
@@ -102,12 +103,11 @@ const EDITION_PILL_OPTIONS = [
 /**
  * Whether the save is allowed to proceed.
  *
- * The gate only applies when the override is ON: with it off these values are
- * inert, so an all-unchecked config is legitimate and must still save. The
- * server enforces the same rule, but checking here keeps the message specific.
+ * These are the defaults every following artist uses (#1822), so they always
+ * need a release type. The server enforces the same rule; checking here keeps
+ * the message specific.
  */
 export function globalConfigIsSavable(config: WatchlistGlobalConfig): boolean {
-  if (!config.global_override_enabled) return true;
   return RELEASE_TYPE_KEYS.some((key) => config[key]);
 }
 
@@ -143,10 +143,37 @@ export function WatchlistGlobalSettingsModal({ profileId, initialConfig, onClose
     if (initialConfig) setConfig(initialConfig);
   }, [initialConfig]);
 
+  const reset = useMutation({
+    mutationFn: () => resetWatchlistToDefaults(),
+    onSuccess: async (count) => {
+      window.showToast?.(
+        `${count} artist${count === 1 ? '' : 's'} back on the defaults`,
+        'success',
+      );
+      setConfig((previous) => ({ ...previous, custom_artist_count: 0 }));
+      await queryClient.invalidateQueries({ queryKey: WATCHLIST_QUERY_KEY });
+    },
+    onError: (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error'),
+  });
+
+  const onReset = async () => {
+    const count = config.custom_artist_count ?? 0;
+    const confirmed = await window.showConfirmDialog?.({
+      title: 'Reset to defaults',
+      message: `${count} artist${count === 1 ? ' has its' : 's have their'} own rules. Put ${
+        count === 1 ? 'it' : 'them'
+      } back on the defaults?`,
+      confirmText: 'Reset',
+      destructive: true,
+    });
+    if (confirmed === false) return;
+    reset.mutate();
+  };
+
   const save = useMutation({
     mutationFn: (next: WatchlistGlobalConfig) => saveWatchlistGlobalConfig(next),
     onSuccess: async (saved) => {
-      window.showToast?.('Global watchlist settings saved', 'success');
+      window.showToast?.('Watchlist defaults saved', 'success');
       queryClient.setQueryData(watchlistGlobalConfigQueryOptions(profileId).queryKey, saved);
       // The grid's pills reflect per-artist settings, which the override
       // supersedes, so the whole page is refreshed exactly as before.
@@ -161,10 +188,15 @@ export function WatchlistGlobalSettingsModal({ profileId, initialConfig, onClose
       window.showToast?.('Please select at least one release type', 'error');
       return;
     }
-    save.mutate({ ...config, exclude_terms: config.exclude_terms.trim() });
+    // the override is retired (#1822): defaults are what followers use
+    save.mutate({
+      ...config,
+      global_override_enabled: false,
+      exclude_terms: config.exclude_terms.trim(),
+    });
   };
 
-  const overrideEnabled = config.global_override_enabled;
+  const customCount = config.custom_artist_count ?? 0;
   const setFlag = (key: IncludeKey, value: boolean) =>
     setConfig((previous) => ({ ...previous, [key]: value }));
 
@@ -177,14 +209,14 @@ export function WatchlistGlobalSettingsModal({ profileId, initialConfig, onClose
         className="watchlist-artist-config-modal wl-global-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Global Watchlist Settings"
+        aria-label="Watchlist defaults"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="wl-global-modal-head">
           <div>
-            <h2 className="wl-global-modal-title">Global Watchlist Settings</h2>
+            <h2 className="wl-global-modal-title">Watchlist defaults</h2>
             <p className="wl-global-modal-sub">
-              Override per-artist settings for all watchlist scans.
+              Every artist uses these unless you give it its own rules.
             </p>
           </div>
           <button className="wl-global-modal-close" onClick={onClose} aria-label="Close">
@@ -194,48 +226,27 @@ export function WatchlistGlobalSettingsModal({ profileId, initialConfig, onClose
 
         <div className="watchlist-artist-config-content">
           <div className="watchlist-artist-config-body">
-            <div className="config-section">
-              <label
-                className={`config-option global-override-toggle${overrideEnabled ? ' enabled' : ''}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={overrideEnabled}
-                  onChange={(event) =>
-                    setConfig((previous) => ({
-                      ...previous,
-                      global_override_enabled: event.target.checked,
-                    }))
-                  }
-                />
-                <div className="config-option-content">
-                  <div className="config-option-icon">🌐</div>
-                  <div className="config-option-text">
-                    <span className="config-option-title">Enable Global Override</span>
-                    <span className="config-option-description">
-                      When enabled, the settings below apply to ALL artists, ignoring individual
-                      artist configs
-                    </span>
-                  </div>
-                </div>
-              </label>
-            </div>
+            {customCount > 0 ? (
+              <div className="config-section wl-defaults-custom">
+                <span>
+                  {customCount} artist{customCount === 1 ? ' has its' : 's have their'} own rules
+                  and {customCount === 1 ? "doesn't" : "don't"} use these.
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={reset.isPending}
+                  onClick={() => void onReset()}
+                >
+                  {reset.isPending ? 'Resetting…' : 'Reset all to defaults'}
+                </button>
+              </div>
+            ) : null}
 
-            {/* Dimmed and click-through-disabled while the override is off,
-                exactly as toggleGlobalOverrideOptions did. The values stay
-                editable in state so nothing is lost by toggling. */}
-            <div
-              style={{
-                opacity: overrideEnabled ? 1 : 0.4,
-                pointerEvents: overrideEnabled ? 'auto' : 'none',
-                transition: 'opacity 0.3s',
-              }}
-            >
+            <div>
               <div className="config-section">
                 <h3 className="config-section-title">Release Types</h3>
-                <p className="config-section-subtitle">
-                  Select which release types to download for all artists
-                </p>
+                <p className="config-section-subtitle">Which release types to grab</p>
                 <div className="config-options">
                   {RELEASE_TYPE_KEYS.map((key) => (
                     <ConfigOption
@@ -405,8 +416,7 @@ export function WatchlistGlobalSettingsModal({ profileId, initialConfig, onClose
                   }
                 />
                 <p className="config-exclude-terms-hint">
-                  Applied globally to all watchlist scans regardless of override setting.
-                  Case-insensitive substring matching.
+                  Applied to every watchlist scan. Case-insensitive substring matching.
                 </p>
               </div>
             </div>
@@ -424,7 +434,7 @@ export function WatchlistGlobalSettingsModal({ profileId, initialConfig, onClose
               disabled={save.isPending}
               onClick={onSave}
             >
-              {save.isPending ? 'Saving...' : 'Save Global Settings'}
+              {save.isPending ? 'Saving...' : 'Save defaults'}
             </button>
           </div>
         </div>

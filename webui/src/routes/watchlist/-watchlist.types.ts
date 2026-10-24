@@ -86,6 +86,9 @@ export interface WatchlistArtist {
   include_remixes: boolean;
   include_acoustic: boolean;
   include_compilations: boolean;
+  /** #1822: true = the rules above are the watchlist defaults. Absent on an
+   *  older server. */
+  follow_defaults?: boolean;
   // NOTE: no `include_instrumentals` here. The global config carries one and
   // the per-artist config endpoint accepts one, but the list payload does not
   // return it — do not add it to this type without adding it server-side.
@@ -188,6 +191,8 @@ export interface WatchlistGlobalConfig {
    * re-ranking) — do not conflate them.
    */
   prefer_explicit_edition: boolean;
+  /** #1822: artists with their own release rules instead of these defaults. */
+  custom_artist_count?: number;
 }
 
 export interface WatchlistGlobalConfigResponse {
@@ -251,6 +256,11 @@ export interface WatchlistArtistConfig {
   global_auto_download?: boolean;
   /** null = "Use default" rather than the first profile in the list. */
   quality_profile_id: number | null;
+  /** #1822: the artist uses the watchlist defaults; the include_* fields then
+   *  show the defaults, which are what a scan applies. */
+  follow_defaults?: boolean;
+  /** the current defaults, so the panel can show them when following. */
+  defaults?: Partial<Record<string, boolean>>;
 }
 
 export interface WatchlistArtistInfo {

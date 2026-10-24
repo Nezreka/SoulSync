@@ -1466,6 +1466,68 @@
   backdrop-filter: blur(12px);
 }
 
+/* #1822: follow the defaults, or have its own rules */
+.wap-follow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--white-a04);
+  cursor: pointer;
+}
+
+.wap-follow > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.wap-follow b {
+  font-size: 13.5px;
+  color: var(--wl-text-primary);
+}
+
+.wap-follow input {
+  width: 34px;
+  height: 20px;
+  accent-color: rgb(var(--accent-rgb));
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.wap-pill {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: rgb(var(--accent-rgb));
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.wap-pill--custom,
+.watchlist-page-container .watchlist-pill-custom {
+  background: rgba(167, 139, 250, 0.16);
+  color: #c4b5fd;
+}
+
+.wl-defaults-custom {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--wl-text-secondary);
+}
+
+.wl-defaults-custom span {
+  flex: 1 1 220px;
+}
+
 /* the panel's menu portals to the body; on phones the sheet sits at 10051 */
 .lib-menu.wap-menu {
   z-index: 10070;

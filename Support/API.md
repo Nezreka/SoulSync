@@ -1155,7 +1155,8 @@ List all watched artists for the current profile.
         "include_live": false,
         "include_remixes": false,
         "include_acoustic": false,
-        "include_compilations": false
+        "include_compilations": false,
+        "follow_defaults": true
       }
     ]
   }
@@ -1183,6 +1184,7 @@ List all watched artists for the current profile.
 | `include_remixes` | bool | Include remixes |
 | `include_acoustic` | bool | Include acoustic versions |
 | `include_compilations` | bool | Include compilations |
+| `follow_defaults` | bool | The artist uses the watchlist defaults. The `include_*` fields then show the defaults, which are the rules a scan applies |
 
 #### `POST /api/v1/watchlist`
 
@@ -1207,7 +1209,9 @@ Update content type filters for a watched artist without having to remove and re
 }
 ```
 
-Accepts any combination of: `include_albums`, `include_eps`, `include_singles`, `include_live`, `include_remixes`, `include_acoustic`, `include_compilations`.
+Accepts any combination of: `include_albums`, `include_eps`, `include_singles`, `include_live`, `include_remixes`, `include_acoustic`, `include_compilations`, `follow_defaults`.
+
+Send `"follow_defaults": true` to put an artist back on the watchlist defaults. Sending release rules for an artist that follows the defaults gives it its own rules, starting from the defaults it was getting, so the fields you leave out keep the values a scan was already using.
 
 **Response:**
 

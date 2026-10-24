@@ -376,12 +376,12 @@ const HELPER_CONTENT = {
         docsId: 'discover'
     },
     '#watchlist-global-settings-btn': {
-        title: 'Global Watchlist Settings',
-        description: 'Override download preferences for ALL watchlisted artists at once. When enabled, these settings replace individual artist configurations. Useful for applying the same release type and content filters across your entire watchlist.',
+        title: 'Watchlist Defaults',
+        description: 'The release rules every artist uses unless you give it its own. Find it in the watchlist menu (⋯).',
         tips: [
-            'Button shows "Global Override ON" when active',
-            'Overrides individual artist settings while enabled',
-            'Disable to return to per-artist configurations'
+            'Changing the defaults changes every artist that follows them',
+            'Artists with their own rules show a Custom badge',
+            'Reset all to defaults puts custom artists back on them'
         ]
     },
     '.watchlist-artist-card': {
@@ -396,7 +396,7 @@ const HELPER_CONTENT = {
 
     // ─── WATCHLIST ARTIST CONFIG MODAL ──────────────────────────────
 
-    '#watchlist-artist-config-modal .config-section:first-child': {
+    '#watchlist-artist-config-modal .wap-grab': {
         title: 'Download Preferences',
         description: 'Choose which types of releases to watch for this artist. Checked types will be monitored during scans and added to your Wishlist when found.',
         tips: [
@@ -405,13 +405,13 @@ const HELPER_CONTENT = {
             'Singles: Individual tracks and 2-3 track releases'
         ]
     },
-    '#watchlist-artist-config-modal .config-section:nth-child(2)': {
+    '#watchlist-artist-config-modal .wap-include': {
         title: 'Content Filters',
         description: 'Control which types of content to include or exclude when scanning for new releases. By default, live, remix, acoustic, compilation, and instrumental versions are all excluded — check the ones you want.',
         tips: [
             'Unchecked = excluded from scans (won\'t be added to wishlist)',
             'These filters apply during watchlist scans only',
-            'Global Settings can override these per-artist filters'
+            'Turn on Follow watchlist defaults to use the defaults instead'
         ]
     },
     '#config-include-live': {
@@ -451,12 +451,12 @@ const HELPER_CONTENT = {
     // ─── WATCHLIST GLOBAL CONFIG MODAL ──────────────────────────────
 
     '#watchlist-global-config-modal': {
-        title: 'Global Watchlist Settings',
-        description: 'When global override is enabled, these settings apply to ALL watched artists, replacing their individual configurations. Useful for uniform preferences across your entire watchlist.',
+        title: 'Watchlist Defaults',
+        description: 'The release rules every artist follows unless it has its own. Change them here and every following artist changes with them.',
         tips: [
-            'Toggle "Enable Global Override" at the top to activate',
             'Same options as per-artist: release types + content filters',
-            'Disable override to return to individual artist settings'
+            'Give one artist its own rules from its panel (Rules tab)',
+            'Reset all to defaults puts every custom artist back on these'
         ]
     },
 

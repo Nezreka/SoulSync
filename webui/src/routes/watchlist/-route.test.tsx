@@ -56,6 +56,10 @@ interface StubOptions {
   /** Collects what was POSTed, for tests that care about the payload and not
    *  just that a request happened. */
   bodies?: { url: string; body: Record<string, unknown> }[];
+  /** #1822: the artist follows the watchlist defaults. */
+  followDefaults?: boolean;
+  /** #1822: artists with their own rules, as the defaults form reports. */
+  customCount?: number;
 }
 
 function stubFetch(options: StubOptions = {}) {
@@ -71,6 +75,8 @@ function stubFetch(options: StubOptions = {}) {
     globalAutoDownload = true,
     autoDownloadPref = null,
     bodies,
+    followDefaults = false,
+    customCount = 0,
   } = options;
 
   const calls: string[] = [];
@@ -123,6 +129,7 @@ function stubFetch(options: StubOptions = {}) {
             include_instrumentals: false,
             exclude_terms: '',
             global_auto_download: globalAutoDownload,
+            custom_artist_count: customCount,
           },
         });
       }
@@ -137,6 +144,9 @@ function stubFetch(options: StubOptions = {}) {
       }
       if (url.includes('/api/podcasts/watchlist')) {
         return createResponse({ success: true, count: podcasts.length, podcasts });
+      }
+      if (url.includes('/api/watchlist/reset-to-defaults')) {
+        return createResponse({ success: true, reset: customCount });
       }
       if (url.includes('/link-provider')) {
         return createResponse({ success: true });
@@ -159,6 +169,18 @@ function stubFetch(options: StubOptions = {}) {
             auto_download_pref: autoDownloadPref,
             global_auto_download: globalAutoDownload,
             quality_profile_id: null,
+            follow_defaults: followDefaults,
+            defaults: {
+              include_albums: true,
+              include_eps: true,
+              include_singles: true,
+              include_live: false,
+              include_remixes: false,
+              include_acoustic: false,
+              include_compilations: false,
+              include_instrumentals: false,
+              include_other_artists: false,
+            },
           },
           artist: {
             id: 'sp-aphex',
@@ -255,24 +277,23 @@ describe('watchlist route', () => {
     expect(screen.getByRole('button', { name: 'Open Search' })).toBeInTheDocument();
   });
 
-  it('only shows the global override banner when the override is on', async () => {
-    stubFetch({ globalOverride: false });
-    const { unmount } = renderWatchlistRoute();
-
-    await waitFor(() => {
-      expect(screen.getByText('Aphex Twin')).toBeInTheDocument();
+  it('marks an artist with its own rules, not one on the defaults (#1822)', async () => {
+    stubFetch({
+      artists: [
+        artistRow({ follow_defaults: false }),
+        artistRow({
+          id: 2,
+          artist_name: 'Boards',
+          spotify_artist_id: 'sp-boc',
+          follow_defaults: true,
+        }),
+      ],
     });
-    expect(screen.queryByText(/Global override is active/)).not.toBeInTheDocument();
-
-    unmount();
-    vi.unstubAllGlobals();
-
-    stubFetch({ globalOverride: true });
     renderWatchlistRoute();
 
-    await waitFor(() => {
-      expect(screen.getByText(/Global override is active/)).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByText('Boards')).toBeInTheDocument());
+    expect(document.querySelectorAll('.watchlist-pill-custom')).toHaveLength(1);
+    expect(screen.queryByText(/Global override is active/)).not.toBeInTheDocument();
   });
 
   it('shows the last-scan strip only once a scan has completed', async () => {
@@ -698,32 +719,30 @@ describe('watchlist route', () => {
     });
   });
 
-  it('opens global settings from the URL and saves', async () => {
-    const calls = stubFetch({ globalOverride: true });
+  it('opens the watchlist defaults from the URL and saves them', async () => {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    stubFetch({ bodies });
     renderWatchlistRoute(['/watchlist?settings=true']);
 
-    await waitFor(() => {
-      expect(screen.getByRole('dialog', { name: 'Global Watchlist Settings' })).toBeInTheDocument();
-    });
+    const dialog = await screen.findByRole('dialog', { name: 'Watchlist defaults' });
+    // no override switch any more, and nothing greyed out
+    expect(within(dialog).queryByText(/Enable Global Override/)).not.toBeInTheDocument();
 
-    // Populated from the loaded config, not from blank defaults.
-    const overrideToggle = screen.getByRole('checkbox', { name: /Enable Global Override/ });
-    expect(overrideToggle).toBeChecked();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save Global Settings' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save defaults' }));
 
     await waitFor(() => {
-      const posts = calls.filter((url) => url.includes('/api/watchlist/global-config'));
-      expect(posts.length).toBeGreaterThan(1);
+      expect(bodies.some((call) => call.url.includes('/api/watchlist/global-config'))).toBe(true);
     });
+    const saved = bodies.find((call) => call.url.includes('/api/watchlist/global-config'))!.body;
+    expect(saved.global_override_enabled).toBe(false);
   });
 
-  it('refuses to save an override with no release type, and says why', async () => {
-    stubFetch({ globalOverride: true });
+  it('refuses defaults with no release type, and says why', async () => {
+    stubFetch();
     window.showToast = vi.fn();
     renderWatchlistRoute(['/watchlist?settings=true']);
 
-    const dialog = await screen.findByRole('dialog', { name: 'Global Watchlist Settings' });
+    const dialog = await screen.findByRole('dialog', { name: 'Watchlist defaults' });
     const inDialog = within(dialog);
 
     // each box is found through its description text and the label around it.
@@ -734,7 +753,7 @@ describe('watchlist route', () => {
       expect(box.type).toBe('checkbox');
       if (box.checked) fireEvent.click(box);
     }
-    fireEvent.click(inDialog.getByRole('button', { name: 'Save Global Settings' }));
+    fireEvent.click(inDialog.getByRole('button', { name: 'Save defaults' }));
 
     await waitFor(() => {
       expect(window.showToast).toHaveBeenCalledWith(
@@ -744,14 +763,18 @@ describe('watchlist route', () => {
     });
   });
 
-  it('the menu reports an active override', async () => {
-    stubFetch({ globalOverride: true });
-    renderWatchlistRoute();
+  it('resets custom artists to the defaults, after asking', async () => {
+    const calls = stubFetch({ customCount: 3 });
+    window.showConfirmDialog = vi.fn(async () => true);
+    renderWatchlistRoute(['/watchlist?settings=true']);
 
-    const more = await screen.findByRole('button', { name: 'More watchlist actions' });
-    await waitFor(() => expect(more).toHaveClass('watchlist-global-settings-active'));
-    fireEvent.click(more);
-    expect(screen.getByRole('menuitem', { name: /override on/ })).toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog', { name: 'Watchlist defaults' });
+    expect(within(dialog).getByText(/3 artists have their own rules/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset all to defaults' }));
+
+    await waitFor(() => {
+      expect(calls.some((url) => url.includes('/api/watchlist/reset-to-defaults'))).toBe(true);
+    });
   });
 
   it('opens artist config from the URL with the stored values', async () => {
@@ -845,7 +868,7 @@ describe('watchlist route', () => {
     fireEvent.click(
       screen.getByRole('checkbox', { name: /Auto-download new releases by default/ }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Save Global Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save defaults' }));
 
     await waitFor(() => {
       expect(bodies.some((call) => call.url.includes('global-config'))).toBe(true);
@@ -984,15 +1007,43 @@ describe('watchlist route', () => {
     });
   });
 
-  it('warns inside the config modal while the global override is on', async () => {
-    stubFetch({ globalOverride: true });
+  it('a following artist shows the switch on, and a rule change gives it its own rules', async () => {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    stubFetch({ bodies, followDefaults: true });
     renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
 
+    const follow = await screen.findByRole('switch', { name: /Follow watchlist defaults/ });
+    expect(follow).toBeChecked();
+    expect(screen.getByText('Defaults')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Live' }));
+    expect(follow).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
     await waitFor(() => {
-      expect(
-        screen.getByText(/these per-artist settings are currently ignored during scans/),
-      ).toBeInTheDocument();
+      expect(bodies.some((call) => call.url.includes('/config'))).toBe(true);
     });
+    const saved = bodies.find((call) => call.url.includes('/config'))!.body;
+    expect(saved.follow_defaults).toBe(false);
+    expect(saved.include_live).toBe(true);
+  });
+
+  it('switching an artist back to the defaults saves follow_defaults', async () => {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    stubFetch({ bodies, followDefaults: false });
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    const follow = await screen.findByRole('switch', { name: /Follow watchlist defaults/ });
+    expect(follow).not.toBeChecked();
+    fireEvent.click(follow);
+    // the chips show the defaults it will get (EPs is on in the defaults)
+    expect(screen.getByRole('checkbox', { name: 'EPs' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => {
+      expect(bodies.some((call) => call.url.includes('/config'))).toBe(true);
+    });
+    expect(bodies.find((call) => call.url.includes('/config'))!.body.follow_defaults).toBe(true);
   });
 
   it('opens the artist panel on its overview, with every genre and the stats', async () => {

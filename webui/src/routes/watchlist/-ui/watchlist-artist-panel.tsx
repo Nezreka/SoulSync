@@ -187,6 +187,8 @@ function updateFromDraft(draft: WatchlistArtistConfig): WatchlistArtistConfigUpd
     quality_profile_id: draft.quality_profile_id,
     lookback_days: draft.lookback_days,
     preferred_metadata_source: draft.preferred_metadata_source,
+    // always said, so the server knows which rules a save means (#1822)
+    follow_defaults: Boolean(draft.follow_defaults),
   };
 }
 
@@ -194,17 +196,10 @@ interface Props {
   profileId: number;
   artistId: string;
   initialTab: ArtistPanelTab;
-  globalOverrideActive: boolean;
   onClose: () => void;
 }
 
-export function WatchlistArtistPanel({
-  profileId,
-  artistId,
-  initialTab,
-  globalOverrideActive,
-  onClose,
-}: Props) {
+export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose }: Props) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const configQuery = useQuery(watchlistArtistConfigQueryOptions(profileId, artistId));
@@ -267,7 +262,7 @@ export function WatchlistArtistPanel({
 
   const onSave = () => {
     if (!draft) return;
-    if (!artistConfigIsSavable(draft)) {
+    if (!draft.follow_defaults && !artistConfigIsSavable(draft)) {
       window.showToast?.('Please select at least one release type', 'error');
       return;
     }
@@ -286,8 +281,26 @@ export function WatchlistArtistPanel({
     remove.mutate();
   };
 
+  // changing a rule on an artist that follows the defaults gives it its own
+  // rules, starting from the defaults it was getting
   const setFlag = (key: IncludeKey, value: boolean) =>
-    setDraft((previous) => (previous ? { ...previous, [key]: value } : previous));
+    setDraft((previous) =>
+      previous ? { ...previous, follow_defaults: false, [key]: value } : previous,
+    );
+  const setFollow = (follow: boolean) =>
+    setDraft((previous) => {
+      if (!previous) return previous;
+      if (!follow) return { ...previous, follow_defaults: false };
+      // show the rules it will get
+      const defaults = payload?.config?.defaults ?? {};
+      const next = { ...previous, follow_defaults: true };
+      for (const key of [...RELEASE_TYPE_KEYS, ...CONTENT_FILTER_KEYS]) {
+        const value = defaults[key];
+        if (typeof value === 'boolean') next[key] = value;
+      }
+      return next;
+    });
+  const following = Boolean(draft?.follow_defaults);
 
   const discography = payload ? pickDiscographySource(payload) : null;
   const releases = payload?.recent_releases ?? [];
@@ -324,6 +337,11 @@ export function WatchlistArtistPanel({
               {name || 'Loading…'}
             </h2>
             <span className="wap-sub">
+              {config ? (
+                <span className={`wap-pill${config.follow_defaults ? '' : ' wap-pill--custom'}`}>
+                  {config.follow_defaults ? 'Defaults' : 'Custom rules'}
+                </span>
+              ) : null}
               {scanText}
               {addedText ? ` · ${addedText}` : ''}
             </span>
@@ -461,14 +479,24 @@ export function WatchlistArtistPanel({
         {tab === 'rules' && draft ? (
           // the id is what helper.js keys its contextual help off
           <div className="wap-body" id="watchlist-artist-config-modal">
-            {globalOverrideActive ? (
-              <div className="wap-note wap-note--warn">
-                Global override is active — these per-artist settings are currently ignored during
-                scans.
-              </div>
-            ) : null}
+            <label className="wap-follow">
+              <span>
+                <b>Follow watchlist defaults</b>
+                <small className="wap-hint">
+                  {following
+                    ? 'Uses the defaults, and changes with them. Change a rule below to give this artist its own.'
+                    : 'This artist has its own rules.'}
+                </small>
+              </span>
+              <input
+                type="checkbox"
+                role="switch"
+                checked={following}
+                onChange={(event) => setFollow(event.target.checked)}
+              />
+            </label>
 
-            <section className="config-section wap-section">
+            <section className="config-section wap-section wap-grab">
               <h3>What to grab</h3>
               <div className="wap-chips">
                 {RELEASE_TYPE_KEYS.map((key) => (
@@ -482,7 +510,7 @@ export function WatchlistArtistPanel({
               </div>
             </section>
 
-            <section className="config-section wap-section">
+            <section className="config-section wap-section wap-include">
               <h3>Also include</h3>
               <div className="wap-chips">
                 {CONTENT_FILTER_KEYS.map((key) => (

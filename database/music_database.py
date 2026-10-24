@@ -322,6 +322,8 @@ class WatchlistArtist:
     # about Library v2 (or any other UI that created the watch).
     quality_profile_id: Optional[int] = None
     profile_id: int = 1
+    # #1822: True = uses the watchlist defaults for the release rules above
+    follow_defaults: bool = False
 
 @dataclass
 class SimilarArtist:
@@ -1363,6 +1365,8 @@ class MusicDatabase:
             # Same ordering rule: must land AFTER the recreates, or it is dropped.
             self._add_watchlist_auto_download_pref_column(cursor)
             self._add_watchlist_quality_profile_column(cursor)
+            # #1822: defaults instead of a global override. same ordering rule.
+            self._add_watchlist_follow_defaults_column(cursor)
 
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
@@ -4357,6 +4361,42 @@ class MusicDatabase:
                 logger.info("Added quality_profile_id column to watchlist_artists")
         except Exception as e:
             logger.error(f"Error adding watchlist quality profile column: {e}")
+
+    def _add_watchlist_follow_defaults_column(self, cursor):
+        """Add follow_defaults: 1 = the artist uses the watchlist defaults (#1822).
+
+        new artists follow the defaults (column default 1). existing ones are
+        stamped so the rules a scan applies don't move: 1 when the global
+        override is on or the artist's rules already equal the defaults, 0
+        otherwise. if the defaults can't be read, every existing artist keeps
+        its own rules (0), which is exactly what it had."""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = {column[1] for column in cursor.fetchall()}
+            if not columns or 'follow_defaults' in columns:
+                return
+            cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN follow_defaults INTEGER DEFAULT 1")
+            try:
+                from core.settings import config_manager
+                from core.watchlist_defaults import (
+                    INCLUDE_KEYS, default_values, legacy_override_on, stamp_value)
+                defaults = default_values(config_manager)
+                override_on = legacy_override_on(config_manager)
+                present = [key for key in INCLUDE_KEYS if key in columns]
+                cursor.execute(f"SELECT id{''.join(', ' + k for k in present)} FROM watchlist_artists")
+                rows = cursor.fetchall()
+                for row in rows:
+                    flags = {key: row[i + 1] for i, key in enumerate(present)}
+                    cursor.execute("UPDATE watchlist_artists SET follow_defaults = ? WHERE id = ?",
+                                   (stamp_value(flags, defaults, override_on), row[0]))
+                logger.info("Added follow_defaults to watchlist_artists (%d existing artists stamped)",
+                            len(rows))
+            except Exception as stamp_err:
+                cursor.execute("UPDATE watchlist_artists SET follow_defaults = 0")
+                logger.warning("Could not read watchlist defaults (%s); existing artists keep "
+                               "their own rules", stamp_err)
+        except Exception as e:
+            logger.error(f"Error adding follow_defaults to watchlist_artists: {e}")
 
     def _add_watchlist_lookback_days_column(self, cursor):
         """Add per-artist lookback_days column to watchlist_artists table"""
@@ -18115,7 +18155,7 @@ class MusicDatabase:
                 optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'musicbrainz_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
                                    'include_instrumentals', 'include_other_artists', 'lookback_days', 'preferred_metadata_source',
-                                   'auto_download', 'auto_download_pref', 'quality_profile_id']
+                                   'auto_download', 'auto_download_pref', 'quality_profile_id', 'follow_defaults']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -18191,7 +18231,10 @@ class MusicDatabase:
                         auto_download=auto_download,
                         auto_download_pref=auto_download_pref,
                         quality_profile_id=quality_profile_id,
-                        profile_id=profile_id
+                        profile_id=profile_id,
+                        follow_defaults=bool(row['follow_defaults'])
+                        if 'follow_defaults' in existing_columns and row['follow_defaults'] is not None
+                        else False,
                     ))
 
                 return watchlist_artists
