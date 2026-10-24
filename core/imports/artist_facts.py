@@ -154,9 +154,17 @@ def info_chain(facts: dict) -> str:
     return facts.get("disambiguation") or facts.get("country") or facts.get("genre") or ""
 
 
+def composite_chain(facts: dict) -> str:
+    """the disambiguation note, else country and genre together ("US Rock"),
+    else whichever of the two exists (QT3496's addon to #1859)."""
+    if facts.get("disambiguation"):
+        return facts["disambiguation"]
+    return " ".join(part for part in (facts.get("country"), facts.get("genre")) if part)
+
+
 def clear_cache() -> None:
     with _cache_lock:
         _cache.clear()
 
 
-__all__ = ["artist_facts", "info_chain", "clear_cache"]
+__all__ = ["artist_facts", "info_chain", "composite_chain", "clear_cache"]

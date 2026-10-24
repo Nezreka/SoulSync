@@ -584,21 +584,23 @@ def apply_content_rating(template: str, track_explicit=None, album_explicit=None
 
 # #1859: what tells same-named artists apart. replaced before $albumartist and
 # $artist, which would otherwise eat the front of these names.
-_ARTIST_FACT_NAMES = ("disambiguation", "country", "genre", "info", "clash")
-_ARTIST_FACT_RE = re.compile(r"\$\{?(?:albumartist|artist)(?:disambiguation|country|genre|info|clash)(?![a-z])")
+_ARTIST_FACT_NAMES = ("disambiguation", "country", "genre", "info", "composite", "clash")
+_ARTIST_FACT_RE = re.compile(
+    r"\$\{?(?:albumartist|artist)(?:disambiguation|country|genre|info|composite|clash)(?![a-z])")
 
 
 def apply_artist_facts(template: str, album_artist: str, track_artist: str, context: dict) -> str:
-    """Fill $albumartist{disambiguation,country,genre,info,clash} and the
-    $artist... set for the track artist.
+    """Fill $albumartist{disambiguation,country,genre,info,composite,clash} and
+    the $artist... set for the track artist.
 
-    info is the first of disambiguation, country, genre. clash is info, but
+    info is the first of disambiguation, country, genre. composite is the
+    disambiguation, else country and genre together ("US Rock"). clash is info, but
     only when another artist in the library has the same name, so unique
     artists keep a plain folder. all of it comes from what enrichment
     stored; an artist the library doesn't know renders nothing."""
     if not template or not _ARTIST_FACT_RE.search(template):
         return template
-    from core.imports.artist_facts import artist_facts, info_chain
+    from core.imports.artist_facts import artist_facts, composite_chain, info_chain
     album = artist_facts(album_artist, mbid=context.get("_albumartist_mbid"),
                          source=context.get("_albumartist_source"),
                          source_id=context.get("_albumartist_source_id"))
@@ -612,6 +614,7 @@ def apply_artist_facts(template: str, album_artist: str, track_artist: str, cont
             "country": facts.get("country", ""),
             "genre": facts.get("genre", ""),
             "info": info,
+            "composite": composite_chain(facts),
             "clash": info if facts.get("clash") else "",
         }
         for name in _ARTIST_FACT_NAMES:

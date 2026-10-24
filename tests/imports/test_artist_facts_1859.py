@@ -91,6 +91,27 @@ def test_clash_is_empty_for_a_unique_artist(db):
         == "$albumartist ()"
 
 
+def test_composite_falls_back_through_country_and_genre():
+    # QT3496's addon: the note when there is one, else country and genre together
+    from core.imports.artist_facts import composite_chain
+    assert composite_chain({"disambiguation": "film composer", "country": "US", "genre": "Score"}) \
+        == "film composer"
+    assert composite_chain({"disambiguation": "", "country": "US", "genre": "Rock"}) == "US Rock"
+    assert composite_chain({"country": "UK", "genre": ""}) == "UK"
+    assert composite_chain({"country": "", "genre": "Rock"}) == "Rock"
+    assert composite_chain({}) == ""
+
+
+def test_composite_token_renders_and_keeps_its_neighbours(db):
+    # Culture: no note, JM + Reggae. info would say only "JM"
+    out = apply_artist_facts("$albumartist [$albumartistcomposite]/$albumartistinfo/${artistcomposite}x",
+                             "Culture", "Culture", {})
+    assert out == "$albumartist [JM Reggae]/JM/JM Reggaex"
+    # the uk nirvana has a note, so composite is just the note
+    assert apply_artist_facts("[$albumartistcomposite]", "Nirvana", "Nirvana", {"_albumartist_mbid": UK}) \
+        == "[UK 60s band]"
+
+
 class _Config:
     def __init__(self, values):
         self._values = values
@@ -132,6 +153,15 @@ def _import_destination(artist, artist_id, album):
         {"is_album": True, "album_name": album, "track_number": 1, "disc_number": 1},
         ".flac", create_dirs=False)
     return path
+
+
+def test_composite_folder_through_the_path_builder(db, template):
+    root = template("$albumartist [$albumartistcomposite]/$album/$track - $title")
+    assert _import_destination("Culture", "dz-culture", "Two Sevens Clash") == \
+        str(root / "Culture [JM Reggae]" / "Two Sevens Clash" / "01 - Song.flac")
+    # nothing known: the empty brackets clean themselves up
+    assert _import_destination("Nobody", "dz-none", "Debut") == \
+        str(root / "Nobody" / "Debut" / "01 - Song.flac")
 
 
 def test_two_nirvanas_get_two_folders_and_culture_stays_plain(db, template):
