@@ -22,9 +22,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
+import unicodedata
 from typing import Any, Dict, List, Optional, Set
 
 from utils.logging_config import get_logger
@@ -70,6 +72,30 @@ def remove_owned_from_wishlist() -> bool:
 
 
 _STATUSES = (STATUS_WANTED, STATUS_SEARCHING, STATUS_GRABBED, STATUS_DONE, STATUS_FAILED, STATUS_CANCELLED)
+
+# A library book that never matched a catalogue edition still owns a wishlisted
+# one when its folder names the same series and number. Audio plays routed from
+# the music side arrive exactly like that: tagged "Folge 6: ...", no narrator,
+# so the conservative matcher never confirms them, and the wishlist went on
+# hunting episodes that were already on disk. The runtime floor keeps a
+# leftover theme song or a half-finished copy from counting as the episode.
+SERIES_OWNERSHIP_MIN_RUNTIME = 0.9
+
+
+def _series_key(title: Any) -> str:
+    text = unicodedata.normalize("NFKD", str(title or "")).casefold()
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    return " ".join(re.findall(r"\w+", text))
+
+
+def _sequence_key(sequence: Any) -> str:
+    """"06", "6" and "6.0" are the same episode; "4.5" is not "4"."""
+    text = str(sequence or "").strip()
+    try:
+        number = float(text.replace(",", "."))
+    except ValueError:
+        return text.casefold()
+    return f"{number:g}"
 
 # Whether a wishlisted book must be downloaded in the narrator's reading it was
 # wished for. On Audible the narrator is baked into the ASIN, so picking a book
@@ -715,27 +741,31 @@ class AudiobookDatabase:
         Ownership used to be checked only when a pass reached the row, so a
         book copied in by hand showed "Looking" for as long as the backoff and
         the batch size kept it out of the next few passes. Every profile: the
-        library is shared.
-        """
-        owned = """
-            SELECT catalog_asin FROM audiobook_library
-            WHERE match_status IN ('identifier', 'automatic', 'confirmed')
+        library is shared. A book without a catalogue match counts too when
+        its series and number say which one it is.
         """
         conn = self._connect()
         try:
+            by_series = sorted(self._wishlist_asins_owned_by_series(conn))
+            owned = """
+                SELECT catalog_asin FROM audiobook_library
+                WHERE match_status IN ('identifier', 'automatic', 'confirmed')
+            """
+            if by_series:
+                owned += " UNION VALUES " + ", ".join("(?)" for _ in by_series)
             if remove_owned_from_wishlist():
                 # Rows already marked done go too, so turning the setting on
                 # clears what earlier passes left behind.
                 cursor = conn.execute(
                     f"DELETE FROM audiobook_wishlist WHERE status = ? OR asin IN ({owned})",
-                    (STATUS_DONE,))
+                    (STATUS_DONE, *by_series))
                 verb = "removed from the wishlist"
             else:
                 cursor = conn.execute(f"""
                     UPDATE audiobook_wishlist
                     SET status = ?, last_error = '', status_changed_at = ?
                     WHERE status != ? AND asin IN ({owned})
-                """, (STATUS_DONE, _now(), STATUS_DONE))
+                """, (STATUS_DONE, _now(), STATUS_DONE, *by_series))
                 verb = "marked done"
             conn.commit()
             if cursor.rowcount:
@@ -745,6 +775,36 @@ class AudiobookDatabase:
         except sqlite3.Error as exc:
             logger.warning("Could not reconcile the wishlist with the library: %s", exc)
             return 0
+
+    def _wishlist_asins_owned_by_series(self, conn) -> Set[str]:
+        """Wishlisted ASINs a library book owns by series and number.
+
+        Only for books the catalogue match left open: a confirmed edition is
+        already owned by its ASIN, and one the user kept unmatched on purpose
+        ("ignored") has been ruled out. Both runtimes must be known, so a book
+        whose length nobody could read never counts.
+        """
+        library: Dict[tuple, int] = {}
+        for title, sequence, runtime in conn.execute("""
+            SELECT series_title, series_sequence, runtime_minutes FROM audiobook_library
+            WHERE match_status NOT IN ('identifier', 'automatic', 'confirmed', 'ignored')
+              AND series_title != '' AND series_sequence != ''
+        """):
+            key = (_series_key(title), _sequence_key(sequence))
+            library[key] = max(library.get(key, 0), int(runtime or 0))
+        if not library:
+            return set()
+
+        owned = set()
+        for asin, title, sequence, runtime in conn.execute("""
+            SELECT asin, series_title, series_sequence, runtime_minutes FROM audiobook_wishlist
+            WHERE status != ? AND series_title != '' AND series_sequence != ''
+        """, (STATUS_DONE,)):
+            have = library.get((_series_key(title), _sequence_key(sequence)), 0)
+            want = int(runtime or 0)
+            if have and want and have >= want * SERIES_OWNERSHIP_MIN_RUNTIME:
+                owned.add(str(asin))
+        return owned
 
     def wishlist_counts(self, profile_id: int = 1) -> Dict[str, int]:
         conn = self._connect()
