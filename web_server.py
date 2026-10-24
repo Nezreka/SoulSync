@@ -15125,6 +15125,10 @@ def _apply_path_template(template: str, context: dict) -> str:
         letter_artist_name = clean_context.get('artist', 'U')
     artist_letter_value = _shared_artist_letter(letter_artist_name)
 
+    # #1859: shared with core.imports.paths, before $albumartist eats the prefix
+    from core.imports.paths import apply_artist_facts
+    result = apply_artist_facts(result, album_artist_value, context.get('artist'), context)
+
     # Support ${var} delimited syntax (e.g. ${albumtype}s → Albums)
     # Must run before $var replacements to prevent partial matching
     _bracket_map = {

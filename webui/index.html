@@ -7339,7 +7339,20 @@
                                                         otherwise), <code>$contentrating</code> ([E] or [C]) and
                                                         <code>$contentratingfull</code> ([Explicit] or [Clean]); these
                                                         stay empty when the source doesn't say, and in a folder they
-                                                        follow the album, not the track. The
+                                                        follow the album, not the track.
+                                                        To tell same-named artists apart:
+                                                        <code>$albumartistdisambiguation</code> (MusicBrainz's note,
+                                                        like &ldquo;US grunge band&rdquo;),
+                                                        <code>$albumartistcountry</code> (US, GB, JM),
+                                                        <code>$albumartistgenre</code>,
+                                                        <code>$albumartistinfo</code> (the first of those three the
+                                                        artist has) and <code>$albumartistclash</code> (the same, but
+                                                        only when another artist in your library shares the name, so
+                                                        <code>$albumartist ($albumartistclash)</code> keeps unique
+                                                        artists plain). The <code>$artist</code> versions
+                                                        (<code>$artistinfo</code> and so on) describe the track
+                                                        artist. They come from enrichment, so an artist that hasn't
+                                                        been matched to MusicBrainz yet renders nothing. The
                                                         three disc variables work in a folder segment as well as in the
                                                         filename and are empty on a single-disc album, so
                                                         <code>$albumartist/$album/Disc $discnum/$track - $title</code>

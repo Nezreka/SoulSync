@@ -1367,6 +1367,7 @@ def _build_post_process_context(
     profile_id: Optional[int] = None,
     local_explicit: Any = None,
     local_album_explicit: Any = None,
+    local_artist_mbid: Optional[str] = None,
 ) -> dict:
     """Build the same shape `import_album_process` builds so post-process
     treats this exactly like a fresh download with full Spotify-style
@@ -1487,6 +1488,9 @@ def _build_post_process_context(
             'name': effective_artist_name,
             'id': '',
             'genres': [],
+            # #1859: the library artist, so $albumartistinfo renders what the
+            # import rendered for it
+            'musicbrainz_id': local_artist_mbid or '',
         },
         'spotify_album': {
             'id': api_album_id,
@@ -1745,6 +1749,7 @@ def preview_album_reorganize(
             profile_id=profile_id,
             local_explicit=plan_item['track'].get('explicit'),
             local_album_explicit=album_data.get('explicit'),
+            local_artist_mbid=album_data.get('artist_musicbrainz_id'),
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1946,6 +1951,7 @@ class _RunContext:
     source: Optional[str] = None            # the metadata source the plan resolved
     profile_id: Optional[int] = None        # #1504: owning profile for own-library files
     local_album_explicit: Any = None        # #1860: the library's explicit flag for the album
+    local_artist_mbid: Optional[str] = None  # #1859: the album artist's musicbrainz id
 
     def emit(self, **updates) -> None:
         """Fire the progress callback. Caller is responsible for
@@ -2037,6 +2043,7 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
         profile_id=ctx.profile_id,
         local_explicit=local_explicit,
         local_album_explicit=ctx.local_album_explicit,
+        local_artist_mbid=ctx.local_artist_mbid,
     )
     context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
     try:
@@ -2409,6 +2416,7 @@ def reorganize_album(
         source=plan.get('source'),
         profile_id=profile_id,
         local_album_explicit=album_data.get('explicit'),
+        local_artist_mbid=album_data.get('artist_musicbrainz_id'),
     )
 
     try:

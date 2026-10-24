@@ -530,8 +530,8 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation', '$label', '$explicit', '$contentrating', '$contentratingfull'],
-        single: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality', '$explicit', '$contentrating', '$contentratingfull'],
+        album: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation', '$label', '$explicit', '$contentrating', '$contentratingfull', '$albumartistdisambiguation', '$albumartistcountry', '$albumartistgenre', '$albumartistinfo', '$albumartistclash', '$artistdisambiguation', '$artistcountry', '$artistgenre', '$artistinfo', '$artistclash'],
+        single: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality', '$explicit', '$contentrating', '$contentratingfull', '$albumartistdisambiguation', '$albumartistcountry', '$albumartistgenre', '$albumartistinfo', '$albumartistclash', '$artistdisambiguation', '$artistcountry', '$artistgenre', '$artistinfo', '$artistclash'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
         video: ['$artist', '$artistletter', '$title', '$year'],
         podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type'],
