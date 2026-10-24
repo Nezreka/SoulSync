@@ -127,6 +127,22 @@ it('retains whitespace cleanup as a real proposed edit', () => {
   expect(group.valueSummary).toBe(' Home  → Home');
 });
 
+it('explains album grouping without exposing database row IDs in its summary', () => {
+  const [group] = groupReadyChanges([
+    {
+      id: 1,
+      finding_type: 'reconciliation_metadata',
+      review_tier: 'ready',
+      details: {
+        changes: { library_album_assignment: { old: 'separate-row-id', new: 'target-row-id' } },
+      },
+    } as unknown as ReviewFinding,
+  ]);
+  expect(group.key).toBe('library_album_assignment');
+  expect(group.valueSummary).toContain('reviewed album');
+  expect(group.valueSummary).not.toMatch(/separate-row-id|target-row-id/);
+});
+
 it('does not turn a wanted download into a new review decision', () => {
   const waiting = {
     id: 'waiting',

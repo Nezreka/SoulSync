@@ -294,6 +294,8 @@ export function groupReadyChanges(items: ReviewFinding[], readyOnly = true): Rea
         .join('; ');
     } else if (group.key === 'filename') {
       valueSummary = `Rename ${count} file${count === 1 ? '' : 's'}`;
+    } else if (group.key === 'library_album_assignment') {
+      valueSummary = `Group ${count} track${count === 1 ? '' : 's'} under the reviewed album`;
     } else {
       const first = values[0];
       const same = values.every(

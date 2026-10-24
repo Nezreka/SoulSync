@@ -838,6 +838,39 @@ def test_unindexed_album_member_gets_guarded_file_tag_proposal(tmp_path, monkeyp
         assert conn.execute('SELECT COUNT(*) FROM tracks').fetchone()[0] == 1
 
 
+@pytest.mark.parametrize('previous_identity', ['file', 'track'])
+def test_indexing_keeps_pending_proposal_visible_on_the_first_rescan(tmp_path, monkeypatch, previous_identity):
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch, mixed=True)
+    if previous_identity == 'file':
+        with db._get_connection() as conn:
+            conn.execute('DELETE FROM tracks WHERE id=2')
+            conn.commit()
+    scan = LibraryReconciliationJob()
+    assert not scan.scan(context).errors
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    previous = next(item for item in worker.get_review_case(case_id)['items']
+                    if item['file_path'] == str(paths[1]))
+    assert previous['entity_type'] == previous_identity
+    assert worker.apply_review_decision(case_id, previous['id'],
+        evidence_token=previous['evidence_token'], action='fix')['success']
+    with db._get_connection() as conn:
+        if previous_identity == 'file':
+            conn.execute("INSERT INTO tracks (id,album_id,artist_id,title,track_number,file_path) VALUES (22,10,1,'Hourglass',2,?)", (str(paths[1]),))
+        else:
+            conn.execute('UPDATE tracks SET id=22 WHERE id=2')
+        conn.commit()
+    for _ in range(2):
+        assert not scan.scan(context).errors
+        current = [item for item in worker.get_review_case(case_id)['items']
+                   if item['file_path'] == str(paths[1])]
+        assert len(current) == 1
+        assert (current[0]['id'], current[0]['entity_type'], current[0]['entity_id']) == (previous['id'], 'track', '22')
+        assert current[0]['details']['track_id'] == '22'
+        assert not current[0]['details'].get('file_only')
+        # The database target changed, so the old approval is not transferable.
+        assert not current[0]['details'].get('plan_approved')
+
+
 @pytest.mark.parametrize('changed', ['indexed', 'indexed_alias', 'file_changed'])
 def test_unindexed_metadata_apply_rejects_changed_evidence(tmp_path, monkeypatch, changed):
     db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch, mixed=True)

@@ -1433,6 +1433,12 @@ class RepairWorker:
                         WHERE id = ?
                     """, (severity, title, description,
                           json.dumps(details) if details else '{}', file_path, existing_id))
+                    if job_id == 'library_reconciliation':
+                        # A published file can gain (or change) its library row.
+                        # Keep the identity aligned with this scan's observed
+                        # proposal so obsolete-finding cleanup cannot remove it.
+                        cursor.execute('UPDATE repair_findings SET entity_type=?, entity_id=? WHERE id=?',
+                                       (entity_type, entity_id, existing_id))
                     if has_case_key:
                         cursor.execute(
                             "UPDATE repair_findings SET review_case_key = ? WHERE id = ?",
