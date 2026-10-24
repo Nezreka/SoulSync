@@ -21360,6 +21360,14 @@ def mirror_playlist_endpoint():
         except Exception as e:
             logger.debug("mirrored_playlist_created emit failed: %s", e)
 
+        # identify it in the background, like My Playlists, so it is ready to
+        # sync without pressing Identify (core/playlists/auto_identify)
+        try:
+            from core.playlists import auto_identify as _mirror_identify
+            _mirror_identify.request_if_unmatched(playlist_id, database.get_mirrored_playlist_tracks(playlist_id))
+        except Exception as _id_err:
+            logger.debug("mirror-time identify skipped: %s", _id_err)
+
         return jsonify({"success": True, "playlist_id": playlist_id})
     except ValueError as ve:
         # #990: malformed/all-empty track payload — a client error, not a 500.

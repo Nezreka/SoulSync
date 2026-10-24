@@ -234,3 +234,103 @@ def test_an_edit_during_a_run_gets_a_second_run(scheduler):
 def test_without_a_runner_nothing_is_scheduled(monkeypatch):
     monkeypatch.setattr(auto_identify, "_runner", None)
     assert auto_identify.request(1) is False
+
+
+# ── mirrors: identified after they are made and after every refresh ────
+
+
+@pytest.fixture()
+def asked(monkeypatch):
+    calls = []
+    monkeypatch.setattr(auto_identify, "request", lambda pid, **kw: calls.append(int(pid)) or True)
+    return calls
+
+
+@pytest.mark.parametrize("extra, wanted", [
+    (None, True),                                              # never identified
+    ({"origin": {"source": "spotify", "id": "x"}}, True),      # an origin is not a match
+    ({"discovered": True, "wing_it_fallback": True}, False),   # a stub alone starts nothing
+    ({"discovered": True, "manual_match": True}, False),
+    ({"discovered": True, "matched_data": {"track_number": 3, "album": {"id": "a"}}}, False),
+    ({"unmatched_by_user": True}, False),
+])
+def test_only_tracks_that_still_need_a_match_start_an_identify(asked, extra, wanted):
+    track = {"extra_data": json.dumps(extra) if extra else None}
+    assert auto_identify.request_if_unmatched(7, [track]) is wanted
+    assert asked == ([7] if wanted else [])
+
+
+def _refresh_deps(db, detail):
+    from types import SimpleNamespace
+
+    class _Adapter:
+        def refresh_playlist(self, _id):
+            return detail
+
+    class _Registry:
+        def get_source(self, _source):
+            return _Adapter()
+
+    return SimpleNamespace(
+        get_database=lambda: db,
+        playlist_source_registry=_Registry(),
+        update_progress=lambda *a, **k: None,
+        logger=__import__("logging").getLogger("test"),
+        engine=None,
+        config_manager=SimpleNamespace(get=lambda *a, **k: None),
+        spotify_client=None,
+    )
+
+
+def _mirror(db):
+    return db.mirror_playlist("deezer", "123", "Mirror", [
+        {"track_name": "One", "artist_name": "A", "source_track_id": "1",
+         "extra_data": {"discovered": True, "manual_match": True}},
+    ], profile_id=1)
+
+
+@pytest.mark.parametrize("skip_discovery, wanted", [(False, True), (True, False)])
+def test_a_refresh_that_brings_new_tracks_asks_for_an_identify(mdb, asked, skip_discovery, wanted):
+    from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
+    from core.playlists.sources import NormalizedTrack, PlaylistDetail
+    pid = _mirror(mdb)
+    detail = PlaylistDetail(meta=None, tracks=[
+        NormalizedTrack(position=1, track_name="One", artist_name="A", source_track_id="1"),
+        NormalizedTrack(position=2, track_name="Two", artist_name="A", source_track_id="2"),
+    ])
+    result = auto_refresh_mirrored({"playlist_id": pid, "skip_discovery": skip_discovery},
+                                   _refresh_deps(mdb, detail))
+    assert result["refreshed"] == "1"
+    assert asked == ([pid] if wanted else [])  # the pipeline identifies on its own
+
+
+def test_a_refresh_with_nothing_new_asks_for_nothing(mdb, asked):
+    from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
+    from core.playlists.sources import NormalizedTrack, PlaylistDetail
+    pid = _mirror(mdb)
+    detail = PlaylistDetail(meta=None, tracks=[NormalizedTrack(position=1, track_name="One", artist_name="A", source_track_id="1")])
+    auto_refresh_mirrored({"playlist_id": pid}, _refresh_deps(mdb, detail))
+    assert asked == []
+
+
+def test_background_identifies_never_run_more_than_two_at_once(monkeypatch):
+    live, peak, gate = [0], [0], threading.Event()
+    lock = threading.Lock()
+
+    def runner(pls):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+        gate.wait(0.3)
+        with lock:
+            live[0] -= 1
+
+    monkeypatch.setattr(auto_identify, "_runner", runner)
+    monkeypatch.setattr(auto_identify, "_get_playlist", lambda pid: {"id": pid, "name": "p"})
+    monkeypatch.setattr(auto_identify, "_pending", set())
+    monkeypatch.setattr(auto_identify, "_running", set())
+    monkeypatch.setattr(auto_identify, "_timers", {})
+    for pid in range(1, 6):
+        auto_identify.request(pid, delay=0.01)
+    time.sleep(1.2)
+    assert peak[0] == auto_identify.MAX_CONCURRENT_RUNS

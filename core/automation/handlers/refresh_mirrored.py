@@ -28,6 +28,7 @@ from core.automation.deps import AutomationDeps
 from core.profile_context import get_background_profile
 from core.playlists.source_refs import require_refresh_url
 from core.playlists.sources import PlaylistDetail, to_mirror_track_dict
+from core.playlists import auto_identify
 from core.playlists.user_playlists import has_upstream
 from core.playlists.sources.base import (
     SOURCE_SPOTIFY,
@@ -126,7 +127,8 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
                 if 'source_skipped' in meta_extra else {}
             )
             refreshed += _commit_refresh(
-                pl, source, source_id, tracks, db, deps, auto_id, mirror_kwargs
+                pl, source, source_id, tracks, db, deps, auto_id, mirror_kwargs,
+                identify=not skip_discovery,
             )
         except _SkipPlaylist:
             # Source-specific soft-skip (e.g. Tidal not authenticated).
@@ -283,8 +285,14 @@ def _commit_refresh(
     deps: AutomationDeps,
     auto_id: Optional[str],
     mirror_kwargs: Optional[Dict[str, Any]] = None,
+    identify: bool = True,
 ) -> int:
     """Persist the refreshed track list + emit playlist_changed when delta.
+
+    New tracks get a quiet background identify, the same one My Playlists
+    use (core/playlists/auto_identify), so a mirror is ready to sync after
+    every refresh. Pipeline runs pass ``identify=False``: their own
+    discovery phase does it next.
 
     Returns 1 when a refresh successfully landed, 0 otherwise. The
     caller is responsible for incrementing the running tally."""
@@ -303,7 +311,7 @@ def _commit_refresh(
         if sid and sid in old_extra_map and 'extra_data' not in t:
             t['extra_data'] = old_extra_map[sid]
 
-    db.mirror_playlist(
+    saved_id = db.mirror_playlist(
         source=source,
         source_playlist_id=source_id,
         name=pl['name'],
@@ -314,6 +322,8 @@ def _commit_refresh(
         image_url=pl.get('image_url'),
         **(mirror_kwargs or {}),
     )
+    if identify and saved_id:
+        auto_identify.request_if_unmatched(saved_id, tracks)
 
     # Membership just changed — if this playlist is organize-by-playlist, rebuild
     # its folder (with prune) so a track that LEFT the playlist has its symlink
