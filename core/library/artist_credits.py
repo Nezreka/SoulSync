@@ -536,6 +536,25 @@ def credited_names(cursor, track_ids: Sequence[str]) -> Dict[str, List[str]]:
     return {tid: max(lists.values(), key=len) for tid, lists in by_track.items()}
 
 
+def album_credited_names(cursor, album_ids: Sequence[str]) -> Dict[str, List[str]]:
+    """``credited_names`` for albums: {album_id: [names in credit order]}.
+
+    Same source tie-break — the source that credited the most artists wins —
+    so the tag write and the artist pages agree about who made an album.
+    """
+    if not album_ids:
+        return {}
+    ph = ','.join('?' for _ in album_ids)
+    cursor.execute(f"""
+        SELECT album_id, source, position, name FROM album_artist_credits
+        WHERE album_id IN ({ph}) ORDER BY album_id, source, position
+    """, list(album_ids))
+    by_album: Dict[str, Dict[str, List[str]]] = {}
+    for aid, source, _pos, name in cursor.fetchall():
+        by_album.setdefault(str(aid), {}).setdefault(source, []).append(name)
+    return {aid: max(lists.values(), key=len) for aid, lists in by_album.items()}
+
+
 def appears_on_albums(cursor, artist_id: Any, limit: int = 100,
                       scope_sql: str = '1=1', scope_params: Sequence[Any] = ()) -> List[Dict[str, Any]]:
     """albums this artist is credited on that are filed under someone else,

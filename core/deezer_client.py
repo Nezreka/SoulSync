@@ -89,6 +89,45 @@ def _upgrade_deezer_cover_url(url: str, target_size: int = _DEEZER_MAX_COVER_SIZ
     return _DEEZER_CDN_SIZE_PATTERN.sub(f'/{target_size}x{target_size}-', url, count=1)
 
 
+def _album_main_artists(album_data: Dict[str, Any], primary_name: str,
+                        primary_id: str) -> List[Dict[str, str]]:
+    """Every credited album artist, from `/album/<id>`'s ``contributors``.
+
+    Only ``role == 'Main'`` counts. Contributors also carry ``Featured``
+    on singles titled "X (feat. Y)", and a guest is not an album artist —
+    promoting one is exactly what ``_album_artist_names`` in
+    ``core/metadata/source.py`` refuses to do for the track list.
+
+    ``primary_name`` leads the result. ``album.artist`` is what the album
+    artist tag and the ``$albumartist`` folder segment already resolve to
+    (via ``context_artists[0]`` in ``extract_source_metadata``), so
+    anchoring on it means this can only ADD names, never re-path a
+    library. It matched ``contributors[0]`` in every release sampled, but
+    being wrong once would silently move folders.
+
+    Deezer credits a duo alongside its own members (``¥$`` next to Kanye
+    West and Ty Dolla $ign) and an artist next to their own alias (Kanye
+    West, Ye) — indistinguishable from a real collab, so the credits are
+    taken at face value. Every name is a real Deezer artist either way.
+
+    ``/search/album`` omits ``contributors`` entirely; the primary alone
+    comes back then, matching today's output.
+    """
+    artists = [{'name': primary_name, 'id': primary_id}]
+    seen = {primary_name}
+    contributors = album_data.get('contributors')
+    if not isinstance(contributors, list):
+        return artists
+    for contributor in contributors:
+        if not isinstance(contributor, dict) or contributor.get('role') != 'Main':
+            continue
+        name = str(contributor.get('name') or '').strip()
+        if name and name not in seen:
+            seen.add(name)
+            artists.append({'name': name, 'id': str(contributor.get('id', ''))})
+    return artists
+
+
 def _is_full_track_payload(payload: Optional[Dict[str, Any]]) -> bool:
     """Distinguish a full `/track/<id>` cache hit from partial album-tracks data.
 
@@ -989,7 +1028,7 @@ class DeezerClient:
             'id': str(album_data.get('id', album_id)),
             'name': album_data.get('title', ''),
             'images': images,
-            'artists': [{'name': artist_name, 'id': artist_id}],
+            'artists': _album_main_artists(album_data, artist_name, artist_id),
             'release_date': album_data.get('release_date', ''),
             'total_tracks': album_data.get('nb_tracks', 0),
             'album_type': album_type,
