@@ -236,3 +236,26 @@ test('clearing queue filters preserves the selected queue mode', async ({ page }
       .getByRole('button', { name: /Ready to apply/ }),
   ).toHaveAttribute('aria-current', 'page');
 });
+
+test('tablet sidebar leaves enough room for a long album title and its navigation', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 800, height: 1100 });
+  await installShell(
+    page,
+    reviewFixture(false, (review) => {
+      review.album = 'Come What(ever) May [Special Edition]';
+    }),
+  );
+  await page.goto(`${ORIGIN}/review?mode=all`);
+  const title = page.getByRole('heading', {
+    name: 'Come What(ever) May [Special Edition]',
+    exact: true,
+  });
+  const previous = page.getByRole('button', { name: /Previous album/ });
+  await expect(title).toBeVisible();
+  const titleBox = (await title.boundingBox())!,
+    navBox = (await previous.boundingBox())!;
+  expect(navBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
+  expect(titleBox.width).toBeGreaterThan(240);
+});

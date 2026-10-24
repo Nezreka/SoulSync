@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 
 def migrate_album(conn, old_id, new_id):
@@ -98,12 +99,30 @@ def repair_legacy_ids(db):
         plans = conn.execute('SELECT album_id, profile_id, plan_json FROM reconcile_album_plans '
                              'WHERE album_id NOT IN (SELECT id FROM albums)').fetchall()
         for old_id, profile, raw in plans:
-            ids = (json.loads(raw or '{}').get('inventory') or {}).get('track_ids') or []
-            if not ids:
-                continue
+            inventory = json.loads(raw or '{}').get('inventory') or {}
+            ids = inventory.get('track_ids') or []
             owners = conn.execute('SELECT DISTINCT t.album_id, a.owner_profile_id FROM tracks t '
                 'JOIN albums a ON a.id=t.album_id WHERE t.id IN (SELECT value FROM json_each(?))',
-                (json.dumps(ids),)).fetchall()
+                (json.dumps(ids),)).fetchall() if ids else []
+            if not owners and old_id:
+                # Some servers replace track IDs together with the album ID.
+                # The file must still be the same inode through either mount.
+                found = set()
+                for path in inventory.get('paths') or []:
+                    if not os.path.isfile(path):
+                        continue
+                    name = os.path.basename(path).replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+                    candidates = conn.execute("SELECT t.album_id, a.owner_profile_id, t.file_path "
+                        "FROM tracks t JOIN albums a ON a.id=t.album_id "
+                        "WHERE t.file_path=? OR t.file_path LIKE ? ESCAPE '\\'",
+                        (path, '%/' + name)).fetchall()
+                    for album, owner, candidate in candidates:
+                        try:
+                            if os.path.samefile(path, candidate):
+                                found.add((album, owner))
+                        except (OSError, TypeError):
+                            continue
+                owners = list(found)
             if len(owners) == 1 and int(owners[0][1] or 1) == int(profile or 1):
                 migrate_album(conn, old_id, owners[0][0])
         conn.commit()

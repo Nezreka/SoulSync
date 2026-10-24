@@ -239,9 +239,37 @@ def settle_assignments(db, case_id, assignments, release_id, source):
         conn.close()
 
 
+def recover_published_requests(conn):
+    """Recover a missed publication callback from an exact, verified delivery."""
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='wishlist_removals'").fetchone():
+        return
+    from mutagen import File, MutagenError
+    for case, profile, release, track, requested in conn.execute(
+            "SELECT case_id,profile_id,release_id,source_track_id,updated_at FROM reconcile_fulfillment "
+            "WHERE source='musicbrainz' AND state='requested' AND published_path='' ").fetchall():
+        deliveries = conn.execute("SELECT final_path, profile_ids FROM wishlist_removals "
+            "WHERE spotify_track_id=? AND reason='download_complete' AND removed_at >= ? "
+            "ORDER BY removed_at DESC", (track, requested)).fetchall()
+        for path, profiles in deliveries:
+            try:
+                if int(profile) not in json.loads(profiles or '[]') or not os.path.isfile(path):
+                    continue
+                tags = File(path, easy=True)
+                if (not tags or release not in (tags.get('musicbrainz_albumid') or [])
+                        or track not in (tags.get('musicbrainz_trackid') or [])):
+                    continue
+                conn.execute("UPDATE reconcile_fulfillment SET state='published', published_path=?, "
+                    "refresh_needed=1, updated_at=CURRENT_TIMESTAMP WHERE case_id=? AND source='musicbrainz' "
+                    "AND release_id=? AND source_track_id=?", (path, case, release, track))
+                break
+            except (OSError, ValueError, TypeError, AttributeError, MutagenError):
+                continue
+
+
 def backfill_requests(conn):
     """Retain requests made before the durable acquisition state was introduced."""
     ensure_schema(conn)
+    recover_published_requests(conn)
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='repair_findings'").fetchone():
         return
     active_requests = set()

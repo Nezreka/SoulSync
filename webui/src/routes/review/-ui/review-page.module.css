@@ -3724,3 +3724,13 @@
   margin-top: 4px;
   color: var(--text-2);
 }
+
+/* The shell sidebar can leave a narrow album panel on a tablet-sized window. */
+@container album-review (max-width: 680px) {
+  .albumHeader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .albumHeader .nav {
+    justify-content: space-between;
+  }
+}

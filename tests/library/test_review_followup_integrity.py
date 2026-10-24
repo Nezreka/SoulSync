@@ -115,3 +115,51 @@ def test_review_organization_preview_uses_final_folder_and_preserves_filenames(t
     assert result['tracks'][0]['new_path_abs'] == str(tmp_path/'Approved Album'/'01 - Approved.flac')
     assert contexts[0]['spotify_album']['disambiguation'] == ''
     assert path.read_bytes() == b'audio'
+
+
+@pytest.mark.parametrize('owner,expected', [(1,'new'),(2,'old')])
+def test_legacy_album_and_track_id_changes_require_same_physical_file_and_profile(tmp_path, owner, expected):
+    from core.library.reconciliation_migration import repair_legacy_ids
+    db=Database(tmp_path/'legacy.db')
+    path=tmp_path/'01 - 100%_Rolling.flac';path.write_bytes(b'audio')
+    alias=tmp_path/'alias';alias.symlink_to(tmp_path,target_is_directory=True)
+    with db._get_connection() as conn:
+        conn.execute('CREATE TABLE albums(id TEXT,owner_profile_id INTEGER)')
+        conn.execute('INSERT INTO albums VALUES("new",?)',(owner,))
+        conn.execute('CREATE TABLE tracks(id TEXT,album_id TEXT,file_path TEXT)')
+        conn.execute('INSERT INTO tracks VALUES("new-track","new",?)',(str(alias/path.name),))
+        conn.execute('CREATE TABLE reconcile_album_plans(case_id TEXT PRIMARY KEY,album_id TEXT,profile_id INTEGER,plan_json TEXT)')
+        conn.execute('INSERT INTO reconcile_album_plans VALUES("album:1:old","old",1,?)',
+            (json.dumps({'inventory':{'track_ids':['old-track'],'paths':[str(path)]}}),))
+        conn.execute('CREATE TABLE reconcile_album_intent(album_id TEXT PRIMARY KEY,scope TEXT)')
+        conn.execute('INSERT INTO reconcile_album_intent VALUES("old","partial")')
+    repair_legacy_ids(db)
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT album_id FROM reconcile_album_intent').fetchone()[0] == expected
+        assert conn.execute('SELECT count(*) FROM reconcile_album_plans').fetchone()[0] == 1
+
+
+@pytest.mark.parametrize('profile,release,reason,receipt_date,expected',[
+    (1,'release','download_complete','2099-01-01','published'),
+    (2,'release','download_complete','2099-01-01','requested'),
+    (1,'different','download_complete','2099-01-01','requested'),
+    (1,'release','removed_by_user','2099-01-01','requested'),
+    (1,'release','download_complete','2000-01-01','requested')])
+def test_missed_publication_requires_matching_delivery_profile_and_embedded_identity(tmp_path,profile,release,reason,receipt_date,expected):
+    from core.library.reconciliation_fulfillment import recover_published_requests, settle_assignments
+    from core.repair_review_identity import review_case_key
+    from tests.library.test_reconciliation_end_to_end import _minimal_flac
+    db=Database(tmp_path/'receipt.db');path=tmp_path/'published.flac'
+    _minimal_flac(path,{'musicbrainz_albumid':release,'musicbrainz_trackid':'recording'})
+    details={'album_id':'album','profile_id':1,'source':'musicbrainz','release_id':'release','replacement_request':True}
+    record_request(db,details,{'source_track_id':'recording'})
+    with db._get_connection() as conn:
+        conn.execute('CREATE TABLE wishlist_removals(spotify_track_id TEXT,reason TEXT,final_path TEXT,profile_ids TEXT,removed_at TEXT)')
+        conn.execute('INSERT INTO wishlist_removals VALUES("recording",?,?,?,?)',(reason,str(path),json.dumps([profile]),receipt_date))
+        recover_published_requests(conn)
+        assert conn.execute('SELECT state FROM reconcile_fulfillment').fetchone()[0] == expected
+    if expected=='published':
+        # Publication is not completion; only a subsequent supported assignment settles it.
+        settle_assignments(db,review_case_key(details,None),[{'source_track_id':'recording','status':'confirmed','file_path':str(path)}],'release','musicbrainz')
+        with db._get_connection() as conn:
+            assert conn.execute('SELECT state FROM reconcile_fulfillment').fetchone()[0] == 'fulfilled'
