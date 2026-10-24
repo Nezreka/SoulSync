@@ -2,6 +2,9 @@
 import os
 import threading
 import time
+from pathlib import Path
+
+import pytest
 
 from core.library.reconciliation_evidence import file_identity
 from core.repair_jobs.library_reconciliation import LibraryReconciliationJob, _suggest_filename
@@ -199,7 +202,8 @@ def test_destination_preview_includes_planned_tags_without_writing_files(tmp_pat
     assert preview == actual
 
 
-def test_discovery_retains_known_members_when_moved_folders_require_a_full_walk(tmp_path, monkeypatch):
+@pytest.mark.parametrize('with_mount_alias', [False, True])
+def test_discovery_retains_known_members_when_moved_folders_require_a_full_walk(tmp_path, monkeypatch, with_mount_alias):
     album = build_album(tmp_path, monkeypatch, 'supported')
     case = scan_case(album)
     for i, path in enumerate(album.paths):
@@ -211,6 +215,16 @@ def test_discovery_retains_known_members_when_moved_folders_require_a_full_walk(
         with album.db._get_connection() as conn:
             conn.execute('UPDATE tracks SET file_path=? WHERE file_path=?', (str(moved), str(path)))
     album.folder.rmdir()
+    if with_mount_alias:
+        alias = tmp_path / 'other-mount'
+        alias.symlink_to(album.root, target_is_directory=True)
+        load_rows = LibraryReconciliationJob._load_rows
+        def rows_with_aliases(job, *args, **kwargs):
+            tracks, albums = load_rows(job, *args, **kwargs)
+            tracks.update({str(alias / Path(path).relative_to(album.root)): row
+                           for path, row in list(tracks.items())})
+            return tracks, albums
+        monkeypatch.setattr(LibraryReconciliationJob, '_load_rows', rows_with_aliases)
     result = LibraryReconciliationJob().scan(album.context, target_folder=str(album.folder), scope='discovery')
     assert not result.stopped_early, result.stopped_early
     refreshed = album.worker.get_review_case(case['case_id'])

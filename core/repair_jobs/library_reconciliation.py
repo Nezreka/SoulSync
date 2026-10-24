@@ -2202,10 +2202,15 @@ class LibraryReconciliationJob(RepairJob):
                 # Database track IDs survive a rename. Only follow a move when
                 # all surviving known members have one unambiguous folder owner.
                 known_ids = set((inventory_request.saved or {}).get('track_ids') or [])
-                current_paths = {path for path, row in tracks.items()
-                                 if row.get('id') in known_ids and os.path.isfile(path)}
+                # _load_rows indexes verified aliases of the same physical
+                # file (for example /music and /app/Music/library). Compare
+                # surviving track IDs, since only the configured root is walked.
+                current_ids = {row['id'] for path, row in tracks.items()
+                               if row.get('id') in known_ids and os.path.isfile(path)}
                 owners = [folder for folder, paths in folders.items()
-                          if current_paths and current_paths.issubset(set(paths))]
+                          if current_ids and current_ids.issubset({
+                              tracks.get(os.path.normpath(path), {}).get('id')
+                              for path in paths})]
                 if len(owners) == 1:
                     relocated_from, target_folder = target_folder, owners[0]
             if target_folder not in folders:
