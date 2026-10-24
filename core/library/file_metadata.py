@@ -3,12 +3,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import mutagen
-from mutagen.id3 import Frame
+from mutagen.asf import ASFBaseAttribute
+from mutagen.id3 import Frame, UFID
+from mutagen.mp4 import AtomDataType, MP4FreeForm
 
 
 def _value(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
+    if isinstance(value, MP4FreeForm):
+        encoding = {AtomDataType.UTF8: 'utf-8', AtomDataType.UTF16: 'utf-16-be'}.get(value.dataformat)
+        if encoding:
+            try:
+                return value.decode(encoding)
+            except UnicodeDecodeError:
+                pass
+    if isinstance(value, ASFBaseAttribute):
+        return _value(value.value)
     if isinstance(value, bytes):
         return {'binary_bytes': len(value)}
     if isinstance(value, (list, tuple)):
@@ -18,7 +29,13 @@ def _value(value):
     # ID3 frames carry descriptions, languages and multiple text values in
     # addition to their printable text. Keep them all, omitting binary blobs.
     if isinstance(value, Frame):
-        return {key: _value(item) for key, item in vars(value).items() if not key.startswith('_')}
+        result = {key: _value(item) for key, item in vars(value).items() if not key.startswith('_')}
+        if isinstance(value, UFID) and value.owner in ('http://musicbrainz.org', 'https://musicbrainz.org'):
+            try:
+                result['data'] = value.data.decode('ascii')
+            except UnicodeDecodeError:
+                pass
+        return result
     return str(value)
 
 

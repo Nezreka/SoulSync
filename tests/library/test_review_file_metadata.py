@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import wave
 
 from flask import Flask
-from mutagen.id3 import TIT2, TPE1, TXXX, APIC
+from mutagen.id3 import TIT2, TPE1, TXXX, APIC, UFID
+from mutagen.mp4 import AtomDataType, MP4Cover, MP4FreeForm
 from mutagen.wave import WAVE
 import pytest
 
@@ -21,6 +22,7 @@ def audio_file(path, title='Local title'):
     audio.tags.add(TIT2(encoding=3, text=title))
     audio.tags.add(TPE1(encoding=3, text=['Noah Kahan', 'Hozier']))
     audio.tags.add(TXXX(encoding=3, desc='custom user tag', text=['one', 'two']))
+    audio.tags.add(UFID(owner='http://musicbrainz.org', data=b'93ef0bf8-5478-43a7-ad00-1650069bd721'))
     audio.tags.add(APIC(encoding=3, mime='image/png', type=3, desc='Cover', data=b'picture-bytes'))
     audio.save()
 
@@ -32,6 +34,7 @@ def test_native_tags_keep_custom_values_multiple_artists_and_picture_metadata(tm
     assert record['Tag: TIT2']['text'] == ['Local title']
     assert record['Tag: TPE1']['text'] == ['Noah Kahan', 'Hozier']
     assert record['Tag: TXXX:custom user tag']['text'] == ['one', 'two']
+    assert record['Tag: UFID:http://musicbrainz.org']['data'] == '93ef0bf8-5478-43a7-ad00-1650069bd721'
     assert record['Tag: APIC:Cover']['data'] == {'binary_bytes': 13}
     assert record['Sample rate (Hz)'] == 8000
     assert record['Channels'] == 1
@@ -40,6 +43,27 @@ def test_native_tags_keep_custom_values_multiple_artists_and_picture_metadata(tm
     audio.tags['TIT2'] = TIT2(encoding=3, text='Changed since review')
     audio.save()
     assert read_file_metadata(str(path))['Tag: TIT2']['text'] == ['Changed since review']
+
+
+def test_native_binary_containers_preserve_text_without_expanding_images(monkeypatch):
+    import mutagen
+    from mutagen.asf import ASFByteArrayAttribute, ASFUnicodeAttribute
+    monkeypatch.setattr(mutagen, 'File', lambda *_args, **_kwargs: SimpleNamespace(
+        info=SimpleNamespace(), tags={
+            '----:com.apple.iTunes:MusicBrainz Track Id': [MP4FreeForm(b'recording-id')],
+            'custom UTF16': [MP4FreeForm('Bj\u00f6rk'.encode('utf-16-be'), dataformat=AtomDataType.UTF16)],
+            'invalid UTF8': [MP4FreeForm(b'\xff')],
+            'covr': [MP4Cover(b'picture-bytes')],
+            'WM/Artist': ASFUnicodeAttribute('Noah Kahan & Hozier'),
+            'WM/Picture': ASFByteArrayAttribute(b'picture-bytes'),
+        }))
+    record = read_file_metadata('/music/test.m4a')
+    assert record['Tag: ----:com.apple.iTunes:MusicBrainz Track Id'] == ['recording-id']
+    assert record['Tag: custom UTF16'] == ['Bj\u00f6rk']
+    assert record['Tag: invalid UTF8'] == [{'binary_bytes': 1}]
+    assert record['Tag: covr'] == [{'binary_bytes': 13}]
+    assert record['Tag: WM/Artist'] == 'Noah Kahan & Hozier'
+    assert record['Tag: WM/Picture'] == {'binary_bytes': 13}
 
 
 @pytest.mark.parametrize('membership', ['finding', 'assignment', 'unrelated', 'outside', 'missing'])
