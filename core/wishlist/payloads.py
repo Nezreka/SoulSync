@@ -132,6 +132,8 @@ def ensure_wishlist_track_format(track_info):
         'popularity': track_info.get('popularity', 0),
         'source': track_info.get('source', 'webui_modal'),
     }
+    if track_info.get('standard_completion_per_track'):
+        normalized['standard_completion_per_track'] = True
     if track_info.get('quality_profile_id') is not None:
         normalized['quality_profile_id'] = track_info.get('quality_profile_id')
     return normalized
@@ -208,6 +210,9 @@ def build_cancelled_task_wishlist_payload(task, profile_id: int = 1):
         'track_number': track_info.get('track_number'),
         'disc_number': track_info.get('disc_number'),
     }
+
+    if track_info.get('standard_completion_per_track'):
+        track_data['standard_completion_per_track'] = True
 
     source_context = {
         'playlist_name': task.get('playlist_name', 'Unknown Playlist'),

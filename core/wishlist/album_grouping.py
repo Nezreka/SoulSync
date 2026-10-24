@@ -229,6 +229,11 @@ def group_wishlist_tracks_by_album(
 
     for track in tracks:
         spotify_data = _extract_track_data(track)
+        # Standard completion must never widen a verified missing-track list
+        # into a whole-release search (which may return a deluxe bundle).
+        if spotify_data.get('standard_completion_per_track'):
+            unbucketable.append(track)
+            continue
         key = _album_key(spotify_data)
         if key is None:
             unbucketable.append(track)
