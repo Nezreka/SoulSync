@@ -22,6 +22,7 @@ returned plan to the media-server client.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import List, Optional, Tuple
 
 
@@ -224,10 +225,24 @@ def plan_align_rewrite(current_ids, matched_ids, keep_extras: bool = False):
     matched = [str(m) for m in matched_ids]
     if any(m not in current_set for m in matched):
         return None
-    ordered = list(matched)
+    # an id goes in at most as many times as the playlist holds it. two
+    # source rows can share one server track (pass 0, #1852), so matched_ids
+    # can name it twice, and writing both would add a copy the playlist
+    # never had. a song the playlist really holds twice keeps both.
+    room = Counter(current)
+    ordered = []
+    for m in matched:
+        if room[m] > 0:
+            room[m] -= 1
+            ordered.append(m)
     if keep_extras:
-        matched_set = set(matched)
-        ordered.extend(c for c in current if c not in matched_set)
+        # whatever the aligned block didn't use, in current order
+        placed = Counter(ordered)
+        for c in current:
+            if placed[c] > 0:
+                placed[c] -= 1
+            else:
+                ordered.append(c)
     return ordered
 
 
