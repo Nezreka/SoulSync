@@ -189,6 +189,16 @@ def _run_wishlist_cycle(
     logger = runtime.logger
     from core.wishlist.album_grouping import group_wishlist_tracks_by_album
 
+    # stopped while the manual run was still preparing: the placeholder is
+    # about to be rebuilt as the first album batch, which would quietly undo
+    # the cancel and start the downloads anyway
+    if first_batch_id is not None:
+        with runtime.tasks_lock:
+            placeholder = runtime.download_batches.get(first_batch_id) or {}
+            if placeholder.get('phase') == 'cancelled':
+                logger.info(f"[Manual-Wishlist] {first_batch_id} was stopped before dispatch")
+                return {'submitted': [], 'album_batches': 0, 'residual_count': 0}
+
     extra_fields = None
     if auto_initiated:
         extra_fields = {

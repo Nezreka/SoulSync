@@ -16,11 +16,18 @@ const POLL_MS = 5000;
 export interface LiveWishlistState {
   /** True while auto-processing or a manual wishlist batch is in flight. */
   processing: boolean;
+  /** the running wishlist batch, whoever started it; the page polls its progress. */
+  batchId: string | null;
 }
 
-async function readProcessing(): Promise<{ processing: boolean; total: number }> {
+async function readProcessing(): Promise<{
+  processing: boolean;
+  total: number;
+  batchId: string | null;
+}> {
   let processing = false;
   let total = 0;
+  let batchId: string | null = null;
 
   try {
     const statsResp = await fetch('/api/wishlist/stats');
@@ -34,20 +41,24 @@ async function readProcessing(): Promise<{ processing: boolean; total: number }>
   }
 
   // A manual batch does not set is_auto_processing, so the active-process list
-  // is checked too — the vanilla poller did both and OR'd them.
-  if (!processing) {
-    try {
-      const procResp = await fetch('/api/active-processes');
-      if (procResp.ok) {
-        const data: { active_processes?: { playlist_id?: string }[] } = await procResp.json();
-        processing = (data.active_processes ?? []).some((p) => p.playlist_id === 'wishlist');
+  // is checked too — the vanilla poller did both and OR'd them. it also names
+  // the batch, so the progress strip can follow an auto run as well.
+  try {
+    const procResp = await fetch('/api/active-processes');
+    if (procResp.ok) {
+      const data: { active_processes?: { playlist_id?: string; batch_id?: string }[] } =
+        await procResp.json();
+      const run = (data.active_processes ?? []).find((p) => p.playlist_id === 'wishlist');
+      if (run) {
+        processing = true;
+        batchId = run.batch_id ?? null;
       }
-    } catch {
-      /* same */
     }
+  } catch {
+    /* same */
   }
 
-  return { processing, total };
+  return { processing, total, batchId };
 }
 
 /**
@@ -62,6 +73,7 @@ async function readProcessing(): Promise<{ processing: boolean; total: number }>
  */
 export function useLiveWishlist(onRefresh: () => void): LiveWishlistState {
   const [processing, setProcessing] = useState(false);
+  const [batchId, setBatchId] = useState<string | null>(null);
   const lastTotal = useRef<number | null>(null);
   const wasProcessing = useRef(false);
   const refresh = useRef(onRefresh);
@@ -79,10 +91,11 @@ export function useLiveWishlist(onRefresh: () => void): LiveWishlistState {
     let cancelled = false;
 
     const tick = async () => {
-      const { processing: active, total } = await readProcessing();
+      const { processing: active, total, batchId: runId } = await readProcessing();
       if (cancelled) return;
 
       setProcessing(active);
+      setBatchId(runId);
 
       if (active) {
         if (lastTotal.current !== null && total < lastTotal.current) refresh.current();
@@ -104,5 +117,5 @@ export function useLiveWishlist(onRefresh: () => void): LiveWishlistState {
     };
   }, []);
 
-  return { processing };
+  return { processing, batchId };
 }

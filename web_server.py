@@ -17667,6 +17667,48 @@ def _add_cancelled_task_to_wishlist(task):
     except Exception as e:
         logger.error(f"[Atomic Cancel] Critical error handling cancelled task: {e}")
 
+def _cancel_one_batch(batch_id):
+    """Cancel one batch and its unfinished tasks. Caller holds tasks_lock.
+    Returns how many tasks it cancelled."""
+    download_batches[batch_id]['phase'] = 'cancelled'
+    playlist_id = download_batches[batch_id].get('playlist_id')
+
+    # Reset wishlist auto-processing flag if this is a wishlist batch (auto-initiated only)
+    # Manual wishlist downloads don't set the flag, so only reset if auto-initiated
+    if playlist_id == 'wishlist':
+        if download_batches[batch_id].get('auto_initiated', False):
+            with wishlist_timer_lock:
+                _rt_state.wishlist_auto_processing = False
+                _rt_state.wishlist_auto_processing_timestamp = 0
+            logger.warning("[Wishlist Cancel] Reset wishlist auto-processing flag for cancelled auto-batch")
+        else:
+            logger.warning("ℹ️ [Wishlist Cancel] Manual wishlist batch cancelled (no flag reset needed)")
+
+    # Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist
+    if playlist_id and playlist_id.startswith('youtube_'):
+        url_hash = playlist_id.replace('youtube_', '')
+        if url_hash in youtube_playlist_states:
+            youtube_playlist_states[url_hash]['phase'] = 'discovered'
+            logger.warning(f"Reset YouTube playlist {url_hash} to discovered phase (batch cancelled)")
+
+    cancelled_count = 0
+    for task_id in download_batches[batch_id].get('queue', []):
+        if task_id in download_tasks:
+            task = download_tasks[task_id]
+            if task['status'] not in ['completed', 'failed', 'not_found', 'cancelled']:
+                task['status'] = 'cancelled'
+                cancelled_count += 1
+
+    # close the sync history row with what finished before the cancel.
+    # nothing else ever will: a cancelled batch never reaches a
+    # completion check, and the row read "In progress" for good
+    try:
+        _record_sync_history_completion(batch_id, download_batches[batch_id])
+    except Exception as hist_err:
+        logger.warning(f"[Cancel Batch] Could not close sync history for {batch_id}: {hist_err}")
+    return cancelled_count
+
+
 @app.route('/api/playlists/<batch_id>/cancel_batch', methods=['POST'])
 def cancel_batch(batch_id):
     """
@@ -17686,54 +17728,27 @@ def cancel_batch(batch_id):
             if batch_id not in download_batches:
                 return jsonify({"success": False, "error": "Batch not found"}), 404
 
-            # Mark batch as cancelled
-            download_batches[batch_id]['phase'] = 'cancelled'
+            # a wishlist run is split into one batch per album plus a per-track
+            # batch, all sharing wishlist_run_id. cancelling only the one id the
+            # page polls left the rest downloading
+            run_id = download_batches[batch_id].get('wishlist_run_id')
+            targets = [batch_id]
+            if run_id:
+                targets += [
+                    bid for bid, row in download_batches.items()
+                    if bid != batch_id and isinstance(row, dict)
+                    and row.get('wishlist_run_id') == run_id
+                    and row.get('phase') not in ('complete', 'error', 'cancelled')
+                ]
 
-            # Get playlist_id before doing resets
-            playlist_id = download_batches[batch_id].get('playlist_id')
+            cancelled_count = sum(_cancel_one_batch(bid) for bid in targets)
 
-            # Reset wishlist auto-processing flag if this is a wishlist batch (auto-initiated only)
-            # Manual wishlist downloads don't set the flag, so only reset if auto-initiated
-            if playlist_id == 'wishlist':
-                auto_initiated = download_batches[batch_id].get('auto_initiated', False)
-                if auto_initiated:
-                    with wishlist_timer_lock:
-                        _rt_state.wishlist_auto_processing = False
-                        _rt_state.wishlist_auto_processing_timestamp = 0
-                    logger.warning("[Wishlist Cancel] Reset wishlist auto-processing flag for cancelled auto-batch")
-                else:
-                    logger.warning("ℹ️ [Wishlist Cancel] Manual wishlist batch cancelled (no flag reset needed)")
-
-            # Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist
-            if playlist_id and playlist_id.startswith('youtube_'):
-                url_hash = playlist_id.replace('youtube_', '')
-                if url_hash in youtube_playlist_states:
-                    youtube_playlist_states[url_hash]['phase'] = 'discovered'
-                    logger.warning(f"Reset YouTube playlist {url_hash} to discovered phase (batch cancelled)")
-
-            # Cancel all individual tasks in the batch
-            cancelled_count = 0
-            for task_id in download_batches[batch_id].get('queue', []):
-                if task_id in download_tasks:
-                    task = download_tasks[task_id]
-                    if task['status'] not in ['completed', 'failed', 'not_found', 'cancelled']:
-                        task['status'] = 'cancelled'
-                        cancelled_count += 1
-
-            # close the sync history row with what finished before the cancel.
-            # nothing else ever will: a cancelled batch never reaches a
-            # completion check, and the row read "In progress" for good
-            try:
-                _record_sync_history_completion(batch_id, download_batches[batch_id])
-            except Exception as hist_err:
-                logger.warning(f"[Cancel Batch] Could not close sync history for {batch_id}: {hist_err}")
-
-            # Add activity for batch cancellation
             playlist_name = download_batches[batch_id].get('playlist_name', 'Unknown Playlist')
             add_activity_item("", "Batch Cancelled", f"'{playlist_name}' - {cancelled_count} downloads cancelled", "Now")
 
-            logger.warning(f"Cancelled batch {batch_id} with {cancelled_count} tasks")
-            return jsonify({"success": True, "cancelled_tasks": cancelled_count})
+            logger.warning(f"Cancelled batch {batch_id} ({len(targets)} batch(es)) with {cancelled_count} tasks")
+            return jsonify({"success": True, "cancelled_tasks": cancelled_count,
+                            "cancelled_batches": len(targets)})
 
     except Exception as e:
         logger.error(f"Error cancelling batch {batch_id}: {e}")
