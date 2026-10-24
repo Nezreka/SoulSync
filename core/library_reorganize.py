@@ -2759,7 +2759,15 @@ def naming_fingerprint() -> str:
         'library.reorganize_preserve_casing',
         'metadata_enhancement.tags.feat_in_title',
     )
-    blob = json.dumps({k: get(k, None) for k in keys}, sort_keys=True, default=str)
+    values = {k: get(k, None) for k in keys}
+    # a new file_organization toggle lands in everyone's stored section on
+    # their next settings save. left in while off, that alone would change
+    # the hash and unsettle every placed album, so off counts as absent.
+    org = values.get('file_organization')
+    if isinstance(org, dict) and not org.get('unicode_substitution'):
+        values['file_organization'] = {k: v for k, v in org.items()
+                                       if k != 'unicode_substitution'}
+    blob = json.dumps(values, sort_keys=True, default=str)
     return hashlib.sha1(blob.encode('utf-8')).hexdigest()[:16]
 
 

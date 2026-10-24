@@ -385,8 +385,53 @@ def _truncate_utf8_bytes(value: str, max_bytes: int) -> str:
     return value[:1] if value else value
 
 
+# lookalikes that are legal on windows, smb, macos and linux (#1867, QT3496).
+# '"' is left out: it turns into curly quotes by position.
+_LOOKALIKES = {
+    ":": "\ua789",  # ꞉ modifier letter colon
+    "?": "\uff1f",  # ？ fullwidth question mark
+    "/": "\u2215",  # ∕ division slash
+    "\\": "\u29f5",  # ⧵ reverse solidus operator
+    "*": "\u204e",  # ⁎ low asterisk
+    "|": "\u2502",  # │ light vertical bar
+    "<": "\u2039",  # ‹ single left angle quote
+    ">": "\u203a",  # › single right angle quote
+}
+
+
+def unicode_substitution_enabled() -> bool:
+    """file_organization.unicode_substitution, off unless turned on."""
+    try:
+        return bool(_get_config_manager().get("file_organization.unicode_substitution", False))
+    except Exception:   # config unavailable → underscores, as always
+        return False
+
+
+def substitute_lookalikes(name: str) -> str:
+    """swap windows-forbidden characters for lookalikes instead of '_'.
+
+    'AC/DC' → 'AC∕DC', 'What's Going On?' → 'What's Going On？'. a quote opens
+    at the start or after a space or bracket and closes anywhere else. trailing
+    dots become fullwidth ('DAMN.' → 'DAMN．') so windows can't eat them.
+    leading dots are left alone: the caller still strips those (#1129)."""
+    out = []
+    for i, ch in enumerate(name):
+        if ch == '"':
+            prev = name[i - 1] if i else " "
+            out.append("\u201c" if prev.isspace() or prev in "([{" else "\u201d")
+        else:
+            out.append(_LOOKALIKES.get(ch, ch))
+    text = "".join(out).rstrip()
+    body = text.rstrip(".")
+    if body.strip(". "):
+        text = body + "\uff0e" * (len(text) - len(body))
+    return text
+
+
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename for file system compatibility."""
+    if unicode_substitution_enabled():
+        filename = substitute_lookalikes(re.sub(r"\s+", " ", filename).strip())
     sanitized = re.sub(r'[<>:"/\\|?*]', "_", filename)
     sanitized = re.sub(r"\s+", " ", sanitized).strip()
     # Windows forbids TRAILING dots/spaces; Unix hides anything with a LEADING

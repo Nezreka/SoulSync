@@ -13910,6 +13910,9 @@ def _read_staging_file_metadata(full_path: str, filename: str) -> dict:
 def _sanitize_filename(filename: str) -> str:
     """Sanitize filename for file system compatibility."""
     import re
+    from core.imports.paths import substitute_lookalikes, unicode_substitution_enabled
+    if unicode_substitution_enabled():
+        filename = substitute_lookalikes(re.sub(r'\s+', ' ', filename).strip())
     sanitized = re.sub(r'[<>:"/\\|?*]', '_', filename)
     sanitized = re.sub(r'\s+', ' ', sanitized).strip()
     # Windows forbids trailing dots/spaces on files and folders.
