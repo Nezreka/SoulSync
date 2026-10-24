@@ -757,6 +757,12 @@ def _score_streaming_candidates(results, spotify_track, why=None):
 
         r.confidence = confidence
         r.version_type = 'wrong_version' if is_wrong_version else match_type
+        # every best-of copy of a song scores the same here; this says which
+        # one is on the album being downloaded (#1866). torrent/usenet rows
+        # carry the release name, already scored above.
+        _album_match = getattr(matching_engine, 'album_field_match', None)
+        if _album_match and r.username not in ('torrent', 'usenet', 'youtube'):
+            r.album_match = _album_match(expected_album, getattr(r, 'album', None))
         if confidence >= 0.60:
             scored.append(r)
         elif why is not None:
@@ -770,7 +776,8 @@ def _score_streaming_candidates(results, spotify_track, why=None):
 
     if scored:
         # Sort by confidence (best match first)
-        scored.sort(key=lambda x: x.confidence, reverse=True)
+        scored.sort(key=lambda x: (x.confidence, getattr(x, 'album_match', 0) or 0),
+                    reverse=True)
         best = scored[0]
         logger.info(f"[{source_label}] {len(scored)}/{len(results)} candidates passed validation "
               f"(best: {best.confidence:.2f} '{best.artist} - {best.title}')")

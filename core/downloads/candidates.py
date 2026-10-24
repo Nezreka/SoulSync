@@ -156,6 +156,9 @@ def _priority_sort_key(r):
     """Today's confidence-first key: never download a high-quality WRONG file."""
     return (
         getattr(r, 'confidence', 0) or 0,
+        # confidence caps at 1.0, so same-song copies tie; the album's own
+        # release goes first (#1866)
+        getattr(r, 'album_match', 0) or 0,
         getattr(r, 'quality_score', 0) or 0,
         getattr(r, 'upload_speed', 0) or 0,
         -(getattr(r, 'queue_length', 0) or 0),
