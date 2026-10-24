@@ -163,3 +163,41 @@ def test_missed_publication_requires_matching_delivery_profile_and_embedded_iden
         settle_assignments(db,review_case_key(details,None),[{'source_track_id':'recording','status':'confirmed','file_path':str(path)}],'release','musicbrainz')
         with db._get_connection() as conn:
             assert conn.execute('SELECT state FROM reconcile_fulfillment').fetchone()[0] == 'fulfilled'
+
+
+@pytest.mark.parametrize('other_request,same_path,expected', [(False,True,'published'),(True,True,'requested'),(False,False,'requested')])
+def test_retagged_delivery_requires_unique_request_and_same_file_in_exact_album_plan(tmp_path,other_request,same_path,expected):
+    from core.library.reconciliation_fulfillment import recover_published_requests
+    from core.repair_review_identity import review_case_key
+    from tests.library.test_reconciliation_end_to_end import _minimal_flac
+    db=Database(tmp_path/'retagged.db');path=tmp_path/'published.flac'
+    _minimal_flac(path,{'musicbrainz_albumid':'another-pressing','musicbrainz_trackid':'recording'})
+    details={'album_id':'album','profile_id':1,'source':'musicbrainz','release_id':'requested-release','replacement_request':True}
+    record_request(db,details,{'source_track_id':'recording'})
+    key=review_case_key(details,None)
+    if other_request:
+        record_request(db,{**details,'album_id':'another-album','release_id':'another-release'},{'source_track_id':'recording'})
+    with db._get_connection() as conn:
+        conn.execute('CREATE TABLE wishlist_removals(spotify_track_id TEXT,reason TEXT,final_path TEXT,profile_ids TEXT,removed_at TEXT)')
+        conn.execute('INSERT INTO wishlist_removals VALUES("recording","download_complete",?,"[1]","2099-01-01")',(str(path),))
+        conn.execute('CREATE TABLE reconcile_album_plans(case_id TEXT PRIMARY KEY,plan_json TEXT)')
+        plan={'source':'musicbrainz','release_id':'requested-release','assignments':[
+            {'source_track_id':'recording','file_path':str(path if same_path else tmp_path/'another.flac'),'status':'uncertain'}]}
+        conn.execute('INSERT INTO reconcile_album_plans VALUES(?,?)',(key,json.dumps(plan)))
+        recover_published_requests(conn)
+        assert conn.execute('SELECT state FROM reconcile_fulfillment WHERE case_id=?',(key,)).fetchone()[0] == expected
+
+
+@pytest.mark.parametrize('new_scope,expected', [(None,'partial'),('complete','complete')])
+def test_album_id_migration_retains_inferred_scope_without_overriding_new_choice(tmp_path,new_scope,expected):
+    from core.library.reconciliation_migration import migrate_album
+    db=Database(tmp_path/'scope.db')
+    with db._get_connection() as conn:
+        conn.execute('CREATE TABLE reconcile_album_plans(case_id TEXT PRIMARY KEY,album_id TEXT,plan_json TEXT)')
+        conn.execute('INSERT INTO reconcile_album_plans VALUES("album:1:old","old",?)',
+            (json.dumps({'source':'musicbrainz','release_id':'release','intent_scope':'partial'}),))
+        conn.execute('CREATE TABLE reconcile_album_intent(album_id TEXT PRIMARY KEY,scope TEXT,source TEXT,release_id TEXT)')
+        if new_scope:
+            conn.execute('INSERT INTO reconcile_album_intent VALUES("new",?,"musicbrainz","release")',(new_scope,))
+        migrate_album(conn,'old','new')
+        assert conn.execute('SELECT scope FROM reconcile_album_intent WHERE album_id="new"').fetchone()[0]==expected

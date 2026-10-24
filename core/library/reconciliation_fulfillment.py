@@ -239,6 +239,31 @@ def settle_assignments(db, case_id, assignments, release_id, source):
         conn.close()
 
 
+def _planned_delivery(conn, case, profile, release, track, path):
+    """An older import may have retagged a delivery with another pressing ID."""
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_album_plans'").fetchone():
+        return False
+    identities = conn.execute('SELECT DISTINCT case_id,source,release_id FROM reconcile_fulfillment '
+        'WHERE profile_id=? AND source_track_id=?', (profile, track)).fetchall()
+    if len(identities) != 1 or tuple(identities[0]) != (case, 'musicbrainz', release):
+        return False
+    row = conn.execute('SELECT plan_json FROM reconcile_album_plans WHERE case_id=?', (case,)).fetchone()
+    if not row:
+        return False
+    plan = json.loads(row[0])
+    if plan.get('source') != 'musicbrainz' or plan.get('release_id') != release:
+        return False
+    for assignment in plan.get('assignments') or []:
+        if str(assignment.get('source_track_id') or '') != track or not assignment.get('file_path'):
+            continue
+        try:
+            if os.path.samefile(path, assignment['file_path']):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def recover_published_requests(conn):
     """Recover a missed publication callback from an exact, verified delivery."""
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='wishlist_removals'").fetchone():
@@ -255,8 +280,10 @@ def recover_published_requests(conn):
                 if int(profile) not in json.loads(profiles or '[]') or not os.path.isfile(path):
                     continue
                 tags = File(path, easy=True)
-                if (not tags or release not in (tags.get('musicbrainz_albumid') or [])
-                        or track not in (tags.get('musicbrainz_trackid') or [])):
+                if not tags or track not in (tags.get('musicbrainz_trackid') or []):
+                    continue
+                if (release not in (tags.get('musicbrainz_albumid') or [])
+                        and not _planned_delivery(conn, case, profile, release, track, path)):
                     continue
                 conn.execute("UPDATE reconcile_fulfillment SET state='published', published_path=?, "
                     "refresh_needed=1, updated_at=CURRENT_TIMESTAMP WHERE case_id=? AND source='musicbrainz' "

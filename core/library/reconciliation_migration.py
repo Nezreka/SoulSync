@@ -54,7 +54,16 @@ def migrate_album(conn, old_id, new_id):
                     conn.execute('INSERT OR REPLACE INTO reconcile_case_redirects VALUES (?, ?)',
                                  (old_case, row['case_id']))
             if row.get('plan_json'):
-                row['plan_json'] = json.dumps(document(json.loads(row['plan_json'])))
+                plan = document(json.loads(row['plan_json']))
+                row['plan_json'] = json.dumps(plan)
+                # Playlist-derived partial ownership can disappear when the
+                # media server replaces track IDs too. Retain that existing
+                # album scope, while respecting a newer explicit choice.
+                if ('reconcile_album_intent' in tables and plan.get('intent_scope') in ('partial', 'complete')
+                        and plan.get('source') and plan.get('release_id')):
+                    conn.execute('INSERT OR IGNORE INTO reconcile_album_intent '
+                        '(album_id,scope,source,release_id) VALUES(?,?,?,?)',
+                        (new_id, plan['intent_scope'], plan['source'], plan['release_id']))
             existing = conn.execute(f'SELECT * FROM {table} WHERE album_id=?', (new_id,)).fetchall()
             if table == 'reconcile_wanted_slots' and existing:
                 prior = dict(zip(cols, existing[0]))
