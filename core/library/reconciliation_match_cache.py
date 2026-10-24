@@ -12,6 +12,7 @@ from pathlib import Path
 import sys
 import time
 import unicodedata
+import zlib
 
 from core.library.reconciliation_catalogue import current, stage
 
@@ -60,6 +61,27 @@ def canonical(value):
 
 def digest(raw):
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def stored_payload(raw):
+    """Repeated evidence labels compress well; keep the existing disk budget."""
+    encoded = raw.encode()
+    packed = b'Z1' + zlib.compress(encoded, level=3)
+    return packed if len(packed) < len(encoded) else raw
+
+
+def restored_payload(payload):
+    if isinstance(payload, str):  # Cache entries written before compression.
+        if len(payload.encode()) > MAX_RESULT:
+            raise ValueError('Oversized matching result')
+        return payload
+    if not isinstance(payload, bytes) or not payload.startswith(b'Z1') or len(payload) > MAX_RESULT:
+        raise ValueError('Invalid matching storage format')
+    decoder = zlib.decompressobj()
+    raw = decoder.decompress(payload[2:], MAX_RESULT + 1)
+    if len(raw) > MAX_RESULT or not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
+        raise ValueError('Invalid compressed matching result')
+    return raw.decode()
 
 
 @lru_cache(maxsize=1)
@@ -176,10 +198,37 @@ class MatchingCache:
                 self.policy = policy_identity()
                 with self._connection() as conn:
                     ensure_schema(conn)
+                self._compact_legacy_storage()
             except Exception:
                 self.counts['cache_errors'] += 1
                 self.store = False
                 self.disabled = True
+
+    def _compact_legacy_storage(self):
+        # Preserve existing hits on upgrade. Commit bounded batches so review
+        # decisions do not wait behind a transaction over the entire cache.
+        after = ''
+        while True:
+            with self._connection() as conn:
+                rows = conn.execute('''SELECT cache_key,payload,checksum,byte_size
+                    FROM reconcile_match_cache WHERE typeof(payload)='text' AND cache_key>?
+                    ORDER BY cache_key LIMIT 128''', (after,)).fetchall()
+            if not rows:
+                return
+            after = rows[-1][0]
+            updates = []
+            for key, raw, checksum, old_size in rows:
+                if len(raw.encode()) > MAX_RESULT or digest(raw) != checksum:
+                    continue  # Normal reads reject and repair invalid entries.
+                packed = stored_payload(raw)
+                if isinstance(packed, bytes):
+                    updates.append((packed, len(packed), key, checksum))
+                    self.counts['storage_bytes_saved'] += old_size - len(packed)
+            if updates:
+                with self._connection() as conn:
+                    conn.executemany('''UPDATE reconcile_match_cache SET payload=?, byte_size=?
+                        WHERE cache_key=? AND checksum=? AND typeof(payload)='text' ''', updates)
+                self.counts['storage_compacted'] += len(updates)
 
     @contextmanager
     def _connection(self):
@@ -217,14 +266,15 @@ class MatchingCache:
             with self._connection() as conn:
                 row = conn.execute('SELECT payload,checksum,compute_seconds,last_access,policy FROM reconcile_match_cache WHERE cache_key=?', (key,)).fetchone()
             if row and row[3] >= self.started - RETENTION and row[4] == self.policy:
-                if len(row[0].encode()) > MAX_RESULT or not math.isfinite(row[2]) or row[2] < 0:
+                if not math.isfinite(row[2]) or row[2] < 0:
                     raise ValueError('Invalid matching cache record')
-                if digest(row[0]) != row[1]:
+                raw = restored_payload(row[0])
+                if digest(raw) != row[1]:
                     raise ValueError('Matching checksum mismatch')
                 self.counts['persistent_hits'] += 1
                 self.touches.add(key)
-                self._remember(key, row[0], row[2])
-                return row[0], row[2]
+                self._remember(key, raw, row[2])
+                return raw, row[2]
         return None
 
     def _write(self, key, raw, cost):
@@ -234,10 +284,12 @@ class MatchingCache:
             return
         self._remember(key, raw, cost)
         if self.store:
+            packed = stored_payload(raw)
+            size = len(packed) if isinstance(packed, bytes) else len(packed.encode())
             now = time.time()
             with self._connection() as conn:
                 conn.execute('INSERT OR REPLACE INTO reconcile_match_cache VALUES (?,?,?,?,?,?,?,?)',
-                             (key, self.policy, raw, digest(raw), size, now, now, cost))
+                             (key, self.policy, packed, digest(raw), size, now, now, cost))
                 self.writes += 1
                 if self.writes % 64 == 0:
                     evict(conn)

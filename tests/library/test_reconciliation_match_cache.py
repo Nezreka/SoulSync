@@ -220,3 +220,43 @@ def test_scan_connection_is_reused_without_holding_writer_lock(db, evidence):
     assert session.conn is None
     with pytest.raises(sqlite3.ProgrammingError):
         held.execute('SELECT 1')
+
+
+def test_evidence_rich_results_fit_and_reuse_within_the_existing_disk_budget(db, evidence):
+    fresh = reconcile_folder(*evidence)
+    raw = cache.encode(fresh)
+    cold = cache.MatchingCache(db, 'reuse')
+    run(cold, evidence)
+    cold.finish()
+    with db._get_connection() as conn:
+        payload, size = conn.execute('SELECT payload,byte_size FROM reconcile_match_cache').fetchone()
+        assert size == len(payload) < len(raw.encode()) / 2
+        assert cache.restored_payload(payload) == raw
+        assert cache.evict(conn, max_bytes=len(raw.encode()) // 2) == 0
+    assert run(cache.MatchingCache(db, 'reuse'), evidence,
+               compute=Mock(side_effect=AssertionError('must reuse every check'))) == fresh
+
+
+def test_legacy_cache_compacts_without_losing_hits_or_changing_evidence(db, evidence):
+    fresh = run(cache.MatchingCache(db, 'reuse'), evidence)
+    raw = cache.encode(fresh)
+    with db._get_connection() as conn:
+        conn.execute('UPDATE reconcile_match_cache SET payload=?,byte_size=?', (raw, len(raw.encode())))
+    restarted = cache.MatchingCache(db, 'reuse')
+    assert restarted.counts['storage_compacted'] == 1
+    assert run(restarted, evidence, compute=Mock(side_effect=AssertionError('must preserve old hit'))) == fresh
+    assert not cache.MatchingCache(db, 'reuse').counts['storage_compacted']
+
+
+@pytest.mark.parametrize('damage', ['truncated', 'trailing', 'too_large'])
+def test_invalid_compressed_results_are_bounded_and_recomputed(db, evidence, damage):
+    import zlib
+    run(cache.MatchingCache(db, 'reuse'), evidence)
+    with db._get_connection() as conn:
+        payload = conn.execute('SELECT payload FROM reconcile_match_cache').fetchone()[0]
+        damaged = (payload[:-3] if damage == 'truncated' else payload + b'extra' if damage == 'trailing'
+                   else b'Z1' + zlib.compress(b'x' * (cache.MAX_RESULT + 1)))
+        conn.execute('UPDATE reconcile_match_cache SET payload=?', (damaged,))
+    restarted = cache.MatchingCache(db, 'reuse')
+    assert run(restarted, evidence) == reconcile_folder(*evidence)
+    assert restarted.counts['cache_errors'] == 1
