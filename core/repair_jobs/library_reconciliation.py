@@ -271,6 +271,22 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
     # exactly what reconciliation must repair. Without an anchor, positions
     # must remain disjoint to avoid merging coincidentally named copies.
     trusted: dict[str, object] = {}
+    # A media-server rescan can split a single physical album into several
+    # library rows. Accept one exact title/artist/owner with one authoritative
+    # release and disjoint positions; conflicting editions remain unresolved.
+    for folder, paths in groups.items():
+        ids = album_ids(paths)
+        if len(ids) < 2:
+            continue
+        rows = [albums.get(album_id) or {} for album_id in ids]
+        identities = {release_identity(row) for row in rows if release_identity(row)}
+        names = {(fold_title(row.get('album_title') or '', drop_brackets=False),
+                  fold_title(row.get('artist_name') or '', drop_brackets=False),
+                  row.get('owner_profile_id') or 1) for row in rows}
+        if (len(names) == 1 and all(next(iter(names))[:2]) and len(identities) == 1
+                and len(positions(paths)) == len(paths)):
+            anchors = [album_id for album_id in ids if release_identity(albums.get(album_id) or {})]
+            trusted[folder] = sorted(anchors, key=str)[0]
     for child in sorted(list(groups)):
         if child not in groups or not _DISC_FOLDER.match(os.path.basename(child)):
             continue
@@ -383,7 +399,7 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
         if deluxe_folder not in groups:
             continue
         deluxe_ids = album_ids(groups[deluxe_folder])
-        if len(deluxe_ids) != 1 or not (2 <= len(groups[deluxe_folder]) <= 12):
+        if len(deluxe_ids) != 1 or len(groups[deluxe_folder]) < 2:
             continue
         deluxe_id = next(iter(deluxe_ids))
         deluxe_album = albums.get(deluxe_id) or {}
@@ -392,6 +408,8 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
                 not _album_has_release_id(deluxe_album)):
             continue
         extra_positions = positions(groups[deluxe_folder])
+        if len(extra_positions) != len(groups[deluxe_folder]):
+            continue
         candidates = []
         for regular_folder, regular_paths in siblings(deluxe_folder, deluxe_album):
             if (regular_folder == deluxe_folder or len(regular_paths) < 8 or
@@ -584,7 +602,7 @@ def _normalize_slot(item: dict, source: str) -> dict:
     artist_names.extend(str(a).strip() for a in artists
                         if not isinstance(a, dict) and str(a or '').strip())
     artist_names = list(dict.fromkeys(artist_names))
-    artist = artist_names[0] if artist_names else ''
+    artist = ' & '.join(artist_names)
     return {
         'title': item.get('name') or item.get('title') or '',
         'artist': artist or '',
@@ -920,15 +938,31 @@ def _search_release_candidates(album: dict | None, context: JobContext,
     return candidates[:4]
 
 
+def _trailing_album_qualifier(value: str) -> tuple[str, str] | None:
+    """Find one balanced trailing qualifier, including nested pressing detail."""
+    value = value.strip()
+    if not value or value[-1] not in ')]':
+        return None
+    opening = '(' if value[-1] == ')' else '['
+    closing = value[-1]
+    depth = 0
+    for index in range(len(value) - 1, -1, -1):
+        if value[index] == closing:
+            depth += 1
+        elif value[index] == opening:
+            depth -= 1
+            if depth == 0:
+                if index and value[index - 1].isspace():
+                    return value[:index].strip(), value[index + 1:-1]
+                return None
+    return None
+
+
 def _album_titles_compatible(current: str, release: str) -> bool:
     """Keep local edition detail when both names share the same album identity."""
-    def trailing_qualifier(value: str) -> tuple[str, str] | None:
-        match = (re.match(r'^(.*?)\s+\(([^()]*)\)\s*$', value.strip()) or
-                 re.match(r'^(.*?)\s+\[([^\[\]]*)\]\s*$', value.strip()))
-        return match.groups() if match else None
 
     def without_repeated_qualifier(value: str) -> str:
-        qualified = trailing_qualifier(value)
+        qualified = _trailing_album_qualifier(value)
         if not qualified:
             return value
         base, qualifier = qualified
@@ -944,8 +978,8 @@ def _album_titles_compatible(current: str, release: str) -> bool:
     release_normalized = normalize(cleaned_release)
     if not current_normalized or not release_normalized:
         return False
-    current_qualifier = trailing_qualifier(cleaned_current)
-    release_qualifier = trailing_qualifier(cleaned_release)
+    current_qualifier = _trailing_album_qualifier(cleaned_current)
+    release_qualifier = _trailing_album_qualifier(cleaned_release)
     if current_qualifier or release_qualifier:
         current_base, current_detail = current_qualifier or (cleaned_current, '')
         release_base, release_detail = release_qualifier or (cleaned_release, '')
@@ -986,14 +1020,20 @@ def _display_album_title(files: list[dict], library_title: str,
     tag_titles = [_clean_album_display_title(title) for title in tag_titles if title]
     if tag_titles:
         normalized = {re.sub(r'\s+', ' ', title).casefold() for title in tag_titles}
-        library_qualifier = (
-            re.match(r'^(.*?)\s+\(([^()]*)\)\s*$', (library_title or '').strip()) or
-            re.match(r'^(.*?)\s+\[([^\[\]]*)\]\s*$', (library_title or '').strip())
-        )
+        library_qualifier = _trailing_album_qualifier(library_title)
+        # Physical pressing descriptions belong to the release evidence. Only
+        # clean them when all files and the selected release agree on the base
+        # title; never erase a local live/remix/deluxe title merely for brevity.
+        pressing_only = bool(library_qualifier
+            and re.search(r'\b(?:black|white|colou?red|gold|silver)\s+(?:disc|vinyl)\b',
+                          library_qualifier[1], re.I)
+            and not re.search(r'\b(?:live|remix|acoustic|instrumental|remaster(?:ed)?)\b',
+                              library_qualifier[1], re.I)
+            and normalize(release_title) == normalize(tag_titles[0]))
         clean_library_variant = bool(
             library_qualifier and
-            normalize(tag_titles[0]) == normalize(library_qualifier.group(1)) and
-            not _ALBUM_MATERIAL_QUALIFIER.search(library_qualifier.group(2))
+            normalize(tag_titles[0]) == normalize(library_qualifier[0]) and
+            (pressing_only or not _ALBUM_MATERIAL_QUALIFIER.search(library_qualifier[1]))
         )
         if len(normalized) == 1 and clean_library_variant:
             return tag_titles[0]
@@ -1010,10 +1050,9 @@ def _album_title_preservable(current: str, release: str) -> bool:
         return True
     # A catalog edition can be exact while a consistent local display title
     # intentionally omits its qualifier. Keep the release ID as the identity.
-    qualified = (re.match(r'^(.*?)\s+\(([^()]*)\)\s*$', release.strip()) or
-                 re.match(r'^(.*?)\s+\[([^\[\]]*)\]\s*$', release.strip()))
+    qualified = _trailing_album_qualifier(release)
     return bool(qualified and current.strip() and
-                normalize(current) == normalize(qualified.group(1)))
+                normalize(current) == normalize(qualified[0]))
 
 
 def _wanted_slot_key(slot: dict) -> str:
@@ -2219,6 +2258,13 @@ class LibraryReconciliationJob(RepairJob):
                             description='This folder contains tracks assigned to more than one library album.',
                             details={'album_folder': folder, 'album_title': os.path.basename(folder),
                                      'album_ids': list(album_counts), 'file_count': len(files),
+                                     'folder_issue': 'mixed_ownership',
+                                     'checked_files': [{
+                                         'file_path': member['path'],
+                                         'title': member['tags'].get('title') or os.path.basename(member['path']),
+                                         'album': (albums.get((member.get('db') or {}).get('album_id')) or {}).get('album_title') or '',
+                                         'artist': (albums.get((member.get('db') or {}).get('album_id')) or {}).get('artist_name') or '',
+                                     } for member in files],
                                      'evidence_signature': _evidence_signature(files, list(album_counts))}):
                             result.findings_created += 1
                         continue
@@ -2234,6 +2280,7 @@ class LibraryReconciliationJob(RepairJob):
                             details={'album_id': album_id, 'album_folder': folder,
                                      'profile_id': album.get('owner_profile_id') if album else 1,
                                      'album_title': os.path.basename(folder), 'file_count': len(files),
+                                     'folder_issue': 'split_ownership',
                                      'evidence_signature': _evidence_signature(files, album_id)}):
                             result.findings_created += 1
                         continue
@@ -2638,6 +2685,7 @@ class LibraryReconciliationJob(RepairJob):
                     }
                     assignment_options = [{
                         'key': _wanted_slot_key(slot), 'title': slot['title'],
+                        'artist': slot.get('artist') or '',
                         'disc_number': slot.get('disc_number') or 1,
                         'track_number': slot.get('track_number'),
                         'display_track_number': slot.get('track_number'),
@@ -2732,6 +2780,8 @@ class LibraryReconciliationJob(RepairJob):
                                          'fingerprint_key': file['acoustid'].get('fingerprint_key'),
                                          'expected_title': slot['title'], 'match_reasons': pair['reasons'],
                                          'expected_artist': slot.get('artist') or common['artist_name'],
+                                         'expected_artist_names': slot.get('artist_names') or [],
+                                         'recording_mbid': slot.get('recording_mbid') or '',
                                          'file_duration_ms': tags.get('duration_ms') or 0,
                                          'expected_duration_ms': slot.get('duration_ms') or 0,
                                          'track_id': file['db']['id'] if file.get('db') else None,
@@ -2861,6 +2911,10 @@ class LibraryReconciliationJob(RepairJob):
                             changed['library_album_assignment'] = {
                                 'old': str(row.get('album_id') or ''),
                                 'new': str(album_id),
+                                'old_label': ' · '.join(filter(None, (
+                                    (albums.get(row.get('album_id')) or {}).get('album_title'),
+                                    (albums.get(row.get('album_id')) or {}).get('artist_name')))) + ' (separate library entry)',
+                                'new_label': f"{common['album_title']} · {common['artist_name']} (reviewed album)",
                             }
                         if (row and confirmed_mbid and
                                 row.get('musicbrainz_recording_id') != confirmed_mbid):

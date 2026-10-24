@@ -1735,6 +1735,8 @@ class RepairWorker:
                     'error_count': 0, 'plan': snapshot.get('plan'),
                     'refreshing': True,
                 })
+                if key not in result['case_ids']:
+                    result['case_ids'].insert(0, key)
                 if key not in matching:
                     result['total'] += 1
         return result
@@ -1753,13 +1755,7 @@ class RepairWorker:
 
     @staticmethod
     def _snapshot_review_mode(snapshot):
-        items = [item for item in snapshot.get('items', [])
-                 if repair_review_queue.finding_category(item) != 'pending_fulfillment']
-        if any(item.get('review_tier') == 'destructive' for item in items):
-            return 'destructive'
-        if any(item.get('review_tier') != 'ready' for item in items):
-            return 'manual'
-        return 'ready' if items else 'waiting'
+        return repair_review_queue.case_mode(snapshot.get('items', []))
 
     def get_review_summary(self, *, status='pending', q='', job_id='', category=''):
         result = repair_review_queue.queue_summary(
@@ -2220,8 +2216,7 @@ class RepairWorker:
             case = self.get_review_case(case_id, job_id='library_reconciliation')
             if not case or not signature or case.get('plan_signature') != signature or (case.get('refresh') or {}).get('state') == 'running':
                 return {'success': False, 'stale': True, 'error': 'The plan changed; review it again'}
-            if any(item.get('review_tier') != 'ready' and item.get('category') != 'pending_fulfillment'
-                   for item in case['items']):
+            if not case['plan']['can_apply_ready']:
                 return {'success': False, 'error': 'Resolve the remaining choices before saving for bulk apply'}
             if not case['plan']['ready']:
                 return {'success': False, 'error': 'No changes remain to apply'}

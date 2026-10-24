@@ -164,6 +164,7 @@ export interface ReviewCaseSummary {
 
 export interface ReviewQueuePage {
   items: ReviewCaseSummary[];
+  case_ids?: string[];
   total: number;
   ready_total?: number;
   page: number;
@@ -193,6 +194,7 @@ export interface ReviewCase {
   plan_signature?: string;
   saved_for_later?: boolean;
   album: string | null;
+  current_album_title?: string;
   artist: string | null;
   album_thumb_url?: string | null;
   folder: string | null;

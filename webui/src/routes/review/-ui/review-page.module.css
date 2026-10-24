@@ -936,7 +936,9 @@
   backdrop-filter: none;
 }
 .albumHeader {
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 20px;
   border-bottom: 1px solid var(--line-strong);
   padding-bottom: 14px;
   align-items: flex-start;
@@ -952,7 +954,7 @@
   min-width: 0;
 }
 .albumHeader .nav {
-  flex: 0 0 auto;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
 }
@@ -2740,16 +2742,48 @@
   background:
     linear-gradient(rgba(var(--info-rgb), 0.1), rgba(var(--info-rgb), 0.1)), var(--surface-overlay);
 }
-.releaseDetailHeader .factList {
+.releaseFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 6px 0;
   font-size: 12px;
-  gap: 2px;
-  margin-block: 6px;
 }
-.releaseDetailHeader .factList div {
-  padding: 2px 0;
-  gap: 12px;
-  grid-template-columns: 88px minmax(0, 1fr);
-  background: transparent;
+.releaseFacts > div {
+  display: grid;
+  gap: 3px;
+  border-left: 2px solid var(--line-strong);
+  padding-left: 8px;
+  max-width: 100%;
+}
+.releaseFacts dt {
+  color: var(--text-2);
+}
+.releaseFacts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.albumMaintenance {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.albumHeader p.plannedAlbumTitle {
+  margin-top: 6px;
+  color: var(--accent);
+  font-size: 13px;
+}
+@media (max-width: 560px) {
+  .albumHeader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .albumHeader .nav {
+    justify-content: space-between;
+  }
+  .albumMaintenance {
+    gap: 6px;
+  }
 }
 .page .assignmentGroup[data-tone='danger'] > button {
   color: var(--danger-light);
@@ -2926,4 +2960,123 @@
 }
 .planContext .releaseReference {
   margin-top: 8px;
+}
+
+.assignmentChoices {
+  display: grid;
+  gap: 6px;
+  margin-block: 12px;
+  max-height: min(360px, 45dvh);
+  overflow-y: auto;
+}
+.assignmentChoices > button {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 10px;
+  text-align: left;
+  white-space: normal;
+  padding: 10px;
+}
+.assignmentChoices > button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+.assignmentChoices small {
+  display: block;
+  color: var(--text-2);
+  font-weight: 400;
+}
+.assignmentPosition {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.audioEvidence {
+  padding: 14px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+.audioEvidence[data-tone='danger'] {
+  border-color: var(--danger);
+  border-left-width: 4px;
+  background:
+    linear-gradient(rgba(var(--danger-rgb), 0.08), rgba(var(--danger-rgb), 0.08)), var(--surface-1);
+}
+.audioEvidence[data-tone='warning'] {
+  border-color: var(--warning);
+  border-left-width: 4px;
+  background:
+    linear-gradient(rgba(var(--warning-rgb), 0.08), rgba(var(--warning-rgb), 0.08)),
+    var(--surface-1);
+}
+.audioEvidence h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.audioEvidence p {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+.audioCandidates {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+}
+.audioCandidates li {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  gap: 5px;
+}
+.audioCandidateHeading {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+}
+.audioCandidateHeading > strong {
+  overflow-wrap: anywhere;
+}
+.audioRecordingLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 11px;
+}
+.audioRecordingLinks a {
+  color: var(--text-2);
+  text-underline-offset: 2px;
+}
+
+.folderConflict {
+  padding-block: 18px;
+}
+.folderConflict h3 {
+  margin-block: 12px 8px;
+  overflow-wrap: anywhere;
+}
+.folderConflict p {
+  line-height: 1.5;
+}
+.folderFiles {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.folderFiles li {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--surface-1);
+  border-radius: var(--radius-sm);
+}
+.folderFiles small {
+  color: var(--text-2);
+  overflow-wrap: anywhere;
 }

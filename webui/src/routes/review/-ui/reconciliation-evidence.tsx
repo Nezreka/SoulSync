@@ -35,6 +35,11 @@ export type ReleaseEvidence = NonNullable<AlbumReconciliationPlan['candidates']>
 type Tone = 'good' | 'warning' | 'danger' | 'info' | 'muted';
 type IconName = 'check' | 'warning' | 'x' | 'audio' | 'disc' | 'info' | 'arrow';
 
+function catalogValue(value: unknown): string {
+  const text = label(value).trim();
+  return /^(?:\[none\]|none|n\/a|-)$/i.test(text) ? '' : text;
+}
+
 function count(value: unknown): number {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
@@ -51,21 +56,6 @@ function baseVersionTitle(value: string): string {
 
 function percent(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : '';
-}
-
-function MusicBrainzId({ value, kind }: { value: unknown; kind: 'release' | 'recording' }) {
-  const id = label(value);
-  if (!id) return null;
-  return (
-    <a
-      className={styles.recordingLink}
-      href={musicBrainzBrowserUrl(kind, id)}
-      target="_blank"
-      rel="noreferrer"
-    >
-      <code>{id}</code>
-    </a>
-  );
 }
 
 function EvidenceIcon({ name, ...props }: SVGProps<SVGSVGElement> & { name: IconName }) {
@@ -438,62 +428,125 @@ function DuplicateCopies({
   );
 }
 
-function AudioEvidence({ details }: { details: Data }) {
+function AudioEvidence({ details, explain = false }: { details: Data; explain?: boolean }) {
   const audio = object(details.acoustid);
   const grouped = new Map<string, Data>();
   for (const recording of objects(audio.recordings)) {
-    const identity = `${label(recording.title)
-      .toLocaleLowerCase()
-      .replaceAll(/[^\p{L}\p{N}\s]/gu, ' ')
-      .replaceAll(/\s+/g, ' ')
-      .trim()}::${label(recording.artist)
-      .toLocaleLowerCase()
-      .replaceAll(/[^\p{L}\p{N}\s]/gu, ' ')
-      .replaceAll(/\s+/g, ' ')
-      .trim()}`;
+    const identity = [recording.title, recording.artist]
+      .map((value) =>
+        label(value)
+          .toLocaleLowerCase()
+          .replaceAll(/[^\p{L}\p{N}]+/gu, ' ')
+          .trim(),
+      )
+      .join('::');
     const current = grouped.get(identity);
-    if (!current || count(recording.score) > count(current.score)) {
-      grouped.set(identity, {
-        ...recording,
-        recording_count: count(current?.recording_count) + 1,
-      });
-    } else {
-      current.recording_count = count(current.recording_count) + 1;
-    }
+    const ids = [
+      ...new Set([...((current?.ids as string[]) || []), label(recording.mbid)].filter(Boolean)),
+    ];
+    grouped.set(identity, {
+      ...(count(current?.score) > count(recording.score) ? current : recording),
+      ids,
+    });
   }
-  const recordings = [...grouped.values()].sort((a, b) => count(b.score) - count(a.score));
+  const recordings = [...grouped.values()];
   const status = label(audio.status || details.acoustid_status);
-  if (!status) return null;
+  const reasons =
+    explain && Array.isArray(details.ambiguity_reasons)
+      ? details.ambiguity_reasons.map(label).filter(Boolean)
+      : [];
+  const expected = label(details.expected_title || object(details.replacement_track).name);
+  const wrong = explain && details.audio_conflict === 'different_recording';
+  const unsupported =
+    explain &&
+    status === 'ok' &&
+    expected &&
+    recordings.length > 0 &&
+    !recordings.some(
+      (row) =>
+        (label(row.mbid) === label(details.recording_mbid) && Boolean(details.recording_mbid)) ||
+        baseVersionTitle(label(row.title)) === baseVersionTitle(expected),
+    );
+  const localLength = count(details.file_duration_ms || object(details.current_tags).duration_ms);
+  const releaseLength = count(
+    details.expected_duration_ms || object(details.replacement_track).duration_ms,
+  );
+  const delta = localLength && releaseLength ? Math.abs(localLength - releaseLength) : 0;
+  if (!status && !reasons.length && !wrong && !(explain && delta > 3000)) return null;
   return (
-    <section className={styles.technicalCard}>
-      <h5>
-        <EvidenceIcon name="audio" /> Audio identity
-      </h5>
-      <p>
-        {status === 'ok'
-          ? `${recordings.length} AcoustID candidate${recordings.length === 1 ? '' : 's'}`
-          : status === 'no_match'
-            ? 'No AcoustID match'
-            : `AcoustID status: ${status.replaceAll('_', ' ')}`}
-      </p>
-      {recordings.length > 0 && (
-        <ol className={styles.audioCandidates}>
-          {recordings.slice(0, 5).map((recording, index) => (
-            <li key={`${label(recording.mbid)}-${index}`}>
-              <strong>{audioSummary(recording) || 'Unnamed recording'}</strong>
-              {count(recording.recording_count) > 1 && (
-                <small>{count(recording.recording_count)} linked recording IDs</small>
-              )}
-              {Boolean(recording.mbid) && (
-                <small>
-                  Recording ID: <MusicBrainzId value={recording.mbid} kind="recording" />
-                </small>
-              )}
-            </li>
-          ))}
-        </ol>
+    <section
+      className={styles.audioEvidence}
+      data-tone={wrong ? 'danger' : reasons.length || unsupported ? 'warning' : undefined}
+      aria-label="Audio identity"
+    >
+      <h4>
+        <EvidenceIcon name={wrong ? 'x' : reasons.length ? 'warning' : 'audio'} />
+        {wrong
+          ? 'Audio does not support this release track'
+          : reasons.length
+            ? 'Why this needs review'
+            : 'Audio identity'}
+      </h4>
+      {(wrong || unsupported) && (
+        <p>
+          No AcoustID candidate names this release track: <strong>{expected}</strong>. Listen before
+          changing this file.
+        </p>
       )}
-      {recordings.length > 5 && <small>{recordings.length - 5} more candidates</small>}
+      {reasons.map((reason) => (
+        <p key={reason}>{reason}</p>
+      ))}
+      {explain && delta > 3000 && (
+        <div className={styles.durationWarning}>
+          <strong>Length differs by {(delta / 1000).toFixed(1)} seconds</strong>
+          <span>
+            Local {formatDuration(localLength)} · Release {formatDuration(releaseLength)}
+          </span>
+        </div>
+      )}
+      {recordings.length > 0 ? (
+        <>
+          <p className={styles.muted}>
+            Fingerprint similarity is not recording certainty.
+            {recordings.length > 1 && ' Equal scores do not rank these recordings.'}
+          </p>
+          <ul className={styles.audioCandidates}>
+            {recordings.map((recording, index) => (
+              <li key={index}>
+                <div className={styles.audioCandidateHeading}>
+                  <strong>{label(recording.title) || 'Unnamed recording'}</strong>
+                  <Badge aria-label={`Fingerprint similarity: ${percent(recording.score)}`}>
+                    {percent(recording.score)}
+                  </Badge>
+                </div>
+                <span>{label(recording.artist) || 'Artist not supplied'}</span>
+                <div className={styles.audioRecordingLinks}>
+                  {(recording.ids as string[]).map((id) => (
+                    <a
+                      key={id}
+                      href={musicBrainzBrowserUrl('recording', id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={`MusicBrainz recording ${id}`}
+                    >
+                      {id === details.recording_mbid ? 'Selected recording' : 'Recording'} ·{' '}
+                      {id.slice(0, 8)} ↗
+                    </a>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        status && (
+          <p>
+            {status === 'no_match'
+              ? 'No AcoustID match'
+              : `AcoustID status: ${status.replaceAll('_', ' ')}`}
+          </p>
+        )
+      )}
     </section>
   );
 }
@@ -666,7 +719,8 @@ export function ReleaseComparison({
                 country={label(active.country)}
                 disambiguation={label(active.disambiguation)}
               />
-              <dl className={styles.factList}>
+              <CandidateFit candidate={active} />
+              <dl className={styles.releaseFacts}>
                 {[
                   ['Release date', active.date],
                   [
@@ -674,7 +728,7 @@ export function ReleaseComparison({
                     Array.isArray(active.label_catalogs) && active.label_catalogs.length
                       ? objects(active.label_catalogs)
                           .map((row) =>
-                            [label(row.label), label(row.catalog_number)]
+                            [label(row.label), catalogValue(row.catalog_number)]
                               .filter(Boolean)
                               .join(' · '),
                           )
@@ -685,7 +739,7 @@ export function ReleaseComparison({
                     'Catalog number',
                     Array.isArray(active.label_catalogs) && active.label_catalogs.length
                       ? null
-                      : active.catalog_number,
+                      : catalogValue(active.catalog_number),
                   ],
                   ['Discs', active.disc_count],
                   ['Barcode', active.barcode],
@@ -698,7 +752,6 @@ export function ReleaseComparison({
                     </div>
                   ))}
               </dl>
-              <CandidateFit candidate={active} />
               {count(active.excluded_video_tracks) > 0 && (
                 <p className={styles.muted}>
                   {count(active.excluded_video_tracks)} video tracks excluded from audio review
@@ -869,10 +922,12 @@ function Facts({
   finding,
   details,
   release,
+  caseId,
 }: {
   finding: Pick<ReviewFinding, 'file_path'>;
   details: Data;
   release?: ReleaseEvidence;
+  caseId?: string | null;
 }) {
   const [recordOpen, setRecordOpen] = useState(false);
   const tags = object(details.current_tags);
@@ -895,9 +950,14 @@ function Facts({
       <section className={styles.technicalCard}>
         <div className={styles.sectionHeading}>
           <h5>Local evidence</h5>
-          {finding.file_path && (
-            <Button size="sm" variant="ghost" type="button" onClick={() => setRecordOpen(true)}>
-              DB Record
+          {finding.file_path && caseId && (
+            <Button
+              size="sm"
+              type="button"
+              title="Read all embedded tags and audio properties from this file"
+              onClick={() => setRecordOpen(true)}
+            >
+              <EvidenceIcon name="disc" /> File metadata
             </Button>
           )}
         </div>
@@ -905,18 +965,9 @@ function Facts({
           <RecordInspector
             name={currentTitle || finding.file_path?.split('/').pop() || 'Track'}
             recordKind="Track"
-            endpoint={
-              details.track_id != null
-                ? `/api/track/${encodeURIComponent(label(details.track_id))}/record`
-                : undefined
-            }
-            extraRecord={{
-              'Embedded tags (review snapshot)': tags,
-              'Audio identity (review snapshot)': details.acoustid,
-              ...(!details.track_id
-                ? { 'Library metadata (review snapshot)': details.current_library_metadata }
-                : {}),
-            }}
+            title="File metadata"
+            sourceDescription="Read directly from the audio file when opened. All native tags are included; embedded image and binary contents are represented by their size."
+            endpoint={`/api/repair/review-queue/${encodeURIComponent(caseId || '')}/file-metadata?${new URLSearchParams({ path: finding.file_path || '' })}`}
             onClose={() => setRecordOpen(false)}
           />
         )}
@@ -1067,6 +1118,7 @@ export function AssignmentEvidence({
     source: album.album_plan?.source,
     release_id: album.album_plan?.release_id,
     acoustid: row.acoustid,
+    audio_conflict: row.audio_conflict,
   };
   const release = album.album_plan?.candidates?.find(
     (candidate) =>
@@ -1105,29 +1157,10 @@ export function AssignmentEvidence({
                 ? 'You previously reviewed this assignment.'
                 : row.preview_reason || 'This assignment needs review.'}
       </p>
-      {needsReview && Boolean(row.ambiguity_reasons?.length) && (
-        <section
-          className={styles.problemCard}
-          data-tone="warning"
-          aria-label="Why this needs review"
-        >
-          <h4>
-            <EvidenceIcon name="warning" /> Why this needs review
-          </h4>
-          <ul>
-            {row.ambiguity_reasons?.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {row.audio_conflict === 'different_recording' && (
-        <p className={styles.error}>
-          This file’s tags suggest it belongs on this album, but its fingerprint identifies
-          {` ${row.audio_title || 'a different recording'}`}. Review the audio before choosing how
-          to handle it.
-        </p>
-      )}
+      <AudioEvidence
+        details={{ ...details, ambiguity_reasons: needsReview ? row.ambiguity_reasons : [] }}
+        explain={needsReview}
+      />
       {controls}
       <ReviewAudio
         localPath={row.file_path || ''}
@@ -1138,8 +1171,12 @@ export function AssignmentEvidence({
         previewUrl={row.slot_preview_url || ''}
         previewSource={album.album_plan?.source || ''}
       />
-      <Facts finding={{ file_path: row.file_path || null }} details={details} release={release} />
-      {row.acoustid && <AudioEvidence details={details} />}
+      <Facts
+        finding={{ file_path: row.file_path || null }}
+        details={details}
+        release={release}
+        caseId={album.case_id}
+      />
       {Boolean(row.reasons?.length) && (
         <section className={styles.technicalCard}>
           <h5>Why this track was paired</h5>
@@ -1152,6 +1189,7 @@ export function AssignmentEvidence({
 
 export function ReconciliationEvidence({
   finding,
+  caseId,
   onKeepCopy,
   busy = false,
   prominent = false,
@@ -1160,6 +1198,7 @@ export function ReconciliationEvidence({
   release,
 }: {
   finding: ReviewFinding;
+  caseId?: string;
   onKeepCopy?: (trackId: string) => void;
   busy?: boolean;
   prominent?: boolean;
@@ -1183,54 +1222,14 @@ export function ReconciliationEvidence({
               changeOperation(change.old, change.next)
             ]
           : ''
-      }${proposedFieldLabel(change.field, change.locations)}`,
+      }${proposedFieldLabel(change.field, shownChanges.filter((row) => row.field === change.field).length > 1 ? change.locations : undefined)}`,
       current: change.old,
       planned: change.next,
     }));
   const missing = objects(details.missing_tracks);
   const reasons = Array.isArray(details.match_reasons) ? details.match_reasons.map(label) : [];
-  const ambiguityReasons = Array.isArray(details.ambiguity_reasons)
-    ? details.ambiguity_reasons.map(label).filter(Boolean)
-    : [];
   const primaryPairs = objects(objects(details.candidates)[0]?.pairs);
   const duplicateCopies = objects(details.duplicate_copies);
-  const audio = object(details.acoustid);
-  const expectedIdentity = `${label(details.expected_title)
-    .toLocaleLowerCase()
-    .trim()}::${label(details.artist_name).toLocaleLowerCase().trim()}`;
-  const bestAudioScore =
-    count(audio.best_score) ||
-    Math.max(0, ...objects(audio.recordings).map((recording) => count(recording.score)));
-  const competingAudioIdentities = [
-    ...new Map(
-      objects(audio.recordings)
-        .filter((recording) => Math.abs(count(recording.score) - bestAudioScore) < 0.000_001)
-        .filter((recording) => {
-          const identity = `${label(recording.title).toLocaleLowerCase().trim()}::${label(
-            recording.artist,
-          )
-            .toLocaleLowerCase()
-            .trim()}`;
-          return identity !== expectedIdentity;
-        })
-        .map((recording) => [
-          `${label(recording.title).toLocaleLowerCase()}::${label(recording.artist).toLocaleLowerCase()}`,
-          recording,
-        ]),
-    ).values(),
-  ];
-  const expectedTitle = label(
-    details.expected_title ||
-      object(details.replacement_track).title ||
-      object(details.replacement_track).name,
-  )
-    .toLocaleLowerCase()
-    .trim();
-  const audioSupportsExpected = objects(audio.recordings).some(
-    (recording) =>
-      Boolean(expectedTitle) &&
-      baseVersionTitle(label(recording.title)) === baseVersionTitle(expectedTitle),
-  );
 
   return (
     <div className={styles.reconciliationEvidence}>
@@ -1276,33 +1275,7 @@ export function ReconciliationEvidence({
             )}
         </section>
       )}
-      {ambiguityReasons.length > 0 && (
-        <section className={styles.problemCard} data-tone="warning">
-          <h4>
-            <EvidenceIcon name="warning" /> Why this needs review
-          </h4>
-          <ul>
-            {ambiguityReasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-          {competingAudioIdentities.length > 0 && (
-            <div className={styles.competingIdentities}>
-              <strong>Other recordings linked to this fingerprint</strong>
-              <small>
-                These scores measure fingerprint similarity, not certainty about the track.
-              </small>
-              <ul>
-                {competingAudioIdentities.slice(0, 3).map((recording) => (
-                  <li key={`${label(recording.title)}-${label(recording.artist)}`}>
-                    {audioSummary(recording)}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </section>
-      )}
+      {prominent && <AudioEvidence details={details} explain />}
       {missing.length > 0 && (
         <section className={styles.problemCard} data-tone="danger">
           <h4>
@@ -1331,17 +1304,6 @@ export function ReconciliationEvidence({
             </ul>
           </section>
         )}
-      {prominent && label(audio.status) === 'ok' && expectedTitle && !audioSupportsExpected && (
-        <section className={styles.problemCard} data-tone="warning">
-          <h4>
-            <EvidenceIcon name="warning" /> No AcoustID candidate names this release track
-          </h4>
-          <p>
-            The fingerprint returned other recording identities. Compare the audio before choosing
-            this assignment.
-          </p>
-        </section>
-      )}
       {primaryPairs.length > 0 && (
         <section className={styles.trackSection}>
           <div className={styles.sectionHeading}>
@@ -1379,23 +1341,10 @@ export function ReconciliationEvidence({
       <DuplicateCopies details={details} onKeepCopy={onKeepCopy} busy={busy} />
       {controls}
       {audioControl}
-      {objects(details.tool_checks).length > 0 && (
-        <section className={styles.technicalCard}>
-          <h5>Other maintenance checks</h5>
-          <ul>
-            {objects(details.tool_checks).map((check) => (
-              <li key={label(check.id)}>
-                <strong>{label(check.title)}</strong>
-                <p>{label(check.reason)}</p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {!prominent && <AudioEvidence details={details} explain />}
       {prominent && (
         <div className={styles.prominentEvidence}>
-          <Facts finding={finding} details={details} release={release} />
-          <AudioEvidence details={details} />
+          <Facts finding={finding} details={details} release={release} caseId={caseId} />
         </div>
       )}
       {prominent && reasons.length > 0 && (
@@ -1407,8 +1356,9 @@ export function ReconciliationEvidence({
       )}
       {(!prominent || objects(details.checked_files).length > 0) && (
         <div className={styles.technicalGrid}>
-          {!prominent && <Facts finding={finding} details={details} release={release} />}
-          {!prominent && <AudioEvidence details={details} />}
+          {!prominent && (
+            <Facts finding={finding} details={details} release={release} caseId={caseId} />
+          )}
           <CheckedFiles details={details} />
           {!prominent && reasons.length > 0 && (
             <section className={styles.technicalCard}>

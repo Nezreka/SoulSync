@@ -1669,3 +1669,36 @@ def test_missing_track_subset_rejects_foreign_stale_and_invalid_selections():
     assert len(calls) == 1
     case['items'].append({'id': 5, 'finding_type': 'reconciliation_release'})
     assert not worker.start_review_missing_tracks('album', finding_ids=[1])['started']
+
+
+def test_queue_navigation_spans_pages_in_the_same_filtered_order():
+    db = _Database()
+    for index in range(1, 6):
+        db.add(index, f'/music/Album {index}/song.flac',
+               {'album_folder': f'/music/Album {index}', 'album_title': f'Album {index}'},
+               job_id='library_reconciliation', kind='reconciliation_metadata')
+    first = list_cases(db, limit=2, job_id='library_reconciliation')
+    second = list_cases(db, page=1, limit=2, job_id='library_reconciliation')
+    assert first['case_ids'] == second['case_ids']
+    assert len(first['case_ids']) == 5
+    assert first['case_ids'][2] == second['items'][0]['case_id']
+    assert first['case_ids'][1] == first['items'][-1]['case_id']
+    filtered = list_cases(db, limit=2, q='Album 3', job_id='library_reconciliation')
+    assert filtered['case_ids'] == [filtered['items'][0]['case_id']]
+    assert list_cases(db, page=99, limit=2)['page'] == 2
+
+
+def test_pending_download_with_saved_metadata_has_no_ready_actions():
+    from core.repair_review_queue import queue_summary
+    db = _Database()
+    common = {'album_folder': '/music/Waiting'}
+    db.add(1, '/music/Waiting/01.flac', {**common, 'changes': {'title': {'old': 'one', 'new': 'One'}}},
+           job_id='library_reconciliation', kind='reconciliation_metadata')
+    db.add(2, None, {**common, 'fulfillment_state': 'wishlisted'},
+           job_id='library_reconciliation', kind='reconciliation_missing')
+    totals = queue_summary(db, job_id='library_reconciliation')
+    assert totals['waiting'] == 1 and totals['ready'] == totals['ready_total'] == 0
+    assert ready_batch_preview(db)['action_count'] == 0
+    case = get_case(db, list_cases(db)['items'][0]['case_id'])
+    assert case['plan']['status'] == 'waiting'
+    assert not case['plan']['can_apply_ready']

@@ -1859,11 +1859,11 @@ def test_replacement_fragment_joins_same_release_in_sibling_folder():
     assert trusted == {original: 10}
 
 
-def test_deluxe_addendum_joins_disjoint_regular_album_for_review():
+@pytest.mark.parametrize('deluxe_numbers', [(12, 13, 14, 25, 26), tuple(range(12, 27))])
+def test_deluxe_addendum_joins_disjoint_regular_album_for_review(deluxe_numbers):
     regular = '/music/Split Chain/[2025] motionblur'
     deluxe = '/music/Split Chain/[2026] motionblur (DELUXE)'
     regular_paths = [f'{regular}/{number:02}.flac' for number in range(1, 12)]
-    deluxe_numbers = (12, 13, 14, 25, 26)
     deluxe_paths = [f'{deluxe}/{number:02}.mp3' for number in deluxe_numbers]
     folders = {regular: regular_paths, deluxe: deluxe_paths}
     tracks = {
@@ -3111,3 +3111,30 @@ def test_release_catalog_details_preserves_label_catalog_associations():
         {'label': 'First label', 'catalog_number': 'A-1'},
         {'label': 'Second label', 'catalog_number': 'B-2'},
     ]
+
+
+def test_nested_pressing_qualifier_uses_unanimous_clean_file_title():
+    files = [{'tags': {'album': 'Precambrian'}} for _ in range(14)]
+    assert _display_album_title(files, 'Precambrian (deluxe limited edition (black disc))', 'Precambrian') == 'Precambrian'
+    assert _display_album_title(files, 'Precambrian (Deluxe Edition)', 'Precambrian') == 'Precambrian (Deluxe Edition)'
+    assert _display_album_title(files, 'Precambrian (live (black disc))', 'Precambrian') == 'Precambrian (live (black disc))'
+    files[0]['tags']['album'] = 'Precambrian (Deluxe Edition)'
+    assert _display_album_title(files, 'Precambrian (deluxe limited edition (black disc))', 'Precambrian') != 'Precambrian'
+
+
+@pytest.mark.parametrize('conflict', ['', 'release', 'artist', 'title', 'position', 'owner'])
+def test_same_folder_library_split_has_one_compatible_owner(conflict):
+    folder = '/music/Ghost/Prequelle'
+    paths = [f'{folder}/{number:02}.flac' for number in range(1, 11)]
+    tracks = {path: {'album_id': 2 if number == 3 else 1, 'track_number': number, 'disc_number': 1}
+              for number, path in enumerate(paths, 1)}
+    albums = {1: {'album_title': 'Prequelle', 'artist_name': 'Ghost', 'owner_profile_id': 1},
+              2: {'album_title': 'Prequelle', 'artist_name': 'Ghost', 'owner_profile_id': 1,
+                  'musicbrainz_release_id': 'release'}}
+    if conflict == 'release': albums[1]['musicbrainz_release_id'] = 'another-release'
+    if conflict == 'artist': albums[1]['artist_name'] = 'Another Artist'
+    if conflict == 'title': albums[1]['album_title'] = 'Prequelle (Live)'
+    if conflict == 'position': tracks[paths[0]]['track_number'] = 3
+    if conflict == 'owner': albums[1]['owner_profile_id'] = 2
+    _, trusted = _group_logical_albums({folder: paths}, tracks, albums)
+    assert trusted == ({} if conflict else {folder: 2})

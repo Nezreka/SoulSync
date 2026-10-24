@@ -145,6 +145,36 @@ def repair_review_queue_case(case_id):
         return jsonify({'error': 'Could not load review case'}), 500
 
 
+@bp.route('/api/repair/review-queue/<path:case_id>/file-metadata', methods=['GET'])
+def repair_review_file_metadata(case_id):
+    """Inspect a current file belonging to this review case, never a free path."""
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 503
+    case = worker.get_review_case(case_id, job_id='library_reconciliation')
+    path = request.args.get('path', '')
+    members = [*(case or {}).get('items', []),
+               *((case or {}).get('album_plan') or {}).get('assignments', [])]
+    if not path or not any(row.get('file_path') == path for row in members):
+        return jsonify({'success': False, 'error': 'File is no longer in this album review. Reanalyze the album.'}), 404
+    from pathlib import Path
+    from core.repair_jobs.base import all_library_roots
+    from core.library.file_metadata import read_file_metadata
+    from mutagen import MutagenError
+    try:
+        resolved = Path(path).resolve(strict=True)
+        roots = [Path(root).resolve() for root in all_library_roots(worker._job_context())]
+        if not any(resolved.is_relative_to(root) for root in roots):
+            return jsonify({'success': False, 'error': 'File is outside the configured library'}), 403
+        record = read_file_metadata(str(resolved))
+        response = jsonify({'success': True, 'record': record})
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+    except (OSError, ValueError, MutagenError) as exc:
+        logger.info('Could not inspect review file %s: %s', path, exc)
+        return jsonify({'success': False, 'error': 'Could not read this file. It may have moved; reanalyze the album.'}), 422
+
+
 @bp.route('/api/repair/review-queue/<path:case_id>/findings/<int:finding_id>/apply', methods=['POST'])
 def repair_review_queue_apply(case_id, finding_id):
     worker = _repair_worker()

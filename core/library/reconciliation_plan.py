@@ -15,7 +15,7 @@ from functools import lru_cache
 from typing import Any
 
 from core.matching.assignment import assign_max_weight
-from core.matching.artist_aliases import artist_names_match
+from core.matching.artist_aliases import artist_names_match, split_artist_credit
 from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
 from core.text.fold import fold_title
 from core.text.title_match import (
@@ -418,6 +418,17 @@ def _artist_credit_supports(recording_artist: str, slot_artist: str, aliases=Non
                                threshold=1.0, similarity=same_name)[0])
 
 
+def _full_credit_agrees(credit: str, slot: dict) -> bool:
+    """Exact contributor evidence, distinct from permissive audio support."""
+    names = slot.get('artist_names') or []
+    if not credit or not names:
+        return False
+    fold = lambda value: fold_title(value, drop_brackets=False)
+    if fold(credit) == fold(' & '.join(names)):
+        return True
+    return {fold(name) for name in split_artist_credit(credit)} == {fold(name) for name in names}
+
+
 def audio_contradicts_local_title(file: dict) -> bool:
     """Whether strong fingerprint identities all name different recordings."""
     title = str((file.get('tags') or {}).get('title') or
@@ -565,6 +576,27 @@ class _MatchFacts:
         supported = self._memo('close_alternatives', id(file), collect)
         return len(supported) > int(id(slot) in supported)
 
+    def credit_distinguishes(self, file, slot, alternative):
+        """Separate original/featured versions corroborated by recording ID.
+
+        Matching a primary artist or a track number alone is insufficient.
+        AcoustID may link both recordings; the complete existing credit, exact
+        embedded ID, position, titles and measured length must agree together.
+        """
+        tags = file.get('tags') or {}
+        credit = str(tags.get('track_artist') or tags.get('artist') or '')
+        delta = self.delta(file, slot)
+        return bool(_full_credit_agrees(credit, slot)
+            and alternative.get('artist_names') and not _full_credit_agrees(credit, alternative)
+            and tags.get('mbid') and tags['mbid'] == _recording_id(slot)
+            and _recording_id(slot) != _recording_id(alternative)
+            and (tags.get('disc_number') or 1, tags.get('track_number')) ==
+                (slot.get('disc_number') or 1, slot.get('track_number'))
+            and self.title_score(str(tags.get('title') or ''), str(slot.get('title') or '')) >= .88
+            and self.title_score(_local_filename_title(file), str(slot.get('title') or '')) >= .88
+            and delta is not None and delta <= 3000 and self.compatible(file, slot)
+            and any(row.get('mbid') == _recording_id(slot) for row in self.strong_recordings(file)))
+
     def metadata_supports(self, file, slot):
         def supported():
             tags, audio = file.get('tags') or {}, file.get('acoustid') or {}
@@ -679,19 +711,23 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None,
             score = float(recording.get('score') or 0)
             if score < 0.80:
                 continue
+            candidate_weight, candidate_reason = 0, ''
             if _recording_id(slot) and recording.get('mbid') == _recording_id(slot):
-                fingerprint_weight = max(fingerprint_weight, int(10_000 * score))
-                reasons = ['AcoustID recording ID matches release slot']
+                candidate_weight = int(10_000 * score)
+                candidate_reason = 'AcoustID recording ID matches release slot'
             elif facts.supports(recording, slot):
-                fingerprint_weight = max(fingerprint_weight, int(5_000 * score))
-                reasons = ['AcoustID recording title matches release slot']
+                candidate_weight = int(5_000 * score)
+                candidate_reason = 'AcoustID recording title matches release slot'
             elif recording_supports_file_slot(recording, file, slot):
                 # The local title and slot already passed the symmetric
                 # version check above. A bare AcoustID recording label is
                 # therefore positive audio evidence, rather than merely an
                 # exception to the wrong-audio veto.
-                fingerprint_weight = max(fingerprint_weight, int(5_000 * score))
-                reasons = ['AcoustID base recording title matches release slot']
+                candidate_weight = int(5_000 * score)
+                candidate_reason = 'AcoustID base recording title matches release slot'
+            if candidate_weight > fingerprint_weight:
+                fingerprint_weight = candidate_weight
+                reasons = [candidate_reason]
 
     if alternate_wording:
         reasons.append('Exact audio identity supports alternate version wording; review qualifiers')
@@ -821,6 +857,8 @@ def reconcile_folder(files: list[dict], slots: list[dict],
         ) -> bool:
             if other_index == assigned_slot_index:
                 return False
+            if facts.credit_distinguishes(files[candidate_file_index], slots[assigned_slot_index], other):
+                return False
             delta = facts.delta(files[candidate_file_index], other)
             if delta is not None and delta > 15000:
                 return False
@@ -850,9 +888,10 @@ def reconcile_folder(files: list[dict], slots: list[dict],
                  (artist_agrees and position_agrees and corroborating_metadata >= 1))
         )
         ambiguous = ambiguous_fingerprint and not fingerprint_context_resolves
-        alternative = max((w for j, (w, _) in enumerate(weighted[file_index])
-                           if j != slot_index), default=None)
-        close_alternative = alternative is not None and alternative >= weight * 0.92
+        close_alternative = any(
+            other_index != slot_index and contender >= weight * .92
+            and not facts.credit_distinguishes(files[file_index], slot, slots[other_index])
+            for other_index, (contender, _) in enumerate(weighted[file_index]))
         # A duplicate copy can have a poorer filename or stale tags while
         # sharing the same strong AcoustID identity. Leave room for those
         # weaker metadata layers before declaring either copy the keeper.

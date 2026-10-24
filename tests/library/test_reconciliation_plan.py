@@ -1147,3 +1147,31 @@ def test_verified_manual_assignment_is_settled_in_track_matrix(monkeypatch):
     rows, categories = job._album_plan_assignments(files, slots, plan)
     assert rows[0]['status'] == 'uncertain'
     assert 'audio_conflicts' in categories
+
+
+@pytest.mark.parametrize('weakness', ['', 'id', 'credit', 'duration', 'position', 'same_credit'])
+def test_featured_versions_use_full_credit_with_recording_and_position(weakness):
+    recordings = [{'title': 'Northern Attitude', 'artist': artist, 'mbid': mbid, 'score': .997}
+                  for artist, mbid in [('Noah Kahan', 'original'), ('Noah Kahan with Hozier', 'featured')]]
+    slots = [{'title': 'Northern Attitude', 'artist': artist, 'artist_names': names,
+              'recording_mbid': mbid, 'track_number': position, 'disc_number': 1, 'duration_ms': 267256}
+             for artist, names, mbid, position in [
+                 ('Noah Kahan', ['Noah Kahan'], 'original', 1),
+                 ('Noah Kahan & Hozier', ['Noah Kahan', 'Hozier'], 'featured', 26)]]
+    files = []
+    for slot in slots:
+        file = _file('Northern Attitude', f"/album/{slot['track_number']:02} - Northern Attitude.flac", 267256)
+        file['tags'].update(track_artist=slot['artist'], mbid=slot['recording_mbid'], track_number=slot['track_number'])
+        file['acoustid'] = {'status': 'ok', 'recordings': recordings}
+        files.append(file)
+    if weakness == 'id': files[1]['tags']['mbid'] = ''
+    if weakness == 'credit': files[1]['tags']['track_artist'] = 'Noah Kahan'
+    if weakness == 'duration': files[1]['tags']['duration_ms'] += 10000
+    if weakness == 'position': files[1]['tags']['track_number'] = 27
+    if weakness == 'same_credit':
+        slots[1]['artist_names'] = slots[0]['artist_names']
+    plan = reconcile_folder(files, slots)
+    assert [(pair['file_index'], pair['slot_index']) for pair in plan['pairs']] == [(0, 0), (1, 1)]
+    featured = plan['pairs'][1]
+    assert (featured['confidence'] == 'clear') == (not weakness)
+    assert featured['reasons'][0] == 'AcoustID recording ID matches release slot'

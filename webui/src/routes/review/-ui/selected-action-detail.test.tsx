@@ -42,9 +42,9 @@ it('keeps accept and keep choices visible while allowing alternative reassignmen
   expect(onAct).toHaveBeenCalledWith('fix');
   fireEvent.click(screen.getByRole('button', { name: 'Keep current values' }));
   expect(onAct).toHaveBeenCalledWith('dismiss');
-  expect(screen.getByText('Change track assignment').closest('details')!.open).toBe(false);
-  fireEvent.click(screen.getByText('Change track assignment'));
-  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'id:other:1:2' } });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Change track assignment' }));
+  fireEvent.click(screen.getByRole('button', { name: /Other/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Save plan assignment' }));
   expect(onAct).toHaveBeenCalledWith('fix', 'assign:id:other:1:2');
 });
@@ -52,7 +52,7 @@ it('keeps accept and keep choices visible while allowing alternative reassignmen
 it('shows identity replacement alongside readable edits before approval', () => {
   render(<ReconciliationEvidence finding={finding} />);
   expect(screen.getAllByText('Song').length).toBeGreaterThan(0);
-  expect(screen.getByText('Replace MusicBrainz release ID · file tag')).toBeVisible();
+  expect(screen.getByText('Replace MusicBrainz release ID')).toBeVisible();
   expect(screen.getByText('old-id')).toBeVisible();
   expect(screen.getByText('new-id')).toBeVisible();
   expect(screen.getByText('old-id').closest('details')).toBeNull();
@@ -74,7 +74,7 @@ it('shows short identifier additions and removals beside a filename edit', () =>
       }}
     />,
   );
-  expect(screen.getByText('Remove Recording ID · file and library')).toBeVisible();
+  expect(screen.getByText('Remove Recording ID')).toBeVisible();
   expect(screen.getAllByText('remove-id')).toHaveLength(1);
   expect(screen.getByText('remove-id').closest('details')).toBeNull();
   expect(screen.getByText('added-id')).toBeVisible();
@@ -198,14 +198,17 @@ it('exposes no assignment mutation from a numbering preview or a missing file', 
 it('clears a draft assignment when the same finding receives another release or options', () => {
   const onAct = vi.fn();
   const { rerender } = render(detail(finding, onAct));
-  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'id:other:1:2' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Change track assignment' }));
+  fireEvent.click(screen.getByRole('button', { name: /Other/ }));
   expect(screen.getByRole('button', { name: 'Save plan assignment' })).not.toBeDisabled();
   rerender(
     detail({ ...finding, details: { ...finding.details, release_id: 'another-release' } }, onAct),
   );
-  expect(screen.getByRole('combobox')).toHaveValue('');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Change track assignment' }));
   expect(screen.getByRole('button', { name: 'Save plan assignment' })).toBeDisabled();
-  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'id:other:1:2' } });
+  expect(screen.getByRole('button', { name: 'Save plan assignment' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: /Other/ }));
   rerender(
     detail(
       {
@@ -218,7 +221,8 @@ it('clears a draft assignment when the same finding receives another release or 
       onAct,
     ),
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Save plan assignment' }));
   expect(onAct).not.toHaveBeenCalled();
-  expect(screen.getByRole('combobox')).toHaveValue('');
+  expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Change track assignment' }));
+  expect(screen.getByRole('button', { name: 'Save plan assignment' })).toBeDisabled();
 });

@@ -277,7 +277,10 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 'manual' if 'manual' in tiers else
                 'blocked' if 'blocked' in tiers else 'ready')
         consistency = _album_consistency_summary(rows)
-        if category == 'numbering':
+        if category == 'folder_conflicts':
+            decision_label = 'Resolve album ownership'
+            summary = rows[0].get('description') or 'Review the library albums represented by these files.'
+        elif category == 'numbering':
             decision_label, summary = _numbering_change_summary(rows)
         elif category == 'title_conventions':
             summary = f'{len(rows)} title wording changes preserve the identified recordings.'
@@ -369,7 +372,7 @@ def classify_case(items: list[dict[str, Any]]) -> dict[str, Any]:
         'total': len(items),
         'status': ('needs_review' if case_mode(items) in ('manual', 'destructive') else 'waiting' if items and case_mode(items) == 'waiting' else 'ready'),
         'blocker_reasons': reasons,
-        'can_apply_ready': counts['ready'] > 0 and not any(item['review_tier'] != 'ready' and finding_category(item) != 'pending_fulfillment' for item in items),
+        'can_apply_ready': counts['ready'] > 0 and case_mode(items) == 'ready',
         'can_organize': bool(items and all(item.get('finding_type') == 'reconciliation_metadata' for item in items) and not counts['manual'] and
                              not counts['destructive'] and not counts['blocked']),
         'decision_count': len(decisions),
@@ -421,8 +424,12 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
               AND review_case_key IN (SELECT review_case_key FROM matching_cases)
             GROUP BY review_case_key
             ORDER BY priority ASC, error_count DESC, pending DESC, case_id ASC
-            LIMIT ? OFFSET ?
-        """, [*params, status, *([job_id] if job_id else []), limit, page * limit]).fetchall()
+        """, [*params, status, *([job_id] if job_id else [])]).fetchall()
+        # The small ordered ID list keeps album navigation independent of the
+        # visible page. Hydrate evidence only for the requested page below.
+        ordered_case_ids = [row[0] for row in rows]
+        page = min(page, max(0, (len(rows) - 1) // limit))
+        rows = rows[page * limit:(page + 1) * limit]
         items = [{
                 'case_id': row[0], 'pending': row[1], 'priority': row[2],
                 'album': row[3], 'artist': row[4],
@@ -464,7 +471,7 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                                  for finding in grouped.get(item['case_id'], [])
                                  if finding['details'].get('album_id') is not None), None)
                 item['album_thumb_url'] = artwork.get(album_id) if album_id else None
-        return {'items': items, 'total': total, 'ready_total': ready_total,
+        return {'items': items, 'case_ids': ordered_case_ids, 'total': total, 'ready_total': ready_total,
                 'page': page, 'limit': limit}
     finally:
         conn.close()
@@ -737,6 +744,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
             'plan_signature': choices.plan_signature(items),
             'saved_for_later': bool(conn.execute('SELECT 1 FROM reconcile_saved_plans WHERE case_id=? AND signature=?', (case_id, choices.plan_signature(items))).fetchone()),
             'album': label.get('album_title') or label.get('album') or label.get('album_name'),
+            'current_album_title': label.get('library_album_title') or '',
             'artist': label.get('artist_name') or label.get('artist') or
                       label.get('expected_artist'),
             'folder': next((item['details'].get('album_folder') for item in items

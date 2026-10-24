@@ -172,6 +172,8 @@ def assert_snapshot(name, case, tmp_path, album):
               'fingerprint_key', 'folder_audio_path_digest'}
 
     def normalize(value, key=''):
+        if key == 'case_ids':
+            return [normalize(item, 'case_id') for item in value]
         if key == 'case_id':
             return ('album:10:relocated' if case['folder'].endswith('reorganized')
                     else 'album:10:acceptance')

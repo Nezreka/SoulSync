@@ -4,6 +4,7 @@
     "plan_signature": "missing_metadata:plan_signature:0",
     "saved_for_later": false,
     "album": "Northbound",
+    "current_album_title": "Northbound",
     "artist": "Acceptance Artist",
     "folder": "/music/Acceptance Artist/Northbound",
     "items": [
@@ -122,6 +123,7 @@
             {
               "key": "id:00000000-0000-4000-8000-000000000001:1:1",
               "title": "Home",
+              "artist": "Acceptance Artist",
               "disc_number": 1,
               "track_number": 1,
               "display_track_number": 1,
@@ -131,6 +133,7 @@
             {
               "key": "id:00000000-0000-4000-8000-000000000002:1:2",
               "title": "Open Water",
+              "artist": "Acceptance Artist",
               "disc_number": 1,
               "track_number": 2,
               "display_track_number": 2,
@@ -282,6 +285,7 @@
             {
               "key": "id:00000000-0000-4000-8000-000000000001:1:1",
               "title": "Home",
+              "artist": "Acceptance Artist",
               "disc_number": 1,
               "track_number": 1,
               "display_track_number": 1,
@@ -291,6 +295,7 @@
             {
               "key": "id:00000000-0000-4000-8000-000000000002:1:2",
               "title": "Open Water",
+              "artist": "Acceptance Artist",
               "disc_number": 1,
               "track_number": 2,
               "display_track_number": 2,
@@ -719,6 +724,9 @@
         },
         "album_thumb_url": null
       }
+    ],
+    "case_ids": [
+      "album:10:acceptance"
     ],
     "total": 1,
     "ready_total": 2,

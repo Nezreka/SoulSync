@@ -96,6 +96,76 @@ afterEach(() => {
 });
 
 describe('library reconciliation review queue', () => {
+  it('navigates across pages and retains neighbors when reanalysis leaves the current filter', async () => {
+    let ids = ['first', 'middle', 'last'];
+    fetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
+      const parsed = new URL(url, 'http://localhost');
+      if (parsed.pathname === '/api/repair/review-queue') {
+        const page = Math.min(Number(parsed.searchParams.get('page')), ids.length - 1);
+        return Promise.resolve(
+          reply({
+            items: [
+              {
+                case_id: ids[page],
+                album: ids[page],
+                pending: 1,
+                finding_types: [],
+                priority: 1,
+                error_count: 0,
+              },
+            ],
+            case_ids: ids,
+            total: ids.length,
+            page,
+            limit: 1,
+          }),
+        );
+      }
+      if (parsed.pathname === '/api/repair/review-queue/middle/reanalyze') {
+        expect(options?.method).toBe('POST');
+        ids = ['first', 'last'];
+        return Promise.resolve(reply({ queued: true }));
+      }
+      const id = parsed.pathname.split('/').at(-1);
+      if (['first', 'middle', 'last'].includes(id || ''))
+        return Promise.resolve(
+          reply({
+            case_id: id,
+            album: id,
+            count: 1,
+            status: 'pending',
+            items: [],
+            refresh: { state: 'complete' },
+          }),
+        );
+      throw new Error(`Unexpected request: ${url}`);
+    });
+
+    render(<ReviewPage />);
+    await screen.findByRole('heading', { name: 'first' });
+    expect(screen.getByRole('button', { name: /Previous album/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /Next album/ }));
+    await screen.findByRole('heading', { name: 'middle' });
+    await screen.findByText('Page 2 of 3');
+    fireEvent.click(screen.getByRole('button', { name: /Next album/ }));
+    await screen.findByRole('heading', { name: 'last' });
+    await screen.findByText('Page 3 of 3');
+    expect(screen.getByRole('button', { name: /Next album/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /Previous album/ }));
+    await screen.findByRole('heading', { name: 'middle' });
+    fireEvent.click(screen.getByRole('button', { name: 'Reanalyze album' }));
+    await screen.findByText('Page 2 of 2');
+    expect(screen.getByRole('button', { name: /Previous album/ })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: /Next album/ })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /Next album/ }));
+    await screen.findByRole('heading', { name: 'last' });
+    fireEvent.click(screen.getByRole('button', { name: /Previous album/ }));
+    await screen.findByRole('heading', { name: 'first' });
+    await screen.findByText('Page 1 of 2');
+  });
+
   it('offers one album completeness choice with individually wanted tracks', async () => {
     const intent = {
       ...finding,
@@ -1100,7 +1170,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('Choose the copy to keep')).toBeTruthy();
     expect(screen.getByText('Playlist: Release Radar')).toBeTruthy();
     expect(screen.getAllByRole('button', { name: 'Plan to keep this copy' })).toHaveLength(2);
-    expect(screen.getByText('2 linked recording IDs')).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: /Recording · cold-/ })).toHaveLength(2);
   });
 
   it('pins the chosen release with its evidence token', async () => {

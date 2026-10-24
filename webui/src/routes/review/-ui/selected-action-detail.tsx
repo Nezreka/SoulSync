@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
-import { Button, Select } from '@/components/form/form';
+import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
+import { Button, TextInput } from '@/components/form/form';
 
 import type { ReviewFinding } from '../-review.api';
 import type { FindingTypeInfo } from '../../tools/-tools.groups';
@@ -15,6 +16,7 @@ import { findingHeading, record, records, textValue, shortDuration } from './rev
 
 export function SelectedActionDetail({
   finding,
+  caseId,
   itemIndex,
   itemCount,
   typeInfo,
@@ -30,6 +32,7 @@ export function SelectedActionDetail({
   release,
 }: {
   finding: ReviewFinding;
+  caseId?: string;
   itemIndex: number;
   itemCount: number;
   typeInfo?: FindingTypeInfo;
@@ -87,8 +90,6 @@ export function SelectedActionDetail({
   const releaseDurationMs = Number(
     details.expected_duration_ms || record(details.replacement_track).duration_ms || 0,
   );
-  const durationDifference =
-    localDurationMs && releaseDurationMs ? Math.abs(localDurationMs - releaseDurationMs) : 0;
   return (
     <section
       className={styles.findingDetail}
@@ -129,30 +130,6 @@ export function SelectedActionDetail({
           Next decision →
         </Button>
       </nav>
-      {wrongAudio && Boolean(details.acoustid_title) && (
-        <div className={styles.identityWarning}>
-          <strong>
-            Fingerprint identifies {textValue(details.acoustid_title)}
-            {details.acoustid_artist ? ` by ${textValue(details.acoustid_artist)}` : ''}
-            {typeof details.acoustid_score === 'number'
-              ? ` · ${Math.round(details.acoustid_score * 100)}%`
-              : ''}
-          </strong>
-          <span>
-            Expected release track:{' '}
-            {textValue(details.expected_title || replacement.name) || 'No matching slot'}. Review
-            the audio before changing this file.
-          </span>
-        </div>
-      )}
-      {durationDifference > 3000 && (
-        <div className={styles.durationWarning}>
-          <strong>Length differs by {(durationDifference / 1000).toFixed(1)} seconds</strong>
-          <span>
-            Local {shortDuration(localDurationMs)} · Release {shortDuration(releaseDurationMs)}
-          </span>
-        </div>
-      )}
       {!compact && (
         <section
           className={styles.suggestion}
@@ -193,6 +170,7 @@ export function SelectedActionDetail({
       )}
       <ReconciliationEvidence
         finding={finding}
+        caseId={caseId}
         release={release}
         busy={busy}
         prominent={
@@ -312,6 +290,11 @@ export function SelectedActionDetail({
                   assignmentOptions.map((slot) => slot.key),
                 ])}
                 options={assignmentOptions}
+                current={textValue(details.expected_title || replacement.name)}
+                local={
+                  finding.file_path?.split('/').at(-1) ||
+                  textValue(record(details.current_tags).title)
+                }
                 numberingMode={textValue(details.numbering_mode)}
                 saved={details.saved_assignment === true}
                 busy={busy}
@@ -377,59 +360,105 @@ export function SelectedActionDetail({
   );
 }
 
-/** Reset a draft selection whenever its file, release, or available slots change. */
+/** A fresh draft belongs to one file and one release (the caller keys this component). */
 function AssignmentChoice({
   options,
   numberingMode,
   saved,
   busy,
   onAct,
+  current,
+  local,
 }: {
   options: Record<string, unknown>[];
   numberingMode: string;
   saved: boolean;
   busy: boolean;
+  current: string;
+  local: string;
   onAct: (action: 'fix', choice: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const [slot, setSlot] = useState('');
+  const [query, setQuery] = useState('');
+  const changeOpen = (value: boolean) => {
+    setOpen(value);
+    if (!value) {
+      setSlot('');
+      setQuery('');
+    }
+  };
+  const optionsShown = options.filter((option) =>
+    [option.title, option.artist, option.track_number, option.disc_number]
+      .join(' ')
+      .toLocaleLowerCase()
+      .includes(query.trim().toLocaleLowerCase()),
+  );
+  const save = (choice: string) => {
+    changeOpen(false);
+    onAct('fix', choice);
+  };
   return (
-    <details className={styles.actionDisclosure}>
-      <summary>Change track assignment</summary>
-      <div className={styles.assignmentCorrection}>
-        <label>
-          Assign this file to another release track
-          <Select value={slot} disabled={busy} onChange={(event) => setSlot(event.target.value)}>
-            <option value="">Choose a release track…</option>
-            {options.map((option, index) => (
-              <option value={textValue(option.key)} key={`${textValue(option.key)}-${index}`}>
-                {formatTrackPosition(
-                  textValue(option.disc_number),
-                  textValue(option.track_number),
-                  numberingMode,
-                  textValue(option.display_track_number) || undefined,
-                )}{' '}
-                {textValue(option.title)}
-              </option>
+    <>
+      <Button type="button" disabled={busy} onClick={() => changeOpen(true)}>
+        Change track assignment
+      </Button>
+      <DialogFrame open={open} onOpenChange={changeOpen}>
+        <DialogHeader title="Change track assignment">Local file: {local}</DialogHeader>
+        <DialogBody>
+          <p>
+            {saved ? 'Planned' : 'Proposed'} release track:{' '}
+            <strong>{current || 'No assigned track'}</strong>
+          </p>
+          <TextInput
+            aria-label="Find a release track"
+            placeholder="Find a release track or artist…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <div className={styles.assignmentChoices} aria-label="Release tracks">
+            {optionsShown.map((option) => (
+              <Button
+                key={textValue(option.key)}
+                type="button"
+                aria-pressed={slot === textValue(option.key)}
+                onClick={() => setSlot(textValue(option.key))}
+                disabled={busy}
+              >
+                <span className={styles.assignmentPosition}>
+                  {formatTrackPosition(
+                    textValue(option.disc_number),
+                    textValue(option.track_number),
+                    numberingMode,
+                    textValue(option.display_track_number) || undefined,
+                  )}
+                </span>
+                <span>
+                  <strong>{textValue(option.title)}</strong>
+                  <small>{textValue(option.artist)}</small>
+                </span>
+                <small>{shortDuration(Number(option.duration_ms))}</small>
+              </Button>
             ))}
-          </Select>
-        </label>
-        <Button
-          type="button"
-          disabled={busy || !slot}
-          onClick={() => onAct('fix', `assign:${slot}`)}
-        >
-          Save plan assignment
-        </Button>
-        {saved && (
-          <Button type="button" disabled={busy} onClick={() => onAct('fix', 'assign:auto')}>
-            Reset plan assignment
+            {!optionsShown.length && <p>No release tracks match this search.</p>}
+          </div>
+          <p className={styles.muted}>
+            Saves this assignment in the album plan and recalculates proposed edits. Files change
+            only when you apply the plan.
+          </p>
+        </DialogBody>
+        <DialogFooter>
+          {saved && (
+            <Button disabled={busy} onClick={() => save('assign:auto')}>
+              Reset plan assignment
+            </Button>
+          )}
+          <Button onClick={() => changeOpen(false)}>Cancel</Button>
+          <Button variant="primary" disabled={busy || !slot} onClick={() => save(`assign:${slot}`)}>
+            Save plan assignment
           </Button>
-        )}
-        <small>
-          This saves your plan choice and recalculates proposed edits. Files stay unchanged until
-          you apply them.
-        </small>
-      </div>
-    </details>
+        </DialogFooter>
+      </DialogFrame>
+    </>
   );
 }

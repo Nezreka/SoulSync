@@ -20,10 +20,14 @@ export function RecordInspector({
   endpoint,
   recordKind = 'Artist',
   extraRecord,
+  title,
+  sourceDescription,
 }: {
   endpoint?: string;
   recordKind?: string;
   extraRecord?: Record<string, unknown>;
+  title?: string;
+  sourceDescription?: string;
   name: string;
   onClose: () => void;
 }) {
@@ -86,13 +90,13 @@ export function RecordInspector({
         data-shared-modal=""
         aria-modal="true"
         role="dialog"
-        aria-label={`${recordKind} database record`}
+        aria-label={title || `${recordKind} database record`}
       >
         <div className="arec-header">
           <div className="arec-title-wrap">
             <div className="arec-title">
               <span className="arec-dot" />
-              {recordKind} DB Record
+              {title || `${recordKind} DB Record`}
             </div>
             <div className="arec-sub" id="arec-sub">
               {name}
@@ -170,9 +174,10 @@ export function RecordInspector({
         </div>
 
         <p className="record-source">
-          {endpoint
-            ? 'Library database record fetched when opened.'
-            : 'Review evidence snapshot; no current database record is available.'}{' '}
+          {sourceDescription ||
+            (endpoint
+              ? 'Library database record fetched when opened.'
+              : 'Review evidence snapshot; no current database record is available.')}{' '}
           {extraRecord
             ? 'Embedded tags and audio identity below are snapshots from the review analysis, not a fresh file read.'
             : ''}

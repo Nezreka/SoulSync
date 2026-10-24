@@ -10,7 +10,10 @@ import {
   type ReleaseEvidence,
 } from './reconciliation-evidence';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 it('explains the actual alternative that requires a release decision', () => {
   render(
@@ -60,6 +63,25 @@ const finding = {
 function releaseSection() {
   return within(screen.getByText('Release track', { exact: true }).closest('section')!);
 }
+
+it('opens fresh embedded file metadata using the enclosing album case', async () => {
+  const fetch = vi.fn().mockResolvedValue({
+    json: async () => ({
+      success: true,
+      record: { 'Tag: ARTIST': ['Artist', 'Guest'], 'Tag: COMMENT': ['Original file note'] },
+    }),
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<ReconciliationEvidence finding={finding} caseId="folder:album" />);
+  fireEvent.click(screen.getByRole('button', { name: 'File metadata' }));
+  const dialog = screen.getByRole('dialog', { name: 'File metadata' });
+  expect(await within(dialog).findByText('Tag: ARTIST')).toBeVisible();
+  expect(await within(dialog).findByText('Original file note', { exact: false })).toBeVisible();
+  expect(fetch.mock.calls[0][0]).toBe(
+    '/api/repair/review-queue/folder%3Aalbum/file-metadata?path=%2Fmusic%2FLocal+album%2FSong.flac',
+  );
+  expect(within(dialog).queryByText('Track DB Record')).toBeNull();
+});
 
 it('keeps selected catalogue identity separate from local display and embedded album names', () => {
   render(<ReconciliationEvidence finding={finding} release={release} />);
@@ -177,7 +199,7 @@ it('explains uncertainty and competing identities before proposed edits, decisio
   }
   expect(
     screen
-      .getByText('No AcoustID candidate names this release track')
+      .getByText(/No AcoustID candidate names this release track:/)
       .compareDocumentPosition(screen.getByText('Accept assignment')) &
       Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();

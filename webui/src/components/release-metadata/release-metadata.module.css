@@ -4,11 +4,33 @@
   gap: 6px;
   margin-block: 6px;
 }
-.badges span {
+.badges > [data-slot='badge'] {
   white-space: normal;
   text-align: left;
   font-weight: 500;
   font-size: 12px;
   color: var(--text-2);
   padding: 3px 7px;
+  gap: 5px;
+  cursor: help;
+}
+.flag {
+  width: 18px;
+  height: 12px;
+  flex: none;
+  border-radius: 1px;
+}
+.tooltipPosition {
+  z-index: 10000;
+}
+.tooltip {
+  max-width: min(300px, calc(100vw - 24px));
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-2, #262626);
+  color: var(--text-1, #eee);
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 4px 16px #0005;
 }

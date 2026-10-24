@@ -393,12 +393,42 @@ export function ReviewPage() {
     () => reviewCase?.items.find((finding) => finding.id === activeId),
     [reviewCase, activeId],
   );
-  const caseIndex = queue?.items.findIndex((item) => item.case_id === caseId) ?? -1;
+  const orderedCaseIds = useMemo(
+    () => queue?.case_ids || queue?.items.map((item) => item.case_id) || [],
+    [queue],
+  );
+  const caseIndex = orderedCaseIds.indexOf(caseId);
+  const navigationAnchor = useRef({ caseId: '', index: 0 });
+  if (caseIndex >= 0) navigationAnchor.current = { caseId, index: caseIndex };
+  const detachedIndex =
+    navigationAnchor.current.caseId === caseId ? navigationAnchor.current.index : 0;
+  const previousCaseId =
+    orderedCaseIds[
+      caseIndex >= 0 ? caseIndex - 1 : Math.min(detachedIndex - 1, orderedCaseIds.length - 1)
+    ];
+  const nextCaseId =
+    orderedCaseIds[
+      caseIndex >= 0 ? caseIndex + 1 : Math.min(detachedIndex, orderedCaseIds.length - 1)
+    ];
+  useEffect(() => {
+    if (!queue?.case_ids || !caseId) return;
+    const index = queue.case_ids.indexOf(caseId);
+    const target = index >= 0 ? Math.floor(index / queue.limit) : queue.page;
+    if (target !== page) setPage(target);
+  }, [queue, caseId, page]);
   const pageCount = queue ? Math.max(1, Math.ceil(queue.total / queue.limit)) : 1;
-  const albumNumber = queue && caseIndex >= 0 ? page * queue.limit + caseIndex + 1 : null;
+  const albumNumber =
+    queue && caseIndex >= 0 ? (queue.case_ids ? 0 : page * queue.limit) + caseIndex + 1 : null;
   const typeInfo = active ? catalog[active.finding_type] : undefined;
   const mutationBusy = busy || reanalyzing || applyBusy || reviewCase?.refresh?.state === 'running';
   const plan = reviewCase?.plan || emptyPlan;
+  const folderFinding = !reviewCase?.album_plan
+    ? reviewCase?.items.find((item) => item.details?.folder_issue)
+    : undefined;
+  const albumTitleChange = reviewCase?.items
+    .filter((item) => !item.details?.plan_keep)
+    .map((item) => record(record(item.details?.changes).library_album_title))
+    .find((change) => change.new && change.new !== change.old);
   const albumModel = useMemo(() => buildAlbumModel(reviewCase), [reviewCase]);
   const {
     decisions,
@@ -425,7 +455,8 @@ export function ReviewPage() {
     decisionMembers,
     releaseOrderedAssignments,
   } = albumModel;
-  const albumReady = plan.can_apply_ready && reviewDecisions.length === 0;
+  const albumReady =
+    plan.can_apply_ready && reviewDecisions.length === 0 && pendingDecisions.length === 0;
   const sourceFolders = useMemo(
     () =>
       [
@@ -639,6 +670,7 @@ export function ReviewPage() {
         return true;
       if (updated.case_id !== requestedId) {
         setCaseId(updated.case_id);
+        await refreshQueue();
         return true;
       }
       // Poll the active album while it is being analyzed. Recounting the whole
@@ -883,13 +915,11 @@ export function ReviewPage() {
     setReanalyzingCase(requestedId);
     try {
       await reanalyzeReviewCase(requestedId, refreshCatalogue);
-      const updated = await fetchReviewCase(requestedId);
       if (
         selectedCaseRef.current === requestedId &&
         requestVersion === caseRequestVersion.current
       ) {
-        if (updated.case_id !== requestedId) setCaseId(updated.case_id);
-        else setReviewCase(updated);
+        await refreshRef.current();
       }
     } catch (cause) {
       if (selectedCaseRef.current === requestedId) setError((cause as Error).message);
@@ -1235,6 +1265,7 @@ export function ReviewPage() {
       <SelectedActionDetail
         key={active.id}
         finding={active}
+        caseId={reviewCase?.case_id}
         release={primaryCandidate}
         itemIndex={navigationIndex}
         itemCount={navigationIds.length}
@@ -1619,14 +1650,39 @@ export function ReviewPage() {
                         ? 'Album review'
                         : `Album ${albumNumber} of ${queue?.total ?? '—'}`}
                       {' · '}
-                      {reviewCase.count} pending action
-                      {reviewCase.count === 1 ? '' : 's'}
+                      {Math.max(0, reviewCase.count - wishlistedCount)} pending change
+                      {reviewCase.count - wishlistedCount === 1 ? '' : 's'}
+                      {wishlistedCount > 0 &&
+                        ` · ${wishlistedCount} requested track${wishlistedCount === 1 ? '' : 's'}`}
                     </div>
-                    <h2>{reviewCase.album || 'Unassigned files'}</h2>
+                    <h2>
+                      {reviewCase.current_album_title || reviewCase.album || 'Unassigned files'}
+                    </h2>
                     <p>{reviewCase.artist || 'Artist not established'}</p>
+                    {albumTitleChange && (
+                      <p className={styles.plannedAlbumTitle}>
+                        Album title after apply: <strong>{textValue(albumTitleChange.new)}</strong>
+                      </p>
+                    )}
                   </div>
                 </div>
-                <div className={styles.nav}>
+                <nav className={styles.nav} aria-label="Album navigation">
+                  <Button
+                    type="button"
+                    disabled={!previousCaseId}
+                    onClick={() => previousCaseId && selectCase(previousCaseId)}
+                  >
+                    ← Previous album
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!nextCaseId}
+                    onClick={() => nextCaseId && selectCase(nextCaseId)}
+                  >
+                    Next album →
+                  </Button>
+                </nav>
+                <div className={styles.albumMaintenance}>
                   <Button
                     type="button"
                     disabled={mutationBusy}
@@ -1641,20 +1697,6 @@ export function ReviewPage() {
                   >
                     Refresh catalog evidence
                   </Button>
-                  <Button
-                    type="button"
-                    disabled={caseIndex <= 0}
-                    onClick={() => selectCase(queue!.items[caseIndex - 1].case_id)}
-                  >
-                    ← Previous album
-                  </Button>
-                  <Button
-                    type="button"
-                    disabled={!queue || caseIndex < 0 || caseIndex >= queue.items.length - 1}
-                    onClick={() => selectCase(queue!.items[caseIndex + 1].case_id)}
-                  >
-                    Next album →
-                  </Button>
                 </div>
               </div>
 
@@ -1663,70 +1705,72 @@ export function ReviewPage() {
                   {error}
                 </Notice>
               )}
-              <nav
-                className={styles.albumViews}
-                role="tablist"
-                aria-label="Album review views"
-                onKeyDown={(event) => {
-                  const views: AlbumView[] = ['plan', 'release', 'tracks'];
-                  const index = views.indexOf(albumView);
-                  const next =
-                    event.key === 'ArrowRight'
-                      ? views[(index + 1) % 3]
-                      : event.key === 'ArrowLeft'
-                        ? views[(index + 2) % 3]
-                        : event.key === 'Home'
-                          ? views[0]
-                          : event.key === 'End'
-                            ? views[2]
-                            : null;
-                  if (next) {
-                    event.preventDefault();
-                    if (next === 'tracks') showTrackList(trackFilter, false);
-                    else setAlbumView(next);
-                    document.getElementById(`review-tab-${next}`)?.focus();
-                  }
-                }}
-              >
-                <Button
-                  type="button"
-                  role="tab"
-                  id="review-tab-plan"
-                  aria-controls="review-tab-panel"
-                  aria-selected={albumView === 'plan'}
-                  tabIndex={albumView === 'plan' ? 0 : -1}
-                  aria-current={albumView === 'plan' ? 'page' : undefined}
-                  onClick={() => setAlbumView('plan')}
+              {!folderFinding && (
+                <nav
+                  className={styles.albumViews}
+                  role="tablist"
+                  aria-label="Album review views"
+                  onKeyDown={(event) => {
+                    const views: AlbumView[] = ['plan', 'release', 'tracks'];
+                    const index = views.indexOf(albumView);
+                    const next =
+                      event.key === 'ArrowRight'
+                        ? views[(index + 1) % 3]
+                        : event.key === 'ArrowLeft'
+                          ? views[(index + 2) % 3]
+                          : event.key === 'Home'
+                            ? views[0]
+                            : event.key === 'End'
+                              ? views[2]
+                              : null;
+                    if (next) {
+                      event.preventDefault();
+                      if (next === 'tracks') showTrackList(trackFilter, false);
+                      else setAlbumView(next);
+                      document.getElementById(`review-tab-${next}`)?.focus();
+                    }
+                  }}
                 >
-                  Plan
-                  <span>{reviewDecisions.length || plan.ready}</span>
-                </Button>
-                <Button
-                  type="button"
-                  role="tab"
-                  id="review-tab-release"
-                  aria-controls="review-tab-panel"
-                  aria-selected={albumView === 'release'}
-                  tabIndex={albumView === 'release' ? 0 : -1}
-                  aria-current={albumView === 'release' ? 'page' : undefined}
-                  onClick={() => setAlbumView('release')}
-                >
-                  Release
-                </Button>
-                <Button
-                  type="button"
-                  role="tab"
-                  id="review-tab-tracks"
-                  aria-controls="review-tab-panel"
-                  aria-selected={albumView === 'tracks'}
-                  tabIndex={albumView === 'tracks' ? 0 : -1}
-                  aria-current={albumView === 'tracks' ? 'page' : undefined}
-                  onClick={() => showTrackList(trackFilter, false)}
-                >
-                  Tracks
-                  <span>{assignments.length}</span>
-                </Button>
-              </nav>
+                  <Button
+                    type="button"
+                    role="tab"
+                    id="review-tab-plan"
+                    aria-controls="review-tab-panel"
+                    aria-selected={albumView === 'plan'}
+                    tabIndex={albumView === 'plan' ? 0 : -1}
+                    aria-current={albumView === 'plan' ? 'page' : undefined}
+                    onClick={() => setAlbumView('plan')}
+                  >
+                    Plan
+                    <span>{reviewDecisions.length || plan.ready}</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    role="tab"
+                    id="review-tab-release"
+                    aria-controls="review-tab-panel"
+                    aria-selected={albumView === 'release'}
+                    tabIndex={albumView === 'release' ? 0 : -1}
+                    aria-current={albumView === 'release' ? 'page' : undefined}
+                    onClick={() => setAlbumView('release')}
+                  >
+                    Release
+                  </Button>
+                  <Button
+                    type="button"
+                    role="tab"
+                    id="review-tab-tracks"
+                    aria-controls="review-tab-panel"
+                    aria-selected={albumView === 'tracks'}
+                    tabIndex={albumView === 'tracks' ? 0 : -1}
+                    aria-current={albumView === 'tracks' ? 'page' : undefined}
+                    onClick={() => showTrackList(trackFilter, false)}
+                  >
+                    Tracks
+                    <span>{assignments.length}</span>
+                  </Button>
+                </nav>
+              )}
 
               {applyBusy && operationCase === reviewCase.case_id && (
                 <Notice tone="info" className={styles.applyBanner} role="status" aria-live="polite">
@@ -1767,6 +1811,38 @@ export function ReviewPage() {
                   role="tabpanel"
                   aria-labelledby={`review-tab-${albumView}`}
                 >
+                  {folderFinding && (
+                    <section
+                      className={styles.folderConflict}
+                      aria-label="Folder membership review"
+                    >
+                      <StatusChip tone="warning" icon="warning">
+                        Album ownership needs review
+                      </StatusChip>
+                      <h3>{folderFinding.title}</h3>
+                      <p>{folderFinding.description}</p>
+                      <p>
+                        {textValue(folderFinding.details?.file_count)} local files were found. A
+                        release plan cannot be built until their album ownership is consistent.
+                      </p>
+                      <p>
+                        Check the album tags and folder placement below. Correct the conflicting
+                        membership, then reanalyze this album.
+                      </p>
+                      <p className={styles.muted}>{reviewCase.folder}</p>
+                      <ul className={styles.folderFiles}>
+                        {records(folderFinding.details?.checked_files).map((file) => (
+                          <li key={textValue(file.file_path)}>
+                            <strong>{textValue(file.title)}</strong>
+                            <span>
+                              {[file.album, file.artist].map(textValue).filter(Boolean).join(' · ')}
+                            </span>
+                            <small>{textValue(file.file_path)}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
                   {albumView === 'plan' && albumReady && (
                     <section className={styles.albumApplyAll} aria-label="Apply album changes">
                       <div>
@@ -1825,6 +1901,7 @@ export function ReviewPage() {
 
                   {albumView === 'plan' &&
                     !albumReady &&
+                    !folderFinding &&
                     (reviewCase.album_plan || decisions.length > 0) && (
                       <section className={styles.decisionBoard} aria-label="Album decisions">
                         <div className={styles.sectionHeading}>
@@ -1833,12 +1910,16 @@ export function ReviewPage() {
                             <h3>
                               {reviewDecisions.length
                                 ? `${reviewDecisions.length} choice${reviewDecisions.length === 1 ? '' : 's'} need${reviewDecisions.length === 1 ? 's' : ''} your input`
-                                : 'Decisions complete'}
+                                : plan.status === 'waiting'
+                                  ? 'Waiting for requested tracks'
+                                  : 'Decisions complete'}
                             </h3>
                             <p>
                               {releaseChoicePending
                                 ? 'Choose the release first. Track and numbering proposals will be recalculated for that edition.'
-                                : 'Resolve these choices before applying the album. Inspect affected tracks to compare exact values.'}
+                                : plan.status === 'waiting'
+                                  ? 'Your planned changes are saved. This album becomes ready to apply after its requested files are received and assigned.'
+                                  : 'Resolve these choices before applying the album. Inspect affected tracks to compare exact values.'}
                             </p>
                           </div>
                         </div>
@@ -2044,22 +2125,23 @@ export function ReviewPage() {
                       >
                         <div className={styles.planSummary}>
                           <div>
-                            <div className={styles.eyebrow}>Safe changes</div>
+                            <div className={styles.eyebrow}>Planned changes</div>
                             <strong>
-                              {plan.ready} independent change{plan.ready === 1 ? ' is' : 's are'}{' '}
-                              ready
+                              {plan.ready} supported change{plan.ready === 1 ? '' : 's'}
                             </strong>
                             <p>
-                              These edits are supported. Resolve the remaining album decisions
-                              before applying the plan.
+                              {plan.status === 'waiting'
+                                ? 'These edits stay in your plan while the requested files are received and assigned.'
+                                : 'Resolve the remaining album decisions before applying these edits.'}
                             </p>
                           </div>
                           <div className={styles.planBadges}>
                             <StatusChip tone="good" icon="check">
-                              {plan.ready} ready
+                              {plan.ready} planned
                             </StatusChip>
                           </div>
                         </div>
+                        {plan.status === 'waiting' && readySummaryList}
                         <Button
                           type="button"
                           className={styles.secondaryButton}
@@ -2101,12 +2183,17 @@ export function ReviewPage() {
                           already requested. Published downloads are checked automatically; the
                           album stays here until those files are assigned.
                         </p>
-                        <a
-                          className={styles.secondaryButton}
-                          href={`/wishlist?q=${encodeURIComponent(reviewCase?.album || '')}`}
+                        <Button
+                          nativeButton={false}
+                          role="link"
+                          render={
+                            <a
+                              href={`/wishlist?q=${encodeURIComponent(reviewCase?.album || '')}`}
+                            />
+                          }
                         >
                           View album in Wishlist →
-                        </a>
+                        </Button>
                       </div>
                     </section>
                   )}
@@ -2768,37 +2855,40 @@ export function ReviewPage() {
                       </section>
                     )}
 
-                    {albumView === 'plan' && !albumReady && proposedChangeGroups.length > 0 && (
-                      <section
-                        className={styles.planContext}
-                        aria-label="Proposed metadata by field"
-                      >
-                        <div>
-                          <div className={styles.eyebrow}>Proposed metadata</div>
-                          <h4>Changes by field</h4>
-                          <p>Choose a field to see the affected tracks and exact values.</p>
-                        </div>
-                        <div className={styles.readySummaryList}>
-                          {proposedChangeGroups.map((group) => (
-                            <Button
-                              key={group.key}
-                              type="button"
-                              onClick={() => {
-                                showTrackList(group.key);
-                              }}
-                            >
-                              <span>
-                                <strong>{group.label}</strong>
-                                <small>{group.valueSummary}</small>
-                              </span>
-                              <b>
-                                {group.count} track{group.count === 1 ? '' : 's'} →
-                              </b>
-                            </Button>
-                          ))}
-                        </div>
-                      </section>
-                    )}
+                    {albumView === 'plan' &&
+                      !albumReady &&
+                      plan.status !== 'waiting' &&
+                      proposedChangeGroups.length > 0 && (
+                        <section
+                          className={styles.planContext}
+                          aria-label="Proposed metadata by field"
+                        >
+                          <div>
+                            <div className={styles.eyebrow}>Proposed metadata</div>
+                            <h4>Changes by field</h4>
+                            <p>Choose a field to see the affected tracks and exact values.</p>
+                          </div>
+                          <div className={styles.readySummaryList}>
+                            {proposedChangeGroups.map((group) => (
+                              <Button
+                                key={group.key}
+                                type="button"
+                                onClick={() => {
+                                  showTrackList(group.key);
+                                }}
+                              >
+                                <span>
+                                  <strong>{group.label}</strong>
+                                  <small>{group.valueSummary}</small>
+                                </span>
+                                <b>
+                                  {group.count} track{group.count === 1 ? '' : 's'} →
+                                </b>
+                              </Button>
+                            ))}
+                          </div>
+                        </section>
+                      )}
 
                     {albumView === 'release' && (
                       <ReleaseComparison

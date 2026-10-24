@@ -53,8 +53,8 @@ for (const width of [1800, 1280, 390]) {
       await expect(row).toHaveAttribute('data-status', ready ? 'change' : 'uncertain');
       await row.click();
       for (const label of [
-        'Remove Recording ID · file and library',
-        'Replace MusicBrainz release ID · file tag',
+        'Remove Recording ID',
+        'Replace MusicBrainz release ID',
       ]) {
         const field = page.getByRole('rowheader', { name: label, exact: true });
         await field.scrollIntoViewIfNeeded();

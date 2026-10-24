@@ -88,23 +88,24 @@ export function statusLabel(status: string, row?: AlbumAssignment) {
 export function changeFieldLabel(field: string, locations?: string[]): string {
   const name =
     {
-      artist: 'Album artist · file tag',
+      artist: 'Album artist',
       album_artist: 'Album artist',
-      track_artist: 'Track artist · file tag',
-      library_track_artist: 'Track artist · library',
-      album: 'Album title · file tag',
-      library_album_title: 'Album title · library',
+      track_artist: 'Track artists',
+      library_track_artist: 'Track artists',
+      album: 'Album title',
+      library_album_title: 'Album title',
+      library_album_assignment: 'Album grouping',
       title: 'Track title',
-      library_title: 'Track title · library',
+      library_title: 'Track title',
       track_number: 'Track number',
       disc_number: 'Disc number',
-      library_track_number: 'Track number · library',
-      library_disc_number: 'Disc number · library',
-      library_recording_disambiguation: 'Recording description · library',
+      library_track_number: 'Track number',
+      library_disc_number: 'Disc number',
+      library_recording_disambiguation: 'Recording description',
       filename: 'Filename',
       musicbrainz_recording_id: 'Recording ID',
       musicbrainz_release_id: 'MusicBrainz release ID',
-      library_recording_mbid: 'Recording ID · library',
+      library_recording_mbid: 'Recording ID',
     }[field] || field.replaceAll('_', ' ');
   if (!locations || field === 'filename') return name;
   const base = name.replace(/ · (file tag|library)$/, '');
@@ -155,8 +156,8 @@ export function displayChanges(changes: unknown) {
   const rows: Array<{ field: string; old: string; next: string; locations: string[] }> = [];
   for (const [field, raw] of Object.entries(record(changes))) {
     const value = record(raw);
-    const old = changeValue(value.old);
-    const next = changeValue(value.new);
+    const old = changeValue(value.old_label ?? value.old);
+    const next = changeValue(value.new_label ?? value.new);
     const semantic =
       {
         library_album_title: 'album',

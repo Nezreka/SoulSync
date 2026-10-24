@@ -88,7 +88,7 @@ const scenarios = [
   },
   { name: 'partial', ready: false, chooser: 'Choose album completeness' },
   { name: 'selective', ready: false, chooser: 'Choose missing tracks' },
-  { name: 'waiting', ready: true, plan: 'Missing tracks being acquired' },
+  { name: 'waiting', ready: false, plan: 'Missing tracks being acquired' },
   { name: 'cancelled', ready: false, chooser: 'Choose missing tracks' },
   { name: 'saved', ready: true, plan: 'Ready change summary' },
   { name: 'duplicate_saved', ready: true, plan: 'Ready change summary' },
@@ -143,6 +143,33 @@ async function openAcceptance(
 }
 
 for (const width of [1800, 390]) {
+  test(`assignment and file metadata dialogs ${width}px`, async ({ page }) => {
+    const api = acceptanceApi('repeated_recording');
+    const { errors, missing } = await openAcceptance(page, width, api, [
+      http.get('*/api/repair/review-queue/:id/file-metadata', () => HttpResponse.json({
+        success: true, record: { File: '01 - Home.flac', Format: 'FLAC', 'Tag: TITLE': ['Home'], 'Tag: ARTIST': ['Acceptance Artist', 'Guest'], 'Tag: COMMENT': ['Original file note'], 'Embedded pictures': [{ mime: 'image/jpeg', data: { binary_bytes: 24000 } }] },
+      })),
+    ]);
+    await page.getByRole('tab', { name: /^Tracks/ }).click();
+    await page.locator('[data-review-assignment]').first().click();
+    await page.getByRole('button', { name: 'Change track assignment', exact: true }).click();
+    const assignment = page.getByRole('dialog', { name: 'Change track assignment' });
+    await expect(assignment.getByRole('button', { name: 'Save plan assignment' })).toBeDisabled();
+    await expect(assignment.getByRole('button', { name: /Open Water/ })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(['review-acceptance', `assignment-dialog-${width}.png`]);
+    await assignment.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('button', { name: 'File metadata', exact: true }).click();
+    const metadata = page.getByRole('dialog', { name: 'File metadata', exact: true });
+    await expect(metadata.getByText('Tag: ARTIST', { exact: true })).toBeVisible();
+    await settle(page);
+    await expect(page).toHaveScreenshot(['review-acceptance', `file-metadata-dialog-${width}.png`]);
+    await metadata.getByRole('button', { name: 'Close record' }).click();
+    expect(errors).toEqual([]);
+    expect(missing).toEqual([]);
+    expect(api.unexpected).toEqual([]);
+  });
+
   for (const numbering of [false, true]) {
     test(`album metadata conflict on Plan ${numbering ? 'with numbering ' : ''}${width}px`, async ({
       page,
@@ -332,7 +359,7 @@ for (const width of [1800, 390, 320]) {
           // A proposed replacement/removal must be available before acceptance.
           if (scenario.name === 'contradictory_metadata' || scenario.name === 'stale') {
             const change = detail.getByRole('rowheader', {
-              name: 'Replace MusicBrainz release ID · file tag',
+              name: 'Replace MusicBrainz release ID',
             });
             await expect(change).toBeVisible();
             expect(await change.locator('xpath=ancestor::details').count()).toBe(0);

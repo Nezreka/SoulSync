@@ -188,3 +188,45 @@ def test_filename_number_only_change_does_not_require_title_confirmation(kind):
     assert finding_category(item) == 'numbering'
     details['changes']['filename']['new'] = '12 - Home.mp3'
     assert _finding_tier(item)[0] == 'manual'
+
+
+def test_supported_album_artist_correction_does_not_replace_performer():
+    details = {'confidence': 'clear', 'assignment_evidence': 'audio',
+        'expected_artist_names': ['Matchbox Twenty'],
+        'changes': {'artist': {'old': 'Various Artists', 'new': 'Matchbox Twenty'}}}
+    item = {'finding_type': 'reconciliation_metadata', 'details': details}
+    assert _finding_tier(item)[0] == 'ready'
+    details['changes']['track_artist'] = {'old': 'Another Artist', 'new': 'Matchbox Twenty'}
+    assert _finding_tier(item)[0] == 'manual'
+    details['changes'].pop('track_artist')
+    details['assignment_evidence'] = 'metadata'
+    assert _finding_tier(item)[0] == 'manual'
+
+
+def test_filename_cleanup_is_not_a_title_tag_convention():
+    item = {'finding_type': 'reconciliation_metadata', 'details': {
+        'confidence': 'clear', 'title_difference_kind': 'typography',
+        'changes': {'filename': {'old': '02 - Matchbox Twenty - Bed of Lies.mp3',
+                                 'new': '10 - Bed Of Lies.mp3'}}}}
+    assert finding_category(item) == 'metadata'
+    assert _finding_tier(item)[0] == 'ready'
+    item['details']['changes']['title'] = {'old': 'Bed of Lies', 'new': 'Bed Of Lies'}
+    assert finding_category(item) == 'title_conventions'
+
+
+def test_requested_downloads_hold_the_album_until_assignment():
+    from core.repair_review_policy import case_mode
+    from core.repair_review_queue import classify_case
+    ready = {'finding_type': 'reconciliation_metadata', 'details': {
+        'confidence': 'clear', 'changes': {'musicbrainz_recording_id': {'old': '', 'new': 'id'}}}}
+    waiting = {'finding_type': 'reconciliation_missing', 'details': {'fulfillment_state': 'wishlisted'}}
+    items = [ready, waiting]
+    plan = classify_case(items)
+    assert plan['ready'] == 1
+    assert plan['status'] == case_mode(items) == 'waiting'
+    assert not plan['can_apply_ready']
+    waiting['details']['fulfillment_state'] = 'downloaded'
+    assert not classify_case(items)['can_apply_ready']
+    waiting['details']['fulfillment_state'] = ''
+    assert classify_case(items)['status'] == 'needs_review'
+    assert classify_case([ready])['can_apply_ready']

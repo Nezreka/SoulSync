@@ -17,7 +17,7 @@ _POSITION_CHANGE_KEYS = frozenset({
     'track_number', 'disc_number', 'library_track_number', 'library_disc_number',
 })
 _TRACK_ARTIST_CHANGE_KEYS = frozenset({
-    'artist', 'track_artist', 'library_track_artist',
+    'track_artist', 'library_track_artist',
 })
 _RECORDING_ID_CHANGE_KEYS = frozenset({
     'musicbrainz_recording_id', 'library_recording_mbid',
@@ -26,12 +26,20 @@ _RECORDING_ID_CHANGE_KEYS = frozenset({
 
 def _replaces_artist_credit(changes: dict[str, Any], details: dict | None = None) -> bool:
     """An unrelated nonempty credit needs a person, even on a clear match."""
-    for field in _TRACK_ARTIST_CHANGE_KEYS:
+    for field in (*_TRACK_ARTIST_CHANGE_KEYS, 'artist'):
         change = changes.get(field)
         old, new = _change_value(change, 'old'), _change_value(change, 'new')
         if old and new and old.casefold() != new.casefold():
             from core.library.reconciliation_metadata import credit_preserves_artists
             evidence = details or {}
+            # `artist` is the album-artist tag, not the performer credit. A
+            # generic compilation label can be corrected on a supported
+            # single-artist release without replacing any track performer.
+            if (field == 'artist' and old.casefold() in ('various artists', 'various')
+                    and evidence.get('confidence') in ('clear', 'manual')
+                    and evidence.get('assignment_evidence') in ('audio', 'user')
+                    and evidence.get('expected_artist_names') == [new]):
+                continue
             if (evidence.get('confidence') in ('clear', 'manual')
                     and evidence.get('assignment_evidence') in ('audio', 'user')
                     and credit_preserves_artists(old, new,
@@ -100,7 +108,7 @@ def finding_category(item: dict[str, Any]) -> str:
     if finding_type in _DESTRUCTIVE_TYPES:
         return 'duplicates' if finding_type == 'reconciliation_duplicate' else 'extra_files'
     if finding_type == 'reconciliation_unresolved':
-        return 'audio_conflicts'
+        return 'folder_conflicts' if details.get('folder_issue') else 'audio_conflicts'
     # A possibly different recording version is the controlling decision even
     # when its atomic repair also carries track-number or filename changes.
     # The grouped numbering button must never conceal a material title edit.
@@ -113,7 +121,7 @@ def finding_category(item: dict[str, Any]) -> str:
             and not details.get('numbering_choice') and _finding_tier(item)[0] == 'ready'):
         return 'numbering'
     if (details.get('title_difference_kind') in ('typography', 'flavor', 'cosmetic') and
-            _changes_title_text(changes)):
+            {'title', 'library_title'}.intersection(changes)):
         return 'title_conventions'
     return 'metadata'
 
@@ -254,7 +262,9 @@ def case_mode(items: list[dict]) -> str:
     unresolved = [item for item in required if item.get('review_tier') != 'ready']
     if any(item.get('review_tier') == 'destructive' for item in unresolved):
         return 'destructive'
-    return 'manual' if unresolved else 'ready' if required else 'waiting'
+    if unresolved:
+        return 'manual'
+    return 'waiting' if len(required) < len(items) else 'ready'
 
 
 def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', case_id: str = '', compact: bool = False) -> dict:
@@ -269,7 +279,7 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
     detail_sql, join = 'f.details_json', ''
     choice_sql = 'NULL, NULL, NULL, NULL'
     if compact:
-        fields = ('changes', 'fulfillment_state', 'audio_conflict', 'version_conflict',
+        fields = ('changes', 'fulfillment_state', 'audio_conflict', 'version_conflict', 'folder_issue',
                   'title_difference_kind', 'confidence', 'numbering_mode',
                   'release_disc_count', 'local_file_count', 'release_track_count',
                   'recording_mbid', 'expected_duration_ms', 'expected_title',
@@ -302,10 +312,8 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
         blocked = any(item['finding_type'] in _GLOBAL_BLOCKER_TYPES for item in items)
         for item in items:
             item['review_tier'], _ = _finding_tier(item, global_blocked=blocked)
-        required = [item for item in items if finding_category(item) != 'pending_fulfillment']
-        unresolved = [item for item in required if item['review_tier'] != 'ready']
-        ready = [item['id'] for item in required if item['review_tier'] == 'ready'] if not unresolved else []
         mode = case_mode(items)
+        ready = [item['id'] for item in items] if mode == 'ready' else []
         result[key] = {'mode': mode, 'ready_ids': ready, 'items': items}
     return result
 
