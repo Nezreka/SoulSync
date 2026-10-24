@@ -1365,6 +1365,8 @@ def _build_post_process_context(
     type_source: Optional[str] = None,
     album_artist: Optional[str] = None,
     profile_id: Optional[int] = None,
+    local_explicit: Any = None,
+    local_album_explicit: Any = None,
 ) -> dict:
     """Build the same shape `import_album_process` builds so post-process
     treats this exactly like a fresh download with full Spotify-style
@@ -1511,6 +1513,10 @@ def _build_post_process_context(
             'secondary_types': list(api_album.get('secondary_types') or []),
             'is_compilation': is_comp,
             'artists': [{'name': album_artist_name}],
+            # #1860: $explicit in a folder. the source's word, else the
+            # library's, so a tag-mode album keeps the badge its import gave it
+            'explicit': (api_album.get('explicit') if api_album.get('explicit') is not None
+                         else local_album_explicit),
         },
         'track_info': {
             'name': track_name,
@@ -1521,6 +1527,8 @@ def _build_post_process_context(
             'artists': normalized_artists,
             'uri': api_track.get('uri', ''),
             '_explicit_artist_context': {'name': album_artist_name},
+            'explicit': (api_track.get('explicit') if api_track.get('explicit') is not None
+                         else local_explicit),
         },
         'original_search_result': {
             'title': track_name,
@@ -1735,6 +1743,8 @@ def preview_album_reorganize(
             album_artist=artist_name,
             type_source=plan.get('source'),
             profile_id=profile_id,
+            local_explicit=plan_item['track'].get('explicit'),
+            local_album_explicit=album_data.get('explicit'),
         )
         # `_build_final_path_for_track` switches between ALBUM and SINGLE
         # modes based on `album_info.get('is_album')` — must be passed,
@@ -1935,6 +1945,7 @@ class _RunContext:
     record_type: Optional[str] = None
     source: Optional[str] = None            # the metadata source the plan resolved
     profile_id: Optional[int] = None        # #1504: owning profile for own-library files
+    local_album_explicit: Any = None        # #1860: the library's explicit flag for the album
 
     def emit(self, **updates) -> None:
         """Fire the progress callback. Caller is responsible for
@@ -2007,7 +2018,7 @@ def _stage_track(ctx: _RunContext, track_id, title, resolved_src) -> Optional[st
     return staging_file
 
 
-def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, staging_file, *, per_item_api_album=None) -> Optional[str]:
+def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, staging_file, *, per_item_api_album=None, local_explicit=None) -> Optional[str]:
     """Build the per-track context, hand it to post-processing, and
     return the final on-disk path it produced. Returns None on any
     failure (exception, AcoustID rejection, internal skip); the caller
@@ -2024,6 +2035,8 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
         album_artist=ctx.artist_name,
         type_source=ctx.source,
         profile_id=ctx.profile_id,
+        local_explicit=local_explicit,
+        local_album_explicit=ctx.local_album_explicit,
     )
     context_key = f"reorganize_{ctx.album_id}_{track_id}_{uuid.uuid4().hex[:8]}"
     try:
@@ -2163,6 +2176,7 @@ def _process_one_track(ctx: _RunContext, plan_item: dict) -> None:
     new_path = _run_post_process_for_track(
         ctx, track_id, title, plan_item['api_track'], staging_file,
         per_item_api_album=plan_item.get('api_album'),
+        local_explicit=track.get('explicit'),
     )
     if new_path is None:
         return
@@ -2394,6 +2408,7 @@ def reorganize_album(
         record_type=plan.get('record_type') or album_data.get('record_type'),
         source=plan.get('source'),
         profile_id=profile_id,
+        local_album_explicit=album_data.get('explicit'),
     )
 
     try:

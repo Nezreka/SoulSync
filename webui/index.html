@@ -7334,7 +7334,12 @@
                                                         <code>$track_disambiguation</code> (the recording's version
                                                         note, like &ldquo;acoustic&rdquo;; added to the filename
                                                         automatically when your template leaves it out, unless the
-                                                        same toggle above is turned off). The
+                                                        same toggle above is turned off),
+                                                        <code>$explicit</code> ([E] on explicit tracks, nothing
+                                                        otherwise), <code>$contentrating</code> ([E] or [C]) and
+                                                        <code>$contentratingfull</code> ([Explicit] or [Clean]); these
+                                                        stay empty when the source doesn't say, and in a folder they
+                                                        follow the album, not the track. The
                                                         three disc variables work in a folder segment as well as in the
                                                         filename and are empty on a single-disc album, so
                                                         <code>$albumartist/$album/Disc $discnum/$track - $title</code>

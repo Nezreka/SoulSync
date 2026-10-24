@@ -15064,7 +15064,11 @@ def _apply_path_template(template: str, context: dict) -> str:
     # This prevents '/' in metadata from creating unintended path components
     clean_context = _sanitize_context_values(context)
 
-    result = template
+    # #1860: shared with core.imports.paths, so the M3U folder never keeps a
+    # literal $explicit
+    from core.imports.paths import apply_content_rating
+    result = apply_content_rating(template, context.get('explicit'), context.get('album_explicit'))
+    template = result
 
     # Replace variables in order from longest to shortest to avoid partial replacements
     # (e.g., $albumartist must be replaced before $album to prevent "Scorpionartist" from typo "$albumartis")
