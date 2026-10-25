@@ -324,6 +324,17 @@ def oidc_signin_callback():
     if result.error:
         return _oidc_done(result.error)
     _complete_sign_in(database, result.profile_id)
+    # the session lasts as long as the provider says (#1838). one whose
+    # clock can't be recorded would never end, so it isn't kept
+    from core.security import oidc_session
+    if not oidc_session.record_sign_in(database, session.get('device_id'), account.identity, tokens, claims):
+        logger.warning("OIDC sign-in for profile %s not kept: its session clock couldn't be saved",
+                       result.profile_id)
+        if session.get('device_id'):
+            oidc_session.end_device(database, session['device_id'])
+        for _k in ('login_authenticated', 'profile_id', 'profile_epoch', 'device_id', 'device_owner'):
+            session.pop(_k, None)
+        return _oidc_done('Sign-in failed. Try again.')
     return _oidc_done()
 
 

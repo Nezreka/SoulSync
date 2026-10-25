@@ -795,6 +795,13 @@ def _set_profile_context():
         if not _signed_out and not _devices.device_is_live(
                 _device_id, lambda d: get_database().get_profile_device(d)):
             _signed_out = True
+        # a sign-in with oidc lasts as long as the provider says (#1838):
+        # past that it is renewed, and a renewal that fails ends it here
+        if not _signed_out and _device_id:
+            from core.security import oidc_session
+            if not oidc_session.check_device(_device_id, get_database(), config_manager):
+                oidc_session.end_device(get_database(), _device_id)
+                _signed_out = True
         if not _signed_out:
             _devices.touch(_device_id, lambda d: get_database().touch_profile_device(d))
         if _signed_out:
@@ -23276,6 +23283,15 @@ def _ws_snapshot_revoked(snapshot):
         device_live = _devices.device_is_live(
             snapshot.get('device_id'),
             lambda d: get_database().get_profile_device(d))
+        # #1838: the oidc session clock runs here too, not only on HTTP. a
+        # socket alone never makes a request, so without this a browser
+        # (or a replayed cookie) holding only a socket would outlive a
+        # renewal that fails. ending it revokes the device, the same as HTTP
+        if epoch_current and device_live and snapshot.get('device_id'):
+            from core.security import oidc_session
+            if not oidc_session.check_device(snapshot['device_id'], get_database(), config_manager):
+                oidc_session.end_device(get_database(), snapshot['device_id'])
+                device_live = False
         return is_session_revoked(has_profile_session=True,
                                   epoch_current=epoch_current,
                                   device_live=device_live)
