@@ -2410,7 +2410,7 @@ class YouTubeClient(DownloadSourcePlugin):
         """
         try:
             # Import lyrics client
-            from core.lyrics_client import lyrics_client
+            from core.lyrics_client import PIPELINE_MAX_WAIT_SECONDS, lyrics_client
 
             if not lyrics_client.api:
                 logger.debug("   LRClib API not available - skipping lyrics")
@@ -2433,7 +2433,8 @@ class YouTubeClient(DownloadSourcePlugin):
                     track_name=track_name,
                     artist_name=artist_name,
                     album_name=album_name,
-                    duration_seconds=duration_seconds
+                    duration_seconds=duration_seconds,
+                    max_wait_seconds=PIPELINE_MAX_WAIT_SECONDS,
                 )
             else:
                 success = lyrics_client.create_lrc_file(

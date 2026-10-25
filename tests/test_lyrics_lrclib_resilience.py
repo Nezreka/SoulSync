@@ -880,3 +880,57 @@ def test_generate_lrc_file_logs_transient_reason(monkeypatch, caplog):
     assert ok is False
     assert 'rate-limited' in caplog.text
     assert 'No lyrics found' not in caplog.text
+
+
+# ── pipeline cap: an import never waits out a shared cooldown ────────────
+
+def test_pipeline_lookup_does_not_park_behind_a_long_cooldown(monkeypatch, tmp_path):
+    """LRCLib asked for Retry-After: 300 and the shared cooldown holds it.
+    The download pipeline fetches lyrics inline for every imported track,
+    and the first slot wait had no cap for it, so each track slept the
+    whole cooldown (299s, measured). With the pipeline cap the lookup is
+    refused at once, no request fires, and the reason says busy instead
+    of "no lyrics"."""
+    import time as _time
+    monkeypatch.setattr(lrclib_throttle, "wait_for_slot", _REAL_WAIT_FOR_SLOT)
+    lrclib_throttle._reset_for_tests()
+    lrclib_throttle.note_rate_limited(300)
+    slept = []
+    monkeypatch.setattr(_time, "sleep", lambda s: slept.append(s))
+    api = MagicMock()
+    c = _client(api)
+    from core.lyrics_client import PIPELINE_MAX_WAIT_SECONDS
+    ok, reason = c.create_lrc_file_detailed(
+        str(tmp_path / "song.flac"), "Song", "Artist", "Album", 200,
+        max_wait_seconds=PIPELINE_MAX_WAIT_SECONDS)
+    assert ok is False and 'busy' in reason
+    assert slept == [] and c.sleeps == []
+    api.get_lyrics.assert_not_called()
+    api.search_lyrics.assert_not_called()
+
+
+def test_import_and_youtube_paths_pass_the_pipeline_cap(monkeypatch):
+    from core.lyrics_client import PIPELINE_MAX_WAIT_SECONDS
+    from core.metadata import lyrics as metadata_lyrics
+    from core.youtube_client import YouTubeClient
+
+    seen = {}
+
+    def detailed(*a, **k):
+        seen.update(k)
+        return True, None
+
+    monkeypatch.setattr("core.lyrics_client.lyrics_client",
+                        SimpleNamespace(api=object(), create_lrc_file_detailed=detailed))
+    monkeypatch.setattr(metadata_lyrics, "get_config_manager",
+                        lambda: SimpleNamespace(get=lambda k, d=None: d))
+    assert metadata_lyrics.generate_lrc_file(
+        "/x/song.flac",
+        {"original_search": {"title": "Song", "duration_ms": 200000}},
+        {"name": "Artist"}, {}) is True
+    assert seen.get("max_wait_seconds") == PIPELINE_MAX_WAIT_SECONDS
+
+    seen.clear()
+    track = SimpleNamespace(artists=["Artist"], name="Song", album="Album", duration_ms=200000)
+    YouTubeClient._create_lyrics_file(object.__new__(YouTubeClient), "/x/song.mp3", track)
+    assert seen.get("max_wait_seconds") == PIPELINE_MAX_WAIT_SECONDS

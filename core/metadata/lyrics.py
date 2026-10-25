@@ -26,7 +26,7 @@ def generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: d
         return False
 
     try:
-        from core.lyrics_client import lyrics_client
+        from core.lyrics_client import PIPELINE_MAX_WAIT_SECONDS, lyrics_client
 
         context = normalize_import_context(context)
         original_search = get_import_original_search(context)
@@ -57,12 +57,14 @@ def generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: d
         # lyrics may well exist, LRCLib just didn't answer.
         detailed = getattr(lyrics_client, 'create_lrc_file_detailed', None)
         if callable(detailed):
+            # pipeline cap: an import never waits out an LRCLib cooldown
             success, fetch_reason = detailed(
                 audio_file_path=file_path,
                 track_name=track_name,
                 artist_name=artist_name,
                 album_name=album_name,
                 duration_seconds=duration_seconds,
+                max_wait_seconds=PIPELINE_MAX_WAIT_SECONDS,
             )
         else:
             success = lyrics_client.create_lrc_file(

@@ -27,6 +27,11 @@ MAX_RETRY_DELAY_SECONDS = 30.0   # cap on any single Retry-After / backoff wait
 MAX_TOTAL_RETRY_WAIT_SECONDS = 20.0  # cap on ALL retry waiting per call, so a
 # lookup sharing a gthread with HTTP handlers can never park it for a
 # minute-plus behind stacked Retry-After waits (gunicorn timeout is 120s)
+# The download/import pipeline fetches lyrics inline for every track. They
+# are best effort there (the Lyrics Filler picks up misses later), so a
+# pipeline lookup never waits out a shared cooldown: uncapped, the FIRST
+# slot wait of every imported track sat out the whole thing, up to 300s.
+PIPELINE_MAX_WAIT_SECONDS = 5.0
 
 # Lookup outcomes. The old contract collapsed all three into "no lyrics",
 # so a 429 during a Lyrics Filler scan was recorded as a definitive
@@ -441,14 +446,17 @@ class LyricsClient:
         return None
 
     def create_lrc_file(self, audio_file_path: str, track_name: str, artist_name: str,
-                       album_name: str = None, duration_seconds: int = None) -> bool:
+                       album_name: str = None, duration_seconds: int = None,
+                       max_wait_seconds: float = None) -> bool:
         """Bool wrapper over create_lrc_file_detailed (see there)."""
         ok, _reason = self.create_lrc_file_detailed(
-            audio_file_path, track_name, artist_name, album_name, duration_seconds)
+            audio_file_path, track_name, artist_name, album_name, duration_seconds,
+            max_wait_seconds=max_wait_seconds)
         return ok
 
     def create_lrc_file_detailed(self, audio_file_path: str, track_name: str, artist_name: str,
-                                 album_name: str = None, duration_seconds: int = None):
+                                 album_name: str = None, duration_seconds: int = None,
+                                 max_wait_seconds: float = None):
         """
         Create .lrc sidecar file for the given audio file.
 
@@ -457,7 +465,8 @@ class LyricsClient:
         ``(False, reason)`` when the fetch could not be completed
         (rate-limited / server error / timeout) or writing failed —
         so callers can surface the real reason instead of claiming the
-        lyrics are "no longer available" (#1879).
+        lyrics are "no longer available" (#1879). ``max_wait_seconds``
+        caps each throttle wait (see _call_lrclib).
         """
         if not self.api:
             logger.debug("LRClib API not available - skipping lyrics")
@@ -496,7 +505,8 @@ class LyricsClient:
             # Fetch lyrics from LRClib
             logger.debug(f"Fetching lyrics for: {artist_name} - {track_name}")
             fetch = self.check_remote_lyrics(
-                track_name, artist_name, album_name, duration_seconds)
+                track_name, artist_name, album_name, duration_seconds,
+                max_wait_seconds=max_wait_seconds)
 
             if fetch.status == STATUS_UNKNOWN:
                 # Transient/permanent failure — NOT "no lyrics". The

@@ -1417,6 +1417,12 @@ def reset_state(_inert_video_enrichment_engine, _inert_video_download_monitor):
     # every bit of it a previous test's reservation.
     from core.prowlarr_throttle import _reset_for_tests as _reset_prowlarr_throttle
     _reset_prowlarr_throttle()
+    # LRCLib throttle (core.lrclib_throttle, #1879): fourth of this shape, plus
+    # a shared cooldown. A test that feeds the real client a 429 leaves up to
+    # 300s of cooldown behind, and the next test through the shared
+    # lyrics_client would sleep it out for real.
+    from core.lrclib_throttle import _reset_for_tests as _reset_lrclib_throttle
+    _reset_lrclib_throttle()
     # Video download-source cooldowns (core.automation.handlers.
     # video_process_wishlist): two process-wide dicts keyed by (item, transport).
     # Two client refusals put that pair on a SIX HOUR cooldown, and the test
