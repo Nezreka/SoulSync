@@ -579,3 +579,68 @@ def test_reconciling_marks_owned_rows_done_by_default(db):
     with _remove_owned(False):
         assert db.mark_owned_wishlist_done() == 1
     assert db.get_wishlist(1)[0]["status"] == "done"
+
+
+def _wish_episode(db, asin, sequence, runtime, series="Lisa & Fiona"):
+    db.add_to_wishlist({"asin": asin, "title": f"Episode {sequence}", "runtime_minutes": runtime,
+                        "series": [{"title": series, "sequence": sequence}]}, profile_id=1)
+
+
+def _disk_episode(db, key, sequence, runtime, series="Lisa & Fiona"):
+    db.add_to_library({"asin": f"local:{key}", "title": f"Folge {sequence}: Something",
+                       "runtime_minutes": runtime, "series": [{"title": series, "sequence": sequence}]},
+                      f"/books/{key}", source="scan")
+
+
+def test_an_unmatched_disk_book_owns_the_wished_episode_by_series_and_number(db):
+    _wish_episode(db, "B000000006", "6", 67)
+    _disk_episode(db, "six", "06", 67, series="lisa & fiona")
+    with _remove_owned(False):
+        assert db.mark_owned_wishlist_done() == 1
+    assert db.get_wishlist(1)[0]["status"] == "done"
+
+
+def test_a_short_disk_copy_does_not_own_the_episode(db):
+    # A leftover theme song, or a copy that stopped a third of the way in.
+    _wish_episode(db, "B000000016", "16", 72)
+    _disk_episode(db, "sixteen", "16", 28)
+    with _remove_owned(False):
+        assert db.mark_owned_wishlist_done() == 0
+    assert db.get_wishlist(1)[0]["status"] == "wanted"
+
+
+def test_series_ownership_needs_the_same_series_and_number(db):
+    _wish_episode(db, "B000000005", "5", 60)
+    _wish_episode(db, "B000000045", "4.5", 60)
+    _disk_episode(db, "other", "5", 60, series="Bobby & Max")
+    _disk_episode(db, "four", "4", 60)
+    with _remove_owned(False):
+        assert db.mark_owned_wishlist_done() == 0
+
+
+def test_series_ownership_needs_both_runtimes(db):
+    _wish_episode(db, "B000000007", "7", 0)
+    _wish_episode(db, "B000000008", "8", 70)
+    _disk_episode(db, "seven", "7", 70)
+    _disk_episode(db, "eight", "8", 0)
+    with _remove_owned(False):
+        assert db.mark_owned_wishlist_done() == 0
+
+
+def test_a_disk_book_kept_unmatched_by_the_user_does_not_own_anything(db):
+    _wish_episode(db, "B000000009", "9", 62)
+    _disk_episode(db, "nine", "9", 62)
+    conn = db._connect()
+    conn.execute("UPDATE audiobook_library SET match_status='ignored'")
+    conn.commit()
+    with _remove_owned(False):
+        assert db.mark_owned_wishlist_done() == 0
+
+
+def test_series_ownership_also_removes_rows_when_asked(db):
+    _wish_episode(db, "B000000006", "6", 67)
+    _wish_episode(db, "B000000016", "16", 72)
+    _disk_episode(db, "six", "6", 67)
+    with _remove_owned(True):
+        assert db.mark_owned_wishlist_done() == 1
+    assert [r["asin"] for r in db.get_wishlist(1)] == ["B000000016"]
