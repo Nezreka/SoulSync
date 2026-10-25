@@ -156,6 +156,8 @@ export interface BulkFixStatus {
   fixed?: number;
   failed?: number;
   stopped?: boolean;
+  error?: string | null;
+  note?: string | null;
   errors?: Array<{ error: string }> | null;
 }
 

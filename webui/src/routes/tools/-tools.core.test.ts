@@ -760,6 +760,35 @@ describe('bulkFixRunMessage', () => {
     );
   });
 
+  it('appends the run-level note when a completed mixed run carries one (#1879 breaker)', () => {
+    expect(
+      bulkFixRunMessage({
+        fixed: 2,
+        failed: 5,
+        total: 9,
+        note: 'LRCLib stopped answering reliably — remaining lyrics findings stay pending',
+        errors: [{ error: 'LRCLib rate-limited (429) — retry later' }],
+      }).message,
+    ).toBe(
+      'Fixed 2, 5 failed of 9: LRCLib stopped answering reliably — remaining lyrics findings stay pending',
+    );
+  });
+
+  it('prefers the run-level error when a stopped run carries one (#1879 breaker)', () => {
+    expect(
+      bulkFixRunMessage({
+        fixed: 0,
+        failed: 5,
+        total: 30,
+        stopped: true,
+        error: 'LRCLib stopped answering reliably — bulk fix stopped early',
+        errors: [{ error: 'LRCLib rate-limited (429) — retry later' }],
+      }).message,
+    ).toBe(
+      'Bulk fix stopped — fixed 0, 5 failed of 30: LRCLib stopped answering reliably — bulk fix stopped early',
+    );
+  });
+
   it('is an error when nothing was fixed, even with no failures', () => {
     expect(bulkFixRunMessage({ fixed: 0, failed: 0, total: 4 }).type).toBe('error');
   });

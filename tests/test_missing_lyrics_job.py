@@ -47,10 +47,12 @@ def test_has_remote_lyrics_false_when_none():
     assert _client_with_api(api).has_remote_lyrics("Instrumental", "Artist") is False
 
 
-def test_has_remote_lyrics_false_when_no_api():
+def test_has_remote_lyrics_unknown_when_no_api():
+    # #1879 tri-state: no API client is an UNKNOWN, not a definitive
+    # negative — "we couldn't ask" must not read as "no lyrics exist".
     c = LyricsClient.__new__(LyricsClient)
     c.api = None
-    assert c.has_remote_lyrics("Song", "Artist") is False
+    assert c.has_remote_lyrics("Song", "Artist") is None
 
 
 # ── sidecar detection ────────────────────────────────────────────────────────
