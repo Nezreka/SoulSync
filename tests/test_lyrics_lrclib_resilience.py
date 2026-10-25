@@ -288,9 +288,13 @@ def test_throttle_note_rate_limited_floor_cap_and_zero():
 def test_throttle_window_cap_defers_beyond_window(monkeypatch):
     monkeypatch.setattr(lrclib_throttle, "_settings", lambda: (0.0, 3))
     lrclib_throttle._reset_for_tests()
-    slots = [lrclib_throttle.reserve_request_slot() for _ in range(4)]
-    # 4th reservation must wait for the oldest to leave the 60s window
+    slots = [lrclib_throttle.reserve_request_slot() for _ in range(7)]
+    # 4th reservation must wait for the oldest to leave the 60s window,
+    # and the cap applies per-window, not once: reservations past the
+    # cap must not all collapse onto the same instant (the min_gap=0
+    # burst the old _TIMES[0] formula produced).
     assert slots[3] - slots[0] >= 59.0
+    assert slots[6] - slots[3] >= 59.0
     assert slots == sorted(slots)                   # list stays ordered
 
 
@@ -397,6 +401,23 @@ def test_scan_unknown_run_resets_on_definitive_answer(tmp_path, monkeypatch):
     assert result.skipped == 3                       # only the definitive absents
 
 
+def test_scan_permanent_unknown_resets_the_transient_streak(tmp_path, monkeypatch):
+    # "Consecutive" must be literally true: a permanent unknown means
+    # LRCLib answered, so the transient streak restarts after it.
+    transient = LyricsFetchResult(
+        STATUS_UNKNOWN, reason='LRCLib rate-limited (429) — retry later',
+        error_kind='rate_limited')
+    permanent = LyricsFetchResult(
+        STATUS_UNKNOWN, reason='LRCLib rejected the request (400)',
+        error_kind='permanent')
+    answers = iter([transient] * 4 + [permanent] + [transient] * 4 +
+                   [LyricsFetchResult(STATUS_ABSENT)] * 2)
+    probe = lambda *a, **k: next(answers)  # noqa: E731
+    result, findings = _scan_with_probe(tmp_path, monkeypatch, probe, n=11)
+    assert result.stopped_early == ''          # 4 + reset + 4 never reaches 5
+    assert result.skipped == 2
+
+
 def test_scan_permanent_unknowns_do_not_stop_the_scan(tmp_path, monkeypatch):
     # A permanent query error (400 for one album's bad metadata) is not
     # LRCLib failing: seven in a row must NOT stop the scan, and the
@@ -416,7 +437,10 @@ def test_scan_raising_probe_aborts_with_reason_visible(tmp_path, monkeypatch):
         raise RuntimeError('probe exploded')
     result, findings = _scan_with_probe(tmp_path, monkeypatch, boom)
     assert findings == []
-    assert result.stopped_early and 'probe exploded' in result.stopped_early
+    # The user-facing stopped_early names the error TYPE, not the raw
+    # exception text (that lives in the log line).
+    assert result.stopped_early and 'RuntimeError' in result.stopped_early
+    assert 'probe exploded' not in result.stopped_early
     assert result.skipped == 0
 
 
@@ -503,16 +527,23 @@ def _player_post(monkeypatch, fake_client):
 
 
 def test_player_endpoint_surfaces_rate_limit(monkeypatch):
-    fake = SimpleNamespace(
-        api=object(),
-        lookup_remote_lyrics=lambda **k: LyricsFetchResult(
+    seen = {}
+
+    def _lookup(**k):
+        seen.update(k)
+        return LyricsFetchResult(
             STATUS_UNKNOWN, reason='LRCLib rate-limited (429) — retry later',
-            error_kind='rate_limited'))
+            error_kind='rate_limited')
+
+    fake = SimpleNamespace(api=object(), lookup_remote_lyrics=_lookup)
     resp = _player_post(monkeypatch, fake)
     body = resp.get_json()
     assert body["success"] is False
     assert body["error"] == 'LRCLib rate-limited (429) — retry later'
     assert body["retryable"] is True
+    # The endpoint must forward its interactive wait cap — if this
+    # argument is dropped tomorrow, the player can park on a cooldown.
+    assert seen.get('max_wait_seconds') == 10
 
 
 def test_player_endpoint_permanent_error_is_not_retryable(monkeypatch):
@@ -562,6 +593,271 @@ def test_player_endpoint_real_client_429_on_search(monkeypatch):
     assert 'rate-limited' in body["error"]
     assert body["retryable"] is True
     assert api.search_lyrics.call_count == 3      # bounded retries happened
+
+
+# ── bulk Fix All: LRCLib circuit breaker ─────────────────────────────────
+
+def _bulk_worker(types, fix):
+    import threading
+
+    from core.repair_worker import RepairWorker
+    w = RepairWorker.__new__(RepairWorker)
+    w._bulk_fix_stop_event = threading.Event()
+    w.should_stop = False
+    w._bulk_fix_thread = None
+    w._bulk_fix_state = {
+        'running': True, 'total': 0, 'done': 0, 'fixed': 0, 'failed': 0,
+        'stopped': False, 'job_id': None, 'finding_type': None,
+        'safe_only': False, 'errors': [], 'error': None, 'note': None,
+        'per_type': {},
+    }
+    w._types_for_findings = lambda ids: types
+    w.fix_finding = fix
+    return w
+
+
+_TRANSIENT = {'success': False, 'error': 'LRCLib rate-limited (429) — retry later'}
+
+
+def test_bulk_fix_stops_after_consecutive_lrclib_transients(monkeypatch):
+    calls = []
+    w = _bulk_worker(
+                     {i: 'missing_lyrics' for i in range(1, 9)},
+                     lambda fid, fix_action=None: calls.append(fid) or dict(_TRANSIENT))
+    w._bulk_fix_state['total'] = 8
+    w._run_bulk_fix(list(range(1, 9)))
+    state = w._bulk_fix_state
+    assert calls == [1, 2, 3, 4, 5]                    # stopped at the breaker
+    assert state['done'] == 5 and state['failed'] == 5 and state['fixed'] == 0
+    assert state['stopped'] is True
+    assert state['error'] and 'LRCLib stopped answering' in state['error']
+    assert state['per_type']['missing_lyrics'] == {'fixed': 0, 'failed': 5}
+
+
+def test_bulk_fix_breaker_ignores_local_failures_and_resets_on_definitive():
+    # A purely local failure (stale file) neither increments nor resets
+    # the streak; a definitive LRCLib answer resets it.
+    local = {'success': False, 'error': 'File not found on disk: /music/gone.flac'}
+    outcomes = iter([dict(_TRANSIENT), dict(_TRANSIENT), local,
+                     dict(_TRANSIENT), dict(_TRANSIENT), dict(_TRANSIENT)])
+    w = _bulk_worker({i: 'missing_lyrics' for i in range(1, 8)},
+                     lambda fid, fix_action=None: next(outcomes))
+    w._bulk_fix_state['total'] = 7
+    w._run_bulk_fix(list(range(1, 8)))
+    state = w._bulk_fix_state
+    assert state['done'] == 6 and state['stopped'] is True   # tripped on the 5th transient
+    assert len(state['errors']) == 6
+
+    for definitive_error in (
+            'Could not fetch lyrics (no longer available?)',
+            'LRCLib rejected the request (400)'):
+        definitive = {'success': False, 'error': definitive_error}
+        outcomes2 = iter([dict(_TRANSIENT)] * 4 + [definitive] +
+                         [dict(_TRANSIENT)] * 4 + [{'success': True}])
+        w2 = _bulk_worker({i: 'missing_lyrics' for i in range(1, 11)},
+                          lambda fid, fix_action=None: next(outcomes2))
+        w2._bulk_fix_state['total'] = 10
+        w2._run_bulk_fix(list(range(1, 11)))
+        assert w2._bulk_fix_state['done'] == 10, definitive_error
+        assert w2._bulk_fix_state['stopped'] is False, definitive_error
+
+
+def test_bulk_fix_breaker_mixed_run_skips_only_lyrics():
+    # Lyrics trip the breaker; the genre findings queued behind them
+    # still run, and the remaining lyrics findings are skipped (left
+    # pending, counted in done but neither fixed nor failed).
+    types = {i: 'missing_lyrics' for i in range(1, 8)}
+    types.update({8: 'genre_cleanup', 9: 'genre_cleanup'})
+    attempted = []
+
+    def fix(fid, fix_action=None):
+        attempted.append(fid)
+        if types[fid] == 'missing_lyrics':
+            return dict(_TRANSIENT)
+        return {'success': True}
+
+    w = _bulk_worker(types, fix)
+    w._bulk_fix_state['total'] = 9
+    w._run_bulk_fix(list(range(1, 10)))
+    state = w._bulk_fix_state
+    assert attempted == [1, 2, 3, 4, 5, 8, 9]        # 6, 7 skipped
+    assert state['done'] == 9
+    assert state['fixed'] == 2 and state['failed'] == 5
+    assert state['stopped'] is False and state['error'] is None
+    assert state['note'] and 'LRCLib stopped answering' in state['note']
+    assert '2 remaining lyrics finding(s) skipped' in state['note']
+    assert state['per_type']['missing_lyrics'] == {'fixed': 0, 'failed': 5}
+    assert state['per_type']['genre_cleanup'] == {'fixed': 2, 'failed': 0}
+
+
+def test_bulk_fix_breaker_trips_with_only_other_types_remaining():
+    # The trip lands on the last lyrics finding; only genre findings
+    # remain. The note must not claim lyrics findings were skipped.
+    types = {i: 'missing_lyrics' for i in range(1, 6)}
+    types.update({6: 'genre_cleanup', 7: 'genre_cleanup'})
+
+    def fix(fid, fix_action=None):
+        return dict(_TRANSIENT) if types[fid] == 'missing_lyrics' else {'success': True}
+
+    w = _bulk_worker(types, fix)
+    w._bulk_fix_state['total'] = 7
+    w._run_bulk_fix(list(range(1, 8)))
+    state = w._bulk_fix_state
+    assert state['done'] == 7 and state['fixed'] == 2 and state['failed'] == 5
+    assert state['stopped'] is False
+    assert state['note'] and 'LRCLib stopped answering' in state['note']
+    assert 'skipped' not in state['note']
+
+
+def test_bulk_fix_breaker_trip_on_final_finding_is_not_stopped_early():
+    w = _bulk_worker({i: 'missing_lyrics' for i in range(1, 6)},
+                     lambda fid, fix_action=None: dict(_TRANSIENT))
+    w._bulk_fix_state['total'] = 5
+    w._run_bulk_fix(list(range(1, 6)))
+    state = w._bulk_fix_state
+    assert state['done'] == 5 and state['failed'] == 5
+    assert state['stopped'] is False and state['error'] is None
+
+
+def test_bulk_fix_breaker_resets_on_success(monkeypatch):
+    outcomes = iter([dict(_TRANSIENT)] * 4 + [{'success': True}] +
+                    [dict(_TRANSIENT)] * 4 + [{'success': True}])
+    w = _bulk_worker(
+                     {i: 'missing_lyrics' for i in range(1, 11)},
+                     lambda fid, fix_action=None: next(outcomes))
+    w._bulk_fix_state['total'] = 10
+    w._run_bulk_fix(list(range(1, 11)))
+    state = w._bulk_fix_state
+    assert state['done'] == 10 and state['stopped'] is False
+    assert state['fixed'] == 2 and state['failed'] == 8
+
+
+def test_bulk_fix_breaker_ignores_other_types(monkeypatch):
+    w = _bulk_worker(
+                     {i: 'genre_cleanup' for i in range(1, 8)},
+                     lambda fid, fix_action=None: dict(_TRANSIENT))
+    w._bulk_fix_state['total'] = 7
+    w._run_bulk_fix(list(range(1, 8)))
+    assert w._bulk_fix_state['done'] == 7 and w._bulk_fix_state['stopped'] is False
+
+
+def test_permanent_exact_plus_empty_search_stays_unknown():
+    # Exact query rejected (400, e.g. empty artist) and search — same
+    # parameters — returns nothing: that is NOT proof of absence.
+    class _Api:
+        def get_lyrics(self, **kw):
+            raise FakeHTTPError(400)
+
+        def search_lyrics(self, **kw):
+            return []
+
+    client = _client(_Api())
+    result = client.lookup_remote_lyrics('Song', '', album_name='Album',
+                                         duration_seconds=200)
+    assert result.status == STATUS_UNKNOWN and result.error_kind == 'permanent'
+    assert client.has_remote_lyrics('Song', '', 'Album', 200) is None
+
+    class _Api404:
+        def get_lyrics(self, **kw):
+            raise FakeHTTPError(404)
+
+        def search_lyrics(self, **kw):
+            return []
+
+    client2 = _client(_Api404())
+    result2 = client2.lookup_remote_lyrics('Song', 'Artist', album_name='Album',
+                                           duration_seconds=200)
+    assert result2.status == STATUS_ABSENT       # 404 + empty search IS absent
+
+
+def test_create_detailed_catch_all_reason_is_generic(monkeypatch):
+    client = _client(SimpleNamespace())
+    monkeypatch.setattr(client, 'lookup_remote_lyrics',
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError('/secret/path exploded')))
+    ok, reason = client.create_lrc_file_detailed('/tmp/x.flac', 'Song', 'Artist')
+    assert ok is False
+    assert reason == 'Lyrics fetch/write failed — see app log for details'
+    assert 'secret' not in reason
+
+
+def test_retry_throttle_wait_is_capped_by_remaining_budget(monkeypatch):
+    # The budget check alone is not enough: when a retry DOES wait for
+    # a slot, that wait must be capped by the remaining per-call
+    # budget, and refusing must return the real transient outcome, not
+    # a busy. (A timeout sets no shared cooldown, so the retry path is
+    # exercised directly.)
+    from core import lrclib_throttle
+
+    class _ApiTimeout:
+        def get_lyrics(self, **kw):
+            raise requests.exceptions.ReadTimeout('slow')
+
+        def search_lyrics(self, **kw):  # pragma: no cover - must not be called
+            raise AssertionError('transient exact failure must not fall through')
+
+    client = _client(_ApiTimeout())
+    waits = []
+
+    def fake_wait(max_wait_seconds=None):
+        waits.append(max_wait_seconds)
+        return max_wait_seconds is None or max_wait_seconds >= 28
+
+    monkeypatch.setattr(lrclib_throttle, 'wait_for_slot', fake_wait)
+    result = client.lookup_remote_lyrics('Song', 'Artist', album_name='Album',
+                                         duration_seconds=200)
+    assert result.status == STATUS_UNKNOWN
+    assert result.error_kind == 'timeout'
+    assert 'busy' not in result.reason
+    assert waits[0] is None                       # first attempt uncapped
+    assert waits[1] is not None and waits[1] <= 20.0   # retry capped by budget
+
+
+def test_headerless_429_skips_the_doomed_retry(monkeypatch):
+    # A 429 without Retry-After sets a 30s shared cooldown against a
+    # 20s per-call budget: the retry could never fire inside the
+    # budget, so the client returns after ONE attempt — no wasted
+    # backoff sleep, no refused slot wait.
+    from core import lrclib_throttle
+
+    class _Api429:
+        def get_lyrics(self, **kw):
+            raise FakeHTTPError(429)
+
+        def search_lyrics(self, **kw):  # pragma: no cover - must not be called
+            raise AssertionError('transient exact failure must not fall through')
+
+    client = _client(_Api429())
+    waits = []
+    monkeypatch.setattr(lrclib_throttle, 'wait_for_slot',
+                        lambda max_wait_seconds=None: waits.append(max_wait_seconds) or True)
+    result = client.lookup_remote_lyrics('Song', 'Artist', album_name='Album',
+                                         duration_seconds=200)
+    assert result.status == STATUS_UNKNOWN
+    assert result.error_kind == 'rate_limited'
+    assert waits == [None]        # exactly one attempt's wait
+    assert client.sleeps == []    # and no backoff sleep before giving up
+
+
+def test_every_transient_reason_trips_the_breaker_classifier():
+    # Tie the breaker's text classifier to the client's actual reasons:
+    # if a transient reason is ever reworded, THIS test should fail
+    # rather than the breaker silently never tripping.
+    from core.lyrics_client import classify_lyrics_error
+    from core.repair_worker import _is_lrclib_transient_error
+    reasons = [
+        classify_lyrics_error(FakeHTTPError(429)).reason,
+        classify_lyrics_error(FakeHTTPError(503)).reason,
+        classify_lyrics_error(requests.exceptions.ReadTimeout('slow')).reason,
+        classify_lyrics_error(requests.exceptions.ConnectionError('down')).reason,
+        'LRCLib API not available',
+        'LRCLib busy (rate-limit cooldown) — retry later',
+    ]
+    for reason in reasons:
+        assert _is_lrclib_transient_error(reason), reason
+    # …and definitive answers never trip it.
+    assert not _is_lrclib_transient_error(
+        'Could not fetch lyrics (no longer available?)')
+    assert not _is_lrclib_transient_error('disk full')
 
 
 # ── import path: transient failure is not logged as "No lyrics found" ────

@@ -79,7 +79,12 @@ def reserve_request_slot(max_wait_seconds: Optional[float] = None) -> Optional[f
         if _TIMES and min_gap > 0:
             at = max(at, _TIMES[-1] + min_gap)              # space from the last reservation
         if max_per_window and len(_TIMES) >= max_per_window:
-            at = max(at, _TIMES[0] + WINDOW_SECONDS)        # window full → wait it out
+            # Window full → wait until the max_per_window-th most recent
+            # reservation leaves the window. (Using _TIMES[0] here would
+            # collapse every reservation past the cap onto the same
+            # instant whenever the list holds more than the cap — e.g.
+            # with min_gap = 0 — and fire them as a burst.)
+            at = max(at, _TIMES[-max_per_window] + WINDOW_SECONDS)
         at = max(at, _COOLDOWN_UNTIL[0])                    # honour a 429/5xx cooldown
         if max_wait_seconds is not None and at - now > max_wait_seconds:
             return None                                     # don't consume a slot

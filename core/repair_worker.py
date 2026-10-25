@@ -33,6 +33,38 @@ from utils.logging_config import get_logger
 
 logger = get_logger("repair_worker")
 
+# Consecutive transient LRCLib failures after which a background bulk
+# fix stops early instead of grinding through a whole lyrics backlog
+# against a service that is refusing (#1879; mirrors the Lyrics Filler
+# scan's MAX_CONSECUTIVE_UNKNOWN).
+MAX_CONSECUTIVE_LRCLIB_TRANSIENT = 5
+
+_LRCLIB_TRANSIENT_MARKERS = ('rate-limited', 'server error', 'timed out',
+                             'Could not reach', 'busy (', 'not available')
+
+
+def _is_lrclib_transient_error(error) -> bool:
+    """True when a fix error is an LRCLib TRANSIENT failure reason (the
+    tri-state reasons core.lyrics_client produces: rate-limited / server
+    error / timeout / unreachable / busy), as opposed to a definitive
+    answer like "no longer available"."""
+    if not isinstance(error, str) or 'LRCLib' not in error:
+        return False
+    return any(marker in error for marker in _LRCLIB_TRANSIENT_MARKERS)
+
+
+def _is_lrclib_definitive_error(error) -> bool:
+    """True when a fix error is a DEFINITIVE LRCLib answer: the service
+    responded — the lyrics are absent ("no longer available") or the
+    query was permanently rejected — as opposed to a transient failure
+    or a purely local error (missing file, write failure), which says
+    nothing about LRCLib at all."""
+    if not isinstance(error, str):
+        return False
+    if 'no longer available' in error:
+        return True
+    return error.startswith('LRCLib') and not _is_lrclib_transient_error(error)
+
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 # How long a RESOLVED finding keeps suppressing its own recurrence. See
@@ -6351,6 +6383,10 @@ class RepairWorker:
                 'safe_only': bool(safe_only),
                 'errors': [],
                 'error': None,
+                # Run-level note (e.g. the LRCLib circuit breaker skipped
+                # the remaining lyrics findings in a mixed run) — shown
+                # in the completion toast when there is no stop error.
+                'note': None,
                 # Per-type tallies so a mixed run can say WHAT it is fixing
                 # ("312 cover art, 40 lyrics") instead of one opaque number.
                 'per_type': {},
@@ -6387,6 +6423,15 @@ class RepairWorker:
     def _run_bulk_fix(self, ids: List[int], fix_action: str = None):
         state = self._bulk_fix_state
         types = self._types_for_findings(ids)
+        # LRCLib circuit breaker (#1879): the Lyrics Filler scan stops
+        # after 5 consecutive transient unknowns; a Fix All over
+        # thousands of lyrics findings must do the same instead of
+        # grinding through every one against a service that is already
+        # refusing (each failure is honestly reported, but at library
+        # scale the run would take hours and record thousands of
+        # "failed" fixes for what is one outage).
+        lrclib_transient_streak = 0
+        lrclib_tripped = False
         try:
             for fid in ids:
                 if self._bulk_fix_stop_event.is_set() or self.should_stop:
@@ -6394,12 +6439,71 @@ class RepairWorker:
                     logger.info("Background bulk fix stopped at %d/%d",
                                 state['done'], state['total'])
                     break
+                if lrclib_tripped and types.get(fid) == 'missing_lyrics':
+                    # Breaker tripped earlier in this run: skip the
+                    # remaining lyrics findings (they stay pending) but
+                    # let other finding types finish — they have nothing
+                    # to do with LRCLib.
+                    state['done'] += 1
+                    continue
                 try:
                     result = self.fix_finding(fid, fix_action=fix_action)
                 except Exception as e:  # fix_finding shouldn't raise, but never kill the run
                     result = {'success': False, 'error': str(e)}
                 state['done'] += 1
                 slug = types.get(fid)
+                # Breaker bookkeeping only — the tallies below run as
+                # usual for this finding; the loop breaks afterwards
+                # only when nothing but lyrics findings remains. The
+                # streak counts LYRICS findings only: other types neither
+                # increment nor reset it (they say nothing about LRCLib),
+                # while a lyrics success or a definitive lyrics failure
+                # (LRCLib answered) resets it.
+                trip_lrclib_breaker = False
+                if slug == 'missing_lyrics':
+                    if result.get('success'):
+                        lrclib_transient_streak = 0
+                    elif _is_lrclib_transient_error(result.get('error')):
+                        lrclib_transient_streak += 1
+                        if lrclib_transient_streak >= MAX_CONSECUTIVE_LRCLIB_TRANSIENT \
+                                and not lrclib_tripped:
+                            lrclib_tripped = True
+                            trip_lrclib_breaker = True
+                            breaker_base = (
+                                f'LRCLib stopped answering reliably after '
+                                f'{lrclib_transient_streak} consecutive failed lyrics '
+                                f'fixes ({result.get("error")}).')
+                            remaining = ids[state['done']:]
+                            skipped_lyrics = sum(
+                                1 for r in remaining
+                                if types.get(r) == 'missing_lyrics')
+                            if remaining and skipped_lyrics == len(remaining):
+                                # Nothing left but lyrics — stop the run.
+                                state['stopped'] = True
+                                state['error'] = (
+                                    breaker_base + ' Bulk fix stopped early; the '
+                                    'remaining findings stay pending and can be '
+                                    'retried later.')
+                                logger.warning("Background bulk fix stopping early: %s",
+                                               state['error'])
+                            elif remaining:
+                                # Mixed run: skip only the lyrics rest
+                                # (which may be none, if the trip landed
+                                # on the last lyrics finding in the run).
+                                state['note'] = breaker_base + (
+                                    f' {skipped_lyrics} remaining lyrics '
+                                    f'finding(s) skipped — they stay pending '
+                                    f'and can be retried later.'
+                                    if skipped_lyrics else '')
+                                logger.warning("Background bulk fix: %s", state['note'])
+                            # No remaining findings: a completed run —
+                            # no stop claim at all.
+                    elif _is_lrclib_definitive_error(result.get('error')):
+                        # LRCLib answered definitively — reset.
+                        lrclib_transient_streak = 0
+                    # Any other failure (a purely local error: missing
+                    # file, write failure) says nothing about LRCLib —
+                    # it neither increments nor resets the streak.
                 if slug:
                     tally = state['per_type'].get(slug)
                     if tally is None:
@@ -6417,6 +6521,8 @@ class RepairWorker:
                     logger.warning("Bulk fix failed for finding #%s: %s", fid, error_msg)
                     if len(state['errors']) < 20:
                         state['errors'].append({'id': fid, 'error': error_msg})
+                if trip_lrclib_breaker and state['stopped']:
+                    break
         except Exception as e:
             logger.error("Background bulk fix crashed: %s", e, exc_info=True)
             state['error'] = str(e)

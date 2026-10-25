@@ -266,7 +266,10 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
                     if wrote:
                         result['lyrics_written'] += 1
                     elif fetch_reason:
-                        logger.debug("retag lyrics fetch incomplete for %s: %s", fp, fetch_reason)
+                        # Warning, not debug (#1879): a transient LRCLib
+                        # failure must be visible at the default log level,
+                        # not indistinguishable from "no lyrics".
+                        logger.warning("retag lyrics fetch incomplete for %s: %s", fp, fetch_reason)
                 except Exception as e:
                     logger.debug("retag lyrics fetch failed for %s: %s", fp, e)
 

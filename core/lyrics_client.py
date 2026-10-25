@@ -201,8 +201,11 @@ class LyricsClient:
         Returns ``(data, None)`` on success or ``(None, LyricsFetchResult)``
         describing the failure outcome. ABSENT (404) and permanent errors
         are never retried; transient errors retry up to ``max_attempts``
-        total tries, waiting Retry-After (capped) or exponential backoff
-        with jitter between tries.
+        total tries — subject to the shared throttle cooldown and the
+        per-call wait budget below, either of which can cut the retries
+        short (a headerless 429 sets a 30s cooldown against a 20s
+        budget, so in practice that call returns after one attempt and
+        the NEXT caller is the one that retries).
 
         The wait budget is measured in ELAPSED time (monotonic), not just
         explicit backoff sleeps: a retry's throttle wait can include a
@@ -223,13 +226,31 @@ class LyricsClient:
         started = time.monotonic()
         last = None
         for attempt in range(attempts):
-            if attempt > 0 and time.monotonic() - started > MAX_TOTAL_RETRY_WAIT_SECONDS:
+            elapsed = time.monotonic() - started
+            if attempt > 0 and elapsed > MAX_TOTAL_RETRY_WAIT_SECONDS:
                 logger.warning("%s %s — elapsed wait budget (%.0fs) exhausted after "
                                "%d attempt(s); giving up for now",
                                description, last.error_kind if last else 'transient',
                                MAX_TOTAL_RETRY_WAIT_SECONDS, attempt)
                 return None, last
-            if not lrclib_throttle.wait_for_slot(max_wait_seconds=max_wait_seconds):
+            # Cap the throttle wait itself by the REMAINING per-call
+            # budget on retries: checking the budget before an uncapped
+            # wait would still let a long shared cooldown park this
+            # thread well past it (the check passes at ~1.5s elapsed,
+            # then wait_for_slot sits out a 30s cooldown).
+            wait_cap = max_wait_seconds
+            if attempt > 0:
+                remaining = MAX_TOTAL_RETRY_WAIT_SECONDS - elapsed
+                wait_cap = remaining if wait_cap is None else min(wait_cap, remaining)
+            if not lrclib_throttle.wait_for_slot(max_wait_seconds=wait_cap):
+                if attempt > 0 and last is not None:
+                    # A retry whose slot lies past the wait cap (the
+                    # per-call budget or the caller's own cap): report
+                    # the real transient outcome, not a busy.
+                    logger.warning("%s %s — next slot is past the %.0fs wait cap; "
+                                   "giving up for now",
+                                   description, last.error_kind, wait_cap)
+                    return None, last
                 # Interactive caller and the next slot is too far away —
                 # say busy, don't park. Name the actual constraint: a
                 # rate-limit cooldown if one is in effect, otherwise the
@@ -271,14 +292,26 @@ class LyricsClient:
                 else:
                     delay = min(2.0 ** attempt, MAX_RETRY_DELAY_SECONDS)
                     delay += random.uniform(0, 0.5)
-                if (time.monotonic() - started) + delay > MAX_TOTAL_RETRY_WAIT_SECONDS:
+                elapsed_now = time.monotonic() - started
+                cooldown_left = lrclib_throttle.status()['cooldown_remaining']
+                wait_limit = MAX_TOTAL_RETRY_WAIT_SECONDS
+                if max_wait_seconds is not None:
+                    wait_limit = min(wait_limit, max_wait_seconds)
+                if elapsed_now + delay > wait_limit \
+                        or elapsed_now + cooldown_left > wait_limit:
                     # Waiting longer would park this thread past the
-                    # per-call budget — report the transient outcome now
-                    # and let the caller retry later instead.
-                    logger.warning("%s %s (attempt %d/%d) — retry wait %.1fs would exceed "
-                                   "the %.0fs per-call budget; giving up for now",
+                    # wait limit — either the backoff itself is too
+                    # long, or the shared cooldown this failure just set
+                    # (30s default for a headerless 429) already runs
+                    # past it, in which case the retry's slot wait would
+                    # be refused anyway and the backoff sleep is wasted.
+                    # Report the transient outcome now; the caller can
+                    # retry later.
+                    logger.warning("%s %s (attempt %d/%d) — retry wait (backoff %.1fs, "
+                                   "cooldown %.1fs) would exceed the %.0fs wait limit; "
+                                   "giving up for now",
                                    description, outcome.error_kind, attempt + 1, attempts,
-                                   delay, MAX_TOTAL_RETRY_WAIT_SECONDS)
+                                   delay, cooldown_left, wait_limit)
                     return None, outcome
                 logger.debug("%s %s (attempt %d/%d) — retrying in %.1fs",
                              description, outcome.error_kind, attempt + 1, attempts, delay)
@@ -327,6 +360,9 @@ class LyricsClient:
             # Fall through to search on: ABSENT (404), a permanent query
             # error (400 — search takes different params and may hit),
             # or a None-returning client (failure is None).
+            exact_failure = failure
+        else:
+            exact_failure = None
         # Strategy 2: Search without duration
         results, failure = self._call_lrclib(
             'Search fallback',
@@ -337,6 +373,16 @@ class LyricsClient:
             return failure
         if results:
             return LyricsFetchResult(STATUS_FOUND, data=results[0])
+        if exact_failure is not None and exact_failure.error_kind == 'permanent':
+            # The exact query was REJECTED (400) and search found
+            # nothing. That is not proof LRCLib has no lyrics; the
+            # query itself was broken (e.g. an empty artist name).
+            # Stay UNKNOWN so the track is not recorded as definitively
+            # lyric-less. Deliberately conservative: if the 400 was
+            # caused by the album/duration (which search doesn't send),
+            # the track stays UNKNOWN and is simply re-probed on the
+            # next scan — extra traffic, but never a false negative.
+            return exact_failure
         return LyricsFetchResult(STATUS_ABSENT, error_kind='not_found',
                                  reason='LRCLib has no lyrics for this track')
 

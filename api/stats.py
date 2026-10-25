@@ -330,14 +330,17 @@ def fetch_lyrics_endpoint():
     Body: ``{title, artist, album?, duration?}``. Returns
     ``{success, synced, plain, source}`` where ``synced`` is an LRC
     string with ``[mm:ss.xx] line`` timestamps (or None) and ``plain``
-    is the untimestamped text (or None). ``source`` is the lookup
-    strategy that hit (``exact`` / ``search`` / ``sidecar``).
+    is the untimestamped text (or None). ``source`` is ``sidecar`` for
+    a local lyrics file or ``lrclib`` for a network hit (else None).
+    A transient LRCLib failure from the lookup returns
+    ``success: False`` with the real reason in ``error`` and
+    ``retryable: True`` for transient kinds (#1879) — it is NOT the
+    same response as a definitive ``no lyrics found``.
 
     Tries the local ``.lrc`` / ``.txt`` sidecar first when a
     ``file_path`` is supplied — already-downloaded tracks should not
-    bounce LRClib on every play. Falls through to LRClib's exact-
-    match endpoint when title+artist+album+duration are all available,
-    then to its generic search endpoint.
+    bounce LRClib on every play. Falls through to the shared
+    LyricsClient's exact-match then search lookup.
     """
     try:
         data = request.get_json() or {}
@@ -390,13 +393,22 @@ def fetch_lyrics_endpoint():
             return jsonify({'success': False, 'error': 'LRCLib unavailable',
                             'synced': None, 'plain': None, 'source': None}), 200
 
-        # Interactive caller: cap the throttle wait at 10s so a player
+        # Interactive caller: cap each throttle wait at 10s so a player
         # request can never park an HTTP worker for the length of a
         # rate-limit cooldown (which can exceed the gunicorn timeout).
+        # The cap is per reservation, not per request — a lookup that
+        # falls through to search waits at most 10s per strategy.
         fetch = _lyrics_client.lookup_remote_lyrics(
             track_name=title, artist_name=artist,
             album_name=album, duration_seconds=duration,
             max_wait_seconds=10)
+
+        if fetch is None:
+            # A substituted/legacy client returning the old contract's
+            # None (unknown) — answer with the soft unavailable body,
+            # not a 500 from dereferencing it below.
+            return jsonify({'success': False, 'error': 'LRCLib unavailable',
+                            'synced': None, 'plain': None, 'source': None}), 200
 
         if fetch.status == 'unknown':
             # retryable only for genuinely transient kinds — a permanent

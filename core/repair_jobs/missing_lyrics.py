@@ -191,10 +191,12 @@ class MissingLyricsJob(RepairJob):
                 # Warning, not debug: if the probe is raising for a
                 # programming reason (not LRCLib), that must be visible —
                 # and the consecutive-unknown abort below bounds this to
-                # a handful of lines before the scan stops.
+                # a handful of lines before the scan stops. The full
+                # exception goes to the LOG; the user-facing reason (it
+                # can land in stopped_early) names only the error type.
                 logger.warning("[Lyrics Filler] availability check failed for '%s': %s", title, e)
                 probe_status = 'unknown'
-                probe_reason = f'LRCLib lookup failed: {e}'
+                probe_reason = f'LRCLib lookup failed ({type(e).__name__})'
 
             if probe_status == 'unknown':
                 unknown_count += 1
@@ -204,8 +206,13 @@ class MissingLyricsJob(RepairJob):
                 # album's bad metadata) says something about that track's
                 # query, not about LRCLib's health: counting it would stop
                 # a whole-library scan with a false "LRCLib stopped
-                # answering" diagnosis over a cluster of bad rows.
-                if probe_kind != 'permanent':
+                # answering" diagnosis over a cluster of bad rows. It does
+                # RESET the streak, though — LRCLib answered, and
+                # "consecutive" in the stop message should be literally
+                # true (same rule as the bulk-fix breaker).
+                if probe_kind == 'permanent':
+                    consecutive_unknown = 0
+                else:
                     consecutive_unknown += 1
                     last_unknown_reason = probe_reason
                 logger.warning(

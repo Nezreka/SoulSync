@@ -2448,7 +2448,9 @@ class YouTubeClient(DownloadSourcePlugin):
             if success:
                 logger.debug("   Created .lrc lyrics file")
             elif fetch_reason:
-                logger.debug(f"   Lyrics fetch incomplete: {fetch_reason}")
+                # Warning, not debug (#1879): a transient LRCLib failure
+                # must be visible at the default log level.
+                logger.warning(f"   Lyrics fetch incomplete: {fetch_reason}")
             else:
                 logger.debug("   No lyrics found on LRClib")
 

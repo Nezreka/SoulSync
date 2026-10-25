@@ -1211,11 +1211,19 @@ async function _npLyricsLoadForTrack(track) {
                 ? data.error : 'No lyrics found';
             content.replaceChildren(empty);
         }
+        if (data && data.retryable && _npLyricsState.trackKey === key) {
+            // Transient failure (#1879): don't let the already-loaded
+            // guard pin this track as "done" forever — clearing the key
+            // lets the next load attempt (this track starting again)
+            // retry the fetch.
+            _npLyricsState.trackKey = null;
+        }
         if (status) status.textContent = '';
     } catch (e) {
         console.debug('lyrics fetch failed:', e);
         const content = document.getElementById('np-lyrics-content');
         if (content) content.innerHTML = '<div class="np-lyrics-empty">Lyrics unavailable</div>';
+        if (_npLyricsState.trackKey === key) _npLyricsState.trackKey = null;  // network error is transient too
         if (status) status.textContent = '';
     } finally {
         _npLyricsState.fetchInFlight = false;
