@@ -358,6 +358,10 @@ def _tidy_component(part: str) -> str:
     p = re.sub(r"\s+-\s+(?=(\s|$))", " ", p)   # ' - ' before an empty token
     p = re.sub(r"\(\s*\)", "", p)                 # empty ( ) from a missing $year
     p = re.sub(r"\[\s*\]", "", p)
+    # a title that already ends in a year ("Treasure Island (2026)", "Battlestar
+    # Galactica (2003)", as Plex names them) followed by $year: the title's own
+    # year is part of its name, so it stays and the appended one goes
+    p = re.sub(r"\((\d{4})\)(?:\s*\(\d{4}\))+", r"(\1)", p)
     p = re.sub(r"\s+", " ", p).strip()
     p = p.strip("-").strip()
     return p.rstrip(". ")

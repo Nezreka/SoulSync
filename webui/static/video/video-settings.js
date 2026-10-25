@@ -1509,6 +1509,7 @@
         return out.split('/').map(function (p) {
             p = p.replace(/\{\s*(?:[A-Za-z]+-)?\s*\}/g, '');   // '{imdb-}' / '{}' from an empty id
             p = p.replace(/\s+-\s+(?=(\s|$))/g, ' ').replace(/\(\s*\)/g, '').replace(/\[\s*\]/g, '');
+            p = p.replace(/\((\d{4})\)(?:\s*\(\d{4}\))+/g, '($1)');
             p = p.replace(/\s+/g, ' ').trim().replace(/^-+|-+$/g, '').trim().replace(/[ .]+$/, '');
             return p;
         }).filter(function (p) { return p !== ''; }).join('/');
