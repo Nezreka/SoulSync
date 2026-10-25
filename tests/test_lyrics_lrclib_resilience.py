@@ -40,6 +40,9 @@ class FakeHTTPError(Exception):
         self.headers = headers or {}
 
 
+_REAL_WAIT_FOR_SLOT = lrclib_throttle.wait_for_slot
+
+
 @pytest.fixture(autouse=True)
 def _no_throttle_waits(monkeypatch):
     lrclib_throttle._reset_for_tests()
@@ -170,14 +173,29 @@ def test_timeout_is_unknown_and_never_searches():
     api.search_lyrics.assert_not_called()
 
 
-def test_other_4xx_is_unknown_without_retry_or_search():
+def test_other_4xx_on_exact_falls_back_to_search():
+    # A 400 from /get (e.g. an empty artist name — lrclibapi raises
+    # IncorrectPublishTokenError for any 400) is a permanent error for
+    # THAT query, but search takes different parameters and may still
+    # hit. The old code always fell through; only transient failures
+    # block the fallback.
     api = MagicMock()
     api.get_lyrics.side_effect = FakeHTTPError(400)
+    api.search_lyrics.return_value = [_lyrics()]
+    c = _client(api)
+    assert c.has_remote_lyrics("Song", "Artist", "Album", 200) is True
+    assert api.get_lyrics.call_count == 1          # permanent: never retried
+    assert api.search_lyrics.call_count == 1
+
+
+def test_other_4xx_on_both_strategies_is_unknown():
+    api = MagicMock()
+    api.get_lyrics.side_effect = FakeHTTPError(400)
+    api.search_lyrics.side_effect = FakeHTTPError(400)
     c = _client(api)
     result = c.lookup_remote_lyrics("Song", "Artist", "Album", 200)
     assert result.status == STATUS_UNKNOWN and result.error_kind == 'permanent'
-    assert api.get_lyrics.call_count == 1
-    api.search_lyrics.assert_not_called()
+    assert api.get_lyrics.call_count == 1 and api.search_lyrics.call_count == 1
 
 
 def test_transient_then_success_returns_found():
@@ -242,6 +260,72 @@ def test_throttle_cooldown_pushes_next_slot(monkeypatch):
     at = lrclib_throttle.reserve_request_slot()
     assert at - _time.monotonic() >= 50  # cooldown honoured (bounded, ~60s)
     assert lrclib_throttle.status()['cooldown_remaining'] > 0
+
+
+def test_lrclib_throttle_settings_are_registered():
+    # The pacing knobs must exist in core/settings.py defaults (and the
+    # web_server persist list) — an unregistered key would silently read
+    # as the fallback forever and "turn it down in Settings" would be a
+    # lie. Under the test config (pure defaults) they read back as the
+    # shipped defaults.
+    assert lrclib_throttle._settings() == (
+        lrclib_throttle.DEFAULT_MIN_GAP_SECONDS,
+        lrclib_throttle.DEFAULT_MAX_PER_WINDOW)
+
+
+def test_throttle_note_rate_limited_floor_cap_and_zero():
+    lrclib_throttle._reset_for_tests()
+    lrclib_throttle.note_rate_limited(None)          # no header → 30s default
+    assert 25 <= lrclib_throttle.status()['cooldown_remaining'] <= 30
+    lrclib_throttle._reset_for_tests()
+    lrclib_throttle.note_rate_limited(0)             # explicit 0 is NOT "missing"
+    assert 0 < lrclib_throttle.status()['cooldown_remaining'] <= 5   # floor only
+    lrclib_throttle._reset_for_tests()
+    lrclib_throttle.note_rate_limited(9999)          # absurd → capped at 300s
+    assert 250 <= lrclib_throttle.status()['cooldown_remaining'] <= 300
+
+
+def test_throttle_window_cap_defers_beyond_window(monkeypatch):
+    monkeypatch.setattr(lrclib_throttle, "_settings", lambda: (0.0, 3))
+    lrclib_throttle._reset_for_tests()
+    slots = [lrclib_throttle.reserve_request_slot() for _ in range(4)]
+    # 4th reservation must wait for the oldest to leave the 60s window
+    assert slots[3] - slots[0] >= 59.0
+    assert slots == sorted(slots)                   # list stays ordered
+
+
+def test_busy_refusal_when_interactive_wait_exceeds_cooldown(monkeypatch):
+    # Player-style call: a 60s cooldown is in effect and the caller will
+    # only wait 0.05s → no request is fired at all, busy comes back.
+    # (Uses the real wait_for_slot, captured before the autouse stub.)
+    monkeypatch.setattr(lrclib_throttle, "wait_for_slot", _REAL_WAIT_FOR_SLOT)
+    lrclib_throttle._reset_for_tests()
+    lrclib_throttle.note_rate_limited(60)
+    api = MagicMock()
+    c = _client(api)
+    result = c.lookup_remote_lyrics("Song", "Artist", max_wait_seconds=0.05)
+    assert result.status == STATUS_UNKNOWN and result.error_kind == 'rate_limited'
+    assert 'busy' in result.reason
+    api.get_lyrics.assert_not_called()
+    api.search_lyrics.assert_not_called()
+
+
+def test_retry_budget_is_elapsed_based(monkeypatch):
+    # Retry-After: 12 twice would need 24s of waiting: the second wait
+    # would push elapsed past the 20s budget, so the call gives up after
+    # 2 attempts instead of parking the thread. Fake clock: the client's
+    # sleeper advances it; the throttle is stubbed by the autouse fixture.
+    import time as _time_module
+    clock = [1000.0]
+    monkeypatch.setattr(_time_module, "monotonic", lambda: clock[0])
+    api = MagicMock()
+    api.get_lyrics.side_effect = FakeHTTPError(429, {'Retry-After': '12'})
+    c = _client(api)
+    c._sleep = lambda s: clock.__setitem__(0, clock[0] + s)
+    result = c.lookup_remote_lyrics("Song", "Artist", "Album", 200)
+    assert result.status == STATUS_UNKNOWN and result.error_kind == 'rate_limited'
+    assert api.get_lyrics.call_count == 2
+    api.search_lyrics.assert_not_called()
 
 
 # ── scan: unknowns counted separately, abort after consecutive run ──────
@@ -311,6 +395,20 @@ def test_scan_unknown_run_resets_on_definitive_answer(tmp_path, monkeypatch):
     assert result.stopped_early == ''
     assert result.findings_created == 1
     assert result.skipped == 3                       # only the definitive absents
+
+
+def test_scan_permanent_unknowns_do_not_stop_the_scan(tmp_path, monkeypatch):
+    # A permanent query error (400 for one album's bad metadata) is not
+    # LRCLib failing: seven in a row must NOT stop the scan, and the
+    # tracks are still not counted as definitive skips.
+    probe = lambda *a, **k: LyricsFetchResult(  # noqa: E731
+        STATUS_UNKNOWN, reason='LRCLib rejected the request (400)',
+        error_kind='permanent')
+    result, findings = _scan_with_probe(tmp_path, monkeypatch, probe)
+    assert findings == []
+    assert result.stopped_early == ''
+    assert result.skipped == 0
+    assert result.scanned == 7                       # every track probed
 
 
 def test_scan_raising_probe_aborts_with_reason_visible(tmp_path, monkeypatch):

@@ -195,7 +195,7 @@ class LyricsClient:
 
     # ── low-level call: pacing + bounded transient retry ─────────────────
 
-    def _call_lrclib(self, description, fn):
+    def _call_lrclib(self, description, fn, max_wait_seconds=None):
         """Run one LRCLib call with pacing and bounded transient retries.
 
         Returns ``(data, None)`` on success or ``(None, LyricsFetchResult)``
@@ -203,14 +203,44 @@ class LyricsClient:
         are never retried; transient errors retry up to ``max_attempts``
         total tries, waiting Retry-After (capped) or exponential backoff
         with jitter between tries.
+
+        The wait budget is measured in ELAPSED time (monotonic), not just
+        explicit backoff sleeps: a retry's throttle wait can include a
+        shared rate-limit cooldown set by another caller, and that wait
+        parks this thread just the same. Once elapsed time exceeds
+        MAX_TOTAL_RETRY_WAIT_SECONDS the transient outcome is returned
+        instead of retrying again.
+
+        ``max_wait_seconds`` is for interactive callers (the player
+        endpoint): when the throttle cannot offer a slot within that
+        wait, no request is fired at all and a busy UNKNOWN comes back,
+        rather than parking an HTTP worker for the length of a cooldown
+        (which can exceed the 120s gunicorn timeout).
         """
         from core import lrclib_throttle
         attempts = max(1, int(getattr(self, 'max_attempts', MAX_LRCLIB_ATTEMPTS) or 1))
         sleeper = getattr(self, '_sleep', None) or time.sleep
-        waited = 0.0
+        started = time.monotonic()
         last = None
         for attempt in range(attempts):
-            lrclib_throttle.wait_for_slot()
+            if attempt > 0 and time.monotonic() - started > MAX_TOTAL_RETRY_WAIT_SECONDS:
+                logger.warning("%s %s — elapsed wait budget (%.0fs) exhausted after "
+                               "%d attempt(s); giving up for now",
+                               description, last.error_kind if last else 'transient',
+                               MAX_TOTAL_RETRY_WAIT_SECONDS, attempt)
+                return None, last
+            if not lrclib_throttle.wait_for_slot(max_wait_seconds=max_wait_seconds):
+                # Interactive caller and the next slot is too far away —
+                # say busy, don't park. Name the actual constraint: a
+                # rate-limit cooldown if one is in effect, otherwise the
+                # shared request window is simply full.
+                if lrclib_throttle.status()['cooldown_remaining'] > 0:
+                    busy_reason = 'LRCLib busy (rate-limit cooldown) — retry later'
+                else:
+                    busy_reason = 'LRCLib busy (request budget full) — retry later'
+                return None, LyricsFetchResult(
+                    STATUS_UNKNOWN, error_kind='rate_limited',
+                    reason=busy_reason)
             try:
                 return fn(), None
             except Exception as e:
@@ -221,9 +251,15 @@ class LyricsClient:
                     return None, outcome
                 last = outcome
                 # LRCLib explicitly pushed back — every caller backs off
-                # together, not just this one.
-                if outcome.error_kind in ('rate_limited', 'server'):
+                # together, not just this one. A 429 earns the shared
+                # cooldown its Retry-After asks for (30s default); a lone
+                # 5xx without one earns only the floor, so one hiccup
+                # doesn't park every caller for half a minute.
+                if outcome.error_kind == 'rate_limited':
                     lrclib_throttle.note_rate_limited(outcome.retry_after)
+                elif outcome.error_kind == 'server':
+                    lrclib_throttle.note_rate_limited(
+                        outcome.retry_after if outcome.retry_after is not None else 5)
                 if attempt + 1 >= attempts:
                     logger.warning("%s failed after %d attempts (%s): %s",
                                    description, attempts, outcome.error_kind, e)
@@ -235,7 +271,7 @@ class LyricsClient:
                 else:
                     delay = min(2.0 ** attempt, MAX_RETRY_DELAY_SECONDS)
                     delay += random.uniform(0, 0.5)
-                if waited + delay > MAX_TOTAL_RETRY_WAIT_SECONDS:
+                if (time.monotonic() - started) + delay > MAX_TOTAL_RETRY_WAIT_SECONDS:
                     # Waiting longer would park this thread past the
                     # per-call budget — report the transient outcome now
                     # and let the caller retry later instead.
@@ -247,13 +283,13 @@ class LyricsClient:
                 logger.debug("%s %s (attempt %d/%d) — retrying in %.1fs",
                              description, outcome.error_kind, attempt + 1, attempts, delay)
                 sleeper(delay)
-                waited += delay
         return None, last  # pragma: no cover - loop always returns
 
     # ── fetch strategy: exact match, then search — tri-state ────────────
 
     def lookup_remote_lyrics(self, track_name: str, artist_name: str,
-                             album_name: str = None, duration_seconds: int = None) -> LyricsFetchResult:
+                             album_name: str = None, duration_seconds: int = None,
+                             max_wait_seconds: float = None) -> LyricsFetchResult:
         """LRClib fetch — exact match (with duration) then search fallback.
 
         Tri-state (#1879): FOUND carries the lyrics object, ABSENT means
@@ -262,6 +298,10 @@ class LyricsClient:
         permanent query error) — callers must not record UNKNOWN as a
         negative. A transient exact-match failure does NOT fall through
         to search: a second request while rate-limited makes it worse.
+        A permanent exact-match failure (e.g. a 400 for an empty artist
+        name) DOES fall through, as the old code did: search takes
+        different parameters and may still hit. ``max_wait_seconds``
+        is forwarded to the throttle for interactive callers.
         """
         if not self.api:
             return LyricsFetchResult(STATUS_UNKNOWN, error_kind='unavailable',
@@ -272,18 +312,27 @@ class LyricsClient:
                 'Exact match',
                 lambda: self.api.get_lyrics(
                     track_name=track_name, artist_name=artist_name,
-                    album_name=album_name, duration=duration_seconds))
+                    album_name=album_name, duration=duration_seconds),
+                max_wait_seconds=max_wait_seconds)
             if data is not None:
                 return LyricsFetchResult(STATUS_FOUND, data=data)
-            if failure is not None and failure.status != STATUS_ABSENT:
+            if failure is not None and failure.status != STATUS_ABSENT \
+                    and failure.error_kind != 'permanent':
+                # Transient failure (429/5xx/timeout, incl. a busy
+                # refusal for an interactive caller): do NOT fire the
+                # search fallback — a second request while LRCLib is
+                # pushing back makes it worse, and a busy refusal means
+                # the caller already declined to wait for a slot.
                 return failure
-            # ABSENT from exact match (or a None-returning client):
-            # the search fallback queries differently and may still hit.
+            # Fall through to search on: ABSENT (404), a permanent query
+            # error (400 — search takes different params and may hit),
+            # or a None-returning client (failure is None).
         # Strategy 2: Search without duration
         results, failure = self._call_lrclib(
             'Search fallback',
             lambda: self.api.search_lyrics(
-                track_name=track_name, artist_name=artist_name))
+                track_name=track_name, artist_name=artist_name),
+            max_wait_seconds=max_wait_seconds)
         if failure is not None:
             return failure
         if results:
@@ -303,7 +352,8 @@ class LyricsClient:
         return result.data if result.status == STATUS_FOUND else None
 
     def check_remote_lyrics(self, track_name: str, artist_name: str,
-                            album_name: str = None, duration_seconds: int = None) -> LyricsFetchResult:
+                            album_name: str = None, duration_seconds: int = None,
+                            max_wait_seconds: float = None) -> LyricsFetchResult:
         """Tri-state availability check with usable-content semantics.
 
         Like lookup_remote_lyrics, except FOUND additionally requires the
@@ -311,7 +361,8 @@ class LyricsClient:
         lyrics content counts as ABSENT, matching has_remote_lyrics'
         historical contract).
         """
-        result = self.lookup_remote_lyrics(track_name, artist_name, album_name, duration_seconds)
+        result = self.lookup_remote_lyrics(track_name, artist_name, album_name,
+                                           duration_seconds, max_wait_seconds=max_wait_seconds)
         if result.status != STATUS_FOUND:
             return result
         data = result.data
@@ -402,9 +453,12 @@ class LyricsClient:
                 track_name, artist_name, album_name, duration_seconds)
 
             if fetch.status == STATUS_UNKNOWN:
-                # Transient/permanent failure — NOT "no lyrics". Surface
-                # the real reason at a visible level (#1879).
-                logger.warning(f"Lyrics fetch incomplete for {artist_name} - {track_name}: {fetch.reason}")
+                # Transient/permanent failure — NOT "no lyrics". The
+                # reason travels with the return value and every caller
+                # surfaces it (worker error, scan log, endpoint response,
+                # import log), so this stays debug to avoid logging the
+                # same failure twice (#1879).
+                logger.debug(f"Lyrics fetch incomplete for {artist_name} - {track_name}: {fetch.reason}")
                 return False, fetch.reason
 
             # No lyrics found (definitive)
@@ -442,7 +496,10 @@ class LyricsClient:
 
         except Exception as e:
             logger.error(f"Error creating LRC file for {track_name}: {e}")
-            return False, str(e)
+            # Generic reason, not str(e): the reason is user-presentable
+            # (the repair worker returns it verbatim) and a raw exception
+            # can carry file paths / OS messages. Detail lives in the log.
+            return False, 'Lyrics fetch/write failed — see app log for details'
 
 
     def _embed_lyrics(self, audio_file_path: str, lyrics_text: str):

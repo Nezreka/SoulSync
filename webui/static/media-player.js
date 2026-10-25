@@ -1201,11 +1201,14 @@ async function _npLyricsLoadForTrack(track) {
         const content = document.getElementById('np-lyrics-content');
         if (content) {
             // A failed lookup (LRCLib rate-limited / 503 / rejected,
-            // #1879) is NOT necessarily "no lyrics" — the endpoint now
-            // returns the real reason in `error`, so show it when present.
+            // #1879) is NOT necessarily "no lyrics" — when the endpoint
+            // returns an LRCLib reason, show that instead of the generic
+            // copy. Anything else (a definitive miss, a raw server
+            // error) keeps the old "No lyrics found" text.
             const empty = document.createElement('div');
             empty.className = 'np-lyrics-empty';
-            empty.textContent = (data && data.error) ? data.error : 'No lyrics found';
+            empty.textContent = (data && data.error && (data.retryable || data.error.startsWith('LRCLib')))
+                ? data.error : 'No lyrics found';
             content.replaceChildren(empty);
         }
         if (status) status.textContent = '';

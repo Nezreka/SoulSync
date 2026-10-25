@@ -708,6 +708,17 @@ class ConfigManager:
                 "search_min_gap_seconds": 2.0,
                 "max_searches_per_minute": 20,
             },
+            # LRCLib — the community lyrics service behind the Lyrics
+            # Filler, imports, retag and the player (core.lyrics_client).
+            # Pacing for core.lrclib_throttle: LRCLib's allowances are
+            # approximate (~45 req/min generic, ~90/min with an
+            # identifying User-Agent) and unpaced bursts earn 429/503s,
+            # which used to be misreported as "no lyrics" (#1879).
+            # 0 on either knob disables that half of the budget.
+            "lrclib": {
+                "request_min_gap_seconds": 0.75,
+                "max_requests_per_minute": 80,
+            },
             # Torrent client — receives .torrent / magnet URIs from the
             # torrent download plugin. ``type`` picks which adapter to
             # instantiate (qbittorrent | transmission | deluge).

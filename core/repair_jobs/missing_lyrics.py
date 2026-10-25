@@ -161,6 +161,7 @@ class MissingLyricsJob(RepairJob):
             # (True = found, False = absent, None = unknown).
             probe_status = 'absent'
             probe_reason = ''
+            probe_kind = ''
             try:
                 check = getattr(lyrics_client, 'check_remote_lyrics', None)
                 if callable(check):
@@ -168,6 +169,7 @@ class MissingLyricsJob(RepairJob):
                     if hasattr(outcome, 'status'):
                         probe_status = outcome.status
                         probe_reason = getattr(outcome, 'reason', '') or ''
+                        probe_kind = getattr(outcome, 'error_kind', '') or ''
                         if probe_status not in ('found', 'absent', 'unknown'):
                             # An unrecognized status string is a contract
                             # we don't understand — never record it as a
@@ -196,8 +198,16 @@ class MissingLyricsJob(RepairJob):
 
             if probe_status == 'unknown':
                 unknown_count += 1
-                consecutive_unknown += 1
-                last_unknown_reason = probe_reason
+                # Only TRANSIENT unknowns (429/5xx/timeout/network — or an
+                # unclassified one, e.g. a raising probe) count toward the
+                # early stop. A permanent query error (e.g. a 400 for one
+                # album's bad metadata) says something about that track's
+                # query, not about LRCLib's health: counting it would stop
+                # a whole-library scan with a false "LRCLib stopped
+                # answering" diagnosis over a cluster of bad rows.
+                if probe_kind != 'permanent':
+                    consecutive_unknown += 1
+                    last_unknown_reason = probe_reason
                 logger.warning(
                     "[Lyrics Filler] LRCLib availability unknown for '%s' (%s) — not counted as missing lyrics",
                     title, probe_reason or 'lookup failed')

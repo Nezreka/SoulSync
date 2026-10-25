@@ -387,12 +387,16 @@ def fetch_lyrics_endpoint():
         # of a misleading 'no lyrics found'.
         from core.lyrics_client import lyrics_client as _lyrics_client
         if getattr(_lyrics_client, 'api', None) is None:
-            return jsonify({'success': False, 'error': 'lrclib unavailable',
+            return jsonify({'success': False, 'error': 'LRCLib unavailable',
                             'synced': None, 'plain': None, 'source': None}), 200
 
+        # Interactive caller: cap the throttle wait at 10s so a player
+        # request can never park an HTTP worker for the length of a
+        # rate-limit cooldown (which can exceed the gunicorn timeout).
         fetch = _lyrics_client.lookup_remote_lyrics(
             track_name=title, artist_name=artist,
-            album_name=album, duration_seconds=duration)
+            album_name=album, duration_seconds=duration,
+            max_wait_seconds=10)
 
         if fetch.status == 'unknown':
             # retryable only for genuinely transient kinds — a permanent

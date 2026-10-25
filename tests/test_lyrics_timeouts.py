@@ -11,6 +11,12 @@ def test_both_lrclib_lookups_have_transport_timeouts(monkeypatch):
         timeouts.append(kwargs.get('timeout'))
         raise requests.exceptions.ReadTimeout('simulated unresponsive lyrics service')
     monkeypatch.setattr(requests.Session, 'request', stalled)
+    # Isolate from the shared LRCLib throttle: this test pins TRANSPORT
+    # timeouts, not pacing (#1879) — and throttle state must not leak
+    # into (or out of) this test.
+    from core import lrclib_throttle
+    lrclib_throttle._reset_for_tests()
+    monkeypatch.setattr(lrclib_throttle, 'wait_for_slot', lambda **k: True)
     client = LyricsClient()
     client._sleep = lambda s: None  # don't wait out the retry backoff
     assert client.api is not None

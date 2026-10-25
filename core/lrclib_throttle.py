@@ -22,6 +22,7 @@ by the same budget.
 
 from __future__ import annotations
 
+import bisect
 import threading
 import time
 from typing import Any, Dict, Optional
@@ -82,7 +83,10 @@ def reserve_request_slot(max_wait_seconds: Optional[float] = None) -> Optional[f
         at = max(at, _COOLDOWN_UNTIL[0])                    # honour a 429/5xx cooldown
         if max_wait_seconds is not None and at - now > max_wait_seconds:
             return None                                     # don't consume a slot
-        _TIMES.append(at)
+        # insort, not append: with min_gap = 0 a reservation pushed out
+        # by the window/cooldown can be followed by one at `now`, which
+        # would leave the list unsorted and break front-pruning.
+        bisect.insort(_TIMES, at)
         return at
 
 
@@ -109,7 +113,9 @@ def note_rate_limited(retry_after: Any = None) -> None:
     every lookup for an hour, and anything under 5s is not a real backoff.
     """
     try:
-        secs = float(retry_after) if retry_after else 30.0
+        # None (no header) → default; an explicit 0 is a real value and
+        # must not be read as "missing" — it still earns the 5s floor.
+        secs = float(retry_after) if retry_after is not None else 30.0
     except (TypeError, ValueError):
         secs = 30.0
     with _LOCK:

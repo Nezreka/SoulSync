@@ -2424,17 +2424,31 @@ class YouTubeClient(DownloadSourcePlugin):
             album_name = spotify_track.album
             duration_seconds = int(spotify_track.duration_ms / 1000) if spotify_track.duration_ms else None
 
-            # Create LRC file
-            success = lyrics_client.create_lrc_file(
-                audio_file_path=audio_file_path,
-                track_name=track_name,
-                artist_name=artist_name,
-                album_name=album_name,
-                duration_seconds=duration_seconds
-            )
+            # Create LRC file (detailed variant when available, #1879:
+            # a transient failure is not "no lyrics found")
+            detailed = getattr(lyrics_client, 'create_lrc_file_detailed', None)
+            if callable(detailed):
+                success, fetch_reason = detailed(
+                    audio_file_path=audio_file_path,
+                    track_name=track_name,
+                    artist_name=artist_name,
+                    album_name=album_name,
+                    duration_seconds=duration_seconds
+                )
+            else:
+                success = lyrics_client.create_lrc_file(
+                    audio_file_path=audio_file_path,
+                    track_name=track_name,
+                    artist_name=artist_name,
+                    album_name=album_name,
+                    duration_seconds=duration_seconds
+                )
+                fetch_reason = None
 
             if success:
                 logger.debug("   Created .lrc lyrics file")
+            elif fetch_reason:
+                logger.debug(f"   Lyrics fetch incomplete: {fetch_reason}")
             else:
                 logger.debug("   No lyrics found on LRClib")
 
