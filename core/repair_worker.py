@@ -5294,6 +5294,7 @@ class RepairWorker:
         skipped_count = 0
         track_details = []
         existing_track_ids = {t.id for t in existing_tracks}
+        _tracklist_cache: Dict[str, Any] = {}
 
         for mt in missing_tracks:
             track_name = mt.get('name', '')
@@ -5310,7 +5311,8 @@ class RepairWorker:
                 track_details.append({'track': track_name, 'status': 'skipped', 'reason': 'no track name'})
                 continue
 
-            if not _album_fill_target_artist_allows_track(artist_name, track_artists):
+            if (not _album_fill_target_artist_allows_track(artist_name, track_artists)
+                    and not self._album_tracklist_credits_artist(details, artist_name, _tracklist_cache)):
                 skipped_count += 1
                 logger.warning(
                     "Album auto-fill skipped '%s': source artist(s) %s do not match target album artist '%s'",
@@ -5475,6 +5477,47 @@ class RepairWorker:
             'skipped': skipped_count,
             'details': track_details,
         }
+
+    def _album_tracklist_credits_artist(self, details, artist_name, cache) -> bool:
+        """True when the album's own source tracklist credits the album artist
+        somewhere. a guest track on a soundtrack (Alexander Rybak on John
+        Powell's How to Train Your Dragon 2) is fine on its album. what the
+        artist check is really for is an album matched to the wrong release
+        (Gut's Light Years pointing at Jamiroquai's), and there the album
+        artist isn't on the tracklist at all. no tracklist, no pass."""
+        if 'credits' in cache:
+            return cache['credits']
+        cache['credits'] = False
+        album_sources = {
+            'spotify': details.get('spotify_album_id', ''),
+            'itunes': details.get('itunes_album_id', ''),
+            'deezer': details.get('deezer_album_id', ''),
+            'discogs': details.get('discogs_album_id', ''),
+            'hydrabase': details.get('hydrabase_album_id', ''),
+        }
+        primary = details.get('primary_source')
+        if primary and details.get('primary_album_id') and not album_sources.get(primary):
+            album_sources[primary] = details.get('primary_album_id')
+        for source in get_source_priority(primary or get_primary_source()):
+            fid = album_sources.get(source, '')
+            if not fid:
+                continue
+            try:
+                api_tracks = get_album_tracks_for_source(source, fid)
+            except Exception as e:
+                logger.debug("Album fill: %s tracklist failed for %s: %s", source, fid, e)
+                continue
+            items = (api_tracks or {}).get('items') or []
+            if not items:
+                continue
+            for item in items:
+                for a in item.get('artists', []) or []:
+                    name = a.get('name', '') if isinstance(a, dict) else str(a or '')
+                    if name and _album_fill_artist_names_match(artist_name, name):
+                        cache['credits'] = True
+                        return True
+            return False
+        return False
 
     def _refetch_missing_tracks(self, album_id, details):
         """Re-fetch missing track list from APIs when the stored list is empty."""
