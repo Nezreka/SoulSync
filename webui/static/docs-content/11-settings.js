@@ -17,6 +17,7 @@ SoulSync needs credentials for the services it queries for metadata and enrichme
 - **Tidal** — Client ID, Client Secret, and Redirect URI. Log in with the Authenticate button — it opens Tidal's authorization page in the browser, and the callback is just a success page: close the window and you're connected.
 - **Last.fm** — API key, API secret, and your username. Powers scrobbling, similar artists, and listening-history import.
 - **Genius** — Client access token for lyrics.
+- **Pollinations** — Optional API key for playlist cover art. Works without one (one image every 45 seconds, with their mark).
 - **Qobuz** — Email and password, or a pasted auth token when login hits a CAPTCHA. Powers metadata enrichment and Qobuz downloads.
 - **HiFi** — no credentials at all. Free lossless downloads from community-run hifi-api instances, which you add and health-check on the Sources tab.
 - **Deezer** — App ID, App Secret, and Redirect URI (OAuth), or an ARL token for playlist access and downloads. Powers favorites, playlists, and Deezer downloads.

@@ -3304,6 +3304,8 @@ async function loadSettingsData() {
 
         // Populate Genius settings
         document.getElementById('genius-access-token').value = settings.genius?.access_token || '';
+        const _pollinationsKey = document.getElementById('pollinations-api-key');
+        if (_pollinationsKey) _pollinationsKey.value = settings.pollinations?.api_key || '';
 
         // Populate iTunes settings
         document.getElementById('itunes-country').value = settings.itunes?.country || 'US';
@@ -6746,6 +6748,11 @@ async function saveSettings(quiet = false) {
             scrobble_enabled: document.getElementById('lastfm-scrobble-enabled').checked,
             embed_tags: document.getElementById('embed-lastfm').checked,
             tags: _collectServiceTags('lastfm')
+        },
+        pollinations: {
+            // _cfgStr: undefined when the field is absent (video side), so a
+            // save there doesn't wipe the stored key
+            api_key: _cfgStr('pollinations-api-key', { trim: true }),
         },
         genius: {
             access_token: document.getElementById('genius-access-token').value,

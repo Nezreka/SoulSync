@@ -76536,6 +76536,102 @@ body.src-modal-open { overflow: hidden; }
 .mm-more-item--danger:hover:not(:disabled) { background: rgba(255, 90, 90, 0.12); }
 .mm-more-sep { height: 1px; margin: 5px 8px; background: var(--white-a08); }
 
+/* generate cover art: a preview sheet over the playlist modal. solid
+   surfaces, no blur: some browsers skip backdrop-filter entirely */
+.cover-art-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: var(--black-a75);
+    animation: as-in 0.16s ease-out;
+}
+.cover-art-sheet {
+    width: min(420px, 100%);
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+    padding: 20px;
+    border: 1px solid var(--white-a10);
+    border-radius: var(--radius-xl);
+    background: var(--bg-raised);
+    box-shadow: 0 30px 80px var(--black-a60);
+    color: var(--text-bright);
+}
+.cover-art-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.cover-art-head h3 { margin: 0; font-size: 17px; font-weight: 750; letter-spacing: -0.01em; }
+.cover-art-for { margin: 3px 0 0; font-size: 13px; color: var(--text-3); }
+.cover-art-close {
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border: none;
+    border-radius: var(--radius-circle);
+    background: var(--white-a06);
+    color: var(--text-2);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+.cover-art-close:hover { background: var(--white-a12); color: var(--text-bright); }
+.cover-art-frame {
+    position: relative;
+    aspect-ratio: 1;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    background: var(--white-a05);
+}
+.cover-art-img { display: block; width: 100%; height: 100%; object-fit: cover; transition: opacity 0.2s ease; }
+.cover-art-img--dim { opacity: 0.35; }
+.cover-art-status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    font-size: 13.5px;
+    color: var(--text-2);
+    text-align: center;
+}
+.cover-art-status--error { color: var(--danger-light); }
+.cover-art-spin {
+    width: 26px;
+    height: 26px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: mm-spin 0.7s linear infinite;
+}
+.cover-art-vibe { min-height: 18px; margin: 12px 2px 0; font-size: 12.5px; color: var(--text-3); }
+.cover-art-inline-error { color: var(--danger-light); }
+.cover-art-actions { display: flex; gap: 10px; margin-top: 16px; }
+.cover-art-btn {
+    flex: 1;
+    height: 42px;
+    padding: 0 16px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-pill);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 650;
+    cursor: pointer;
+    transition: background 0.15s ease, opacity 0.15s ease;
+}
+.cover-art-btn:disabled { opacity: 0.45; cursor: default; }
+.cover-art-btn--ghost { background: var(--white-a06); border-color: var(--white-a10); color: var(--text-bright); }
+.cover-art-btn--ghost:hover:not(:disabled) { background: var(--white-a12); }
+.cover-art-btn--primary { background: rgb(var(--accent-rgb)); color: var(--black-a90); }
+.cover-art-btn--primary:hover:not(:disabled) { background: rgb(var(--accent-light-rgb)); }
+.cover-art-note { margin: 14px 2px 0; font-size: 11.5px; line-height: 1.5; color: var(--text-3); }
+@media (prefers-reduced-motion: reduce) {
+    .cover-art-overlay, .cover-art-spin { animation: none; }
+}
+
 /* the sort is a quiet pill on the right, above the column head */
 .mm-sortbar { justify-content: flex-end; padding: 4px 22px 4px; background: #121216; }
 .mm-sort-note { margin-right: auto; }

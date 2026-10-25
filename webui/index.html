@@ -3659,6 +3659,29 @@
                                             </div>
                                         </div>
 
+                                        <!-- Pollinations (optional; playlist cover art works without a key) -->
+                                        <div class="api-service-frame stg-service" data-service="pollinations">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: #7ad3a7;"></span>
+                                                <h4 class="service-title">Pollinations</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>API Key (optional):</label>
+                                                    <input type="password" id="pollinations-api-key"
+                                                        placeholder="Pollinations API key" autocomplete="off">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-help">Makes cover art for playlists, from the ⋯ menu on any playlist.
+                                                        Works without a key: one image every 45 seconds, with a small Pollinations mark in the corner.</div>
+                                                    <div class="callback-help">A key from <a
+                                                            href="https://enter.pollinations.ai" target="_blank" rel="noopener noreferrer"
+                                                            style="color: #7ad3a7;">enter.pollinations.ai</a> removes the mark and the wait.</div>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         <!-- MusicBrainz server (optional; public API requires no credentials) -->
                                         <div class="api-service-frame stg-service" id="musicbrainz-server-settings"
                                             data-service="musicbrainz">

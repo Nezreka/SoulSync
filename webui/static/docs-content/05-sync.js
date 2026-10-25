@@ -191,6 +191,15 @@ Every parsed playlist from any source is automatically **mirrored**. The Mirrore
 
 ![Mirrored playlist cards](sync-mirror.jpg)
 
+## Cover art
+
+Pick **Generate cover art** from a playlist card's **⋯** menu, or the **⋯** inside an open playlist. SoulSync reads the playlist's genres, mood and era from your library (and the playlist's name) and asks [Pollinations](https://pollinations.ai) for an image.
+
+- It opens as a preview. **Try another** paints it again in a different style; **Use this cover** keeps it
+- A generated cover stays when the playlist refreshes from its source, and syncs to Plex, Jellyfin or Navidrome
+- **Restore original cover** in the same menu puts the source's own cover back
+- Free with no setup: one image every 45 seconds, with a small Pollinations mark in the corner. A key from enter.pollinations.ai in **Settings → Pollinations** removes both
+
 ## Auto-sync schedules
 
 Mirrored playlists can refresh and re-sync on a schedule from the **Bulk schedule** button:

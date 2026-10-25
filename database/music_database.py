@@ -1514,6 +1514,7 @@ class MusicDatabase:
             self._add_mirrored_playlist_source_skipped_column(cursor)
             self._add_mirrored_playlist_track_added_at_column(cursor)
             self._add_mirrored_playlist_request_list_columns(cursor)
+            self._add_mirrored_playlist_custom_cover_columns(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -2936,6 +2937,26 @@ class MusicDatabase:
                 logger.info("Added custom_name column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding custom_name column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_custom_cover_columns(self, cursor):
+        """custom_cover: the user picked this cover (a generated one), so a
+        refresh from the source must leave image_url alone. source_image_url
+        keeps the source's own poster so "restore original" has it back."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'custom_cover' not in cols:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists ADD COLUMN custom_cover INTEGER NOT NULL DEFAULT 0"
+                )
+                logger.info("Added custom_cover column to mirrored_playlists table")
+            if 'source_image_url' not in cols:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists ADD COLUMN source_image_url TEXT DEFAULT NULL"
+                )
+                logger.info("Added source_image_url column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding custom cover columns to mirrored_playlists: {e}")
 
     def _add_mirrored_playlist_server_link_columns(self, cursor):
         """Which server playlist a mirror corresponds to, once we know.
@@ -25763,7 +25784,15 @@ class MusicDatabase:
                         name = excluded.name,
                         description = COALESCE(NULLIF(excluded.description, ''), mirrored_playlists.description),
                         owner = excluded.owner,
-                        image_url = COALESCE(NULLIF(excluded.image_url, ''), mirrored_playlists.image_url),
+                        image_url = CASE
+                            WHEN mirrored_playlists.custom_cover THEN mirrored_playlists.image_url
+                            ELSE COALESCE(NULLIF(excluded.image_url, ''), mirrored_playlists.image_url)
+                        END,
+                        source_image_url = CASE
+                            WHEN mirrored_playlists.custom_cover
+                            THEN COALESCE(NULLIF(excluded.image_url, ''), mirrored_playlists.source_image_url)
+                            ELSE mirrored_playlists.source_image_url
+                        END,
                         track_count = excluded.track_count,
                         quality_profile_id = CASE
                             WHEN ? THEN excluded.quality_profile_id
@@ -25927,6 +25956,58 @@ class MusicDatabase:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error setting image for mirrored playlist {playlist_id}: {e}")
+            return False
+
+    def set_mirrored_playlist_custom_cover(
+        self,
+        playlist_id: int,
+        image_url: str,
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """put a cover the user made on the playlist and keep it there.
+
+        the first time, whatever cover it had moves to source_image_url so it
+        can be restored. a second generate keeps that original, it doesn't
+        stash the first generated one over it.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET "
+                    "source_image_url = CASE WHEN custom_cover THEN source_image_url ELSE image_url END, "
+                    "image_url = ?, custom_cover = 1, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?" + owner_sql,
+                    [image_url, int(playlist_id), *owner_params],
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting custom cover for mirrored playlist {playlist_id}: {e}")
+            return False
+
+    def restore_mirrored_playlist_source_cover(
+        self,
+        playlist_id: int,
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """drop the custom cover, back to the source's own (or none, and the
+        views fall back to track art). refreshes write image_url again after."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET image_url = source_image_url, "
+                    "source_image_url = NULL, custom_cover = 0, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?" + owner_sql,
+                    [int(playlist_id), *owner_params],
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error restoring cover for mirrored playlist {playlist_id}: {e}")
             return False
 
     def set_mirrored_playlist_description(
@@ -26118,6 +26199,7 @@ class MusicDatabase:
         pl['organize_by_playlist'] = bool(pl.get('organize_by_playlist', 0))
         pl['is_request_list'] = bool(pl.get('is_request_list', 0))
         pl['auto_remove_fulfilled'] = bool(pl.get('auto_remove_fulfilled', 0))
+        pl['custom_cover'] = bool(pl.get('custom_cover', 0))
         pl['upstream_playlist_id'] = pl.get('upstream_playlist_id') or None
         try:
             pl['source_skipped'] = json.loads(pl['source_skipped']) if pl.get('source_skipped') else None

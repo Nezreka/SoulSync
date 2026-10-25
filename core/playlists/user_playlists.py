@@ -528,12 +528,14 @@ def set_cover_from_track(db: Any, playlist: Dict[str, Any], position: Any) -> st
 
 
 def remove_cover_file(playlist_id: int, base_dir: Optional[str] = None) -> None:
-    """best-effort delete of an uploaded cover file. only user playlists ever
-    have one, so after any mirror delete this is a no-op for the rest."""
+    """best-effort delete of a playlist's cover file: an upload, or a generated
+    cover and any preview left over. a no-op for playlists with neither."""
     try:
         os.remove(cover_path(playlist_id, base_dir))
     except OSError:
         pass
+    from core.playlists import cover_art
+    cover_art.discard_preview(playlist_id, base_dir)
 
 
 def clear_cover(db: Any, playlist: Dict[str, Any], *, base_dir: Optional[str] = None) -> None:
