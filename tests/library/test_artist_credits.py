@@ -704,6 +704,41 @@ def test_appears_on_albums_respects_library_scope(db):
     assert len(_albums_for(db, 2, scope_sql=own_sql, scope_params=own_params)) == 1
 
 
+def test_appears_on_stays_on_the_page_artists_server(db):
+    """rihanna is on plex and navidrome with the same spotify id. her navidrome
+    copy of anti isn't someone else's album, and its navidrome art and files
+    don't work on the plex page. a collab filed on navidrome stays off too."""
+    _seed(db)
+    c = _raw(db)
+    c.execute("INSERT INTO artists (id, name, server_source, spotify_artist_id) "
+              "VALUES (3, 'Rihanna', 'navidrome', 'sp_rihanna')")
+    c.execute("INSERT INTO artists (id, name, server_source, spotify_artist_id) "
+              "VALUES (4, 'Calvin Harris', 'navidrome', 'sp_calvin')")
+    c.execute("INSERT INTO albums (id, artist_id, title, year, server_source, thumb_url) "
+              "VALUES (30, 3, 'Anti', 2016, 'navidrome', '/rest/getCoverArt?id=al-anti')")
+    c.execute("INSERT INTO albums (id, artist_id, title, year, server_source) "
+              "VALUES (40, 4, '18 Months', 2012, 'navidrome')")
+    c.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, server_source) "
+              "VALUES (300, 30, 3, 'Work', 1, 'navidrome')")
+    c.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, server_source) "
+              "VALUES (400, 40, 4, 'We Found Love', 1, 'navidrome')")
+    c.commit()
+    c.close()
+    with db._get_connection() as conn:
+        cur = conn.cursor()
+        ac.save_album_credits(cur, 10, 'spotify', SP_18_MONTHS)
+        ac.save_album_credits(cur, 30, 'spotify', [{'id': 'sp_rihanna', 'name': 'Rihanna'}])
+        ac.save_album_credits(cur, 40, 'spotify', SP_18_MONTHS)
+        ac.save_track_credits(cur, 100, 'spotify', SP_WE_FOUND_LOVE)
+        ac.save_track_credits(cur, 300, 'spotify', [{'id': 'sp_rihanna', 'name': 'Rihanna'}])
+        ac.save_track_credits(cur, 400, 'spotify', SP_WE_FOUND_LOVE)
+        conn.commit()
+    assert [a['id'] for a in _albums_for(db, 2)] == ['10']
+    assert [t['id'] for t in _appears_on(db, 2)] == ['100']
+    assert [a['id'] for a in _albums_for(db, 3)] == ['40']
+    assert [t['id'] for t in _appears_on(db, 3)] == ['400']
+
+
 def test_spotify_album_match_saves_album_artists(db, monkeypatch):
     """the Album dataclass keeps names and ids in two parallel lists."""
     from core.spotify_client import Album

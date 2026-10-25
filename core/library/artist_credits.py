@@ -478,8 +478,9 @@ def appears_on(cursor, artist_id: Any, limit: int = 200,
                scope_sql: str = '1=1', scope_params: Sequence[Any] = ()) -> List[Dict[str, Any]]:
     """tracks this artist is credited on that are filed under someone else.
 
-    their own tracks are already on the page, so those are left out. one row
-    per track even when several sources credit them. scope_sql is the caller's
+    their own tracks are already on the page, so those are left out, and so
+    is the same artist's copy on another media server (other art paths, other
+    files). one row per track even when several sources credit them. scope_sql is the caller's
     library scope over t.owner_profile_id, so a profile only sees its own."""
     ids = artist_source_ids(cursor, artist_id)
     if not ids:
@@ -495,10 +496,11 @@ def appears_on(cursor, artist_id: Any, limit: int = 200,
         JOIN artists ar ON ar.id = t.artist_id
         WHERE t.id IN (SELECT c.track_id FROM track_artist_credits c WHERE {where})
           AND t.artist_id != ?
+          AND ar.server_source IS (SELECT server_source FROM artists WHERE id = ?)
           AND {scope_sql}
         ORDER BY al.year DESC, al.title, t.track_number
         LIMIT ?
-    """, params + [artist_id] + list(scope_params) + [limit])
+    """, params + [artist_id, artist_id] + list(scope_params) + [limit])
     rows = cursor.fetchall()
     if not rows:
         return []
@@ -540,7 +542,9 @@ def appears_on_albums(cursor, artist_id: Any, limit: int = 100,
                       scope_sql: str = '1=1', scope_params: Sequence[Any] = ()) -> List[Dict[str, Any]]:
     """albums this artist is credited on that are filed under someone else,
     with their tracks. a collab album sits under one artist row; this puts it
-    on the other artist's page too. scope_sql is over al.owner_profile_id."""
+    on the other artist's page too. only the page artist's server, their own
+    albums on another server aren't someone else's. scope_sql is over
+    al.owner_profile_id."""
     ids = artist_source_ids(cursor, artist_id)
     if not ids:
         return []
@@ -552,10 +556,11 @@ def appears_on_albums(cursor, artist_id: Any, limit: int = 100,
         JOIN artists ar ON ar.id = al.artist_id
         WHERE al.id IN (SELECT c.album_id FROM album_artist_credits c WHERE {where})
           AND al.artist_id != ?
+          AND ar.server_source IS (SELECT server_source FROM artists WHERE id = ?)
           AND {scope_sql}
         ORDER BY al.year DESC, al.title
         LIMIT ?
-    """, params + [artist_id] + list(scope_params) + [limit])
+    """, params + [artist_id, artist_id] + list(scope_params) + [limit])
     albums = cursor.fetchall()
     if not albums:
         return []
