@@ -17,6 +17,8 @@ export interface CoverArtPreview {
   prompt: string;
   /** a pollinations key is set: no mark on the image, no 45s wait */
   keyed: boolean;
+  /** the playlist's name is drawn on the preview */
+  show_name: boolean;
 }
 
 /** a failed call. retryAfter is set when waiting is the fix (the free tier). */
@@ -52,11 +54,27 @@ async function call<T>(url: string, init?: RequestInit): Promise<T> {
 const base = (playlistId: number) => `/api/mirrored-playlists/${playlistId}/cover-art`;
 
 /** make a preview. attempt rotates the art style, so try-another really differs. */
-export function generateCoverArt(playlistId: number, attempt = 0): Promise<CoverArtPreview> {
+export function generateCoverArt(
+  playlistId: number,
+  attempt = 0,
+  showName = true,
+): Promise<CoverArtPreview> {
   return call<CoverArtPreview>(base(playlistId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ attempt }),
+    body: JSON.stringify({ attempt, show_name: showName }),
+  });
+}
+
+/** the name on the preview, or off it. redraws the same image, no new one. */
+export function setCoverArtName(
+  playlistId: number,
+  showName: boolean,
+): Promise<{ preview_url: string; show_name: boolean }> {
+  return call<{ preview_url: string; show_name: boolean }>(`${base(playlistId)}/name`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ show_name: showName }),
   });
 }
 

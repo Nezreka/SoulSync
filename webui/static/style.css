@@ -76628,6 +76628,48 @@ body.src-modal-open { overflow: hidden; }
 .cover-art-btn--primary { background: rgb(var(--accent-rgb)); color: var(--black-a90); }
 .cover-art-btn--primary:hover:not(:disabled) { background: rgb(var(--accent-light-rgb)); }
 .cover-art-note { margin: 14px 2px 0; font-size: 11.5px; line-height: 1.5; color: var(--text-3); }
+/* the name on the cover: a quiet switch row, the watchlist panel's switch */
+.cover-art-name {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--white-a10);
+    border-radius: var(--radius-lg);
+    background: var(--white-a04);
+    font-size: 13px;
+    color: var(--text-bright);
+    cursor: pointer;
+}
+.cover-art-name input {
+    appearance: none;
+    position: relative;
+    width: 38px;
+    height: 22px;
+    margin: 0;
+    flex-shrink: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a12);
+    cursor: pointer;
+    transition: background var(--dur-quick) var(--ease-emphasized);
+}
+.cover-art-name input::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text-bright);
+    transition: transform var(--dur-quick) var(--ease-emphasized);
+}
+.cover-art-name input:checked { background: rgb(var(--accent-rgb)); }
+.cover-art-name input:checked::after { transform: translateX(16px); }
+.cover-art-name input:disabled { opacity: 0.45; cursor: default; }
+.cover-art-name input:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
     .cover-art-overlay, .cover-art-spin { animation: none; }
 }

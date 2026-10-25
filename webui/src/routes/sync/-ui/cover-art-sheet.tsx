@@ -16,6 +16,7 @@ import {
   type CoverArtPreview,
   discardCoverArtPreview,
   generateCoverArt,
+  setCoverArtName,
   vibeLine,
 } from '../../../features/playlists/cover-art';
 
@@ -43,6 +44,11 @@ export function CoverArtSheet({
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [readyAt, setReadyAt] = useState<number | null>(null);
+  // the playlist's name drawn on the cover. a ref too, so generate reads the
+  // current choice without being rebuilt (that would re-run the first generate)
+  const [showName, setShowName] = useState(true);
+  const showNameRef = useRef(true);
+  const [renaming, setRenaming] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const attempt = useRef(0);
   const alive = useRef(true);
@@ -60,7 +66,7 @@ export function CoverArtSheet({
     setLoading(true);
     setError(null);
     try {
-      const result = await generateCoverArt(playlistId, attempt.current);
+      const result = await generateCoverArt(playlistId, attempt.current, showNameRef.current);
       if (!alive.current) return;
       madePreview.current = true;
       attempt.current += 1;
@@ -105,6 +111,26 @@ export function CoverArtSheet({
   }, [readyAt]);
   const secondsLeft = waiting && readyAt !== null ? Math.ceil((readyAt - now) / 1000) : 0;
 
+  const toggleName = async (next: boolean) => {
+    showNameRef.current = next;
+    setShowName(next);
+    if (!preview) return;
+    setRenaming(true);
+    setError(null);
+    try {
+      const result = await setCoverArtName(playlistId, next);
+      if (!alive.current) return;
+      setPreview((current) => (current ? { ...current, ...result } : current));
+    } catch (err) {
+      if (!alive.current) return;
+      showNameRef.current = !next;
+      setShowName(!next);
+      setError(err instanceof Error ? err.message : "Couldn't change the cover");
+    } finally {
+      if (alive.current) setRenaming(false);
+    }
+  };
+
   const use = async () => {
     if (!preview || applying) return;
     saving.current = true;
@@ -123,7 +149,7 @@ export function CoverArtSheet({
   };
 
   const made = vibeLine(preview?.vibe);
-  const busy = loading || applying;
+  const busy = loading || applying || renaming;
 
   return createPortal(
     <div className="cover-art-overlay" onClick={onBackdropClick}>
@@ -177,6 +203,17 @@ export function CoverArtSheet({
             ''
           )}
         </p>
+
+        <label className="cover-art-name">
+          <span>Show name on cover</span>
+          <input
+            type="checkbox"
+            role="switch"
+            checked={showName}
+            disabled={loading || applying || renaming}
+            onChange={(event) => void toggleName(event.target.checked)}
+          />
+        </label>
 
         <div className="cover-art-actions">
           <button

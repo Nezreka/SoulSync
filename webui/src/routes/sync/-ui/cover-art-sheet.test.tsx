@@ -44,6 +44,7 @@ function mockFetch(replies: Record<string, Reply[]>) {
 
 const GEN = 'POST /api/mirrored-playlists/3/cover-art';
 const APPLY = 'POST /api/mirrored-playlists/3/cover-art/apply';
+const NAME = 'POST /api/mirrored-playlists/3/cover-art/name';
 
 function renderSheet() {
   const onClose = vi.fn();
@@ -77,7 +78,7 @@ describe('CoverArtSheet', () => {
     expect(img).toHaveAttribute('src', '/api/mirrored-playlists/3/cover-art/preview?v=1');
     expect(screen.getByText('Made from synthwave, electronic, dreamy, 1980s')).toBeInTheDocument();
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
-    expect(JSON.parse(calls[0].body ?? '{}')).toEqual({ attempt: 0 });
+    expect(JSON.parse(calls[0].body ?? '{}')).toEqual({ attempt: 0, show_name: true });
   });
 
   it('strict mode still makes only one: a second free call inside 45s is refused', async () => {
@@ -187,6 +188,72 @@ describe('CoverArtSheet', () => {
     });
     const gens = calls.filter((c) => c.method === 'POST' && c.url.endsWith('/cover-art'));
     expect(gens.map((c) => JSON.parse(c.body ?? '{}').attempt)).toEqual([0, 1]);
+  });
+
+  it('show name is on by default and goes with the generate', async () => {
+    const calls = mockFetch({ [GEN]: [PREVIEW] });
+    renderSheet();
+    await screen.findByAltText('Generated cover preview');
+    expect(screen.getByRole('switch', { name: 'Show name on cover' })).toBeChecked();
+    expect(JSON.parse(calls[0].body ?? '{}')).toEqual({ attempt: 0, show_name: true });
+  });
+
+  it('flipping show name redraws the same image instead of making a new one', async () => {
+    const calls = mockFetch({
+      [GEN]: [PREVIEW],
+      [NAME]: [
+        {
+          status: 200,
+          body: {
+            success: true,
+            preview_url: '/api/mirrored-playlists/3/cover-art/preview?v=2',
+            show_name: false,
+          },
+        },
+      ],
+    });
+    renderSheet();
+    await screen.findByAltText('Generated cover preview');
+    fireEvent.click(screen.getByRole('switch', { name: 'Show name on cover' }));
+    await waitFor(() =>
+      expect(screen.getByAltText('Generated cover preview')).toHaveAttribute(
+        'src',
+        '/api/mirrored-playlists/3/cover-art/preview?v=2',
+      ),
+    );
+    expect(screen.getByRole('switch', { name: 'Show name on cover' })).not.toBeChecked();
+    expect(calls.filter((c) => `${c.method} ${c.url}` === GEN)).toHaveLength(1);
+    const name = calls.find((c) => `${c.method} ${c.url}` === NAME);
+    expect(JSON.parse(name?.body ?? '{}')).toEqual({ show_name: false });
+  });
+
+  it('try another keeps the show name choice', async () => {
+    const keyed: Reply = { status: 200, body: { ...PREVIEW.body, keyed: true } };
+    const calls = mockFetch({ [GEN]: [keyed] });
+    renderSheet();
+    await screen.findByAltText('Generated cover preview');
+    fireEvent.click(screen.getByRole('switch', { name: 'Show name on cover' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Try another' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Try another' }));
+    await waitFor(() =>
+      expect(calls.filter((c) => `${c.method} ${c.url}` === GEN)).toHaveLength(2),
+    );
+    const second = calls.filter((c) => `${c.method} ${c.url}` === GEN)[1];
+    expect(JSON.parse(second.body ?? '{}')).toEqual({ attempt: 1, show_name: false });
+  });
+
+  it('a failed redraw puts the switch back and says why', async () => {
+    mockFetch({
+      [GEN]: [PREVIEW],
+      [NAME]: [{ status: 404, body: { error: 'That preview is gone. Generate a new one.' } }],
+    });
+    renderSheet();
+    await screen.findByAltText('Generated cover preview');
+    fireEvent.click(screen.getByRole('switch', { name: 'Show name on cover' }));
+    expect(
+      await screen.findByText('That preview is gone. Generate a new one.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Show name on cover' })).toBeChecked();
   });
 
   it('strips the server retry hint, the button says it', () => {

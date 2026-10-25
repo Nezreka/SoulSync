@@ -7,7 +7,8 @@ first; only "use this cover" puts it on the playlist.
 
 pollinations works with no key: one image every 45s per ip, their small model,
 and their logo in the corner. a key from enter.pollinations.ai lifts all three.
-we never crop the logo off the free images, it's their attribution.
+we never crop the logo off the free images, it's their attribution, and the
+name we draw on (add_name) stays at the top, clear of it.
 
 prompt rules learned the hard way on the free model: it can't do negation
 ("no people" draws people), so the unwanted stuff goes in negative_prompt and
@@ -17,6 +18,7 @@ the prompt only names light, texture and landscape. words like "rave" or
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import random
@@ -476,8 +478,144 @@ def check_key(
     return False, f"Pollinations answered {status}. Try again in a bit."
 
 
+# ── the name on the cover ───────────────────────────────────────────────
+#
+# the playlist's name in big type top-left, a small source line above it, on
+# a dark fade from the top. the bottom of the image is never touched, so the
+# free tier's mark stays as pollinations drew it.
+
+FONT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "video", "overlays", "fonts")
+TITLE_FONT = "Inter-ExtraBold.ttf"
+LABEL_FONT = "Inter-SemiBold.ttf"
+
+SOURCE_LABELS = {
+    "spotify": "Spotify playlist",
+    "spotify_public": "Spotify playlist",
+    "tidal": "Tidal playlist",
+    "deezer": "Deezer playlist",
+    "qobuz": "Qobuz playlist",
+    "youtube": "YouTube playlist",
+    "ytmusic": "YouTube Music playlist",
+    "beatport": "Beatport chart",
+    "lastfm": "Last.fm playlist",
+    "listenbrainz": "ListenBrainz playlist",
+    "metasync": "SoulSync Charts",
+    "soulsync_discovery": "SoulSync mix",
+    "newpipe": "NewPipe playlist",
+}
+
+
+def source_label(playlist: Dict[str, Any]) -> str:
+    """the small line over the name. yours are soulsync playlists."""
+    if up.is_user_playlist(playlist):
+        return "SoulSync playlist"
+    return SOURCE_LABELS.get(str(playlist.get("source") or "").lower(), "Playlist")
+
+
+def _wrap(draw: Any, text: str, font: Any, width: float) -> List[str]:
+    lines: List[str] = []
+    line = ""
+    for word in text.split():
+        trial = f"{line} {word}".strip()
+        if not line or draw.textlength(trial, font=font) <= width:
+            line = trial
+        else:
+            lines.append(line)
+            line = word
+    if line:
+        lines.append(line)
+    return lines
+
+
+def _fit_title(draw: Any, text: str, side: int, width: float) -> tuple:
+    """the biggest size the name fits in 3 lines at, down to a floor. past
+    that the last line gets an ellipsis."""
+    from PIL import ImageFont
+
+    path = os.path.join(FONT_DIR, TITLE_FONT)
+    size = round(side * 0.097)
+    floor = round(side * 0.06)
+    while True:
+        font = ImageFont.truetype(path, size)
+        lines = _wrap(draw, text, font, width)
+        fits = len(lines) <= 3 and all(draw.textlength(ln, font=font) <= width for ln in lines)
+        if fits or size <= floor:
+            break
+        size -= 2
+    if not fits:
+        lines = lines[:3]
+        last = lines[-1]
+        while last and draw.textlength(last + "…", font=font) > width:
+            last = last[:-1]
+        lines[-1] = last.rstrip() + "…"
+    return font, lines, size
+
+
+def add_name(image: bytes, name: str, label: str) -> bytes:
+    """the cover with its name on it. image is a square webp from _encode_cover."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.open(io.BytesIO(image)).convert("RGBA")
+    side = img.width
+    name = " ".join((name or "").split()) or "Playlist"
+
+    # a fade from the top: dark behind the text, gone by halfway down
+    reach = side // 2
+    fade = Image.new("L", (1, side), 0)
+    for y in range(reach):
+        fade.putpixel((0, y), int(255 * 0.78 * (1 - y / reach) ** 1.6))
+    shade = Image.new("RGBA", (side, side), (8, 8, 12, 255))
+    shade.putalpha(fade.resize((side, side)))
+    img = Image.alpha_composite(img, shade)
+
+    draw = ImageDraw.Draw(img)
+    pad = round(side * 0.0625)
+    label_font = ImageFont.truetype(os.path.join(FONT_DIR, LABEL_FONT), round(side * 0.027))
+    draw.text((pad, pad), label.upper(), font=label_font, fill=(235, 235, 240, 255))
+    font, lines, size = _fit_title(draw, name, side, side - 2 * pad)
+    y = pad + round(side * 0.047)
+    for line in lines:
+        draw.text((pad, y), line, font=font, fill=(255, 255, 255, 255))
+        y += round(size * 1.1)
+
+    out = io.BytesIO()
+    img.save(out, "WEBP", quality=88)
+    return out.getvalue()
+
+
 def preview_path(playlist_id: int, base_dir: Optional[str] = None, *, mkdir: bool = True) -> str:
     return os.path.join(up.cover_dir(base_dir, mkdir=mkdir), f"preview-{int(playlist_id)}.webp")
+
+
+def raw_preview_path(playlist_id: int, base_dir: Optional[str] = None, *, mkdir: bool = True) -> str:
+    """the image as pollinations made it, so the name can come off and go back
+    on without spending another image."""
+    return os.path.join(up.cover_dir(base_dir, mkdir=mkdir), f"preview-{int(playlist_id)}-raw.webp")
+
+
+def _write(path: str, data: bytes) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+    os.replace(tmp, path)
+
+
+def _render_preview(playlist: Dict[str, Any], raw: bytes, show_name: bool,
+                    base_dir: Optional[str]) -> None:
+    data = add_name(raw, playlist.get("name") or "", source_label(playlist)) if show_name else raw
+    _write(preview_path(playlist['id'], base_dir), data)
+
+
+def set_preview_name(playlist: Dict[str, Any], show_name: bool, *,
+                     base_dir: Optional[str] = None) -> Dict[str, Any]:
+    """put the name on the preview or take it off. no new image."""
+    raw_path = raw_preview_path(playlist['id'], base_dir, mkdir=False)
+    if not os.path.isfile(raw_path):
+        raise CoverArtError("That preview is gone. Generate a new one.", status=404)
+    with open(raw_path, "rb") as fh:
+        raw = fh.read()
+    _render_preview(playlist, raw, show_name, base_dir)
+    return {'preview_url': preview_url(playlist['id']), 'show_name': bool(show_name)}
 
 
 def preview_url(playlist_id: int) -> str:
@@ -490,6 +628,7 @@ def make_preview(
     *,
     api_key: Optional[str] = None,
     attempt: int = 0,
+    show_name: bool = True,
     base_dir: Optional[str] = None,
     http_get: Optional[Callable[..., Any]] = None,
 ) -> Dict[str, Any]:
@@ -502,17 +641,15 @@ def make_preview(
         data = up._encode_cover(raw)
     except up.UserPlaylistError:
         raise CoverArtError("Pollinations sent back something that isn't an image. Try again.") from None
-    path = preview_path(playlist['id'], base_dir)
-    tmp = path + ".tmp"
-    with open(tmp, "wb") as fh:
-        fh.write(data)
-    os.replace(tmp, path)
+    _write(raw_preview_path(playlist['id'], base_dir), data)
+    _render_preview(playlist, data, show_name, base_dir)
     logger.info("cover art preview for playlist %s (attempt %s)", playlist['id'], attempt)
     return {
         'preview_url': preview_url(playlist['id']),
         'vibe': vibe,
         'prompt': prompt,
         'keyed': bool((api_key or '').strip()),
+        'show_name': bool(show_name),
     }
 
 
@@ -523,6 +660,10 @@ def apply_preview(db: Any, playlist: Dict[str, Any], *, base_dir: Optional[str] 
     if not os.path.isfile(src):
         raise CoverArtError("That preview is gone. Generate a new one.", status=404)
     os.replace(src, up.cover_path(playlist['id'], base_dir))
+    try:
+        os.remove(raw_preview_path(playlist['id'], base_dir, mkdir=False))
+    except OSError:
+        pass
     url = up.cover_url(playlist['id'])
     if up.is_user_playlist(playlist):
         ok = db.set_mirrored_playlist_image_url(playlist['id'], url, profile_id=playlist.get('profile_id'))
@@ -534,10 +675,12 @@ def apply_preview(db: Any, playlist: Dict[str, Any], *, base_dir: Optional[str] 
 
 
 def discard_preview(playlist_id: int, base_dir: Optional[str] = None) -> None:
-    try:
-        os.remove(preview_path(playlist_id, base_dir, mkdir=False))
-    except OSError:
-        pass
+    for path in (preview_path(playlist_id, base_dir, mkdir=False),
+                 raw_preview_path(playlist_id, base_dir, mkdir=False)):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def restore_original(db: Any, playlist: Dict[str, Any], *, base_dir: Optional[str] = None) -> None:

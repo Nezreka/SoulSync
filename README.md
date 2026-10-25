@@ -102,7 +102,7 @@ Bring a playlist in from anywhere, keep a mirror of it, and keep your media serv
 - **Export** any playlist to Spotify, Deezer, ListenBrainz or a JSPF file.
 - **Beatport**: Top 100, Hype 100, top 10 lists and releases, and a full genre browser.
 - **Organize by playlist**: optionally download a playlist into its own folder.
-- **Cover art**: *Generate cover art* in any playlist's ⋯ menu (on the card or inside the playlist) paints a cover from its genres, mood and era with [Pollinations](https://pollinations.ai). Preview it, try another style, keep the one you like; it survives refreshes and syncs to your server. Free with no key (one image every 45s, small Pollinations mark), or add a key in Settings to lift both.
+- **Cover art**: *Generate cover art* in any playlist's ⋯ menu (on the card or inside the playlist) paints a cover from its genres, mood and era with [Pollinations](https://pollinations.ai). Preview it with the playlist's name across the top (or without), try another style, keep the one you like; it survives refreshes and syncs to your server. Free with no key (one image every 45s, small Pollinations mark), or add a key in Settings to lift both.
 
 ## Search & downloads
 

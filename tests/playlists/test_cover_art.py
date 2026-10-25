@@ -563,3 +563,117 @@ def test_restore_from_an_already_stashed_echo_goes_to_no_cover(mdb, tmp_path):
     row = mdb.get_mirrored_playlist(pid)
     assert row["image_url"] is None
     assert row["custom_cover"] is False
+
+
+# ── the name on the cover ───────────────────────────────────────────────
+
+
+def _cover_pixels(data):
+    from PIL import Image
+    return Image.open(io.BytesIO(data)).convert("RGB")
+
+
+def _region_diff(a, b, box):
+    from PIL import ImageChops, ImageStat
+    return max(ImageStat.Stat(ImageChops.difference(a.crop(box), b.crop(box))).mean)
+
+
+def test_the_name_goes_on_top_and_leaves_the_mark_corner_alone(mdb, tmp_path):
+    """the name sits top-left on a fade. the bottom of the image, where the
+    free tier's mark is, comes through untouched."""
+    pid = _mirror(mdb, source="tidal")
+    out = ca.make_preview(mdb, mdb.get_mirrored_playlist(pid), base_dir=str(tmp_path), http_get=_Http())
+    assert out["show_name"] is True
+    with open(ca.raw_preview_path(pid, str(tmp_path)), "rb") as fh:
+        raw = _cover_pixels(fh.read())
+    with open(ca.preview_path(pid, str(tmp_path)), "rb") as fh:
+        named = _cover_pixels(fh.read())
+    side = raw.width
+    assert _region_diff(raw, named, (0, 0, side, side // 4)) > 20  # name + fade
+    # bottom quarter: only the webp re-encode, nothing drawn
+    assert _region_diff(raw, named, (0, side * 3 // 4, side, side)) < 4
+
+
+def test_show_name_off_is_the_image_as_made(mdb, tmp_path):
+    pid = _mirror(mdb)
+    out = ca.make_preview(mdb, mdb.get_mirrored_playlist(pid), base_dir=str(tmp_path),
+                          show_name=False, http_get=_Http())
+    assert out["show_name"] is False
+    with open(ca.raw_preview_path(pid, str(tmp_path)), "rb") as a, \
+            open(ca.preview_path(pid, str(tmp_path)), "rb") as b:
+        assert a.read() == b.read()
+
+
+def test_the_small_line_names_the_source():
+    assert ca.source_label({"source": "tidal"}) == "Tidal playlist"
+    assert ca.source_label({"source": "spotify_public"}) == "Spotify playlist"
+    assert ca.source_label({"source": "metasync"}) == "SoulSync Charts"
+    assert ca.source_label({"source": "something-new"}) == "Playlist"
+
+
+def test_a_user_playlist_is_a_soulsync_playlist(mdb):
+    pid = up.create_playlist(mdb, 1, "Mine")
+    assert ca.source_label(mdb.get_mirrored_playlist(pid)) == "SoulSync playlist"
+
+
+@pytest.mark.parametrize("name", [
+    "Driving Music",
+    "The Absolutely Enormous Collection of Every Song I Have Ever Loved In My Entire Life Ever",
+    "Supercalifragilisticexpialidocious" * 2,
+    "",
+])
+def test_any_name_fits_in_three_lines(name):
+    from PIL import Image, ImageDraw
+    draw = ImageDraw.Draw(Image.new("RGB", (up.COVER_SIDE, up.COVER_SIDE)))
+    width = up.COVER_SIDE * 0.875
+    font, lines, _ = ca._fit_title(draw, name or "Playlist", up.COVER_SIDE, width)
+    assert 1 <= len(lines) <= 3
+    assert all(draw.textlength(line, font=font) <= width for line in lines)
+
+
+def test_the_fonts_ship_with_soulsync():
+    for font in (ca.TITLE_FONT, ca.LABEL_FONT):
+        assert os.path.isfile(os.path.join(ca.FONT_DIR, font))
+
+
+def test_used_or_thrown_away_takes_the_raw_copy_too(mdb, tmp_path):
+    pid = _mirror(mdb)
+    # keyed: two generates back to back would hit the free tier's 45s
+    ca.make_preview(mdb, mdb.get_mirrored_playlist(pid), base_dir=str(tmp_path),
+                    api_key="k", http_get=_Http())
+    ca.discard_preview(pid, str(tmp_path))
+    assert not os.path.exists(ca.raw_preview_path(pid, str(tmp_path), mkdir=False))
+
+    ca.make_preview(mdb, mdb.get_mirrored_playlist(pid), base_dir=str(tmp_path),
+                    api_key="k", http_get=_Http())
+    ca.apply_preview(mdb, mdb.get_mirrored_playlist(pid), base_dir=str(tmp_path))
+    assert not os.path.exists(ca.raw_preview_path(pid, str(tmp_path), mkdir=False))
+
+
+def test_name_switch_redraws_without_a_new_image(mdb, monkeypatch, tmp_path, http):
+    pid = _mirror(mdb)
+    c = _client(mdb, monkeypatch, tmp_path)
+    assert c.post(f"/api/mirrored-playlists/{pid}/cover-art", json={"show_name": True}).status_code == 200
+    asked = len(http.calls)
+
+    r = c.post(f"/api/mirrored-playlists/{pid}/cover-art/name", json={"show_name": False})
+    assert r.status_code == 200, r.data
+    assert r.get_json()["show_name"] is False
+    assert len(http.calls) == asked  # no pollinations call, so no 45s spent
+    with open(ca.raw_preview_path(pid, str(tmp_path)), "rb") as a, \
+            open(ca.preview_path(pid, str(tmp_path)), "rb") as b:
+        assert a.read() == b.read()
+
+    assert c.post(f"/api/mirrored-playlists/{pid}/cover-art/name",
+                  json={"show_name": True}).get_json()["show_name"] is True
+    with open(ca.raw_preview_path(pid, str(tmp_path)), "rb") as a, \
+            open(ca.preview_path(pid, str(tmp_path)), "rb") as b:
+        assert a.read() != b.read()
+
+
+def test_name_switch_without_a_preview_says_so(mdb, monkeypatch, tmp_path, http):
+    pid = _mirror(mdb)
+    c = _client(mdb, monkeypatch, tmp_path)
+    r = c.post(f"/api/mirrored-playlists/{pid}/cover-art/name", json={"show_name": False})
+    assert r.status_code == 404
+    assert "Generate a new one" in r.get_json()["error"]
