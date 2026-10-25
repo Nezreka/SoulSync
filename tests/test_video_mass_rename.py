@@ -297,3 +297,15 @@ def test_rename_rows_year_null_when_neither_exists(env):
     _seed_episode_file(db, movies, year=None, first_air_date=None)
     rows = db.rename_owned_episode_files()
     assert rows and rows[0]["show_year"] is None
+
+
+def test_preview_keeps_the_quality_the_file_name_carries(env):
+    """A media-server scan records no quality; the preview used to propose a
+    name with '$quality' rendered empty."""
+    from core.video import organization
+    db, movies = env
+    organization.save(db, {**organization.load(db),
+                           "movie_template": "$title ($year)/$title ($year) [$quality]"})
+    _seed_movie_file(db, movies, name="heat.1995.1080p.bluray.x264-GRP.mkv")
+    e = mr.preview()["entries"][0]
+    assert e["proposed"] == str(movies / "Heat (1995)" / "Heat (1995) [Bluray-1080p].mkv")

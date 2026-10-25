@@ -116,6 +116,7 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
     caller can report a live count. Pure read — never mutates."""
     from api.video import get_video_db
     from core.video import organization
+    from core.video.library_paths import file_quality
     from core.video.path_resolver import resolve_video_file_path, video_base_dirs
     db = get_video_db()
     settings = organization.load(db)
@@ -158,6 +159,7 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
             return
         base = _base_dir_of(local, base_dirs) or os.path.dirname(local)
         ext = os.path.splitext(local)[1]
+        fields = dict(fields, quality=file_quality(fields.get("quality"), local))
         proposed = organization.render_path(kind, base, fields, settings, ext)["path"]
         if os.path.normpath(proposed) != os.path.normpath(local):
             entries.append({"key": key, "kind": kind, "title": title,

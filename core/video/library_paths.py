@@ -83,6 +83,18 @@ def quality_full(parsed: Any) -> str:
     return tag
 
 
+def file_quality(stored: Any, path: Any) -> str:
+    """The quality a re-namer should render for an owned file: the stored value
+    when there is one, else the ``{Quality Full}`` tag read off the file's own
+    name. A media-server scan never records a quality, so without this every
+    rename pass rendered '$quality' empty and proposed stripping a quality tag
+    the file already carried. '' when neither says."""
+    if stored:
+        return str(stored)
+    from core.video.release_parse import parse_release
+    return quality_full(parse_release(os.path.basename(str(path or ""))))
+
+
 def movie_folder(title: Any, year: Any) -> str:
     """'The Matrix (1999)' — the per-movie folder name."""
     return (sanitize(title) or "Unknown") + _year_suffix(year)
