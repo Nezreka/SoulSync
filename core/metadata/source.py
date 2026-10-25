@@ -1261,15 +1261,31 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
     if pp["hifi_bpm"] and pp["hifi_bpm"] > 0 and _tag_enabled(cfg, "hifi.tags.bpm"):
         bpm_candidates.append(("HiFi", pp["hifi_bpm"]))
     if bpm_candidates:
-        bpm_source, bpm_val = bpm_candidates[0]
-        bpm_int = int(bpm_val)
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TBPM(encoding=3, text=[str(bpm_int)]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["BPM"] = [str(bpm_int)]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["tmpo"] = [bpm_int]
-        logger.info("BPM (%s): %s", bpm_source, bpm_int)
+        # Store through tag_writer's _stored_bpm — the one stored form
+        # every BPM writer uses and build_tag_diff compares against, so
+        # an enrichment-written BPM does not preview as changed
+        # afterwards (#1871). It also guards non-finite/non-numeric
+        # candidates (returns None) instead of raising here; a candidate
+        # with no stored form falls through to the next source rather
+        # than skipping BPM entirely. Local import, matching this
+        # module's style, avoids any import-order coupling with
+        # core.tag_writer.
+        from core.tag_writer import _stored_bpm
+        bpm_int = None
+        bpm_source = None
+        for cand_source, bpm_val in bpm_candidates:
+            stored = _stored_bpm(bpm_val)
+            if stored is not None:
+                bpm_source, bpm_int = cand_source, stored
+                break
+        if bpm_int is not None:
+            if isinstance(audio_file.tags, symbols.ID3):
+                audio_file.tags.add(symbols.TBPM(encoding=3, text=[str(bpm_int)]))
+            elif is_vorbis_like(audio_file, symbols):
+                audio_file["BPM"] = [str(bpm_int)]
+            elif isinstance(audio_file, symbols.MP4):
+                audio_file["tmpo"] = [bpm_int]
+            logger.info("BPM (%s): %s", bpm_source, bpm_int)
 
     if beatport.get("key") and _tag_enabled(cfg, "beatport.tags.key"):
         from core.beatport.enrich import standard_key
