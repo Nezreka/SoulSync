@@ -1,0 +1,488 @@
+"""#1879: LRCLib transient failures must not read as "no lyrics".
+
+core/lyrics_client.py used to collapse every LRCLib failure — a 404
+(definitively absent), a 429/503 (transient) and a timeout — into None,
+so the Lyrics Filler scan recorded rate-limited tracks as lyric-less and
+the repair worker told users the lyrics were "no longer available".
+
+The contract is now tri-state (found / absent / unknown), transient
+failures get bounded retries honouring Retry-After, the search fallback
+never fires after a transient exact-match failure, every call is paced
+by core.lrclib_throttle, and the scan stops early after a run of
+consecutive unknowns instead of burning the whole library.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+import requests
+
+from core import lrclib_throttle
+from core.lyrics_client import (
+    LyricsClient,
+    LyricsFetchResult,
+    STATUS_ABSENT,
+    STATUS_FOUND,
+    STATUS_UNKNOWN,
+    classify_lyrics_error,
+)
+
+
+class FakeHTTPError(Exception):
+    """Duck-typed like lrclibapi's APIError family: status_code + headers."""
+
+    def __init__(self, status_code, headers=None):
+        super().__init__(f"{status_code} error")
+        self.status_code = status_code
+        self.headers = headers or {}
+
+
+@pytest.fixture(autouse=True)
+def _no_throttle_waits(monkeypatch):
+    lrclib_throttle._reset_for_tests()
+    monkeypatch.setattr(lrclib_throttle, "wait_for_slot", lambda **k: True)
+    yield
+    lrclib_throttle._reset_for_tests()
+
+
+def _client(api):
+    c = LyricsClient.__new__(LyricsClient)
+    c.api = api
+    c.max_attempts = 3
+    c.sleeps = []
+    c._sleep = lambda s: c.sleeps.append(s)
+    return c
+
+
+def _lyrics(synced="[00:01]hi", plain=None):
+    return SimpleNamespace(synced_lyrics=synced, plain_lyrics=plain)
+
+
+# ── classification ───────────────────────────────────────────────────────
+
+def test_classify_404_is_absent():
+    out = classify_lyrics_error(FakeHTTPError(404))
+    assert out.status == STATUS_ABSENT and out.error_kind == 'not_found'
+
+
+def test_classify_429_is_transient_with_retry_after():
+    out = classify_lyrics_error(FakeHTTPError(429, {'Retry-After': '7'}))
+    assert out.status == STATUS_UNKNOWN and out.error_kind == 'rate_limited'
+    assert out.retry_after == 7.0
+    assert 'rate-limited' in out.reason and '429' in out.reason
+
+
+def test_classify_503_is_transient_server():
+    out = classify_lyrics_error(FakeHTTPError(503, {'Retry-After': '1'}))
+    assert out.status == STATUS_UNKNOWN and out.error_kind == 'server'
+    assert out.retry_after == 1.0
+
+
+def test_classify_other_4xx_is_unknown_not_absent():
+    out = classify_lyrics_error(FakeHTTPError(400))
+    assert out.status == STATUS_UNKNOWN and out.error_kind == 'permanent'
+
+
+def test_classify_retry_after_http_date():
+    from datetime import datetime, timedelta, timezone
+    from email.utils import format_datetime
+    future = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=30))
+    out = classify_lyrics_error(FakeHTTPError(503, {'Retry-After': future}))
+    assert out.error_kind == 'server'
+    assert out.retry_after is not None and 0 < out.retry_after <= 30
+
+
+def test_classify_timeout_and_connection_are_transient():
+    assert classify_lyrics_error(requests.exceptions.ReadTimeout('x')).error_kind == 'timeout'
+    assert classify_lyrics_error(requests.exceptions.ConnectionError('x')).error_kind == 'network'
+
+
+def test_classify_real_lrclib_exceptions():
+    lrclib_exceptions = pytest.importorskip("lrclib.exceptions")
+
+    class _Resp:
+        status_code = 429
+        reason = 'Too Many Requests'
+        url = 'https://lrclib.net/api/get'
+        text = ''
+        headers = {'Retry-After': '3'}
+
+    out = classify_lyrics_error(lrclib_exceptions.RateLimitError(_Resp()))
+    assert out.error_kind == 'rate_limited' and out.retry_after == 3.0
+    _Resp.status_code = 404
+    out = classify_lyrics_error(lrclib_exceptions.NotFoundError(_Resp()))
+    assert out.status == STATUS_ABSENT
+
+
+# ── fetch strategy: retries, no fallback on transient ────────────────────
+
+def test_404_exact_falls_back_to_search_and_absent_when_empty():
+    api = MagicMock()
+    api.get_lyrics.side_effect = FakeHTTPError(404)
+    api.search_lyrics.return_value = []
+    c = _client(api)
+    assert c.has_remote_lyrics("Song", "Artist", "Album", 200) is False
+    assert api.get_lyrics.call_count == 1          # 404 is never retried
+    assert api.search_lyrics.call_count == 1
+
+
+def test_429_exact_retries_bounded_and_never_searches():
+    api = MagicMock()
+    api.get_lyrics.side_effect = FakeHTTPError(429, {'Retry-After': '7'})
+    c = _client(api)
+    assert c.has_remote_lyrics("Song", "Artist", "Album", 200) is None   # unknown, NOT False
+    assert api.get_lyrics.call_count == 3          # bounded retries
+    api.search_lyrics.assert_not_called()          # no fallback while rate-limited
+    # Retry-After honoured exactly (no jitter on an explicit instruction)
+    assert c.sleeps == [7.0, 7.0]
+
+
+def test_huge_retry_after_gives_up_instead_of_parking_the_thread():
+    # Retry-After: 60 → single-attempt delay caps at 30s, which exceeds
+    # the 20s per-call wait budget, so the caller gets the transient
+    # outcome immediately instead of parking a gthread for a minute.
+    api = MagicMock()
+    api.get_lyrics.side_effect = FakeHTTPError(429, {'Retry-After': '60'})
+    c = _client(api)
+    result = c.lookup_remote_lyrics("Song", "Artist", "Album", 200)
+    assert result.status == STATUS_UNKNOWN and result.error_kind == 'rate_limited'
+    assert api.get_lyrics.call_count == 1
+    assert c.sleeps == []
+
+
+def test_503_search_only_path_is_unknown():
+    api = MagicMock()
+    api.search_lyrics.side_effect = FakeHTTPError(503, {'Retry-After': '1'})
+    c = _client(api)
+    result = c.lookup_remote_lyrics("Song", "Artist")
+    assert result.status == STATUS_UNKNOWN and result.error_kind == 'server'
+    assert api.search_lyrics.call_count == 3
+
+
+def test_timeout_is_unknown_and_never_searches():
+    api = MagicMock()
+    api.get_lyrics.side_effect = requests.exceptions.ReadTimeout('slow')
+    c = _client(api)
+    assert c.has_remote_lyrics("Song", "Artist", "Album", 200) is None
+    api.search_lyrics.assert_not_called()
+
+
+def test_other_4xx_is_unknown_without_retry_or_search():
+    api = MagicMock()
+    api.get_lyrics.side_effect = FakeHTTPError(400)
+    c = _client(api)
+    result = c.lookup_remote_lyrics("Song", "Artist", "Album", 200)
+    assert result.status == STATUS_UNKNOWN and result.error_kind == 'permanent'
+    assert api.get_lyrics.call_count == 1
+    api.search_lyrics.assert_not_called()
+
+
+def test_transient_then_success_returns_found():
+    api = MagicMock()
+    api.get_lyrics.side_effect = [FakeHTTPError(429, {'Retry-After': '1'}), _lyrics()]
+    c = _client(api)
+    assert c.has_remote_lyrics("Song", "Artist", "Album", 200) is True
+    assert api.get_lyrics.call_count == 2
+
+
+def test_found_record_without_lyrics_content_is_absent():
+    api = MagicMock()
+    api.get_lyrics.return_value = _lyrics(synced=None, plain=None)
+    c = _client(api)
+    assert c.has_remote_lyrics("Song", "Artist", "Album", 200) is False
+
+
+def test_no_api_is_unknown_not_absent():
+    c = _client(None)
+    assert c.has_remote_lyrics("Song", "Artist") is None
+    assert c.lookup_remote_lyrics("Song", "Artist").error_kind == 'unavailable'
+
+
+# ── create_lrc_file_detailed ─────────────────────────────────────────────
+
+def test_create_detailed_surfaces_rate_limit_reason(tmp_path):
+    audio = tmp_path / "song.flac"
+    audio.write_bytes(b"x")
+    api = MagicMock()
+    api.get_lyrics.side_effect = FakeHTTPError(429, {'Retry-After': '2'})
+    c = _client(api)
+    ok, reason = c.create_lrc_file_detailed(str(audio), "Song", "Artist", "Album", 200)
+    assert ok is False
+    assert reason and 'rate-limited' in reason
+    assert c.create_lrc_file(str(audio), "Song", "Artist", "Album", 200) is False
+
+
+def test_create_detailed_absent_reason_is_none(tmp_path):
+    audio = tmp_path / "song.flac"
+    audio.write_bytes(b"x")
+    api = MagicMock()
+    api.get_lyrics.side_effect = FakeHTTPError(404)
+    api.search_lyrics.return_value = []
+    c = _client(api)
+    ok, reason = c.create_lrc_file_detailed(str(audio), "Song", "Artist", "Album", 200)
+    assert ok is False and reason is None
+
+
+# ── throttle ─────────────────────────────────────────────────────────────
+
+def test_throttle_reservations_are_spaced():
+    lrclib_throttle._reset_for_tests()
+    first = lrclib_throttle.reserve_request_slot()
+    second = lrclib_throttle.reserve_request_slot()
+    assert second - first >= lrclib_throttle.DEFAULT_MIN_GAP_SECONDS - 0.05
+
+
+def test_throttle_cooldown_pushes_next_slot(monkeypatch):
+    lrclib_throttle._reset_for_tests()
+    lrclib_throttle.note_rate_limited(60)
+    import time as _time
+    at = lrclib_throttle.reserve_request_slot()
+    assert at - _time.monotonic() >= 50  # cooldown honoured (bounded, ~60s)
+    assert lrclib_throttle.status()['cooldown_remaining'] > 0
+
+
+# ── scan: unknowns counted separately, abort after consecutive run ──────
+
+class _DB:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def _get_connection(self):
+        cur = MagicMock()
+        cur.execute.return_value = None
+        cur.fetchone.return_value = [len(self._rows)]
+        cur.fetchall.return_value = self._rows
+        conn = MagicMock()
+        conn.cursor.return_value = cur
+        return conn
+
+
+def _ctx(db, findings):
+    return SimpleNamespace(
+        db=db,
+        config_manager=SimpleNamespace(get=lambda k, d=None: d),
+        check_stop=lambda: False, wait_if_paused=lambda: False,
+        update_progress=lambda *a, **k: None, report_progress=lambda *a, **k: None,
+        create_finding=lambda **kw: (findings.append(kw) or True),
+    )
+
+
+def _scan_with_probe(tmp_path, monkeypatch, probe, n=7):
+    from core.repair_jobs.missing_lyrics import MissingLyricsJob
+    rows = []
+    for i in range(n):
+        f = tmp_path / f"t{i}.flac"
+        f.write_bytes(b"x")
+        rows.append((i + 1, f"Song{i}", "Artist", "Album", str(f), 200000))
+    fake_client = SimpleNamespace(api=object(), check_remote_lyrics=probe)
+    monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)
+    findings = []
+    result = MissingLyricsJob().scan(_ctx(_DB(rows), findings))
+    return result, findings
+
+
+def test_scan_stops_early_after_consecutive_unknowns(tmp_path, monkeypatch):
+    probe = lambda *a, **k: LyricsFetchResult(  # noqa: E731
+        STATUS_UNKNOWN, reason='LRCLib rate-limited (429) — retry later',
+        error_kind='rate_limited')
+    result, findings = _scan_with_probe(tmp_path, monkeypatch, probe)
+    assert findings == []
+    assert result.findings_created == 0
+    assert result.skipped == 0                       # unknowns are NOT skips
+    assert result.stopped_early and 'LRCLib' in result.stopped_early
+    assert result.scanned == 5                       # stopped at the threshold
+
+
+def test_scan_unknown_run_resets_on_definitive_answer(tmp_path, monkeypatch):
+    answers = iter([
+        LyricsFetchResult(STATUS_UNKNOWN, reason='LRCLib server error (503) — retry later', error_kind='server'),
+        LyricsFetchResult(STATUS_UNKNOWN, reason='LRCLib server error (503) — retry later', error_kind='server'),
+        LyricsFetchResult(STATUS_FOUND, data=_lyrics()),
+        LyricsFetchResult(STATUS_ABSENT),
+        LyricsFetchResult(STATUS_UNKNOWN, reason='LRCLib server error (503) — retry later', error_kind='server'),
+        LyricsFetchResult(STATUS_ABSENT),
+        LyricsFetchResult(STATUS_ABSENT),
+    ])
+    probe = lambda *a, **k: next(answers)  # noqa: E731
+    result, findings = _scan_with_probe(tmp_path, monkeypatch, probe)
+    assert result.stopped_early == ''
+    assert result.findings_created == 1
+    assert result.skipped == 3                       # only the definitive absents
+
+
+def test_scan_raising_probe_aborts_with_reason_visible(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError('probe exploded')
+    result, findings = _scan_with_probe(tmp_path, monkeypatch, boom)
+    assert findings == []
+    assert result.stopped_early and 'probe exploded' in result.stopped_early
+    assert result.skipped == 0
+
+
+def test_scan_check_returning_bare_bool_is_mapped(tmp_path, monkeypatch):
+    # A check_remote_lyrics that returns a bare bool (not a result
+    # object) must not be read as 'absent' for a truthy hit.
+    probe = lambda title, *a, **k: title == "Song0"  # noqa: E731
+    result, findings = _scan_with_probe(tmp_path, monkeypatch, probe, n=2)
+    assert result.findings_created == 1
+    assert result.skipped == 1
+
+
+def test_scan_unrecognized_probe_status_is_unknown_not_absent(tmp_path, monkeypatch):
+    probe = lambda *a, **k: SimpleNamespace(status='available', reason='')  # noqa: E731
+    result, findings = _scan_with_probe(tmp_path, monkeypatch, probe)
+    assert findings == []
+    assert result.skipped == 0
+    assert result.stopped_early and 'unrecognized probe status' in result.stopped_early
+
+
+def test_scan_falls_back_to_bool_probe(tmp_path, monkeypatch):
+    # Clients without check_remote_lyrics: True/False/None from
+    # has_remote_lyrics maps to found/absent/unknown.
+    from core.repair_jobs.missing_lyrics import MissingLyricsJob
+    f1 = tmp_path / "a.flac"; f1.write_bytes(b"x")
+    f2 = tmp_path / "b.flac"; f2.write_bytes(b"x")
+    rows = [(1, "Song", "Artist", "Album", str(f1), 200000),
+            (2, "Gone", "Artist", "Album", str(f2), 200000)]
+    fake_client = SimpleNamespace(
+        api=object(),
+        has_remote_lyrics=lambda title, *a, **k: True if title == "Song" else None)
+    monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)
+    findings = []
+    result = MissingLyricsJob().scan(_ctx(_DB(rows), findings))
+    assert result.findings_created == 1
+    assert result.skipped == 0 and result.stopped_early == ''
+
+
+# ── repair worker: real reason instead of "no longer available?" ─────────
+
+def _worker(tmp_path, monkeypatch, fake_client):
+    from core.repair_worker import RepairWorker
+    w = RepairWorker.__new__(RepairWorker)
+    w.transfer_folder = str(tmp_path)
+    w._config_manager = SimpleNamespace(get=lambda k, d=None: d)
+    monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)
+    monkeypatch.setattr("core.repair_worker._resolve_file_path", lambda raw, *a, **k: raw)
+    return w
+
+
+def test_fix_missing_lyrics_surfaces_transient_reason(tmp_path, monkeypatch):
+    audio = tmp_path / "song.flac"; audio.write_bytes(b"x")
+    fake = SimpleNamespace(
+        create_lrc_file_detailed=lambda *a, **k: (False, 'LRCLib rate-limited (429) — retry later'))
+    w = _worker(tmp_path, monkeypatch, fake)
+    res = w._fix_missing_lyrics("track", "1", None, {
+        "file_path": str(audio), "track_title": "Song", "artist": "Artist",
+        "album_title": "Album", "duration": 200})
+    assert res["success"] is False
+    assert res["error"] == 'LRCLib rate-limited (429) — retry later'
+
+
+def test_fix_missing_lyrics_absent_keeps_old_message(tmp_path, monkeypatch):
+    audio = tmp_path / "song.flac"; audio.write_bytes(b"x")
+    fake = SimpleNamespace(create_lrc_file_detailed=lambda *a, **k: (False, None))
+    w = _worker(tmp_path, monkeypatch, fake)
+    res = w._fix_missing_lyrics("track", "1", None, {
+        "file_path": str(audio), "track_title": "Song", "artist": "Artist",
+        "album_title": "Album", "duration": 200})
+    assert res["success"] is False
+    assert res["error"] == 'Could not fetch lyrics (no longer available?)'
+
+
+# ── player endpoint: transient reason surfaced, not "no lyrics found" ────
+
+def _player_post(monkeypatch, fake_client):
+    from flask import Flask
+    import api.stats as stats
+    monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)
+    app = Flask(__name__)
+    app.register_blueprint(stats.bp)
+    return app.test_client().post("/api/lyrics/fetch", json={
+        "title": "Song", "artist": "Artist", "album": "Album", "duration": 200})
+
+
+def test_player_endpoint_surfaces_rate_limit(monkeypatch):
+    fake = SimpleNamespace(
+        api=object(),
+        lookup_remote_lyrics=lambda **k: LyricsFetchResult(
+            STATUS_UNKNOWN, reason='LRCLib rate-limited (429) — retry later',
+            error_kind='rate_limited'))
+    resp = _player_post(monkeypatch, fake)
+    body = resp.get_json()
+    assert body["success"] is False
+    assert body["error"] == 'LRCLib rate-limited (429) — retry later'
+    assert body["retryable"] is True
+
+
+def test_player_endpoint_permanent_error_is_not_retryable(monkeypatch):
+    fake = SimpleNamespace(
+        api=object(),
+        lookup_remote_lyrics=lambda **k: LyricsFetchResult(
+            STATUS_UNKNOWN, reason='LRCLib rejected the request (400)',
+            error_kind='permanent'))
+    resp = _player_post(monkeypatch, fake)
+    body = resp.get_json()
+    assert body["success"] is False
+    assert body["error"] == 'LRCLib rejected the request (400)'
+    assert body["retryable"] is False
+
+
+def test_player_endpoint_absent_still_no_lyrics_found(monkeypatch):
+    fake = SimpleNamespace(
+        api=object(),
+        lookup_remote_lyrics=lambda **k: LyricsFetchResult(STATUS_ABSENT))
+    resp = _player_post(monkeypatch, fake)
+    body = resp.get_json()
+    assert body["success"] is False and body["error"] == 'no lyrics found'
+
+
+def test_player_endpoint_found_returns_lyrics(monkeypatch):
+    fake = SimpleNamespace(
+        api=object(),
+        lookup_remote_lyrics=lambda **k: LyricsFetchResult(STATUS_FOUND, data=_lyrics()))
+    resp = _player_post(monkeypatch, fake)
+    body = resp.get_json()
+    assert body["success"] is True and body["synced"] == "[00:01]hi"
+    assert body["source"] == 'lrclib'
+
+
+def test_player_endpoint_real_client_429_on_search(monkeypatch):
+    # End-to-end through the REAL client classification: the exact match
+    # 404s (definitive), the search fallback then gets a 429, and the
+    # endpoint must surface the rate-limit reason as retryable — not
+    # 'no lyrics found'.
+    api = MagicMock()
+    api.get_lyrics.side_effect = FakeHTTPError(404)
+    api.search_lyrics.side_effect = FakeHTTPError(429, {'Retry-After': '1'})
+    client = _client(api)
+    resp = _player_post(monkeypatch, client)
+    body = resp.get_json()
+    assert body["success"] is False
+    assert 'rate-limited' in body["error"]
+    assert body["retryable"] is True
+    assert api.search_lyrics.call_count == 3      # bounded retries happened
+
+
+# ── import path: transient failure is not logged as "No lyrics found" ────
+
+def test_generate_lrc_file_logs_transient_reason(monkeypatch, caplog):
+    import logging
+
+    from core.metadata import lyrics as metadata_lyrics
+
+    fake = SimpleNamespace(
+        create_lrc_file_detailed=lambda *a, **k: (False, 'LRCLib rate-limited (429) — retry later'))
+    monkeypatch.setattr("core.lyrics_client.lyrics_client", fake)
+    monkeypatch.setattr(metadata_lyrics, "get_config_manager",
+                        lambda: SimpleNamespace(get=lambda k, d=None: d))
+    with caplog.at_level(logging.WARNING, logger="metadata.lyrics"):
+        ok = metadata_lyrics.generate_lrc_file(
+            "/x/song.flac",
+            {"original_search": {"title": "Song", "duration_ms": 200000}},
+            {"name": "Artist"}, {})
+    assert ok is False
+    assert 'rate-limited' in caplog.text
+    assert 'No lyrics found' not in caplog.text

@@ -3800,17 +3800,37 @@ class RepairWorker:
         try:
             from core.lyrics_client import lyrics_client
             duration = details.get('duration')
-            ok = lyrics_client.create_lrc_file(
-                resolved,
-                details.get('track_title') or '',
-                details.get('artist') or '',
-                album_name=details.get('album_title'),
-                duration_seconds=int(duration) if duration else None,
-            )
+            # Prefer the detailed variant (#1879): it distinguishes a
+            # definitive "LRCLib has no lyrics" from a transient failure
+            # (429/503/timeout), whose real reason is surfaced instead of
+            # the old misleading "no longer available?" text. The finding
+            # stays pending either way, so a later run can retry.
+            detailed = getattr(lyrics_client, 'create_lrc_file_detailed', None)
+            if callable(detailed):
+                ok, fetch_reason = detailed(
+                    resolved,
+                    details.get('track_title') or '',
+                    details.get('artist') or '',
+                    album_name=details.get('album_title'),
+                    duration_seconds=int(duration) if duration else None,
+                )
+            else:
+                ok = lyrics_client.create_lrc_file(
+                    resolved,
+                    details.get('track_title') or '',
+                    details.get('artist') or '',
+                    album_name=details.get('album_title'),
+                    duration_seconds=int(duration) if duration else None,
+                )
+                fetch_reason = None
         except Exception as e:
             logger.error("Lyrics fix failed for %s: %s", os.path.basename(raw_path), e)
             return {'success': False, 'error': str(e)}
         if not ok:
+            if fetch_reason:
+                # Transient/permanent fetch failure — report the real
+                # reason (e.g. "LRCLib rate-limited (429) — retry later").
+                return {'success': False, 'error': fetch_reason}
             # Lyrics vanished between scan and apply (rare) — report, don't crash.
             return {'success': False, 'error': 'Could not fetch lyrics (no longer available?)'}
         return {'success': True, 'action': 'applied_lyrics', 'message': 'Wrote lyrics (.lrc) + embedded'}

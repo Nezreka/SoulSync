@@ -1199,7 +1199,15 @@ async function _npLyricsLoadForTrack(track) {
             }
         }
         const content = document.getElementById('np-lyrics-content');
-        if (content) content.innerHTML = '<div class="np-lyrics-empty">No lyrics found</div>';
+        if (content) {
+            // A failed lookup (LRCLib rate-limited / 503 / rejected,
+            // #1879) is NOT necessarily "no lyrics" — the endpoint now
+            // returns the real reason in `error`, so show it when present.
+            const empty = document.createElement('div');
+            empty.className = 'np-lyrics-empty';
+            empty.textContent = (data && data.error) ? data.error : 'No lyrics found';
+            content.replaceChildren(empty);
+        }
         if (status) status.textContent = '';
     } catch (e) {
         console.debug('lyrics fetch failed:', e);

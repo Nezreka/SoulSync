@@ -52,16 +52,32 @@ def generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: d
         if original_search.get("duration_ms"):
             duration_seconds = int(original_search["duration_ms"] / 1000)
 
-        success = lyrics_client.create_lrc_file(
-            audio_file_path=file_path,
-            track_name=track_name,
-            artist_name=artist_name,
-            album_name=album_name,
-            duration_seconds=duration_seconds,
-        )
+        # Prefer the detailed variant (#1879): a transient LRCLib failure
+        # (429/503/timeout) must not be logged as "No lyrics found" — the
+        # lyrics may well exist, LRCLib just didn't answer.
+        detailed = getattr(lyrics_client, 'create_lrc_file_detailed', None)
+        if callable(detailed):
+            success, fetch_reason = detailed(
+                audio_file_path=file_path,
+                track_name=track_name,
+                artist_name=artist_name,
+                album_name=album_name,
+                duration_seconds=duration_seconds,
+            )
+        else:
+            success = lyrics_client.create_lrc_file(
+                audio_file_path=file_path,
+                track_name=track_name,
+                artist_name=artist_name,
+                album_name=album_name,
+                duration_seconds=duration_seconds,
+            )
+            fetch_reason = None
 
         if success:
             logger.info("LRC file generated for: %s", track_name)
+        elif fetch_reason:
+            logger.warning("Lyrics fetch incomplete for %s: %s", track_name, fetch_reason)
         else:
             logger.warning("No lyrics found for: %s", track_name)
         return success
