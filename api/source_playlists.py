@@ -1442,6 +1442,51 @@ def get_tidal_playlists():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# a big tidal playlist takes minutes to page through (1s between pages). the
+# sync page's background crawl, the modal opening it and start identifying
+# each used to fetch it again from scratch, so start sat behind a second
+# multi-minute fetch while the modal showed nothing. one fetch per playlist
+# at a time, and start takes the one that just landed.
+_TIDAL_FETCH_HANDOFF_SECONDS = 300
+_tidal_fetch_lock = threading.Lock()
+_tidal_fetch_inflight = {}  # (id(client), playlist_id) -> Event
+_tidal_fetch_recent = {}  # playlist_id -> (client, fetched_at, playlist)
+
+
+def _fetch_tidal_playlist(client, playlist_id, *, reuse_recent=False):
+    """client.get_playlist, shared. an identical fetch already running is
+    waited on, not repeated. reuse_recent takes a fetch from the last few
+    minutes (once, so a re-run after that still gets fresh tracks)."""
+    key = (id(client), playlist_id)
+    while True:
+        with _tidal_fetch_lock:
+            if reuse_recent:
+                recent = _tidal_fetch_recent.get(playlist_id)
+                if (recent and recent[0] is client
+                        and time.time() - recent[1] < _TIDAL_FETCH_HANDOFF_SECONDS):
+                    del _tidal_fetch_recent[playlist_id]
+                    return recent[2]
+            pending = _tidal_fetch_inflight.get(key)
+            if pending is None:
+                done = threading.Event()
+                _tidal_fetch_inflight[key] = done
+                break
+        # someone else is fetching it. wait, then take theirs (or fetch, if
+        # theirs failed). a fresh fetch only waits; it does not reuse.
+        pending.wait()
+        reuse_recent = True
+    playlist = None
+    try:
+        playlist = client.get_playlist(playlist_id)
+        return playlist
+    finally:
+        with _tidal_fetch_lock:
+            if playlist is not None and playlist.tracks:
+                _tidal_fetch_recent[playlist_id] = (client, time.time(), playlist)
+            _tidal_fetch_inflight.pop(key, None)
+        done.set()
+
+
 @bp.route('/api/tidal/playlist/<playlist_id>', methods=['GET'])
 def get_tidal_playlist_tracks(playlist_id):
     """Fetches full track details for a specific Tidal playlist (matches sync.py pattern)."""
@@ -1455,7 +1500,7 @@ def get_tidal_playlist_tracks(playlist_id):
         # `get_playlist` recognizes the virtual `tidal-favorites` ID and
         # dispatches to the userCollectionTracks endpoint internally, so
         # the rest of this handler treats it identically to a real playlist.
-        full_playlist = client.get_playlist(playlist_id)
+        full_playlist = _fetch_tidal_playlist(client, playlist_id)
         if not full_playlist:
             return jsonify({"error": "Playlist not found or unable to access. This may be due to privacy settings or Tidal API restrictions."}), 404
 
@@ -1505,12 +1550,14 @@ tidal_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix=
 def start_tidal_discovery(playlist_id):
     """Start Spotify discovery process for a Tidal playlist"""
     try:
-        # Get playlist data from Tidal
-        if not _tidal_client() or not _tidal_client().is_authenticated():
+        # Get playlist data from Tidal. the same client the page listed and
+        # fetched the playlist with, or a profile's own private playlist 404s
+        client = get_tidal_client_for_profile() or _tidal_client()
+        if not client or not client.is_authenticated():
             return jsonify({"error": "Tidal not authenticated."}), 401
 
-        # Fetch this single playlist directly — no need to re-fetch all playlists
-        target_playlist = _tidal_client().get_playlist(playlist_id)
+        # the fetch the modal or the page's crawl just made, if there is one
+        target_playlist = _fetch_tidal_playlist(client, playlist_id, reuse_recent=True)
 
         if not target_playlist:
             return jsonify({"error": "Tidal playlist not found"}), 404

@@ -127,12 +127,17 @@ describe('discovery via frames', () => {
 
   it('a failed start reverts to fresh (the beatport/LB revert)', async () => {
     responder = () => ({ error: 'nope' });
+    const toast = vi.fn();
+    window.showToast = toast;
     const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.listenbrainz));
     act(() => result.current.seed('mbid-1'));
     await act(async () => {
       await result.current.startDiscovery('mbid-1', { title: 'Weekly Jams' });
     });
     expect(result.current.states['mbid-1'].phase).toBe('fresh');
+    // and says why, instead of quietly going back to Start Identifying
+    expect(toast).toHaveBeenCalledWith("Couldn't start identifying: nope", 'error');
+    delete (window as { showToast?: unknown }).showToast;
     // LB sends the playlist body verbatim.
     expect(calls[0].body).toEqual({ title: 'Weekly Jams' });
   });

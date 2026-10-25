@@ -263,6 +263,26 @@ function AccountVerticalTab({
         const tracks = Array.isArray(playlist.tracks) ? playlist.tracks : [];
         vertical.seed(sourceId, { ...playlist, tracks });
         onOpen(sourceId);
+        if (tracks.length === 0) {
+          // opened before the background crawl got to this one: a big tidal
+          // playlist then sat at "0 tracks" with nothing moving for minutes.
+          // fetch it now (the backend shares this with the crawl and hands
+          // it to start identifying) and fill the modal in when it lands.
+          void fetchAccountPlaylist(chrome.base, sourceId)
+            .then((fullData) => {
+              const fetched = Array.isArray(fullData.tracks) ? (fullData.tracks as unknown[]) : [];
+              if (fetched.length === 0) return;
+              const filled = normalizeFreshTracks(fetched);
+              setPlaylistTracks(sourceId, filled);
+              vertical.patchState(sourceId, (s) => {
+                const has = Array.isArray(s.playlist?.tracks) && s.playlist.tracks.length > 0;
+                return has
+                  ? s
+                  : { ...s, playlist: { ...(s.playlist ?? playlist), tracks: filled } };
+              });
+            })
+            .catch(() => undefined);
+        }
         return;
       }
       // Qobuz (1649-1680) / YouTube Music: fetch the track list behind the overlay first.

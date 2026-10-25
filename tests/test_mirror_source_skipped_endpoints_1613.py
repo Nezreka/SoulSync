@@ -94,6 +94,8 @@ def test_tidal_identify_refreshes_the_mirrors_counts(client, monkeypatch):
     import api.source_playlists as sp
     pl_id = _post_mirror(client, 'D1')
     monkeypatch.setattr(sp, '_tidal_client', lambda: _Tidal(_gappy('D1')))
+    # start fetches with the profile's client, like the page does
+    monkeypatch.setattr(sp, 'get_tidal_client_for_profile', lambda: None)
     monkeypatch.setattr(sp.tidal_discovery_executor, 'submit', lambda *a, **k: None)
     monkeypatch.setitem(sp.tidal_discovery_states, 'D1', {'phase': 'discovered'})
     monkeypatch.setattr(sp, 'add_activity_item', lambda *a, **k: None)
