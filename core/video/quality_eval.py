@@ -348,6 +348,12 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
     if not rejected and profile.get("prefer_hdr") == "require" and not parsed.get("hdr"):
         rejected = "HDR required but this is SDR"
 
+    # 3b) audio language (dubbed / MULTI). a release with no tag is the
+    # original audio, so require skips it.
+    lang_hit = _language_hit(parsed, profile)
+    if not rejected and lang_hit is False and profile.get("audio_language_mode") == "require":
+        rejected = "No " + "/".join(c.upper() for c in profile.get("audio_languages") or []) + " audio tag (or MULTI)"
+
     # 4) scope validation (episode vs season pack vs series pack; movie year match)
     if not rejected:
         _, scope_reason = _scope_ok(parsed, scope, want_season, want_episode, want_year, want_title,
@@ -387,6 +393,8 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
         score += 15
     if profile.get("prefer_repack") and (parsed.get("repack") or parsed.get("proper")):
         score += 10
+    if lang_hit:
+        score += 150    # the audio you asked for beats a resolution step
 
     res_lab = resolution_label(res)
     if inferred and res_lab:
@@ -395,6 +403,18 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
                         (source or "").upper() if source else "", fam.upper() if fam else ""] if x])
     return {"accepted": rejected is None, "score": score, "rejected": rejected,
             "tier": tier, "quality_label": label}
+
+
+def _language_hit(parsed, profile):
+    """None when the profile doesn't care about audio language, else whether
+    the release carries one of its languages or a MULTI / dual audio tag."""
+    mode = profile.get("audio_language_mode")
+    wanted = set(profile.get("audio_languages") or [])
+    if mode not in ("prefer", "require") or not wanted:
+        return None
+    if parsed.get("multi"):
+        return True
+    return bool(wanted & set(parsed.get("languages") or []))
 
 
 def _infer_resolution(scope, size_gb):

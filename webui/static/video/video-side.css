@@ -4457,6 +4457,7 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vq-select option { background: #14181f; color: #fff; }
 /* hard-reject chips (on = blocked) */
 .vq-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.vq-chips[hidden] { display: none; }
 .vq-chip { padding: 7px 14px; border-radius: var(--radius-pill); cursor: pointer; font-size: 12.5px; font-weight: 600;
     background: var(--white-a05); border: 1px solid var(--white-a12);
     color: var(--white-a60); transition: all var(--dur-fast); }

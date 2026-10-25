@@ -249,7 +249,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Seeding goals, **season packs**, and stall detection.
 - **Quality profiles**:
   - A 16-tier ladder with upgrade-until-cutoff and Sonarr-style **custom formats**.
-  - Codec, HDR and audio preferences, size limits and minimum seeders.
+  - Codec, HDR and audio preferences, **audio language** (prefer or require a dubbed / MULTI release), size limits and minimum seeders.
   - A separate YouTube profile.
 - **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames, NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
 - **Downloads page**: Downloads / Review / Clients views with live batches, a review queue and download-client management — the same setup as the music side.

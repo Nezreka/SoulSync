@@ -35,6 +35,14 @@
         'cam': 'CAM / TS', 'screener': 'Screener', 'workprint': 'Workprint', '3d': '3D', 'x264': 'x264 / AVC'
     };
     var REJECT_ORDER = ['cam', 'screener', 'workprint', '3d', 'x264'];
+    // audio languages a release tag can name (core/video/quality_profile.AUDIO_LANGUAGES)
+    var LANG_ORDER = ['fr', 'de', 'it', 'es', 'pt', 'ja', 'ko', 'zh', 'ru', 'pl', 'nl',
+                      'sv', 'da', 'no', 'fi', 'hi', 'tr', 'cs', 'hu', 'ar', 'uk', 'en'];
+    var LANG_LABEL = { fr: 'French', de: 'German', it: 'Italian', es: 'Spanish', pt: 'Portuguese',
+                       ja: 'Japanese', ko: 'Korean', zh: 'Chinese', ru: 'Russian', pl: 'Polish',
+                       nl: 'Dutch', sv: 'Swedish', da: 'Danish', no: 'Norwegian', fi: 'Finnish',
+                       hi: 'Hindi', tr: 'Turkish', cs: 'Czech', hu: 'Hungarian', ar: 'Arabic',
+                       uk: 'Ukrainian', en: 'English' };
 
     function esc(s) {
         return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -1208,6 +1216,19 @@
         _vqSeg('vq-audio', 'data-vq-audio', p.prefer_audio);
         var rep = document.getElementById('vq-prefer-repack'); if (rep) rep.checked = !!p.prefer_repack;
 
+        // Audio language (dubbed / MULTI). MULTI always counts as a match.
+        var lmode = p.audio_language_mode || 'off';
+        _vqSeg('vq-lang-mode', 'data-vq-lang-mode', lmode);
+        var lg = document.getElementById('vq-langs');
+        if (lg) {
+            var langs = Array.isArray(p.audio_languages) ? p.audio_languages : [];
+            lg.hidden = lmode === 'off';
+            lg.innerHTML = LANG_ORDER.map(function (k) {
+                var on = langs.indexOf(k) !== -1;
+                return '<button type="button" class="vq-chip' + (on ? ' on' : '') + '" data-vq-lang="' + k + '">' + (LANG_LABEL[k] || k) + '</button>';
+            }).join('');
+        }
+
         // Size guard — split by runtime so a movie and an episode aren't judged the same.
         var mv = document.getElementById('vq-movie-size'); if (mv) mv.value = p.max_movie_gb || 0;
         var ep = document.getElementById('vq-episode-size'); if (ep) ep.value = p.max_episode_gb || 0;
@@ -1238,6 +1259,14 @@
         var j = i + dir;
         if (i < 0 || j < 0 || j >= arr.length) return;
         var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;   // swap
+        renderQuality(); saveQuality(true);
+    }
+
+    function toggleLang(k) {
+        var p = _videoQuality; if (!p) return;
+        if (!Array.isArray(p.audio_languages)) p.audio_languages = [];
+        var i = p.audio_languages.indexOf(k);
+        if (i === -1) p.audio_languages.push(k); else p.audio_languages.splice(i, 1);
         renderQuality(); saveQuality(true);
     }
 
@@ -1295,6 +1324,10 @@
             if (hd) { _videoQuality.prefer_hdr = hd.getAttribute('data-vq-hdr'); renderQuality(); saveQuality(true); return; }
             var au = e.target.closest('[data-vq-audio]');
             if (au) { _videoQuality.prefer_audio = au.getAttribute('data-vq-audio'); renderQuality(); saveQuality(true); return; }
+            var lm = e.target.closest('[data-vq-lang-mode]');
+            if (lm) { _videoQuality.audio_language_mode = lm.getAttribute('data-vq-lang-mode'); renderQuality(); saveQuality(true); return; }
+            var lc = e.target.closest('[data-vq-lang]');
+            if (lc) { toggleLang(lc.getAttribute('data-vq-lang')); return; }
         });
         card.addEventListener('change', function (e) {
             if (!_videoQuality) return;

@@ -4701,6 +4701,17 @@
                                                 </label>
                                             </div>
                                             <div class="vq-block">
+                                                <div class="vq-label">Audio language <span class="vq-hint">for
+                                                        dubbed or MULTI releases. a release with no language tag is
+                                                        the original audio</span></div>
+                                                <div class="vq-seg" id="vq-lang-mode">
+                                                    <button type="button" data-vq-lang-mode="off">Don't care</button>
+                                                    <button type="button" data-vq-lang-mode="prefer">Prefer</button>
+                                                    <button type="button" data-vq-lang-mode="require">Require</button>
+                                                </div>
+                                                <div class="vq-chips" id="vq-langs" style="margin-top:10px;" hidden></div>
+                                            </div>
+                                            <div class="vq-block">
                                                 <div class="vq-label">Max size <span class="vq-hint">skip anything
                                                         bigger — set per type so a movie and an episode aren't judged
                                                         the same</span></div>
