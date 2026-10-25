@@ -298,6 +298,49 @@ def test_network_failure_is_a_readable_error():
     assert "Pollinations" in str(err.value)
 
 
+# ── the settings test button ────────────────────────────────────────────
+
+def test_key_check_asks_about_the_key_and_spends_nothing():
+    http = _Http(_Resp(status=200, ctype="application/json"))
+    assert ca.check_key("sk", http_get=http) == (True, "Pollinations accepted the key.")
+    assert http.calls[0]["url"] == ca.KEY_CHECK_URL
+    assert http.calls[0]["headers"] == {"Authorization": "Bearer sk"}
+    # never the image endpoint, never the free tier's one slot
+    assert ca._next_free_at == 0
+
+
+@pytest.mark.parametrize("status,words", [(401, "didn't accept"), (403, "image access"), (500, "500")])
+def test_key_check_says_what_went_wrong(status, words):
+    ok, msg = ca.check_key("sk", http_get=_Http(_Resp(status=status)))
+    assert not ok and words in msg
+
+
+def test_no_key_only_checks_pollinations_answers():
+    http = _Http(_Resp(status=200, ctype="application/json"))
+    ok, msg = ca.check_key("  ", http_get=http)
+    assert ok and "45 seconds" in msg
+    assert http.calls[0]["url"] == ca.MODELS_URL
+    assert http.calls[0]["headers"] == {}
+
+
+def test_key_check_network_failure_is_readable():
+    def boom(*a, **k):
+        raise OSError("connection reset")
+    assert ca.check_key("sk", http_get=boom) == (False, "Couldn't reach Pollinations.")
+
+
+def test_the_settings_button_routes_to_the_key_check(monkeypatch):
+    from unittest.mock import patch
+    from core import connection_test
+    seen = []
+    monkeypatch.setattr(ca, "check_key", lambda key: seen.append(key) or (True, "ok"))
+    with patch.object(connection_test.config_manager, "get",
+                      side_effect=lambda k, d=None: "sk" if k == "pollinations.api_key" else {}), \
+         patch.object(connection_test.config_manager, "set"):
+        assert connection_test.run_service_test("pollinations", {}) == (True, "ok")
+    assert seen == ["sk"]
+
+
 # ── preview, apply, restore ─────────────────────────────────────────────
 
 

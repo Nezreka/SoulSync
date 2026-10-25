@@ -755,8 +755,8 @@ const SERVICE_GROUPS = {
           ids: ['musicbrainz', 'spotify', 'itunes', 'deezer', 'discogs', 'tidal', 'qobuz', 'hydrabase'] },
         { label: 'Scrobbling', hint: 'listening history and recommendations',
           ids: ['lastfm', 'listenbrainz'] },
-        { label: 'Extras', hint: 'lyrics, concerts and fingerprint checks',
-          ids: ['genius', 'concerts', 'acoustid'] },
+        { label: 'Extras', hint: 'lyrics, concerts, fingerprint checks and cover art',
+          ids: ['genius', 'concerts', 'acoustid', 'pollinations'] },
     ],
     video: [
         { label: 'Metadata', hint: 'movies, shows and episodes',

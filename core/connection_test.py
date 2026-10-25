@@ -354,6 +354,9 @@ def run_service_test(service, test_config):
                     return False, "Invalid Genius access token."
             except Exception as e:
                 return False, f"Genius connection error: {str(e)}"
+        elif service == "pollinations":
+            from core.playlists.cover_art import check_key
+            return check_key(config_manager.get('pollinations.api_key', ''))
         elif service == "usenet_client":
             client_type = (config_manager.get('usenet_client.type', '') or '').strip().lower()
             url = config_manager.get('usenet_client.url', '')

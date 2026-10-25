@@ -434,6 +434,48 @@ def generate_image(
 # route, so the sync push already knows how to hand them to plex as a file.
 
 
+KEY_CHECK_URL = "https://gen.pollinations.ai/account/key"
+# public, needs no key: just proves pollinations answers
+MODELS_URL = "https://gen.pollinations.ai/image/models"
+CHECK_TIMEOUT_SECONDS = 15
+
+
+def check_key(
+    api_key: Optional[str] = None,
+    *,
+    http_get: Optional[Callable[..., Any]] = None,
+) -> tuple:
+    """the settings test button: (ok, message). asks pollinations about the
+    key itself, so it never spends pollen or the free tier's one slot. no key
+    is fine, the free tier needs none, so then it only checks they answer"""
+    if http_get is None:
+        import requests
+        http_get = requests.get
+    key = (api_key or '').strip()
+    try:
+        if key:
+            resp = http_get(KEY_CHECK_URL, headers={'Authorization': f'Bearer {key}'},
+                            timeout=CHECK_TIMEOUT_SECONDS)
+        else:
+            resp = http_get(MODELS_URL, timeout=CHECK_TIMEOUT_SECONDS)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("pollinations check failed: %s", e)
+        return False, "Couldn't reach Pollinations."
+    status = getattr(resp, 'status_code', 0)
+    if not key:
+        if status == 200:
+            return True, ("Pollinations is reachable. No key: one image every 45 seconds, "
+                          "with a small Pollinations mark.")
+        return False, f"Pollinations answered {status}. Try again in a bit."
+    if status == 200:
+        return True, "Pollinations accepted the key."
+    if status == 401:
+        return False, "Pollinations didn't accept the API key."
+    if status == 403:
+        return False, "That key can't make images. Give it image access at enter.pollinations.ai."
+    return False, f"Pollinations answered {status}. Try again in a bit."
+
+
 def preview_path(playlist_id: int, base_dir: Optional[str] = None, *, mkdir: bool = True) -> str:
     return os.path.join(up.cover_dir(base_dir, mkdir=mkdir), f"preview-{int(playlist_id)}.webp")
 
