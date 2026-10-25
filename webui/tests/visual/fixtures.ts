@@ -18,6 +18,9 @@ export const shellHandlers: RequestHandler[] = [
   // date, so keep it off; `{}` would hide it too, but only by accident.
   http.get('*/api/weather', () => HttpResponse.json({ enabled: false })),
   http.get('*/api/auth/plex/available', () => HttpResponse.json({ enabled: false })),
+  // The dashboard's Finish setup card reads `items` and needs the real shape;
+  // dismissed keeps it hidden, as it was before the card existed.
+  http.get('*/api/onboarding/checklist', () => HttpResponse.json({ dismissed: true, items: [] })),
 ];
 
 const ARTIST_NAMES = [
