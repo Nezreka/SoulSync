@@ -76,7 +76,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 54   # v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 56   # v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -816,6 +816,25 @@ class VideoDatabase:
                         f"CREATE UNIQUE INDEX {idx} ON video_wishlist{cols} "
                         f"WHERE kind = '{kind}'")
                     logger.info("v49: rebuilt %s as per-profile", idx)
+        if prev_version < 56:
+            # v56: TMDB lumps some anime into one long season (Jujutsu Kaisen
+            # S01E01-59) and the episode sync filed the overflow as missing
+            # rows next to the server's real S02/S03. the sync now files them
+            # under TVDB's numbers and retires the leftovers, but the full
+            # sync is one-time, so re-queue the shows that look like that:
+            # missing rows past the server's last episode of a season, with
+            # the server holding a later season. (dev ran this as v55 while
+            # the tvdb worker was still eating the queue, so it runs again.)
+            conn.execute(
+                "UPDATE shows SET episodes_synced=0 WHERE episodes_synced=1 "
+                "AND tmdb_id IS NOT NULL AND tvdb_id IS NOT NULL AND id IN ("
+                "SELECT e.show_id FROM episodes e WHERE e.server_id IS NULL "
+                "AND COALESCE(e.has_file, 0)=0 AND e.season_number>0 "
+                "AND e.episode_number > (SELECT MAX(s.episode_number) FROM episodes s "
+                "WHERE s.show_id=e.show_id AND s.season_number=e.season_number "
+                "AND s.server_id IS NOT NULL) "
+                "AND EXISTS (SELECT 1 FROM episodes l WHERE l.show_id=e.show_id "
+                "AND l.season_number>e.season_number AND l.server_id IS NOT NULL))")
 
     # ── enrichment plumbing (per-source match status, like music) ─────────────
     def enrichment_next(self, service: str, retry_days: int = 30, priority=None) -> dict | None:
@@ -2157,6 +2176,60 @@ class VideoDatabase:
                     touched += 1
             conn.commit()
             return touched
+        finally:
+            conn.close()
+
+    def server_has_episodes(self, show_id: int, season_number: int, episode_numbers) -> bool:
+        """True when the server holds any of these episode numbers in this season
+        (a server numbering a lumped anime season TMDB's way)."""
+        nums = [int(n) for n in episode_numbers or []]
+        if not nums:
+            return False
+        conn = self._get_connection()
+        try:
+            marks = ",".join("?" * len(nums))
+            return conn.execute(
+                f"SELECT 1 FROM episodes WHERE show_id=? AND season_number=? "
+                f"AND episode_number IN ({marks}) AND server_id IS NOT NULL LIMIT 1",
+                [show_id, season_number] + nums).fetchone() is not None
+        finally:
+            conn.close()
+
+    def retire_renumbered_episodes(self, show_id: int, season_number: int, moved: dict) -> int:
+        """drop the missing rows an episode left behind at its TMDB number once
+        it's filed under TVDB's ({old episode: (season, episode)}), and move any
+        wishlist row along with it. the episode itself lives on at the new number,
+        so this is a merge, not a delete of a fact. rows with a file or a server
+        id are never touched. Returns rows dropped."""
+        if not moved:
+            return 0
+        conn = self._get_connection()
+        try:
+            show = conn.execute("SELECT tmdb_id FROM shows WHERE id=?", (show_id,)).fetchone()
+            dropped = 0
+            for old, (ns, ne) in moved.items():
+                row = conn.execute(
+                    "SELECT id FROM episodes WHERE show_id=? AND season_number=? AND episode_number=? "
+                    "AND server_id IS NULL AND COALESCE(has_file, 0)=0",
+                    (show_id, season_number, int(old))).fetchone()
+                if row:
+                    conn.execute("DELETE FROM subtitle_wanted WHERE video_kind='episode' AND video_id=?",
+                                 (row["id"],))
+                    conn.execute("DELETE FROM episodes WHERE id=?", (row["id"],))
+                    dropped += 1
+                if show and show["tmdb_id"] is not None:
+                    key = (int(show["tmdb_id"]), season_number, int(old))
+                    conn.execute(
+                        "UPDATE OR IGNORE video_wishlist SET season_number=?, episode_number=? "
+                        "WHERE kind='episode' AND tmdb_id=? AND season_number=? AND episode_number=?",
+                        (int(ns), int(ne)) + key)
+                    # already wished at the new number too: one row is enough
+                    conn.execute(
+                        "DELETE FROM video_wishlist "
+                        "WHERE kind='episode' AND tmdb_id=? AND season_number=? AND episode_number=?",
+                        key)
+            conn.commit()
+            return dropped
         finally:
             conn.close()
 
