@@ -1391,10 +1391,10 @@ function initPathPreview() {
     bar.id = 'path-preview-scenarios';
     bar.className = 'path-preview-scenarios';
     bar.setAttribute('role', 'radiogroup');
-    bar.setAttribute('aria-label', 'Preview the templates with');
+    bar.setAttribute('aria-label', 'Example release your templates are filled in with');
     const label = document.createElement('span');
     label.className = 'path-preview-scenarios-label';
-    label.textContent = 'Preview with';
+    label.textContent = 'Your templates, filled in with an example release:';
     bar.append(label);
     PATH_PREVIEW_SCENARIOS.forEach(([key, text]) => {
         const button = document.createElement('button');
