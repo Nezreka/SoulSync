@@ -448,7 +448,8 @@ def substitute_lookalikes(name: str) -> str:
 
     'AC/DC' → 'AC∕DC', 'What's Going On?' → 'What's Going On？'. a quote opens
     at the start or after a space or bracket and closes anywhere else. trailing
-    dots become fullwidth ('DAMN.' → 'DAMN．') so windows can't eat them.
+    dots become one dot leaders ('DAMN.' → 'DAMN․') so windows can't eat them.
+    not the fullwidth stop: it is twice as wide and reads as ". " (#1873).
     leading dots are left alone: the caller still strips those (#1129)."""
     out = []
     for i, ch in enumerate(name):
@@ -460,7 +461,7 @@ def substitute_lookalikes(name: str) -> str:
     text = "".join(out).rstrip()
     body = text.rstrip(".")
     if body.strip(". "):
-        text = body + "\uff0e" * (len(text) - len(body))
+        text = body + "\u2024" * (len(text) - len(body))
     return text
 
 

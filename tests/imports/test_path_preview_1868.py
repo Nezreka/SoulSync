@@ -110,7 +110,7 @@ def test_unsaved_toggles_render_and_never_stick(saved):
                        {"unicode_substitution": True}, "explicit")
     off = preview_paths({"album_path": "$albumartist/$album/$title"},
                         {"unicode_substitution": False}, "explicit")
-    assert on["paths"]["album_path"] == "Kendrick Lamar/DAMN．/HUMBLE．.flac"
+    assert on["paths"]["album_path"] == "Kendrick Lamar/DAMN․/HUMBLE․.flac"
     assert off["paths"]["album_path"] == "Kendrick Lamar/DAMN/HUMBLE.flac"
     # outside the preview the importer reads the saved config again
     assert import_paths.unicode_substitution_enabled() is False

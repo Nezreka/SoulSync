@@ -1,12 +1,13 @@
 """windows-safe lookalikes instead of underscores in names (#1867, QT3496).
 
 off (every existing install): AC/DC files as AC_DC, byte for byte as before.
-on: AC∕DC, What's Going On？, DAMN． and both sanitizers agree, so a download
+on: AC∕DC, What's Going On？, DAMN․ and both sanitizers agree, so a download
 and reorganize land in the same place.
 """
 
 from __future__ import annotations
 
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -37,13 +38,21 @@ def cfg(monkeypatch):
     ("AC/DC", "AC∕DC"),
     ("What's Going On?", "What's Going On？"),
     ("Volume 1: The Hits", "Volume 1꞉ The Hits"),
-    ("DAMN.", "DAMN．"),
-    ("Fred again..", "Fred again．．"),
+    ("DAMN.", "DAMN․"),
+    ("Fred again..", "Fred again․․"),
     ('Say "Hi" (the "Mix")', "Say “Hi” (the “Mix”)"),
     ("a\\b*c|d<e>f", "a⧵b⁎c│d‹e›f"),
 ])
 def test_lookalikes(raw, want):
     assert substitute_lookalikes(raw) == want
+
+
+def test_kept_dot_is_not_a_wide_glyph():
+    # #1873: the fullwidth stop drew as ". " so "DAMN．" looked like a stray
+    # period and space. the kept dot has to be as narrow as a real one.
+    dot = substitute_lookalikes("DAMN.")[-1]
+    assert dot != "."
+    assert unicodedata.east_asian_width(dot) not in ("F", "W")
 
 
 def test_off_keeps_underscores_byte_for_byte(cfg):
@@ -55,7 +64,7 @@ def test_off_keeps_underscores_byte_for_byte(cfg):
 def test_on_keeps_the_symbols(cfg):
     cfg.values["file_organization.unicode_substitution"] = True
     assert sanitize_filename("AC/DC") == "AC∕DC"
-    assert sanitize_filename("DAMN. ") == "DAMN．"
+    assert sanitize_filename("DAMN. ") == "DAMN․"
     # leading dots still go: a dotfile folder vanishes from media servers (#1129)
     assert sanitize_filename("...Baby One More Time") == "Baby One More Time"
     assert sanitize_filename("...") == "_"
@@ -98,7 +107,7 @@ def test_the_built_path_keeps_the_symbols(cfg, tmp_path, monkeypatch):
         {"is_album": True, "album_name": album, "track_number": 3, "disc_number": 1},
         ".flac", create_dirs=False)
     rel = Path(path).relative_to(tmp_path).parts
-    assert rel == ("AC∕DC", "Who Made Who？", "03 - D.T．.flac")
+    assert rel == ("AC∕DC", "Who Made Who？", "03 - D.T․.flac")
 
 
 def test_off_does_not_move_the_naming_fingerprint(monkeypatch):
