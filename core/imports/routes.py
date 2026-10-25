@@ -210,11 +210,30 @@ _staging_scan_problems: list = []
 # import doesn't re-commit stale (pre-import) records (see the generation guard above).
 _staging_scan_generation: Dict[str, int] = {"value": 0}
 
+# The inbox-summary slot's lock and build counter live up here, next to
+# the generation they guard: invalidate_staging_scan_cache() (below)
+# bumps the generation under this lock, and a name resolved at call time
+# from 100 lines down is a trap for the next refactor. The slot itself is
+# defined with its rationale further down (see _last_inbox_summary).
+_last_inbox_summary_lock = threading.RLock()
+
+
+def _initial_build_seq() -> int:
+    return int(time.time() * 1000)
+
+
+_inbox_build_counter: Dict[str, int] = {"value": _initial_build_seq()}
+# Complete builds whose counts never reached the slot (generation guard,
+# remember failure): adopting a remembered seq is only sound while no
+# such build intervenes (see _remember_inbox_summary).
+_inbox_remember_skips: Dict[str, int] = {"value": 0}
+
 # Background-scan plumbing: a large staging folder (whole-library migration, #947) makes
 # the synchronous scan exceed gunicorn's 120s request timeout. The runner moves the SAME
 # scan off the request thread; the endpoints report progress instead of blocking.
 _staging_scan_status: Dict[str, Any] = {
     "status": "idle", "scanned": 0, "total": 0, "path": None, "error": None,
+    "started_at": None,
 }
 _staging_scan_status_lock = threading.Lock()
 
@@ -238,7 +257,8 @@ def ensure_background_staging_scan(runtime: ImportRouteRuntime, staging_path: st
                 and _staging_scan_status["path"] == staging_path):
             return
         _staging_scan_status.update({"status": "scanning", "scanned": 0, "total": 0,
-                                     "path": staging_path, "error": None})
+                                     "path": staging_path, "error": None,
+                                     "started_at": time.time()})
 
     def _run() -> None:
         try:
@@ -400,7 +420,13 @@ def invalidate_staging_scan_cache() -> None:
     """Drop the cached staging scan (call after an import moves/removes files so the
     next files/groups/hints request reflects the new state immediately). Also bumps the
     scan generation so an in-flight background scan won't re-commit pre-import records."""
-    _staging_scan_generation["value"] += 1
+    # The bump takes the inbox-summary lock (defined further down; resolved
+    # at call time) so it is atomic against _remember_inbox_summary's
+    # check-then-write: a remember either sees the new generation and
+    # skips, or completes before the bump — never slips stale counts in
+    # between the check and the write.
+    with _last_inbox_summary_lock:
+        _staging_scan_generation["value"] += 1
     _staging_scan_cache.update({"path": None, "ts": 0.0, "records": None})
     _staging_scan_problems.clear()
     # the scanning payload's history cache is an invalidation target too:
@@ -461,6 +487,196 @@ def _inbox_worker_payload(worker: Any, status: Dict[str, Any]) -> Dict[str, Any]
 # scan — the scan's own completion brings the exact rows.
 _SCANNING_HISTORY_TTL = 5.0
 _scanning_history_cache: Dict[str, Any] = {"path": None, "ts": 0.0, "rows": None, "problems": None}
+
+# The header strip's numbers from the last COMPLETE inbox build (#1874).
+# A scanning reply cannot recount the folder yet, but dropping the strip's
+# stats for the whole scan is the reported bug — a cold page open mid-scan
+# (or a return from the matcher) has no client-side snapshot to fall back
+# on, so the server carries the last counts it actually counted. Never
+# fabricated: with no complete build for the folder on record the scanning
+# reply still carries no summary at all, exactly as #1671 requires.
+# Bounds, so last-known never becomes long-stale: a SINGLE slot (only the
+# most recently built folder's summary is kept — the path check means a
+# different folder never inherits it, it just gets none), a one-hour TTL,
+# and an empty-folder build CLEARS the slot instead of remembering zeroes —
+# serving a remembered "0 items" for a batch nobody has counted is the
+# fabrication #1671 forbids, in older clothes. A complete build is
+# authoritative for the folder's readable staged content even when it also
+# reports problems (unreadable subdirectories are surfaced separately in
+# the reply's problems list): an empty build with problems still clears.
+# The TTL bounds cross-session staleness, not intra-batch staleness: while
+# a client polls, every complete build between scans refreshes the entry,
+# but the auto-import worker moves files without ever building an inbox,
+# so a cold open late in a worker-only batch can show counts up to the TTL
+# old while its first scan runs. That is the same last-known tradeoff the
+# page's own snapshot makes; the scan banner's live progress total is the
+# current file count in that window, and the scan landing replaces the
+# numbers. Age is judged at the scan's start, so an entry that was fresh
+# enough when a scan began is served for that scan's whole duration, even
+# past the TTL — expiring mid-scan would be the original bug returning.
+# Deliberately NOT cleared by invalidate_staging_scan_cache(): that is
+# called after imports and uploads move files, and the re-scan that
+# follows is precisely when the strip must keep showing the batch's
+# numbers until the scan lands and a fresh complete build replaces them
+# (the same lifetime the page's own in-memory snapshot has). One known
+# corollary: after an upload, the post-upload scan can show pre-upload
+# counts (without the just-uploaded files) until that scan lands.
+# The entry is one immutable tuple swapped under a lock in a single
+# assignment — (path, summary|None, ts, wire_seq, start_seq, cleared) —
+# so a reader can never tear a path from another folder's summary across
+# a concurrent complete build, and writers are serialised. Ordering is by
+# START sequence: every complete build takes the next sequence number
+# when its counting begins, and a build whose start is older than the
+# remembered build's start never overwrites it, however late it finishes.
+# The generation guard is the second check (a build whose records
+# predate an invalidation never remembers — the same discipline
+# _scan_staging_records follows). The WIRE sequence a summary carries
+# ("seq") is the start sequence of the build that first counted those
+# numbers: a build whose numbers are unchanged from the remembered ones
+# ADOPTS the remembered wire sequence instead of minting a new one, so
+# identical polls stay deeply equal (the page's structural sharing
+# survives) and sequence comparisons are only ever asked to order
+# summaries whose numbers differ. Clearing writes a tombstone that keeps
+# the folder path, both sequences, and the cleared build's counted
+# numbers, so a late older build cannot resurrect cleared counts and an
+# identical later build can adopt the tombstone's wire sequence instead
+# of churning a new one per poll. Like the neighbouring caches, the slot
+# and its sequences are per-process state: coherent with the shipped
+# single-worker gunicorn config; a multi-worker deployment would need
+# both in shared storage before seq comparisons meant anything across
+# processes.
+_LAST_INBOX_SUMMARY_TTL = 3600.0
+_LAST_INBOX_SUMMARY_HARD_TTL = 4 * _LAST_INBOX_SUMMARY_TTL
+_RECENT_SCAN_DONE_SECONDS = 120.0
+# The slot, and below it the "skips at write" marker adoption checks.
+# Entry: (path, summary|None, ts, wire_seq, start_seq, cleared|None).
+_last_inbox_summary: Dict[str, Any] = {"entry": None, "skips": 0}
+# The build counter is seeded from the wall clock rather than 0: a tab
+# that stays open across a server restart keeps its snapshot's seq, and
+# a restarted counter starting near 0 would lose every comparison
+# against it until the scan lands. Clock-seeded, a later process always
+# starts ahead of any earlier process's increments (a process would need
+# millions of builds in its lifetime to catch up with the clock).
+# MILLISECONDS, not nanoseconds: the seq is compared in the browser, and
+# a ns value (~1.8e18) exceeds JavaScript's safe-integer range (~9e15) —
+# JSON parsing would round adjacent seqs to equal and silently break the
+# ordering. A ms seed (~1.7e12) stays exact, with headroom for ~9e12
+# builds. (A wall clock stepping BACKWARDS across a restart could still
+# seed below an open tab's snapshot seq; that tab then keeps its
+# snapshot until the scan lands and replaces both — one scan, accepted.)
+# (The counter and the lock are defined by _staging_scan_generation:
+# invalidate_staging_scan_cache() bumps the generation under the lock.)
+
+
+def _copy_inbox_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
+    copied = dict(summary)
+    if isinstance(copied.get("by_status"), dict):
+        copied["by_status"] = dict(copied["by_status"])
+    return copied
+
+
+def _next_build_seq() -> int:
+    with _last_inbox_summary_lock:
+        _inbox_build_counter["value"] += 1
+        return _inbox_build_counter["value"]
+
+
+def _inbox_summary_cleared_seq(staging_path: str) -> Optional[int]:
+    """The wire sequence of the slot's tombstone, if the slot is cleared
+    FOR THIS FOLDER: a scanning reply carries it so a tab whose snapshot
+    predates the clear (an empty complete build) drops that snapshot
+    instead of showing counts a later build already superseded with
+    zero. Folder-scoped like the summary itself — the single slot may
+    hold another folder's tombstone after a path switch."""
+    with _last_inbox_summary_lock:
+        entry = _last_inbox_summary["entry"]
+        if entry is not None and entry[1] is None and entry[0] == staging_path:
+            return entry[3]
+        return None
+
+
+def _remember_inbox_summary(staging_path: str, summary: Dict[str, Any], *,
+                            generation: Optional[int] = None,
+                            build_seq: Optional[int] = None) -> Optional[int]:
+    """Remember a complete build's counted summary (without its "seq").
+
+    ``build_seq`` is the build's START sequence. Returns the wire sequence
+    the build's reply should carry, or None when the build was skipped by
+    an ordering guard (its reply then carries its own start sequence,
+    which still orders it correctly against the remembered entry for any
+    tab that received it)."""
+    with _last_inbox_summary_lock:
+        if generation is not None and generation != _staging_scan_generation["value"]:
+            # Its counts reached a tab but never the slot: adoption must
+            # not reuse an older sequence past it (see the skips check).
+            _inbox_remember_skips["value"] += 1
+            return None
+        entry = _last_inbox_summary["entry"]
+        start = build_seq if build_seq is not None else _next_build_seq()
+        if entry is not None and entry[4] > start:
+            return None
+        counted_zero = not summary.get("items") and not summary.get("files")
+
+        def _store(new_entry) -> None:
+            _last_inbox_summary["entry"] = new_entry
+            _last_inbox_summary["skips"] = _inbox_remember_skips["value"]
+
+        if entry is not None and entry[0] == staging_path:
+            no_skips_since = (
+                _inbox_remember_skips["value"] == _last_inbox_summary.get("skips", 0))
+            if entry[1] is not None:
+                previous = {k: v for k, v in entry[1].items() if k != "seq"}
+                if previous == summary and no_skips_since:
+                    # Unchanged numbers, and no unremembered build in
+                    # between: adopt the wire sequence they were first
+                    # counted under, refresh the timestamp. (With a skip
+                    # in between, a tab may hold the skipped build's
+                    # different counts under a higher sequence — reusing
+                    # the old one would order this fresher count behind
+                    # it, so the build falls through and mints its own.)
+                    _store((staging_path, entry[1], time.time(), entry[3], start, None))
+                    return entry[3]
+            elif entry[5] is not None and entry[5] == summary and no_skips_since:
+                # A tombstone holding exactly these (zero) numbers:
+                # adopt its wire sequence instead of churning a new one.
+                wire = entry[3]
+                _store((staging_path, None, time.time(), wire, start,
+                        _copy_inbox_summary(summary)))
+                return wire
+        if counted_zero:
+            _store((staging_path, None, time.time(), start, start,
+                    _copy_inbox_summary(summary)))
+            return start
+        _store((staging_path, {**_copy_inbox_summary(summary), "seq": start},
+                time.time(), start, start, None))
+        return start
+
+
+def _last_inbox_summary_for(staging_path: str, *,
+                            scan_started_at: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    with _last_inbox_summary_lock:
+        entry = _last_inbox_summary["entry"]
+        if entry is None:
+            return None
+        path, summary, remembered_at, _wire_seq, _start_seq, _cleared = entry
+        if path != staging_path or summary is None:
+            return None
+        # Age is judged at the scan's start when the caller is a scanning
+        # reply: an entry fresh enough when the scan began stays servable
+        # for that scan's whole duration (a >1h scan must not lose the
+        # strip mid-scan — the original bug), while an entry already past
+        # the TTL when the scan began is never served at all. A hard cap
+        # still applies either way: a scan whose thread hangs (a stalled
+        # network walk) must not make last-known immortal.
+        now = time.time()
+        if (now - remembered_at) >= _LAST_INBOX_SUMMARY_HARD_TTL:
+            return None
+        judged_at = now
+        if scan_started_at is not None and scan_started_at < judged_at:
+            judged_at = scan_started_at
+        if (judged_at - remembered_at) >= _LAST_INBOX_SUMMARY_TTL:
+            return None
+        return _copy_inbox_summary(summary)
 
 
 def _scanning_history_rows(worker: Any, staging_path: str,
@@ -570,11 +786,55 @@ def _scanning_inbox_payload(scanning: Dict[str, Any], staging_path: str,
     the worker's state is in memory, so both can be served immediately. The
     page keeps showing them (plus the folder path and the auto-import switch)
     under a scan-progress banner instead of blanking to zeroes and claiming
-    the folder is not configured. No ``summary``: the staged counts are
-    exactly what is not known yet, and a fabricated "0 items" is the bug
-    being fixed. Enrichment must never break the poll — any failure falls
-    back to the bare scanning payload."""
+    the folder is not configured. No fabricated ``summary``: the staged
+    counts are exactly what is not known yet, and a fabricated "0 items" is
+    the bug #1671 fixed. The one summary a scanning reply may carry is the
+    last COMPLETE build's, for this same folder (#1874) — real counted
+    numbers the page's header strip keeps showing until the scan lands,
+    instead of vanishing whenever the page was not already open with a
+    client-side snapshot when processing began. (On a cold open the header
+    can therefore disagree with the filter-pill counts for the scan's
+    duration: the pills count the history rows in ``items``, the header
+    shows the last build's staged rows. The scan landing reconciles them.)
+    Enrichment must never break the poll — any failure falls back to the
+    bare scanning payload."""
     payload = dict(scanning)
+    try:
+        with _staging_scan_status_lock:
+            scan_status = dict(_staging_scan_status)
+        # A just-finished scan counts too: this reply was already
+        # determined to be a scanning reply, and the scan may have
+        # finished in the gap since — its start is still the right moment
+        # to judge the entry's age. started_at is left in place after a
+        # scan for exactly this read, but only a RECENT done is read as
+        # this reply's scan; a stale done belongs to an earlier scan
+        # whose polls have long ended (a new scan re-stamps it anyway).
+        scan_started = scan_status.get("started_at")
+        scan_started_at = (
+            scan_started
+            if scan_status.get("path") == staging_path
+            and scan_started is not None
+            and (
+                scan_status.get("status") == "scanning"
+                or (
+                    scan_status.get("status") == "done"
+                    and (time.time() - scan_started) < _RECENT_SCAN_DONE_SECONDS
+                )
+            )
+            else None
+        )
+        summary = _last_inbox_summary_for(staging_path, scan_started_at=scan_started_at)
+    except Exception:  # noqa: BLE001 — the summary is a nicety during a scan
+        summary = None
+    if summary is not None:
+        payload["summary"] = summary
+    else:
+        try:
+            cleared_seq = _inbox_summary_cleared_seq(staging_path)
+        except Exception:  # noqa: BLE001 — same nicety rule as the summary
+            cleared_seq = None
+        if cleared_seq is not None:
+            payload["summary_cleared_seq"] = cleared_seq
     status: Dict[str, Any] = {}
     rows: list = []
     problems: list = []
@@ -603,9 +863,27 @@ def inbox(runtime: ImportRouteRuntime, worker: Any) -> tuple[Dict[str, Any], int
     failed to boot; the inbox then lists staging with nothing joined."""
     try:
         staging_path = runtime.get_staging_path()
+        # Captured BEFORE the records are fetched, and re-checked at
+        # remember time: a build that spans an invalidation never
+        # remembers, even in the rare case its records turned out fresh
+        # (the next poll's build, seconds later, remembers instead).
+        # Skipping is the safe direction — the dangerous one is storing
+        # pre-invalidation counts as fresh. One accepted consequence: a
+        # skipped build leaves the PREVIOUS entry in place, so a cold
+        # open during the following scan shows that older entry. A tab
+        # that received the skipped build keeps its own numbers — they
+        # were its complete reply, and its snapshot's sequence (the
+        # skipped build's start) outranks the entry's — which is ordinary
+        # snapshot semantics; the guard's distrust is about what the
+        # SERVER serves to everyone else.
+        build_generation = _staging_scan_generation["value"]
         records, scanning = _records_or_scanning_payload(runtime, staging_path)
         if scanning is not None:
             return _scanning_inbox_payload(scanning, staging_path, worker), 200
+        # The build's start sequence: taken now, before the counting work
+        # (enumeration, history, build), so ordering never follows finish
+        # order (see the slot comment above _last_inbox_summary).
+        build_seq = _next_build_seq()
 
         from core.imports.inbox import build_inbox, summarize
 
@@ -633,11 +911,38 @@ def inbox(runtime: ImportRouteRuntime, worker: Any) -> tuple[Dict[str, Any], int
 
         rows = build_inbox(candidates, records, history, status.get("active_imports") or [],
                            staging_root=staging_path)
+        # "seq" rides in the served summary so the page can order a
+        # scanning reply's summary against its own snapshot by build. The
+        # remember call returns the wire sequence (the start sequence, or
+        # the adopted one when the numbers are unchanged); when an
+        # ordering guard skipped the build, the reply still carries the
+        # build's own start sequence.
+        counted = summarize(rows)
+        try:
+            wire_seq = _remember_inbox_summary(
+                staging_path, counted, generation=build_generation,
+                build_seq=build_seq)
+        except Exception as exc:  # noqa: BLE001 — remembering must never fail a built inbox
+            runtime.logger.error("Error remembering import inbox summary: %s", exc)
+            wire_seq = None
+            # No clear needed on failure: the slot still holds an OLDER
+            # entry whose wire sequence is below this build's, so every
+            # tab orders this build's snapshot ahead of it by sequence —
+            # and clearing would only strip stats from OTHER tabs whose
+            # snapshots are older still. What failure must not do is
+            # wedge the slot (a malformed entry would fail every later
+            # remember the same way): reset it to empty so the next
+            # build remembers cleanly. The reset is an RLock take plus a
+            # plain assignment — neither can realistically raise.
+            with _last_inbox_summary_lock:
+                _inbox_remember_skips["value"] += 1
+                _last_inbox_summary["entry"] = None
+        summary = {**counted, "seq": wire_seq if wire_seq is not None else build_seq}
         return {
             "success": True,
             "staging_path": staging_path,
             "items": rows,
-            "summary": summarize(rows),
+            "summary": summary,
             "problems": problems,
             "worker": _inbox_worker_payload(worker, status),
         }, 200

@@ -126,7 +126,34 @@ export function Inbox({
         problems.push(problem);
       }
     }
-    return { ...payload, items, summary: snapshotForPath.summary, problems };
+    // #1874: the server now carries the last complete build's summary in
+    // its scanning reply too. Neither it nor this tab's snapshot is
+    // blindly fresher — a build the server skipped remembering (its
+    // records predated an invalidation) still reached this tab — so the
+    // two are ordered by the build sequence the server stamps into each
+    // summary ("seq"); a summary without one (older server) loses to one
+    // with one, and ties go to the server's.
+    const serverSummary = payload.summary;
+    const snapshotSummary = snapshotForPath.summary;
+    let summary =
+      serverSummary && snapshotSummary
+        ? (serverSummary.seq ?? -1) >= (snapshotSummary.seq ?? -1)
+          ? serverSummary
+          : snapshotSummary
+        : (serverSummary ?? snapshotSummary);
+    // A clear the tab has not seen (a later build counted the folder
+    // empty) supersedes a snapshot taken before it: the server now
+    // sends the clear's build seq precisely so this tab does not keep
+    // showing the cleared batch's numbers.
+    if (
+      summary &&
+      summary === snapshotSummary &&
+      payload.summary_cleared_seq != null &&
+      (snapshotSummary?.seq ?? -1) < payload.summary_cleared_seq
+    ) {
+      summary = undefined;
+    }
+    return { ...payload, items, summary, problems };
   })();
 
   // #1671: the "import complete" notice the reporter asked for. It has to
