@@ -11,9 +11,14 @@ socket, asks ``check_device``:
 - past it: renew server to server. the renewal has to be for the same
   account and pass the required group again (oidc_signin.refresh). on
   success the clock moves on and a rotated refresh token is stored
-- no refresh token, a refusal, or the provider out of reach: the session
-  ends. ending access when renewal fails is the point of #1838, so an
-  unreachable provider signs people out rather than letting them ride on
+- a refusal, or the provider out of reach: the session ends. ending access
+  when renewal fails is the point of #1838, so an unreachable provider signs
+  people out rather than letting them ride on
+- the provider never gave a refresh token: the session stays, like before
+  #1838. authentik and authelia only give one when offline_access is asked
+  for, and their access tokens last minutes, so ending it here would sign
+  those users out every few minutes. adding offline_access to the scopes
+  turns renewal on for them
 - oidc turned off, or the profile no longer linked to that account: the
   session ends too, since it could never be renewed
 
@@ -78,6 +83,9 @@ def record_sign_in(db, device_id: Optional[str], identity: str, tokens: dict,
     if expires_at is None:
         return False
     refresh_token = tokens.get("refresh_token")
+    if not (isinstance(refresh_token, str) and refresh_token):
+        logger.info("OIDC sign-in: the provider gave no refresh token, so this session "
+                    "won't follow the provider. add offline_access to the scopes to turn that on")
     ok = db.set_profile_device_oidc(
         device_id, identity=identity, expires_at=expires_at,
         refresh_token=refresh_token if isinstance(refresh_token, str) and refresh_token else None)
@@ -111,6 +119,8 @@ def check_device(device_id: Optional[str], db, config_manager, *,
         return False
     if now < float(row.get("expires_at") or 0):
         return True
+    if not row.get("has_refresh_token"):
+        return True   # nothing to renew with, keep it (see the module doc)
 
     with _device_lock(device_id):
         try:
@@ -125,7 +135,9 @@ def check_device(device_id: Optional[str], db, config_manager, *,
         if now < float(row.get("expires_at") or 0):
             return True   # another request renewed it while this one waited
         if not row.get("refresh_token"):
-            logger.info("OIDC session ended for profile %s: expired, no refresh token", row.get("owner_id"))
+            # one was stored but won't decrypt (the key changed): never send
+            # the ciphertext to the provider
+            logger.info("OIDC session ended for profile %s: its refresh token can't be read", row.get("owner_id"))
             return _ended(db, device_id, row)
         try:
             doc = oidc_signin.discover(settings.issuer)

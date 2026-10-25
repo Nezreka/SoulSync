@@ -3,8 +3,9 @@
 The callback records a clock on the device row (which account, when to
 renew, the refresh token encrypted). Every request, and every check of the
 browser's open socket, renews it past that time server to server; a renewal
-that fails, a refusal, a removed group or no refresh token ends the session
-by revoking the device. Password and Plex sessions have no clock and are
+that fails, a refusal or a removed group ends the session by revoking the
+device. A provider that gave no refresh token keeps the session, like
+before. Password and Plex sessions have no clock and are
 never touched. Sessions from before the change are ended once at upgrade
 for every profile with an OIDC link.
 
@@ -377,16 +378,28 @@ def test_leaving_the_required_group_signs_the_browser_out(client, monkeypatch):
     assert client.get(_GATED).status_code == 401
 
 
-def test_no_refresh_token_means_signed_out_at_expiry(client, monkeypatch):
-    # A1: nothing to renew with, so the user signs in again (usually one click)
+def test_no_refresh_token_keeps_the_session_past_expiry(client, monkeypatch):
+    # authentik/authelia without offline_access: access tokens last minutes,
+    # ending the session there would sign them out every few minutes
     _config(monkeypatch)
     p = _install(monkeypatch, _Provider(_uid(), give_refresh=False))
     _, device = _sign_in(client, p)
     assert _stored(device)['oidc_refresh_token'] is None
-    assert client.get(_GATED).status_code == 200
     _expire(device)
-    assert client.get(_GATED).status_code == 401
+    for _ in range(3):
+        assert client.get(_GATED).status_code == 200
+    assert _stored(device)['revoked_at'] is None
     assert p.refresh_calls == []
+
+
+def test_no_refresh_token_still_ends_when_oidc_is_turned_off(client, monkeypatch):
+    _config(monkeypatch)
+    p = _install(monkeypatch, _Provider(_uid(), give_refresh=False))
+    _, device = _sign_in(client, p)
+    _expire(device)
+    _config(monkeypatch, **{'security.oidc_signin': False})
+    oidc_session.forget(device)
+    assert client.get(_GATED).status_code == 401
 
 
 def test_a_token_that_no_longer_decrypts_ends_the_session(client, monkeypatch):
@@ -608,8 +621,9 @@ def test_a_good_renewal_keeps_the_socket(client, monkeypatch):
 
 def test_an_expired_session_that_cant_renew_cannot_open_a_socket(client, monkeypatch):
     _config(monkeypatch)
-    p = _install(monkeypatch, _Provider(_uid(), give_refresh=False))
+    p = _install(monkeypatch, _Provider(_uid()))
     _, device = _sign_in(client, p)
+    p.refresh_answer = (400, {'error': 'invalid_grant'})
     _expire(device)
     assert _socket(client).is_connected() is False
 

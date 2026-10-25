@@ -10036,9 +10036,10 @@ class MusicDatabase:
             return False
 
     def get_profile_device_oidc(self, device_id: str) -> Optional[Dict[str, Any]]:
-        """{'owner_id', 'identity', 'expires_at', 'refresh_token', 'revoked',
-        'profile_identity'} for a device row, the refresh token decrypted
-        ('' when there is none or it can't be read), the profile's current
+        """{'owner_id', 'identity', 'expires_at', 'refresh_token',
+        'has_refresh_token', 'revoked', 'profile_identity'} for a device row,
+        the refresh token decrypted ('' when there is none or it can't be
+        read, has_refresh_token tells the two apart), the profile's current
         oidc link beside it. None when there is no such row. raises on a read
         error: the caller decides what a failed read means."""
         with self._get_connection() as conn:
@@ -10063,6 +10064,7 @@ class MusicDatabase:
             token = dec if isinstance(dec, str) and dec != raw else ''
         return {'owner_id': row['owner_id'], 'identity': row['oidc_identity'],
                 'expires_at': row['oidc_expires_at'], 'refresh_token': token,
+                'has_refresh_token': bool(row['oidc_refresh_token']),
                 'revoked': bool(row['revoked_at']), 'profile_identity': row['profile_identity']}
 
     # ── admin audit log ──────────────────────────────────────────────────
