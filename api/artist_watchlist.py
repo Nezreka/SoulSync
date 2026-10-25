@@ -1644,12 +1644,35 @@ def watchlist_artist_config(artist_id):
             if config['follow_defaults']:
                 config.update(defaults)
 
+            # what you own of theirs and how much you play them
+            overview = database.get_watchlist_artist_overview(
+                result[7] or artist_info.get('name') or '',
+                {
+                    'spotify': spotify_id,
+                    'itunes': itunes_id,
+                    'deezer': deezer_id,
+                    'discogs': discogs_id,
+                    'musicbrainz': musicbrainz_id,
+                },
+                profile_id=active_profile_id,
+            )
+            if overview['library']:
+                from core.metadata.artwork import normalize_image_url
+                for album in overview['library']['recent_albums']:
+                    album['thumb_url'] = normalize_image_url(album['thumb_url']) or ''
+            if overview['listening']:
+                from core.metadata.artwork import normalize_image_url
+                for track in overview['listening']['top_tracks']:
+                    track['thumb_url'] = normalize_image_url(track['thumb_url']) or ''
+
             from core.metadata.registry import available_sources, get_primary_source
             return jsonify({
                 "success": True,
                 "config": config,
                 "artist": artist_info,
                 "recent_releases": releases,
+                "library": overview['library'],
+                "listening": overview['listening'],
                 "spotify_artist_id": spotify_id,
                 "itunes_artist_id": itunes_id,
                 "deezer_artist_id": deezer_id,

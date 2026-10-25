@@ -60,6 +60,9 @@ interface StubOptions {
   followDefaults?: boolean;
   /** #1822: artists with their own rules, as the defaults form reports. */
   customCount?: number;
+  /** what you own of the panel's artist and how much you play them. */
+  library?: Record<string, unknown> | null;
+  listening?: Record<string, unknown> | null;
 }
 
 function stubFetch(options: StubOptions = {}) {
@@ -77,6 +80,8 @@ function stubFetch(options: StubOptions = {}) {
     bodies,
     followDefaults = false,
     customCount = 0,
+    library = null,
+    listening = null,
   } = options;
 
   const calls: string[] = [];
@@ -148,6 +153,12 @@ function stubFetch(options: StubOptions = {}) {
       if (url.includes('/api/watchlist/reset-to-defaults')) {
         return createResponse({ success: true, reset: customCount });
       }
+      if (url.includes('/api/library/albums/9/tracks')) {
+        return createResponse({
+          success: true,
+          tracks: [{ id: 't1', title: 'Minipops 67', file_path: '/m/syro/01.flac' }],
+        });
+      }
       if (url.includes('/link-provider')) {
         return createResponse({ success: true });
       }
@@ -197,6 +208,8 @@ function stubFetch(options: StubOptions = {}) {
           amazon_artist_id: null,
           musicbrainz_artist_id: null,
           watchlist_name: 'Aphex Twin',
+          library,
+          listening,
           global_metadata_source: 'deezer',
           quality_profiles: [
             { id: 1, name: 'Lossless', is_default: true },
@@ -1061,6 +1074,96 @@ describe('watchlist route', () => {
     // the overview shows ALL genres
     expect(screen.getByText('electronic')).toBeInTheDocument();
     expect(screen.getByText('braindance')).toBeInTheDocument();
+  });
+
+  it('shows your listening and your library on the overview', async () => {
+    stubFetch({
+      listening: {
+        play_count: 212,
+        plays_30d: 18,
+        last_played: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+        months: [
+          ...Array.from({ length: 11 }, (_, i) => ({
+            month: `2025-${String(i + 1).padStart(2, '0')}`,
+            plays: 0,
+          })),
+          { month: '2025-12', plays: 9 },
+        ],
+        top_tracks: [
+          {
+            title: 'Xtal',
+            album: 'Selected Ambient Works 85-92',
+            play_count: 40,
+            thumb_url: '',
+          },
+          { title: 'Avril 14th', album: 'Avril 14th', play_count: 22, thumb_url: '' },
+        ],
+      },
+      library: {
+        artist_id: 77,
+        album_count: 4,
+        track_count: 52,
+        recent_albums: [
+          {
+            id: 9,
+            title: 'Syro',
+            year: 2014,
+            thumb_url: '',
+            added_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+            track_count: 12,
+          },
+        ],
+      },
+    });
+    const navigateToPage = vi.fn();
+    vi.stubGlobal('navigateToPage', navigateToPage);
+    const playTrackList = vi.fn(async () => {});
+    vi.stubGlobal('playTrackList', playTrackList);
+    renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    const panel = within(await screen.findByRole('dialog'));
+    expect(await panel.findByText('Your listening')).toBeInTheDocument();
+    expect(panel.getByText('212')).toBeInTheDocument();
+    expect(panel.getByText(/last played 3 days ago/)).toBeInTheDocument();
+    expect(panel.getByRole('button', { name: /Xtal/ })).toBeInTheDocument();
+    // a single's album is its title, said once
+    expect(panel.getAllByText('Avril 14th')).toHaveLength(1);
+    expect(panel.getByLabelText('December 2025: 9 plays')).toBeInTheDocument();
+    expect(panel.getByText('4 albums · 52 tracks')).toBeInTheDocument();
+    expect(panel.getByText('added 2 days ago')).toBeInTheDocument();
+
+    // an owned album plays, from the library's files
+    fireEvent.click(panel.getByTitle('Play Syro'));
+    await waitFor(() => expect(playTrackList).toHaveBeenCalledTimes(1));
+    expect(playTrackList).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          title: 'Minipops 67',
+          file_path: '/m/syro/01.flac',
+          is_library: true,
+        }),
+      ],
+      'Syro',
+    );
+    expect(navigateToPage).not.toHaveBeenCalled();
+
+    // Open is what goes to the library artist
+    fireEvent.click(panel.getByRole('button', { name: 'Open' }));
+    expect(navigateToPage).toHaveBeenCalledWith('artist-detail', {
+      artistId: 77,
+      artistName: 'Aphex Twin',
+    });
+  });
+
+  it('hides listening and library when there is nothing to say', async () => {
+    stubFetch();
+    renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    await waitFor(() => {
+      expect(screen.getByText('1,234,567')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Your listening')).not.toBeInTheDocument();
+    expect(screen.queryByText('In your library')).not.toBeInTheDocument();
   });
 
   it('switches to Rules inside the same panel (#1822: one artist view, not three)', async () => {

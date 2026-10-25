@@ -8171,6 +8171,173 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
+    # library artist columns the watchlist ids land on. the library table drops
+    # the _artist_id suffix for deezer/discogs/musicbrainz.
+    _WATCHLIST_LIBRARY_ID_COLUMNS = (
+        ('spotify', 'spotify_artist_id'),
+        ('itunes', 'itunes_artist_id'),
+        ('deezer', 'deezer_id'),
+        ('discogs', 'discogs_id'),
+        ('musicbrainz', 'musicbrainz_id'),
+    )
+
+    def get_watchlist_artist_overview(self, name: str, provider_ids: Optional[Dict[str, Any]] = None,
+                                      profile_id=None, album_limit: int = 6,
+                                      track_limit: int = 5) -> Dict[str, Any]:
+        """what the watchlist panel's overview says about you and this artist:
+        what you own of theirs and how much you play them.
+
+        the library side is the active server, in the caller's library scope.
+        provider ids find the artist first, the normalized name only when no id
+        lands. plays come from the pile profile_id reads, matched on the names
+        the artist goes by (indexed, exact), so a play filed under a feature
+        credit isn't counted. an empty side comes back as None."""
+        out: Dict[str, Any] = {'library': None, 'listening': None}
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            from core.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            scope_sql, scope_params = self._current_scope_sql('a.owner_profile_id')
+            base_where = f"a.server_source = ? AND {scope_sql}"
+            base_params = [active_server, *scope_params]
+
+            artist_rows: list = []
+            id_terms, id_params = [], []
+            for key, column in self._WATCHLIST_LIBRARY_ID_COLUMNS:
+                value = (provider_ids or {}).get(key)
+                if value:
+                    id_terms.append(f"a.{column} = ?")
+                    id_params.append(str(value))
+            if id_terms:
+                cursor.execute(
+                    f"SELECT a.id, a.name FROM artists a WHERE {base_where} AND ({' OR '.join(id_terms)})",
+                    (*base_params, *id_params))
+                artist_rows = cursor.fetchall()
+            if not artist_rows and name:
+                norm = self._normalize_for_comparison(name)
+                if norm:
+                    expr = self._norm_expr(self._norm_ready(cursor), 'a', 'name', 'name_norm')
+                    cursor.execute(
+                        f"SELECT a.id, a.name FROM artists a WHERE {base_where} AND {expr} = ?",
+                        (*base_params, norm))
+                    artist_rows = cursor.fetchall()
+
+            artist_ids = [row[0] for row in artist_rows]
+            if artist_ids:
+                marks = ','.join('?' * len(artist_ids))
+                cursor.execute(f"SELECT COUNT(*) FROM albums WHERE artist_id IN ({marks})", artist_ids)
+                album_count = cursor.fetchone()[0]
+                cursor.execute(f"SELECT COUNT(*) FROM tracks WHERE artist_id IN ({marks})", artist_ids)
+                track_count = cursor.fetchone()[0]
+                cursor.execute(f"""
+                    SELECT al.id, al.title, al.year, al.thumb_url, al.created_at,
+                           (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id)
+                    FROM albums al
+                    WHERE al.artist_id IN ({marks})
+                    ORDER BY al.created_at DESC, al.id DESC
+                    LIMIT ?
+                """, (*artist_ids, album_limit))
+                albums = [
+                    {'id': r[0], 'title': r[1], 'year': r[2], 'thumb_url': r[3] or '',
+                     'added_at': r[4], 'track_count': r[5]}
+                    for r in cursor.fetchall()
+                ]
+                if album_count or track_count:
+                    out['library'] = {
+                        'artist_id': artist_ids[0],
+                        'album_count': album_count,
+                        'track_count': track_count,
+                        'recent_albums': albums,
+                    }
+
+            names = sorted({n for n in [name, *(row[1] for row in artist_rows)] if n})
+            if names:
+                from core.listening_scope import owner_clause
+                owner = owner_clause(self._listening_owner(profile_id))
+                marks = ','.join('?' * len(names))
+                where = f"WHERE artist IN ({marks}) AND {owner}"
+                cursor.execute(f"""
+                    SELECT COUNT(*), MAX(played_at),
+                           SUM(CASE WHEN played_at >= datetime('now', '-30 days') THEN 1 ELSE 0 END)
+                    FROM listening_history {where}
+                """, names)
+                plays, last_played, recent = cursor.fetchone()
+                if plays:
+                    cursor.execute(f"""
+                        SELECT title, album, COUNT(*) AS n, MAX(db_track_id)
+                        FROM listening_history {where}
+                        AND title IS NOT NULL AND title != ''
+                        GROUP BY LOWER(title)
+                        ORDER BY n DESC, MAX(played_at) DESC
+                        LIMIT ?
+                    """, (*names, track_limit))
+                    top = cursor.fetchall()
+                    # a song's cover is its album's on the ACTIVE server. a
+                    # play's linked track can be another server's row (one
+                    # play, three libraries) or gone after a rescan, and the
+                    # other server's art path can't be served, so only this
+                    # artist's rows count: the linked track, then the song's
+                    # title, then the play's album title
+                    by_track: Dict[str, str] = {}
+                    by_title: Dict[str, str] = {}
+                    by_album: Dict[str, str] = {}
+                    if artist_ids:
+                        marks = ','.join('?' * len(artist_ids))
+                        cursor.execute(f"""
+                            SELECT t.id, LOWER(t.title), al.thumb_url FROM tracks t
+                            JOIN albums al ON al.id = t.album_id
+                            WHERE t.artist_id IN ({marks})
+                              AND al.thumb_url IS NOT NULL AND al.thumb_url != ''
+                        """, artist_ids)
+                        for track_id, title, thumb in cursor.fetchall():
+                            by_track[str(track_id)] = thumb
+                            by_title.setdefault(title, thumb)
+                        cursor.execute(f"""
+                            SELECT LOWER(title), thumb_url FROM albums
+                            WHERE artist_id IN ({marks})
+                              AND thumb_url IS NOT NULL AND thumb_url != ''
+                        """, artist_ids)
+                        by_album = {r[0]: r[1] for r in cursor.fetchall()}
+
+                    # plays per month, the last 12, oldest first. months are
+                    # local like every other listening bucket (#1840)
+                    cursor.execute(f"""
+                        SELECT strftime('%Y-%m', played_at, 'localtime') AS ym, COUNT(*)
+                        FROM listening_history {where}
+                        AND played_at >= datetime('now', 'localtime', 'start of month', '-11 months', 'utc')
+                        GROUP BY ym
+                    """, names)
+                    per_month = dict(cursor.fetchall())
+                    today = datetime.now()
+                    months = []
+                    for back in range(11, -1, -1):
+                        y, m = divmod(today.year * 12 + today.month - 1 - back, 12)
+                        key = f"{y:04d}-{m + 1:02d}"
+                        months.append({'month': key, 'plays': per_month.get(key, 0)})
+
+                    out['listening'] = {
+                        'play_count': plays,
+                        'last_played': last_played,
+                        'plays_30d': recent or 0,
+                        'months': months,
+                        'top_tracks': [
+                            {'title': r[0], 'album': r[1] or '', 'play_count': r[2],
+                             'thumb_url': by_track.get(str(r[3]))
+                             or by_title.get(r[0].lower())
+                             or by_album.get((r[1] or '').lower(), '')}
+                            for r in top
+                        ],
+                    }
+        except Exception as e:
+            logger.error(f"Error building watchlist artist overview for {name!r}: {e}")
+        finally:
+            if conn:
+                conn.close()
+        return out
+
     def get_listening_timeline(self, time_range='30d', granularity='day', profile_id=None):
         """Get play count per time period for chart rendering."""
         conn = None

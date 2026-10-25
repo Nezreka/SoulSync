@@ -302,6 +302,31 @@ export interface WatchlistRecentReleasesResponse {
   error?: string;
 }
 
+/** what you own of a watchlist artist, on the active server */
+export interface WatchlistArtistLibrary {
+  artist_id: number | string;
+  album_count: number;
+  track_count: number;
+  recent_albums: Array<{
+    id: number | string;
+    title: string;
+    year: number | null;
+    thumb_url: string;
+    added_at: string | null;
+    track_count: number;
+  }>;
+}
+
+/** how much you play a watchlist artist, from your listening pile */
+export interface WatchlistArtistListening {
+  play_count: number;
+  plays_30d: number;
+  last_played: string | null;
+  /** the last 12 months, oldest first, 'YYYY-MM' local */
+  months: Array<{ month: string; plays: number }>;
+  top_tracks: Array<{ title: string; album: string; play_count: number; thumb_url: string }>;
+}
+
 export interface QualityProfileSummary {
   id: number;
   name?: string;
@@ -314,6 +339,8 @@ export interface WatchlistArtistConfigResponse {
   config?: WatchlistArtistConfig;
   artist?: WatchlistArtistInfo;
   recent_releases?: WatchlistRecentRelease[];
+  library?: WatchlistArtistLibrary | null;
+  listening?: WatchlistArtistListening | null;
   spotify_artist_id?: string | null;
   itunes_artist_id?: string | null;
   deezer_artist_id?: string | null;

@@ -317,3 +317,22 @@ export function describeAutoDownload(
     ? 'Following the global default, which is currently ON — new releases download.'
     : 'Following the global default, which is currently OFF — nothing downloads automatically.';
 }
+
+/**
+ * "today" / "yesterday" / "3 days ago" / "2 weeks ago" / "5 months ago" for a
+ * db stamp (bare stamps are utc). '' when absent or unparseable.
+ */
+export function formatSince(stamp: string | null | undefined, now = Date.now()): string {
+  if (!stamp) return '';
+  const bare = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(stamp);
+  const then = Date.parse(bare ? `${stamp.replace(' ', 'T')}Z` : stamp);
+  if (!Number.isFinite(then)) return '';
+  const days = Math.floor((now - then) / 86_400_000);
+  if (days < 1) return 'today';
+  if (days < 2) return 'yesterday';
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.floor(days / 7)} weeks ago`;
+  if (days < 365) return `${Math.floor(days / 30)} months ago`;
+  const years = Math.floor(days / 365);
+  return years === 1 ? 'a year ago' : `${years} years ago`;
+}

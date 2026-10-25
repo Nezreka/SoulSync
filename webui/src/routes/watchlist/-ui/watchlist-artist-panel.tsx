@@ -3,13 +3,17 @@ import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
 import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-route-toggle';
+import { playTrackByMetadata } from '@/features/playback/play-track';
+import { getShellBridge } from '@/platform/shell/bridge';
 import { ActionMenu } from '@/routes/artist-detail/-ui/action-menu';
 
 import type {
   WatchlistArtistConfig,
+  WatchlistArtistLibrary,
   WatchlistArtistConfigResponse,
   WatchlistMetadataSource,
 } from '../-watchlist.types';
+import type { LibraryAlbum } from '../../library/-library.types';
 
 import {
   removeWatchlistArtist,
@@ -24,14 +28,18 @@ import {
   describeAutoDownload,
   effectiveAutoDownload,
   formatRelativeScanTime,
+  formatSince,
 } from '../-watchlist.helpers';
+import { loadAlbumTracks } from '../../library/-library.api';
+import { albumQueueTrack } from '../../library/-library.helpers';
 import { hideOnError } from './hide-on-error';
 import { WatchlistLinkedProviders } from './watchlist-linked-providers';
 
 /**
  * One panel per artist (#1822). It replaces three views that each showed part
  * of the same artist: the inspector drawer, the full-screen detail and the
- * settings modal. Overview is who they are, Rules is what the watchlist grabs,
+ * settings modal. Overview is who they are and what they are to you (your
+ * plays, what you own), Rules is what the watchlist grabs,
  * Sources is where it looks. Rules and Sources share one draft and one save.
  */
 
@@ -207,6 +215,12 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
 
   const [tab, setTab] = useState<ArtistPanelTab>(initialTab);
   useEffect(() => setTab(initialTab), [initialTab, artistId]);
+  const [bioOpen, setBioOpen] = useState(false);
+  const [heroFailed, setHeroFailed] = useState(false);
+  useEffect(() => {
+    setBioOpen(false);
+    setHeroFailed(false);
+  }, [artistId]);
 
   const [draft, setDraft] = useState<WatchlistArtistConfig | null>(null);
   // Adopt the server config once, and again if a re-link refetches it. Editing
@@ -304,6 +318,41 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
 
   const discography = payload ? pickDiscographySource(payload) : null;
   const releases = payload?.recent_releases ?? [];
+  const library = payload?.library ?? null;
+  const listening = payload?.listening ?? null;
+  // the library page's own album play: every queued row has a file
+  const playLibraryAlbum = async (album: WatchlistArtistLibrary['recent_albums'][number]) => {
+    if (!library) return;
+    const owned: LibraryAlbum = {
+      id: album.id,
+      title: album.title,
+      year: album.year,
+      thumb_url: album.thumb_url || null,
+      artist_id: library.artist_id,
+      artist_name: name,
+    };
+    try {
+      const tracks = await loadAlbumTracks(album.id);
+      if (!tracks.length) {
+        window.showToast?.(`No playable tracks in ${album.title}`, 'info');
+        return;
+      }
+      await window.playTrackList?.(
+        tracks.map((track) => albumQueueTrack(track, owned)),
+        album.title,
+      );
+    } catch {
+      window.showToast?.(`Could not play ${album.title}`, 'error');
+    }
+  };
+  const openLibraryArtist = () => {
+    if (!library) return;
+    onClose();
+    void window.navigateToPage?.('artist-detail', {
+      artistId: library.artist_id,
+      artistName: name,
+    });
+  };
   const metaTags = [artist?.style, artist?.mood, artist?.label].filter((value): value is string =>
     Boolean(value),
   );
@@ -317,6 +366,59 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
     ? `added ${new Date(config.date_added).toLocaleDateString()}`
     : '';
 
+  const heroImage = !heroFailed && artist?.image_url ? artist.image_url : null;
+  const headText = (
+    <div className="wap-head-text">
+      <h2 className="wap-name" title={name}>
+        {name || 'Loading…'}
+      </h2>
+      <span className="wap-sub">
+        {config ? (
+          <span className={`wap-pill${config.follow_defaults ? '' : ' wap-pill--custom'}`}>
+            {config.follow_defaults ? 'Defaults' : 'Custom rules'}
+          </span>
+        ) : null}
+        {scanText}
+        {addedText ? ` · ${addedText}` : ''}
+      </span>
+    </div>
+  );
+  const headActions = (
+    <>
+      <ActionMenu
+        className="wap-menu"
+        items={[
+          {
+            key: 'remove',
+            label: 'Remove from watchlist',
+            danger: true,
+            disabled: remove.isPending,
+            onSelect: () => void onRemove(),
+          },
+        ]}
+        trigger={(props) => (
+          <button
+            type="button"
+            className="watchlist-inspector-close-btn"
+            aria-label="Artist actions"
+            {...props}
+            ref={props.ref as (el: HTMLButtonElement | null) => void}
+          >
+            ⋯
+          </button>
+        )}
+      />
+      <button
+        type="button"
+        className="watchlist-inspector-close-btn"
+        aria-label="Close"
+        onClick={onClose}
+      >
+        ✕
+      </button>
+    </>
+  );
+
   return (
     <div className="watchlist-inspector-backdrop" onClick={onClose}>
       <div
@@ -326,58 +428,24 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
         aria-label={name ? `${name} on your watchlist` : 'Watchlist artist'}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="wap-head">
-          {artist?.image_url ? (
-            <img className="wap-avatar" src={artist.image_url} alt="" onError={hideOnError} />
-          ) : (
-            <span className="wap-avatar wap-avatar--empty" aria-hidden="true" />
-          )}
-          <div className="wap-head-text">
-            <h2 className="wap-name" title={name}>
-              {name || 'Loading…'}
-            </h2>
-            <span className="wap-sub">
-              {config ? (
-                <span className={`wap-pill${config.follow_defaults ? '' : ' wap-pill--custom'}`}>
-                  {config.follow_defaults ? 'Defaults' : 'Custom rules'}
-                </span>
-              ) : null}
-              {scanText}
-              {addedText ? ` · ${addedText}` : ''}
-            </span>
+        {heroImage ? (
+          <div className="wap-hero">
+            <img
+              className="wap-hero-img"
+              src={heroImage}
+              alt=""
+              onError={() => setHeroFailed(true)}
+            />
+            <div className="wap-hero-actions">{headActions}</div>
+            <div className="wap-hero-text">{headText}</div>
           </div>
-          <ActionMenu
-            className="wap-menu"
-            items={[
-              {
-                key: 'remove',
-                label: 'Remove from watchlist',
-                danger: true,
-                disabled: remove.isPending,
-                onSelect: () => void onRemove(),
-              },
-            ]}
-            trigger={(props) => (
-              <button
-                type="button"
-                className="watchlist-inspector-close-btn"
-                aria-label="Artist actions"
-                {...props}
-                ref={props.ref as (el: HTMLButtonElement | null) => void}
-              >
-                ⋯
-              </button>
-            )}
-          />
-          <button
-            type="button"
-            className="watchlist-inspector-close-btn"
-            aria-label="Close"
-            onClick={onClose}
-          >
-            ✕
-          </button>
-        </div>
+        ) : (
+          <div className="wap-head">
+            <span className="wap-avatar wap-avatar--empty" aria-hidden="true" />
+            {headText}
+            {headActions}
+          </div>
+        )}
 
         <div className="wap-tabs" role="tablist" aria-label="Artist panel">
           {(['overview', 'rules', 'sources'] as const).map((key) => (
@@ -423,13 +491,114 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
                 ))}
               </div>
             ) : null}
-            {artist?.summary ? <p className="wap-bio">{artist.summary}</p> : null}
             {metaTags.length > 0 ? (
               <div className="wap-tags wap-tags--quiet">
                 {metaTags.map((tag) => (
                   <span key={tag}>{tag}</span>
                 ))}
               </div>
+            ) : null}
+            {listening ? (
+              <section className="wap-section">
+                <h3>Your listening</h3>
+                <div className="wap-listen">
+                  <div className="wap-listen-top">
+                    <div className="wap-listen-hero">
+                      <b>{listening.play_count.toLocaleString()}</b>
+                      <span>{listening.play_count === 1 ? 'play' : 'plays'}</span>
+                    </div>
+                    <PlaysByMonth months={listening.months ?? []} />
+                  </div>
+                  <p className="wap-listen-meta">
+                    {listening.plays_30d.toLocaleString()} in the last 30 days
+                    {listening.last_played
+                      ? ` · last played ${formatSince(listening.last_played)}`
+                      : ''}
+                  </p>
+                  {listening.top_tracks.length > 0 ? (
+                    <ol className="wap-toptracks">
+                      {listening.top_tracks.map((track) => (
+                        <li key={track.title}>
+                          <button
+                            type="button"
+                            title={`Play ${track.title}`}
+                            onClick={() =>
+                              void playTrackByMetadata(
+                                getShellBridge(),
+                                track.title,
+                                name,
+                                track.album,
+                              )
+                            }
+                          >
+                            <span className="wap-toptrack-art" aria-hidden="true">
+                              {track.thumb_url ? (
+                                <img src={track.thumb_url} alt="" onError={hideOnError} />
+                              ) : null}
+                            </span>
+                            <span className="wap-toptrack-text">
+                              <span>{track.title}</span>
+                              {/* a single's album is its own title, so it says nothing */}
+                              {track.album &&
+                              track.album.toLowerCase() !== track.title.toLowerCase() ? (
+                                <small>{track.album}</small>
+                              ) : null}
+                            </span>
+                            <span className="wap-toptrack-count">
+                              {track.play_count.toLocaleString()}
+                              <small>{track.play_count === 1 ? 'play' : 'plays'}</small>
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
+            {library ? (
+              <section className="wap-section">
+                <div className="wap-section-head">
+                  <h3>In your library</h3>
+                  <button type="button" className="wap-link" onClick={openLibraryArtist}>
+                    Open
+                  </button>
+                </div>
+                <span className="wap-hint">
+                  {library.album_count} {library.album_count === 1 ? 'album' : 'albums'} ·{' '}
+                  {library.track_count} {library.track_count === 1 ? 'track' : 'tracks'}
+                </span>
+                {library.recent_albums.length > 0 ? (
+                  <div className="wap-releases">
+                    {library.recent_albums.map((album) => (
+                      <button
+                        key={String(album.id)}
+                        type="button"
+                        className="wap-release-btn"
+                        title={`Play ${album.title}`}
+                        onClick={() => void playLibraryAlbum(album)}
+                      >
+                        <span className="wap-release-art">
+                          {album.thumb_url ? (
+                            <img src={album.thumb_url} alt="" onError={hideOnError} />
+                          ) : (
+                            <span className="wap-cover-empty" aria-hidden="true" />
+                          )}
+                          <span className="wap-release-play" aria-hidden="true">
+                            ▶
+                          </span>
+                        </span>
+                        <span>{album.title}</span>
+                        <small>
+                          {formatSince(album.added_at)
+                            ? `added ${formatSince(album.added_at)}`
+                            : album.year || `${album.track_count} tracks`}
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
             ) : null}
             {releases.length > 0 ? (
               <section className="wap-section">
@@ -450,6 +619,19 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
                     </div>
                   ))}
                 </div>
+              </section>
+            ) : null}
+            {artist?.summary ? (
+              <section className="wap-section">
+                <h3>About</h3>
+                <p className={`wap-bio${bioOpen ? '' : ' is-clamped'}`}>{artist.summary}</p>
+                <button
+                  type="button"
+                  className="wap-link wap-link--start"
+                  onClick={() => setBioOpen((open) => !open)}
+                >
+                  {bioOpen ? 'Less' : 'More'}
+                </button>
               </section>
             ) : null}
             <button
@@ -741,5 +923,44 @@ function ToggleChip({
       />
       {title}
     </label>
+  );
+}
+
+/**
+ * plays per month, the last 12. one series, so no legend: the section names
+ * it. a month with no plays keeps a stub so the year still reads as a year.
+ */
+function PlaysByMonth({ months }: { months: Array<{ month: string; plays: number }> }) {
+  if (months.length === 0) return null;
+  const peak = Math.max(1, ...months.map((entry) => entry.plays));
+  const label = (key: string, style: 'short' | 'long') => {
+    const [year, month] = key.split('-').map(Number);
+    return new Date(year, month - 1, 1).toLocaleString(undefined, {
+      month: style,
+      ...(style === 'long' ? { year: 'numeric' } : {}),
+    });
+  };
+  return (
+    <figure className="wap-months" aria-label="Plays per month, the last 12 months">
+      <div className="wap-months-bars">
+        {months.map((entry) => {
+          const tip = `${label(entry.month, 'long')}: ${entry.plays.toLocaleString()} ${
+            entry.plays === 1 ? 'play' : 'plays'
+          }`;
+          return (
+            <span key={entry.month} className="wap-months-col" data-tip={tip} aria-label={tip}>
+              <span
+                className={`wap-months-bar${entry.plays ? '' : ' is-empty'}`}
+                style={entry.plays ? { height: `${(entry.plays / peak) * 100}%` } : undefined}
+              />
+            </span>
+          );
+        })}
+      </div>
+      <figcaption className="wap-months-axis">
+        <span>{label(months[0].month, 'short')}</span>
+        <span>{label(months[months.length - 1].month, 'short')}</span>
+      </figcaption>
+    </figure>
   );
 }
