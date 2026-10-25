@@ -681,12 +681,12 @@ html[data-sidebar="collapsed"] .sidebar-holiday {
         radial-gradient(circle at 50% 100%, rgba(242, 247, 255, 0.95) 0 4px, transparent 4.6px) 0 100% / 13px 7px repeat-x,
         radial-gradient(circle at 50% 100%, rgba(242, 247, 255, 0.95) 0 6px, transparent 6.6px) 5px 100% / 31px 8px repeat-x,
         linear-gradient(rgba(242, 247, 255, 0.95), rgba(242, 247, 255, 0.95)) 0 100% / 100% 3px no-repeat;
-    filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.35));
+    filter: drop-shadow(0 1px 1.5px var(--black-a35));
     opacity: 0.9;
     transition: filter 1.2s ease;
 }
 #app-sidebar.holiday-night .holiday-snowcap {
-    filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.35)) brightness(0.82) hue-rotate(-8deg);
+    filter: drop-shadow(0 1px 1.5px var(--black-a35)) brightness(0.82) hue-rotate(-8deg);
 }
 
 /* ── new year's: a string of lights across the divider ─────────────────────── */
