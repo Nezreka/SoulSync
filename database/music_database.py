@@ -25788,9 +25788,15 @@ class MusicDatabase:
                             WHEN mirrored_playlists.custom_cover THEN mirrored_playlists.image_url
                             ELSE COALESCE(NULLIF(excluded.image_url, ''), mirrored_playlists.image_url)
                         END,
+                        -- a refresh whose source sends no poster hands the row's own
+                        -- image back. that's our generated cover, not the source's,
+                        -- so it never becomes the "original" restore goes back to
                         source_image_url = CASE
                             WHEN mirrored_playlists.custom_cover
-                            THEN COALESCE(NULLIF(excluded.image_url, ''), mirrored_playlists.source_image_url)
+                                 AND NULLIF(excluded.image_url, '') IS NOT NULL
+                                 AND excluded.image_url IS NOT mirrored_playlists.image_url
+                                 AND excluded.image_url NOT LIKE '/api/user-playlists/%'
+                            THEN excluded.image_url
                             ELSE mirrored_playlists.source_image_url
                         END,
                         track_count = excluded.track_count,
@@ -25999,7 +26005,11 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 owner_sql, owner_params = self._mirror_owner_clause(profile_id)
                 cursor.execute(
-                    "UPDATE mirrored_playlists SET image_url = source_image_url, "
+                    # a local cover as the "original" is the generated one an
+                    # echo stashed (fixed since); its file goes, so point at nothing
+                    "UPDATE mirrored_playlists SET image_url = CASE "
+                    "WHEN source_image_url LIKE '/api/user-playlists/%' THEN NULL "
+                    "ELSE source_image_url END, "
                     "source_image_url = NULL, custom_cover = 0, updated_at = CURRENT_TIMESTAMP "
                     "WHERE id = ?" + owner_sql,
                     [int(playlist_id), *owner_params],

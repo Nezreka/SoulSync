@@ -254,6 +254,11 @@ def list_charts(db: Any, profile_id: Optional[int]) -> List[Dict[str, Any]]:
                 cover_tiles.append(url)
             if len(cover_tiles) == 4:
                 break
+        own_id = _mirror_id(db, key, profile_id) if profile_id is not None else None
+        # a cover they generated for their copy beats the network's chart art
+        own = db.get_mirrored_playlist(own_id) if own_id else None
+        if own and own.get('custom_cover') and own.get('image_url'):
+            image_url = own['image_url']
         out.append({
             'key': key,
             'name': name,
@@ -263,7 +268,7 @@ def list_charts(db: Any, profile_id: Optional[int]) -> List[Dict[str, Any]]:
             'track_count': len(tracks),
             'matched': matched,
             'ready': bool(total) and matched >= total,
-            'playlist_id': _mirror_id(db, key, profile_id) if profile_id is not None else None,
+            'playlist_id': own_id,
             'updated_at': updated_at,
         })
     return out

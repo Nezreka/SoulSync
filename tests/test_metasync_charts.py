@@ -199,3 +199,18 @@ def test_the_automation_is_registered_and_scheduled_daily():
     spec = next(s for s in SYSTEM_AUTOMATIONS if s["action_type"] == "metasync_refresh_charts")
     assert spec["trigger_config"] == {"interval": 24, "unit": "hours"}
     assert any(a["type"] == "metasync_refresh_charts" for a in ACTIONS)
+
+
+def test_a_generated_cover_on_your_copy_shows_on_the_chart_card(db):
+    """reported oct 25: generate cover art on a metasync chart saved fine, but
+    the dashboard / discover chart card kept drawing the network's chart art,
+    because list_charts never looked at the profile's own copy."""
+    mc.store_charts(db, handoff(("trending", "Trending", [track(1), track(2)])), Identify())
+    playlist_id = mc.open_chart(db, "trending", 1, Identify())
+    before = mc.list_charts(db, 1)[0]["image_url"]
+    assert db.set_mirrored_playlist_custom_cover(playlist_id, "/api/user-playlists/9/cover?v=1")
+    assert mc.list_charts(db, 1)[0]["image_url"] == "/api/user-playlists/9/cover?v=1"
+    # someone else's view of the chart, and the next day's handoff, are untouched
+    assert mc.list_charts(db, 2)[0]["image_url"] == before
+    mc.store_charts(db, handoff(("trending", "Trending", [track(1), track(3)])), Identify())
+    assert mc.list_charts(db, 1)[0]["image_url"] == "/api/user-playlists/9/cover?v=1"

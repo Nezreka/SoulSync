@@ -486,3 +486,37 @@ def test_restore_with_nothing_generated_is_refused(mdb, monkeypatch, tmp_path, h
     # but throwing away a preview always works
     assert c.delete(f"/api/mirrored-playlists/{pid}/cover-art?preview_only=1").status_code == 200
     assert mdb.get_mirrored_playlist(pid)["image_url"] == "https://src/a.jpg"
+
+
+def test_a_refresh_echoing_the_cover_back_keeps_the_real_original(mdb, tmp_path):
+    """reported oct 25 on a spotify_public mirror: its source sends no poster,
+    so the scheduled refresh passes the row's own image_url back in. that was
+    the generated cover, and it got stashed as the "original", so restore
+    would have put the generated cover back (and then deleted its file)."""
+    pid = _mirror(mdb, source="spotify_public")
+    ca.make_preview(mdb, mdb.get_mirrored_playlist(pid), base_dir=str(tmp_path), http_get=_Http())
+    url = ca.apply_preview(mdb, mdb.get_mirrored_playlist(pid), base_dir=str(tmp_path))
+    # refresh_mirrored: image_url=pl.get('image_url')
+    _mirror(mdb, source="spotify_public", image=mdb.get_mirrored_playlist(pid)["image_url"])
+    # an older generated url coming back the same way
+    _mirror(mdb, source="spotify_public", image=f"/api/user-playlists/{pid}/cover?v=1")
+    row = mdb.get_mirrored_playlist(pid)
+    assert row["image_url"] == url
+    assert row["source_image_url"] == "https://src/a.jpg"
+    ca.restore_original(mdb, row, base_dir=str(tmp_path))
+    assert mdb.get_mirrored_playlist(pid)["image_url"] == "https://src/a.jpg"
+
+
+def test_restore_from_an_already_stashed_echo_goes_to_no_cover(mdb, tmp_path):
+    """rows saved before the echo fix hold the generated url as the original.
+    restoring them must not point at the file restore is about to delete."""
+    pid = _mirror(mdb, source="spotify_public")
+    local = f"/api/user-playlists/{pid}/cover?v=5"
+    with mdb._get_connection() as conn:
+        conn.execute("UPDATE mirrored_playlists SET custom_cover = 1, image_url = ?, "
+                     "source_image_url = ? WHERE id = ?", (local, local, pid))
+        conn.commit()
+    ca.restore_original(mdb, mdb.get_mirrored_playlist(pid), base_dir=str(tmp_path))
+    row = mdb.get_mirrored_playlist(pid)
+    assert row["image_url"] is None
+    assert row["custom_cover"] is False
