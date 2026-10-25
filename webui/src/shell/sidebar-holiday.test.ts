@@ -28,13 +28,15 @@ afterEach(() => {
 });
 
 describe('holiday decorations', () => {
-  it('halloween: a pumpkin and a bat in the header, a roosting bat, pumpkins on the status card', () => {
+  it('halloween: a cobweb in the header corner, a spider on the divider, the jack-o-lantern lighting the card', () => {
     mountHoliday('halloween', DAY);
-    expect(arts('.sidebar-header')).toEqual([
-      '/static/holidays/pumpkin-1.webp',
-      '/static/holidays/bat-1.webp',
-    ]);
-    expect(arts('.sidebar-spacer')).toEqual(['/static/holidays/bat-2.webp']);
+    // the moon and the bats are painted on the sky now, not pasted on
+    expect(arts('.sidebar-header')).toEqual([]);
+    expect(document.querySelectorAll('.sidebar-header .holiday-cobweb svg path').length).toBe(11);
+    expect(document.querySelectorAll('.sidebar-spacer .holiday-spider .holiday-silk').length).toBe(
+      1,
+    );
+    expect(document.querySelectorAll('[data-music-only] .holiday-spill').length).toBe(1);
     // both sides' cards get them: only the visible one shows
     expect(arts('[data-music-only]')).toEqual([
       '/static/holidays/pumpkin-2.webp',
@@ -75,9 +77,46 @@ describe('holiday decorations', () => {
     expect(new Set([...lights].map((l) => (l as HTMLElement).style.animationDelay)).size).toBe(11);
   });
 
-  it("new year's hangs nothing: the fireworks are painted on the sky", () => {
+  it("new year's: a string of lights across the divider, twinkling out of step", () => {
     mountHoliday('new-year', DAY);
-    expect(document.querySelectorAll('.sidebar-holiday').length).toBe(0);
+    const bulbs = [...document.querySelectorAll<HTMLElement>('.sidebar-spacer .holiday-bulb')];
+    expect(bulbs.length).toBe(13);
+    expect(new Set(bulbs.map((b) => b.style.animationDelay)).size).toBe(13);
+    // they hang on the wire: highest at the ends of a swag, lowest mid-swag
+    const tops = bulbs.map((b) => parseFloat(b.style.top));
+    expect(Math.max(...tops)).toBeLessThanOrEqual(9);
+    expect(Math.min(...tops)).toBeGreaterThanOrEqual(1);
+  });
+
+  it('every holiday lights its card and sets its tint', () => {
+    for (const id of [
+      'halloween',
+      'thanksgiving',
+      'christmas',
+      'new-year',
+      'lunar-new-year',
+    ] as const) {
+      mountHoliday(id, DAY);
+      expect(sidebar().dataset.holiday).toBe(id);
+      expect(document.querySelectorAll('[data-music-only] .holiday-spill').length).toBe(1);
+    }
+    mountHoliday(null, DAY);
+    expect(sidebar().dataset.holiday).toBeUndefined();
+  });
+
+  it('christmas: snow settled on the card', () => {
+    mountHoliday('christmas', DAY);
+    expect(document.querySelectorAll('[data-music-only] .holiday-snowcap').length).toBe(1);
+  });
+
+  it('the big day is marked, and cleared after', () => {
+    mountHoliday('halloween', { ...DAY, moment: true });
+    expect(sidebar().classList.contains('holiday-moment')).toBe(true);
+    mountHoliday('halloween', DAY);
+    expect(sidebar().classList.contains('holiday-moment')).toBe(false);
+    mountHoliday('halloween', { ...DAY, moment: true });
+    unmountHoliday();
+    expect(sidebar().classList.contains('holiday-moment')).toBe(false);
   });
 
   it('never takes clicks or screen-reader attention', () => {
@@ -101,7 +140,7 @@ describe('holiday decorations', () => {
     mountHoliday('halloween', DAY);
     expect(document.querySelectorAll('.sidebar-header .sidebar-holiday').length).toBe(1);
     mountHoliday('thanksgiving', DAY);
-    expect(arts('.sidebar-header')).toEqual([]);
+    expect(document.querySelectorAll('.holiday-cobweb').length).toBe(0);
     expect(mountedHoliday()).toBe('thanksgiving');
     mountHoliday(null, DAY);
     expect(document.querySelectorAll('.sidebar-holiday').length).toBe(0);

@@ -14,13 +14,16 @@
  *   as-is rather than adding a client-side tz database for a sub-hour glitch.
  */
 
+import { createHolidaySky } from './holiday-scene';
 import {
   fireworksLevel,
   HOLIDAY_LABELS,
   holidayOn,
   isChristmasDay,
   localDate,
+  LUNAR_FIREWORKS,
   type HolidayId,
+  type HolidaySky,
 } from './holidays';
 import { mountHoliday, unmountHoliday } from './sidebar-holiday';
 import {
@@ -653,7 +656,10 @@ function startScene(
   const rawCtx = canvas.getContext('2d');
   if (!rawCtx) return () => canvas.remove();
   const ctx: CanvasRenderingContext2D = rawCtx;
-  const engine = createWeatherScene(ctx, sceneConditions(data), Math.random, sceneExtras(data));
+  const cond = sceneConditions(data);
+  const sky = holidaySky(data);
+  const layer = sky ? createHolidaySky(ctx, cond, Math.random, sky) : null;
+  const engine = createWeatherScene(ctx, cond, Math.random, { ...sceneExtras(data), layer });
 
   function fit(): void {
     const r = sidebar.getBoundingClientRect();
@@ -662,7 +668,10 @@ function startScene(
     const h = Math.max(1, r.height || 600);
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
-    engine.resize(w, h, dpr);
+    // the header is opaque: the sky shows from its bottom edge down
+    const header = sidebar.querySelector('.sidebar-header');
+    const top = header ? header.getBoundingClientRect().bottom - r.top : 0;
+    engine.resize(w, h, dpr, Math.max(0, top));
   }
 
   // this scene's own frame handle. shared module state let a crossfade's
@@ -894,9 +903,11 @@ export function setWeatherPreview(preview: WeatherPreview | null): void {
 
 interface HolidayMoment {
   id: HolidayId;
+  /** the big day itself, 0..1 */
+  moment: number;
   /** christmas day: it snows whatever the sky says */
   snow: boolean;
-  /** new year's fireworks, 0..1 */
+  /** new year's fireworks, 0..1 (lunar new year's too, on the eve and the day) */
   fireworks: number;
 }
 
@@ -910,7 +921,12 @@ function holidayMoment(data: WeatherResponse): HolidayMoment | null {
   if (preview?.holiday === 'none') return null;
   if (preview?.holiday && preview.holiday in HOLIDAY_LABELS) {
     const id = preview.holiday as HolidayId;
-    return { id, snow: id === 'christmas', fireworks: id === 'new-year' ? 1 : 0 };
+    return {
+      id,
+      moment: 1,
+      snow: id === 'christmas',
+      fireworks: id === 'new-year' ? 1 : id === 'lunar-new-year' ? LUNAR_SHOW : 0,
+    };
   }
   if (data.holidays === false && !preview?.date) return null;
   const pretend = preview ? previewDate(preview) : null;
@@ -918,16 +934,26 @@ function holidayMoment(data: WeatherResponse): HolidayMoment | null {
   const [y, m, d] = pretend
     ? [pretend.getUTCFullYear(), pretend.getUTCMonth() + 1, pretend.getUTCDate()]
     : localDate(offset);
-  const id = holidayOn(y, m, d, data.location?.country_code ?? null)?.id;
-  if (!id) return null;
+  const today = holidayOn(y, m, d, data.location?.country_code ?? null);
+  if (!today) return null;
+  const id = today.id;
   const local = new Date(Date.now() + offset * 1000);
   const minutes = local.getUTCHours() * 60 + local.getUTCMinutes();
   return {
     id,
+    moment: today.isDay ? 1 : 0,
     snow: id === 'christmas' && isChristmasDay(m, d),
-    fireworks: id === 'new-year' ? fireworksLevel(m, d, minutes) : 0,
+    fireworks:
+      id === 'new-year'
+        ? fireworksLevel(m, d, minutes)
+        : id === 'lunar-new-year' && today.isDay
+          ? LUNAR_SHOW
+          : 0,
   };
 }
+
+/** how busy lunar new year's fireworks are on the eve and the day */
+const LUNAR_SHOW = 0.45;
 
 /** the holiday showing now: a forced one, else by the (pretend) date */
 export function currentHoliday(data: WeatherResponse): HolidayId | null {
@@ -936,7 +962,17 @@ export function currentHoliday(data: WeatherResponse): HolidayId | null {
 
 /** what the holiday adds to the scene canvas (exported for tests) */
 export function sceneExtras(data: WeatherResponse): SceneExtras {
-  return { fireworks: holidayMoment(data)?.fireworks ?? 0 };
+  const h = holidayMoment(data);
+  return {
+    fireworks: h?.fireworks ?? 0,
+    ...(h?.id === 'lunar-new-year' ? { fireworkColors: LUNAR_FIREWORKS } : {}),
+  };
+}
+
+/** the holiday's sky for the scene canvas, or null (exported for tests) */
+export function holidaySky(data: WeatherResponse): HolidaySky | null {
+  const h = holidayMoment(data);
+  return h ? { id: h.id, moment: h.moment } : null;
 }
 
 /** put up (or take down) the holiday's decorations, lit for the hour */
@@ -946,7 +982,12 @@ function syncHoliday(): void {
     return;
   }
   const cond = sceneConditions(active.data);
-  mountHoliday(currentHoliday(active.data), { night: !cond.isDay, wind: windStrength(cond) });
+  const h = holidayMoment(active.data);
+  mountHoliday(h?.id ?? null, {
+    night: !cond.isDay,
+    wind: windStrength(cond),
+    moment: (h?.moment ?? 0) > 0.5,
+  });
 }
 
 /** true once the weather line is up: a preview paints over it, so it needs it */
