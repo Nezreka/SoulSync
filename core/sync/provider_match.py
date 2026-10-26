@@ -34,7 +34,10 @@ must still corroborate itself:
 The ID column is not unique: the same recording can sit on an album and
 a compilation, and a poison-stamped duplicate is precisely a row that
 fails corroboration while its sibling passes. Every row carrying the ID
-is considered, in track-id order, and the first corroborated one wins.
+is considered, in track-id order, and every corroborated one is
+returned — the first may still be the row the user unmatched or the
+one whose server key went stale, so callers iterate until one row
+survives their own checks too.
 
 A row that fails either check is NOT a match here — the caller falls
 through to its normal matching, exactly as before. Anything unreadable
@@ -346,25 +349,29 @@ def _rows_for_id(db: Any, lookup_id: str, server_source: str) -> List[Any]:
     return [row] if row is not None else []
 
 
-def provider_id_library_match(db: Any, track: Any, server_source: str = None) -> Optional[Any]:
-    """The library row whose stored Spotify ID is one of this track's IDs.
+def provider_id_library_matches(db: Any, track: Any, server_source: str = None) -> List[Any]:
+    """Every library row whose stored Spotify ID is one of this track's
+    IDs and that corroborates itself, in lookup order.
 
     Tries each of the track's lookup ids (the discovered catalogue id,
     then the playlist's own ``source_track_id`` — see ``match_lookup_ids``)
     in order, and for each ID every library row carrying it, in the
     order the db returns them. Wing-It stub ids are skipped: a stub is
-    minted locally and names nothing at Spotify. Returns the first
-    corroborated row, or None. Never raises."""
+    minted locally and names nothing at Spotify. Callers that act on a
+    row (rejection check, materialize, rescue) iterate the list: the
+    first corroborated row may be the unmatched or stale one while a
+    duplicate further down is the live match. Never raises."""
     if getattr(db, "get_tracks_by_spotify_id", None) is None and \
             getattr(db, "get_track_by_spotify_id", None) is None:
-        return None
+        return []
     try:
         from core.discovery.wing_it import is_stub_id
         from core.sync.match_overrides import match_lookup_ids
         lookup_ids = match_lookup_ids(track)
     except Exception as e:  # noqa: BLE001 - no ids, no provider match
         logger.debug("provider match: lookup ids unavailable: %s", e)
-        return None
+        return []
+    matches: List[Any] = []
     for lookup_id in lookup_ids:
         if is_stub_id(lookup_id):
             continue
@@ -378,12 +385,20 @@ def provider_id_library_match(db: Any, track: Any, server_source: str = None) ->
                 logger.info(
                     "Provider-ID match: '%s' -> library track %s (spotify id %s)",
                     getattr(track, "name", "?"), _row_value(row, "id"), lookup_id)
-                return row
-            logger.debug(
-                "Provider-ID candidate for spotify id %s rejected on "
-                "title/duration corroboration", lookup_id)
-    return None
+                matches.append(row)
+            else:
+                logger.debug(
+                    "Provider-ID candidate for spotify id %s rejected on "
+                    "title/duration corroboration", lookup_id)
+    return matches
 
 
-__all__ = ["provider_id_library_match", "provider_match_rejected",
-           "provider_titles_agree", "durations_agree_ms"]
+def provider_id_library_match(db: Any, track: Any, server_source: str = None) -> Optional[Any]:
+    """The first corroborated row — see ``provider_id_library_matches``."""
+    matches = provider_id_library_matches(db, track, server_source)
+    return matches[0] if matches else None
+
+
+__all__ = ["provider_id_library_match", "provider_id_library_matches",
+           "provider_match_rejected", "provider_titles_agree",
+           "durations_agree_ms"]

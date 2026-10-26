@@ -272,6 +272,18 @@ def test_plural_generator_consumed_and_plural_failure_falls_back_to_singular():
     assert provider_id_library_match(_RaisingPluralDb(), _track(), "soulsync") is not None
 
 
+def test_matches_returns_every_corroborated_row_in_order():
+    from core.sync.provider_match import provider_id_library_matches
+
+    class _PluralDb:
+        def get_tracks_by_spotify_id(self, sid, server_source=None):
+            return [_row(id="lib-bad", title="Wrong Song"),
+                    _row(id="lib-1"), _row(id="lib-2")]
+
+    rows = provider_id_library_matches(_PluralDb(), _track(), "soulsync")
+    assert [r.id for r in rows] == ["lib-1", "lib-2"]
+
+
 def test_getters_without_the_server_source_kwarg_are_still_asked():
     # A foreign/stub getter whose signature has no server_source must be
     # called with the ID alone, not written off as a miss.
@@ -396,6 +408,19 @@ def test_db_only_matcher_rejection_check_failure_fails_closed():
          patch("core.artists.map.get_current_profile_id", side_effect=RuntimeError("no profile")):
         result = asyncio.run(discovery_sync._database_only_find_track(track, candidate_pool={}))
     assert result == (None, 0.0)
+
+
+def test_db_only_matcher_tries_the_next_row_when_the_first_is_unmatched():
+    # Same Spotify ID on two rows: the user unmatched the first, the
+    # second is the live match — iteration must reach it.
+    track = _track()
+    first = _row(id="t77", title="Pesnya")
+    second = _row(id="t78", title="Pesnya")
+    db = _db_only_fake(first)
+    db.get_tracks_by_spotify_id.return_value = [first, second]
+    db.get_server_match_rejections_strict.return_value = {("sp1885", "t77")}
+    match, conf = _run_db_only(track, db)
+    assert conf == 1.0 and match.id == "t78"
 
 
 def test_db_only_matcher_rejection_check_uses_the_syncs_own_profile():
@@ -528,6 +553,31 @@ def test_media_matcher_rejection_check_uses_the_syncs_own_profile():
         _sync_profile_id.reset(token)
     assert conf == 1.0 and match.id == "t88"
     assert db.get_server_match_rejections_strict.call_args[0][0] == 42
+
+
+def test_media_matcher_tries_the_next_row_when_the_first_is_unmatched():
+    track = _track()
+    first = _row(id="t88", title="Pesnya")
+    second = _row(id="t89", title="Pesnya")
+    db = _media_fake(first)
+    db.get_tracks_by_spotify_id.return_value = [first, second]
+    db.get_track_by_id.side_effect = (
+        lambda i: {"t88": first, "t89": second}.get(str(i)))
+    db.get_server_match_rejections_strict.return_value = {("sp1885", "t88")}
+    match, conf = _run_media(track, db)
+    assert conf == 1.0 and match.id == "t89"
+
+
+def test_media_matcher_tries_the_next_row_when_the_first_cannot_materialize():
+    track = _track()
+    first = _row(id="t88", title="Pesnya")
+    second = _row(id="t89", title="Pesnya")
+    db = _media_fake(first)
+    db.get_tracks_by_spotify_id.return_value = [first, second]
+    db.get_track_by_id.side_effect = (
+        lambda i: second if str(i) == "t89" else None)
+    match, conf = _run_media(track, db)
+    assert conf == 1.0 and match.id == "t89"
 
 
 def test_media_matcher_cancelled_sync_never_reaches_the_provider_path():

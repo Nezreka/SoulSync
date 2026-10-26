@@ -266,9 +266,12 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
         # it (same guard as the media-server matcher).
         try:
             from core.sync.provider_match import (
-                provider_id_library_match, provider_match_rejected)
-            provider_row = provider_id_library_match(db, spotify_track, active_server)
-            if provider_row is not None:
+                provider_id_library_matches, provider_match_rejected)
+            # Every corroborated row gets its turn, as in the media
+            # matcher: the first may be the unmatched duplicate while a
+            # sibling row carrying the same ID is the live match.
+            for provider_row in provider_id_library_matches(
+                    db, spotify_track, active_server):
                 _pid = provider_row.get("id") if isinstance(provider_row, dict) else provider_row.id
                 _ptitle = provider_row.get("title") if isinstance(provider_row, dict) else provider_row.title
                 # Fail CLOSED (provider_match_rejected): a pairing the
@@ -299,8 +302,7 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
                     logger.info(
                         f"Provider-ID match for '{original_title}' not honored — "
                         f"unmatched by user or rejection state unknown (library track {_pid})")
-                    provider_row = None
-            if provider_row is not None:
+                    continue
                 class DatabaseTrackProvider:
                     def __init__(self, track_id, title, artist, album):
                         self.ratingKey = track_id

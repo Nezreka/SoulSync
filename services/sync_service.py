@@ -1510,10 +1510,13 @@ class PlaylistSyncService:
                 return None, 0.0
             try:
                 from core.sync.provider_match import (
-                    durations_agree_ms, provider_id_library_match,
+                    durations_agree_ms, provider_id_library_matches,
                     provider_match_rejected, provider_titles_agree)
-                provider_row = provider_id_library_match(cache_db, spotify_track, active_server)
-                if provider_row is not None:
+                # Every corroborated row gets its turn: the first may be
+                # the unmatched or stale duplicate while a sibling row
+                # carrying the same ID is the live match.
+                for provider_row in provider_id_library_matches(
+                        cache_db, spotify_track, active_server):
                     _provider_id = (provider_row.get("id") if isinstance(provider_row, dict)
                                     else provider_row.id)
                     # Strict rejection test (provider_match_rejected),
