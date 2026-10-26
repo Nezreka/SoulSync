@@ -280,3 +280,34 @@ describe('a page that cannot load', () => {
     expect(extractFunction('resetExtras', SRC)).toContain("classList.remove('vd-page--error')");
   });
 });
+
+describe('about and where to watch', () => {
+  it('names every language, not just the common ones', () => {
+    const SUB = SRC.slice(
+      SRC.indexOf('var SUB_LANG_NAMES'),
+      SRC.indexOf('};', SRC.indexOf('var SUB_LANG_NAMES')) + 2,
+    );
+    const langLabel = fn<(c: string) => string>('langLabel', `${SUB}\nvar _langNames = null;`);
+    expect(langLabel('fa')).toBe('Persian');
+    expect(langLabel('bg')).toBe('Bulgarian');
+    expect(langLabel('en')).toBe('English');
+    expect(langLabel('qqq')).toBe('QQQ');
+  });
+
+  it('one tile per streaming service, ad tier folded into it', () => {
+    const dedupe = fn<(l: { name: string }[]) => { name: string }[]>('dedupeProviders');
+    const names = dedupe([
+      { name: 'Netflix' },
+      { name: 'Netflix Standard with Ads' },
+      { name: 'Peacock Premium' },
+      { name: 'Hulu with Ads' },
+    ]).map((p) => p.name);
+    // an ad tier whose base isn't listed stays
+    expect(names).toEqual(['Netflix', 'Peacock Premium', 'Hulu with Ads']);
+  });
+
+  it('a studio chip always shows the studio name', () => {
+    const body = extractFunction('renderFacts', SRC);
+    expect(body).toContain('<span class="vd-studio-name">');
+  });
+});

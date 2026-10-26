@@ -2148,8 +2148,8 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     border-color: rgba(var(--vd-accent-rgb), 0.6); background: rgba(var(--vd-accent-rgb), 0.14);
 }
 .vd-studio-chip .vd-studio-logo {
-    max-height: 26px; max-width: 120px; object-fit: contain; display: block;
-    padding: 3px 8px; border-radius: var(--radius-sm); background: linear-gradient(160deg, #fafafe, #d9dbe6);
+    max-height: 22px; max-width: 72px; object-fit: contain; display: block; margin: 0 10px 0 -6px;
+    padding: 2px 6px; border-radius: var(--radius-sm); background: linear-gradient(160deg, #fafafe, #d9dbe6);
 }
 
 /* videos rail */

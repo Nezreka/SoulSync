@@ -604,10 +604,21 @@
         hu: 'Hungarian', ro: 'Romanian', th: 'Thai', uk: 'Ukrainian', vi: 'Vietnamese',
         id: 'Indonesian'
     };
-    function subLangLabel(code) {
+    // the hand maps cover the common codes; the browser names the rest, so a
+    // Persian or Bulgarian subtitle reads "Persian", not "FA"
+    var _langNames = null;
+    function langLabel(code) {
         var c = String(code || '').toLowerCase();
-        return SUB_LANG_NAMES[c] || code.toUpperCase();
+        if (!c) return '';
+        if (SUB_LANG_NAMES[c]) return SUB_LANG_NAMES[c];
+        try {
+            if (_langNames === null) _langNames = (typeof Intl !== 'undefined' && Intl.DisplayNames) ? new Intl.DisplayNames(['en'], { type: 'language' }) : false;
+            var n = _langNames && _langNames.of(c);
+            if (n && n.toLowerCase() !== c) return n;
+        } catch (e) { /* not a code Intl knows */ }
+        return c.toUpperCase();
     }
+    function subLangLabel(code) { return langLabel(code); }
     function renderSubtitles(d) {
         var el = q('[data-vd-subs]');
         if (!el) return;
@@ -1749,7 +1760,7 @@
             var aggHref = link || jwSearch;
             var aggVia = link ? 'TMDB' : 'JustWatch';   // fallback tooltip must match the href
             var srvName = (ex.server && ex.server.server || '').toLowerCase();
-            var provs = (ex.providers || []).filter(function (p) {
+            var provs = dedupeProviders(ex.providers || []).filter(function (p) {
                 return (p.name || '').toLowerCase() !== srvName;
             });
             if (provs.length) {
@@ -1815,12 +1826,24 @@
             (long ? '<button class="vd-review-more" type="button" data-vd-review-more>Read more</button>' : '');
     }
 
+    // TMDB lists a service's ad tier as its own provider ("Netflix" and "Netflix
+    // Standard with Ads"); one tile per service is enough
+    function dedupeProviders(list) {
+        var names = {};
+        list.forEach(function (p) { names[String(p.name || '').toLowerCase()] = true; });
+        return list.filter(function (p) {
+            var n = String(p.name || '').toLowerCase();
+            var base = n.replace(/\s+(standard |basic )?with ads$/, '');
+            return base === n || !names[base];
+        });
+    }
+
     // ── facts / keywords ──────────────────────────────────────────────────────
     var LANGS = { en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian',
         ja: 'Japanese', ko: 'Korean', zh: 'Chinese', hi: 'Hindi', ru: 'Russian', pt: 'Portuguese',
         sv: 'Swedish', da: 'Danish', nl: 'Dutch', no: 'Norwegian', fi: 'Finnish', pl: 'Polish',
         tr: 'Turkish', ar: 'Arabic', he: 'Hebrew', th: 'Thai', cs: 'Czech' };
-    function langName(c) { return LANGS[c] || String(c || '').toUpperCase(); }
+    function langName(c) { return LANGS[c] || langLabel(c); }
     function fmtMoney(n) {
         if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
         if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -1878,10 +1901,11 @@
         var sth = q('[data-vd-studios]');
         if (sth) {
             sth.innerHTML = studios.map(function (s) {
-                var inner = s.logo
-                    ? '<img class="vd-studio-logo" src="' + esc(s.logo) + '" alt="' + esc(s.name) +
-                      '" loading="lazy" onerror="this.outerHTML=\'' + esc(s.name).replace(/'/g, '&#39;') + '\'">'
-                    : esc(s.name);
+                // logo beside the name: at chip size a tall or photographic
+                // logo alone was an unreadable thumbnail
+                var inner = (s.logo
+                    ? '<img class="vd-studio-logo" src="' + esc(s.logo) + '" alt="" loading="lazy" onerror="this.remove()">'
+                    : '') + '<span class="vd-studio-name">' + esc(s.name) + '</span>';
                 return '<button type="button" class="vd-studio-chip" data-vd-studio="' + s.tmdb_id +
                     '" title="' + esc(s.name) + '">' + inner + '</button>';
             }).join('');
