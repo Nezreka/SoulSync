@@ -226,6 +226,18 @@ describe('findings', () => {
     expect(lastCall().body).toEqual({ fix_action: 'track-42' });
   });
 
+  it('declares a bulk run only when the caller says so', async () => {
+    // a caller fixing a selection posts once per id but is a bulk run —
+    // the flag is what stops the album gate treating each selected
+    // finding as an explicit single fix.
+    jsonOnce({ success: true });
+    await fixFinding(7, null, { bulk: true });
+    expect(lastCall().body).toEqual({ bulk: true });
+    jsonOnce({ success: true });
+    await fixFinding(7, 'staging', { bulk: true });
+    expect(lastCall().body).toEqual({ fix_action: 'staging', bulk: true });
+  });
+
   it('resolves and dismisses', async () => {
     jsonOnce({});
     await resolveFinding(1);
