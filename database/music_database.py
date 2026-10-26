@@ -278,6 +278,11 @@ class DatabaseTrackWithMetadata:
     # credit, compilation/soundtrack evidence was invisible to the artist
     # scorer and legitimate cached matches failed validation.
     track_artist: Optional[str] = None
+    # only get_tracks_by_spotify_id fills these two. None means the row
+    # didn't come from an id lookup, never "the id matched" (#1885).
+    # file_path lets the plex stale key rescue prefer the exact file.
+    spotify_track_id: Optional[str] = None
+    file_path: Optional[str] = None
 
 @dataclass
 class WatchlistArtist:
@@ -12034,7 +12039,68 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting track {track_id}: {e}")
             return None
-    
+
+    def get_tracks_by_spotify_id(self, spotify_track_id, server_source: str = None) -> List[DatabaseTrackWithMetadata]:
+        """every library track carrying this spotify id, in track id order
+        (text order, so it's stable across runs).
+
+        the id is mostly stamped by the enrichment worker from a name search,
+        so it's a strong hint, not proof. the column isn't unique either (album
+        and compilation copies, a wrong stamp next to the right one), so every
+        row comes back and core.sync.provider_match picks between them. same
+        shape and profile scope as get_track_by_id (#1885)."""
+        try:
+            spotify_id_str = str(spotify_track_id or '').strip()
+            if not spotify_id_str:
+                return []
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            scope_sql, scope_params = self._current_scope_sql('t.owner_profile_id')
+            server_clause = "AND t.server_source = ?" if server_source else ""
+            params = [spotify_id_str]
+            if server_source:
+                params.append(server_source)
+            params.extend(scope_params)
+            cursor.execute(f"""
+                SELECT t.id, t.album_id, t.artist_id, t.title, t.track_number,
+                       t.duration, t.created_at, t.updated_at, t.track_artist,
+                       t.spotify_track_id, t.file_path,
+                       a.name as artist_name, al.title as album_title
+                FROM tracks t
+                JOIN artists a ON t.artist_id = a.id
+                JOIN albums al ON t.album_id = al.id
+                WHERE t.spotify_track_id = ? {server_clause} AND {scope_sql}
+                ORDER BY t.id
+            """, params)
+
+            return [
+                DatabaseTrackWithMetadata(
+                    id=row['id'],
+                    album_id=row['album_id'],
+                    artist_id=row['artist_id'],
+                    title=row['title'],
+                    artist_name=row['artist_name'],
+                    album_title=row['album_title'],
+                    track_number=row['track_number'],
+                    duration=row['duration'],
+                    created_at=row['created_at'],
+                    updated_at=row['updated_at'],
+                    track_artist=row['track_artist'] if 'track_artist' in row.keys() else None,
+                    spotify_track_id=row['spotify_track_id'],
+                    file_path=row['file_path'],
+                )
+                for row in cursor.fetchall()
+            ]
+
+        except Exception as e:
+            logger.error(f"Error getting tracks by spotify id {spotify_track_id}: {e}")
+            return []
+
+    def get_track_by_spotify_id(self, spotify_track_id, server_source: str = None) -> Optional[DatabaseTrackWithMetadata]:
+        """the first row get_tracks_by_spotify_id returns, or None."""
+        rows = self.get_tracks_by_spotify_id(spotify_track_id, server_source=server_source)
+        return rows[0] if rows else None
+
     def get_tracks_by_album(self, album_id: int) -> List[DatabaseTrack]:
         """Get all tracks by album ID"""
         try:
@@ -21968,6 +22034,26 @@ class MusicDatabase:
                     out.update((str(r[0]), str(r[1])) for r in rows)
         except Exception as e:
             logger.error(f"get_server_match_rejections error: {e}")
+        return out
+
+    def get_server_match_rejections_strict(self, profile_id: int, server_source: str,
+                                           source_track_ids) -> set:
+        """get_server_match_rejections, but a db error raises instead of
+        reading as "no rejections". the provider id sync match (#1885) treats
+        a raise as rejected, so an unknown state never re-pins an unmatch."""
+        ids = [str(i) for i in (source_track_ids or []) if i]
+        if not ids:
+            return set()
+        out = set()
+        with self._get_connection() as conn:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                rows = conn.execute(
+                    "SELECT source_track_id, server_track_id FROM server_match_rejections"
+                    " WHERE profile_id = ? AND server_source = ?"
+                    f" AND source_track_id IN ({','.join('?' for _ in chunk)})",
+                    [profile_id, server_source or ''] + chunk).fetchall()
+                out.update((str(r[0]), str(r[1])) for r in rows)
         return out
 
     def invalidate_sync_match_cache(self, server_source: str = None) -> int:
