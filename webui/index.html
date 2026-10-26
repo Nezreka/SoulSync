@@ -9858,7 +9858,7 @@
                                                              status, icon and disconnect when connected, else connect -->
                                                         <div class="form-group security-oidc-admin" id="security-oidc-admin">
                                                             <button type="button" class="auth-button"
-                                                                onclick="window.location.assign('/api/profiles/me/oidc-connect/start')">Connect
+                                                                onclick="window.location.assign(window.SoulSyncURL.resolve('/api/profiles/me/oidc-connect/start'))">Connect
                                                                 my admin account</button>
                                                         </div>
                                                         <!-- sign in with oidc only (#1839; webui/src/shell/oidc-only.ts) -->

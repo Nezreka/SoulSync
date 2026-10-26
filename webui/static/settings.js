@@ -3948,7 +3948,7 @@ async function loadSettingsData() {
             if (oidcDl) oidcDl.checked = settings.security?.oidc_signin_default_can_download || false;
             // the address to register at the provider, as this browser sees it
             const oidcCb = document.getElementById('security-oidc-callback-url');
-            if (oidcCb) oidcCb.textContent = window.location.origin + '/api/auth/oidc/callback';
+            if (oidcCb) oidcCb.textContent = window.location.origin + window.SoulSyncURL.resolve('/api/auth/oidc/callback');
             const signupSides = document.getElementById('security-signup-sides');
             if (signupSides) {
                 const sides = settings.security?.signup_sides;

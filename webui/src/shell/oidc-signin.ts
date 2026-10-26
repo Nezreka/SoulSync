@@ -9,10 +9,16 @@
  * a connect from my account comes back with ?oidc=connect; my account opens
  * again so its outcome is seen.
  *
+ * every navigation goes through appURL: under SOULSYNC_URL_BASE the page's
+ * fetches get the sub-path from url-base.js, but location.assign can't be
+ * patched, so a bare /api/... would leave the app for the host's root.
+ *
  * the admin never gets my account, so their own connection lives in settings
  * > security instead, as the last row of the oidc block: status, the
  * provider's icon and disconnect when connected, else the connect button.
  */
+
+import { appURL } from '@/platform/url-base';
 
 import { OIDC_CONNECT_URL, openMyAccountsModal } from './my-accounts';
 
@@ -90,7 +96,7 @@ export async function initOidcSignIn(
   button.addEventListener('click', () => {
     button.disabled = true;
     button.textContent = 'Redirecting...';
-    go(OIDC_START_URL);
+    go(appURL(OIDC_START_URL));
   });
 }
 
@@ -210,7 +216,7 @@ export async function renderOidcAdmin(
       enabled = false;
     }
     if (enabled) {
-      go(OIDC_CONNECT_URL);
+      go(appURL(OIDC_CONNECT_URL));
       return;
     }
     box.querySelector('.security-oidc-admin-note')?.remove();

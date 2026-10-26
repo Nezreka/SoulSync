@@ -20,6 +20,8 @@
  * /api/profiles/me/oidc for the sign-in card.
  */
 
+import { appURL } from '@/platform/url-base';
+
 import { escapeHtml, toast } from './html';
 
 type ServiceId = 'spotify' | 'tidal' | 'listenbrainz' | 'lastfm';
@@ -845,8 +847,9 @@ function _maOnClick(e: Event): void {
       void _maPlexConnect(btn);
       break;
     case 'oidc-connect':
-      // a page navigation: the provider sends the browser back here after
-      window.location.assign(OIDC_CONNECT_URL);
+      // a page navigation: the provider sends the browser back here after.
+      // appURL: location.assign gets no sub-path from url-base.js
+      window.location.assign(appURL(OIDC_CONNECT_URL));
       break;
     case 'oidc-disconnect':
       void _maServerCall('/api/profiles/me/oidc', 'DELETE', null, 'Disconnected');

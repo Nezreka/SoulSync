@@ -249,3 +249,42 @@ describe("the admin's own connection in settings", () => {
     expect(calls).toBe(1);
   });
 });
+
+describe('under a url base (SOULSYNC_URL_BASE)', () => {
+  // location.assign gets no sub-path from url-base.js, so the shell adds it
+  let meta: HTMLMetaElement;
+  beforeEach(() => {
+    meta = document.createElement('meta');
+    meta.name = 'soulsync-url-base';
+    meta.content = '/soulsync';
+    document.head.append(meta);
+  });
+  afterEach(() => meta.remove());
+
+  it('the sign-in button keeps the sub-path', async () => {
+    available({ enabled: true, label: 'Sign in with Pocket ID', error: null });
+    const go = vi.fn();
+    await initOidcSignIn(go);
+    (document.getElementById('login-oidc-button') as HTMLButtonElement).click();
+    expect(go).toHaveBeenCalledWith('/soulsync' + OIDC_START_URL);
+  });
+
+  it("the admin's connect keeps the sub-path", async () => {
+    document.body.innerHTML = '<div id="security-oidc-admin"></div>';
+    const box = document.getElementById('security-oidc-admin') as HTMLElement;
+    server.use(
+      http.get('*/api/profiles/me/oidc', () =>
+        HttpResponse.json({ success: true, enabled: true, label: 'x', icon: '', connected: false }),
+      ),
+      http.get('*/api/auth/oidc/available', () =>
+        HttpResponse.json({ success: true, enabled: true }),
+      ),
+    );
+    const go = vi.fn();
+    await renderOidcAdmin(box, go);
+    (box.querySelector('button') as HTMLButtonElement).click();
+    await vi.waitFor(() =>
+      expect(go).toHaveBeenCalledWith('/soulsync/api/profiles/me/oidc-connect/start'),
+    );
+  });
+});
