@@ -324,6 +324,13 @@ describe('about and where to watch', () => {
     ]).map((p) => p.name);
     // an ad tier whose base isn't listed stays
     expect(names).toEqual(['Netflix', 'Peacock Premium', 'Hulu with Ads']);
+    const ch = dedupe([
+      { name: 'HBO Max Amazon Channel' },
+      { name: 'HBO Max' },
+      { name: 'Starz Apple TV Channel' },
+    ]).map((p) => p.name);
+    // a resold channel folds into its service; one whose service isn't listed stays
+    expect(ch).toEqual(['HBO Max', 'Starz Apple TV Channel']);
   });
 
   it('your subtitle languages lead, the rest go by name', () => {

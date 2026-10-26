@@ -1858,14 +1858,17 @@
             (long ? '<button class="vd-review-more" type="button" data-vd-review-more>Read more</button>' : '');
     }
 
-    // TMDB lists a service's ad tier as its own provider ("Netflix" and "Netflix
-    // Standard with Ads"); one tile per service is enough
+    // TMDB lists a service's ad tier and its resold channels as their own
+    // providers ("Netflix Standard with Ads", "HBO Max Amazon Channel"); one
+    // tile per service is enough
     function dedupeProviders(list) {
         var names = {};
         list.forEach(function (p) { names[String(p.name || '').toLowerCase()] = true; });
         return list.filter(function (p) {
             var n = String(p.name || '').toLowerCase();
-            var base = n.replace(/\s+(standard |basic )?with ads$/, '');
+            // the ad tier, and the same service resold as an amazon / apple / roku channel
+            var base = n.replace(/\s+(standard |basic )?with ads$/, '')
+                .replace(/\s+(amazon|apple tv|roku premium) channel$/, '');
             return base === n || !names[base];
         });
     }
