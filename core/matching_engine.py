@@ -15,6 +15,7 @@ from core.media_server.types import TrackInfo
 from core.download_plugins.types import TrackResult, AlbumResult
 # Pure text helpers, no cycle back here (core.text imports only core.text).
 from core.text.source_title import strip_artist_prefix
+from core.imports.context import is_placeholder_album
 from core.text.title_match import is_trailing_version_qualifier
 from core.text.track_prefix import strip_track_prefix
 
@@ -782,7 +783,13 @@ class MusicMatchingEngine:
             album_name = getattr(spotify_track, attr, None)
             if album_name:
                 break
-        
+
+        # 'Unknown Album' is the no-album placeholder stored on album-less
+        # playlist entries — as a search term it poisons the priority query
+        # (no peer has such an album; the search returns nothing).
+        if album_name and is_placeholder_album(album_name):
+            album_name = None
+
         # PRIORITY 0: Try exact Artist + Album + Title
         # For Soulseek this matches the typical folder structure (Artist/Album/Track)
         # and prevents wrong-artist downloads when the artist name appears as an album

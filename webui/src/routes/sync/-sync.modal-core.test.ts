@@ -158,7 +158,7 @@ describe('buildDownloadTracks (the two-format builder, 10727-10753)', () => {
     });
   });
 
-  it('album objects pass through; missing fields fall to the Unknown defaults', () => {
+  it('album objects pass through; a missing album stays missing (no invented name)', () => {
     const albumObj = { name: 'Real', images: [{ url: 'x' }] };
     const [row] = buildDownloadTracks([
       { spotify_track: 'T', status_class: 'found', spotify_album: albumObj } as never,
@@ -169,7 +169,9 @@ describe('buildDownloadTracks (the two-format builder, 10727-10753)', () => {
       id: 'unknown',
       name: 'T',
       artists: ['Unknown Artist'],
-      album: { name: 'Unknown Album', album_type: 'album', images: [] },
+      // NOT 'Unknown Album': that literal used to be stamped into the
+      // downloaded file's tags as if it were a real album name.
+      album: { name: '', album_type: 'album', images: [] },
       duration_ms: 0,
     });
   });
