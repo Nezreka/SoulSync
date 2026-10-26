@@ -8112,3 +8112,11 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
 .vd-page--error .vd-title { font-size: clamp(2em, 3.4vw, 3em); }
 .vd-page--error .vd-overview { -webkit-line-clamp: unset; color: var(--white-a75); }
 .vd-page--error .vd-error-ext { text-decoration: none; }
+
+/* subtitles fact: your languages first, the rest one click away */
+.vd-subs-more {
+    background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
+    color: rgba(var(--vd-accent-rgb), 1); text-decoration: underline; text-underline-offset: 3px;
+}
+.vd-subs-more:hover { color: var(--text-1); }
+.vd-detail-row--subs { grid-column: span 2; }

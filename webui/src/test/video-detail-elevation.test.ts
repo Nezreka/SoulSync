@@ -306,6 +306,32 @@ describe('about and where to watch', () => {
     expect(names).toEqual(['Netflix', 'Peacock Premium', 'Hulu with Ads']);
   });
 
+  it('your subtitle languages lead, the rest go by name', () => {
+    const SUB = SRC.slice(
+      SRC.indexOf('var SUB_LANG_NAMES'),
+      SRC.indexOf("SUB_LANG_NAMES['zh-cn']"),
+    );
+    const order = fn<(c: string[], mine: string[]) => string[]>(
+      'subLangOrder',
+      `${SUB}\nvar _langNames = null;\n${extractFunction('langLabel', SRC)}\n${extractFunction('subLangLabel', SRC)}`,
+    );
+    expect(order(['ar', 'az-zb', 'bg', 'en', 'es', 'ea'], ['en'])).toEqual([
+      'en',
+      'ar',
+      'bg',
+      'az-zb',
+      'es',
+      'ea',
+    ]);
+    // pt-br counts as a wanted pt
+    expect(order(['ar', 'pt-br', 'en'], ['pt', 'en'])[0]).toBe('pt-br');
+  });
+
+  it('the subtitles fact opens the full list in place', () => {
+    expect(extractFunction('subLangsHTML', SRC)).toContain('data-vd-subs-more');
+    expect(SRC).toContain("subsMore.parentNode.querySelector('.vd-subs-rest')");
+  });
+
   it('a studio chip always shows the studio name', () => {
     const body = extractFunction('renderFacts', SRC);
     expect(body).toContain('<span class="vd-studio-name">');

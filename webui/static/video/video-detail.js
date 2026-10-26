@@ -602,8 +602,12 @@
         ar: 'Arabic', tr: 'Turkish', sv: 'Swedish', da: 'Danish', fi: 'Finnish',
         no: 'Norwegian', cs: 'Czech', el: 'Greek', he: 'Hebrew', hi: 'Hindi',
         hu: 'Hungarian', ro: 'Romanian', th: 'Thai', uk: 'Ukrainian', vi: 'Vietnamese',
-        id: 'Indonesian'
+        id: 'Indonesian',
+        // OpenSubtitles' own codes
+        ea: 'Spanish (Latin America)', 'az-zb': 'South Azerbaijani', 'zh-tw': 'Chinese (Traditional)',
+        ze: 'Chinese (bilingual)', me: 'Montenegrin', pm: 'Portuguese (Mozambique)', sx: 'Santali'
     };
+    SUB_LANG_NAMES['zh-cn'] = 'Chinese (Simplified)';
     // the hand maps cover the common codes; the browser names the rest, so a
     // Persian or Bulgarian subtitle reads "Persian", not "FA"
     var _langNames = null;
@@ -1838,6 +1842,29 @@
         });
     }
 
+    // The languages you grab subtitles in come first, then the rest by name.
+    // Sorted by code, English hid behind "+20 more" on most films.
+    function subLangOrder(codes, mine) {
+        var want = (mine || []).map(function (c) { return String(c).toLowerCase(); });
+        function rank(c) {
+            var lc = String(c).toLowerCase(), i = want.indexOf(lc);
+            if (i < 0) i = want.indexOf(lc.split('-')[0]);
+            return i < 0 ? want.length : i;
+        }
+        return codes.slice().sort(function (a, b) {
+            return (rank(a) - rank(b)) || subLangLabel(a).localeCompare(subLangLabel(b));
+        });
+    }
+    var SUBS_VISIBLE = 4, _factsArgs = null;
+    function subLangsHTML(codes) {
+        var names = codes.map(subLangLabel);
+        if (names.length <= SUBS_VISIBLE) return esc(names.join(', '));
+        return '<span class="vd-subs-lead">' + esc(names.slice(0, SUBS_VISIBLE).join(', ')) + '</span>' +
+            '<span class="vd-subs-rest" hidden>, ' + esc(names.slice(SUBS_VISIBLE).join(', ')) + '</span> ' +
+            '<button type="button" class="vd-subs-more" data-vd-subs-more aria-expanded="false">+' +
+            (names.length - SUBS_VISIBLE) + ' more</button>';
+    }
+
     // ── facts / keywords ──────────────────────────────────────────────────────
     var LANGS = { en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian',
         ja: 'Japanese', ko: 'Korean', zh: 'Chinese', hi: 'Hindi', ru: 'Russian', pt: 'Portuguese',
@@ -1879,22 +1906,28 @@
     function renderFacts(facts, keywords, studios) {
         var sec = q('[data-vd-facts-section]'), host = q('[data-vd-facts]'), kwh = q('[data-vd-keywords]');
         facts = facts || {}; keywords = keywords || []; studios = studios || [];
+        _factsArgs = [facts, keywords, studios];
         var rows = titleFacts(data);
+        // the studio chips below name every studio; a Studio fact repeated the first
+        if (studios.length) rows = rows.filter(function (r) { return r[0] !== 'Studio'; });
         if (facts.budget) rows.push(['Budget', '$' + fmtMoney(facts.budget)]);
         if (facts.revenue) rows.push(['Box office', '$' + fmtMoney(facts.revenue)]);
         if (facts.original_language) rows.push(['Language', langName(facts.original_language)]);
         if (facts.countries && facts.countries.length) rows.push(['Country', facts.countries.join(', ')]);
         // where subtitles EXIST (OpenSubtitles backfill) — one fact, not a chip wall
-        var subLangs = (data && data.subtitle_langs) || [];
-        if (subLangs.length) {
-            var named = subLangs.slice(0, 4).map(subLangLabel).join(', ');
-            rows.push(['Subtitles exist in', named + (subLangs.length > 4 ? ' +' + (subLangs.length - 4) + ' more' : '')]);
-        }
+        var subLangs = subLangOrder((data && data.subtitle_langs) || [], (prefs && prefs.subtitle_langs) || ['en']);
+        if (subLangs.length) rows.push(['Subtitles exist in', subLangs, 'subs']);
         if (host) {
             host.innerHTML = rows.length ? '<div class="vd-detail-grid">' + rows.map(function (r) {
-                return '<div class="vd-detail-row"><span class="vd-detail-k">' + esc(r[0]) +
-                    '</span><span class="vd-detail-v">' + esc(r[1]) + '</span></div>';
+                var v = r[2] === 'subs' ? subLangsHTML(r[1]) : esc(r[1]);
+                return '<div class="vd-detail-row' + (r[2] === 'subs' ? ' vd-detail-row--subs' : '') + '"><span class="vd-detail-k">' + esc(r[0]) +
+                    '</span><span class="vd-detail-v">' + v + '</span></div>';
             }).join('') + '</div>' : '';
+        }
+        // the fact renders before prefs arrive the first time; re-order once they do
+        if (subLangs.length && !prefs) {
+            var d0 = data;
+            loadPrefs(function () { if (data === d0) renderFacts.apply(null, _factsArgs); });
         }
         // Studio chips → each opens its Studio page (a collection of films). Logo when
         // TMDB has one, else the name; a data-vd-studio hook drives the click.
@@ -3918,6 +3951,14 @@
         if (e.target.closest('[data-vd-ext]')) return;   // let watch links open
         var ytPlay = e.target.closest('[data-vd-yt-play]');   // play the video inline (reuses the trailer player)
         if (ytPlay && r.contains(ytPlay)) { e.preventDefault(); openTrailer(ytPlay.getAttribute('data-vd-yt-play')); return; }
+        var subsMore = e.target.closest('[data-vd-subs-more]');
+        if (subsMore && r.contains(subsMore)) {
+            e.preventDefault();
+            var rest = subsMore.parentNode.querySelector('.vd-subs-rest');
+            if (rest) rest.hidden = false;
+            subsMore.remove();
+            return;
+        }
         var ytLay = e.target.closest('[data-vd-yt-layout]');
         if (ytLay && r.contains(ytLay)) { e.preventDefault(); setYtLayout(ytLay.getAttribute('data-vd-yt-layout')); return; }
         var ytFacet = e.target.closest('[data-vd-yt-filter]');

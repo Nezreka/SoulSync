@@ -674,7 +674,7 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
             "billboard_autoplay": False, "watch_region": "GB"}
         assert db.get_setting("tmdb_api_key") == "abc" and db.get_setting("omdb_api_key") == "om"
         assert client.get("/api/video/prefs").get_json() == {
-            "billboard_autoplay": False, "watch_region": "GB"}
+            "billboard_autoplay": False, "watch_region": "GB", "subtitle_langs": ["en"]}
     finally:
         videoapi._video_db = None
 

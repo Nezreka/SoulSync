@@ -98,12 +98,16 @@ def register_routes(bp):
 
     @bp.route("/prefs", methods=["GET"])
     def video_prefs():
-        # Lightweight UI prefs for the detail page (no API keys).
+        # Lightweight UI prefs for the detail page (no API keys). The subtitle
+        # languages you grab lead the "subtitles exist in" fact.
         from . import get_video_db
+        from core.video import organization
         db = get_video_db()
+        langs = str(organization.load(db).get("subtitle_langs") or "en")
         return jsonify({
             "billboard_autoplay": (db.get_setting("billboard_autoplay") or "1") == "1",
             "watch_region": (db.get_setting("watch_region") or "US").upper(),
+            "subtitle_langs": [x for x in langs.split(",") if x],
         })
 
     @bp.route("/enrichment/config", methods=["POST"])
