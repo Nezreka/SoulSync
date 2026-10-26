@@ -623,8 +623,13 @@ def serialize_metasync_artist(obj, fields: Optional[Set[str]] = None) -> dict:
     d = _to_dict(obj)
     result = {
         "soul_id": d.get("soul_id"),
-        # 'canonical' | 'album' | 'name' | None. Only 'canonical' is
-        # reproducible on another install (see the artists migration).
+        # The pre-kinded_v2 id this row carried, parked by the cutover so
+        # peers can bridge old -> new. None when the row was born on v2.
+        "soul_id_legacy": d.get("soul_id_legacy"),
+        # Derivation of the CURRENT id. kinded_v2 mints are always 'name'
+        # (the normalized name alone — reproducible on any install).
+        # 'canonical' | 'album' are pre-v2 derivations and appear only on
+        # rows whose current id still predates the cutover.
         "soul_id_path": d.get("soul_id_path"),
         "name": d.get("name"),
         "genres": _parse_genres(d.get("genres")),
@@ -638,6 +643,7 @@ def serialize_metasync_album(obj, fields: Optional[Set[str]] = None) -> dict:
     d = _to_dict(obj)
     result = {
         "soul_id": d.get("soul_id"),
+        "soul_id_legacy": d.get("soul_id_legacy"),
         "title": d.get("title"),
         "artist_name": d.get("artist_name"),
         "year": d.get("year"),
@@ -659,7 +665,9 @@ def serialize_metasync_track(obj, fields: Optional[Set[str]] = None) -> dict:
     d = _to_dict(obj)
     result = {
         "soul_id": d.get("soul_id"),
+        "soul_id_legacy": d.get("soul_id_legacy"),
         "album_soul_id": d.get("album_soul_id"),
+        "album_soul_id_legacy": d.get("album_soul_id_legacy"),
         "title": d.get("title"),
         "artist_name": d.get("artist_name"),
         "album_title": d.get("album_title"),
