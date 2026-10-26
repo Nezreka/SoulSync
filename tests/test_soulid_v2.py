@@ -405,3 +405,77 @@ def test_db_init_migration_parks_before_it_clears(tmp_path):
     assert rows["a1"] == (None, "soul_old")
     assert rows["a2"] == (None, None)  # placeholders are not parked
     conn.close()
+
+
+# ── the cutover on a real-sized library (review fix) ──────────────────────
+# One UPDATE over the whole tracks table held the write lock for 7 minutes
+# on a 311k-track library (measured on a copy, WSL): every other writer in
+# the app waited or failed with "database is locked" on the first start
+# after the upgrade. The cutover now commits in rowid chunks.
+
+def _tracks(db, n):
+    for i in range(1, n + 1):
+        _exec(db, "INSERT INTO tracks(id, title, soul_id, album_soul_id) "
+                  "VALUES(?, ?, ?, ?)", (f"t{i}", f"T{i}", f"soul_old{i}", f"soul_alb{i}"))
+
+
+def test_track_cutover_commits_in_chunks_and_lets_writers_in(db, monkeypatch):
+    import core.soulid_worker as sw
+    _tracks(db, 5)
+    worker = _worker(db)
+    worker.cutover_chunk = 2
+    writes = []
+
+    def other_writer(_s):
+        # a second connection with no busy wait: it only gets in if the
+        # cutover released the lock between chunks
+        c = sqlite3.connect(db.path, timeout=0)
+        try:
+            c.execute("INSERT INTO metadata(key, value) VALUES(?, 'x')", (f"w{len(writes)}",))
+            c.commit()
+            writes.append(1)
+        finally:
+            c.close()
+
+    monkeypatch.setattr(sw.time, "sleep", other_writer)
+    assert worker._migrate_track_soul_ids() is True
+    assert len(writes) == 3  # 5 rows in chunks of 2
+    rows = _rows(db, "SELECT soul_id, soul_id_legacy, album_soul_id, album_soul_id_legacy "
+                     "FROM tracks ORDER BY id")
+    assert all(r[0] is None and r[2] is None for r in rows)
+    assert sorted(r[1] for r in rows) == sorted(f"soul_old{i}" for i in range(1, 6))
+    assert sorted(r[3] for r in rows) == sorted(f"soul_alb{i}" for i in range(1, 6))
+
+
+def test_an_interrupted_cutover_resumes_without_losing_an_id(db, monkeypatch):
+    import core.soulid_worker as sw
+    _tracks(db, 5)
+    worker = _worker(db)
+    worker.cutover_chunk = 2
+
+    def stop_after_first_chunk(_s):
+        worker.should_stop = True
+
+    monkeypatch.setattr(sw.time, "sleep", stop_after_first_chunk)
+    assert worker._migrate_track_soul_ids() is False
+    assert _rows(db, "SELECT key FROM metadata WHERE key='soulid_track_version'") == []
+    done = _rows(db, "SELECT id, soul_id, soul_id_legacy FROM tracks WHERE soul_id IS NULL")
+    assert done and all(legacy for _id, _sid, legacy in done)  # every reset row is parked
+
+    worker.should_stop = False
+    monkeypatch.setattr(sw.time, "sleep", lambda _s: None)
+    assert worker._migrate_track_soul_ids() is True
+    rows = dict((r[0], r[1]) for r in _rows(db, "SELECT id, soul_id_legacy FROM tracks"))
+    assert rows == {f"t{i}": f"soul_old{i}" for i in range(1, 6)}
+
+
+def test_a_table_whose_cutover_failed_mints_nothing(db):
+    """a v2 id minted before the cutover lands would be parked as the
+    'legacy' id by the retry, so that table waits."""
+    _exec(db, "INSERT INTO artists(id, name) VALUES('a1', 'Rone')")
+    worker = _worker(db)
+    worker._cut_over = {"artists": False, "albums": True, "tracks": True}
+    assert worker._mint_round() == 0
+    assert _rows(db, "SELECT soul_id FROM artists") == [(None,)]
+    worker._cut_over["artists"] = True
+    assert worker._mint_round() == 1

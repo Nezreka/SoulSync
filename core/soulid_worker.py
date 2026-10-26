@@ -46,6 +46,7 @@ NULL the live columns; the worker then re-mints everything under kinded_v2.
 import hashlib
 import re
 import threading
+import time
 import unicodedata
 from typing import Dict, Any, List
 
@@ -216,6 +217,11 @@ class SoulIDWorker:
 
         # Processing config
         self.batch_size = 100         # Entities per batch (local DB only)
+        # Rows per committed chunk of the one-time cutover. One statement
+        # over the whole table held the write lock for 7 minutes on a
+        # 311k-track library (measured, WSL): every scan, download and
+        # import write in the app waited or failed meanwhile.
+        self.cutover_chunk = 1000
         self.inter_batch_sleep = 0.5  # Between batches
         self.idle_sleep = 30
 
@@ -270,17 +276,19 @@ class SoulIDWorker:
         # A failed table retries on the next start (its flag is only
         # stamped on success) — say so loudly, because until it lands
         # that table keeps pre-v2 ids while the rest has moved on.
-        failed = [name for name, ok in (
-            ("artists", self._migrate_artist_soul_ids()),
-            ("albums", self._migrate_album_soul_ids()),
-            ("tracks", self._migrate_track_soul_ids()),
-        ) if not ok]
+        self._cut_over = {
+            "artists": self._migrate_artist_soul_ids(),
+            "albums": self._migrate_album_soul_ids(),
+            "tracks": self._migrate_track_soul_ids(),
+        }
+        failed = [name for name, ok in self._cut_over.items() if not ok]
         if failed:
             self.stats['errors'] += len(failed)
             logger.error(
                 f"SoulID {SOULID_VERSION} cutover incomplete for: "
                 f"{', '.join(failed)} — those tables keep pre-v2 ids "
-                f"until the cutover succeeds on a later start")
+                f"until the cutover succeeds on a later start (no new ids "
+                f"are minted there meanwhile)")
 
         while not self.should_stop:
             try:
@@ -288,10 +296,7 @@ class SoulIDWorker:
                     interruptible_sleep(self._stop_event, 1)
                     continue
 
-                processed = 0
-                processed += self._process_artists()
-                processed += self._process_albums()
-                processed += self._process_tracks()
+                processed = self._mint_round()
 
                 if processed == 0:
                     self.current_item = None
@@ -306,6 +311,20 @@ class SoulIDWorker:
 
         self.current_item = None
         logger.info("SoulID worker thread finished")
+
+    def _mint_round(self) -> int:
+        """One batch per table. A table whose cutover didn't land mints
+        nothing: a v2 id minted now would be parked as "legacy" by the
+        retry on the next start."""
+        cut = getattr(self, "_cut_over", {})
+        processed = 0
+        if cut.get("artists"):
+            processed += self._process_artists()
+        if cut.get("albums"):
+            processed += self._process_albums()
+        if cut.get("tracks"):
+            processed += self._process_tracks()
+        return processed
 
     # ── Artist processing (batch, local DB only) ──
 
@@ -513,11 +532,19 @@ class SoulIDWorker:
         row = cursor.fetchone()
         return bool(row and row[0] == SOULID_VERSION)
 
-    def _park_and_reset(self, cursor, table: str,
+    def _park_and_reset(self, conn, table: str,
                         pairs: List[tuple]) -> int:
         """Copy live ids into their legacy columns, then NULL the live
         ones. `pairs` is [(live_column, legacy_column), ...]. Returns the
         number of rows reset.
+
+        Chunked by rowid and committed per chunk, so the write lock is
+        held for one chunk at a time and the rest of the app gets in
+        between. Each chunk parks then resets the same rows, so an
+        interrupted run leaves every reset row parked, and the rerun
+        (the flag is only stamped once the whole table is done) picks up
+        where it stopped. Parking never overwrites a filled legacy
+        column, so re-running a chunk is harmless.
 
         Fail-closed: if any legacy column is missing, raise WITHOUT
         touching the live ids. The reset is destructive and the parked
@@ -528,26 +555,43 @@ class SoulIDWorker:
         Placeholders (soul_unnamed_<pk>) are reset but NOT parked: the pk
         is install-local, so a parked placeholder would poison a peer's
         old->new bridge with an id that names a different row there."""
+        cursor = conn.cursor()
         columns = {r[1] for r in cursor.execute(f"PRAGMA table_info({table})")}
         missing = [legacy for _, legacy in pairs if legacy not in columns]
         if missing:
             raise RuntimeError(
                 f"{table} is missing legacy columns {missing}; refusing "
                 "to reset soul ids without parking them first")
-        for live, legacy in pairs:
-            cursor.execute(
-                f"UPDATE {table} SET {legacy} = {live} "
-                f"WHERE {live} IS NOT NULL AND {live} != '' "
-                f"AND {live} NOT LIKE 'soul\\_unnamed\\_%' ESCAPE '\\' "
-                f"AND ({legacy} IS NULL OR {legacy} = '')")
+        lo, hi = cursor.execute(f"SELECT MIN(rowid), MAX(rowid) FROM {table}").fetchone()
+        if lo is None:
+            return 0
+        chunk = max(1, int(getattr(self, "cutover_chunk", 1000) or 1000))
         set_clause = ", ".join(f"{live} = NULL" for live, _ in pairs)
         reset_where = " OR ".join(
-            f"{live} IS NOT NULL AND {live} != ''" for live, _ in pairs)
-        cursor.execute(
-            f"UPDATE {table} SET {set_clause}, "
-            "updated_at = CURRENT_TIMESTAMP "
-            f"WHERE {reset_where}")
-        return cursor.rowcount
+            f"({live} IS NOT NULL AND {live} != '')" for live, _ in pairs)
+        reset = 0
+        start = lo
+        while start <= hi:
+            if getattr(self, "should_stop", False):
+                raise RuntimeError(f"{table} cutover stopped part-way; it resumes next start")
+            end = start + chunk - 1
+            for live, legacy in pairs:
+                cursor.execute(
+                    f"UPDATE {table} SET {legacy} = {live} "
+                    f"WHERE rowid BETWEEN ? AND ? "
+                    f"AND {live} IS NOT NULL AND {live} != '' "
+                    f"AND {live} NOT LIKE 'soul\\_unnamed\\_%' ESCAPE '\\' "
+                    f"AND ({legacy} IS NULL OR {legacy} = '')", (start, end))
+            cursor.execute(
+                f"UPDATE {table} SET {set_clause}, "
+                "updated_at = CURRENT_TIMESTAMP "
+                f"WHERE rowid BETWEEN ? AND ? AND ({reset_where})", (start, end))
+            reset += cursor.rowcount
+            conn.commit()
+            start = end + 1
+            # let a writer that queued behind this chunk take the lock
+            time.sleep(0.02)
+        return reset
 
     def _migrate_artist_soul_ids(self):
         """kinded_v2 cutover for artists: park pre-v2 ids, clear soul_id
@@ -561,7 +605,7 @@ class SoulIDWorker:
                 return True
 
             reset_count = self._park_and_reset(
-                cursor, "artists", [("soul_id", "soul_id_legacy")])
+                conn, "artists", [("soul_id", "soul_id_legacy")])
             cursor.execute(
                 "UPDATE artists SET soul_id_path = NULL "
                 "WHERE soul_id_path IS NOT NULL")
@@ -602,7 +646,7 @@ class SoulIDWorker:
                 return True
 
             reset_count = self._park_and_reset(
-                cursor, "albums", [("soul_id", "soul_id_legacy")])
+                conn, "albums", [("soul_id", "soul_id_legacy")])
             cursor.execute(
                 "INSERT OR REPLACE INTO metadata (key, value) "
                 "VALUES ('soulid_album_version', ?)", (SOULID_VERSION,))
@@ -640,7 +684,7 @@ class SoulIDWorker:
                 return True
 
             reset_count = self._park_and_reset(
-                cursor, "tracks",
+                conn, "tracks",
                 [("soul_id", "soul_id_legacy"),
                  ("album_soul_id", "album_soul_id_legacy")])
             cursor.execute(
