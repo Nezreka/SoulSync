@@ -139,7 +139,10 @@ def test_auto_discovery_defaults_when_fields_missing():
     out = convert_results_to_spotify_tracks(results, 'Spotify Public')
     assert out == [{
         'id': 'unknown', 'name': 'T', 'artists': ['Unknown Artist'],
-        'album': 'Unknown Album', 'duration_ms': 0,
+        # Album stays empty when the result names none — the old
+        # 'Unknown Album' default invented an album that post-processing
+        # stamped into downloaded files' tags.
+        'album': '', 'duration_ms': 0,
     }]
 
 
@@ -1209,3 +1212,20 @@ def test_update_match_no_state_and_no_originals_still_404():
         'identifier': 'gone', 'track_index': 0, 'spotify_track': {'id': 'x'}})
     body, code = update_discovery_match({}, gj, **kw)
     assert code == 404 and body == {'error': 'Identification state not found'}
+
+
+def test_found_result_without_album_stays_albumless():
+    """A found result whose flat spotify_album is empty/missing must not
+    gain an invented 'Unknown Album' on conversion — that literal used to
+    ride the payload into post-processing and get stamped into the
+    downloaded file's tags as a real album name."""
+    results = [{
+        'spotify_track': 'Kentucky', 'spotify_artist': 'Dawn McCarthy',
+        'spotify_album': '', 'spotify_id': 'sp9', 'status_class': 'found',
+    }]
+    converted = convert_results_to_spotify_tracks(results, 'Spotify')
+    assert converted[0]['album'] == ''
+
+    results[0].pop('spotify_album')
+    converted = convert_results_to_spotify_tracks(results, 'Spotify')
+    assert converted[0]['album'] == ''

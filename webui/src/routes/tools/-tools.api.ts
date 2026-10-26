@@ -332,6 +332,12 @@ export interface FixResult {
   success?: boolean;
   message?: string;
   error?: string;
+  /** the fix was held back by design, not failed — e.g. an incomplete
+   *  album whose only missing tracks are other artists', fixed in bulk. */
+  skipped_by_design?: boolean;
+  /** tracks the album gate held back on this fix, including on a fix
+   *  that otherwise succeeded. */
+  other_artist_skipped?: number;
   /** an orphan delete stopped because a library track shares its filename. */
   needs_confirm?: boolean;
   library_paths?: string[];
@@ -341,12 +347,22 @@ export interface FixResult {
  * `fixRepairFinding` / `selectDuplicateToKeep` / `applyCoverArtTarget` — all
  * three POST the same endpoint; only the `fix_action` differs (an action name, a
  * track id to keep, or 'album'/'artist' for which image to apply).
+ *
+ * `bulk` must be set by any caller fixing MORE than the one finding the
+ * user is looking at (the "Fix Selected" loop posts once per id but is a
+ * bulk run). It decides whether the album completeness fixer may
+ * wishlist other artists' tracks: only a fix of one specific finding
+ * counts as asking for that album.
  */
-export async function fixFinding(id: number, fixAction?: string | null): Promise<FixResult> {
-  const response = await postJson(
-    `/api/repair/findings/${id}/fix`,
-    fixAction ? { fix_action: fixAction } : {},
-  );
+export async function fixFinding(
+  id: number,
+  fixAction?: string | null,
+  options?: { bulk?: boolean },
+): Promise<FixResult> {
+  const body: { fix_action?: string; bulk?: boolean } = {};
+  if (fixAction) body.fix_action = fixAction;
+  if (options?.bulk) body.bulk = true;
+  const response = await postJson(`/api/repair/findings/${id}/fix`, body);
   return (await response.json()) as FixResult;
 }
 

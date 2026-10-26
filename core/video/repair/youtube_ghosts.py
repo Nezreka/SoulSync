@@ -45,10 +45,11 @@ def _ghost_kwargs(row: dict, channel: str) -> dict:
     mass-finding fix so the two paths can never drift apart.
 
     The HISTORY ROW is the entity, not the video: after a Forget →
-    re-download → delete-again cycle the new ledger row must be able to flag
-    again (dedup keeps any-status findings forever). Same reason no file_path
-    is passed — a re-download recreates the same path, and path-dedup would
-    silence the new ghost."""
+    re-download → delete-again cycle the new ledger row is a NEW entity,
+    so it can flag again at once under the recurrence contract (a handled
+    finding on the OLD row only ever governs that row). Same reason no
+    file_path is passed — a re-download recreates the same path, and
+    path-dedup would silence the new ghost."""
     return {
         "finding_type": "youtube_ghost", "severity": "warning",
         "entity_type": "youtube_video",

@@ -155,6 +155,12 @@ export interface BulkFixStatus {
   total?: number;
   fixed?: number;
   failed?: number;
+  /** Findings held back by design (e.g. the album completeness gate),
+   *  tallied apart from failures. */
+  skipped?: number;
+  /** Tracks the album gate held back across the run, including on
+   *  findings that otherwise fixed successfully. */
+  other_artist_skipped?: number;
   stopped?: boolean;
   error?: string | null;
   note?: string | null;
