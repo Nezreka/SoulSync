@@ -389,7 +389,11 @@
         } else {
             meta.push(d.owned ? '<span class="vd-match">In library</span>'
                 : '<span class="vd-status">Wanted</span>');
-            if (d.watched) meta.push('<span class="vd-watched-tag" title="Watched on your server">✓ Watched</span>');
+            if (d.watched) {
+                var seen = d.last_viewed_at ? fmtDate(String(d.last_viewed_at).slice(0, 10)) : '';
+                meta.push('<span class="vd-watched-tag" title="Watched on your server' + (seen ? ', last on ' + seen : '') + '">✓ Watched' +
+                    (seen ? ' · ' + esc(seen) : '') + '</span>');
+            }
             // your best copy's format facts (4K · HDR · Atmos · 5.1), like the streamers show
             if (d.owned && d.file) meta.push.apply(meta, formatBadges(d.file));
         }
@@ -673,33 +677,42 @@
     function renderRatings(d) {
         var host = q('[data-vd-ratings]');
         if (!host) return;
+        // each score opens its own site (library pages; previews stay in-app)
+        var q1 = encodeURIComponent(String(d.title || ''));
+        var linked = d.source !== 'tmdb';
+        function chip(cls, inner, url, tip) {
+            var attrs = 'class="vd-rt ' + cls + '"' + (tip ? ' title="' + esc(tip) + '"' : '');
+            return (linked && url)
+                ? '<a ' + attrs + ' href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + inner + '</a>'
+                : '<span ' + attrs + '>' + inner + '</span>';
+        }
         var items = [];
         if (d.imdb_rating) {
-            items.push('<span class="vd-rt vd-rt--imdb"><span class="vd-rt-tag">IMDb</span>' +
-                (Math.round(d.imdb_rating * 10) / 10) + '</span>');
+            items.push(chip('vd-rt--imdb', '<span class="vd-rt-tag">IMDb</span>' + (Math.round(d.imdb_rating * 10) / 10),
+                d.imdb_id ? 'https://www.imdb.com/title/' + d.imdb_id + '/' : '', 'IMDb rating'));
         }
         if (d.rt_rating != null) {
             var fresh = d.rt_rating >= 60;
-            items.push('<span class="vd-rt vd-rt--rt"><span class="vd-rt-ic">' +
-                (fresh ? '🍅' : '🤢') + '</span>' + d.rt_rating + '%</span>');
+            items.push(chip('vd-rt--rt', '<span class="vd-rt-ic">' + (fresh ? '🍅' : '🤢') + '</span>' + d.rt_rating + '%',
+                'https://www.rottentomatoes.com/search?search=' + q1, 'Rotten Tomatoes'));
         }
         if (d.metacritic != null) {
             var cls = d.metacritic >= 61 ? 'good' : d.metacritic >= 40 ? 'mid' : 'bad';
-            items.push('<span class="vd-rt vd-rt--mc vd-rt--mc-' + cls + '">' +
-                '<span class="vd-rt-tag">MC</span>' + d.metacritic + '</span>');
+            items.push(chip('vd-rt--mc vd-rt--mc-' + cls, '<span class="vd-rt-tag">MC</span>' + d.metacritic,
+                'https://www.metacritic.com/search/' + q1 + '/', 'Metacritic'));
         }
         if (d.trakt_rating) {
-            var tv = d.trakt_votes ? ' title="' + esc(d.trakt_votes) + ' Trakt votes"' : '';
-            items.push('<span class="vd-rt vd-rt--trakt"' + tv + '><span class="vd-rt-tag">Trakt</span>' +
-                (Math.round(d.trakt_rating * 10) / 10) + '</span>');
+            items.push(chip('vd-rt--trakt', '<span class="vd-rt-tag">Trakt</span>' + (Math.round(d.trakt_rating * 10) / 10),
+                d.tmdb_id ? 'https://trakt.tv/search/tmdb/' + d.tmdb_id + '?id_type=' + (d.kind === 'movie' ? 'movie' : 'show') : '',
+                d.trakt_votes ? d.trakt_votes + ' Trakt votes' : 'Trakt'));
         }
         if (d.tvmaze_rating) {
-            items.push('<span class="vd-rt vd-rt--tvmaze"><span class="vd-rt-tag">TVmaze</span>' +
-                (Math.round(d.tvmaze_rating * 10) / 10) + '</span>');
+            items.push(chip('vd-rt--tvmaze', '<span class="vd-rt-tag">TVmaze</span>' + (Math.round(d.tvmaze_rating * 10) / 10),
+                'https://www.tvmaze.com/search?q=' + q1, 'TVmaze'));
         }
         if (d.anilist_score) {
-            items.push('<span class="vd-rt vd-rt--anilist"><span class="vd-rt-tag">AniList</span>' +
-                d.anilist_score + '%</span>');
+            items.push(chip('vd-rt--anilist', '<span class="vd-rt-tag">AniList</span>' + d.anilist_score + '%',
+                'https://anilist.co/search/anime?search=' + q1, 'AniList'));
         }
         host.innerHTML = items.join('');
         host.hidden = !items.length;
@@ -804,12 +817,24 @@
             var ytUrl = isPl
                 ? 'https://www.youtube.com/playlist?list=' + esc(d.id)
                 : 'https://www.youtube.com/channel/' + esc(d.id);
+            // the follow is the one action; settings (folder, quality, filters,
+            // retention) used to be reachable only from the watchlist page's cog
+            var ytLib = (window.VideoYoutube && VideoYoutube.openChannelSettings && _canManualMatch())
+                ? moreItem('yt-settings', '⚙', (isPl ? 'Playlist' : 'Channel') + ' settings…',
+                    'Folder name, quality, title filters and what to keep')
+                : '';
+            var ytMore = moreGroup('Manage', ytLib) + moreGroup('Open on', moreLink('YouTube', ytUrl));
             a.innerHTML =
-                '<button class="library-artist-watchlist-btn' + (on ? ' watching' : '') + '" type="button" data-vd-act="' +
+                '<button class="library-artist-watchlist-btn vd-action-main' + (on ? ' watching' : '') + '" type="button" data-vd-act="' +
                     (isPl ? 'yt-pl-follow' : 'yt-follow') + '">' +
                     '<span class="watchlist-icon">' + (on ? '✓' : '＋') + '</span>' +
                     '<span class="watchlist-text">' + (on ? 'In Watchlist' : 'Watchlist') + '</span></button>' +
-                '<a class="vd-yt-link" href="' + ytUrl + '" target="_blank" rel="noopener">Open on YouTube ↗</a>';
+                '<div class="vd-more" data-vd-more>' +
+                    '<button class="vd-manage-btn vd-more-btn" type="button" data-vd-act="more" ' +
+                        'aria-haspopup="true" aria-expanded="false" title="More actions" aria-label="More actions">' +
+                        '<span class="vd-manage-ic" aria-hidden="true">⋯</span> More</button>' +
+                    '<div class="vd-more-menu" data-vd-more-menu hidden>' + ytMore + '</div>' +
+                '</div>';
             return;
         }
         // The watchlist eye applies only to airing shows (movies + ended shows are
@@ -3633,6 +3658,7 @@
             }).catch(function () { btn.disabled = false; });
         }
     }
+    var PL_VISIBLE = 6;
     function ytLoadPlaylists(cid) {
         var sec = q('[data-vd-yt-pl-section]'), host = q('[data-vd-yt-playlists]');
         if (!host) return;
@@ -3641,7 +3667,13 @@
             .then(function (d) {
                 var pls = (d && d.playlists) || [];
                 if (!pls.length || currentId !== cid) return;
-                host.innerHTML = pls.map(ytPlaylistRow).join('');
+                // the first few; the rest wait behind one button. thirty-odd
+                // full-width rows, each with its own button, buried the page end
+                host.classList.remove('vc-playlists--all');
+                host.innerHTML = pls.map(ytPlaylistRow).join('') +
+                    (pls.length > PL_VISIBLE
+                        ? '<button type="button" class="vc-pl-all" data-vd-yt-pl-all>Show all ' + pls.length + ' playlists</button>'
+                        : '');
                 if (sec) sec.hidden = false;
             })
             .catch(function () { /* best-effort */ });
@@ -3791,6 +3823,13 @@
         }
         var castAll = e.target.closest('[data-vd-cast-all]');
         if (castAll && r.contains(castAll)) { openCastModal(); return; }
+        var plAll = e.target.closest('[data-vd-yt-pl-all]');
+        if (plAll && r.contains(plAll)) {
+            var plHost = plAll.closest('[data-vd-yt-playlists]');
+            if (plHost) plHost.classList.add('vc-playlists--all');
+            plAll.remove();
+            return;
+        }
         var stripBtn = e.target.closest('[data-vd-strip]');
         if (stripBtn && r.contains(stripBtn)) { e.preventDefault(); scrollStrip(stripBtn); return; }
         var kwMore = e.target.closest('[data-vd-kw-more]');
@@ -3903,6 +3942,9 @@
                 if (bar && bar.scrollIntoView) bar.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
             else if (which === 'yt-follow') toggleYtFollow();
+            else if (which === 'yt-settings' && data && window.VideoYoutube && VideoYoutube.openChannelSettings) {
+                VideoYoutube.openChannelSettings(data.id, data.title, data.kind === 'playlist' ? 'playlist' : 'channel');
+            }
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);
             return;

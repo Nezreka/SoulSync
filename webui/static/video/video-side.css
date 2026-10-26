@@ -8083,3 +8083,18 @@ body[data-side="video"] #gsearch-aura {
 /* a channel without a banner borrows its biggest video's thumbnail, blurred
    into colour so its own lettering doesn't fight the channel name */
 .vd-bb-bg.vd-bb-bg--ambient { filter: blur(28px) saturate(1.25) brightness(0.62); transform: scale(1.2); animation: none; }
+
+/* rating chips open their site */
+a.vd-rt { text-decoration: none; color: inherit; transition: transform var(--dur-fast) ease, border-color var(--dur-fast) ease; }
+a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
+
+/* channel playlists: six, then "Show all"; the follow is a quiet pill */
+.vc-playlists:not(.vc-playlists--all) > .vc-pl:nth-child(n + 7) { display: none; }
+.vc-pl-all {
+    width: 100%; min-height: 42px; margin-top: 4px; border-radius: var(--radius-lg); cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 700; color: var(--white-a70);
+    background: var(--white-a03); border: 1px dashed var(--white-a14);
+}
+.vc-pl-all:hover { color: var(--text-1); background: var(--white-a06); }
+.vc-pl .vc-pl-watch:not(.watching) { background: transparent; border-color: var(--white-a14); color: var(--white-a75); box-shadow: none; }
+.vc-pl .vc-pl-watch:not(.watching):hover { color: var(--text-1); border-color: var(--white-a30); }

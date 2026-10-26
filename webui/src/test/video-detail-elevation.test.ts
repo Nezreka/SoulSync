@@ -163,3 +163,68 @@ describe('the rest of the pass', () => {
     expect(body).toContain('centerInStrip(host)');
   });
 });
+
+describe('round two', () => {
+  const ratings = (d: Record<string, unknown>) => {
+    const host = document.createElement('div');
+    host.innerHTML = '<div data-vd-ratings></div>';
+    const render = fn<(d: unknown) => void>(
+      'renderRatings',
+      `function esc(s) { return String(s == null ? '' : s); }
+       function q(sel) { return globalThis.__host.querySelector(sel); }`,
+    );
+    (globalThis as Record<string, unknown>).__host = host;
+    render(d);
+    return host.querySelector('[data-vd-ratings]') as HTMLElement;
+  };
+
+  it('each rating opens its own site on a library page', () => {
+    const el = ratings({
+      source: 'library',
+      kind: 'movie',
+      title: 'Heat',
+      imdb_id: 'tt0113277',
+      imdb_rating: 8.3,
+      rt_rating: 88,
+      tmdb_id: 949,
+      trakt_rating: 8.1,
+    });
+    expect(el.querySelector('a.vd-rt--imdb')?.getAttribute('href')).toBe(
+      'https://www.imdb.com/title/tt0113277/',
+    );
+    expect(el.querySelector('a.vd-rt--rt')?.getAttribute('href')).toContain(
+      'rottentomatoes.com/search?search=Heat',
+    );
+    expect(el.querySelector('a.vd-rt--trakt')?.getAttribute('href')).toContain(
+      '/tmdb/949?id_type=movie',
+    );
+  });
+
+  it('a preview keeps everything in-app', () => {
+    const el = ratings({
+      source: 'tmdb',
+      kind: 'movie',
+      title: 'Heat',
+      imdb_id: 'tt0113277',
+      imdb_rating: 8.3,
+    });
+    expect(el.querySelector('a')).toBeNull();
+    expect(el.querySelector('span.vd-rt--imdb')).not.toBeNull();
+  });
+
+  it('a channel shows six playlists and folds the rest behind one button', () => {
+    const body = extractFunction('ytLoadPlaylists', SRC);
+    expect(body).toContain('pls.length > PL_VISIBLE');
+    expect(SRC).toContain('var PL_VISIBLE = 6;');
+    const css = readFileSync(resolve(process.cwd(), 'static/video/video-side.css'), 'utf8');
+    expect(css).toContain(
+      '.vc-playlists:not(.vc-playlists--all) > .vc-pl:nth-child(n + 7) { display: none; }',
+    );
+  });
+
+  it('a channel page reaches its own settings', () => {
+    const body = extractFunction('renderActions', SRC);
+    expect(body).toContain("moreItem('yt-settings'");
+    expect(SRC).toContain('VideoYoutube.openChannelSettings(data.id, data.title');
+  });
+});

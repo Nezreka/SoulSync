@@ -389,6 +389,10 @@ Movies and shows can come from either Plex or Jellyfin and render the same way.
 
 The hero keeps one main action: **Play / Resume** on your server when you own it, otherwise **Get**. Trailer and the follow toggle (watchlist for an airing show, wishlist for a movie you don't own) sit beside it, and everything else is in one **More** menu, grouped into **Get**, **Library** (edit details, change poster, sync with server, mark watched, files and match) and **Open on** (IMDb, TMDB, TVDB, Letterboxd, official site).
 
+The synopsis shows three lines; **More** opens the rest in place. Every score in the ratings row opens its own site (IMDb, Rotten Tomatoes, Metacritic, Trakt, TVmaze). Below the tabs, cast comes first, then the collection and **More Like This**, videos and photos, then one **About** section with the facts (release, runtime, rating, studio or network, budget, language, the languages subtitles exist in) and keywords. The side-scrolling rows have arrows when you hover them.
+
+A show's numbers count like you'd read them: **Specials** and episodes that haven't aired yet are never "missing", so a show with every aired episode reads **Complete**. Specials sit after the real seasons.
+
 On a show, each episode row shows **Missing** or **Upcoming** only when there's a gap. A missing episode gets one **Get** button, and the rest (manual search, wishlist, download again for an upgrade, subtitles) is in the row's **⋯** menu. The season bar works the same way: **Grab season** plus a menu with manual search, wishlist, monitoring and clear failures.
 `
         },
@@ -957,9 +961,17 @@ Follow a **YouTube channel** (or a specific **playlist**) the way you'd follow a
 
 It's visual-first: channels get artwork and a proper detail page showing their videos, what you own, and what's still available.
 
+## The channel page
+
+Videos show as a **grid** of thumbnails, like YouTube's own Videos tab: title, views, date, length, and a **Downloaded** or **In wishlist** badge. Click a thumbnail to play it. Each card has a download button for videos you don't have, and a **⋯** menu with wishlist, download again and Open on YouTube. Prefer the old wide rows? The **Grid / List** switch next to the sort menu remembers your choice.
+
+Upload years show as pills above the grid (the view toggle still offers the other year layouts), and search, sort and the Downloaded / Not downloaded / length filters work in both layouts. **Grab year** downloads every missing video in the selected year.
+
+A channel without a banner uses a blurred version of its most-viewed video as the page backdrop. The first six playlists are listed under the videos, with **Show all** for the rest.
+
 ## Per-channel settings
 
-Each followed channel (or playlist) has its own settings:
+Each followed channel (or playlist) has its own settings, under **More → Channel settings** on the channel's page (or the cog on the watchlist):
 
 - **Custom name** — a display-name override
 - **Quality** — a per-channel quality override (blank uses the global default)
