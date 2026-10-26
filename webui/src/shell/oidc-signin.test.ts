@@ -78,6 +78,43 @@ describe('the oidc button', () => {
   });
 });
 
+describe('oidc only (#1839)', () => {
+  function loginDom() {
+    document.body.innerHTML = `
+      <div id="login-entry">
+        <p class="launch-pin-subtitle">Enter your account name and password</p>
+        <form id="login-form"></form>
+        <div id="login-plex"></div>
+        <div id="login-oidc" class="login-oidc" hidden>
+          <span class="login-oidc-or">or</span>
+          <button id="login-oidc-button" type="button">Sign in with OIDC</button>
+        </div>
+        <p id="login-error" style="display:none"></p>
+        <button class="launch-pin-forgot">Forgot password?</button>
+      </div>`;
+  }
+
+  it('leaves only the provider button on the login screen', async () => {
+    loginDom();
+    available({ enabled: true, label: 'Sign in with Pocket ID', error: null, oidc_only: true });
+    await initOidcSignIn(vi.fn());
+    expect(document.getElementById('login-form')!.style.display).toBe('none');
+    expect(document.getElementById('login-plex')!.style.display).toBe('none');
+    expect(document.querySelector<HTMLElement>('.launch-pin-forgot')!.style.display).toBe('none');
+    expect(document.querySelector<HTMLElement>('.login-oidc-or')!.style.display).toBe('none');
+    expect(document.getElementById('login-oidc')!.hidden).toBe(false);
+    expect(window.__soulsyncOidcOnly).toBe(true);
+  });
+
+  it('changes nothing while it is off', async () => {
+    loginDom();
+    available({ enabled: true, label: 'Sign in with Pocket ID', error: null, oidc_only: false });
+    await initOidcSignIn(vi.fn());
+    expect(document.getElementById('login-form')!.style.display).toBe('');
+    expect(window.__soulsyncOidcOnly).toBe(false);
+  });
+});
+
 describe('coming back from a connect', () => {
   it('reopens my account and drops the marker', () => {
     const open = vi.fn();

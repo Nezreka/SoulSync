@@ -300,6 +300,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 - Non-admins get a **My Account** panel for their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
 - **Security**:
   - An admin PIN with brute-force limits, or full **username/password login** with recovery questions.
+  - Sign in with Plex or with your own OIDC provider, or **OIDC only**, which turns every other sign-in off. If the provider is ever down, `SOULSYNC_OIDC_ONLY_OVERRIDE=off` and a restart let the admin back in with their password.
   - Or trust a forward-auth header from Authelia, Authentik or oauth2-proxy.
   - Reverse-proxy and sub-path aware.
 - **Own library per profile** (Plex / Jellyfin): a profile can have its own folder and server library.

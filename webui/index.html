@@ -9861,6 +9861,26 @@
                                                                 onclick="window.location.assign('/api/profiles/me/oidc-connect/start')">Connect
                                                                 my admin account</button>
                                                         </div>
+                                                        <!-- sign in with oidc only (#1839; webui/src/shell/oidc-only.ts) -->
+                                                        <div class="form-group" id="security-oidc-only-wrap">
+                                                            <label class="toggle-label">
+                                                                <input type="checkbox" id="security-oidc-only">
+                                                                <span>OIDC only: turn off every other way to sign in</span>
+                                                            </label>
+                                                            <div class="setting-help-text">
+                                                                Password sign-in, the recovery question, Sign in with Plex
+                                                                and switching profiles with a password stop working, and
+                                                                anyone signed in some other way is signed out. Invites send
+                                                                people to your provider instead of asking for a password.
+                                                                Needs login mode, and you have to be signed in with OIDC
+                                                                yourself to turn it on. Every profile needs an OIDC
+                                                                connection first. Passwords are kept and work again if you
+                                                                turn this off. If the provider is ever down, set
+                                                                <code>SOULSYNC_OIDC_ONLY_OVERRIDE=off</code> on the
+                                                                container and restart, then sign in with the admin password.
+                                                            </div>
+                                                            <div class="setting-help-text" id="security-oidc-only-status" hidden></div>
+                                                        </div>
                                                     </div>
                                                 </div>
                                                 <div class="form-group" id="security-signup-defaults">

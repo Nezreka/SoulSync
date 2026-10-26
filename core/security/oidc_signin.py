@@ -37,7 +37,7 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlencode, urlparse
 
 import requests
@@ -187,7 +187,7 @@ class Flow:
     nonce: str
     verifier: str
     redirect_uri: str
-    mode: str = "signin"          # or "connect"
+    mode: str = "signin"          # or "connect", or "invite" (#1839)
     profile_id: Optional[int] = None
     started_at: float = 0.0
 
@@ -553,6 +553,28 @@ def connect_profile(db, profile_id: int, account: OidcAccount) -> SignInResult:
             return SignInResult(error="Couldn't save the connection")
         logger.info("OIDC connect: profile %s connected", profile_id)
         return SignInResult(profile_id=profile_id)
+
+
+def sign_up_by_invite(db, account: OidcAccount, settings: OidcSettings,
+                      create: Callable[[], Tuple[Optional[int], Optional[str]]]) -> SignInResult:
+    """an invite accepted while sign-in is oidc only (#1839): the account
+    that just signed in at the provider gets a new profile, made by
+    `create` (which spends the invite), linked to it. the required group
+    still applies, and an account that already has a profile is turned away
+    before the invite is spent. runs under the sign-in lock, so a sign-in of
+    the same account can't make a second profile in between"""
+    if not allowed_in(account, settings):
+        return SignInResult(error="Your account isn't allowed to use SoulSync. Ask your admin.")
+    with _sign_in_lock:
+        if db.get_profile_by_oidc_identity(account.identity):
+            return SignInResult(error="That account already has a SoulSync profile. Sign in instead.")
+        profile_id, error = create()
+        if error or profile_id is None:
+            return SignInResult(error=error or "Couldn't create your profile")
+        if not db.set_profile_oidc_identity(profile_id, account.identity):
+            return SignInResult(error="Couldn't save the connection")
+        logger.info("OIDC invite: created profile %s for '%s'", profile_id, account.username)
+        return SignInResult(profile_id=profile_id, created=True)
 
 
 def _create_profile(db, username: str, *, can_download: bool,

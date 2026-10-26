@@ -10100,6 +10100,21 @@ class MusicDatabase:
                 'has_refresh_token': bool(row['oidc_refresh_token']),
                 'revoked': bool(row['revoked_at']), 'profile_identity': row['profile_identity']}
 
+    def count_live_devices_without_oidc(self) -> int:
+        """signed-in devices whose sign-in wasn't with oidc: what turning
+        oidc-only on would sign out (#1839). raises on a read error"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(profile_devices)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if not cols:
+                return 0
+            where = "revoked_at IS NULL"
+            if 'oidc_identity' in cols:
+                where += " AND oidc_identity IS NULL"
+            cursor.execute(f"SELECT COUNT(*) FROM profile_devices WHERE {where}")
+            return int(cursor.fetchone()[0])
+
     # ── admin audit log ──────────────────────────────────────────────────
     _AUDIT_KEEP = 5000
 
