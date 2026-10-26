@@ -152,9 +152,12 @@ _BACKFILL = {
         "show": ("shows", "tvmaze_status", "tvmaze_attempted",
                  "(imdb_id IS NOT NULL OR tvdb_id IS NOT NULL)"),
     },
-    "anilist": {  # anime-only, matched by title (shows only)
+    "anilist": {  # anime-only, matched by title (shows only). only animation:
+        # a title search scored Arrow, Angel and The Bear off same-named anime
         "show": ("shows", "anilist_status", "anilist_attempted",
-                 "title IS NOT NULL AND title <> ''"),
+                 "title IS NOT NULL AND title <> '' AND EXISTS (SELECT 1 FROM show_genres sg "
+                 "JOIN genres g ON g.id = sg.genre_id WHERE sg.show_id = shows.id "
+                 "AND g.name = 'Animation')"),
     },
     "wikidata": {  # official website lookup by imdb id (movies + shows)
         "movie": ("movies", "wikidata_status", "wikidata_attempted", "imdb_id IS NOT NULL"),
@@ -1022,7 +1025,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             for kind, (tbl, sc, _ac, has_id) in kinds.items():
-                cols = "id, title, tmdb_id, imdb_id" + (", tvdb_id" if tbl == "shows" else "")
+                cols = "id, title, tmdb_id, imdb_id, year" + (", tvdb_id" if tbl == "shows" else "")
                 row = conn.execute(
                     f"SELECT {cols} FROM {tbl} WHERE {sc} IS NULL AND {has_id} "
                     f"ORDER BY id LIMIT 1").fetchone()

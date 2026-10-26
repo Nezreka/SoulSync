@@ -204,6 +204,26 @@ describe('round two', () => {
     );
   });
 
+  it('an anilist score shows on animation only', () => {
+    // older title-search matches gave The Bear and Arrow a same-named anime's score
+    const bear = ratings({
+      source: 'library',
+      kind: 'show',
+      title: 'The Bear',
+      anilist_score: 40,
+      genres: ['Comedy'],
+    });
+    expect(bear.querySelector('.vd-rt--anilist')).toBeNull();
+    const aot = ratings({
+      source: 'library',
+      kind: 'show',
+      title: 'Attack on Titan',
+      anilist_score: 85,
+      genres: ['Animation'],
+    });
+    expect(aot.querySelector('.vd-rt--anilist')?.textContent).toContain('85%');
+  });
+
   it('a preview keeps everything in-app', () => {
     const el = ratings({
       source: 'tmdb',

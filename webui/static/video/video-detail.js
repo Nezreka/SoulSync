@@ -732,7 +732,9 @@
             items.push(chip('vd-rt--tvmaze', '<span class="vd-rt-tag">TVmaze</span>' + (Math.round(d.tvmaze_rating * 10) / 10),
                 'https://www.tvmaze.com/search?q=' + q1, 'TVmaze'));
         }
-        if (d.anilist_score) {
+        // AniList only scores anime; older title-search matches gave Arrow and
+        // The Bear a stranger's score, so it shows on animation only
+        if (d.anilist_score && (d.genres || []).indexOf('Animation') >= 0) {
             items.push(chip('vd-rt--anilist', '<span class="vd-rt-tag">AniList</span>' + d.anilist_score + '%',
                 'https://anilist.co/search/anime?search=' + q1, 'AniList'));
         }
