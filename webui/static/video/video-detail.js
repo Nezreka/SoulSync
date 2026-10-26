@@ -263,6 +263,7 @@
 
     // ── billboard ─────────────────────────────────────────────────────────────
     function renderBillboard(d) {
+        renderTabs();
         setText('[data-vd-title]', d.title);
         setText('[data-vd-overview]', d.overview);
 
@@ -385,30 +386,20 @@
         renderEssentials(d);
         renderTypeChip(d);
 
+        // The IMDb / TMDB / TVDB / Letterboxd tiles moved into More → "Open on":
+        // a row of four 30px logos was a whole hero line for links nobody needs
+        // twice a visit.
         var l = q('[data-vd-links]');
-        if (l && d.source === 'tmdb') {
-            l.innerHTML = '';                     // preview items keep everything in-app
-        } else if (l) {
-            var badges = [];
-            if (d.imdb_id) badges.push(badge('', 'IMDb', 'IMDb', 'https://www.imdb.com/title/' + d.imdb_id + '/'));
-            if (d.tmdb_id) badges.push(badge(TMDB_LOGO, 'TMDB', 'TMDB',
-                'https://www.themoviedb.org/' + (d.kind === 'movie' ? 'movie' : 'tv') + '/' + d.tmdb_id));
-            if (d.tvdb_id) badges.push(badge(TVDB_LOGO, 'TVDB', 'TVDB', 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series'));
-            // Letterboxd is film-only; it deep-links by TMDB id (redirects to the
-            // film page). #1039 (QT3496).
-            if (d.kind === 'movie' && d.tmdb_id) {
-                badges.push(badge('', 'Lbxd', 'Letterboxd', 'https://letterboxd.com/tmdb/' + d.tmdb_id + '/'));
-            }
-            if (d.wikidata_url) badges.push(badge('', 'Official Site', 'Official Site', d.wikidata_url));
-            l.innerHTML = badges.join('');
-        }
+        if (l) { l.innerHTML = ''; l.hidden = true; }
         var g = q('[data-vd-genres]');
         if (g) {
             g.innerHTML = (d.genres || []).slice(0, 6).map(function (gn) {
                 return genreChip(gn);
             }).join('');
         }
-        renderSubtitles(d);
+        // Subtitle AVAILABILITY was a wall of up to 13 chips in the hero; it's one
+        // line under Details now (renderFacts), next to the other facts.
+        renderSubtitles(null);
         // Subtitle language overrides (Phase 3; video-subtitles.js): per-title
         // config section. Gates itself to library movie/show pages.
         if (window.VideoSubtitles) window.VideoSubtitles.mountOverrides(d.kind, d.id, currentSource);
@@ -442,19 +433,11 @@
             }
             var views = yc && yc.compactCount(d.view_count);
             if (views) chips.push(essentialChip('Views', views, ''));
-        } else if (d.kind === 'show') {
-            var pctOwned = d.episode_total ? Math.round(d.episode_owned / d.episode_total * 100) : 0;
-            chips.push(essentialChip('Library', pctOwned + '% complete', pctOwned === 100 ? 'ok' : 'focus'));
-            if (d.next_up) {
-                chips.push(essentialChip('Next', 'S' + String(d.next_up.season_number).padStart(2, '0') +
-                    'E' + String(d.next_up.episode_number).padStart(2, '0'), 'live'));
-            }
-            if (d.status) chips.push(essentialChip('Status', statusLabel(d.status), ''));
-        } else {
-            if (d.file) chips.push(essentialChip('Best copy', fileSummary(d.file), 'live'));
-            else if (!d.owned) chips.push(essentialChip('Library', d.source === 'tmdb' ? 'Preview' : 'Wanted', 'focus'));
-            if (d.watched) chips.push(essentialChip('Watched', 'Yes', 'ok'));
         }
+        // Movies and shows carry nothing here any more: "Library 74%" and
+        // "Status Ended" repeated the meta line one row up, "Next S05E02" is on
+        // the Resume button, and "Best copy" lives in the Your library tab with
+        // every other copy. The row stays for YouTube and the preview type chip.
         host.innerHTML = chips.filter(Boolean).join('');
         host.hidden = !chips.length;
     }
@@ -524,6 +507,15 @@
             })
             .catch(function () { /* a chip, never an error */ });
     }
+    // The awards backfill stores a FLAG ('oscar' / 'winner', the overlay keys),
+    // and the hero printed it raw: a lone lowercase "winner" under the ratings.
+    // A full OMDb sentence (older rows) passes through unchanged.
+    function awardsLabel(s) {
+        var k = String(s || '').trim().toLowerCase();
+        if (k === 'oscar') return 'Oscar winner';
+        if (k === 'winner') return 'Award winner';
+        return String(s || '').trim();
+    }
     // OMDb Awards line ("Won 2 Oscars. 154 wins & 87 nominations total.") — the
     // overlay system already fetches it; the detail page finally shows it.
     function renderAwards(d) {
@@ -532,7 +524,7 @@
         var s = (d && d.awards || '').trim();
         if (!s || /^n\/?a$/i.test(s)) { host.hidden = true; host.innerHTML = ''; return; }
         host.hidden = false;
-        host.innerHTML = '<span class="vd-awards-ic">🏆</span>' + esc(s);
+        host.innerHTML = '<span class="vd-awards-ic">🏆</span>' + esc(awardsLabel(s));
     }
 
     // Subtitle availability (OpenSubtitles backfill, #video-enrichment): a chip row
@@ -692,6 +684,53 @@
         }
     }
 
+    // The hero carries ONE primary action and at most two companions; the rest
+    // lives behind a single "More" menu, grouped. It used to put up to nine
+    // same-weight buttons in three rows (Play beside Manage Poster beside
+    // Wishlist Missing), plus a row of tiny link tiles and a wall of subtitle
+    // chips. Every action still exists and keeps its data-vd-act, so the click
+    // dispatcher below is unchanged; only where each one renders moved.
+    //
+    //   primary    Play/Resume on your server; else Get (movie you don't own,
+    //              show you don't own) or Get Missing (owned show, no server
+    //              link); a profile without download rights gets Request
+    //   companions Trailer, and the follow toggle that is a STATE (watchlist
+    //              for an airing show, wishlist for a movie you don't own)
+    //   More       acquisition extras, library management, Open on…
+    function moreGroup(label, items) {
+        return items ? '<div class="vd-more-group"><div class="vd-more-label">' + esc(label) + '</div>' + items + '</div>' : '';
+    }
+    function moreItem(act, icon, label, title, extra) {
+        return '<button class="vd-manage-btn" type="button" data-vd-act="' + act + '"' + (extra || '') +
+            (title ? ' title="' + esc(title) + '"' : '') + '>' +
+            '<span class="vd-manage-ic" aria-hidden="true">' + icon + '</span> ' + esc(label) + '</button>';
+    }
+    function moreLink(label, url) {
+        return '<a class="vd-manage-btn vd-more-link" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' +
+            '<span class="vd-manage-ic" aria-hidden="true">↗</span> ' + esc(label) + '</a>';
+    }
+    function externalLinks(d) {
+        if (d.source === 'tmdb') return '';   // preview items keep everything in-app
+        var out = '';
+        if (d.imdb_id) out += moreLink('IMDb', 'https://www.imdb.com/title/' + d.imdb_id + '/');
+        if (d.tmdb_id) out += moreLink('TMDB', 'https://www.themoviedb.org/' + (d.kind === 'movie' ? 'movie' : 'tv') + '/' + d.tmdb_id);
+        if (d.tvdb_id) out += moreLink('TVDB', 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series');
+        // Letterboxd is film-only; it deep-links by TMDB id (#1039, QT3496)
+        if (d.kind === 'movie' && d.tmdb_id) out += moreLink('Letterboxd', 'https://letterboxd.com/tmdb/' + d.tmdb_id + '/');
+        if (d.wikidata_url) out += moreLink('Official site', d.wikidata_url);
+        return out;
+    }
+    function missingAiredCount(d) {
+        var today = new Date().toISOString().slice(0, 10), n = 0;
+        (d.seasons || []).forEach(function (s) {
+            if (s.season_number === 0) return;
+            (s.episodes || []).forEach(function (ep) {
+                if (!ep.owned && (!ep.air_date || ep.air_date <= today)) n++;
+            });
+        });
+        return n;
+    }
+
     function renderActions(d) {
         var a = q('[data-vd-actions]');
         if (!a) return;
@@ -726,14 +765,21 @@
                     if (res && res.results) { d._vw_watched = !!res.results[String(d.tmdb_id)]; if (data === d) renderActions(d); }
                 }).catch(function () { /* keep default state */ });
         }
-        var html = '';
-        // Management actions (poster / metadata / sync / watched) collect here and
-        // ship behind one "More" button. Nine same-sized buttons in three rows gave
-        // "Play" and "Manage Poster" identical weight; these four are the ones you
-        // reach for occasionally, so they stop competing with the ones you don't.
-        var more = '';
-        // Primary CTA: play it on your media server (owned items; arrives with
-        // extras). The logo IS the brand name — "Play on <logo>" (no redundant word).
+        // Requests (arr-parity P4): a profile WITHOUT download rights has no
+        // acquisition path at all — give it the ask-an-admin button instead of
+        // the Get/Watchlist controls (those APIs are gated for this profile).
+        var _canDl = (typeof canDownload !== 'function') || canDownload();
+        // an owned movie has nothing left to ask for; a show can still be
+        // missing seasons. "Requested" once this profile has one waiting.
+        var _ownedMovie = d.kind === 'movie' && ((d.source !== 'tmdb') || !!d.owned);
+        var ownLibItem = (d.source !== 'tmdb') || d.owned;
+        var haveShow = d.kind === 'show' && ((d.source !== 'tmdb') || !!d.owned);
+        var missingEps = haveShow ? missingAiredCount(d) : 0;
+        var primary = '', companions = '', getMore = '', libMore = '';
+
+        // ── primary ──
+        // Play on your media server (owned items; arrives with extras). The logo
+        // IS the brand name — "Play on <logo>" (no redundant word).
         if (d.server && d.server.url) {
             var sv = esc(d.server.server || 'Server');
             var slogo = SERVER_LOGOS[d.server.server];
@@ -756,23 +802,9 @@
                 ? '<span class="vd-play-ic">▶</span><span>' + verb + ' on</span>' +
                   '<img class="vd-play-logo" src="' + esc(slogo) + '" alt="' + sv + '">' + epTag
                 : '<span class="vd-play-ic">▶</span><span>' + verb + ' on ' + sv + '</span>' + epTag;
-            html += '<a class="vd-play-btn vd-action-main" href="' + esc(href) +
+            primary = '<a class="vd-play-btn vd-action-main" href="' + esc(href) +
                 '" target="_blank" rel="noopener" title="' + tip + '">' + inner + '</a>';
         }
-        if (d.trailer && d.trailer.key) {
-            html += '<button class="vd-trailer-btn" type="button" data-vd-act="trailer">' +
-                '<span class="vd-trailer-ic">▶</span> Trailer</button>';
-        }
-        // Watchlist (follow an AIRING show to wishlist its new episodes) applies whether
-        // the show is owned or a TMDB preview — the curated watchlist is keyed by
-        // tmdb_id. Ended/cancelled shows are terminal (isAiringShow=false) → no button.
-        // Requests (arr-parity P4): a profile WITHOUT download rights has no
-        // acquisition path at all — give it the ask-an-admin button instead of
-        // the Get/Watchlist controls (those APIs are gated for this profile).
-        var _canDl = (typeof canDownload !== 'function') || canDownload();
-        // an owned movie has nothing left to ask for; a show can still be
-        // missing seasons. "Requested" once this profile has one waiting.
-        var _ownedMovie = d.kind === 'movie' && ((d.source !== 'tmdb') || !!d.owned);
         if (!_canDl && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id && !_ownedMovie) {
             if (!d._req_checked) {
                 d._req_checked = true;
@@ -786,58 +818,42 @@
                     }).catch(function () { /* keep the plain button */ });
             }
             var asked = !!d._req_pending;
-            html +=
+            var reqBtn =
                 '<button class="library-artist-watchlist-btn vd-action-main' + (asked ? ' watching' : '') +
                 '" type="button" data-vd-act="request"' + (asked ? ' disabled' : '') + '>' +
                 '<span class="watchlist-icon">' + (asked ? '✓' : '🙋') + '</span>' +
                 '<span class="watchlist-text">' + (asked ? 'Requested' : 'Request') + '</span></button>';
+            if (!primary) primary = reqBtn; else companions += reqBtn;
         }
-        if (isAiringShow && _canDl) {
-            var showPoster = d.source !== 'tmdb' ? ('/api/video/poster/show/' + d.id) : proxied(d.poster_url);
-            html +=
-                '<button class="library-artist-watchlist-btn vwl-btn vd-vwl-action' +
-                (watching ? ' watching active' : '') + '" type="button"' +
-                ' data-vwl-kind="show" data-vwl-id="' + esc(d.tmdb_id) + '"' +
-                ' data-vwl-title="' + esc(d.title || '') + '"' +
-                ' data-vwl-poster="' + esc(showPoster || '') + '"' +
-                (d.source !== 'tmdb' && d.id ? ' data-vwl-libid="' + esc(d.id) + '"' : '') +
-                ' title="' + (watching ? 'On watchlist' : 'Add to watchlist') + '"' +
-                ' aria-label="' + (watching ? 'On watchlist' : 'Add to watchlist') + '">' +
-                '<span class="watchlist-icon">' + (watching ? '✓' : '＋') + '</span>' +
-                '<span class="watchlist-text">' + (watching ? 'In Watchlist' : 'Watchlist') + '</span></button>';
-        }
-        // Movies are terminal — no "watch for new" follow, so give them the shared
-        // Get control instead (unowned → add to wishlist, owned → re-download /
-        // upgrade). Opens the same VideoGet modal the discover/search cards use.
+        // Movies are terminal — no "watch for new" follow, so they get the shared
+        // Get control (unowned → add/download, owned → re-download / upgrade). It
+        // opens the same VideoGet modal the discover/search cards use.
         if (d.kind === 'movie' && window.VideoGet && _canDl) {
+            var getMovie = '<button class="library-artist-watchlist-btn vd-action-main" type="button" data-vd-act="get">' +
+                '<span class="watchlist-icon">⬇</span><span class="watchlist-text">Get</span></button>';
+            if (!_ownedMovie && !primary) primary = getMovie;
+            else getMore += moreItem('get', '⬇', _ownedMovie ? 'Download again or upgrade…' : 'Get…',
+                _ownedMovie ? 'Search for a better copy, or grab this one again' : '');
+            // TWO controls, like the shows' follow+get pair: Get always exists (the
+            // modal offers download-now / manual search / grab), and the wishlist
+            // is a separate TOGGLE showing membership. One button wearing three
+            // states once made a wishlisted movie lose the whole download path.
             var wished = !!d._wl_wished;
-            // TWO buttons, like the shows' follow+get pair: 'Get' is ALWAYS
-            // visible (the modal offers download-now / manual search / grab),
-            // and the wishlist button is a separate TOGGLE showing membership.
-            // The old single button wore three states, so a wishlisted movie
-            // showed only 'In Wishlist' and the whole download path vanished.
-            html +=
-                '<button class="library-artist-watchlist-btn vd-action-main" type="button" data-vd-act="get">' +
-                '<span class="watchlist-icon">⬇</span>' +
-                '<span class="watchlist-text">Get</span></button>';
-            html +=
-                '<button class="library-artist-watchlist-btn' + (wished ? ' watching' : '') + '" type="button" data-vd-act="wishtoggle">' +
-                '<span class="watchlist-icon">' + (wished ? '✓' : '＋') + '</span>' +
-                '<span class="watchlist-text">' + (wished ? 'In Wishlist' : 'Wishlist') + '</span></button>';
-            // Subtitle search (Phase 3): Bazarr-style manual subtitle search for
-            // an owned library movie — the modal writes the .srt next to the
-            // file, and the pick is protected from auto-upgrade. A profile
-            // without download rights gets no button (the manual-download
-            // API 403s for it, like the other grab actions).
-            if (currentSource === 'library' && d.owned && _canDl && window.VideoSubtitles) {
-                html +=
-                    '<button class="library-artist-watchlist-btn vd-action-secondary" type="button" data-vd-act="subsearch" ' +
-                    'title="Search subtitles — pick one yourself">' +
-                    '<span class="watchlist-icon">💬</span>' +
-                    '<span class="watchlist-text">Subtitles</span></button>';
+            if (_ownedMovie) {
+                getMore += moreItem('wishtoggle', wished ? '✓' : '＋',
+                    wished ? 'In wishlist — remove' : 'Wishlist for an upgrade');
+            } else {
+                companions += '<button class="library-artist-watchlist-btn' + (wished ? ' watching' : '') + '" type="button" data-vd-act="wishtoggle">' +
+                    '<span class="watchlist-icon">' + (wished ? '✓' : '＋') + '</span>' +
+                    '<span class="watchlist-text">' + (wished ? 'In Wishlist' : 'Wishlist') + '</span></button>';
             }
-            // Reflect wishlist membership on the button (like the show watchlist eye):
-            // check once, then re-render. Re-checked on soulsync:video-wishlist-changed.
+            // Subtitle search (Phase 3): Bazarr-style manual subtitle search for an
+            // owned library movie — the modal writes the .srt next to the file.
+            if (currentSource === 'library' && d.owned && window.VideoSubtitles) {
+                getMore += moreItem('subsearch', '💬', 'Search subtitles', 'Search subtitles — pick one yourself');
+            }
+            // Reflect wishlist membership (like the show watchlist eye): check once,
+            // then re-render. Re-checked on soulsync:video-wishlist-changed.
             if (!d._wl_checked && d.tmdb_id) {
                 d._wl_checked = true;
                 fetch('/api/video/wishlist/check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -849,84 +865,95 @@
                     }).catch(function () { /* keep default */ });
             }
         }
-        // Acquisition CTA for shows — opens the season/episode grab view. Shown on
-        // EVERY show page, owned or not: a show already in the library reads "Get
-        // Missing" (fill the gaps), one you don't have reads "Get Show" (grab it
-        // all). A library-sourced page is inherently owned; a TMDB page keys off
-        // d.owned (the same flag that drives the "In library" badge).
+        // Shows: "Get Show" for one you don't have; "Get Missing" fills the gaps
+        // in one you do. Either is the primary when nothing plays yet.
         if (d.kind === 'show' && window.VideoGet && _canDl) {
-            var haveShow = (d.source !== 'tmdb') || !!d.owned;
             var showGetLabel = haveShow ? 'Get Missing' : 'Get Show';
-            html += '<button class="discog-download-btn discog-btn-compact vd-action-main" type="button" data-vd-act="missing">' +
+            var getShow = '<button class="discog-download-btn discog-btn-compact vd-action-main" type="button" data-vd-act="missing">' +
                 '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">' + showGetLabel + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>';
+            if (!primary && (!haveShow || missingEps > 0)) primary = getShow;
+            else getMore += moreItem('missing', '⭳', haveShow
+                ? (missingEps ? 'Get ' + missingEps + ' missing episode' + (missingEps === 1 ? '' : 's') + '…' : 'Get episodes…')
+                : 'Get show…');
         }
-        // "I have this" — the auto-matcher keys library rows by tmdb_id and
-        // sometimes whiffs (a title on disk with a NULL/wrong tmdb_id reads as
-        // "not in library"). TMDB preview pages are never owned — owned ones
-        // redirect to the library detail — so this is exactly the unowned
-        // case: let the user point this TMDB id at the right library row.
-        // Admin-gated server-side like the other library mutations.
-        if (d.source === 'tmdb' && (d.kind === 'movie' || d.kind === 'show') &&
-                d.tmdb_id && _canManualMatch()) {
-            html += '<button class="library-artist-watchlist-btn vd-action-secondary" type="button" data-vd-act="ihavethis" ' +
-                'title="Link this title to the copy already in your library">' +
-                '<span class="watchlist-icon">✓</span>' +
-                '<span class="watchlist-text">I have this</span></button>';
+        if (d.trailer && d.trailer.key) {
+            companions = '<button class="vd-trailer-btn" type="button" data-vd-act="trailer">' +
+                '<span class="vd-trailer-ic">▶</span> Trailer</button>' + companions;
+        }
+        // Watchlist (follow an AIRING show to wishlist its new episodes) applies whether
+        // the show is owned or a TMDB preview — the curated watchlist is keyed by
+        // tmdb_id. Ended/cancelled shows are terminal (isAiringShow=false) → no button.
+        if (isAiringShow && _canDl) {
+            var showPoster = d.source !== 'tmdb' ? ('/api/video/poster/show/' + d.id) : proxied(d.poster_url);
+            companions +=
+                '<button class="library-artist-watchlist-btn vwl-btn vd-vwl-action' +
+                (watching ? ' watching active' : '') + '" type="button"' +
+                ' data-vwl-kind="show" data-vwl-id="' + esc(d.tmdb_id) + '"' +
+                ' data-vwl-title="' + esc(d.title || '') + '"' +
+                ' data-vwl-poster="' + esc(showPoster || '') + '"' +
+                (d.source !== 'tmdb' && d.id ? ' data-vwl-libid="' + esc(d.id) + '"' : '') +
+                ' title="' + (watching ? 'On watchlist' : 'Add to watchlist') + '"' +
+                ' aria-label="' + (watching ? 'On watchlist' : 'Add to watchlist') + '">' +
+                '<span class="watchlist-icon">' + (watching ? '✓' : '＋') + '</span>' +
+                '<span class="watchlist-text">' + (watching ? 'In Watchlist' : 'Watchlist') + '</span></button>';
         }
         // Whole-show wishlist — every missing AIRED episode across every season in
         // one click (the season bar only covers the selected season). YouTube
         // channels have their own wishlist system (yt wish buttons), so skip them.
-        if (d.kind === 'show' && d.source !== 'youtube' && window.VideoGrab) {
-            html += '<button class="discog-download-btn discog-btn-compact vd-action-secondary" type="button" data-vd-act="wishlist-missing" ' +
-                'title="Add every missing aired episode across all seasons to the wishlist">' +
-                '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist Missing</span>' +
-                '<span class="discog-btn-shimmer"></span></button>';
+        if (d.kind === 'show' && window.VideoGrab && _canDl && (!haveShow || missingEps > 0)) {
+            getMore += moreItem('wishlist-missing', '＋', 'Wishlist every missing episode',
+                'Add every missing aired episode across all seasons to the wishlist');
         }
-        // Manage Poster — library items only (we need a server id + folder to push a
-        // new poster to) and a tmdb id (to fetch the alternates). Opens VideoPoster.
-        var ownLibItem = (d.source !== 'tmdb') || d.owned;
+        // "I have this" — the auto-matcher keys library rows by tmdb_id and sometimes
+        // whiffs (a title on disk with a NULL/wrong tmdb_id reads as "not in
+        // library"). TMDB preview pages are never owned — owned ones redirect to the
+        // library detail — so this is exactly the unowned case. Admin-gated
+        // server-side like the other library mutations.
+        if (d.source === 'tmdb' && (d.kind === 'movie' || d.kind === 'show') &&
+                d.tmdb_id && _canManualMatch()) {
+            libMore += moreItem('ihavethis', '✓', 'I have this…', 'Link this title to the copy already in your library');
+        }
+        // Library management — library rows only.
+        var libRow = (d.source !== 'tmdb') || d.library_id != null;
+        if (ownLibItem && libRow && (d.kind === 'movie' || d.kind === 'show') && window.VideoLibraryTab && currentSource === 'library') {
+            libMore += moreItem('library-tab', '▤', 'Files and match', 'Your copies, where they live, and the match');
+        }
+        // Manage — the per-item metadata editor (edits write to the local row +
+        // push to the item's own server). Library-sourced pages always have a row;
+        // TMDB pages only when owned (library_id resolves it).
+        if (ownLibItem && window.VideoManage && libRow) {
+            libMore += moreItem('manage', '✎', 'Edit details', 'Edit metadata');
+        }
+        // Manage Poster — needs a server id + folder to push to, and a tmdb id
+        // to fetch the alternates. Opens VideoPoster.
         if (ownLibItem && d.tmdb_id && window.VideoPoster) {
-            more += '<button class="vd-manage-btn" type="button" data-vd-act="poster" title="Change poster">' +
-                '<span class="vd-trailer-ic">🖼</span> Manage Poster</button>';
+            libMore += moreItem('poster', '🖼', 'Change poster', 'Change poster');
         }
-        // Manage — the per-item metadata editor (library items only: edits write
-        // to the local row + push to the item's own server). Library-sourced pages
-        // always have a row; TMDB pages only when owned (library_id resolves it).
-        if (ownLibItem && window.VideoManage &&
-                (d.source !== 'tmdb' || d.library_id != null)) {
-            more += '<button class="vd-manage-btn" type="button" data-vd-act="manage" title="Edit metadata">' +
-                '<span class="vd-manage-ic">✎</span> Manage</button>';
-        }
-        // Synchronize — a deep scan scoped to THIS show: re-reads it from the
-        // server and reconciles episodes (adds + removals) without waiting for
-        // a full library scan. Library shows only (needs a local row).
-        var libShowId = (d.kind === 'show' && ownLibItem)
-            ? (d.source !== 'tmdb' ? d.id : d.library_id) : null;
+        // Synchronize — a deep scan scoped to THIS title: re-reads it from the
+        // server and reconciles without waiting for a full library scan.
+        var libShowId = (d.kind === 'show' && ownLibItem) ? (d.source !== 'tmdb' ? d.id : d.library_id) : null;
         if (libShowId != null) {
-            more += '<button class="vd-manage-btn" type="button" data-vd-act="sync-show" data-vd-sync-id="' + esc(libShowId) +
-                '" title="Re-read this show from your server — picks up new or removed episodes">' +
-                '<span class="vd-manage-ic">⟳</span> Sync</button>';
+            libMore += moreItem('sync-show', '⟳', 'Sync with server',
+                'Re-read this show from your server — picks up new or removed episodes',
+                ' data-vd-sync-id="' + esc(libShowId) + '"');
         }
-        var libMovieId = (d.kind === 'movie' && ownLibItem)
-            ? (d.source !== 'tmdb' ? d.id : d.library_id) : null;
+        var libMovieId = (d.kind === 'movie' && ownLibItem) ? (d.source !== 'tmdb' ? d.id : d.library_id) : null;
         if (libMovieId != null) {
-            more += '<button class="vd-manage-btn" type="button" data-vd-act="sync-movie" data-vd-sync-id="' + esc(libMovieId) +
-                '" title="Re-read this movie from your server - updates file, watch, and metadata state">' +
-                '<span class="vd-manage-ic">âŸ³</span> Sync</button>';
+            libMore += moreItem('sync-movie', '⟳', 'Sync with server',
+                'Re-read this movie from your server - updates file, watch, and metadata state',
+                ' data-vd-sync-id="' + esc(libMovieId) + '"');
         }
-        // Watched toggle (the /watched API finally gets a UI): local state +
-        // markPlayed/markUnplayed pushed to the server. Library rows only.
-        if (ownLibItem && (d.kind === 'movie' || d.kind === 'show') &&
-                (d.source !== 'tmdb' || d.library_id != null) && (d.owned || d.episode_owned || d.watched)) {
-            more += '<button class="vd-manage-btn" type="button" data-vd-act="watched-toggle" title="' +
-                (d.watched ? 'Mark unwatched (clears played state on your server too)'
-                           : 'Mark watched (marks played on your server too)') + '">' +
-                '<span class="vd-manage-ic">' + (d.watched ? '↺' : '✓') + '</span> ' +
-                (d.watched ? 'Mark unwatched' : 'Mark watched') + '</button>';
+        // Watched toggle (the /watched API): local state + markPlayed/markUnplayed
+        // pushed to the server. Library rows only.
+        if (ownLibItem && (d.kind === 'movie' || d.kind === 'show') && libRow &&
+                (d.owned || d.episode_owned || d.watched)) {
+            libMore += moreItem('watched-toggle', d.watched ? '↺' : '✓', d.watched ? 'Mark unwatched' : 'Mark watched',
+                d.watched ? 'Mark unwatched (clears played state on your server too)'
+                          : 'Mark watched (marks played on your server too)');
         }
         // Manual "I have this" link state — library pages only. When this row
-        // was linked by hand, the More menu offers the unlink (two-click).
+        // was linked by hand, the menu offers the unlink.
         var _mmLibId = (d.source !== 'tmdb' && (d.kind === 'movie' || d.kind === 'show') && d.id != null)
             ? d.id : null;
         if (_mmLibId != null && !d._mm_checked && _canManualMatch()) {
@@ -939,18 +966,20 @@
                 }).catch(function () { /* stay silent — no link, no menu item */ });
         }
         if (d._mm_tmdb) {
-            more += '<button class="vd-manage-btn" type="button" data-vd-act="unlink" ' +
-                'title="This title was linked to your library by hand (I have this). Remove the link?">' +
-                '<span class="vd-manage-ic">🔗</span> Linked by hand — unlink</button>';
+            libMore += moreItem('unlink', '🔗', 'Linked by hand — unlink',
+                'This title was linked to your library by hand (I have this). Remove the link?');
         }
-        // One button instead of four. With a single item behind it the menu is
+        var links = externalLinks(d);
+        var more = moreGroup('Get', getMore) + moreGroup('Library', libMore) + moreGroup('Open on', links);
+        var html = primary + companions;
+        // One button instead of many. With a single item behind it the menu is
         // pure overhead, so that item just rides in the main row.
         if (more) {
-            html += (moreCount(more) === 1) ? more :
+            html += (moreCount(getMore + libMore) === 1 && !links) ? getMore + libMore :
                 '<div class="vd-more" data-vd-more>' +
                     '<button class="vd-manage-btn vd-more-btn" type="button" data-vd-act="more" ' +
-                        'aria-haspopup="true" aria-expanded="false" title="More actions">' +
-                        '<span class="vd-manage-ic">⋯</span> More</button>' +
+                        'aria-haspopup="true" aria-expanded="false" title="More actions" aria-label="More actions">' +
+                        '<span class="vd-manage-ic" aria-hidden="true">⋯</span> More</button>' +
                     '<div class="vd-more-menu" data-vd-more-menu hidden>' + more + '</div>' +
                 '</div>';
         }
@@ -1366,28 +1395,11 @@
         if (d.runtime_minutes) rows.push(detailCell('Runtime', runtimeLabel(d.runtime_minutes)));
         if (d.studio) rows.push(detailCell('Studio', d.studio));
         if (d.status) rows.push(detailCell('Status', statusLabel(d.status)));
-        if (d.rating_critic) rows.push(detailCell('Critic score', Math.round(d.rating_critic) + '%'));
-        var f = d.file;
-        if (f) {
-            if (f.quality || f.resolution) rows.push(detailCell('Quality', f.quality || mediaRes(f.resolution)));
-            if (f.video_codec) rows.push(detailCell('Video', prettyCodec(f.video_codec)));
-            if (f.dynamic_range) rows.push(detailCell('Dynamic range', f.dynamic_range));
-            var audio = [String(f.audio_codec || '').toUpperCase(), channelsLabel(f.audio_channels), f.atmos ? 'Atmos' : '']
-                .filter(Boolean).join(' · ');
-            if (audio) rows.push(detailCell('Audio', audio));
-            if (f.release_source) rows.push(detailCell('Source', prettySource(f.release_source)));
-            if (f.size_bytes) rows.push(detailCell('Size', fmtBytes(f.size_bytes)));
-        }
-        var html = rows.length ? '<div class="vd-detail-grid">' + rows.join('') + '</div>' : '';
-        var files = d.files || [];
-        if (files.length > 1) {
-            html += '<div class="vd-versions"><div class="vd-versions-h">Versions you own</div>' +
-                files.map(function (v, i) {
-                    return '<div class="vd-version"><span class="vd-version-rank">' + (i + 1) + '</span>' +
-                        '<span>' + esc(fileSummary(v)) + '</span></div>';
-                }).join('') + '</div>';
-        }
-        host.innerHTML = html;
+        // The file rows (quality / codecs / size / every version) moved to the
+        // Your library tab, with paths and actions. The critic score left with
+        // them: it printed Plex's 0-10 RT score as a percent ("9%" for a film the
+        // ratings row above calls 89%), and that row already carries RT.
+        host.innerHTML = rows.length ? '<div class="vd-detail-grid">' + rows.join('') + '</div>' : '';
     }    // ── per-title acquisition history (arr-parity P9) ─────────────────────────
     // Every grab/import/upgrade/failure this title has ever had, from the
     // permanent archive. Library-source pages only (the id keys the lookup).
@@ -1505,7 +1517,67 @@
         if (window.VideoSubtitles) window.VideoSubtitles.reset();
         galleryImages = [];
         stopBillboardTrailer();
+        // the library tab belongs to the title it was opened for
+        unmountLibraryTab();
     }
+
+    // ── tabs: the page as it was, and Your library ───────────────────────────
+    // A library movie/show gets two tabs, like an artist's Discography / Your
+    // library on the music side. The second is a React island
+    // (webui/src/features/video-library) mounted into [data-vd-library-panel];
+    // the subtitle-language and acquisition-history sections are management
+    // too, so they move into it (.vd-lib-extra, CSS). The tab you last used is
+    // remembered per kind.
+    var TAB_KEY = 'soulsync.vdTab.';
+    var _libMounted = null;
+    function tabbable() {
+        return !!(data && currentSource === 'library' && data.source !== 'youtube' &&
+                  (data.kind === 'movie' || data.kind === 'show') && data.id != null);
+    }
+    function savedTab(kind) {
+        try { return localStorage.getItem(TAB_KEY + kind) === 'library' ? 'library' : 'main'; }
+        catch (e) { return 'main'; }
+    }
+    function renderTabs() {
+        var bar = q('[data-vd-tabs]'), body = q('.vd-body');
+        if (!bar || !body) return;
+        var on = tabbable();
+        bar.hidden = !on;
+        body.classList.toggle('vd-body--tabbed', on);
+        setTab(on ? savedTab(data.kind) : 'main', true);
+    }
+    function setTab(tab, quiet) {
+        var body = q('.vd-body'), panel = q('[data-vd-library-panel]');
+        if (!body || !panel) return;
+        if (tab === 'library' && !tabbable()) tab = 'main';
+        body.classList.toggle('vd-body--library', tab === 'library');
+        var btns = body.querySelectorAll('[data-vd-tab]');
+        for (var i = 0; i < btns.length; i++) {
+            var sel = btns[i].getAttribute('data-vd-tab') === tab;
+            btns[i].setAttribute('aria-selected', sel ? 'true' : 'false');
+            btns[i].classList.toggle('vd-tab--active', sel);
+        }
+        panel.hidden = tab !== 'library';
+        if (!quiet && data) { try { localStorage.setItem(TAB_KEY + data.kind, tab); } catch (e) { /* private mode */ } }
+        if (tab === 'library') mountLibraryTab();
+    }
+    function mountLibraryTab() {
+        var panel = q('[data-vd-library-panel]');
+        if (!panel || !tabbable()) return;
+        if (!window.VideoLibraryTab) {
+            // main.tsx is a deferred module: on a cold deep link the page can get
+            // here first. it announces itself when it lands.
+            document.addEventListener('soulsync:video-library-tab-ready', mountLibraryTab, { once: true });
+            return;
+        }
+        window.VideoLibraryTab.mount(panel, { kind: data.kind, id: data.id });
+        _libMounted = panel;
+    }
+    function unmountLibraryTab() {
+        if (_libMounted && window.VideoLibraryTab) window.VideoLibraryTab.unmount(_libMounted);
+        _libMounted = null;
+    }
+
     function loadExtras(kind, id) {
         fetch(DETAIL_URL + kind + '/' + id + '/extras', { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -1658,6 +1730,12 @@
         if (facts.revenue) rows.push(['Box office', '$' + fmtMoney(facts.revenue)]);
         if (facts.original_language) rows.push(['Language', langName(facts.original_language)]);
         if (facts.countries && facts.countries.length) rows.push(['Country', facts.countries.join(', ')]);
+        // where subtitles EXIST (OpenSubtitles backfill) — one fact, not a chip wall
+        var subLangs = (data && data.subtitle_langs) || [];
+        if (subLangs.length) {
+            var named = subLangs.slice(0, 4).map(subLangLabel).join(', ');
+            rows.push(['Subtitles exist in', named + (subLangs.length > 4 ? ' +' + (subLangs.length - 4) + ' more' : '')]);
+        }
         if (host) {
             host.innerHTML = rows.length ? '<div class="vd-detail-grid">' + rows.map(function (r) {
                 return '<div class="vd-detail-row"><span class="vd-detail-k">' + esc(r[0]) +
@@ -2150,32 +2228,60 @@
             // A profile without download rights can't grab or wishlist — on a
             // TMDB preview or a library show it can ASK for a missing episode
             // instead (the request flow); owned episodes have nothing to ask.
-            ((ep.owned ? '<div class="vd-ep-badge">Owned' + (ep.versions > 1 ? ' ×' + ep.versions : '') + '</div>' : '') +
+            // Owned is the normal state, so it no longer wears a badge on every
+            // row; only a gap does (Missing / Upcoming). Owned rows keep every
+            // acquisition action (upgrade-until-cutoff treats them as upgrade
+            // candidates), behind one ⋯ instead of four icon buttons.
+            (epBadge(ep) +
              ((typeof canDownload === 'function' && !canDownload())
                 ? ((!ep.owned && data && data.tmdb_id && window.VideoRequests)
                     ? '<div class="vd-ep-get">' + window.VideoRequests.cardButton({
                         kind: 'episode', tmdbId: data.tmdb_id, season: selectedSeason,
                         episode: ep.episode_number, title: data.title, year: data.year,
                         poster: data.poster_url }) + '</div>'
-                    : (ep.owned ? '' : '<div class="vd-ep-badge">Missing</div>'))
+                    : '')
                 : '<div class="vd-ep-get" data-vd-ep-get="' + ep.episode_number + '">' +
                     '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
-                    '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-ep-grab="' + ep.episode_number +
-                        '" title="' + (ep.owned ? 'Search &amp; download again (upgrade)' : 'Auto-search &amp; download this episode') + '" aria-label="Get episode">⭳</button>' +
-                    '<button class="vd-ep-getbtn vd-ep-search" type="button" data-vd-ep-search="' + ep.episode_number +
-                        '" title="Manual search — pick a release" aria-label="Manual search">⌕</button>' +
-                    '<button class="vd-ep-getbtn vd-ep-wish" type="button" data-vd-ep-wish="' + ep.episode_number +
-                        '" title="' + (ep.owned ? 'Wishlist for an upgrade' : 'Add this episode to the wishlist') + '" aria-label="Wishlist episode">＋</button>' +
+                    (!ep.owned && epAired(ep)
+                        ? '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-ep-grab="' + ep.episode_number +
+                            '" title="Auto-search &amp; download this episode" aria-label="Get episode">⭳</button>'
+                        : '') +
+                    '<span class="vd-pop">' +
+                    '<button class="vd-ep-getbtn vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +
+                        'aria-label="More for episode ' + ep.episode_number + '" title="More">⋯</button>' +
+                    '<div class="vd-pop-menu" data-vd-pop-menu role="menu" hidden>' +
+                    (ep.owned
+                        ? '<button class="vd-manage-btn vd-ep-grab" type="button" role="menuitem" data-vd-ep-grab="' + ep.episode_number +
+                            '" title="Search &amp; download again (upgrade)">⭳ Download again (upgrade)</button>'
+                        : '') +
+                    '<button class="vd-manage-btn vd-ep-search" type="button" role="menuitem" data-vd-ep-search="' + ep.episode_number +
+                        '" title="Manual search — pick a release">⌕ Manual search</button>' +
+                    '<button class="vd-manage-btn vd-ep-wish" type="button" role="menuitem" data-vd-ep-wish="' + ep.episode_number +
+                        '" title="' + (ep.owned ? 'Wishlist for an upgrade' : 'Add this episode to the wishlist') + '">＋ ' +
+                        (ep.owned ? 'Wishlist for an upgrade' : 'Add to wishlist') + '</button>' +
                     // Subtitle search (Phase 3): Bazarr-style manual subtitle
                     // search for an owned episode (needs a library file to
                     // write the .srt next to).
                     ((ep.id != null && ep.owned && data && data.source === 'library')
-                        ? '<button class="vd-ep-getbtn vd-ep-sub" type="button" data-vd-ep-subsearch="' + ep.episode_number +
-                            '" title="Search subtitles — pick one yourself" aria-label="Search subtitles">CC</button>'
+                        ? '<button class="vd-manage-btn vd-ep-sub" type="button" role="menuitem" data-vd-ep-subsearch="' + ep.episode_number +
+                            '" title="Search subtitles — pick one yourself">💬 Search subtitles</button>'
                         : '') +
+                    '</div></span>' +
                   '</div>')) +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '"' + episodeReportAttrs(ep) + ' hidden></div>';
+    }
+
+    function epAired(ep) {
+        return !ep.air_date || String(ep.air_date).slice(0, 10) <= new Date().toISOString().slice(0, 10);
+    }
+    function epBadge(ep) {
+        // an owned row still emits the cell (empty), or its actions would sit one
+        // grid column left of a missing row's and the action column would jump
+        if (ep.owned) return ep.versions > 1 ? '<div class="vd-ep-badge vd-ep-badge--versions">×' + ep.versions + '</div>'
+            : '<div class="vd-ep-badge vd-ep-badge--none" aria-hidden="true"></div>';
+        return epAired(ep) ? '<div class="vd-ep-badge">Missing</div>'
+            : '<div class="vd-ep-badge vd-ep-badge--soon">Upcoming</div>';
     }
 
     // library episodes can be reported (video-issues.js owns the modal); the
@@ -2332,41 +2438,45 @@
         // rows to monitor, and a preview has no library row to act on at all.
         var seasonManage = !isYt && !!data && data.kind === 'show' && data.source !== 'tmdb';
         var monitored = (Number(season.episode_monitored) || 0) > 0;
-        return (canAcquire || seasonManage)
-            ? '<div class="vd-season-actions">' +
-                (canAcquire ? '<span class="vd-season-actions-count">' + seasonMissing.length + ' missing</span>' : '') +
-                (canAcquire ?
-                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-grab ' +
-                    'title="' + (isYt ? 'Download every missing video in this year'
-                                      : 'Auto-search &amp; download every missing episode in this season') + '">' +
-                    '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab ' + (isYt ? 'year' : 'season') + '</span>' +
-                    '<span class="discog-btn-shimmer"></span></button>' : '') +
-                (canAcquire && !isYt ?
-                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-search ' +
-                    'title="Manual search — pick releases for this season">' +
-                    '<span class="discog-btn-icon">⌕</span><span class="discog-btn-text">Manual search</span>' +
-                    '<span class="discog-btn-shimmer"></span></button>' : '') +
-                (canAcquire ?
-                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-wish ' +
-                    'title="' + (isYt ? 'Add every missing video in this year to the wishlist'
-                                      : 'Add every missing episode in this season to the wishlist') + '">' +
-                    '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist ' + (isYt ? 'year' : 'season') + '</span>' +
-                    '<span class="discog-btn-shimmer"></span></button>' : '') +
-                (seasonManage ?
-                '<button class="discog-download-btn discog-btn-compact vd-season-mon' + (monitored ? ' vd-season-mon--on' : '') +
-                    '" type="button" data-vd-season-monitor="' + (monitored ? '0' : '1') + '" ' +
-                    'title="' + (monitored ? 'Stop hunting this season'
-                                           : 'Hunt missing episodes in this season again') + '">' +
-                    '<span class="discog-btn-icon">' + (monitored ? '◉' : '○') + '</span>' +
-                    '<span class="discog-btn-text">' + (monitored ? 'Monitored' : 'Unmonitored') + '</span>' +
-                    '<span class="discog-btn-shimmer"></span></button>' : '') +
-                (seasonManage && data.tmdb_id ?
-                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-clearfail ' +
-                    'title="Clear retry backoff on this season\u2019s stalled wishlist rows and search every source again">' +
-                    '<span class="discog-btn-icon">↺</span><span class="discog-btn-text">Clear failures</span>' +
-                    '<span class="discog-btn-shimmer"></span></button>' : '') +
-              '</div>'
-            : '';
+        if (!canAcquire && !seasonManage) return '';
+        // One visible action (Grab), the rest behind one menu. The bar used to be
+        // five same-weight pills on every season.
+        var menu =
+            (canAcquire && !isYt ?
+            '<button class="discog-download-btn discog-btn-compact" type="button" role="menuitem" data-vd-season-search ' +
+                'title="Manual search — pick releases for this season">' +
+                '<span class="discog-btn-icon">⌕</span><span class="discog-btn-text">Manual search</span></button>' : '') +
+            (canAcquire ?
+            '<button class="discog-download-btn discog-btn-compact" type="button" role="menuitem" data-vd-season-wish ' +
+                'title="' + (isYt ? 'Add every missing video in this year to the wishlist'
+                                  : 'Add every missing episode in this season to the wishlist') + '">' +
+                '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist ' + (isYt ? 'year' : 'season') + '</span></button>' : '') +
+            (seasonManage ?
+            '<button class="discog-download-btn discog-btn-compact vd-season-mon' + (monitored ? ' vd-season-mon--on' : '') +
+                '" type="button" role="menuitem" data-vd-season-monitor="' + (monitored ? '0' : '1') + '" ' +
+                'title="' + (monitored ? 'Stop hunting this season' : 'Hunt missing episodes in this season again') + '">' +
+                '<span class="discog-btn-icon">' + (monitored ? '◉' : '○') + '</span>' +
+                '<span class="discog-btn-text">' + (monitored ? 'Monitored' : 'Unmonitored') + '</span></button>' : '') +
+            (seasonManage && data.tmdb_id ?
+            '<button class="discog-download-btn discog-btn-compact" type="button" role="menuitem" data-vd-season-clearfail ' +
+                'title="Clear retry backoff on this season\u2019s stalled wishlist rows and search every source again">' +
+                '<span class="discog-btn-icon">↺</span><span class="discog-btn-text">Clear failures</span></button>' : '');
+        var status = canAcquire ? seasonMissing.length + ' missing'
+            : (isYt ? '' : 'All ' + season.episodes.length + ' here');
+        if (seasonManage && !monitored) status += (status ? ' · ' : '') + 'not monitored';
+        return '<div class="vd-season-actions">' +
+            '<span class="vd-season-actions-count">' + status + '</span>' +
+            (canAcquire ?
+            '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-grab ' +
+                'title="' + (isYt ? 'Download every missing video in this year'
+                                  : 'Auto-search &amp; download every missing episode in this season') + '">' +
+                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab ' + (isYt ? 'year' : 'season') + '</span>' +
+                '<span class="discog-btn-shimmer"></span></button>' : '') +
+            (menu ? '<span class="vd-pop">' +
+                '<button class="vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +
+                    'aria-label="More for this ' + (isYt ? 'year' : 'season') + '" title="More">⋯</button>' +
+                '<div class="vd-pop-menu" data-vd-pop-menu role="menu" hidden>' + menu + '</div></span>' : '') +
+            '</div>';
     }
 
     function renderEpisodes() {
@@ -2669,7 +2779,7 @@
         if (!id || btn.disabled) return;
         btn.disabled = true;
         var orig = btn.innerHTML;
-        btn.innerHTML = '<span class="vd-manage-ic">âŸ³</span> Syncingâ€¦';
+        btn.innerHTML = '<span class="vd-manage-ic">⟳</span> Syncing…';
         fetch('/api/video/detail/movie/' + encodeURIComponent(id) + '/sync', { method: 'POST' })
             .then(function (r) { return r.json().catch(function () { return { success: false, error: 'HTTP ' + r.status }; }); })
             .then(function (d) {
@@ -3289,7 +3399,40 @@
         return e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
     }
 
+    // The small ⋯ menus on episode rows and the season bar. Inline (inside the
+    // row) so the delegated handlers below act on their items exactly as they
+    // did on the old buttons; one open at a time.
+    function closePops(except) {
+        var r = root(); if (!r) return;
+        var open = r.querySelectorAll('[data-vd-pop-menu]:not([hidden])');
+        for (var i = 0; i < open.length; i++) {
+            if (except && open[i] === except) continue;
+            open[i].hidden = true;
+            var b = open[i].parentNode && open[i].parentNode.querySelector('[data-vd-pop]');
+            if (b) b.setAttribute('aria-expanded', 'false');
+            var row = open[i].closest('.vd-ep');
+            if (row) row.classList.remove('vd-ep--menu');
+        }
+    }
+    function togglePop(btn) {
+        var menu = btn.parentNode && btn.parentNode.querySelector('[data-vd-pop-menu]');
+        if (!menu) return;
+        closePops(menu);
+        menu.hidden = !menu.hidden;
+        btn.setAttribute('aria-expanded', menu.hidden ? 'false' : 'true');
+        var row = btn.closest('.vd-ep');
+        if (row) row.classList.toggle('vd-ep--menu', !menu.hidden);
+        if (!menu.hidden) {
+            var first = menu.querySelector('button:not([disabled])');
+            if (first) first.focus();
+        }
+    }
+
     function onClick(e) {
+        var popBtn = e.target.closest('[data-vd-pop]');
+        if (popBtn) { e.preventDefault(); e.stopPropagation(); togglePop(popBtn); return; }
+        // any other click closes an open ⋯ menu (the item clicked still runs below)
+        closePops();
         var muteBtn = e.target.closest('[data-vd-bb-mute]');
         if (muteBtn) { toggleBillboardMute(muteBtn); return; }
         var stopBtn = e.target.closest('[data-vd-bb-stop]');
@@ -3419,6 +3562,8 @@
         if (viewBtn && r.contains(viewBtn)) { setView(viewBtn.getAttribute('data-vd-view')); return; }
         var ssToggle = e.target.closest('[data-vd-ss-toggle]');
         if (ssToggle && r.contains(ssToggle)) { menuOpen = !menuOpen; renderSeasonNav(); return; }
+        var tabBtn = e.target.closest('[data-vd-tab]');
+        if (tabBtn && r.contains(tabBtn)) { setTab(tabBtn.getAttribute('data-vd-tab')); return; }
         var act = e.target.closest('[data-vd-act]');
         if (act && r.contains(act)) {
             var which = act.getAttribute('data-vd-act');
@@ -3439,6 +3584,11 @@
             else if (which === 'watched-toggle') toggleWatchedState(act);
             else if (which === 'ihavethis') openHaveThisModal();
             else if (which === 'unlink') unlinkManualMatch();
+            else if (which === 'library-tab') {
+                setTab('library');
+                var bar = q('[data-vd-tabs]');
+                if (bar && bar.scrollIntoView) bar.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
             else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);
@@ -3902,7 +4052,44 @@
         }
     }
 
+    // The Your library tab (React) borrows the page's own flows rather than
+    // re-implementing them: manual search, season grabs, subtitle search, the
+    // manage panel. Season actions point the page at that season first, so the
+    // Episodes tab and the live download states agree with what was grabbed.
+    function _withSeason(n, fn) {
+        if (!data || data.kind !== 'show' || !seasonByNum(n)) return;
+        if (selectedSeason !== n) { selectedSeason = n; renderSeasonNav(); ensureSeasonEpisodes(); }
+        fn(document.createElement('button'));
+    }
+    var detailBridge = {
+        manualSearch: function (scope, season, episode) {
+            if (!data || !window.VideoDownload || !VideoDownload.manualSearch) return;
+            if (scope === 'movie') {
+                VideoDownload.manualSearch({ title: data.title, scope: 'movie', year: data.year,
+                    mediaId: data.id, mediaSource: data.source, poster: data.has_poster ? '/api/video/poster/movie/' + data.id : null });
+                return;
+            }
+            if (season != null && selectedSeason !== season) { selectedSeason = season; renderSeasonNav(); ensureSeasonEpisodes(); }
+            _openManualSearch(scope === 'episode' ? 'episode' : 'season', episode);
+        },
+        grabSeason: function (n) { _withSeason(n, grabSeasonInline); },
+        wishlistSeason: function (n) { _withSeason(n, wishSeasonInline); },
+        clearSeasonFailures: function (n) { _withSeason(n, clearSeasonFailures); },
+        subtitleSearch: function (kind, id, title, label) {
+            if (!window.VideoSubtitles || !data) return;
+            window.VideoSubtitles.openManualSearch(kind, id, title, label,
+                { defaultLang: window.VideoSubtitles.effectiveFirstLang(data.kind, data.id) });
+        },
+        openManage: function () { openManagePanel(); },
+        reloadPage: function () {
+            if (!data) return;
+            if (data.kind === 'movie') loadMovie(currentId, currentSource);
+            else if (data.kind === 'show') loadShow(currentId, currentSource);
+        },
+    };
+
     function init() {
+        window.SoulSyncVideoDetail = detailBridge;
         document.addEventListener('soulsync:video-open-detail', onOpen);
         document.addEventListener('click', onClick);
         // Channel search (debounced) + sort — only act on the youtube controls.
@@ -3974,7 +4161,7 @@
             if (bg && !data.has_backdrop) bg.style.backgroundImage = "url('" + (window.SoulSyncURL?.resolve('/api/video/poster/') || '/api/video/poster/') + data.kind + '/' + libId + '?' + cb + "')";
         });
         document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') { closeTrailer(); closeLightbox(); closeCastModal(); }
+            if (e.key === 'Escape') { closePops(); closeTrailer(); closeLightbox(); closeCastModal(); }
             else if (lightboxOpen()) {
                 if (e.key === 'ArrowLeft') lightboxStep(-1);
                 else if (e.key === 'ArrowRight') lightboxStep(1);

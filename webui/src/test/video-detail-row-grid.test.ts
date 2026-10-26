@@ -7,11 +7,13 @@ import { extractFunction } from './vanilla-extract';
 /**
  * The episode row grid has to have a column for every child it can produce.
  *
- * An OWNED episode emits six: index, thumbnail, info, the "Owned" badge, the
- * action buttons, and the chevron. The grid declared five, so the chevron fell
- * onto a second implicit row at the far left of the card. It only happened on
- * owned rows, which is why it read as an expand affordance instead of a broken
- * layout - until a fully-owned season made every row do it at once.
+ * An episode emits six: index, thumbnail, info, the badge cell, the action
+ * group, and the chevron. The grid once declared five, so the chevron fell onto
+ * a second implicit row at the far left of the card.
+ *
+ * Oct 2026: owned rows stopped wearing an "Owned" pill (only a gap gets one),
+ * but they still emit the badge CELL, empty. Without it an owned row's actions
+ * sit one column left of a missing row's and the action column jumps.
  */
 
 const JS = readFileSync(resolve(process.cwd(), 'static/video/video-detail.js'), 'utf8');
@@ -45,7 +47,7 @@ function childCount(ep: Record<string, unknown>): number {
   `;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const build = new Function(
-    `${preamble}\n${extractFunction('episodeReportAttrs', JS)}\n${extractFunction('episodeRow', JS)}\nreturn episodeRow;`,
+    `${preamble}\n${extractFunction('episodeReportAttrs', JS)}\n${extractFunction('epAired', JS)}\n${extractFunction('epBadge', JS)}\n${extractFunction('episodeRow', JS)}\nreturn episodeRow;`,
   )() as (e: unknown) => string;
   const host = document.createElement('div');
   host.innerHTML = build(ep);
@@ -60,9 +62,11 @@ describe('the episode row grid fits every child it emits', () => {
     expect(columns('.vd-ep').length).toBeGreaterThanOrEqual(owned);
   });
 
-  it('still fits a missing episode, which emits one fewer', () => {
+  it('gives a missing episode the same columns, so the actions line up', () => {
     const missing = childCount({ episode_number: 2, title: 'E2', owned: false, overview: 'x' });
-    expect(missing).toBe(5);
+    const owned = childCount({ episode_number: 1, title: 'E1', owned: true, overview: 'x' });
+    expect(missing).toBe(6);
+    expect(missing).toBe(owned);
     expect(columns('.vd-ep').length).toBeGreaterThanOrEqual(missing);
   });
 

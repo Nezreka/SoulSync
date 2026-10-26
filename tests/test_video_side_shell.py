@@ -43,6 +43,9 @@ _ALLOWED_WINDOW = {
     "window.VideoRequestSheet", "window.VideoRequests",
     "window.VideoCalendar", "window.VideoOverlayEditor", "window.VideoCollectionEditor",
     "window.VideoSubtitles",
+    # the detail page's Your library tab (a React island) and the bridge it
+    # calls back through - both video-side
+    "window.VideoLibraryTab", "window.SoulSyncVideoDetail",
     "window.videoWorkerOrbs", "window._videoWorkerOrbsEnabled",
     "window._buildAutomationSection", "window._buildAutomationHub",
     "window._reloadVideoAutomations", "window._vdpgAnyActive", "window._reduceEffectsActive",

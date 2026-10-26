@@ -225,8 +225,9 @@ def _aired(ep: dict, today: str) -> bool:
     return bool(ep.get("has_file")) or bool(ep.get("air_date") and str(ep["air_date"])[:10] <= today)
 
 
-_SEASON_DIR = re.compile(r"^(season|series|staffel|saison|temporada)[\s._-]*\d+$|^specials?$|^s\d{1,3}$",
-                         re.IGNORECASE)
+# "Season 01", "S01", "Specials", and the Plex-style "Breaking Bad Season 5"
+_SEASON_DIR = re.compile(r"(?:^|[\s._-])(?:season|series|staffel|saison|temporada)[\s._-]*\d+$"
+                         r"|^specials?$|^s\d{1,3}$", re.IGNORECASE)
 
 
 def _show_folders(paths: List[str]) -> List[Dict[str, Any]]:
@@ -238,7 +239,7 @@ def _show_folders(paths: List[str]) -> List[Dict[str, Any]]:
         if not p:
             continue
         d = os.path.dirname(p.replace("\\", "/"))
-        if _SEASON_DIR.match(os.path.basename(d) or ""):
+        if _SEASON_DIR.search(os.path.basename(d) or ""):
             d = os.path.dirname(d)
         counts[d] = counts.get(d, 0) + 1
     return [{"path": k, "files": v} for k, v in sorted(counts.items(), key=lambda kv: -kv[1])]

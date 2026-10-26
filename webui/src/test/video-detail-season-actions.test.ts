@@ -13,6 +13,9 @@ import { extractFunction } from './vanilla-extract';
  * complete season you no longer want hunted still needs the toggle. The bar
  * used to render only when something was missing, which put both of those out
  * of reach exactly when the season was healthy.
+ *
+ * Oct 2026 (Boulder: "so many buttons"): every action is still offered, but
+ * only Grab sits on the bar; the rest are behind one ⋯ menu.
  */
 
 const SRC = readFileSync(resolve(process.cwd(), 'static/video/video-detail.js'), 'utf8');
@@ -62,8 +65,9 @@ function partial(mon = 2) {
   };
 }
 
+/** every action the bar offers, visible or behind its ⋯ menu (not the toggle). */
 function buttons(host: HTMLElement): string[] {
-  return Array.from(host.querySelectorAll('button')).map(
+  return Array.from(host.querySelectorAll('button:not([data-vd-pop])')).map(
     (b) => b.querySelector('.discog-btn-text')?.textContent ?? '',
   );
 }
@@ -128,5 +132,17 @@ describe('the season action bar', () => {
 
   it('drops the grab buttons when the grab module never loaded', () => {
     expect(buttons(bar(partial(), { grab: false }))).toEqual(['Monitored', 'Clear failures']);
+  });
+
+  it('shows only Grab on the bar and keeps the rest one click away', () => {
+    const host = bar(partial());
+    const visible = Array.from(
+      host.querySelectorAll('.vd-season-actions > button .discog-btn-text'),
+    ).map((b) => b.textContent);
+    expect(visible).toEqual(['Grab season']);
+    const menu = host.querySelector('[data-vd-pop-menu]') as HTMLElement;
+    expect(menu.hidden).toBe(true);
+    expect(menu.querySelector('[data-vd-season-monitor]')).not.toBeNull();
+    expect(host.querySelector('[data-vd-pop]')?.getAttribute('aria-haspopup')).toBe('menu');
   });
 });

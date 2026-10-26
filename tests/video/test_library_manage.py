@@ -289,3 +289,15 @@ def test_deleting_the_last_episode_file_marks_the_episode_missing(db, tmp_path):
     fid = _add_file(db, episode_id=eps[(1, 1)], path=p)
     assert file_ops.delete_to_recycle(db, fid)["success"]
     assert _row(db, "SELECT has_file FROM episodes WHERE id=?", eps[(1, 1)]) == (0,)
+
+
+def test_show_folders_fold_plex_style_season_folders_into_the_show():
+    """'Breaking Bad/Breaking Bad Season 5' is a season folder too. Read as
+    its own folder, every season of a tidy show looked like a split."""
+    out = library_manage._show_folders([
+        "/m/TV/Breaking Bad/Breaking Bad Season 5/a.mkv",
+        "/m/TV/Breaking Bad/Season 01/b.mkv",
+        "/x/Breaking.Bad/c.mkv",
+    ])
+    assert out == [{"path": "/m/TV/Breaking Bad", "files": 2},
+                   {"path": "/x/Breaking.Bad", "files": 1}]

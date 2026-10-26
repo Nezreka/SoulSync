@@ -96,7 +96,9 @@ def test_detail_js_renders_the_badges():
     # The label + field pairing, not the wrapper around it. The row moved from a
     # bare array to detailCell(...) in a refactor and this started failing on a
     # feature that never went anywhere.
-    assert "'Dynamic range', f.dynamic_range" in js
+    # the per-file facts (dynamic range included) live in the Your library
+    # tab since Oct 2026, not in the overview's Details grid
+    assert "f.dynamic_range" in (_ROOT / "webui" / "src" / "features" / "video-library" / "format.ts").read_text(encoding="utf-8")
     css = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(
         encoding="utf-8", errors="replace")
     assert '.vd-fmt' in css

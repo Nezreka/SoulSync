@@ -2302,6 +2302,14 @@
                             </div>
                         </div>
                         <div class="vd-body">
+                            <!-- Two tabs on a library title: the page as you know it, and Your library
+                                 (files, quality, match, monitoring) — a React island,
+                                 webui/src/features/video-library. Hidden on previews and YouTube. -->
+                            <div class="vd-tabs" data-vd-tabs role="tablist" aria-label="Page sections" hidden>
+                                <button class="vd-tab" type="button" role="tab" data-vd-tab="main" aria-selected="true">Episodes</button>
+                                <button class="vd-tab" type="button" role="tab" data-vd-tab="library" aria-selected="false">Your library</button>
+                            </div>
+                            <div class="vd-library-panel" data-vd-library-panel role="tabpanel" aria-label="Your library" hidden></div>
                             <!-- Where acquisition stands RIGHT NOW. First thing in the
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
@@ -2310,7 +2318,7 @@
                                 <div class="vd-acq" data-vd-acq></div>
                             </div>
                             <!-- Subtitle language overrides (per show/movie) — video-subtitles.js. -->
-                            <div class="vd-subcfg-section" data-vd-subcfg-section hidden>
+                            <div class="vd-subcfg-section vd-lib-extra" data-vd-subcfg-section hidden>
                                 <h2 class="vd-section-h">Subtitles</h2>
                                 <div class="vd-subcfg" data-vd-subcfg></div>
                             </div>
@@ -2376,7 +2384,7 @@
                                 <h2 class="vd-section-h">More Like This</h2>
                                 <div class="vd-similar" data-vd-similar></div>
                             </div>
-                            <div class="vd-history-section" data-vd-history-section hidden>
+                            <div class="vd-history-section vd-lib-extra" data-vd-history-section hidden>
                                 <h2 class="vd-section-h">Acquisition History</h2>
                                 <div class="vd-history" data-vd-history></div>
                             </div>
@@ -2425,6 +2433,14 @@
                             </div>
                         </div>
                         <div class="vd-body">
+                            <!-- Two tabs on a library title: the page as you know it, and Your library
+                                 (files, quality, match, monitoring) — a React island,
+                                 webui/src/features/video-library. Hidden on previews and YouTube. -->
+                            <div class="vd-tabs" data-vd-tabs role="tablist" aria-label="Page sections" hidden>
+                                <button class="vd-tab" type="button" role="tab" data-vd-tab="main" aria-selected="true">Overview</button>
+                                <button class="vd-tab" type="button" role="tab" data-vd-tab="library" aria-selected="false">Your library</button>
+                            </div>
+                            <div class="vd-library-panel" data-vd-library-panel role="tabpanel" aria-label="Your library" hidden></div>
                             <!-- Where acquisition stands RIGHT NOW. First thing in the
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
@@ -2434,7 +2450,7 @@
                                 <div class="vd-acq" data-vd-acq></div>
                             </div>
                             <!-- Subtitle language overrides (per show/movie) — video-subtitles.js. -->
-                            <div class="vd-subcfg-section" data-vd-subcfg-section hidden>
+                            <div class="vd-subcfg-section vd-lib-extra" data-vd-subcfg-section hidden>
                                 <h2 class="vd-section-h">Subtitles</h2>
                                 <div class="vd-subcfg" data-vd-subcfg></div>
                             </div>
@@ -2476,7 +2492,7 @@
                                 <h2 class="vd-section-h">More Like This</h2>
                                 <div class="vd-similar" data-vd-similar></div>
                             </div>
-                            <div class="vd-history-section" data-vd-history-section hidden>
+                            <div class="vd-history-section vd-lib-extra" data-vd-history-section hidden>
                                 <h2 class="vd-section-h">Acquisition History</h2>
                                 <div class="vd-history" data-vd-history></div>
                             </div>
