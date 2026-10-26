@@ -430,3 +430,33 @@ describe('watched, one episode or one season at a time', () => {
     expect(extractFunction('seasonActionsHtml', SRC)).toContain('data-vd-watched-kind="season"');
   });
 });
+
+describe('accent as text', () => {
+  const accentText = fn<(rgb: number[]) => string>('accentText');
+  const lum = (c: number[]) => {
+    const l = c.map((x) => {
+      const v = x / 255;
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
+  };
+  const contrast = (s: string) =>
+    (lum(s.split(', ').map(Number)) + 0.05) / (lum([11, 11, 15]) + 0.05);
+
+  it("lifts a dark accent until it reads (house of the dragon's oxblood)", () => {
+    expect(contrast(accentText([120, 20, 18]))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(accentText([0, 0, 0]))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('leaves an accent that already reads alone', () => {
+    expect(accentText([255, 200, 40])).toBe('255, 200, 40');
+  });
+
+  it('every accent text rule goes through the readable variant', () => {
+    const css = readFileSync(resolve(process.cwd(), 'static/video/video-side.css'), 'utf8');
+    expect(css).not.toMatch(/(?<![-\w])color: *rgba?\(var\(--vd-accent-rgb\)(, *1)?\)/);
+    expect(css).toContain(
+      '.vd-status { color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); }',
+    );
+  });
+});

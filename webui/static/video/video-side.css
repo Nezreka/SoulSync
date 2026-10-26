@@ -681,7 +681,7 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-genre--tag { cursor: default; background: var(--white-a05); border-color: var(--white-a10); color: var(--white-a70); }
 .vd-genre--tag:hover { color: var(--white-a70); background: var(--white-a05); border-color: var(--white-a10); }
 .vd-genre--channel { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
-.vd-genre--channel span { font-size: 9px; color: rgba(var(--vd-accent-rgb), 1); }
+.vd-genre--channel span { font-size: 9px; color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); }
 .vd-meta-rating { padding: 1px 7px; border: 1px solid var(--white-a35); border-radius: var(--radius-xs); font-size: 12px; }
 
 /* Subtitle availability (OpenSubtitles backfill) — a labeled chip row of the
@@ -695,7 +695,7 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-sub { padding: 4px 11px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 600;
     color: rgba(200,220,255,0.92); background: rgba(120,170,255,0.1); border: 1px solid rgba(120,170,255,0.22); }
 .vd-sub--more { color: var(--white-a55); background: var(--white-a06); border-color: var(--white-a12); }
-.vd-status { color: rgb(var(--vd-accent-rgb)); }
+.vd-status { color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); }
 .vd-overview { font-size: 16px; line-height: 1.6; color: rgba(255,255,255,0.86); margin: 0 0 22px; max-width: 640px;
     text-shadow: 0 2px 12px var(--black-a60);
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
@@ -881,7 +881,7 @@ body[data-side="video"] .dashboard-header-sweep {
 /* An unmonitored season reads as switched-off, not as an error: it's a choice. */
 .vd-season-mon { opacity: 0.62; }
 .vd-season-mon--on { opacity: 1; }
-.vd-season-mon--on .discog-btn-icon { color: rgb(var(--vd-accent-rgb)); }
+.vd-season-mon--on .discog-btn-icon { color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); }
 .vd-health-chip--fix { cursor: pointer; font: inherit; }
 .vd-health-chip--fix:hover {
     border-color: rgba(var(--warning-strong-rgb), 0.55); background: rgba(var(--warning-strong-rgb), 0.16);
@@ -1026,10 +1026,10 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-ep-badge, .vd-ep-get, .vd-ep-chev { justify-self: start; }
 .vd-ep-chev { color: var(--white-a35); font-size: 16px; transition: transform var(--dur-moderate) ease, color var(--dur-base) ease; }
 .vd-ep:hover .vd-ep-chev { color: var(--white-a70); }
-.vd-ep--open .vd-ep-chev { transform: rotate(180deg); color: rgb(var(--vd-accent-rgb)); }
+.vd-ep--open .vd-ep-chev { transform: rotate(180deg); color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); }
 .vd-ep:hover { background: var(--white-a04); }
 .vd-ep-index { font-size: 22px; font-weight: 800; color: var(--white-a40); text-align: center; }
-.vd-ep:hover .vd-ep-index { color: rgb(var(--vd-accent-rgb)); }
+.vd-ep:hover .vd-ep-index { color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); }
 .vd-ep-thumb {
     position: relative; width: 150px; aspect-ratio: 16 / 9; border-radius: var(--radius-md); overflow: hidden;
     background: linear-gradient(135deg, rgba(var(--vd-accent-rgb), 0.28), var(--black-a50));
@@ -1439,7 +1439,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     transition: color var(--dur-base) ease;
 }
-.vsr-card:hover .vsr-name { color: rgb(var(--vd-accent-rgb)); }
+.vsr-card:hover .vsr-name { color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); }
 .vsr-sub { display: block; font-size: 12px; color: var(--white-a50); margin-top: 3px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -1805,7 +1805,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vp-hero-info { flex: 1; min-width: 0; padding-bottom: 10px; }
 .vp-role {
     display: inline-block; margin-bottom: 12px; font-size: 12px; font-weight: 800;
-    letter-spacing: 1.4px; text-transform: uppercase; color: rgb(var(--vd-accent-rgb));
+    letter-spacing: 1.4px; text-transform: uppercase; color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb)));
     padding: 5px 13px; border-radius: var(--radius-pill);
     background: rgba(var(--vd-accent-rgb), 0.14); border: 1px solid rgba(var(--vd-accent-rgb), 0.34);
     text-shadow: 0 0 18px rgba(var(--vd-accent-rgb), 0.5);
@@ -1840,7 +1840,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 }
 .vp-bio.vp-bio--open { -webkit-line-clamp: 99; }
 .vp-bio-more {
-    background: none; border: 0; color: rgb(var(--vd-accent-rgb)); font-weight: 700; font-size: 13.5px;
+    background: none; border: 0; color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); font-weight: 700; font-size: 13.5px;
     cursor: pointer; padding: 4px 0; margin: 0 0 30px; display: inline-block;
 }
 .vp-bio-more[hidden] { display: none; }
@@ -1910,7 +1910,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 
 /* cast card on the detail page becomes a real link → person */
 .vd-cast-card--link { cursor: pointer; text-decoration: none; }
-.vd-cast-card--link:hover .vd-cast-name { color: rgb(var(--vd-accent-rgb)); }
+.vd-cast-card--link:hover .vd-cast-name { color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); }
 
 .vd-status--preview {
     color: #fff !important;
@@ -1952,7 +1952,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vst-hero-info { flex: 1; min-width: 0; padding-bottom: 10px; }
 .vst-eyebrow {
     display: inline-block; margin-bottom: 12px; font-size: 12px; font-weight: 800;
-    letter-spacing: 1.4px; text-transform: uppercase; color: rgb(var(--vd-accent-rgb));
+    letter-spacing: 1.4px; text-transform: uppercase; color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb)));
     padding: 5px 13px; border-radius: var(--radius-pill);
     background: rgba(var(--vd-accent-rgb), 0.14); border: 1px solid rgba(var(--vd-accent-rgb), 0.34);
     text-shadow: 0 0 18px rgba(var(--vd-accent-rgb), 0.5);
@@ -1974,7 +1974,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vst-actions:empty { display: none; }
 .vst-site {
     display: inline-block; font-size: 13px; font-weight: 700; text-decoration: none;
-    color: rgb(var(--vd-accent-rgb)); padding: 7px 15px; border-radius: var(--radius-pill);
+    color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); padding: 7px 15px; border-radius: var(--radius-pill);
     background: rgba(var(--vd-accent-rgb), 0.13); border: 1px solid rgba(var(--vd-accent-rgb), 0.32);
     transition: background var(--dur-quick) ease;
 }
@@ -2062,7 +2062,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 }
 .vd-next-ep-badge {
     font-size: 11.5px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
-    color: rgb(var(--vd-accent-rgb)); padding: 4px 11px; border-radius: var(--radius-pill);
+    color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); padding: 4px 11px; border-radius: var(--radius-pill);
     background: rgba(var(--vd-accent-rgb), 0.16); border: 1px solid rgba(var(--vd-accent-rgb), 0.36);
 }
 .vd-next-ep-code { font-weight: 800; }
@@ -2099,7 +2099,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 
 /* clickable crew / director names → person page */
 .vd-person-link { color: inherit; text-decoration: none; border-bottom: 1px solid transparent; transition: color var(--dur-quick) ease, border-color var(--dur-quick) ease; }
-.vd-person-link:hover { color: rgb(var(--vd-accent-rgb)); border-bottom-color: rgba(var(--vd-accent-rgb), 0.5); }
+.vd-person-link:hover { color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); border-bottom-color: rgba(var(--vd-accent-rgb), 0.5); }
 
 /* "fetching full episode list" banner (shown while the TMDB cascade runs) */
 .vd-ep-syncing {
@@ -2232,7 +2232,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vd-cm-card:hover .vd-cm-photo { transform: translateY(-3px); border-color: rgba(var(--vd-accent-rgb), 0.6); }
 .vd-cm-name { display: block; font-size: 13px; font-weight: 700; color: #fff; line-height: 1.3; }
 .vd-cm-char { display: block; font-size: 12px; color: var(--white-a55); line-height: 1.3; }
-.vd-cm-eps { display: block; font-size: 11px; color: rgb(var(--vd-accent-rgb)); margin-top: 2px; font-weight: 600; }
+.vd-cm-eps { display: block; font-size: 11px; color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); margin-top: 2px; font-weight: 600; }
 
 /* ── person: photos rail + also-known-as ─────────────────────────────────── */
 .vp-aka { font-size: 13.5px; color: var(--white-a60); margin: 0 0 18px; font-style: italic; }
@@ -2264,7 +2264,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 }
 .vd-review-body--open { -webkit-line-clamp: 999; }
 .vd-review-more {
-    background: none; border: 0; color: rgb(var(--vd-accent-rgb)); font-weight: 700; font-size: 13.5px;
+    background: none; border: 0; color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); font-weight: 700; font-size: 13.5px;
     cursor: pointer; padding: 8px 0 0;
 }
 
@@ -2338,7 +2338,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vd-guest { width: 92px; text-align: center; text-decoration: none; color: inherit; }
 a.vd-guest { cursor: pointer; transition: transform var(--dur-quick) ease; }
 a.vd-guest:hover { transform: translateY(-3px); }
-a.vd-guest:hover .vd-guest-name { color: rgb(var(--vd-accent-rgb)); }
+a.vd-guest:hover .vd-guest-name { color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); }
 .vd-guest-photo {
     width: 64px; height: 64px; border-radius: var(--radius-circle); object-fit: cover; display: block; margin: 0 auto 7px;
     border: 2px solid var(--white-a08);
@@ -5533,7 +5533,7 @@ body[data-side="video"] #gsearch-aura {
     transform: translateY(-1px);
     box-shadow: 0 8px 22px var(--black-a50), 0 0 22px rgba(var(--vd-accent-rgb), 0.5);
 }
-.vd-manage-ic { font-size: 12px; color: rgb(var(--vd-accent-rgb)); filter: brightness(1.35); }
+.vd-manage-ic { font-size: 12px; color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); filter: brightness(1.35); }
 
 /* ── Video Tools: Library Maintenance — video-only additions ───────────────
    The hero, tabs, job cards, finding cards, history entries and progress
@@ -8140,7 +8140,7 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
 /* subtitles fact: your languages first, the rest one click away */
 .vd-subs-more {
     background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
-    color: rgba(var(--vd-accent-rgb), 1); text-decoration: underline; text-underline-offset: 3px;
+    color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); text-decoration: underline; text-underline-offset: 3px;
 }
 .vd-subs-more:hover { color: var(--text-1); }
 .vd-detail-row--subs { grid-column: span 2; }

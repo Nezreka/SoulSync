@@ -240,6 +240,24 @@
         var L = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
         return L > 0.45 ? '#0b0b0f' : '#fff';
     }
+    // The accent as TEXT on the dark page: a dark sampled accent (House of the
+    // Dragon's oxblood) made "Returning Series" unreadable. Mix it toward white
+    // until it clears 4.5:1 against the page's #0b0b0f.
+    function accentText(rgb) {
+        function lum(c) {
+            var l = c.map(function (x) { var v = x / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+            return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
+        }
+        var bg = lum([11, 11, 15]), c = rgb.slice();
+        for (var t = 0; t <= 10; t++) {
+            c = rgb.map(function (x) { return Math.round(x + (255 - x) * t / 10); });
+            if ((lum(c) + 0.05) / (bg + 0.05) >= 4.5) break;
+        }
+        return c.join(', ');
+    }
+    function resetAccent(r0) {
+        ['--vd-accent-rgb', '--vd-accent-fg', '--vd-accent-text-rgb'].forEach(function (v) { r0.style.removeProperty(v); });
+    }
 
     // ── accent extraction (poster → dominant vibrant colour) ──────────────────
     function applyAccent(img) {
@@ -263,6 +281,7 @@
                 if (r0) {
                     r0.style.setProperty('--vd-accent-rgb', best[0] + ', ' + best[1] + ', ' + best[2]);
                     r0.style.setProperty('--vd-accent-fg', accentFg(best));
+                    r0.style.setProperty('--vd-accent-text-rgb', accentText(best));
                 }
             }
         } catch (e) { /* tainted/no image — keep theme accent */ }
@@ -3084,7 +3103,7 @@
         showLoading(true);
         resetExtras();
         var dh = q('[data-vd-details]'); if (dh) dh.innerHTML = '';
-        var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
+        var r0 = root(); if (r0) resetAccent(r0);
         fetch(detailURL('movie', id, currentSource), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -3160,7 +3179,7 @@
         resetExtras();
         showEpSyncing(false);
         ['[data-vd-episodes]', '[data-vd-season-nav]'].forEach(function (s) { var n = q(s); if (n) n.innerHTML = ''; });
-        var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
+        var r0 = root(); if (r0) resetAccent(r0);
         fetch(detailURL('show', id, currentSource), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -3596,7 +3615,7 @@
         ytCancelLoad();
         showLoading(true); resetExtras(); showEpSyncing(false);
         ['[data-vd-episodes]', '[data-vd-season-nav]'].forEach(function (s) { var n = q(s); if (n) n.innerHTML = ''; });
-        var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
+        var r0 = root(); if (r0) resetAccent(r0);
         ytResetPlaylists();
         fetch('/api/video/youtube/channel/' + encodeURIComponent(id) + '?limit=90', { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -3651,7 +3670,7 @@
         ytCancelLoad();
         showLoading(true); resetExtras(); showEpSyncing(false);
         ['[data-vd-episodes]', '[data-vd-season-nav]'].forEach(function (s) { var n = q(s); if (n) n.innerHTML = ''; });
-        var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
+        var r0 = root(); if (r0) resetAccent(r0);
         ytResetPlaylists();
         fetch('/api/video/youtube/playlist/' + encodeURIComponent(id), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
