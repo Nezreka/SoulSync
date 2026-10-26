@@ -332,6 +332,11 @@ describe('about and where to watch', () => {
     expect(SRC).toContain("subsMore.parentNode.querySelector('.vd-subs-rest')");
   });
 
+  it('the muted hero preview skips the rating card, the trailer button does not', () => {
+    expect(extractFunction('startBillboardTrailer', SRC)).toContain('&start=5');
+    expect(extractFunction('openTrailer', SRC)).not.toContain('start=');
+  });
+
   it('a studio chip always shows the studio name', () => {
     const body = extractFunction('renderFacts', SRC);
     expect(body).toContain('<span class="vd-studio-name">');

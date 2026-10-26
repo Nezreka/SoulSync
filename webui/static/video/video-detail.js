@@ -2124,9 +2124,11 @@
         bb.classList.remove('vd-billboard--restoring');
         var wrap = document.createElement('div');
         wrap.className = 'vd-bb-trailer'; wrap.setAttribute('data-vd-bb-trailer', '');
+        // start=5 skips the rating card and studio logos most trailers open on
+        // (the MPAA green band behind a hero title); the Trailer button plays it all
         wrap.innerHTML = '<iframe allow="autoplay; encrypted-media" frameborder="0" ' +
             'src="https://www.youtube.com/embed/' + encodeURIComponent(key) +
-            '?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&playsinline=1&enablejsapi=1"></iframe>' +
+            '?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&playsinline=1&enablejsapi=1&start=5"></iframe>' +
             '<div class="vd-bb-tctrls"><button class="vd-bb-tbtn" type="button" data-vd-bb-mute aria-label="Unmute">🔇</button>' +
             '<button class="vd-bb-tbtn" type="button" data-vd-bb-stop aria-label="Stop">✕</button></div>';
         bb.appendChild(wrap);
