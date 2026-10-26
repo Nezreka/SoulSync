@@ -4403,6 +4403,13 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 /* Compact watchlist button on each playlist row (the standard button, shrunk) */
 .vc-pl-watch { flex: 0 0 auto; padding: 6px 12px; font-size: 12px; }
 .vc-pl-watch .watchlist-icon { font-size: 13px; }
+/* phone: the "Add to Watchlist" label ate the row and titles read "The A..."; the
+   button goes to its icon (label kept for screen readers) and titles get two lines */
+@media (max-width: 620px) {
+    .vc-pl-watch { padding: 6px 10px; }
+    .vc-pl-watch .watchlist-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .vc-pl-title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+}
 .vc-pl--collapsed .vc-pl-chev { transform: rotate(-90deg); }
 .vc-pl-vids { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; padding: 6px 14px 16px; }
 .vc-pl--collapsed .vc-pl-vids { display: none; }
