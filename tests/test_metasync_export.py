@@ -454,3 +454,80 @@ def test_export_is_read_only(db, client):
         src = fh.read().upper()
     for verb in ("INSERT INTO", "UPDATE ", "DELETE FROM"):
         assert verb not in src
+
+
+# ── kinded_v2: algorithm version + legacy ids ─────────────────────────────
+
+def test_export_reports_the_soulid_algorithm_version(db, client):
+    """A consumer must be able to tell which scheme the ids in a walk
+    belong to (core.soulid_worker.SOULID_VERSION) — stamped once this
+    install's cutover flags say the walk really is kinded_v2."""
+    from core.soulid_worker import SOULID_VERSION
+    _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    _stamp_cutover_flags(db)
+    data = _get(client, entity="artist").get_json()["data"]
+    assert data["soulid_version"] == SOULID_VERSION
+
+
+def test_export_carries_the_parked_legacy_id(db, client):
+    """The cutover parks each row's pre-v2 id in soul_id_legacy so peers
+    can bridge old -> new; the export must serve it."""
+    a_ids, _, _ = _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    conn = db._get_connection()
+    conn.execute("UPDATE artists SET soul_id_legacy = 'soul_prev' WHERE id = ?",
+                 (a_ids[0],))
+    conn.commit()
+    items = _get(client, entity="artist").get_json()["data"]["items"]
+    assert items[0]["soul_id_legacy"] == "soul_prev"
+
+
+def _stamp_cutover_flags(db):
+    from core.soulid_worker import SOULID_VERSION
+    conn = db._get_connection()
+    for key in ("soulid_artist_version", "soulid_album_version",
+                "soulid_track_version"):
+        conn.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+            (key, SOULID_VERSION))
+    conn.commit()
+
+
+def test_export_version_is_null_until_the_cutover_has_run(db, client):
+    """The stamp describes the ids in the walk, so it comes from the DB's
+    own cutover flags — not the code constant. Before the worker's
+    one-time cutover, rows still carry pre-v2 ids and the export must
+    not claim otherwise."""
+    _seed(db, artists=1, albums_per_artist=0, tracks_per_album=0)
+    data = _get(client, entity="artist").get_json()["data"]
+    assert data["soulid_version"] is None
+
+
+def test_export_version_is_stamped_per_entity(db, client):
+    """The three cutovers are independent: the artist walk may claim
+    kinded_v2 while the album walk still honestly says null."""
+    from core.soulid_worker import SOULID_VERSION
+    _seed(db, artists=1, albums_per_artist=1, tracks_per_album=1)
+    conn = db._get_connection()
+    conn.execute(
+        "INSERT OR REPLACE INTO metadata (key, value) VALUES "
+        "('soulid_artist_version', ?)", (SOULID_VERSION,))
+    conn.commit()
+    artist = _get(client, entity="artist").get_json()["data"]
+    album = _get(client, entity="album").get_json()["data"]
+    assert artist["soulid_version"] == SOULID_VERSION
+    assert album["soulid_version"] is None
+
+
+def test_export_carries_album_and_track_legacy_ids(db, client):
+    _seed(db, artists=1, albums_per_artist=1, tracks_per_album=1)
+    conn = db._get_connection()
+    conn.execute("UPDATE albums SET soul_id_legacy = 'soul_prev_album'")
+    conn.execute("UPDATE tracks SET soul_id_legacy = 'soul_prev_track', "
+                 "album_soul_id_legacy = 'soul_prev_album'")
+    conn.commit()
+
+    album = _get(client, entity="album").get_json()["data"]["items"][0]
+    assert album["soul_id_legacy"] == "soul_prev_album"
+    track = _get(client, entity="track").get_json()["data"]["items"][0]
+    assert track["soul_id_legacy"] == "soul_prev_track"
+    assert track["album_soul_id_legacy"] == "soul_prev_album"

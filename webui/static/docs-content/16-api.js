@@ -406,8 +406,10 @@ provider IDs (\`musicbrainz_id\`, \`spotify_artist_id\`, \`itunes_artist_id\`,
 match statuses and last-attempted timestamps, Last.fm stats, and Genius
 metadata. Artists also carry \`aliases\` (array of alternate names),
 Discogs enrichment (\`discogs_bio\`, plus \`discogs_members\` and \`discogs_urls\`
-as arrays), \`soul_id_path\` (how the \`soul_id\` was derived: \`canonical\`,
-\`album\`, or \`name\`), and the \`art_locked\`/\`genres_locked\` flags (boolean
+as arrays), \`soul_id_path\` (how the \`soul_id\` was derived — current
+mints are always \`name\`, the reproducible name-only derivation;
+\`canonical\` and \`album\` appear only on ids that predate the kinded_v2
+cutover), and the \`art_locked\`/\`genres_locked\` flags (boolean
 or null). Enriched queries may also add \`album_count\`, \`track_count\`,
 \`is_watched\`, and \`image_url\`.
 
@@ -3717,7 +3719,7 @@ Pages through artists, albums, or tracks for the MetaSync sidecar.
 
 **Response**
 
-\`data\` contains \`entity\` (echoed, lowercased), \`items\`, \`next_cursor\`, and \`has_more\`. There is **no** \`pagination\` object — \`pagination\` is \`null\`; \`next_cursor\`/\`has_more\` are the paging mechanism. \`next_cursor\` is \`""\` when the page is empty. \`has_more\` is \`len(items) == limit\`, so a full page means "keep walking".
+\`data\` contains \`entity\` (echoed, lowercased), \`soulid_version\` (the soul_id scheme the ids in the walk belong to — \`kinded_v2\`, or \`null\` until this install's one-time upgrade cutover has run), \`items\`, \`next_cursor\`, and \`has_more\`. There is **no** \`pagination\` object — \`pagination\` is \`null\`; \`next_cursor\`/\`has_more\` are the paging mechanism. \`next_cursor\` is \`""\` when the page is empty. \`has_more\` is \`len(items) == limit\`, so a full page means "keep walking".
 
 \`\`\`json
 {
@@ -3763,6 +3765,7 @@ Pages through artists, albums, or tracks for the MetaSync sidecar.
         "bandcamp_match_status": null
       }
     ],
+    "soulid_version": "kinded_v2",
     "next_cursor": "NDI=",
     "has_more": true
   },
@@ -3773,9 +3776,9 @@ Pages through artists, albums, or tracks for the MetaSync sidecar.
 
 Item shapes by entity (in addition to the provider-ID + \`<provider>_match_status\` pairs shown above):
 
-- **artist**: \`soul_id\`, \`soul_id_path\` (\`'canonical'\` | \`'album'\` | \`'name'\` | \`null\` — only \`'canonical'\` is reproducible on another install), \`name\`, \`genres[]\`, \`updated_at\`, plus IDs: \`musicbrainz_id\`, \`spotify_artist_id\`, \`itunes_artist_id\`, \`deezer_id\`, \`discogs_id\`, \`amazon_id\`, \`tidal_id\`, \`qobuz_id\`, \`audiodb_id\`, \`genius_id\`, \`jiosaavn_id\`.
-- **album**: \`soul_id\`, \`title\`, \`artist_name\`, \`year\`, \`release_date\`, \`track_count\`, \`record_type\`, \`label\`, \`genres[]\`, \`updated_at\`, \`canonical_source\`, \`canonical_album_id\`, \`canonical_score\`, plus IDs: \`musicbrainz_release_id\`, \`spotify_album_id\`, \`itunes_album_id\`, \`deezer_id\`, \`discogs_id\`, \`amazon_id\`, \`tidal_id\`, \`qobuz_id\`, \`audiodb_id\`, \`jiosaavn_id\`, \`bandcamp_url\`, \`upc\`. (\`upc\` has no match-status companion.)
-- **track**: \`soul_id\`, \`album_soul_id\`, \`title\`, \`artist_name\`, \`album_title\`, \`track_number\`, \`disc_number\`, \`duration\`, \`bpm\`, \`explicit\`, \`year\`, \`isrc\`, \`updated_at\`, plus IDs: \`musicbrainz_recording_id\`, \`spotify_track_id\`, \`itunes_track_id\`, \`deezer_id\`, \`amazon_id\`, \`tidal_id\`, \`qobuz_id\`, \`audiodb_id\`, \`genius_id\`, \`jiosaavn_id\`, \`bandcamp_url\`.
+- **artist**: \`soul_id\`, \`soul_id_legacy\` (the pre-kinded_v2 id this row carried, or \`null\`), \`soul_id_path\` (\`'name'\` on kinded_v2 mints — the name-only derivation, reproducible on any install; \`'canonical'\` | \`'album'\` appear only on ids that still predate the kinded_v2 cutover), \`name\`, \`genres[]\`, \`updated_at\`, plus IDs: \`musicbrainz_id\`, \`spotify_artist_id\`, \`itunes_artist_id\`, \`deezer_id\`, \`discogs_id\`, \`amazon_id\`, \`tidal_id\`, \`qobuz_id\`, \`audiodb_id\`, \`genius_id\`, \`jiosaavn_id\`.
+- **album**: \`soul_id\`, \`soul_id_legacy\`, \`title\`, \`artist_name\`, \`year\`, \`release_date\`, \`track_count\`, \`record_type\`, \`label\`, \`genres[]\`, \`updated_at\`, \`canonical_source\`, \`canonical_album_id\`, \`canonical_score\`, plus IDs: \`musicbrainz_release_id\`, \`spotify_album_id\`, \`itunes_album_id\`, \`deezer_id\`, \`discogs_id\`, \`amazon_id\`, \`tidal_id\`, \`qobuz_id\`, \`audiodb_id\`, \`jiosaavn_id\`, \`bandcamp_url\`, \`upc\`. (\`upc\` has no match-status companion.)
+- **track**: \`soul_id\`, \`soul_id_legacy\`, \`album_soul_id\`, \`album_soul_id_legacy\`, \`title\`, \`artist_name\`, \`album_title\`, \`track_number\`, \`disc_number\`, \`duration\`, \`bpm\`, \`explicit\`, \`year\`, \`isrc\`, \`updated_at\`, plus IDs: \`musicbrainz_recording_id\`, \`spotify_track_id\`, \`itunes_track_id\`, \`deezer_id\`, \`amazon_id\`, \`tidal_id\`, \`qobuz_id\`, \`audiodb_id\`, \`genius_id\`, \`jiosaavn_id\`, \`bandcamp_url\`.
 
 **Errors**
 

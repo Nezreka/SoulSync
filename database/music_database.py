@@ -189,7 +189,7 @@ _EXPORT_PROVIDER_STATUSES = (
 )
 
 _EXPORT_ARTIST_COLUMNS = (
-    'id', 'soul_id', 'soul_id_path', 'name', 'genres', 'updated_at',
+    'id', 'soul_id', 'soul_id_legacy', 'soul_id_path', 'name', 'genres', 'updated_at',
     'musicbrainz_id', 'spotify_artist_id', 'itunes_artist_id', 'deezer_id',
     'discogs_id', 'amazon_id', 'tidal_id', 'qobuz_id', 'audiodb_id',
     'genius_id', 'jiosaavn_id',
@@ -197,7 +197,7 @@ _EXPORT_ARTIST_COLUMNS = (
 )
 
 _EXPORT_ALBUM_COLUMNS = (
-    'id', 'soul_id', 'title', 'year', 'release_date', 'track_count',
+    'id', 'soul_id', 'soul_id_legacy', 'title', 'year', 'release_date', 'track_count',
     'record_type', 'label', 'genres', 'updated_at',
     'musicbrainz_release_id', 'spotify_album_id', 'itunes_album_id',
     'deezer_id', 'discogs_id', 'amazon_id', 'tidal_id', 'qobuz_id',
@@ -207,7 +207,7 @@ _EXPORT_ALBUM_COLUMNS = (
 )
 
 _EXPORT_TRACK_COLUMNS = (
-    'id', 'soul_id', 'album_soul_id', 'title', 'track_number', 'disc_number',
+    'id', 'soul_id', 'soul_id_legacy', 'album_soul_id', 'album_soul_id_legacy', 'title', 'track_number', 'disc_number',
     'duration', 'bpm', 'explicit', 'year', 'isrc', 'updated_at',
     'musicbrainz_recording_id', 'spotify_track_id', 'itunes_track_id',
     'deezer_id', 'amazon_id', 'tidal_id', 'qobuz_id', 'audiodb_id',
@@ -7607,14 +7607,13 @@ class MusicDatabase:
             if 'soul_id' not in artist_cols:
                 cursor.execute("ALTER TABLE artists ADD COLUMN soul_id TEXT DEFAULT NULL")
                 logger.info("Added soul_id column to artists table")
-            # Which derivation produced the artist soul_id: 'canonical' (name +
-            # a provider's artist id), 'album' (name + the alphabetically-first
-            # album title IN THIS LIBRARY) or 'name' (name alone). Only
-            # 'canonical' is reproducible on another install — the album
-            # fallback depends on what that user happens to own, so two
-            # libraries holding the same artist derive different ids. Nothing
-            # recorded how much to trust a given artist soul_id before this.
-            # NULL means unknown (generated before this column existed).
+            # Which derivation produced the artist soul_id. Under kinded_v2
+            # the only derivation is 'name' (the normalized name alone),
+            # which IS reproducible on any install. 'canonical' (name + a
+            # provider's artist id) and 'album' (name + the alphabetically-
+            # first album title IN THIS LIBRARY) are pre-v2 derivations; the
+            # kinded_v2 cutover resets any row carrying them. NULL means
+            # unknown (generated before this column existed).
             if 'soul_id_path' not in artist_cols:
                 cursor.execute("ALTER TABLE artists ADD COLUMN soul_id_path TEXT DEFAULT NULL")
                 logger.info("Added soul_id_path column to artists table")
@@ -7649,6 +7648,27 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN album_soul_id TEXT DEFAULT NULL")
                 logger.info("Added album_soul_id column to tracks table")
 
+            # Legacy id columns: the kinded_v2 cutover parks each row's
+            # pre-v2 soul_id here before NULLing the live column, so peers
+            # that traded claims about the old ids can bridge old -> new.
+            # Written only by the cutover migrations in core/soulid_worker.
+            if 'soul_id_legacy' not in artist_cols:
+                cursor.execute("ALTER TABLE artists ADD COLUMN soul_id_legacy TEXT DEFAULT NULL")
+                artist_cols.append('soul_id_legacy')
+                logger.info("Added soul_id_legacy column to artists table")
+            if 'soul_id_legacy' not in album_cols:
+                cursor.execute("ALTER TABLE albums ADD COLUMN soul_id_legacy TEXT DEFAULT NULL")
+                album_cols.append('soul_id_legacy')
+                logger.info("Added soul_id_legacy column to albums table")
+            if 'soul_id_legacy' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN soul_id_legacy TEXT DEFAULT NULL")
+                track_cols.append('soul_id_legacy')
+                logger.info("Added soul_id_legacy column to tracks table")
+            if 'album_soul_id_legacy' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN album_soul_id_legacy TEXT DEFAULT NULL")
+                track_cols.append('album_soul_id_legacy')
+                logger.info("Added album_soul_id_legacy column to tracks table")
+
             # Indexes for lookups
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_soul_id ON artists (soul_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_soul_id ON albums (soul_id)")
@@ -7657,10 +7677,23 @@ class MusicDatabase:
 
             # v2.1 migration: regenerate artist soul_ids with new canonical ID algorithm
             # (was name+debut_year, now name+max(deezer_id,itunes_id) via track-verified lookup)
+            # Park before clearing: this block runs at DB init, BEFORE the
+            # SoulID worker's kinded_v2 cutover can park — never delete an
+            # id that exists nowhere else. Placeholders are install-local
+            # and are not parked (same rule as the worker cutover).
             cursor.execute("SELECT value FROM metadata WHERE key = 'soulid_v2_migration'")
             if not cursor.fetchone():
-                cursor.execute("UPDATE artists SET soul_id = NULL")
-                cleared = cursor.rowcount
+                if 'soul_id_legacy' in artist_cols:
+                    cursor.execute(
+                        "UPDATE artists SET soul_id_legacy = soul_id "
+                        "WHERE soul_id IS NOT NULL AND soul_id != '' "
+                        r"AND soul_id NOT LIKE 'soul\_unnamed\_%' ESCAPE '\' "
+                        "AND (soul_id_legacy IS NULL OR soul_id_legacy = '')")
+                    cursor.execute("UPDATE artists SET soul_id = NULL")
+                    cleared = cursor.rowcount
+                else:
+                    # No legacy column, no park — never clear into the void.
+                    cleared = 0
                 cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('soulid_v2_migration', '1')")
                 if cleared > 0:
                     logger.info(f"SoulID v2 migration: cleared {cleared} artist soul_ids for regeneration")
@@ -22874,7 +22907,10 @@ class MusicDatabase:
             'qobuz_track_id': 'qobuz_id',
             'musicbrainz_recording_id': 'musicbrainz_recording_id',
             'audiodb_id': 'audiodb_id',
-            'soul_id': 'soul_id',
+            # soul_id is deliberately NOT copied from provenance: it is a
+            # computed key owned by the SoulID worker (kinded_v2). A stored
+            # provenance id is a pre-v2 id (or one read from a file's tags)
+            # and refilling it here would pin the row to the old scheme.
             'isrc': 'isrc',
             'acquired_quality_json': 'acquired_quality_json',
             'retention_json': 'retention_json',
