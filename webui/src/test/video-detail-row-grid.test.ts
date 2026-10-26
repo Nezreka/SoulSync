@@ -92,3 +92,20 @@ describe('the episode row grid fits every child it emits', () => {
     );
   });
 });
+
+describe('an episode row with its menu open', () => {
+  // Measured in chromium (Oct 2026): every row is its own layer, so a menu
+  // opened in row 3 was painted under row 4's buttons. Raising the open row
+  // is what fixed it; a z-index on the menu alone did nothing.
+  it('sits above the rows after it', () => {
+    const at = CSS.indexOf('\n.vd-ep.vd-ep--menu {');
+    expect(at, 'the open-row rule is gone').toBeGreaterThan(-1);
+    const rule = CSS.slice(at, CSS.indexOf('}', at));
+    expect(rule).toContain('position: relative');
+    expect(rule).toMatch(/z-index:\s*\d+/);
+  });
+
+  it('keeps its actions on screen while the pointer is in the menu', () => {
+    expect(CSS).toContain(':not(.vd-ep--open):not(.vd-ep--menu) .vd-ep-get');
+  });
+});

@@ -807,13 +807,15 @@ body[data-side="video"] .dashboard-header-sweep {
     position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 30;
     display: flex; flex-direction: column; gap: 4px; padding: 6px;
     max-height: 60vh; overflow-y: auto;
-    min-width: 200px; border-radius: var(--radius-lg);
+    min-width: 240px; border-radius: var(--radius-lg);
     background: rgba(16, 18, 24, 0.97); border: 1px solid var(--white-a12);
     box-shadow: 0 18px 46px var(--black-a55); backdrop-filter: blur(14px);
 }
 .vd-more-menu .vd-manage-btn {
     width: 100%; justify-content: flex-start; margin: 0; background: transparent;
     border-color: transparent; box-shadow: none;
+    display: flex; align-items: center; gap: 8px; min-height: 34px; font-size: 13px;
+    text-align: left; white-space: nowrap;
 }
 .vd-more-menu .vd-manage-btn:hover { background: var(--white-a08); }
 
@@ -1065,7 +1067,7 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-ep-badge { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px;
     padding: 5px 12px; border-radius: var(--radius-pill); white-space: nowrap; }
 .vd-ep--owned .vd-ep-badge { color: #4ade80; background: rgba(74,222,128,0.12); border: 1px solid rgba(74,222,128,0.32); }
-.vd-ep--missing .vd-ep-badge { color: var(--white-a50); background: var(--white-a05); border: 1px solid var(--white-a12); }
+.vd-ep--missing .vd-ep-badge { color: var(--warning); background: rgba(var(--warning-rgb), 0.08); border: 1px solid rgba(var(--warning-rgb), 0.28); }
 .vd-ep--missing .vd-ep-index, .vd-ep--missing .vd-ep-title { opacity: 0.7; }
 
 /* Continue Watching — per-episode watch state (server truth from the scan) */
@@ -7545,7 +7547,8 @@ body[data-side="video"] #gsearch-aura {
     transition: opacity 0.16s ease, transform 0.16s ease;
 }
 @media (hover: hover) and (pointer: fine) {
-    .vd-ep:not(:hover):not(:focus-within):not(.vd-ep--open) .vd-ep-get {
+    /* a row whose ⋯ menu is open keeps its actions on screen while you pick */
+    .vd-ep:not(:hover):not(:focus-within):not(.vd-ep--open):not(.vd-ep--menu) .vd-ep-get {
         opacity: 0;
         transform: translateX(6px);
         pointer-events: none;
@@ -7901,17 +7904,17 @@ body[data-side="video"] #gsearch-aura {
 /* ── tabs: the page, and Your library (React, features/video-library) ── */
 .vd-tabs {
     display: flex; gap: 4px; margin: 0 0 26px; padding: 4px; width: max-content; max-width: 100%;
-    border-radius: 14px; background: var(--white-a05); border: 1px solid var(--white-a08);
+    border-radius: var(--radius-card); background: var(--white-a05); border: 1px solid var(--white-a08);
 }
 .vd-tabs[hidden] { display: none; }
 .vd-tab {
-    min-height: 38px; padding: 0 20px; border: 0; border-radius: 10px; cursor: pointer;
+    min-height: 38px; padding: 0 20px; border: 0; border-radius: var(--radius-control); cursor: pointer;
     font: inherit; font-size: 14px; font-weight: 700; color: var(--white-a60); background: transparent;
     transition: color var(--dur-fast), background var(--dur-fast);
 }
-.vd-tab:hover { color: #fff; }
+.vd-tab:hover { color: var(--text-1); }
 .vd-tab--active, .vd-tab[aria-selected="true"] {
-    color: #fff; background: rgba(var(--vd-accent-rgb), 0.28);
+    color: var(--text-1); background: rgba(var(--vd-accent-rgb), 0.28);
     box-shadow: inset 0 0 0 1px rgba(var(--vd-accent-rgb), 0.45);
 }
 .vd-tab:focus-visible { outline: 2px solid rgba(var(--vd-accent-rgb), 0.8); outline-offset: 2px; }
@@ -7922,8 +7925,8 @@ body[data-side="video"] #gsearch-aura {
    sections that used to sit in the main flow (subtitle languages, acquisition
    history) come along, under the tab. */
 .vd-body--library { display: flex; flex-direction: column; }
-.vd-body--library > :not(.vd-tabs):not(.vd-library-panel):not(.vd-lib-extra) { display: none !important; }
-.vd-body:not(.vd-body--library) > .vd-lib-extra { display: none !important; }
+.vd-body.vd-body--library > :not(.vd-tabs):not(.vd-library-panel):not(.vd-lib-extra) { display: none; }
+.vd-body:not(.vd-body--library) > .vd-lib-extra { display: none; }
 .vd-body--library > .vd-tabs { order: 0; }
 .vd-body--library > .vd-library-panel { order: 1; }
 .vd-body--library > .vd-subcfg-section { order: 2; margin-top: 34px; }
@@ -7936,47 +7939,41 @@ body[data-side="video"] #gsearch-aura {
     padding: 4px 10px 2px; font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em;
     text-transform: uppercase; color: var(--white-a40);
 }
-.vd-more-menu { min-width: 240px; }
 .vd-more-menu .vd-more-link { text-decoration: none; color: inherit; }
-.vd-more-menu .vd-manage-btn { display: flex; align-items: center; justify-content: flex-start; gap: 8px;
-    min-height: 34px; font-size: 13px; text-align: left; white-space: nowrap; }
 
 /* ── inline ⋯ menus on episode rows and the season bar ── */
 .vd-pop { position: relative; display: inline-flex; }
 .vd-pop-btn { font-size: 16px; letter-spacing: 0; }
 .vd-season-actions .vd-pop-btn {
-    width: 34px; height: 34px; border-radius: 10px; cursor: pointer; font: inherit; font-size: 17px;
+    width: 34px; height: 34px; border-radius: var(--radius-control); cursor: pointer; font: inherit; font-size: 17px;
     color: var(--white-a70); background: var(--white-a05); border: 1px solid var(--white-a12);
 }
 .vd-season-actions .vd-pop-btn:hover,
-.vd-pop-btn[aria-expanded="true"] { color: #fff; background: var(--white-a10); }
+.vd-pop-btn[aria-expanded="true"] { color: var(--text-1); background: var(--white-a10); }
 .vd-pop-menu {
     position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
     display: flex; flex-direction: column; gap: 2px; padding: 6px; min-width: 220px;
-    border-radius: var(--radius-lg); background: rgba(16, 18, 24, 0.98);
+    border-radius: var(--radius-lg); background: var(--bg-primary);
     border: 1px solid var(--white-a12); box-shadow: 0 18px 46px var(--black-a55);
     backdrop-filter: blur(14px); cursor: default;
 }
 .vd-pop-menu[hidden] { display: none; }
+/* rows are their own layers (the entry animation), so the row with an open
+   menu has to sit above its neighbours or the next row paints over the menu */
+.vd-ep.vd-ep--menu { position: relative; z-index: 40; }
 .vd-pop-menu > button {
     display: flex; align-items: center; gap: 8px; width: 100%; min-height: 34px; margin: 0;
-    padding: 0 12px; border-radius: 8px; justify-content: flex-start; white-space: nowrap;
-    font: inherit; font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.88);
+    padding: 0 12px; border-radius: var(--radius-md); justify-content: flex-start; white-space: nowrap;
+    font: inherit; font-size: 13px; font-weight: 600; color: var(--white-a90);
     background: transparent; border: 0; box-shadow: none; cursor: pointer; text-align: left;
 }
-.vd-pop-menu > button:hover, .vd-pop-menu > button:focus-visible { background: var(--white-a08); color: #fff; outline: none; }
+.vd-pop-menu > button:hover, .vd-pop-menu > button:focus-visible { background: var(--white-a08); color: var(--text-1); outline: none; }
 .vd-pop-menu > button .discog-btn-icon { width: 16px; text-align: center; }
-/* a row whose menu is open keeps its actions on screen while you pick */
-.vd-ep--menu .vd-ep-get { opacity: 1 !important; transform: none !important; pointer-events: auto !important; }
-
-/* ── season bar: what's missing, one Grab, and the menu ── */
-.vd-season-actions { gap: 10px; }
 .vd-season-actions .discog-download-btn[data-vd-season-grab] { min-height: 34px; }
 
 /* ── episode badges: only a gap gets one ── */
-.vd-ep--missing .vd-ep-badge { color: #fbbf24; background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.28); }
-.vd-ep-badge--soon { color: var(--white-a55) !important; background: var(--white-a05) !important; border: 1px solid var(--white-a12) !important; }
-.vd-ep-badge--none { padding: 0; border: 0 !important; background: none !important; }
+.vd-ep--missing .vd-ep-badge.vd-ep-badge--soon { color: var(--white-a55); background: var(--white-a05); border-color: var(--white-a12); }
+.vd-ep .vd-ep-badge.vd-ep-badge--none { padding: 0; border: 0; background: none; }
 .vd-ep-badge--versions { color: var(--white-a70); background: var(--white-a05); border: 1px solid var(--white-a12); }
 /* the management sections that moved under Your library read like its own
    cards: same heading size, same card, the page accent on Save */
