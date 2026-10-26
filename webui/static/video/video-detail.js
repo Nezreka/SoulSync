@@ -1095,7 +1095,7 @@
         var input = ov.querySelector('.vht-search');
         var box = ov.querySelector('[data-vht-results]');
         var linkBtn = ov.querySelector('[data-vht="link"]');
-        var selected = null, timer = null, seq = 0;
+        var selected = null, timer = null, seq = 0, found = {};
 
         function hint(t) { box.innerHTML = '<div class="vht-hint">' + t + '</div>'; }
         function search(qry, mySeq) {
@@ -1106,6 +1106,8 @@
                     if (mySeq !== seq || !document.body.contains(ov)) return;
                     selected = null; linkBtn.disabled = true;
                     var list = (res && res.results) || [];
+                    found = {};
+                    list.forEach(function (r) { found[String(r.id)] = r; });
                     if (!list.length) { hint('No matches in your library — try a shorter search.'); return; }
                     box.innerHTML = list.map(function (r) {
                         var note = (r.tmdb_id && String(r.tmdb_id) !== String(tmdbId))
@@ -1150,26 +1152,46 @@
         });
         function doLink() {
             if (!selected || linkBtn.disabled) return;
+            var row = found[String(selected)] || {};
+            // An unmatched copy IS this title: re-identify the library row itself
+            // (locked, like Fix match). A side link alone made it read as owned
+            // and nothing else — its artwork, details and upgrades stayed wrong.
+            // A copy matched to another title is re-identified only when asked.
+            if (row.tmdb_id && String(row.tmdb_id) !== String(tmdbId) && typeof showConfirmDialog === 'function') {
+                showConfirmDialog({ title: 'Re-identify this copy?',
+                    message: '\u201c' + (row.title || 'That copy') + '\u201d' + (row.year ? ' (' + row.year + ')' : '') +
+                        ' is matched to a different title in your library. Re-identify it as \u201c' +
+                        (d.title || 'this title') + '\u201d? Its artwork, details and upgrades follow, and a scan won\u2019t switch it back.',
+                    confirmText: 'Re-identify', cancelText: 'Cancel' })
+                    .then(function (ok) { if (ok) send(true); });
+                return;
+            }
+            send(!row.tmdb_id || String(row.tmdb_id) !== String(tmdbId));
+        }
+        function send(reidentify) {
             linkBtn.disabled = true;
             linkBtn.textContent = 'Linking\u2026';
             fetch('/api/video/manual-match', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ kind: kind, tmdb_id: tmdbId, library_id: parseInt(selected, 10) })
+                body: JSON.stringify({ kind: kind, tmdb_id: tmdbId, library_id: parseInt(selected, 10),
+                    reidentify: !!reidentify })
             })
                 .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
                 .then(function (res) {
                     if (res.ok && res.j && res.j.success) {
                         closeHaveThisModal();
-                                                    toast('Linked \u2014 this title now shows as in your library');
-                        // The reload hits the new manual link: tmdb_detail
-                        // answers with the redirect and we land on the
-                        // library page.
+                        toast(res.j.reidentified
+                            ? 'Matched \u2014 your copy is now this title'
+                            : 'Linked \u2014 this title now shows as in your library');
+                        // The reload hits the new match (or the manual link):
+                        // tmdb_detail answers with the redirect and we land on
+                        // the library page.
                         if (kind === 'movie') loadMovie(currentId, 'tmdb');
                         else loadShow(currentId, 'tmdb');
                     } else {
                         linkBtn.disabled = false;
                         linkBtn.textContent = 'Link selected';
-                                                    toast('Couldn\u2019t link \u2014 is that title still in your library?', 'error');
+                        toast((res.j && res.j.error) || 'Couldn\u2019t link \u2014 is that title still in your library?', 'error');
                     }
                 })
                 .catch(function () {

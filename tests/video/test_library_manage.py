@@ -301,3 +301,47 @@ def test_show_folders_fold_plex_style_season_folders_into_the_show():
     ])
     assert out == [{"path": "/m/TV/Breaking Bad", "files": 2},
                    {"path": "/x/Breaking.Bad", "files": 1}]
+
+
+# ── the routes ──────────────────────────────────────────────────────────────
+
+def _client(tmp_path, *, is_admin=True):
+    from flask import Flask
+    import api.video as videoapi
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "api.db"))
+    app = Flask(__name__)
+
+    @app.before_request
+    def _stamp_g():
+        from flask import g
+        g.is_admin = is_admin
+        g.can_download = True
+
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    return app.test_client(), videoapi._video_db
+
+
+def test_library_route_hides_paths_from_a_profile_that_is_not_an_admin(tmp_path):
+    c, db = _client(tmp_path, is_admin=False)
+    mid = _movie(db)
+    _add_file(db, movie_id=mid, path="/srv/Movies/Dune (2021)/Dune.mkv", write=False)
+    body = c.get(f"/api/video/detail/movie/{mid}/library").get_json()
+    assert body["can_manage"] is False
+    assert body["files"][0]["path"] is None and body["files"][0]["filename"] == "Dune.mkv"
+    (tmp_path / "admin").mkdir()
+    c2, db2 = _client(tmp_path / "admin")
+    mid2 = _movie(db2)
+    _add_file(db2, movie_id=mid2, path="/srv/Movies/Dune (2021)/Dune.mkv", write=False)
+    assert c2.get(f"/api/video/detail/movie/{mid2}/library").get_json()["files"][0]["path"].endswith("Dune.mkv")
+
+
+def test_file_and_identity_writes_are_admin_only(tmp_path):
+    c, db = _client(tmp_path, is_admin=False)
+    mid = _movie(db)
+    fid = _add_file(db, movie_id=mid, path="/srv/Dune.mkv", write=False)
+    assert c.post(f"/api/video/files/{fid}/delete", json={}).status_code == 403
+    assert c.post(f"/api/video/files/{fid}/rename", json={}).status_code == 403
+    assert c.get(f"/api/video/files/{fid}/rename-plan").status_code == 403
+    assert c.post(f"/api/video/detail/movie/{mid}/identify", json={"tmdb_id": 841}).status_code == 403
+    assert c.post(f"/api/video/detail/movie/{mid}/identify/release", json={}).status_code == 403
+    assert db.library_file_row(fid) is not None

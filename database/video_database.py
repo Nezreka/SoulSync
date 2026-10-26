@@ -1423,15 +1423,26 @@ class VideoDatabase:
         table = {"movie": "movies", "show": "shows"}.get(kind)
         if not table or not (query or "").strip():
             return []
-        like = ("%" + query.strip().replace("\\", "\\\\").replace("%", "\\%")
-                .replace("_", "\\_") + "%")
+        # word by word, not one phrase: TMDB says "Dune: Part One", the server
+        # says "Dune Part One", and a single LIKE on the whole string found
+        # nothing, which made the picker look like the copy wasn't there.
+        # a 4-digit word is treated as the year, not part of the title.
+        words = [w for w in re.findall(r"[^\W_]+", query.lower()) if w]
+        year = next((int(w) for w in words if len(w) == 4 and w.isdigit()
+                     and 1880 <= int(w) <= 2100), None)
+        words = [w for w in words if not (year and w == str(year))][:6]
+        if not words:
+            return []
+        def esc(w):
+            return "%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where = " AND ".join("lower(title) LIKE ? ESCAPE '\\'" for _ in words)
         conn = self._get_connection()
         try:
             rows = conn.execute(
                 f"SELECT id, title, year, tmdb_id FROM {table} "
-                f"WHERE {self._ON_SERVER} AND title LIKE ? ESCAPE '\\' "
-                f"ORDER BY title LIMIT ?",
-                (like, max(1, min(int(limit or 12), 50)))).fetchall()
+                f"WHERE {self._ON_SERVER} AND {where} "
+                f"ORDER BY (year = ?) DESC, length(title), title LIMIT ?",
+                [esc(w) for w in words] + [year if year else -1, max(1, min(int(limit or 12), 50))]).fetchall()
             return [dict(r) for r in rows]
         except sqlite3.Error:
             return []
