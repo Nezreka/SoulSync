@@ -42,8 +42,9 @@ metasync is an optional companion app that runs next to soulsync. its first netw
 
 ## playlists
 
-- **generate cover art** from any playlist's ⋯ menu, with pollinations. it reads the playlist's genres, mood and decade, shows a preview, try another changes the style. works with no key (one image every 45s, their mark stays on), an optional key in settings lifts both. a generated cover on a mirror survives refreshes and restore original cover brings the source's back. also fixed user playlist covers never re-pushing to the server.
+- **generate cover art** from any playlist's ⋯ menu, with the playlist's name and source ("tidal playlist") across the top (a show name on cover switch takes them off without a new image), with pollinations. it reads the playlist's genres, mood and decade, shows a preview, try another changes the style. works with no key (one image every 45s, their mark stays on), an optional key in settings lifts both. a generated cover on a mirror survives refreshes and restore original cover brings the source's back. also fixed user playlist covers never re-pushing to the server.
 - **newpipe backups** on the import tab become mirrored playlists, and a newer backup overwrites the same mirrors.
+- **big tidal playlists get mirrored:** start identifying now creates the mirror when a tidal playlist has none. the page only mirrored from its background crawl, which a 1218-track playlist could lose, so it synced to the server and showed on the dashboard but never in the mirrored list.
 - **big tidal playlists:** opening one before soulsync had pulled its tracks in the background showed 0 tracks, and start identifying fetched the whole playlist again (minutes, 1s a page) with nothing on screen. the modal now loads the tracks when it opens, start reuses that fetch, it uses the profile's own tidal account like the list does, and a failed start says why instead of quietly going back to blank.
 - **sync page:** search on every playlist tab, remove match (keep in playlist) on the server compare view so a wrong pairing never comes back, and swap/add searches with the track's own artist instead of various artists.
 - **source vs server numbering (#1852):** the order check compared mismatched numbering and flagged drift that wasn't there, and align could add a copy of a server track two source rows shared.
@@ -84,6 +85,9 @@ metasync is an optional companion app that runs next to soulsync. its first netw
 
 ## fixes
 
+- **a staging file the library already has no longer blocks the real search.** old mp3s of an album sat in the staging folder; every wishlist cycle grabbed them, the import kept the library copy, and tidal was never searched. a task now skips a staging file it already tried and goes on to search.
+- **a shared "lil" no longer makes two artists the same.** lil jon's "alive" was downloaded for lil yee's "dead or alive": the shared "lil " alone passed the artist check. the fuzzy compare now looks past lil, dj, mc, the, young, yung and big.
+- **wrong song in review:** deletes the file, skips that source next time, puts the song that was asked for back on the wishlist and opens interactive search on it.
 - **album auto-fill lets a guest artist's track onto its own album.** how to train your dragon 2 (john powell) skipped alexander rybak's song for not being the album artist. a track now passes when the album's own tracklist credits the album artist, the check that stopped gut's light years pulling in jamiroquai still holds.
 - **lrclib hiccups aren't "no lyrics" (#1879):** a timeout, 429 or 5xx was recorded the same as a song with no lyrics. those now back off and retry, fix all stops on a broken lrclib instead of marking everything, and an import never sits out an lrclib cooldown (it waited up to 5 minutes a track).
 - **import summary stats (#1874)** stop disappearing while an import is processing.
