@@ -764,6 +764,8 @@ export function FindingsSurface({
 
     let fixed = 0;
     let failed = 0;
+    let skipped = 0;
+    let otherArtistSkipped = 0;
     let lastError = '';
     toast(`Fixing ${ids.length} findings...`, 'info');
 
@@ -796,8 +798,18 @@ export function FindingsSurface({
         // Backfill "Add to Wishlist" falls through with no action — the fix
         // handler already adds to the wishlist by default.
 
-        const result = await fixFinding(id, fixAction);
+        // bulk: true — fixing a selection is a bulk run even though it
+        // posts one id at a time. Without it every selected finding
+        // would count as an explicit single fix, and the album gate
+        // would let a select-all wishlist every other artist on every
+        // compilation in the selection.
+        const result = await fixFinding(id, fixAction, { bulk: true });
+        // Counted even on a successful fix: a partial gate resolves the
+        // finding, and without this the held-back tracks are silent here
+        // (the background Fix All reports them in its run note).
+        otherArtistSkipped += result.other_artist_skipped || 0;
         if (result.success) fixed++;
+        else if (result.skipped_by_design) skipped++;
         else {
           failed++;
           lastError = result.error || 'unknown error';
@@ -807,7 +819,13 @@ export function FindingsSurface({
       }
     }
 
-    const { message, type } = bulkFixLoopMessage(fixed, failed, lastError);
+    const { message, type } = bulkFixLoopMessage(
+      fixed,
+      failed,
+      lastError,
+      skipped,
+      otherArtistSkipped,
+    );
     toast(message, type);
     refreshAll();
   }, [items, prompts, refreshAll, selected]);

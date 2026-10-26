@@ -357,7 +357,14 @@ def repair_finding_fix(finding_id):
 
         data = request.get_json(silent=True) or {}
         fix_action = data.get('fix_action')  # e.g. 'staging' or 'delete' for orphan files
-        result = _repair_worker().fix_finding(finding_id, fix_action=fix_action)
+        # This route is the single-finding fix, so it is the one place
+        # that may declare a fix explicit — and only when the caller
+        # does not declare itself bulk: a "Fix Selected" loop posts here
+        # once per id but is a bulk run. The distinction decides whether
+        # the album completeness fixer may wishlist other artists'
+        # tracks.
+        result = _repair_worker().fix_finding(
+            finding_id, fix_action=fix_action, explicit=not bool(data.get('bulk')))
         return jsonify(result), 200 if result.get('success') else 400
     except Exception as e:
         logger.error(f"Error fixing finding {finding_id}: {e}")
@@ -412,6 +419,8 @@ def repair_findings_bulk_fix():
             'success': True,
             'fixed': result.get('fixed', 0),
             'failed': result.get('failed', 0),
+            'skipped': result.get('skipped', 0),
+            'other_artist_skipped': result.get('other_artist_skipped', 0),
             'total': result.get('total', 0),
             'errors': result.get('errors', [])
         }), 200

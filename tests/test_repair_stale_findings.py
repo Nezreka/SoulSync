@@ -157,7 +157,7 @@ def test_a_raising_finding_does_not_abandon_the_rest(worker, monkeypatch):
     bad = _add(worker, title='explodes')
     good_two = _add(worker, title='last')
 
-    def flaky(fid, fix_action=None):
+    def flaky(fid, fix_action=None, **kwargs):
         if fid == bad:
             raise RuntimeError('stale row blew up')
         return {'success': True, 'action': 'applied_lyrics'}
@@ -178,7 +178,7 @@ def test_the_error_from_a_raising_finding_is_reported_not_swallowed(worker, monk
     """'Errors should be reported and skipped' — mandos21's actual ask."""
     fid = _add(worker)
     monkeypatch.setattr(worker, 'fix_finding',
-                        lambda f, fix_action=None: (_ for _ in ()).throw(OSError('gone')))
+                        lambda f, fix_action=None, **kwargs: (_ for _ in ()).throw(OSError('gone')))
     monkeypatch.setattr(worker, '_pending_fixable_ids', lambda **kw: [fid])
 
     out = worker.bulk_fix_findings()
@@ -187,3 +187,107 @@ def test_the_error_from_a_raising_finding_is_reported_not_swallowed(worker, monk
     assert out['failed'] == 1
     assert out['errors'] and out['errors'][0]['id'] == fid
     assert 'gone' in out['errors'][0]['error']
+
+
+# ── how a fix was asked for is stamped for the handler ───────────────────────
+
+def test_a_direct_fix_is_stamped_as_an_explicit_single_fix(worker, monkeypatch):
+    """A user fixing one finding is an explicit request for THAT finding.
+    The incomplete-album fixer relies on this before wishlisting other
+    artists' tracks from a compilation."""
+    fid = _add(worker)
+    seen = []
+    monkeypatch.setattr(worker, '_execute_fix', lambda *a, **k: seen.append(a[4]) or {
+        'success': True, 'action': 'done'})
+
+    worker.fix_finding(fid, explicit=True)
+
+    assert seen[0]['_explicit_single_fix'] is True
+
+
+def test_a_skipped_by_design_finding_is_not_a_bulk_failure(worker, monkeypatch):
+    """An album held back by the other-artist gate alone stays pending
+    with its reason on the row, but a bulk run must not count it as a
+    failure — at library scale it would be re-reported as a fresh
+    failure on every Fix All, forever."""
+    fid = _add(worker)
+    monkeypatch.setattr(worker, '_execute_fix', lambda *a, **k: {
+        'success': False, 'skipped_by_design': True, 'other_artist_skipped': 2,
+        'error': '2 track(s) by other artists were not added to the wishlist.'})
+    monkeypatch.setattr(worker, '_pending_fixable_ids', lambda **kw: [fid])
+
+    out = worker.bulk_fix_findings()
+
+    assert out['fixed'] == 0
+    assert out['failed'] == 0
+    assert out['skipped'] == 1
+    assert out['other_artist_skipped'] == 2
+    assert out['errors'] == []
+    status, action, error = _row(worker, fid)
+    assert status == 'pending'
+    assert 'other artists were not added' in error
+
+
+def test_a_fix_without_the_explicit_flag_is_not_stamped_explicit(worker, monkeypatch):
+    """The polarity is load-bearing: explicit defaults to False, so any
+    future caller that forgets the flag gets the gated behavior, never
+    the explicit one."""
+    fid = _add(worker)
+    seen = []
+    monkeypatch.setattr(worker, '_execute_fix', lambda *a, **k: seen.append(a[4]) or {
+        'success': True, 'action': 'done'})
+
+    worker.fix_finding(fid)
+
+    assert seen[0]['_explicit_single_fix'] is False
+
+
+def test_a_bulk_fix_is_not_stamped_as_an_explicit_single_fix(worker, monkeypatch):
+    """The bulk loops must never inherit the explicit stamp — a Fix All is
+    not the user asking for each album on it. A stored finding cannot
+    smuggle the stamp either: it is written fresh on every run, over
+    whatever the row's details_json carried in."""
+    cur = worker.db._conn.execute(
+        "INSERT INTO repair_findings (job_id, finding_type, file_path, title, details_json) "
+        "VALUES ('album_completeness', 'incomplete_album', '/music/x.flac', 'smuggled', "
+        "'{\"_explicit_single_fix\": true}')")
+    worker.db._conn.commit()
+    fid = cur.lastrowid
+    seen = []
+    monkeypatch.setattr(worker, '_execute_fix', lambda *a, **k: seen.append(a[4]) or {
+        'success': True, 'action': 'done'})
+    monkeypatch.setattr(worker, '_pending_fixable_ids', lambda **kw: [fid])
+
+    worker.bulk_fix_findings()
+
+    assert seen[0]['_explicit_single_fix'] is False
+
+
+def test_the_background_bulk_loop_also_stamps_bulk(worker, monkeypatch):
+    """The background loop is the actual Fix All path — pin its stamp and
+    its skipped-by-design tally too, not just the synchronous loop's."""
+    fid = _add(worker)
+    seen = []
+    monkeypatch.setattr(worker, '_execute_fix', lambda *a, **k: seen.append(a[4]) or {
+        'success': False, 'skipped_by_design': True, 'other_artist_skipped': 2,
+        'error': '2 track(s) by other artists were not added to the wishlist.'})
+    monkeypatch.setattr(worker, '_types_for_findings', lambda ids: {fid: 'incomplete_album'})
+    worker._bulk_fix_thread = None
+    worker._bulk_fix_stop_event = threading.Event()
+    worker._bulk_fix_state = {
+        'running': True, 'total': 1, 'done': 0, 'fixed': 0, 'failed': 0,
+        'skipped': 0, 'other_artist_skipped': 0, 'stopped': False,
+        'job_id': None, 'finding_type': None, 'safe_only': False,
+        'errors': [], 'error': None, 'note': None, 'per_type': {},
+    }
+
+    worker._run_bulk_fix([fid])
+
+    assert seen[0]['_explicit_single_fix'] is False
+    state = worker._bulk_fix_state
+    assert state['failed'] == 0
+    assert state['skipped'] == 1
+    assert state['other_artist_skipped'] == 2
+    assert state['errors'] == []
+    assert state['per_type'] == {}
+    assert 'other artists were not added to the wishlist' in state['note']

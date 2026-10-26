@@ -153,7 +153,13 @@ export function AlbumInspectionTray({
     for (const f of fixable) {
       setBusyIds((prev) => new Set(prev).add(f.id));
       try {
-        await fixFinding(f.id);
+        // bulk: true — this loop is not a fix of one finding. The tray's
+        // list can span an artist's whole catalogue, every album sharing
+        // a title, or (when the filter matches nothing) up to 100 search
+        // rows, so each call must not count as an explicit single fix:
+        // that is what would let the album completeness gate wishlist
+        // other artists across all of them from one click.
+        await fixFinding(f.id, null, { bulk: true });
       } catch {}
     }
     setBusyIds(new Set());

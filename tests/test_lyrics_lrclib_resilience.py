@@ -623,7 +623,7 @@ def test_bulk_fix_stops_after_consecutive_lrclib_transients(monkeypatch):
     calls = []
     w = _bulk_worker(
                      {i: 'missing_lyrics' for i in range(1, 9)},
-                     lambda fid, fix_action=None: calls.append(fid) or dict(_TRANSIENT))
+                     lambda fid, fix_action=None, **kwargs: calls.append(fid) or dict(_TRANSIENT))
     w._bulk_fix_state['total'] = 8
     w._run_bulk_fix(list(range(1, 9)))
     state = w._bulk_fix_state
@@ -641,7 +641,7 @@ def test_bulk_fix_breaker_ignores_local_failures_and_resets_on_definitive():
     outcomes = iter([dict(_TRANSIENT), dict(_TRANSIENT), local,
                      dict(_TRANSIENT), dict(_TRANSIENT), dict(_TRANSIENT)])
     w = _bulk_worker({i: 'missing_lyrics' for i in range(1, 8)},
-                     lambda fid, fix_action=None: next(outcomes))
+                     lambda fid, fix_action=None, **kwargs: next(outcomes))
     w._bulk_fix_state['total'] = 7
     w._run_bulk_fix(list(range(1, 8)))
     state = w._bulk_fix_state
@@ -655,7 +655,7 @@ def test_bulk_fix_breaker_ignores_local_failures_and_resets_on_definitive():
         outcomes2 = iter([dict(_TRANSIENT)] * 4 + [definitive] +
                          [dict(_TRANSIENT)] * 4 + [{'success': True}])
         w2 = _bulk_worker({i: 'missing_lyrics' for i in range(1, 11)},
-                          lambda fid, fix_action=None: next(outcomes2))
+                          lambda fid, fix_action=None, **kwargs: next(outcomes2))
         w2._bulk_fix_state['total'] = 10
         w2._run_bulk_fix(list(range(1, 11)))
         assert w2._bulk_fix_state['done'] == 10, definitive_error
@@ -670,7 +670,7 @@ def test_bulk_fix_breaker_mixed_run_skips_only_lyrics():
     types.update({8: 'genre_cleanup', 9: 'genre_cleanup'})
     attempted = []
 
-    def fix(fid, fix_action=None):
+    def fix(fid, fix_action=None, **kwargs):
         attempted.append(fid)
         if types[fid] == 'missing_lyrics':
             return dict(_TRANSIENT)
@@ -696,7 +696,7 @@ def test_bulk_fix_breaker_trips_with_only_other_types_remaining():
     types = {i: 'missing_lyrics' for i in range(1, 6)}
     types.update({6: 'genre_cleanup', 7: 'genre_cleanup'})
 
-    def fix(fid, fix_action=None):
+    def fix(fid, fix_action=None, **kwargs):
         return dict(_TRANSIENT) if types[fid] == 'missing_lyrics' else {'success': True}
 
     w = _bulk_worker(types, fix)
@@ -711,7 +711,7 @@ def test_bulk_fix_breaker_trips_with_only_other_types_remaining():
 
 def test_bulk_fix_breaker_trip_on_final_finding_is_not_stopped_early():
     w = _bulk_worker({i: 'missing_lyrics' for i in range(1, 6)},
-                     lambda fid, fix_action=None: dict(_TRANSIENT))
+                     lambda fid, fix_action=None, **kwargs: dict(_TRANSIENT))
     w._bulk_fix_state['total'] = 5
     w._run_bulk_fix(list(range(1, 6)))
     state = w._bulk_fix_state
@@ -724,7 +724,7 @@ def test_bulk_fix_breaker_resets_on_success(monkeypatch):
                     [dict(_TRANSIENT)] * 4 + [{'success': True}])
     w = _bulk_worker(
                      {i: 'missing_lyrics' for i in range(1, 11)},
-                     lambda fid, fix_action=None: next(outcomes))
+                     lambda fid, fix_action=None, **kwargs: next(outcomes))
     w._bulk_fix_state['total'] = 10
     w._run_bulk_fix(list(range(1, 11)))
     state = w._bulk_fix_state
@@ -735,7 +735,7 @@ def test_bulk_fix_breaker_resets_on_success(monkeypatch):
 def test_bulk_fix_breaker_ignores_other_types(monkeypatch):
     w = _bulk_worker(
                      {i: 'genre_cleanup' for i in range(1, 8)},
-                     lambda fid, fix_action=None: dict(_TRANSIENT))
+                     lambda fid, fix_action=None, **kwargs: dict(_TRANSIENT))
     w._bulk_fix_state['total'] = 7
     w._run_bulk_fix(list(range(1, 8)))
     assert w._bulk_fix_state['done'] == 7 and w._bulk_fix_state['stopped'] is False
