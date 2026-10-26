@@ -6537,6 +6537,24 @@ class VideoDatabase:
                     "UPDATE episodes SET play_count=CASE WHEN ? THEN "
                     "MAX(COALESCE(play_count,0),1) ELSE 0 END, view_offset_ms=0 "
                     "WHERE show_id=?", (1 if watched else 0, item_id))
+            elif kind in ("episode", "season"):
+                # one episode or a whole season; the show's watched count is
+                # recounted from its episodes so the hero agrees at once
+                col = "id" if kind == "episode" else "season_id"
+                row = conn.execute(f"SELECT show_id FROM episodes WHERE {col}=? LIMIT 1",
+                                   (item_id,)).fetchone()
+                if not row:
+                    return False
+                # a season only marks rows the server holds, as markPlayed does;
+                # a tmdb-only row you don't have isn't watched
+                held = "" if kind == "episode" else " AND server_id IS NOT NULL"
+                cur = conn.execute(
+                    "UPDATE episodes SET play_count=CASE WHEN ? THEN MAX(COALESCE(play_count,0),1) "
+                    f"ELSE 0 END, view_offset_ms=0 WHERE {col}=?{held}", (1 if watched else 0, item_id))
+                conn.execute(
+                    "UPDATE shows SET watched_episodes=(SELECT COUNT(*) FROM episodes "
+                    "WHERE show_id=shows.id AND COALESCE(play_count,0) > 0) WHERE id=?",
+                    (row[0],))
             else:
                 return False
             conn.commit()

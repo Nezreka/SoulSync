@@ -2576,7 +2576,8 @@
                         kind: 'episode', tmdbId: data.tmdb_id, season: selectedSeason,
                         episode: ep.episode_number, title: data.title, year: data.year,
                         poster: data.poster_url }) + '</div>'
-                    : '')
+                    // watching isn't downloading: a view-only profile still marks it
+                    : (epWatchedItem(ep) ? '<div class="vd-ep-get">' + epPop(ep, epWatchedItem(ep)) + '</div>' : ''))
                 : '<div class="vd-ep-get" data-vd-ep-get="' + ep.episode_number + '">' +
                     '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                     (!ep.owned && epAired(ep)
@@ -2587,6 +2588,7 @@
                     '<button class="vd-ep-getbtn vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +
                         'aria-label="More for episode ' + ep.episode_number + '" title="More">⋯</button>' +
                     '<div class="vd-pop-menu" data-vd-pop-menu role="menu" hidden>' +
+                    epWatchedItem(ep) +
                     (ep.owned
                         ? '<button class="vd-manage-btn vd-ep-grab" type="button" role="menuitem" data-vd-ep-grab="' + ep.episode_number +
                             '" title="Search &amp; download again (upgrade)">⭳ Download again (upgrade)</button>'
@@ -2599,7 +2601,9 @@
                     // Subtitle search (Phase 3): Bazarr-style manual subtitle
                     // search for an owned episode (needs a library file to
                     // write the .srt next to).
-                    ((ep.id != null && ep.owned && data && data.source === 'library')
+                    // (data.source is unset on library payloads, so this keyed on
+                    // currentSource or it never showed)
+                    ((ep.id != null && ep.owned && data && currentSource === 'library')
                         ? '<button class="vd-manage-btn vd-ep-sub" type="button" role="menuitem" data-vd-ep-subsearch="' + ep.episode_number +
                             '" title="Search subtitles — pick one yourself">💬 Search subtitles</button>'
                         : '') +
@@ -2607,6 +2611,55 @@
                   '</div>')) +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '"' + episodeReportAttrs(ep) + ' hidden></div>';
+    }
+
+    // Mark one episode watched or unwatched (library rows you have: the server
+    // can only mark what it holds). The show-wide toggle in More was the only one.
+    function epWatchedItem(ep) {
+        // library payloads carry no source field; currentSource is the truth
+        if (!data || currentSource !== 'library' || ep.id == null || !ep.owned) return '';
+        return '<button class="vd-manage-btn vd-ep-watch" type="button" role="menuitem" data-vd-watched-kind="episode" ' +
+            'data-vd-watched-id="' + esc(ep.id) + '" data-vd-watched-to="' + (ep.watched ? '0' : '1') + '">' +
+            (ep.watched ? '\u21BA Mark unwatched' : '\u2713 Mark watched') + '</button>';
+    }
+    function epPop(ep, items) {
+        return '<span class="vd-pop">' +
+            '<button class="vd-ep-getbtn vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +
+                'aria-label="More for episode ' + ep.episode_number + '" title="More">⋯</button>' +
+            '<div class="vd-pop-menu" data-vd-pop-menu role="menu" hidden>' + items + '</div></span>';
+    }
+    function setPartWatched(btn) {
+        if (!data || btn.disabled) return;
+        var kind = btn.getAttribute('data-vd-watched-kind'), id = btn.getAttribute('data-vd-watched-id');
+        var target = btn.getAttribute('data-vd-watched-to') === '1', d0 = data;
+        btn.disabled = true;
+        fetch(DETAIL_URL + kind + '/' + encodeURIComponent(id) + '/watched', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ watched: target }) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                btn.disabled = false;
+                if (!res || !res.ok) throw new Error();
+                if (data !== d0) return;
+                // mirror the backend so the rows and the hero count move at once
+                var n = 0, total = 0;
+                (data.seasons || []).forEach(function (s) {
+                    (s.episodes || []).forEach(function (ep) {
+                        var hit = kind === 'episode' ? String(ep.id) === String(id)
+                            : (String(s.id) === String(id) && ep.owned);
+                        if (hit) { ep.watched = target; ep.view_offset_ms = 0; }
+                        if (ep.watched) n++;
+                        total++;
+                    });
+                });
+                data.watched_episodes = n;
+                data.watched = total > 0 && n >= total;
+                closePops();
+                renderBillboard(data);
+                renderEpisodes();
+                toast((target ? 'Marked watched' : 'Marked unwatched') + (res.pushed ? ' \u2014 synced to your server' : ''), 'success');
+            })
+            .catch(function () { btn.disabled = false; toast('Could not update watched state', 'error'); });
     }
 
     function epAired(ep) {
@@ -2775,11 +2828,20 @@
         // rows to monitor, and a preview has no library row to act on at all.
         var seasonManage = !isYt && !!data && data.kind === 'show' && data.source !== 'tmdb';
         var monitored = (Number(season.episode_monitored) || 0) > 0;
+        var ownedEps = season.episodes.filter(function (e) { return e.owned; });
+        var seasonWatchedItem = (seasonManage && season.id != null && ownedEps.length)
+            ? (function () {
+                var all = ownedEps.every(function (e) { return e.watched; });
+                return '<button class="discog-download-btn discog-btn-compact" type="button" role="menuitem" ' +
+                    'data-vd-watched-kind="season" data-vd-watched-id="' + esc(season.id) + '" data-vd-watched-to="' + (all ? '0' : '1') + '">' +
+                    '<span class="discog-btn-icon">' + (all ? '\u21BA' : '\u2713') + '</span>' +
+                    '<span class="discog-btn-text">' + (all ? 'Mark season unwatched' : 'Mark season watched') + '</span></button>';
+            })() : '';
         if (!canAcquire && !seasonManage) return '';
         // One visible action (Grab), the rest behind one menu. The bar used to be
         // five same-weight pills on every season.
         var scope = grabScope();
-        var menu =
+        var menu = seasonWatchedItem +
             (canAcquire && !isYt ?
             '<button class="discog-download-btn discog-btn-compact" type="button" role="menuitem" data-vd-season-search ' +
                 'title="Manual search — pick releases for this season">' +
@@ -4003,6 +4065,8 @@
         if (epSearch && r.contains(epSearch)) { e.preventDefault(); e.stopPropagation(); manualSearchEpisode(epSearch); return; }
         var epWish = e.target.closest('[data-vd-ep-wish]');
         if (epWish && r.contains(epWish)) { e.preventDefault(); e.stopPropagation(); wishEpisodeInline(epWish); return; }
+        var partWatched = e.target.closest('[data-vd-watched-kind]');
+        if (partWatched && r.contains(partWatched)) { e.preventDefault(); e.stopPropagation(); setPartWatched(partWatched); return; }
         var epSub = e.target.closest('[data-vd-ep-subsearch]');
         if (epSub && r.contains(epSub)) { e.preventDefault(); e.stopPropagation(); subSearchEpisode(epSub); return; }
         var seasonGrab = e.target.closest('[data-vd-season-grab]');

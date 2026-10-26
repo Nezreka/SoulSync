@@ -370,3 +370,43 @@ describe('youtube tags are not movie genres', () => {
     expect(a?.textContent).toContain('The Action Lab');
   });
 });
+
+describe('watched, one episode or one season at a time', () => {
+  const item = (src: string, ep: Record<string, unknown>) => {
+    const el = document.createElement('div');
+    el.innerHTML = fn<(e: unknown) => string>(
+      'epWatchedItem',
+      `function esc(s) { return String(s == null ? '' : s); }
+       var data = { kind: 'show' }; var currentSource = ${JSON.stringify(src)};`,
+    )(ep);
+    return el.querySelector('[data-vd-watched-kind="episode"]');
+  };
+
+  it('an episode you have gets its own watched toggle', () => {
+    const b = item('library', { id: 7, owned: true, watched: false });
+    expect(b?.getAttribute('data-vd-watched-id')).toBe('7');
+    expect(b?.getAttribute('data-vd-watched-to')).toBe('1');
+    expect(b?.textContent).toContain('Mark watched');
+    expect(item('library', { id: 7, owned: true, watched: true })?.textContent).toContain(
+      'Mark unwatched',
+    );
+  });
+
+  it('keys on currentSource: library payloads carry no source field', () => {
+    // data.source === 'library' was never true on a real payload, so the
+    // episode subtitle search under it never showed
+    expect(item('library', { id: 7, owned: true })).not.toBeNull();
+    expect(item('tmdb', { id: 7, owned: true })).toBeNull();
+    expect(item('library', { id: 7, owned: false })).toBeNull();
+    expect(extractFunction('episodeRow', SRC)).not.toContain("data.source === 'library'");
+  });
+
+  it('a view-only profile still gets the watched toggle', () => {
+    const row = extractFunction('episodeRow', SRC);
+    expect(row).toContain('epPop(ep, epWatchedItem(ep))');
+  });
+
+  it('a library season offers mark season watched', () => {
+    expect(extractFunction('seasonActionsHtml', SRC)).toContain('data-vd-watched-kind="season"');
+  });
+});

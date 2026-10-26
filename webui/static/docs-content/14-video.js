@@ -387,7 +387,7 @@ Every title has a rich **detail page**:
 
 Movies and shows can come from either Plex or Jellyfin and render the same way.
 
-The hero keeps one main action: **Play / Resume** on your server when you own it, otherwise **Get**. Trailer and the follow toggle (watchlist for an airing show, wishlist for a movie you don't own) sit beside it, and everything else is in one **More** menu, grouped into **Get**, **Library** (edit details, change poster, sync with server, mark watched, files and match) and **Open on** (IMDb, TMDB, TVDB, Letterboxd, official site).
+The hero keeps one main action: **Play / Resume** on your server when you own it, otherwise **Get**. Trailer and the follow toggle (watchlist for an airing show, wishlist for a movie you don't own) sit beside it, and everything else is in one **More** menu, grouped into **Get**, **Library** (edit details, change poster, sync with server, mark watched, files and match) and **Open on** (IMDb, TMDB, TVDB, Letterboxd, official site). An episode's **⋯** menu marks just that episode watched or unwatched, and the season's **⋯** marks the whole season; both sync to your server like the show-wide toggle.
 
 The synopsis shows three lines; **More** opens the rest in place. Every score in the ratings row opens its own site (IMDb, Rotten Tomatoes, Metacritic, Trakt, TVmaze). Below the tabs, cast comes first, then the collection and **More Like This**, videos and photos, then one **About** section with the facts (release, runtime, rating, network, budget, language, the languages subtitles exist in, with the ones you grab listed first), the studios, and keywords. **Where to Watch** shows one tile per service. The side-scrolling rows have arrows when you hover them.
 

@@ -43,11 +43,12 @@ function childCount(ep: Record<string, unknown>): number {
     function runtimeLabel(m) { return m ? m + 'm' : ''; }
     var selectedSeason = 1;
     var data = { source: 'library', kind: 'show' };
+    var currentSource = 'library';
     window.VideoGrab = {};
   `;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const build = new Function(
-    `${preamble}\n${extractFunction('episodeReportAttrs', JS)}\n${extractFunction('epAired', JS)}\n${extractFunction('epBadge', JS)}\n${extractFunction('episodeRow', JS)}\nreturn episodeRow;`,
+    `${preamble}\n${extractFunction('episodeReportAttrs', JS)}\n${extractFunction('epAired', JS)}\n${extractFunction('epBadge', JS)}\n${extractFunction('epWatchedItem', JS)}\n${extractFunction('epPop', JS)}\n${extractFunction('episodeRow', JS)}\nreturn episodeRow;`,
   )() as (e: unknown) => string;
   const host = document.createElement('div');
   host.innerHTML = build(ep);
