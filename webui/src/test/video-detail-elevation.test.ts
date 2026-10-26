@@ -342,3 +342,31 @@ describe('about and where to watch', () => {
     expect(body).toContain('<span class="vd-studio-name">');
   });
 });
+
+describe('youtube tags are not movie genres', () => {
+  const chips = (d: Record<string, unknown>) => {
+    const el = document.createElement('div');
+    el.innerHTML = fn<(d: unknown) => string>(
+      'ytTagChips',
+      'function esc(s) { return String(s == null ? "" : s); }',
+    )(d);
+    return el;
+  };
+
+  it('a channel tag only reads, it never opens discover', () => {
+    const el = chips({ kind: 'channel', genres: ['Science', 'physics'] });
+    expect(el.querySelectorAll('.vd-genre--tag').length).toBe(2);
+    expect(el.querySelector('[data-vd-genre]')).toBeNull();
+  });
+
+  it("a playlist's owner opens its channel", () => {
+    const el = chips({
+      kind: 'playlist',
+      genres: ['The Action Lab'],
+      _playlist: { channel_id: 'UC1', channel_title: 'The Action Lab' },
+    });
+    const a = el.querySelector('a[data-vd-yt-channel="UC1"]');
+    expect(a?.getAttribute('href')).toBe('/video-detail/youtube/channel/UC1');
+    expect(a?.textContent).toContain('The Action Lab');
+  });
+});

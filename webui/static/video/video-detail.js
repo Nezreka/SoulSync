@@ -370,8 +370,10 @@
             renderHealth(d);
             renderEssentials(d);
             var ll = q('[data-vd-links]'); if (ll) ll.innerHTML = '';
+            // a youtube tag is not a movie genre: clicking "physics" opened Discover
+            // on an empty genre. a playlist's owner opens its channel; tags just read.
             var gg = q('[data-vd-genres]');
-            if (gg) gg.innerHTML = (d.genres || []).slice(0, 8).map(genreChip).join('');
+            if (gg) gg.innerHTML = ytTagChips(d);
             renderRatings(d); renderAwards(d); renderCrewLine(d); renderNextEpisode(d); renderCast(d);
             return;
         }
@@ -3890,6 +3892,14 @@
                 { detail: { kind: 'studio', id: stid, source: 'tmdb' } }));
             return;
         }
+        var ytCh = e.target.closest('[data-vd-yt-channel]');
+        if (ytCh && r.contains(ytCh)) {
+            if (modified(e)) return;
+            e.preventDefault();
+            document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
+                { detail: { kind: 'channel', source: 'youtube', id: ytCh.getAttribute('data-vd-yt-channel') } }));
+            return;
+        }
         var gchip = e.target.closest('[data-vd-genre]');
         if (gchip && r.contains(gchip)) {   // genre → Discover filtered to it (#1042)
             e.preventDefault();
@@ -4209,6 +4219,17 @@
         if (data && data.kind === 'playlist') return { word: 'all', what: 'in this playlist' };
         if (data && data.source === 'youtube') return { word: 'year', what: 'in this year' };
         return { word: 'season', what: 'in this season' };
+    }
+    function ytTagChips(d) {
+        var pl = d._playlist;
+        if (d.kind === 'playlist' && pl && pl.channel_id) {
+            return '<a class="vd-genre vd-genre--channel" href="/video-detail/youtube/channel/' + encodeURIComponent(pl.channel_id) +
+                '" data-vd-yt-channel="' + esc(pl.channel_id) + '" title="Open the channel">' +
+                '<span aria-hidden="true">\u25B6</span> ' + esc(pl.channel_title || 'Channel') + '</a>';
+        }
+        return (d.genres || []).slice(0, 8).map(function (t) {
+            return '<span class="vd-genre vd-genre--tag">' + esc(t) + '</span>';
+        }).join('');
     }
     function ytGrabSeasonInline(btn) {
         var missing = _seasonMissing();

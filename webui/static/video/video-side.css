@@ -677,6 +677,11 @@ body[data-side="video"] .dashboard-header-sweep {
     font-family: inherit; cursor: pointer; transition: color var(--dur-fast), background var(--dur-fast), border-color var(--dur-fast); }
 .vd-genre:hover { color: #fff; background: rgba(var(--vd-accent-rgb), 0.16);
     border-color: rgba(var(--vd-accent-rgb), 0.55); }
+/* a youtube tag only reads; a playlist's channel chip is a link */
+.vd-genre--tag { cursor: default; background: var(--white-a05); border-color: var(--white-a10); color: var(--white-a70); }
+.vd-genre--tag:hover { color: var(--white-a70); background: var(--white-a05); border-color: var(--white-a10); }
+.vd-genre--channel { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+.vd-genre--channel span { font-size: 9px; color: rgba(var(--vd-accent-rgb), 1); }
 .vd-meta-rating { padding: 1px 7px; border: 1px solid var(--white-a35); border-radius: var(--radius-xs); font-size: 12px; }
 
 /* Subtitle availability (OpenSubtitles backfill) — a labeled chip row of the
