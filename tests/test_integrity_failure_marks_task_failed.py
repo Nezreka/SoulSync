@@ -262,3 +262,86 @@ def test_integrity_failure_takes_priority_over_missing_final_path(_isolate_state
     assert runtime_state.download_tasks['t4']['status'] == 'failed'
     # Critical: must NOT have notified success
     assert ('b4', 't4', True) not in completion_calls
+
+
+# ---------------------------------------------------------------------------
+# A staging file the library already has at least as good
+# ---------------------------------------------------------------------------
+
+
+def _kept_existing(context):
+    def _inner(*a, **kw):
+        context['_context_failure_msg'] = 'Incoming file is not a verified improvement under the quality profile'
+        context['_kept_existing_library_file'] = True
+    return _inner
+
+
+def test_kept_existing_staging_file_retries_without_it(_isolate_state, tmp_path):
+    """TheHomeGuy: a staged mp3 the library already had failed the task back to
+    the wishlist every cycle, so the real search never ran. now the copy goes
+    and the task runs again (staging skips the file it tried)."""
+    completion_calls = []
+    runtime = _build_runtime(completion_calls)
+    _seed_task('t7', 'b7')
+    runtime_state.download_tasks['t7'].update({'staging_match': True, 'status': 'post_processing'})
+    copy = tmp_path / '01 - Þú ert sólin_staging.mp3'
+    copy.write_bytes(b'staged copy')
+    context = {'task_id': 't7', 'batch_id': 'b7', 'context_key': 'staging_t7'}
+    runtime_state.matched_downloads_context['staging_t7'] = context
+    requeued = []
+
+    with patch.object(import_pipeline, 'post_process_matched_download', _kept_existing(context)), \
+         patch.object(import_pipeline, '_requeue_quarantined_task_for_retry',
+                      lambda task_id, batch_id, trigger: requeued.append((task_id, trigger)) or True):
+        import_pipeline.post_process_matched_download_with_verification(
+            'staging_t7', context, str(copy), 't7', 'b7', runtime,
+        )
+
+    assert requeued == [('t7', 'staging')]
+    assert not copy.exists()
+    assert runtime_state.download_tasks['t7']['status'] != 'failed'
+    assert completion_calls == []
+    assert 'staging_t7' not in runtime_state.matched_downloads_context
+
+
+def test_kept_existing_staging_file_with_no_retry_left_fails_and_cleans_up(_isolate_state, tmp_path):
+    completion_calls = []
+    runtime = _build_runtime(completion_calls)
+    _seed_task('t8', 'b8')
+    runtime_state.download_tasks['t8']['staging_match'] = True
+    copy = tmp_path / 'copy.mp3'
+    copy.write_bytes(b'staged copy')
+    context = {'task_id': 't8', 'batch_id': 'b8', 'context_key': 'staging_t8'}
+
+    with patch.object(import_pipeline, 'post_process_matched_download', _kept_existing(context)), \
+         patch.object(import_pipeline, '_requeue_quarantined_task_for_retry', lambda *a: False):
+        import_pipeline.post_process_matched_download_with_verification(
+            'staging_t8', context, str(copy), 't8', 'b8', runtime,
+        )
+
+    assert runtime_state.download_tasks['t8']['status'] == 'failed'
+    assert ('b8', 't8', False) in completion_calls
+    assert not copy.exists()
+
+
+def test_kept_existing_download_still_fails_and_keeps_its_file(_isolate_state, tmp_path):
+    """only staging copies are ours to delete and retry. a real download that
+    isn't an improvement keeps the old behaviour."""
+    completion_calls = []
+    runtime = _build_runtime(completion_calls)
+    _seed_task('t9', 'b9')
+    incoming = tmp_path / 'download.mp3'
+    incoming.write_bytes(b'downloaded')
+    context = {'task_id': 't9', 'batch_id': 'b9', 'context_key': 'k9'}
+    requeued = []
+
+    with patch.object(import_pipeline, 'post_process_matched_download', _kept_existing(context)), \
+         patch.object(import_pipeline, '_requeue_quarantined_task_for_retry',
+                      lambda *a: requeued.append(a) or True):
+        import_pipeline.post_process_matched_download_with_verification(
+            'k9', context, str(incoming), 't9', 'b9', runtime,
+        )
+
+    assert requeued == []
+    assert runtime_state.download_tasks['t9']['status'] == 'failed'
+    assert incoming.exists()

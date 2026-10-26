@@ -278,6 +278,11 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             for value in title_variants
         ]
 
+    # files this task already claimed and the import turned down. offering
+    # one again just repeats the refusal, and the real search never runs
+    with tasks_lock:
+        tried = set(download_tasks.get(task_id, {}).get('staging_tried_paths') or ())
+
     best_match = None
     best_score = 0.0
     best_rank = 0.0
@@ -288,6 +293,12 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
     candidate_scores: list = []
 
     for sf in staging_files:
+        if sf.get('full_path') in tried:
+            logger.debug(
+                "[Staging] Skip candidate %s — this task already tried it",
+                os.path.basename(sf.get('full_path', '?')),
+            )
+            continue
         sf_title_variants = _staging_title_variants(sf['title'], normalize)
         sf_norm_artist = normalize(sf['artist'])
 
@@ -509,6 +520,9 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
                 download_tasks[task_id]['filename'] = dest_path
                 download_tasks[task_id]['username'] = _provenance_username
                 download_tasks[task_id]['staging_match'] = True
+                tried_paths = set(download_tasks[task_id].get('staging_tried_paths') or ())
+                tried_paths.add(best_match['full_path'])
+                download_tasks[task_id]['staging_tried_paths'] = tried_paths
 
         if _private_album_bundle_staging:
             try:

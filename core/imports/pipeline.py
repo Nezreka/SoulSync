@@ -298,6 +298,12 @@ def _mark_task_quarantined(context: dict, quarantine_path: str | None) -> None:
             download_tasks[task_id]['quarantine_entry_id'] = entry_id
 
 
+def _is_staging_task(task_id) -> bool:
+    """the task's file came from the staging folder, not a download."""
+    with tasks_lock:
+        return bool(download_tasks.get(task_id, {}).get('staging_match'))
+
+
 def _requeue_quarantined_task_for_retry(task_id, batch_id, trigger) -> bool:
     """Ask the download monitor to re-run this task on its next-best candidate.
 
@@ -2139,6 +2145,21 @@ def post_process_matched_download_with_verification(context_key, context, file_p
         # import can carry both; honoring the destination would mark a
         # failed import Completed.
         failure_msg = context.get('_context_failure_msg')
+        if failure_msg and kept_existing_library_file(context) and _is_staging_task(task_id):
+            # a staging file the library already has at least as good. it used
+            # to fail here, go back to the wishlist, and claim the same staging
+            # file next cycle, forever, without ever searching. the copy goes
+            # (the staged original is untouched) and the task runs again
+            # without that file, so the real search gets its turn.
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+            if _requeue_quarantined_task_for_retry(task_id, batch_id, 'staging'):
+                with matched_context_lock:
+                    if context_key in matched_downloads_context:
+                        del matched_downloads_context[context_key]
+                return
         if failure_msg:
             logger.error(f"Task {task_id} failed in post-processing: {failure_msg}")
             with tasks_lock:
