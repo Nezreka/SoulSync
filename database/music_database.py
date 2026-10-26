@@ -10102,10 +10102,10 @@ class MusicDatabase:
 
     def count_live_devices_without_oidc(self, days: int = 7) -> int:
         """devices used in the last `days` days whose sign-in wasn't with
-        oidc: what turning oidc-only on would sign out (#1839). a row stays
-        unrevoked after its session ends some other way (a cleared cookie,
-        sign out everywhere), so only recent use counts. raises on a read
-        error"""
+        oidc: the most turning oidc-only on could sign out (#1839). a row
+        stays unrevoked after its session ends some other way (a cleared
+        cookie, sign out everywhere), so this is an upper bound, and only
+        recent use counts. raises on a read error"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("PRAGMA table_info(profile_devices)")

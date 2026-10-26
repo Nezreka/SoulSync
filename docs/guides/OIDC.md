@@ -121,7 +121,7 @@ Pocket ID gives a refresh token without `offline_access`, so sessions follow it 
 
 **Signing in with OIDC from two profiles.** One provider account can connect to only one profile. Connecting it to a second says "That account is connected to another SoulSync profile". Disconnect it from the first one.
 
-**The device list.** Each profile's list of signed-in devices keeps an entry for every sign-in until that device signs out or is revoked there. Sessions that ended some other way (a cleared cookie, sign out everywhere, a password reset) stay listed, so the list can overstate who's actually signed in.
+**The device list.** Each profile's list of signed-in devices keeps an entry for every sign-in until that device signs out or is revoked there. Sessions that ended some other way (a cleared cookie, sign out everywhere, a password reset) stay listed, so the list can overstate who's actually signed in. The OIDC only row's device count reads the same entries, which is why it says how many were used lately rather than how many are signed in.
 
 **Upgrading from 3.5.9 with OIDC already in use.** The first start on 3.6.0 or later signs out every profile connected to OIDC, once. Sessions from before then don't know when the provider expires them, so they start over.
 

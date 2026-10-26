@@ -7,7 +7,7 @@
  *   it means and how to clear it. a member never sees it, and never asks.
  * - settings > security's oidc-only row says what turning it on would do:
  *   who isn't connected yet, whether this session can turn it on, how
- *   many recently used devices it would sign out.
+ *   many devices that didn't sign in with oidc were used lately.
  *
  * both read /api/security/oidc-only, which is admin only, so nothing is
  * asked until the shell knows an admin is signed in.
@@ -128,11 +128,14 @@ export function describeForSettings(st: OidcOnlyStatus): string[] {
       );
     if (st.session_ok === false) lines.push('Sign out and sign back in with OIDC to turn this on.');
     if (typeof st.would_sign_out === 'number' && st.would_sign_out > 0) {
+      // a device row can outlive its session (a cleared cookie, sign out
+      // everywhere), so this says what the rows show, not that each of them
+      // is still signed in
       const n = st.would_sign_out;
       const days = st.recent_days ?? 7;
       lines.push(
-        `Turning it on signs out ${n} ${n === 1 ? 'device' : 'devices'} used in the last ` +
-          `${days} days that signed in without OIDC.`,
+        `${n} ${n === 1 ? 'device that signed in without OIDC was' : 'devices that signed in without OIDC were'} ` +
+          `used in the last ${days} days. Any still signed in will be signed out.`,
       );
     }
   }

@@ -109,7 +109,9 @@ describe('the settings row', () => {
     });
     expect(lines.join(' ')).toContain('Z, Kim');
     expect(lines.join(' ')).toContain('sign back in with OIDC');
-    expect(lines.join(' ')).toContain('3 devices used in the last 7 days');
+    expect(lines.join(' ')).toContain(
+      '3 devices that signed in without OIDC were used in the last 7 days. Any still signed in will be signed out.',
+    );
   });
 
   it('says nothing more once it is on', () => {
