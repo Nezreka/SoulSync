@@ -75,6 +75,13 @@
     }
     // The season a show opens on: the LATEST real season (highest number), not specials/S1.
     // Falls back to specials only when that's all there is.
+    // Specials are extras: they go after the real seasons in every season nav
+    // (the library tab already lists them last), not first at "0%".
+    function specialsLast(seasons) {
+        if (!seasons || !seasons.length) return seasons;
+        return seasons.filter(function (s) { return s.season_number !== 0; })
+            .concat(seasons.filter(function (s) { return s.season_number === 0; }));
+    }
     function defaultSeasonNum(seasons) {
         if (!seasons || !seasons.length) return null;
         var real = seasons.filter(function (s) { return (s.season_number || 0) > 0; });
@@ -262,10 +269,34 @@
     }
 
     // ── billboard ─────────────────────────────────────────────────────────────
+    // The hero clamps the synopsis to three lines; the rest used to be
+    // unreachable. A More / Less toggle appears only when it overflows.
+    function renderOverview(text) {
+        var p = q('[data-vd-overview]');
+        if (!p) return;
+        p.textContent = text || '';
+        p.classList.remove('vd-overview--open');
+        var btn = p.nextElementSibling && p.nextElementSibling.matches('[data-vd-overview-more]')
+            ? p.nextElementSibling : null;
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'vd-overview-more';
+            btn.setAttribute('data-vd-overview-more', '');
+            p.insertAdjacentElement('afterend', btn);
+        }
+        btn.textContent = 'More';
+        btn.setAttribute('aria-expanded', 'false');
+        btn.hidden = true;
+        requestAnimationFrame(function () { btn.hidden = !(p.scrollHeight > p.clientHeight + 2); });
+    }
+
     function renderBillboard(d) {
         renderTabs();
+        var epH = q('.vd-ep-heading');
+        if (epH) epH.textContent = d.source === 'youtube' ? 'Videos' : 'Episodes';
         setText('[data-vd-title]', d.title);
-        setText('[data-vd-overview]', d.overview);
+        renderOverview(d.overview);
 
         // Clearlogo replaces the text title when available (Netflix/Plex feel).
         var logo = q('[data-vd-logo]');
@@ -287,6 +318,7 @@
             bg.style.backgroundImage = url ? "url('" + url + "')" : '';
             bg.classList.toggle('vd-bb-bg--poster', !d.has_backdrop && !!d.has_poster);
             bg.classList.toggle('vd-bb-bg--empty', !d.has_backdrop && !d.has_poster);
+            bg.classList.toggle('vd-bb-bg--ambient', !!d._ambient_backdrop);
         }
         var poster = q('[data-vd-poster]');
         var posterUrl = bbPoster(d);
@@ -341,13 +373,18 @@
         if (d.source === 'tmdb') {
             meta.push('<span class="vd-status vd-status--preview">Preview</span>');
         } else if (d.kind === 'show') {
-            var ownedPct = d.episode_total ? Math.round(d.episode_owned / d.episode_total * 100) : 0;
-            meta.push('<span class="vd-match">' + ownedPct + '% in library</span>');
+            var sc = showCounts(d);
+            var ownedPct = sc.aired ? Math.round(sc.owned / sc.aired * 100) : 0;
+            meta.push('<span class="vd-match" title="' + sc.owned + ' of ' + sc.aired + ' aired episodes' +
+                (sc.specials ? ', not counting ' + sc.specials + ' specials you don\u2019t have' : '') + '">' +
+                (ownedPct === 100 ? 'Complete' : ownedPct + '% in library') + '</span>');
             // Continue Watching: how far through the show you are (server truth).
             if (d.watched) meta.push('<span class="vd-watched-tag" title="Every episode watched">✓ Watched</span>');
             else if (d.watched_episodes > 0) {
+                // the same yardstick as the % beside it: real seasons, aired episodes
+                var wn = sc.watched || d.watched_episodes;
                 meta.push('<span class="vd-watched-tag" title="Episodes watched on your server">✓ ' +
-                    d.watched_episodes + ' of ' + d.episode_total + ' watched</span>');
+                    wn + ' of ' + (sc.aired || d.episode_total) + ' watched</span>');
             }
         } else {
             meta.push(d.owned ? '<span class="vd-match">In library</span>'
@@ -366,8 +403,11 @@
         if (d.year) meta.push('<span>' + esc(d.year) + '</span>');
         if (d.content_rating) meta.push('<span class="vd-meta-rating">' + esc(d.content_rating) + '</span>');
         if (d.kind === 'show') {
-            meta.push('<span>' + d.season_count + ' Season' + (d.season_count === 1 ? '' : 's') + '</span>');
-            meta.push('<span>' + d.episode_total + ' Episodes</span>');
+            // specials are extras, not a season: "6 Seasons" on a five-season show misled
+            var sc2 = showCounts(d);
+            var nSeasons = sc2.seasons || d.season_count;
+            meta.push('<span>' + nSeasons + ' Season' + (nSeasons === 1 ? '' : 's') + '</span>');
+            meta.push('<span>' + (sc2.episodes || d.episode_total) + ' Episodes</span>');
         }
         var rt = runtimeLabel(d.runtime_minutes);
         if (rt) meta.push('<span>' + esc(rt) + '</span>');
@@ -408,6 +448,27 @@
         renderCrewLine(d);
         renderNextEpisode(d);
         renderCast(d);
+    }
+
+    // A show's numbers as a viewer reads them: real seasons only and aired
+    // episodes only (a special, owned or not, never moves the %). Previews and
+    // YouTube fall back to the payload's own totals.
+    function showCounts(d) {
+        var out = { seasons: 0, episodes: 0, aired: 0, owned: 0, specials: 0, watched: 0 };
+        var today = new Date().toISOString().slice(0, 10);
+        (d && d.seasons || []).forEach(function (s) {
+            var special = s.season_number === 0;
+            if (!special) out.seasons++;
+            (s.episodes || []).forEach(function (ep) {
+                if (!special && ep.watched) out.watched++;
+                if (ep.owned) { if (!special) { out.owned++; out.episodes++; out.aired++; } return; }
+                if (special) { out.specials++; return; }
+                out.episodes++;
+                if (!ep.air_date || String(ep.air_date).slice(0, 10) <= today) out.aired++;
+            });
+        });
+        if (!out.episodes && d) { out.episodes = d.episode_total || 0; out.aired = d.episode_total || 0; out.owned = d.episode_owned || 0; }
+        return out;
     }
 
     function essentialChip(label, value, tone) {
@@ -682,6 +743,7 @@
             }).join('');
             if (window.VideoWatchlist) VideoWatchlist.hydrate(castHost);
         }
+        refreshStrips();
     }
 
     // The hero carries ONE primary action and at most two companions; the rest
@@ -1409,19 +1471,12 @@
             '</span><span class="vd-detail-v">' + esc(value) + '</span></div>';
     }
     function renderDetails(d) {
+        // Released / runtime / studio / status used to sit in their own grid at
+        // the top of the body, and budget / language / country in a second
+        // "Details" block further down. They are one About section now
+        // (renderFacts), so the page says each fact once, in one place.
         var host = q('[data-vd-details]');
-        if (!host) return;
-        var rows = [];
-        if (d.release_date) rows.push(detailCell('Released', d.release_date));
-        if (d.digital_release_date && d.digital_release_date !== d.release_date) rows.push(detailCell('Digital release', d.digital_release_date));
-        if (d.runtime_minutes) rows.push(detailCell('Runtime', runtimeLabel(d.runtime_minutes)));
-        if (d.studio) rows.push(detailCell('Studio', d.studio));
-        if (d.status) rows.push(detailCell('Status', statusLabel(d.status)));
-        // The file rows (quality / codecs / size / every version) moved to the
-        // Your library tab, with paths and actions. The critic score left with
-        // them: it printed Plex's 0-10 RT score as a percent ("9%" for a film the
-        // ratings row above calls 89%), and that row already carries RT.
-        host.innerHTML = rows.length ? '<div class="vd-detail-grid">' + rows.join('') + '</div>' : '';
+        if (host) host.innerHTML = '';
     }    // ── per-title acquisition history (arr-parity P9) ─────────────────────────
     // Every grab/import/upgrade/failure this title has ever had, from the
     // permanent archive. Library-source pages only (the id keys the lookup).
@@ -1715,13 +1770,15 @@
         renderVideos(ex.videos);
         renderGallery(ex.gallery);
         renderReview(ex.review);
+        refreshStrips();
         maybeAutoplayBillboard();
     }
 
     function renderReview(review) {
         var sec = q('[data-vd-review-section]'), host = q('[data-vd-review]');
         if (!sec || !host) return;
-        if (!review || !review.content) { sec.hidden = true; return; }
+        // a one-liner ("very good movie 9.5/10") isn't a review worth a section
+        if (!review || !review.content || String(review.content).trim().length < 80) { sec.hidden = true; return; }
         sec.hidden = false;
         var rating = review.rating ? '<span class="vd-review-rating">★ ' + review.rating + '/10</span>' : '';
         var date = review.created ? '<span class="vd-review-date">' + esc(review.created) + '</span>' : '';
@@ -1744,10 +1801,36 @@
         if (n >= 1e3) return Math.round(n / 1e3) + 'K';
         return String(n);
     }
+    function titleFacts(d) {
+        var rows = [];
+        if (!d || d.source === 'youtube') return rows;
+        if (d.kind === 'movie') {
+            if (d.release_date) rows.push(['Released', fmtDate(d.release_date)]);
+            if (d.digital_release_date && d.digital_release_date !== d.release_date) rows.push(['Digital release', fmtDate(d.digital_release_date)]);
+            if (d.runtime_minutes) rows.push(['Runtime', runtimeLabel(d.runtime_minutes)]);
+            if (d.content_rating) rows.push(['Rated', d.content_rating]);
+            if (d.studio) rows.push(['Studio', d.studio]);
+            if (d.status && d.status !== 'Released') rows.push(['Status', statusLabel(d.status)]);
+        } else {
+            var first = String(d.first_air_date || '').slice(0, 4), last = String(d.last_air_date || '').slice(0, 4);
+            var ongoing = /return|continu|production|planned/i.test(String(d.status || ''));
+            if (first) rows.push(['Aired', first + (ongoing ? ' – present' : (last && last !== first ? ' – ' + last : ''))]);
+            if (d.network) rows.push(['Network', d.network]);
+            if (d.status) rows.push(['Status', statusLabel(d.status)]);
+            if (d.runtime_minutes) rows.push(['Episode length', runtimeLabel(d.runtime_minutes)]);
+            if (d.content_rating) rows.push(['Rated', d.content_rating]);
+        }
+        return rows;
+    }
+
+    // Keywords past the first few fold behind "+N more": fifteen chips was a
+    // wall the eye skipped entirely.
+    var KW_VISIBLE = 10;
+
     function renderFacts(facts, keywords, studios) {
         var sec = q('[data-vd-facts-section]'), host = q('[data-vd-facts]'), kwh = q('[data-vd-keywords]');
         facts = facts || {}; keywords = keywords || []; studios = studios || [];
-        var rows = [];
+        var rows = titleFacts(data);
         if (facts.budget) rows.push(['Budget', '$' + fmtMoney(facts.budget)]);
         if (facts.revenue) rows.push(['Box office', '$' + fmtMoney(facts.revenue)]);
         if (facts.original_language) rows.push(['Language', langName(facts.original_language)]);
@@ -1778,7 +1861,11 @@
             }).join('');
         }
         if (kwh) {
-            kwh.innerHTML = keywords.map(kwChip).join('');
+            kwh.classList.remove('vd-keywords--all');
+            kwh.innerHTML = keywords.map(kwChip).join('') +
+                (keywords.length > KW_VISIBLE
+                    ? '<button type="button" class="vd-kw vd-kw--more" data-vd-kw-more>+' + (keywords.length - KW_VISIBLE) + ' more</button>'
+                    : '');
         }
         if (sec) sec.hidden = !(rows.length || keywords.length || studios.length);
     }
@@ -2053,13 +2140,80 @@
         // Keep the selected season (which now defaults to the LATEST) visible in the
         // horizontal nav — otherwise a show with many seasons opens scrolled to S1 with the
         // active card off-screen. block:'nearest' avoids yanking the page vertically.
-        requestAnimationFrame(function () {
-            var active = host.querySelector('.vd-rcard--active, .vd-tseg--active, .vd-pill-btn--active');
-            if (active && active.scrollIntoView) {
-                try { active.scrollIntoView({ inline: 'center', block: 'nearest' }); }
-                catch (e) { /* older browsers: options unsupported, skip */ }
-            }
+        // Scrolls the STRIP only. scrollIntoView({block:'nearest'}) also scrolled
+        // the page whenever the rail sat below the fold, so a show opened
+        // already scrolled past its own title.
+        requestAnimationFrame(function () { centerInStrip(host); refreshStrips(); });
+    }
+
+    // ── side-scrolling rows (cast, more like this, videos, photos, seasons) ──
+    // They were bare horizontal scrollers: the row just ran off the right edge
+    // with no sign there was more. Each gets a wrapper with edge fades and
+    // prev / next buttons that show only when there is somewhere to go, and
+    // move a page at a time. Touch keeps its native swipe (the buttons hide).
+    var STRIPS = ['[data-vd-cast]', '[data-vd-similar]', '[data-vd-collection]', '[data-vd-videos]',
+        '[data-vd-gallery]', '[data-vd-season-nav] .vd-rail'];
+    function stripState(wrap, strip) {
+        var max = strip.scrollWidth - strip.clientWidth;
+        wrap.classList.toggle('vd-strip--start', strip.scrollLeft > 4);
+        wrap.classList.toggle('vd-strip--end', strip.scrollLeft < max - 4);
+    }
+    function enhanceStrip(strip) {
+        if (!strip) return;
+        var wrap = strip.parentNode;
+        if (!wrap.classList || !wrap.classList.contains('vd-strip')) {
+            wrap = document.createElement('div');
+            wrap.className = 'vd-strip';
+            strip.parentNode.insertBefore(wrap, strip);
+            wrap.appendChild(strip);
+            ['prev', 'next'].forEach(function (dir) {
+                var b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'vd-strip-btn vd-strip-btn--' + dir;
+                b.setAttribute('data-vd-strip', dir);
+                b.setAttribute('aria-label', dir === 'prev' ? 'Scroll back' : 'Scroll forward');
+                b.tabIndex = -1;
+                b.textContent = dir === 'prev' ? '\u2039' : '\u203A';
+                wrap.appendChild(b);
+            });
+        }
+        if (!strip._vdStrip) {
+            strip._vdStrip = true;
+            strip.addEventListener('scroll', function () { stripState(wrap, strip); }, { passive: true });
+        }
+        stripState(wrap, strip);
+    }
+    function refreshStrips() {
+        var r = root(); if (!r) return;
+        STRIPS.forEach(function (sel) {
+            var el = r.querySelector(sel);
+            if (el) enhanceStrip(el);
         });
+        // images that load late change the width; one more pass after they settle
+        clearTimeout(refreshStrips._t);
+        refreshStrips._t = setTimeout(function () {
+            STRIPS.forEach(function (sel) {
+                var el = root() && root().querySelector(sel);
+                if (el && el.parentNode.classList.contains('vd-strip')) stripState(el.parentNode, el);
+            });
+        }, 600);
+    }
+    function scrollStrip(btn) {
+        var wrap = btn.closest('.vd-strip');
+        var strip = wrap && wrap.querySelector(':scope > :not(.vd-strip-btn)');
+        if (!strip) return;
+        var step = Math.max(200, strip.clientWidth * 0.85);
+        strip.scrollBy({ left: btn.getAttribute('data-vd-strip') === 'prev' ? -step : step, behavior: 'smooth' });
+    }
+
+    function centerInStrip(host) {
+        var active = host && host.querySelector('.vd-rcard--active, .vd-tseg--active, .vd-pill-btn--active');
+        if (!active) return;
+        var strip = active.parentNode;
+        while (strip && strip !== host && strip.scrollWidth <= strip.clientWidth) strip = strip.parentNode;
+        if (!strip || strip.scrollWidth <= strip.clientWidth) return;
+        var a = active.getBoundingClientRect(), s = strip.getBoundingClientRect();
+        strip.scrollLeft = Math.max(0, strip.scrollLeft + (a.left - s.left) - (s.width - a.width) / 2);
     }
 
     function railHTML() {
@@ -2181,6 +2335,77 @@
                         '</div>') +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '" hidden></div>';
+    }
+
+    // ── channel videos as a grid (the default) ──
+    // A channel is browsed like YouTube's own Videos tab: a grid of thumbnails,
+    // title, views and date, and what you have. The wide TV-episode rows are
+    // still one click away (List). The card keeps every hook the row has
+    // (data-vd-ep-get / data-vd-ep-dl for live download status, data-vd-yt-grab,
+    // data-vd-yt-wish, data-vd-yt-play), so grabs and progress behave the same.
+    var YT_LAYOUT_KEY = 'soulsync.vdYtLayout';
+    function ytLayout() {
+        try { return localStorage.getItem(YT_LAYOUT_KEY) === 'list' ? 'list' : 'grid'; } catch (e) { return 'grid'; }
+    }
+    function setYtLayout(v) {
+        try { localStorage.setItem(YT_LAYOUT_KEY, v === 'list' ? 'list' : 'grid'); } catch (e) { /* private mode */ }
+        renderSeasonNav(); renderEpisodes();
+    }
+    function ytVideoCard(ep) {
+        var id = ep.youtube_id || '';
+        var yc0 = window.VideoYoutube;
+        var meta = [];
+        if (ep.view_count) meta.push((yc0 ? yc0.compactCount(ep.view_count) : ep.view_count) + ' views');
+        if (ep.air_date) meta.push(fmtDate(ep.air_date));
+        var likes = [ep.like_count ? (yc0 ? yc0.compactCount(ep.like_count) : ep.like_count) + ' likes' : '',
+            ep.dislike_count ? (yc0 ? yc0.compactCount(ep.dislike_count) : ep.dislike_count) + ' dislikes' : '']
+            .filter(Boolean).join(' · ');
+        var still = ep.still_url
+            ? '<img class="vd-ytc-img" src="' + esc(ep.still_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+            : '';
+        var state = ep.owned ? '<span class="vd-ytc-state vd-ytc-state--owned">✓ Downloaded</span>'
+            : (ep.wished ? '<span class="vd-ytc-state vd-ytc-state--wished">In wishlist</span>' : '');
+        var noDl = (typeof canDownload === 'function') && !canDownload() && window.VideoRequests;
+        var ch = (data && data._channel) || {};
+        var actions;
+        if (!ep.owned && noDl) {
+            actions = window.VideoRequests.cardButton({ kind: 'youtube', youtubeId: id, title: ep.title,
+                channel: { youtube_id: ch.youtube_id || data.youtube_id || '', title: ch.title || data.title || '' } });
+        } else {
+            actions = (!ep.owned
+                    ? '<button class="vd-ep-getbtn vd-ep-grab vd-ytc-get" type="button" data-vd-yt-grab="' + esc(id) +
+                        '" title="Download this video now" aria-label="Download video">⭳</button>'
+                    : '') +
+                '<span class="vd-pop">' +
+                '<button class="vd-ep-getbtn vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +
+                    'aria-label="More for this video" title="More">⋯</button>' +
+                '<div class="vd-pop-menu" data-vd-pop-menu role="menu" hidden>' +
+                (ep.owned
+                    ? '<button class="vd-manage-btn vd-ep-grab" type="button" role="menuitem" data-vd-yt-grab="' + esc(id) +
+                        '" title="Download again (e.g. after deleting it on the server)">⭳ Download again</button>'
+                    : '<button class="vd-manage-btn vd-ytc-wish' + (ep.wished ? ' watching' : '') + '" type="button" role="menuitem" ' +
+                        'data-vd-yt-wish="' + esc(id) + '"><span class="watchlist-icon">' + (ep.wished ? '✓' : '＋') + '</span> ' +
+                        '<span class="watchlist-text">' + (ep.wished ? 'In Wishlist' : 'Wishlist') + '</span></button>') +
+                '<a class="vd-manage-btn" role="menuitem" data-vd-ext target="_blank" rel="noopener" ' +
+                    'href="https://www.youtube.com/watch?v=' + encodeURIComponent(id) + '">↗ Open on YouTube</a>' +
+                '</div></span>';
+        }
+        return '<article class="vd-ytc' + (ep.owned ? ' vd-ytc--owned' : '') + (ep.wished ? ' vd-ytc--wished' : '') +
+                '" data-vd-ytc="' + esc(id) + '">' +
+            '<button class="vd-ytc-thumb" type="button" data-vd-yt-play="' + esc(id) + '" aria-label="Play ' + esc(ep.title || 'video') + '">' +
+                still + '<span class="vd-ytc-play" aria-hidden="true">▶</span>' +
+                (ep.yt_duration ? '<span class="vd-ep-dur">' + esc(ep.yt_duration) + '</span>' : '') + state +
+            '</button>' +
+            '<div class="vd-ytc-body">' +
+                '<div class="vd-ytc-text">' +
+                    '<div class="vd-ytc-title" title="' + esc(ep.title || '') + '">' + esc(ep.title || 'Untitled') + '</div>' +
+                    '<div class="vd-ytc-meta"' + (likes ? ' title="' + esc(likes) + '"' : '') + '>' + esc(meta.join(' · ')) + '</div>' +
+                '</div>' +
+                '<div class="vd-ep-get vd-ytc-actions" data-vd-ep-get="' + esc(id) + '">' +
+                    '<span class="vd-ep-dl" data-vd-ep-dl></span>' + actions +
+                '</div>' +
+            '</div>' +
+        '</article>';
     }
 
     // The per-video wishlist toggle — the app-standard watchlist-button chrome
@@ -2512,8 +2737,12 @@
             ? (ytFilter.q || ytFilter.state !== 'all' || ytFilter.duration !== 'all' ? 'No videos match these filters.' : 'No videos here.')
             : 'No ' + (missingOnly ? 'missing ' : '') + 'episodes here. 🎉';
         var seasonBar = seasonActionsHtml(season);
+        var grid = !!(data && data.source === 'youtube' && ytLayout() === 'grid');
+        host.classList.toggle('vd-episodes--grid', grid);
         host.innerHTML = seasonBar +
-            (eps.length ? eps.map(episodeRow).join('') : '<div class="vd-ep-empty">' + emptyMsg + '</div>');
+            (eps.length
+                ? (grid ? '<div class="vd-ytgrid">' + eps.map(ytVideoCard).join('') + '</div>' : eps.map(episodeRow).join(''))
+                : '<div class="vd-ep-empty">' + emptyMsg + '</div>');
         host.classList.remove('vd-ep-anim'); void host.offsetWidth; host.classList.add('vd-ep-anim');
         applyDlStates();   // repaint any in-flight/finished grabs on the fresh rows
     }
@@ -2553,9 +2782,19 @@
                 if (currentId === sid && selectedSeason === sn) renderEpisodes();
             });
     }
+    // Channels remember their own year-nav view: upload years as poster cards
+    // (cropped video thumbnails) were the TV metaphor bleeding through, so a
+    // channel starts on compact year pills.
+    var YT_VIEW_KEY = 'soulsync_vd_yt_season_view';
+    function viewKey() { return (data && data.source === 'youtube') ? YT_VIEW_KEY : VIEW_KEY; }
+    function restoreView() {
+        var yt = data && data.source === 'youtube', v = null;
+        try { v = localStorage.getItem(yt ? YT_VIEW_KEY : VIEW_KEY); } catch (e) { v = null; }
+        seasonView = v || (yt ? 'pills' : 'rail');
+    }
     function setView(v) {
         seasonView = v; menuOpen = false;
-        try { localStorage.setItem(VIEW_KEY, v); } catch (e) { /* ignore */ }
+        try { localStorage.setItem(viewKey(), v); } catch (e) { /* ignore */ }
         renderViewToggle(); renderSeasonNav();
     }
 
@@ -2669,6 +2908,9 @@
                 data = d;
                 renderBillboard(d);
                 renderDetails(d);
+                // About carries the title's own facts straight away; TMDB's
+                // (budget, keywords, studios) join when the extras land
+                renderFacts(null, [], []);
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-movie-detail"]');
                 if (sub) sub.scrollTop = 0;
                 if (currentSource === 'tmdb') {
@@ -2738,11 +2980,13 @@
                 if (d && d.redirect) { reopen(d.redirect); return; }
                 if (!d || d.error) { setText('[data-vd-title]', 'Not found'); return; }
                 if (currentId !== id || currentKind !== 'show') return;
-                data = d; menuOpen = false; missingOnly = false;
+                d.seasons = specialsLast(d.seasons);
+                data = d; menuOpen = false; missingOnly = false; restoreView();
                 selectedSeason = initialSeasonNum(d);
                 var mt = q('[data-vd-missing-toggle]');
                 if (mt) { mt.hidden = !(d.seasons && d.seasons.length); mt.classList.remove('vd-missing-toggle--on'); }
                 renderBillboard(d);
+                renderFacts(null, [], []);
                 renderViewToggle(); renderSeasonNav(); ensureSeasonEpisodes();
                 startDlTracking();   // resume any in-flight grabs for this show
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
@@ -2904,6 +3148,7 @@
                 d.server = prev.server || null;
                 d.trailer = prev.trailer || null;
                 d.next_episode = prev.next_episode || null;
+                d.seasons = specialsLast(d.seasons);
                 data = d;
                 if (!seasonByNum(selectedSeason)) {
                     selectedSeason = initialSeasonNum(d);
@@ -3056,7 +3301,13 @@
             esc(ytFilter.q) + '" data-vd-yt-search></div>' +
             '<select class="vd-yt-sort" data-vd-yt-sort>' + sorts.map(function (s) {
                 return '<option value="' + s[0] + '"' + (ytFilter.sort === s[0] ? ' selected' : '') + '>' + esc(s[1]) + '</option>';
-            }).join('') + '</select>' + counts + '</div>' +
+            }).join('') + '</select>' +
+            '<div class="vd-yt-layout" role="group" aria-label="Layout">' +
+                '<button type="button" class="vd-yt-layout-btn' + (ytLayout() === 'grid' ? ' vd-yt-layout-btn--on' : '') +
+                    '" data-vd-yt-layout="grid" aria-pressed="' + (ytLayout() === 'grid') + '" title="Grid">▦</button>' +
+                '<button type="button" class="vd-yt-layout-btn' + (ytLayout() === 'list' ? ' vd-yt-layout-btn--on' : '') +
+                    '" data-vd-yt-layout="list" aria-pressed="' + (ytLayout() === 'list') + '" title="List">☰</button>' +
+            '</div>' + counts + '</div>' +
             '<div class="vd-yt-facets" aria-label="Channel video filters">' +
                 ytFacetBtn('state', 'all', 'All') +
                 ytFacetBtn('state', 'missing', 'Not downloaded') +
@@ -3074,11 +3325,21 @@
         ytVideoMap = {};
         (ch.videos || []).forEach(function (v) { ytVideoMap[v.youtube_id] = v; });
         var seasons = ytGroupByYear(ch.videos || [], ch, false);
+        // no banner: the channel's most-viewed upload in full resolution reads as
+        // channel art; the avatar blown up to 1400px was a blur
+        var backdrop = ch.banner_url ? ytProx(ch.banner_url) : '';
+        if (!backdrop) {
+            var top = (ch.videos || []).filter(function (v) { return v.thumbnail_url; })
+                .sort(function (a, b) { return (Number(b.view_count) || 0) - (Number(a.view_count) || 0); })[0];
+            if (top) backdrop = ytProx(ytHiRes(top.thumbnail_url));
+        }
+        var ambient = !ch.banner_url && !!backdrop;
         return { kind: 'channel', source: 'youtube', id: ch.youtube_id, title: ch.title || 'Channel',
-            overview: ch.description || '', backdrop_url: ytProx(ch.banner_url), has_backdrop: !!ch.banner_url,
+            overview: ch.description || '', backdrop_url: backdrop, has_backdrop: !!backdrop,
             poster_url: ytProx(ch.avatar_url), has_poster: !!ch.avatar_url, genres: ch.tags || [], handle: ch.handle,
             subscriber_count: ch.subscriber_count, video_count: ch.video_count, view_count: ch.view_count,
             following: !!resp.following, _channel: ch, seasons: seasons, season_count: seasons.length,
+            _ambient_backdrop: ambient,
             episode_total: (ch.videos || []).length, episode_owned: ytOwnedCount(ch.videos) };
     }
 
@@ -3153,7 +3414,7 @@
                 showLoading(false);
                 if (!resp || !resp.success) { setText('[data-vd-title]', 'Channel unavailable'); return; }
                 if (currentId !== id) return;
-                data = ytToShow(resp); menuOpen = false; missingOnly = false;
+                data = ytToShow(resp); menuOpen = false; missingOnly = false; restoreView();
                 selectedSeason = data.seasons.length ? data.seasons[0].season_number : null;
                 var mt = q('[data-vd-missing-toggle]');
                 if (mt) { mt.hidden = true; mt.classList.remove('vd-missing-toggle--on'); }   // n/a for channels
@@ -3254,6 +3515,15 @@
             // downloads do), and the buttons above were already patched in place —
             // re-rendering here just refetched every rail poster per click.
             var ep = ytFindEp(id); if (ep) ep.wished = val;
+            var cards = r0 ? r0.querySelectorAll('[data-vd-ytc="' + id + '"]') : [];
+            for (var k = 0; k < cards.length; k++) {
+                cards[k].classList.toggle('vd-ytc--wished', val);
+                var st = cards[k].querySelector('.vd-ytc-state--wished');
+                if (val && !st && !cards[k].classList.contains('vd-ytc--owned')) {
+                    var thumb = cards[k].querySelector('.vd-ytc-thumb');
+                    if (thumb) thumb.insertAdjacentHTML('beforeend', '<span class="vd-ytc-state vd-ytc-state--wished">In wishlist</span>');
+                } else if (!val && st) { st.remove(); }
+            }
             renderEssentials(data);
             document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
         };
@@ -3521,6 +3791,25 @@
         }
         var castAll = e.target.closest('[data-vd-cast-all]');
         if (castAll && r.contains(castAll)) { openCastModal(); return; }
+        var stripBtn = e.target.closest('[data-vd-strip]');
+        if (stripBtn && r.contains(stripBtn)) { e.preventDefault(); scrollStrip(stripBtn); return; }
+        var kwMore = e.target.closest('[data-vd-kw-more]');
+        if (kwMore && r.contains(kwMore)) {
+            var kwWrap = kwMore.closest('[data-vd-keywords]');
+            if (kwWrap) kwWrap.classList.add('vd-keywords--all');
+            kwMore.remove();
+            return;
+        }
+        var ovMore = e.target.closest('[data-vd-overview-more]');
+        if (ovMore && r.contains(ovMore)) {
+            var ov = q('[data-vd-overview]');
+            if (ov) {
+                var opened = ov.classList.toggle('vd-overview--open');
+                ovMore.textContent = opened ? 'Less' : 'More';
+                ovMore.setAttribute('aria-expanded', opened ? 'true' : 'false');
+            }
+            return;
+        }
         var revMore = e.target.closest('[data-vd-review-more]');
         if (revMore && r.contains(revMore)) {
             var body = q('[data-vd-review-body]');
@@ -3531,6 +3820,8 @@
         if (e.target.closest('[data-vd-ext]')) return;   // let watch links open
         var ytPlay = e.target.closest('[data-vd-yt-play]');   // play the video inline (reuses the trailer player)
         if (ytPlay && r.contains(ytPlay)) { e.preventDefault(); openTrailer(ytPlay.getAttribute('data-vd-yt-play')); return; }
+        var ytLay = e.target.closest('[data-vd-yt-layout]');
+        if (ytLay && r.contains(ytLay)) { e.preventDefault(); setYtLayout(ytLay.getAttribute('data-vd-yt-layout')); return; }
         var ytFacet = e.target.closest('[data-vd-yt-filter]');
         if (ytFacet && r.contains(ytFacet) && data && data.source === 'youtube') {
             e.preventDefault();

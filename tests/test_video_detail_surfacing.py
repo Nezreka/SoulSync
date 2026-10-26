@@ -100,7 +100,7 @@ class TestUiPins:
         assert js.count('renderAwards(d)') >= 3         # def + main + youtube-path clear
         assert 'vd-ep-new-chip' in js
         assert 'After-credits scene' in js
-        assert "detailCell('Digital release', d.digital_release_date)" in js
+        assert "rows.push(['Digital release', fmtDate(d.digital_release_date)])" in js   # About, since Oct 26
         # the file facts moved to the Your library tab (Oct 2026)
         assert "f.quality !== f.resolution_label" in (
             _ROOT / "webui" / "src" / "features" / "video-library" / "library-tab.tsx").read_text(encoding="utf-8")

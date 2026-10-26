@@ -3717,13 +3717,26 @@ class VideoDatabase:
                     return out
                 tmdb_id = row["tmdb_id"] if tmdb_id is None else tmdb_id
                 eps = conn.execute(
-                    "SELECT has_file, monitored FROM episodes WHERE show_id=?",
+                    "SELECT has_file, monitored, season_number, air_date FROM episodes WHERE show_id=?",
                     (int(library_id),)).fetchall()
-                out["total"] = len(eps)
+                # specials you don't own and episodes that haven't aired are not
+                # gaps: counting them read "22 missing" on a show whose every
+                # aired episode is on disk. owned specials still count as owned.
+                from datetime import date as _date
+                today = _date.today().isoformat()
                 for e in eps:
                     if e["has_file"]:
                         counts["owned"] += 1
-                    elif not e["monitored"]:
+                        out["total"] += 1
+                        continue
+                    if e["season_number"] == 0:
+                        out["specials_missing"] = out.get("specials_missing", 0) + 1
+                        continue
+                    if e["air_date"] and str(e["air_date"])[:10] > today:
+                        out["upcoming"] = out.get("upcoming", 0) + 1
+                        continue
+                    out["total"] += 1
+                    if not e["monitored"]:
                         counts["ignored"] += 1
                 wl_kind = "episode"
 

@@ -7987,3 +7987,99 @@ body[data-side="video"] #gsearch-aura {
     color: var(--vd-accent-fg);
 }
 .vd-body--library .vd-subcfg .vsub-btn--primary:hover { background: rgb(var(--vd-accent-rgb)); }
+
+/* the synopsis opens in place when it ran past its three lines */
+.vd-overview.vd-overview--open { display: block; -webkit-line-clamp: unset; overflow: visible; }
+.vd-overview-more {
+    margin: -14px 0 20px; padding: 0; border: 0; background: none; cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 800; color: var(--text-1); opacity: 0.8;
+    text-decoration: underline; text-underline-offset: 3px;
+}
+.vd-overview-more:hover { opacity: 1; }
+.vd-overview-more[hidden] { display: none; }
+
+/* About: keywords past the first ten wait behind "+N more" */
+.vd-keywords:not(.vd-keywords--all) > .vd-kw:nth-child(n + 11):not(.vd-kw--more) { display: none; }
+.vd-kw--more { color: var(--white-a60); border-style: dashed; }
+
+/* side-scrolling rows: edge fades + page buttons (video-detail.js enhanceStrip) */
+.vd-strip { position: relative; }
+.vd-strip > :not(.vd-strip-btn) { scrollbar-width: none; }
+.vd-strip > :not(.vd-strip-btn)::-webkit-scrollbar { display: none; }
+.vd-strip.vd-strip--start > :not(.vd-strip-btn) { mask-image: linear-gradient(90deg, transparent 0, var(--bg-primary) 56px); }
+.vd-strip.vd-strip--end > :not(.vd-strip-btn) { mask-image: linear-gradient(270deg, transparent 0, var(--bg-primary) 56px); }
+.vd-strip.vd-strip--start.vd-strip--end > :not(.vd-strip-btn) {
+    mask-image: linear-gradient(90deg, transparent 0, var(--bg-primary) 56px, var(--bg-primary) calc(100% - 56px), transparent 100%);
+}
+.vd-strip-btn {
+    position: absolute; top: calc(50% - 30px); z-index: 3; width: 42px; height: 42px; border-radius: var(--radius-circle);
+    display: grid; place-items: center; padding: 0 0 3px; cursor: pointer; font: inherit; font-size: 28px; line-height: 1;
+    color: var(--text-1); background: var(--black-a75); border: 1px solid var(--white-a18);
+    box-shadow: 0 6px 18px var(--black-a50); backdrop-filter: blur(8px);
+    opacity: 0; pointer-events: none; transition: opacity var(--dur-base) ease, transform var(--dur-base) ease;
+}
+.vd-strip-btn--prev { left: -8px; }
+.vd-strip-btn--next { right: -8px; }
+.vd-strip-btn:hover { transform: scale(1.08); background: var(--black-a90); }
+@media (hover: hover) and (pointer: fine) {
+    .vd-strip.vd-strip--start:hover .vd-strip-btn--prev,
+    .vd-strip.vd-strip--end:hover .vd-strip-btn--next { opacity: 1; pointer-events: auto; }
+}
+
+/* ── channel videos as a grid (YouTube's own Videos tab) ── */
+.vd-ytgrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 28px 18px;
+    padding-top: 8px;
+}
+.vd-ytc { position: relative; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.vd-ytc-thumb {
+    position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; padding: 0; border: 0;
+    border-radius: var(--radius-lg); overflow: hidden; cursor: pointer;
+    background: linear-gradient(135deg, rgba(var(--vd-accent-rgb), 0.25), var(--black-a50));
+    box-shadow: 0 8px 22px var(--black-a40); transition: transform var(--dur-base) ease, box-shadow var(--dur-base) ease;
+}
+.vd-ytc-thumb:hover, .vd-ytc-thumb:focus-visible { transform: translateY(-3px); box-shadow: 0 14px 30px var(--black-a55); }
+.vd-ytc-thumb:focus-visible { outline: 2px solid rgba(var(--vd-accent-rgb), 0.8); outline-offset: 3px; }
+.vd-ytc-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.vd-ytc-play {
+    position: absolute; inset: 0; display: grid; place-items: center; font-size: 30px; color: var(--text-1);
+    background: var(--black-a35); opacity: 0; transition: opacity var(--dur-base) ease;
+}
+.vd-ytc-thumb:hover .vd-ytc-play, .vd-ytc-thumb:focus-visible .vd-ytc-play { opacity: 1; }
+.vd-ytc-state {
+    position: absolute; left: 8px; top: 8px; z-index: 2; padding: 3px 9px; border-radius: var(--radius-pill);
+    font-size: 11px; font-weight: 800; letter-spacing: 0.02em; backdrop-filter: blur(6px);
+}
+.vd-ytc-state--owned { color: var(--success); background: var(--black-a75); border: 1px solid rgba(var(--success-rgb), 0.45); }
+.vd-ytc-state--wished { color: var(--text-1); background: rgba(var(--vd-accent-rgb), 0.85); }
+.vd-ytc-body { display: flex; align-items: flex-start; gap: 8px; }
+.vd-ytc-text { flex: 1 1 auto; min-width: 0; }
+.vd-ytc-title {
+    font-size: 14.5px; font-weight: 700; line-height: 1.35; color: var(--text-1);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.vd-ytc-meta { margin-top: 4px; font-size: 12.5px; color: var(--white-a55); }
+.vd-ytc-actions { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.vd-ytc-actions .vd-ep-dl { min-width: 0; }
+.vd-ytc--owned .vd-ytc-title { color: var(--white-a85); }
+/* grid view: the episode-row hover rules don't apply, the actions just stay put */
+.vd-episodes--grid .vd-ep-get { opacity: 1; transform: none; pointer-events: auto; }
+
+/* the channel's Grid / List switch */
+.vd-yt-layout {
+    display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-control);
+    background: var(--white-a06); border: 1px solid var(--white-a12);
+}
+.vd-yt-layout-btn {
+    width: 34px; height: 30px; border: 0; border-radius: var(--radius-md); cursor: pointer;
+    font: inherit; font-size: 15px; color: var(--white-a60); background: transparent;
+}
+.vd-yt-layout-btn:hover { color: var(--text-1); }
+.vd-yt-layout-btn--on { color: var(--vd-accent-fg); background: rgba(var(--vd-accent-rgb), 0.85); }
+@media (max-width: 620px) {
+    .vd-ytgrid { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+}
+
+/* a channel without a banner borrows its biggest video's thumbnail, blurred
+   into colour so its own lettering doesn't fight the channel name */
+.vd-bb-bg.vd-bb-bg--ambient { filter: blur(28px) saturate(1.25) brightness(0.62); transform: scale(1.2); animation: none; }
