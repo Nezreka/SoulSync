@@ -910,6 +910,7 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-missing-toggle--on { background: rgba(var(--vd-accent-rgb), 0.22); border-color: rgba(var(--vd-accent-rgb), 0.6); color: #fff; }
 
 /* view toggle (rail / timeline / pills / dropdown) */
+.vd-view-toggle[hidden] { display: none; }
 .vd-view-toggle { display: inline-flex; gap: 2px; padding: 3px; border-radius: 9px;
     background: var(--white-a05); border: 1px solid var(--white-a10); }
 .vd-vt-btn { width: 34px; height: 30px; border: 0; border-radius: var(--radius-sm); background: transparent; cursor: pointer;

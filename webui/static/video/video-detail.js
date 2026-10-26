@@ -2134,7 +2134,10 @@
     function renderViewToggle() {
         var host = q('[data-vd-view-toggle]');
         if (!host) return;
-        if (data && data.kind === 'playlist') { host.innerHTML = ''; return; }   // flat list — no view toggle
+        // playlists are flat; channels have one switch (Grid/List) and year pills
+        var yt = !!(data && data.source === 'youtube');
+        host.hidden = yt;
+        if (yt) { host.innerHTML = ''; return; }
         host.innerHTML = VIEWS.map(function (v) {
             return '<button class="vd-vt-btn' + (v.id === seasonView ? ' vd-vt-btn--active' : '') +
                 '" type="button" data-vd-view="' + v.id + '" title="' + v.label + '">' +
@@ -2147,14 +2150,9 @@
         if (!host || !data || !data.seasons.length) { if (host) host.innerHTML = ''; return; }
         if (data.kind === 'playlist') { host.innerHTML = ''; return; }   // flat list — no season nav
         if (data.source === 'youtube') {   // channels: search + sort controls above the
-            // year nav — which still honours the view toggle (rail posters, timeline,
-            // tabs, list). Flat mode (search / most-viewed / longest) hides the nav.
-            host.className = 'vd-season-nav vd-season-nav--yt vd-season-nav--' + seasonView;
-            var nav = ytFlatMode() ? ''
-                : seasonView === 'rail' ? railHTML()
-                : seasonView === 'timeline' ? timelineHTML()
-                : seasonView === 'pills' ? pillsHTML()
-                : dropdownHTML();
+            // year pills. Flat mode (search / most-viewed / longest) hides them.
+            host.className = 'vd-season-nav vd-season-nav--yt vd-season-nav--pills';
+            var nav = ytFlatMode() ? '' : pillsHTML();
             host.innerHTML = ytControlsHTML() + nav;
             return;
         }
@@ -2808,19 +2806,18 @@
                 if (currentId === sid && selectedSeason === sn) renderEpisodes();
             });
     }
-    // Channels remember their own year-nav view: upload years as poster cards
-    // (cropped video thumbnails) were the TV metaphor bleeding through, so a
-    // channel starts on compact year pills.
-    var YT_VIEW_KEY = 'soulsync_vd_yt_season_view';
-    function viewKey() { return (data && data.source === 'youtube') ? YT_VIEW_KEY : VIEW_KEY; }
+    // A channel's upload years are always pills. Years as poster cards were the
+    // TV metaphor bleeding through, and a second view switch beside Grid/List
+    // (both drawn with the same glyph) left two layout controls on one page.
     function restoreView() {
-        var yt = data && data.source === 'youtube', v = null;
-        try { v = localStorage.getItem(yt ? YT_VIEW_KEY : VIEW_KEY); } catch (e) { v = null; }
-        seasonView = v || (yt ? 'pills' : 'rail');
+        if (data && data.source === 'youtube') { seasonView = 'pills'; return; }
+        var v = null;
+        try { v = localStorage.getItem(VIEW_KEY); } catch (e) { v = null; }
+        seasonView = v || 'rail';
     }
     function setView(v) {
         seasonView = v; menuOpen = false;
-        try { localStorage.setItem(viewKey(), v); } catch (e) { /* ignore */ }
+        try { localStorage.setItem(VIEW_KEY, v); } catch (e) { /* ignore */ }
         renderViewToggle(); renderSeasonNav();
     }
 

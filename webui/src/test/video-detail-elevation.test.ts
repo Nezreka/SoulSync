@@ -147,9 +147,13 @@ describe('channel videos as a grid', () => {
 });
 
 describe('the rest of the pass', () => {
-  it('a channel starts on year pills, a show on its own remembered view', () => {
-    const body = extractFunction('restoreView', SRC);
-    expect(body).toContain("(yt ? 'pills' : 'rail')");
+  it('a channel always shows year pills and only one layout switch', () => {
+    expect(extractFunction('restoreView', SRC)).toContain(
+      "data.source === 'youtube') { seasonView = 'pills'; return; }",
+    );
+    expect(extractFunction('renderViewToggle', SRC)).toContain('host.hidden = yt;');
+    const nav = extractFunction('renderSeasonNav', SRC);
+    expect(nav).toContain("ytFlatMode() ? '' : pillsHTML()");
   });
 
   it('a one-line review gets no section', () => {
