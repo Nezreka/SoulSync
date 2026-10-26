@@ -83,16 +83,19 @@ def _resolve_file(db, row: dict):
     for key in ("tmdb_id", "imdb_id", "season", "episode"):
         if info.get(key) is not None:
             identity[key] = info[key]
-    path = info.get("dest_path") or info.get("relative_path")
-    if not path:
-        return None, identity
-    if os.path.isabs(str(path)):
+    dest = info.get("dest_path")
+    if dest:
         # Download rows carry an absolute dest_path. If it's gone, do NOT
         # re-root tail segments against library roots — that can resolve to a
         # wrong same-named file and misattribute the subtitle. Unresolvable.
-        if os.path.exists(str(path)):
-            return str(path), identity
+        if os.path.exists(str(dest)):
+            return str(dest), identity
         return None, identity
+    path = info.get("relative_path")
+    if not path:
+        return None, identity
+    # media_files paths are the media server's view, usually absolute
+    # (/mnt/plex/...), so they always go through the re-rooting resolver.
     try:
         from core.video.path_resolver import resolve_video_file_path, video_base_dirs
         resolved = resolve_video_file_path(str(path), video_base_dirs(db))
