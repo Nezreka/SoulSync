@@ -115,6 +115,45 @@ def test_token_values_cannot_inject_extra_folders():
     assert got["dir"] == os.path.join("/m", "ACDC Live (2020)")
 
 
+def _year_settings():
+    s = organization.default_settings()
+    s["movie_template"] = "$title ($year)/$title ($year) [$quality]"
+    s["episode_template"] = ("$series ($year)/Season $season/"
+                             "$series ($year) - S$seasonE$episode [$quality]")
+    return s
+
+
+def test_a_title_ending_in_its_year_keeps_the_year_once_for_an_episode():
+    # Plex names a remake 'Treasure Island (2026)'; $year must not add a second (2026)
+    fields = {"series": "Treasure Island (2026)", "year": 2026, "season": 1, "episode": 3,
+              "quality": "WEBDL-1080p"}
+    got = organization.render_path("episode", "/t", fields, _year_settings(), ".mkv")
+    assert got["path"] == os.path.join("/t", "Treasure Island (2026)", "Season 01",
+                                       "Treasure Island (2026) - S01E03 [WEBDL-1080p].mkv")
+
+
+def test_a_title_ending_in_its_year_keeps_the_year_once_for_a_movie():
+    fields = {"title": "Dune (2021)", "year": 2021, "quality": "Remux-2160p"}
+    got = organization.render_path("movie", "/m", fields, _year_settings(), ".mkv")
+    assert got["path"] == os.path.join("/m", "Dune (2021)", "Dune (2021) [Remux-2160p].mkv")
+
+
+def test_a_title_ending_in_a_different_year_keeps_its_own():
+    # 'Battlestar Galactica (2003)' is the series' name; its first-air year (2004) is not
+    fields = {"series": "Battlestar Galactica (2003)", "year": 2004, "season": 4, "episode": 20,
+              "quality": "WEBDL-1080p"}
+    got = organization.render_path("episode", "/t", fields, _year_settings(), ".mkv")
+    assert got["path"] == os.path.join("/t", "Battlestar Galactica (2003)", "Season 04",
+                                       "Battlestar Galactica (2003) - S04E20 [WEBDL-1080p].mkv")
+
+
+def test_a_year_inside_the_title_is_left_alone():
+    # only a year at the end of the title meets $year; '2001: A Space Odyssey' is untouched
+    fields = {"title": "2001 A Space Odyssey", "year": 1968, "quality": "Bluray-1080p"}
+    got = organization.render_path("movie", "/m", fields, _year_settings(), ".mkv")
+    assert got["dir"] == os.path.join("/m", "2001 A Space Odyssey (1968)")
+
+
 # ── youtube channels: agentless-indexable TV organisation ────────────────────
 def test_youtube_default_template_is_channel_year_sxe():
     """The default carries the ytdl-sub-style s<year>e<MMDD> token — the thing that

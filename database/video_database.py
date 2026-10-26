@@ -2795,6 +2795,59 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def video_external_ids(self, kind: str, *, media_id=None, tmdb_id=None) -> dict:
+        """{tmdb_id, imdb_id, tvdb_id} for a library movie/show, found by its
+        library row id (``media_id``) or by TMDB id. A movie has no tvdb_id.
+        Missing values are None; an unknown title gives all None."""
+        is_movie = str(kind or "").lower() == "movie"
+        table = "movies" if is_movie else "shows"
+        cols = "tmdb_id, imdb_id" + ("" if is_movie else ", tvdb_id")
+        out = {"tmdb_id": None, "imdb_id": None, "tvdb_id": None}
+        conn = self._get_connection()
+        try:
+            if media_id is not None:
+                row = conn.execute("SELECT %s FROM %s WHERE id = ?" % (cols, table),
+                                   (int(media_id),)).fetchone()
+            elif tmdb_id is not None:
+                row = conn.execute(
+                    "SELECT %s FROM %s WHERE tmdb_id = ? "
+                    "ORDER BY (imdb_id IS NULL OR imdb_id = '') LIMIT 1" % (cols, table),
+                    (int(tmdb_id),)).fetchone()
+            else:
+                return out
+            if row:
+                for k in row.keys():
+                    out[k] = row[k] or None
+            return out
+        except (sqlite3.Error, ValueError, TypeError):
+            return out
+        finally:
+            conn.close()
+
+    def video_title_year(self, kind: str, *, media_id=None, tmdb_id=None):
+        """The year a library movie/show is named by -- a movie's year, a show's
+        first-air year -- found by library row id (``media_id``) or TMDB id.
+        None when the title isn't in the library or has no year."""
+        is_movie = str(kind or "").lower() == "movie"
+        expr = ("year" if is_movie else
+                "COALESCE(year, CAST(substr(NULLIF(first_air_date, ''), 1, 4) AS INTEGER))")
+        table = "movies" if is_movie else "shows"
+        conn = self._get_connection()
+        try:
+            if media_id is not None:
+                row = conn.execute("SELECT %s AS y FROM %s WHERE id = ?" % (expr, table),
+                                   (int(media_id),)).fetchone()
+            elif tmdb_id is not None:
+                row = conn.execute("SELECT MIN(%s) AS y FROM %s WHERE tmdb_id = ?" % (expr, table),
+                                   (int(tmdb_id),)).fetchone()
+            else:
+                return None
+            return int(row["y"]) if row and row["y"] else None
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+        finally:
+            conn.close()
+
     def episode_id_for(self, show_id: int, season, episode):
         """episodes.id for (show, season, episode) — resolves an owned re-grab's
         shows.id media_id to the episode row subtitle_wanted keys on. None when
@@ -6743,6 +6796,35 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def video_show_episode_file_path(self, tmdb_id=None, *, season=None):
+        """The server-reported path (+ size, + its season) of ANY owned episode
+        of a show: {"path", "size_bytes", "season_number"} or None. A new episode
+        of an owned show has no file of its own yet, so this is what tells the
+        importer which folder the show already lives in. Same season first, then
+        the latest season; within a season the latest episode."""
+        if not tmdb_id:
+            return None
+        try:
+            want = int(season) if season is not None else -1
+        except (TypeError, ValueError):
+            want = -1
+        conn = self._get_connection()
+        try:
+            r = conn.execute(
+                "SELECT f.relative_path, f.size_bytes, e.season_number FROM media_files f "
+                "JOIN episodes e ON e.id = f.episode_id "
+                "JOIN shows s ON s.id = e.show_id "
+                "WHERE s.tmdb_id=? AND e.has_file=1 AND f.relative_path<>'' "
+                "ORDER BY (e.season_number = ?) DESC, e.season_number DESC, "
+                "e.episode_number DESC, f.size_bytes DESC LIMIT 1",
+                (int(tmdb_id), want)).fetchone()
+            return ({"path": r["relative_path"], "size_bytes": r["size_bytes"],
+                     "season_number": r["season_number"]} if r else None)
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+        finally:
+            conn.close()
+
     def owned_library_id(self, media_type: str, tmdb_id):
         """The local library row id for an owned title, or None.
 
@@ -6841,7 +6923,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                "SELECT m.id AS movie_id, m.tmdb_id, m.title, m.year, m.runtime_minutes, "
+                "SELECT m.id AS movie_id, m.tmdb_id, m.imdb_id, m.title, m.year, m.runtime_minutes, "
                 "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
                 "f.video_codec, f.audio_codec, f.release_source, f.runtime_seconds "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
@@ -6858,6 +6940,7 @@ class VideoDatabase:
             rows = conn.execute(
                 "SELECT e.id AS episode_id, e.season_number, e.episode_number, "
                 "e.title AS episode_title, s.title AS show_title, "
+                "s.tmdb_id AS show_tmdb_id, s.imdb_id AS show_imdb_id, s.tvdb_id AS show_tvdb_id, "
                 # $year for episode templates: stored year, else the premiere
                 # year from first_air_date (enrichment fills that even when the
                 # server omits ProductionYear) — heals existing NULL-year rows
@@ -7099,14 +7182,19 @@ class VideoDatabase:
         try:
             movies = [dict(r) for r in conn.execute(
                 "SELECT 'movie' AS scope, m.id AS item_id, f.id AS file_id, "
-                "m.title, m.year, m.tmdb_id, NULL AS season, NULL AS episode, "
+                "m.title, m.year, m.tmdb_id, m.imdb_id, NULL AS tvdb_id, "
+                "NULL AS season, NULL AS episode, "
                 "NULL AS episode_title, NULL AS series, "
                 "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                 "WHERE m.has_file = 1")]
             eps = [dict(r) for r in conn.execute(
                 "SELECT 'episode' AS scope, e.id AS item_id, f.id AS file_id, "
-                "s.title AS title, NULL AS year, s.tmdb_id, "
+                "s.title AS title, "
+                # the show's year, as mass rename reads it -- a NULL here rendered
+                # every '$series ($year)' episode path without its year
+                "COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER)) AS year, "
+                "s.tmdb_id, s.imdb_id, s.tvdb_id, "
                 "e.season_number AS season, e.episode_number AS episode, "
                 "e.title AS episode_title, s.title AS series, "
                 "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec "

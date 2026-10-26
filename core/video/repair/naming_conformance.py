@@ -9,10 +9,16 @@ approving renames the file (plus its same-stem sidecars and subtitles) into
 place. Bulk select = mass rename.
 
 Safety: files that can't be located locally are skipped (never guessed); an
-occupied destination is a per-finding error, nothing is overwritten; DB paths
-are NOT rewritten here — the stored path is the SERVER's view, and the next
-scan reconciles it after the server notices the rename (dedup keeps handled
-findings from re-flagging meanwhile).
+occupied destination is a per-finding error, nothing is overwritten. The stored
+path is the SERVER's view, so a rename is mirrored into it the way Mass Rename
+does (the new local name mapped back onto the server's prefix): left stale until
+the next scan, every lookup by that path -- an upgrade finding the file it
+replaces, a new episode finding its show's folder -- missed the renamed file and
+fell back to the template path. The next scan still has the final word.
+
+A media-server scan records no quality, so '$quality' is read off the file's
+own current name when the library has none; otherwise every approved rename
+stripped a quality tag the file already carried.
 """
 
 from __future__ import annotations
@@ -20,8 +26,12 @@ from __future__ import annotations
 import os
 import shutil
 
+from core.video.library_paths import file_quality
 from core.video.repair import register_job
 from core.video.repair.base import JobContext, JobResult, VideoRepairJob
+from utils.logging_config import get_logger
+
+logger = get_logger("video.repair.naming_conformance")
 
 _SIDECAR_SUFFIXES = (".nfo", "-thumb.jpg", "-thumb.jpeg", "-thumb.png", "-thumb.webp",
                      ".srt", ".ass", ".sub", ".idx", ".jpg")
@@ -32,7 +42,19 @@ def _fields_of(row: dict) -> dict:
             "year": row.get("year"), "season": row.get("season"),
             "episode": row.get("episode"), "episode_title": row.get("episode_title"),
             "quality": row.get("quality"), "resolution": row.get("resolution"),
-            "codec": row.get("video_codec"), "tmdbid": row.get("tmdb_id")}
+            "codec": row.get("video_codec"), "tmdbid": row.get("tmdb_id"),
+            "imdbid": row.get("imdb_id"), "tvdbid": row.get("tvdb_id")}
+
+
+def _update_stored_path(db, file_id, old_local: str, new_local: str) -> None:
+    try:
+        from core.video.mass_rename import _inverse_reroot
+        stored = db.media_file_stored_path(int(file_id))
+        if stored is None:
+            return
+        db.set_media_file_stored_path(int(file_id), _inverse_reroot(new_local, old_local, stored))
+    except Exception:   # noqa: BLE001 - the next server scan re-adopts the truth anyway
+        logger.debug("stored-path update failed for file %s", file_id, exc_info=True)
 
 
 def _same_path(a: str, b: str) -> bool:
@@ -122,7 +144,9 @@ class NamingConformanceJob(VideoRepairJob):
                 result.skipped += 1
                 continue
             ext = os.path.splitext(real)[1]
-            expected = organization.render_path(r["scope"], root, _fields_of(r),
+            fields = _fields_of(r)
+            fields["quality"] = file_quality(fields.get("quality"), real)
+            expected = organization.render_path(r["scope"], root, fields,
                                                 settings, ext)["path"]
             if _same_path(real, expected):
                 continue
@@ -160,6 +184,10 @@ class NamingConformanceJob(VideoRepairJob):
         except OSError as e:
             return {"success": False, "error": f"rename failed: {e}"}
         moved = _move_sidecars(cur, want)
+        # the library's stored path must follow, or every lookup by that path
+        # (upgrades, a new episode finding its show's folder) misses the file
+        # until the media server rescans -- the same mirror Mass Rename keeps
+        _update_stored_path(context.db, d.get("file_id"), cur, want)
         # tidy an emptied folder (only ever the file's own former dir)
         try:
             old_dir = os.path.dirname(cur)
