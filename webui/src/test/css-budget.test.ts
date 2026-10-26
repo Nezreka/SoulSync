@@ -7,8 +7,8 @@ import baseline from './css-budget.json';
 import { WEBUI, legacySheets, listFiles, moduleSheets, read, readCss } from './css-files';
 
 /**
- * CSS ratchet. Each number counts a kind of sprawl the CSS cleanup removed.
- * It may go down, never up.
+ * CSS ratchet. Each number counts a kind of sprawl the CSS cleanup removed
+ * (see docs/styling.md). It may go down, never up.
  *
  * - Went up: use a token from static/tokens.css, edit the existing rule, or
  *   reuse an existing breakpoint/z-index instead of adding a new one.
@@ -208,7 +208,7 @@ describe('CSS budget (may only go down)', () => {
     const detail = DETAILS[key as keyof typeof DETAILS];
     expect(
       now,
-      `${key} went up from ${allowed} to ${now}.` +
+      `${key} went up from ${allowed} to ${now}. See docs/styling.md.` +
         (detail ? `\nNow: ${actual.details[detail].join(', ')}` : ''),
     ).toBeLessThanOrEqual(allowed);
   });
