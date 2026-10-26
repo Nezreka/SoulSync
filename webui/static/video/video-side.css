@@ -703,6 +703,9 @@ body[data-side="video"] .dashboard-header-sweep {
     margin-bottom: 16px; max-width: 780px;
 }
 .vd-actions > * { flex: 0 1 auto; }
+/* a global .watchlist-text { flex: 1 } stretched the label, so a full-width
+   phone button read "✓ ........ In Watchlist" */
+.vd-actions .watchlist-text { flex: 0 1 auto; }
 .vd-actions .vd-action-main,
 .vd-actions .discog-download-btn[data-vd-act="missing"],
 .vd-actions .library-artist-watchlist-btn[data-vd-act="get"],
@@ -739,6 +742,9 @@ body[data-side="video"] .dashboard-header-sweep {
     .vd-actions .vd-trailer-btn,
     .vd-actions .vd-manage-btn,
     .vd-actions .vd-yt-link { justify-content: center; width: 100%; min-width: 0; }
+    /* More alone on its row spans it instead of leaving half a row empty */
+    .vd-actions > .vd-action-main + .vd-more:last-child,
+    .vd-actions > .vd-more:only-child { grid-column: 1 / -1; }
 }
 /* live download status chip — sits above the action buttons when a movie on this
    page is downloading; the bar fills with progress and it jumps to Downloads. */
