@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Optional
 
 from core.imports.filename import extract_explicit_track_number
@@ -109,6 +110,126 @@ def read_embedded_track_number(file_path: str) -> Optional[int]:
         return _coerce_positive(text)
     except Exception:
         return None
+
+
+def read_embedded_album(file_path: str) -> Optional[str]:
+    """Read the album name from a downloaded audio file's own tags.
+
+    Tracks whose playlist entry never carried an album (paste-link
+    playlists, discovery-pool rows, TXT imports) arrive at post-processing
+    with the 'Unknown Album' placeholder instead of a name — but the file
+    itself usually knows exactly which album it belongs to (Soulseek
+    uploads and streaming rips are tagged at the source). The import
+    pipeline consults this before filing/tagging so the real album wins
+    over the placeholder. Returns the album string, or None when the file
+    has no usable album tag / can't be read. Never raises.
+    """
+    if not file_path:
+        return None
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(file_path, easy=True)
+        if audio is None:
+            return None
+        raw = audio.get('album')
+        if isinstance(raw, list):
+            raw = raw[0] if raw else None
+        if raw is None:
+            return None
+        text = str(raw).strip()
+        return text or None
+    except Exception:
+        return None
+
+
+def read_embedded_album_artist(file_path: str) -> Optional[str]:
+    """Read the ALBUM ARTIST tag embedded in an audio file, or None.
+
+    Companion to :func:`read_embedded_album`: the album name alone does
+    not say whose album it is, and adopting a various-artists
+    compilation's name for a track whose context names no album files
+    the track under its own artist with the compilation's name,
+    scattering one compilation across per-artist folders. Never raises.
+    """
+    if not file_path:
+        return None
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(file_path, easy=True)
+        if audio is None:
+            return None
+        for key in ('albumartist', 'album artist'):
+            raw = audio.get(key)
+            if isinstance(raw, list):
+                raw = raw[0] if raw else None
+            if raw is None:
+                continue
+            text = str(raw).strip()
+            if text:
+                return text
+        return None
+    except Exception:
+        return None
+
+
+def _normalize_artist_name(name: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(name or "").casefold()).strip()
+
+
+def _credited_artist_names(value: Any) -> set:
+    """The individual artist names in a credit string, normalized.
+
+    "Dawn McCarthy & Bonnie 'Prince' Billy" -> {"dawn mccarthy",
+    "bonnie prince billy"}. Whole names only: a substring rule would
+    call "Eve" the artist of a Steve Lacy album.
+    """
+    parts = re.split(
+        r"[&,]|\bfeat\.?\b|\bfeaturing\b|\bwith\b", str(value or ""), flags=re.IGNORECASE
+    )
+    return {n for n in (_normalize_artist_name(p) for p in parts) if n}
+
+
+def embedded_album_belongs_to_track(album_artist: Optional[str], track_artist: Optional[str]) -> bool:
+    """Whether a file's album tag is safe to adopt for this track.
+
+    Adopt only when the file names no album artist, or credits this
+    track's artist (alone or among the album's credited artists). A
+    various-artists credit, or an album credited to different artists
+    entirely (a mis-tag, a different release), means the album is not
+    this track's album — the track stays album-less rather than
+    inheriting a stranger's album.
+    """
+    album_artist = str(album_artist or "").strip()
+    if not album_artist:
+        return True
+    from core.imports.compilation import is_various_artists_name
+
+    if is_various_artists_name(album_artist):
+        return False
+    track_artist = str(track_artist or "").strip()
+    if not track_artist:
+        return True
+    album_names = _credited_artist_names(album_artist)
+    track_names = _credited_artist_names(track_artist)
+    return bool(album_names & track_names)
+
+
+def embedded_album_name_is_real(name: Any) -> bool:
+    """Whether a file's album tag is a real album name worth adopting.
+
+    Two distrust layers: the 'Unknown Album' placeholder family (the
+    import chain's own no-album marker), and the wider junk set the tag
+    writer already refuses to treat as metadata ('Unknown', 'Untitled
+    Album', ...) — Soulseek files carry those as album tags, and
+    adopting one just renames the bug.
+    """
+    from core.imports.context import has_real_album_name
+
+    if not has_real_album_name(name):
+        return False
+    from core.tag_writer import is_placeholder_meta
+
+    return not is_placeholder_meta(name)
 
 
 def resolve_track_number(

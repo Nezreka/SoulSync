@@ -230,12 +230,16 @@ export function buildDownloadTracks(results: RawDiscoveryResult[]): unknown[] {
         }
         return out;
       }
-      const albumData = (result as { spotify_album?: unknown }).spotify_album || 'Unknown Album';
+      // A missing album stays missing (empty name). Defaulting it to the
+      // literal 'Unknown Album' invents an album the source never named,
+      // and anything downstream that reads the payload's album treats
+      // the invention as a real name.
+      const albumData = (result as { spotify_album?: unknown }).spotify_album || '';
       const albumObject =
         typeof albumData === 'object' && albumData !== null
           ? albumData
           : {
-              name: typeof albumData === 'string' ? albumData : 'Unknown Album',
+              name: typeof albumData === 'string' ? albumData : '',
               album_type: 'album',
               images: [],
             };

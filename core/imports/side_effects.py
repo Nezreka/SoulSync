@@ -12,6 +12,7 @@ from core.settings import config_manager
 from core.imports.context import (
     extract_artist_name,
     get_import_clean_album,
+    has_real_album_name,
     get_import_clean_artist,
     get_import_clean_title,
     get_import_context_album,
@@ -577,8 +578,16 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         else:
             if album_info and isinstance(album_info, dict):
                 album_name = album_info.get("album_name", "")
-            if not album_name:
-                album_name = album_ctx.get("name", "") or original_search.get("album", "")
+            if not has_real_album_name(album_name):
+                # Never record the 'Unknown Album' placeholder as the
+                # library album — the album-mismatch tool reads this row.
+                # Skip placeholder candidates and fall through to the
+                # track title, like album-less singles.
+                album_name = ""
+                for _album_candidate in (album_ctx.get("name", ""), original_search.get("album", "")):
+                    if has_real_album_name(_album_candidate):
+                        album_name = _album_candidate
+                        break
         if not album_name:
             album_name = track_info.get("name", "Unknown")
 
