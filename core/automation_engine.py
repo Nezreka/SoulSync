@@ -82,6 +82,17 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'process_wishlist',
         'initial_delay': 60,  # 1 minute after startup
     },
+    # MetaSync's SIN charts: pulled from the MetaSync node once a day and
+    # matched in the background, then offered on the dashboard and Discover.
+    # Nothing is synced or downloaded. Skips quietly when MetaSync is not
+    # connected.
+    {
+        'name': 'Refresh MetaSync Charts',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 24, 'unit': 'hours'},
+        'action_type': 'metasync_refresh_charts',
+        'initial_delay': 420,  # 7 minutes after startup
+    },
     {
         'name': 'Auto-Scan Watchlist',
         'trigger_type': 'schedule',
@@ -247,6 +258,17 @@ SYSTEM_AUTOMATIONS = [
         'trigger_config': {'interval': 12, 'unit': 'hours'},
         'action_type': 'full_cleanup',
         'initial_delay': 900,  # 15 min after startup
+    },
+    # A dead Deezer ARL is silent until a download needs Deezer, and then that
+    # download quietly falls back to another source. This asks Deezer every few
+    # hours; the client fires 'Deezer Sign-in Failed' / 'Restored'. Does
+    # nothing without an ARL.
+    {
+        'name': 'Check Deezer Sign-in',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'action_type': 'check_deezer_signin',
+        'initial_delay': 1200,  # 20 min after startup, after the boot-time sign-in
     },
     # ── Video side (isolated app, shared engine) ──────────────────────────
     # owned_by='video' keeps these OFF the music automations page (it filters

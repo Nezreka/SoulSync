@@ -3175,6 +3175,7 @@
 }
 
 /* mood cards drift through their colour */
+/* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
 .discover-mix-card[data-mix-key^="mood_"] .mix-card-cover::after {
     background:
         linear-gradient(160deg, rgba(var(--mood-rgb), 0.8) 0%, rgba(var(--mood-rgb), 0.3) 50%, rgba(var(--mood-rgb), 0.75) 100%);
@@ -3587,9 +3588,12 @@ a.dsc-now-artist:hover {
         linear-gradient(90deg, rgba(8, 9, 12, 0.55) 0%, rgba(8, 9, 12, 0) 60%);
 }
 
+/* a tile is ~215px tall: two short lines of title, one of reason, one row
+   of buttons, and room on the right for the video switch */
 .dsc-promo--tile .dsc-promo-body {
     gap: 20px;
     padding: 0 26px;
+    padding-right: 60px;
 }
 
 .dsc-promo--tile .dsc-promo-cover {
@@ -3598,6 +3602,9 @@ a.dsc-now-artist:hover {
 
 .dsc-promo--tile .dsc-promo-title {
     margin-top: 6px;
+    -webkit-line-clamp: 2;
+    font-size: clamp(1.3rem, 1.7vw, 1.75rem) !important;
+    line-height: 1.05;
 }
 
 .dsc-promo--tile .dsc-promo-sub {
@@ -3606,10 +3613,13 @@ a.dsc-now-artist:hover {
     display: -webkit-box;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    -webkit-line-clamp: 1 !important;
 }
 
 .dsc-promo--tile .dsc-promo-actions {
     margin-top: 14px;
+    flex-wrap: nowrap;
+    gap: 8px;
 }
 
 .dsc-promo--tile .dsc-promo-eyebrow {
@@ -3624,27 +3634,6 @@ a.dsc-now-artist:hover {
     display: inline-block;
     margin-right: 8px;
     vertical-align: 1px;
-}
-
-/* a tile is ~215px tall: two short lines of title, one of reason, one row
-   of buttons, and room on the right for the video switch */
-.dsc-promo--tile .dsc-promo-body {
-    padding-right: 60px;
-}
-
-.dsc-promo--tile .dsc-promo-title {
-    -webkit-line-clamp: 2;
-    font-size: clamp(1.3rem, 1.7vw, 1.75rem) !important;
-    line-height: 1.05;
-}
-
-.dsc-promo--tile .dsc-promo-sub {
-    -webkit-line-clamp: 1 !important;
-}
-
-.dsc-promo--tile .dsc-promo-actions {
-    flex-wrap: nowrap;
-    gap: 8px;
 }
 
 .dsc-promo--tile .dsc-pulse-btn {
@@ -3823,6 +3812,7 @@ a.dsc-now-artist:hover {
    its centre, set by the banner as the pointer moves */
 .dsc-promo--feature { --tilt: 2.2deg; }
 .dsc-promo--tile { --tilt: 3.5deg; }
+/* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
 .dsc-promo--portrait { --tilt: 7deg; }
 
 @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {

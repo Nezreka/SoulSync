@@ -312,3 +312,80 @@ def test_perform_album_fill_copy_branch_generates_track_id(tmp_path, monkeypatch
         assert Path(row[2]).exists()
         assert row[3] == "navidrome"
         assert verify_conn.execute("SELECT COUNT(*) FROM tracks WHERE id IS NULL").fetchone()[0] == 0
+
+
+def _soundtrack_worker(tmp_path, album_artist, monkeypatch, tracklist_artists):
+    """a target album with one owned track, a deezer id, and a fake deezer
+    tracklist credited to ``tracklist_artists``."""
+    import core.repair_worker as rw
+
+    existing = tmp_path / album_artist / "Album" / "01 - Owned.flac"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"existing")
+    fetched = []
+
+    def _tracks(source, album_id):
+        fetched.append((source, album_id))
+        return {"items": [{"track_number": i + 1, "artists": [{"name": a}]}
+                          for i, a in enumerate(tracklist_artists)]}
+
+    monkeypatch.setattr(rw, "get_album_tracks_for_source", _tracks)
+    monkeypatch.setattr(rw, "get_source_priority", lambda primary: ["deezer"])
+
+    class _FakeDB:
+        def __init__(self):
+            self.wishlist = []
+
+        def get_tracks_by_album(self, album_id):
+            return [SimpleNamespace(id="owned-1", album_id=album_id, artist_id="a",
+                                    title="Owned", track_number=1,
+                                    file_path=str(existing), bitrate=9999)]
+
+        def search_tracks(self, title="", artist="", limit=50, server_source=None):
+            return []
+
+        def add_to_wishlist(self, *args, **kwargs):
+            self.wishlist.append((args, kwargs))
+
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = _FakeDB()
+    worker.transfer_folder = str(tmp_path)
+    worker._config_manager = None
+    return worker, fetched
+
+
+def _guest_finding(album_artist, guest):
+    return {
+        "album_id": "target-album", "album_title": "How to Train Your Dragon 2",
+        "artist": album_artist, "primary_source": "deezer", "deezer_album_id": "7845235",
+        "missing_tracks": [
+            {"name": "Into a Fantasy", "track_number": 20, "disc_number": 1,
+             "source": "deezer", "source_track_id": "78917815", "artists": [guest]},
+            {"name": "Heat and Havoc", "track_number": 21, "disc_number": 1,
+             "source": "deezer", "source_track_id": "403093682", "artists": [guest]},
+        ],
+    }
+
+
+def test_soundtrack_guest_track_is_not_skipped(tmp_path, monkeypatch):
+    # storm's report: Alexander Rybak's song on John Powell's How to Train Your
+    # Dragon 2 was skipped for not being John Powell. the album's own tracklist
+    # is his, so the guest track belongs on it.
+    worker, fetched = _soundtrack_worker(
+        tmp_path, "John Powell", monkeypatch,
+        ["John Powell"] * 19 + ["Alexander Rybak", "Alexander Rybak"])
+    result = worker._fix_incomplete_album(
+        "album", "target-album", None, _guest_finding("John Powell", "Alexander Rybak"))
+    assert result["skipped"] == 0
+    assert result["wishlisted"] == 2
+    assert fetched == [("deezer", "7845235")]          # one tracklist fetch for the album
+
+
+def test_wrong_release_is_still_skipped_with_a_tracklist(tmp_path, monkeypatch):
+    # gut's light years matched to jamiroquai's: the tracklist never credits gut
+    worker, fetched = _soundtrack_worker(
+        tmp_path, "Gut", monkeypatch, ["Jamiroquai", "Jamiroquai"])
+    result = worker._fix_incomplete_album(
+        "album", "target-album", None, _guest_finding("Gut", "Jamiroquai"))
+    assert result["skipped"] == 2 and result["wishlisted"] == 0
+    assert worker.db.wishlist == []

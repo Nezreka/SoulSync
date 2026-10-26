@@ -802,6 +802,32 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     expect(calls.some((c) => c.url.endsWith('/pipeline/status'))).toBe(false);
   });
 
+  it("the card's ⋯ generates cover art, and using it refetches the cards", async () => {
+    stubFetch();
+    responder = (url, method) => {
+      if (url === '/api/mirrored-playlists') return [ROW];
+      if (method === 'POST' && url === '/api/mirrored-playlists/3/cover-art')
+        return {
+          preview_url: '/p.webp',
+          keyed: true,
+          prompt: '',
+          vibe: { name: 'Road Trip', genres: [], moods: [], decade: null },
+        };
+      if (url.endsWith('/cover-art/apply')) return { image_url: '/x' };
+      return { states: [] };
+    };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    runCardAction('Generate cover art');
+    expect(await screen.findByRole('dialog', { name: 'Cover art' })).toBeInTheDocument();
+    await screen.findByAltText('Generated cover preview');
+    const listFetches = () => calls.filter((c) => c.url === '/api/mirrored-playlists').length;
+    const before = listFetches();
+    fireEvent.click(screen.getByRole('button', { name: 'Use this cover' }));
+    await waitFor(() => expect(listFetches()).toBeGreaterThan(before));
+    expect(screen.queryByRole('dialog', { name: 'Cover art' })).toBeNull();
+  });
+
   it('🔗 opens the editor pre-filled from getMirroredSourceRef and PATCHes', async () => {
     stubFetch();
     window.showToast = vi.fn() as typeof window.showToast;

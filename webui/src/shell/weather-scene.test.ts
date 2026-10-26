@@ -437,4 +437,43 @@ describe("new year's fireworks", () => {
     expect(watch({ isDay: false }, 0)).toBe(0);
     expect(watch({ isDay: false }, 1, 60)).toBeLessThanOrEqual(520);
   });
+
+  it('every rocket bursts, under the header, however tall the sidebar', () => {
+    // a tall sidebar is where a fixed launch speed stalled short and hung
+    for (const h of [700, 1100, 1600]) {
+      const blooms: number[] = [];
+      const ctx = {
+        ...fakeCtx(),
+        createRadialGradient: (
+          _x: number,
+          y: number,
+          _r: number,
+          _x1: number,
+          _y1: number,
+          r1: number,
+        ) => {
+          if (r1 === 70) blooms.push(y); // a burst's flash
+          return { addColorStop: () => {} };
+        },
+      };
+      const eng = createWeatherScene(
+        ctx as unknown as CanvasRenderingContext2D,
+        { ...CALM, isDay: false },
+        seeded(),
+        { fireworks: 1 },
+      );
+      eng.resize(260, h, 1, 240);
+      let t = 0;
+      let mostRockets = 0;
+      for (let i = 0; i < 40 * 60; i++) {
+        t += 1 / 60;
+        eng.frame(1 / 60, t);
+        mostRockets = Math.max(mostRockets, eng.stats().rockets);
+      }
+      // nothing piles up hanging in the air: each one goes off in a few seconds
+      expect(mostRockets).toBeLessThanOrEqual(4);
+      expect(blooms.length).toBeGreaterThan(10);
+      expect(Math.min(...blooms)).toBeGreaterThanOrEqual(240);
+    }
+  });
 });

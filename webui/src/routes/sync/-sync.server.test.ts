@@ -23,6 +23,8 @@ import {
   addTrackPosition,
   applyPickedTrack,
   applyRemovedTrack,
+  applyUnmatchedTrack,
+  canUnmatch,
   removeConfirmOptions,
   deleteServerPlaylist,
   removeServerTrack,
@@ -274,7 +276,7 @@ describe('compareStats + the labels derived from it (356-382)', () => {
 
 describe('the three compare labels + icons (298, 312-314, 323-326)', () => {
   it("are THREE distinct tables — source, server, and the mirrored tab's", () => {
-    // 313: the same six the disambiguation modal uses (193), deliberately one
+    // 313: the six the disambiguation modal uses (193) plus newpipe, deliberately one
     // table. Spotify is a green circle, NOT the mirrored tab's musical note.
     expect(COMPARE_SOURCE_ICONS).toEqual({
       spotify: '🟢',
@@ -283,6 +285,7 @@ describe('the three compare labels + icons (298, 312-314, 323-326)', () => {
       beatport: '🎛️',
       deezer: '🟣',
       file: '📄',
+      newpipe: '▶️',
     });
     // 314: three keys only, and deezer's purple circle here means JELLYFIN.
     expect(COMPARE_SERVER_ICONS).toEqual({ plex: '🟠', jellyfin: '🟣', navidrome: '🔵' });
@@ -304,6 +307,7 @@ describe('the three compare labels + icons (298, 312-314, 323-326)', () => {
     // 312: with a mirrored playlist but no source name, 'source' is capitalised.
     expect(compareSourceLabel(undefined, true)).toBe('Source');
     expect(compareSourceLabel('tidal', true)).toBe('Tidal');
+    expect(compareSourceLabel('newpipe', true)).toBe('NewPipe');
   });
 
   it('builds the meta line with zero fallbacks (301)', () => {
@@ -1033,5 +1037,42 @@ describe('downloadM3u (677-685)', () => {
     expect(document.body.contains(clicked[0])).toBe(false);
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:m3u');
     click.mockRestore();
+  });
+});
+
+describe('applyUnmatchedTrack', () => {
+  const PAIR: CompareTrack = {
+    ...MATCHED,
+    source_track: { name: 'Nights', artist: 'Frank Ocean', source_track_id: 'sp1' },
+  };
+
+  it('the source row goes missing in place and the server track becomes a trailing extra', () => {
+    const next = applyUnmatchedTrack([PAIR, MATCHED], 0);
+    expect(next).toHaveLength(3);
+    expect(next[0]).toMatchObject({ match_status: 'missing', server_track: null, confidence: 0 });
+    expect(next[0].source_track).toEqual(PAIR.source_track);
+    expect(next[1]).toBe(MATCHED);
+    expect(next[2]).toEqual({
+      source_track: null,
+      server_track: PAIR.server_track,
+      match_status: 'extra',
+    });
+  });
+
+  it('leaves a row without both sides alone', () => {
+    const missing: CompareTrack = {
+      match_status: 'missing',
+      source_track: { name: 'x' },
+      server_track: null,
+    };
+    expect(applyUnmatchedTrack([missing], 0)).toEqual([missing]);
+    expect(applyUnmatchedTrack([missing], 5)).toEqual([missing]);
+  });
+
+  it('canUnmatch wants a matched row with both ids', () => {
+    expect(canUnmatch(PAIR)).toBe(true);
+    expect(canUnmatch(MATCHED)).toBe(false);
+    expect(canUnmatch({ ...PAIR, match_status: 'extra' })).toBe(false);
+    expect(canUnmatch({ ...PAIR, server_track: { title: 'no id' } })).toBe(false);
   });
 });

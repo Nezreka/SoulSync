@@ -59,7 +59,7 @@ describe('ImportFileTab — upload zone', () => {
     dropFile('cover.jpg', 'binary');
     await waitFor(() =>
       expect(toast).toHaveBeenCalledWith(
-        'Unsupported file type. Use CSV, TSV, TXT, M3U, or M3U8.',
+        'Unsupported file type. Use CSV, TSV, TXT, M3U, M3U8, or a NewPipe backup (ZIP/DB).',
         'error',
       ),
     );

@@ -8,12 +8,9 @@ import {
 } from './-ui/watchlist-global-settings-modal';
 
 describe('globalConfigIsSavable', () => {
-  it('always allows a save while the override is off', () => {
-    // With the override off these flags are inert, so an all-unchecked config
-    // is legitimate. Blocking it here would make the modal impossible to close
-    // via Save after unticking everything.
+  it('always needs a release type: the defaults apply to every following artist (#1822)', () => {
     const config = setAllIncludes({ ...EMPTY_GLOBAL_CONFIG }, false);
-    expect(globalConfigIsSavable(config)).toBe(true);
+    expect(globalConfigIsSavable(config)).toBe(false);
   });
 
   it('requires at least one release type while the override is on', () => {

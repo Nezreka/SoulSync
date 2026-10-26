@@ -372,22 +372,32 @@ def _fingerprint_sync_id(playlist_id, resync_entry_id):
     return playlist_id
 
 
-def _sync_is_user_playlist(playlist_id, profile_id) -> bool:
-    """True when the synced mirror is a user-made playlist (source 'soulsync').
+def _mirror_id_from_sync_id(playlist_id):
+    """the mirror's row id behind a sync id. the pipeline syncs as
+    auto_mirror_<id>, older callers pass the bare id. None for anything else."""
+    text = str(playlist_id or '')
+    if text.startswith('auto_mirror_'):
+        text = text[len('auto_mirror_'):]
+    return int(text) if text.isdigit() else None
 
-    Best-effort: any lookup failure (tests stub the db, ids aren't always
-    ints) reads as "not a user playlist", keeping the source-poster guards.
-    """
+
+def _sync_mirror_row(playlist_id, profile_id):
     try:
+        mirror_id = _mirror_id_from_sync_id(playlist_id)
+        if mirror_id is None:
+            return None
         from database.music_database import get_database
-        db = get_database()
-        getter = getattr(db, 'get_mirrored_playlist', None)
-        if getter is None:
-            return False
-        row = getter(int(playlist_id), profile_id=profile_id)
-        return bool(row) and row.get('source') == 'soulsync'
+        getter = getattr(get_database(), 'get_mirrored_playlist', None)
+        return getter(mirror_id, profile_id=profile_id) if getter else None
     except Exception:
-        return False
+        return None
+
+
+def _sync_cover_is_users(playlist_id, profile_id) -> bool:
+    """the cover is the user's own pick, so it pushes every sync: a user
+    playlist's, or a mirror's generated cover (custom_cover)."""
+    row = _sync_mirror_row(playlist_id, profile_id)
+    return bool(row) and (row.get('source') == 'soulsync' or bool(row.get('custom_cover')))
 
 
 def run_sync_task(
@@ -740,11 +750,12 @@ def run_sync_task(
         _synced = getattr(result, 'synced_tracks', 0)
         logger.info(f"[PLAYLIST IMAGE] has_image={bool(playlist_image_url)}, synced_tracks={_synced}")
         # A user playlist's cover is the owner's explicit choice — there is no
-        # upstream poster — so it pushes on every sync. The first-sync-only /
+        # upstream poster — so it pushes on every sync. same for a mirror's
+        # generated cover, the user picked it over the source's. The first-sync-only /
         # preserve-existing rules below protect SOURCE posters (#993, #792,
         # #811): re-pushing those would clobber a cover the user set by hand
         # on the server.
-        _is_user_playlist = _sync_is_user_playlist(playlist_id, profile_id)
+        _cover_is_users = _sync_cover_is_users(playlist_id, profile_id)
         # An uploaded cover is a path on this server ("/api/user-playlists/<id>/
         # cover"): make it absolute so the clients can fetch it. Same-host is
         # the common case; a server on another box degrades to today's
@@ -765,9 +776,10 @@ def run_sync_task(
                     from core.playlists import user_playlists as _up
                     _cm = deps.config_manager
                     _base = getattr(_cm, 'base_dir', None) if _cm else None
-                    _cand = _up.cover_path(int(playlist_id), str(_base) if _base else None,
-                                           mkdir=False)
-                    if os.path.isfile(_cand):
+                    _mirror_id = _mirror_id_from_sync_id(playlist_id)
+                    _cand = _up.cover_path(_mirror_id, str(_base) if _base else None,
+                                           mkdir=False) if _mirror_id is not None else ''
+                    if _cand and os.path.isfile(_cand):
                         _cover_local_path = _cand
                 except Exception:
                     _cover_local_path = None
@@ -776,9 +788,9 @@ def run_sync_task(
         # exists (#993) — either re-clobbers a user's custom poster. The source cover
         # is pushed only to a brand-new playlist (a genuine first mirror); after that
         # its cover is left alone. A one-off retroactive backfill is future work.
-        if sync_mode in ('reconcile', 'append') and not _is_user_playlist:
+        if sync_mode in ('reconcile', 'append') and not _cover_is_users:
             logger.info(f"[PLAYLIST IMAGE] {sync_mode} mode — preserving existing playlist image")
-        elif playlist_image_url and _synced > 0 and _playlist_preexisted and not _is_user_playlist:
+        elif playlist_image_url and _synced > 0 and _playlist_preexisted and not _cover_is_users:
             logger.info("[PLAYLIST IMAGE] playlist already existed — leaving its current cover untouched (#993)")
         elif playlist_image_url and _synced > 0:
             try:

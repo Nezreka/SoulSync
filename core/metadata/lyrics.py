@@ -26,7 +26,7 @@ def generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: d
         return False
 
     try:
-        from core.lyrics_client import lyrics_client
+        from core.lyrics_client import PIPELINE_MAX_WAIT_SECONDS, lyrics_client
 
         context = normalize_import_context(context)
         original_search = get_import_original_search(context)
@@ -52,16 +52,34 @@ def generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: d
         if original_search.get("duration_ms"):
             duration_seconds = int(original_search["duration_ms"] / 1000)
 
-        success = lyrics_client.create_lrc_file(
-            audio_file_path=file_path,
-            track_name=track_name,
-            artist_name=artist_name,
-            album_name=album_name,
-            duration_seconds=duration_seconds,
-        )
+        # Prefer the detailed variant (#1879): a transient LRCLib failure
+        # (429/503/timeout) must not be logged as "No lyrics found" — the
+        # lyrics may well exist, LRCLib just didn't answer.
+        detailed = getattr(lyrics_client, 'create_lrc_file_detailed', None)
+        if callable(detailed):
+            # pipeline cap: an import never waits out an LRCLib cooldown
+            success, fetch_reason = detailed(
+                audio_file_path=file_path,
+                track_name=track_name,
+                artist_name=artist_name,
+                album_name=album_name,
+                duration_seconds=duration_seconds,
+                max_wait_seconds=PIPELINE_MAX_WAIT_SECONDS,
+            )
+        else:
+            success = lyrics_client.create_lrc_file(
+                audio_file_path=file_path,
+                track_name=track_name,
+                artist_name=artist_name,
+                album_name=album_name,
+                duration_seconds=duration_seconds,
+            )
+            fetch_reason = None
 
         if success:
             logger.info("LRC file generated for: %s", track_name)
+        elif fetch_reason:
+            logger.warning("Lyrics fetch incomplete for %s: %s", track_name, fetch_reason)
         else:
             logger.warning("No lyrics found for: %s", track_name)
         return success

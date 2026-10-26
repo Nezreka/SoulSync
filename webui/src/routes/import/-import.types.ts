@@ -113,6 +113,9 @@ export interface ImportInboxSummary {
   size: number;
   attention: number;
   by_status: Partial<Record<ImportInboxStatus, number>>;
+  /** server build order (#1874): a scanning reply's summary and a tab
+   * snapshot are ordered by this, never by blind preference */
+  seq?: number;
 }
 
 export interface ImportInboxWorker {
@@ -132,6 +135,9 @@ export interface ImportInboxPayload {
   staging_path?: string;
   items?: ImportInboxItem[];
   summary?: ImportInboxSummary;
+  /** scanning replies only (#1874): the build seq at which the server's
+   * remembered summary was cleared (folder counted empty since) */
+  summary_cleared_seq?: number;
   problems?: ImportStagingProblem[];
   worker?: ImportInboxWorker;
 }

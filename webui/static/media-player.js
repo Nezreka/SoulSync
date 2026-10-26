@@ -1199,12 +1199,31 @@ async function _npLyricsLoadForTrack(track) {
             }
         }
         const content = document.getElementById('np-lyrics-content');
-        if (content) content.innerHTML = '<div class="np-lyrics-empty">No lyrics found</div>';
+        if (content) {
+            // A failed lookup (LRCLib rate-limited / 503 / rejected,
+            // #1879) is NOT necessarily "no lyrics" — when the endpoint
+            // returns an LRCLib reason, show that instead of the generic
+            // copy. Anything else (a definitive miss, a raw server
+            // error) keeps the old "No lyrics found" text.
+            const empty = document.createElement('div');
+            empty.className = 'np-lyrics-empty';
+            empty.textContent = (data && data.error && (data.retryable || data.error.startsWith('LRCLib')))
+                ? data.error : 'No lyrics found';
+            content.replaceChildren(empty);
+        }
+        if (data && data.retryable && _npLyricsState.trackKey === key) {
+            // Transient failure (#1879): don't let the already-loaded
+            // guard pin this track as "done" forever — clearing the key
+            // lets the next load attempt (this track starting again)
+            // retry the fetch.
+            _npLyricsState.trackKey = null;
+        }
         if (status) status.textContent = '';
     } catch (e) {
         console.debug('lyrics fetch failed:', e);
         const content = document.getElementById('np-lyrics-content');
         if (content) content.innerHTML = '<div class="np-lyrics-empty">Lyrics unavailable</div>';
+        if (_npLyricsState.trackKey === key) _npLyricsState.trackKey = null;  // network error is transient too
         if (status) status.textContent = '';
     } finally {
         _npLyricsState.fetchInFlight = false;

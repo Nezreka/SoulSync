@@ -265,6 +265,34 @@ def test_on_complete_failed_task_appended_to_permanently_failed_tracks():
     assert download_batches['b1']['permanently_failed_tracks'][0]['spotify_track'] == {'name': 'Money'}
 
 
+def _failed_reason(status, error_message=None):
+    download_tasks['t1'] = {
+        'status': status, 'track_info': {'name': 'Þú ert sólin'},
+        'track_index': 0, 'retry_count': 0,
+    }
+    if error_message is not None:
+        download_tasks['t1']['error_message'] = error_message
+    download_batches['b1'] = {
+        'queue': ['t1'], 'queue_index': 1, 'active_count': 1,
+        'max_concurrent': 1, 'permanently_failed_tracks': [],
+        'cancelled_tracks': set(),
+    }
+    deps, _ = _build_deps()
+    lc.on_download_completed('b1', 't1', False, deps)
+    return download_batches['b1']['permanently_failed_tracks'][0]['failure_reason']
+
+
+def test_on_complete_failed_task_hands_the_wishlist_its_real_reason():
+    # the wishlist showed "download keeps failing" with nothing behind it,
+    # because every failure was flattened to a bare 'Download failed'
+    why = 'tidal download failed (engine state: errored)'
+    assert _failed_reason('failed', why) == why
+    assert _failed_reason('failed') == 'Download failed'
+    assert _failed_reason('failed', '') == 'Download failed'
+    # not_found keeps the fixed text the wishlist page reads as "no match"
+    assert _failed_reason('not_found', 'No match found for "x" after 3 queries') == 'No matching track found'
+
+
 def test_on_complete_cancelled_task_added_to_cancelled_tracks():
     download_tasks['t1'] = {
         'status': 'cancelled', 'track_info': {'name': 'X'},
@@ -347,8 +375,49 @@ def test_batch_completion_emits_batch_complete_when_all_done():
     # Final task completes
     lc.on_download_completed('b1', 't2', True, deps)
     assert download_batches['b1']['phase'] == 'complete'
-    assert ('batch_complete', {'playlist_name': 'PL', 'artist': 'Bobby & Max', 'total_tracks': '2', 'completed_tracks': '2', 'failed_tracks': '0', 'more_batches_pending': 'false'}) in auto.events
+    assert ('batch_complete', {'playlist_name': 'PL', 'artist': 'Bobby & Max', 'title': '', 'album': '', 'total_tracks': '2', 'completed_tracks': '2', 'failed_tracks': '0', 'more_batches_pending': 'false'}) in auto.events
     assert 'b1' in monitor.stopped
+
+
+def _finish_single_batch(tasks, batch_extra=None):
+    ids = []
+    for i, info in enumerate(tasks):
+        download_tasks[f't{i}'] = {'status': 'completed', 'track_info': info}
+        ids.append(f't{i}')
+    download_batches['b1'] = {
+        'queue': ids, 'queue_index': len(ids), 'active_count': 1,
+        'max_concurrent': 2, 'permanently_failed_tracks': [],
+        'cancelled_tracks': set(), 'playlist_name': 'Wishlist (Auto - Albums)',
+        **(batch_extra or {}),
+    }
+    auto = _FakeAutoEngine()
+    deps, _ = _build_deps(automation=auto, monitor=_FakeMonitor())
+    lc.on_download_completed('b1', ids[-1], True, deps)
+    return [d for t, d in auto.events if t == 'batch_complete'][0]
+
+
+def test_batch_complete_names_the_track_of_a_contextless_wishlist_batch():
+    """the catch-all wishlist batch has no artist_context, so the notification
+    used to say only 'Wishlist (Auto - Albums)'."""
+    ev = _finish_single_batch([{'name': 'Folge 1', 'artists': [{'name': 'Bobby & Max'}],
+                                'album': {'name': 'Das Abenteuer'}}])
+    assert (ev['artist'], ev['title'], ev['album']) == ('Bobby & Max', 'Folge 1', 'Das Abenteuer')
+
+
+def test_batch_complete_summarises_several_artists_without_a_title():
+    ev = _finish_single_batch([
+        {'name': 'a', 'artists': ['A']}, {'name': 'b', 'artists': ['B']},
+        {'name': 'c', 'artists': ['A']}, {'name': 'd', 'artists': ['C']},
+    ])
+    assert ev['artist'] == 'A, B +1'
+    assert ev['title'] == ''
+
+
+def test_batch_complete_keeps_the_album_batch_context():
+    ev = _finish_single_batch(
+        [{'name': 'x', 'artists': ['Other']}],
+        {'artist_context': {'name': 'Bobby & Max'}, 'album_context': {'name': 'Album'}})
+    assert (ev['artist'], ev['album']) == ('Bobby & Max', 'Album')
 
 
 def test_batch_completion_cleans_private_album_bundle_staging(tmp_path):

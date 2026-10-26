@@ -35,6 +35,14 @@
         'cam': 'CAM / TS', 'screener': 'Screener', 'workprint': 'Workprint', '3d': '3D', 'x264': 'x264 / AVC'
     };
     var REJECT_ORDER = ['cam', 'screener', 'workprint', '3d', 'x264'];
+    // audio languages a release tag can name (core/video/quality_profile.AUDIO_LANGUAGES)
+    var LANG_ORDER = ['fr', 'de', 'it', 'es', 'pt', 'ja', 'ko', 'zh', 'ru', 'pl', 'nl',
+                      'sv', 'da', 'no', 'fi', 'hi', 'tr', 'cs', 'hu', 'ar', 'uk', 'en'];
+    var LANG_LABEL = { fr: 'French', de: 'German', it: 'Italian', es: 'Spanish', pt: 'Portuguese',
+                       ja: 'Japanese', ko: 'Korean', zh: 'Chinese', ru: 'Russian', pl: 'Polish',
+                       nl: 'Dutch', sv: 'Swedish', da: 'Danish', no: 'Norwegian', fi: 'Finnish',
+                       hi: 'Hindi', tr: 'Turkish', cs: 'Czech', hu: 'Hungarian', ar: 'Arabic',
+                       uk: 'Ukrainian', en: 'English' };
 
     function esc(s) {
         return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -206,6 +214,66 @@
         }
     }
 
+    // The TV libraries other than the main pick, each with a Scan and an Anime
+    // tick. ``tvMore`` / ``anime`` are the saved lists of titles.
+    var _tvAll = [], _tvMore = [], _anime = [];
+
+    function fillTvMore() {
+        var row = document.querySelector('[data-video-lib-tv-more-row]');
+        var box = document.querySelector('[data-video-lib-tv-more]');
+        if (!row || !box) return;
+        var t = document.querySelector('[data-video-lib-select="tv"]');
+        var main = t ? t.value : '';
+        box.textContent = '';
+        var shown = 0;
+        for (var i = 0; i < _tvAll.length; i++) {
+            var title = _tvAll[i].title;
+            if (!title || title === main) continue;
+            shown++;
+            var item = document.createElement('div');
+            item.className = 'video-library-tv-more-item';
+            var name = document.createElement('span');
+            name.textContent = title;
+            item.appendChild(name);
+            [['scan', 'Scan', _tvMore], ['anime', 'Anime', _anime]].forEach(function (k) {
+                var lab = document.createElement('label');
+                lab.className = 'checkbox-label';
+                var box2 = document.createElement('input');
+                box2.type = 'checkbox';
+                box2.setAttribute('data-video-lib-tv-' + k[0], title);
+                box2.checked = k[2].indexOf(title) !== -1;
+                box2.addEventListener('change', onTvMoreChange);
+                lab.appendChild(box2);
+                lab.appendChild(document.createTextNode(' ' + k[1]));
+                item.appendChild(lab);
+            });
+            box.appendChild(item);
+        }
+        row.hidden = shown === 0;
+    }
+
+    function ticked(kind) {
+        var out = [];
+        var boxes = document.querySelectorAll('[data-video-lib-tv-' + kind + ']');
+        for (var i = 0; i < boxes.length; i++) {
+            if (boxes[i].checked) out.push(boxes[i].getAttribute('data-video-lib-tv-' + kind));
+        }
+        return out;
+    }
+
+    function onTvMoreChange(e) {
+        // a library ticked Anime is one you want scanned: tick Scan with it
+        var b = e && e.target;
+        if (b && b.checked && b.hasAttribute('data-video-lib-tv-anime')) {
+            var title = b.getAttribute('data-video-lib-tv-anime');
+            var scans = document.querySelectorAll('[data-video-lib-tv-scan]');
+            for (var i = 0; i < scans.length; i++) {
+                if (scans[i].getAttribute('data-video-lib-tv-scan') === title) scans[i].checked = true;
+            }
+        }
+        save();
+    }
+
     function load() {
         status('Loading…');
         fetch(URL, { headers: { 'Accept': 'application/json' } })
@@ -215,6 +283,10 @@
                 var sel = d.selected || {};
                 fill(document.querySelector('[data-video-lib-select="movies"]'), d.movies || [], sel.movies);
                 fill(document.querySelector('[data-video-lib-select="tv"]'), d.tv || [], sel.tv);
+                _tvAll = d.tv || [];
+                _tvMore = sel.tv_more || [];
+                _anime = sel.anime || [];
+                fillTvMore();
                 if (!(d.movies || []).length && !(d.tv || []).length) {
                     status('No movie or TV libraries found. Check the server connection and that the user above can see them.');
                 } else if (!sel.movies && !sel.tv) {
@@ -229,11 +301,20 @@
     function save(silent) {
         var m = document.querySelector('[data-video-lib-select="movies"]');
         var t = document.querySelector('[data-video-lib-select="tv"]');
+        var body = { movies: m ? m.value : '', tv: t ? t.value : '' };
+        if (document.querySelector('[data-video-lib-tv-more]')) {
+            // the main TV pick is always scanned; keep an Anime mark on it if it had one
+            var main = body.tv;
+            body.tv_more = ticked('scan');
+            body.anime = ticked('anime').concat(main && _anime.indexOf(main) !== -1 ? [main] : []);
+            _tvMore = body.tv_more;
+            _anime = body.anime;
+        }
         status('Saving…');
         return fetch(URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ movies: m ? m.value : '', tv: t ? t.value : '' })
+            body: JSON.stringify(body)
         })
             .then(function (r) { return r.json(); })
             .then(function () { status('Saved'); if (!silent) toast('Library selection saved', 'success'); })
@@ -1135,6 +1216,19 @@
         _vqSeg('vq-audio', 'data-vq-audio', p.prefer_audio);
         var rep = document.getElementById('vq-prefer-repack'); if (rep) rep.checked = !!p.prefer_repack;
 
+        // Audio language (dubbed / MULTI). MULTI always counts as a match.
+        var lmode = p.audio_language_mode || 'off';
+        _vqSeg('vq-lang-mode', 'data-vq-lang-mode', lmode);
+        var lg = document.getElementById('vq-langs');
+        if (lg) {
+            var langs = Array.isArray(p.audio_languages) ? p.audio_languages : [];
+            lg.hidden = lmode === 'off';
+            lg.innerHTML = LANG_ORDER.map(function (k) {
+                var on = langs.indexOf(k) !== -1;
+                return '<button type="button" class="vq-chip' + (on ? ' on' : '') + '" data-vq-lang="' + k + '">' + (LANG_LABEL[k] || k) + '</button>';
+            }).join('');
+        }
+
         // Size guard — split by runtime so a movie and an episode aren't judged the same.
         var mv = document.getElementById('vq-movie-size'); if (mv) mv.value = p.max_movie_gb || 0;
         var ep = document.getElementById('vq-episode-size'); if (ep) ep.value = p.max_episode_gb || 0;
@@ -1165,6 +1259,14 @@
         var j = i + dir;
         if (i < 0 || j < 0 || j >= arr.length) return;
         var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;   // swap
+        renderQuality(); saveQuality(true);
+    }
+
+    function toggleLang(k) {
+        var p = _videoQuality; if (!p) return;
+        if (!Array.isArray(p.audio_languages)) p.audio_languages = [];
+        var i = p.audio_languages.indexOf(k);
+        if (i === -1) p.audio_languages.push(k); else p.audio_languages.splice(i, 1);
         renderQuality(); saveQuality(true);
     }
 
@@ -1222,6 +1324,10 @@
             if (hd) { _videoQuality.prefer_hdr = hd.getAttribute('data-vq-hdr'); renderQuality(); saveQuality(true); return; }
             var au = e.target.closest('[data-vq-audio]');
             if (au) { _videoQuality.prefer_audio = au.getAttribute('data-vq-audio'); renderQuality(); saveQuality(true); return; }
+            var lm = e.target.closest('[data-vq-lang-mode]');
+            if (lm) { _videoQuality.audio_language_mode = lm.getAttribute('data-vq-lang-mode'); renderQuality(); saveQuality(true); return; }
+            var lc = e.target.closest('[data-vq-lang]');
+            if (lc) { toggleLang(lc.getAttribute('data-vq-lang')); return; }
         });
         card.addEventListener('change', function (e) {
             if (!_videoQuality) return;
@@ -2166,7 +2272,7 @@
         // first arg (which is our `silent` flag — it would suppress the toast).
         var selects = document.querySelectorAll('select[data-video-lib-select]');
         for (var i = 0; i < selects.length; i++) {
-            selects[i].addEventListener('change', function () { save(); });
+            selects[i].addEventListener('change', function () { fillTvMore(); save(); });
         }
         // Enrichment keys save on blur/change (turns the workers on).
         ['tmdb-api-key', 'tvdb-api-key', 'omdb-api-key',

@@ -246,13 +246,30 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
             if title:
                 try:
                     dur = lm.get('duration') or db_data.get('duration')
-                    wrote = _lyrics_client.create_lrc_file(
-                        fp, title, artist,
-                        album_name=lm.get('album') or db_data.get('album'),
-                        duration_seconds=int(dur) if dur else None,
-                    )
+                    # Detailed variant when available (#1879): a transient
+                    # LRCLib failure is logged with its real reason instead
+                    # of silently looking like "no lyrics".
+                    detailed = getattr(_lyrics_client, 'create_lrc_file_detailed', None)
+                    if callable(detailed):
+                        wrote, fetch_reason = detailed(
+                            fp, title, artist,
+                            album_name=lm.get('album') or db_data.get('album'),
+                            duration_seconds=int(dur) if dur else None,
+                        )
+                    else:
+                        wrote = _lyrics_client.create_lrc_file(
+                            fp, title, artist,
+                            album_name=lm.get('album') or db_data.get('album'),
+                            duration_seconds=int(dur) if dur else None,
+                        )
+                        fetch_reason = None
                     if wrote:
                         result['lyrics_written'] += 1
+                    elif fetch_reason:
+                        # Warning, not debug (#1879): a transient LRCLib
+                        # failure must be visible at the default log level,
+                        # not indistinguishable from "no lyrics".
+                        logger.warning("retag lyrics fetch incomplete for %s: %s", fp, fetch_reason)
                 except Exception as e:
                     logger.debug("retag lyrics fetch failed for %s: %s", fp, e)
 

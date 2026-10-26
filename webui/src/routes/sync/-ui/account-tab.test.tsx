@@ -338,6 +338,38 @@ describe('TidalTab', () => {
     expect(screen.getByTestId('seeded')).toHaveTextContent('[]');
   });
 
+  it('opened before the crawl reached it: the tracks are fetched and fill the open modal', async () => {
+    // TheHomeGuy: a big tidal playlist sat at "0 tracks" with nothing
+    // happening, because the click came before the background crawl did.
+    stubFetch();
+    let trackFetches = 0;
+    responder = (url) => {
+      if (url === '/api/tidal/playlists')
+        return [{ id: 't1', name: 'Driving Music', track_count: 2 }];
+      if (url === '/api/tidal/playlists/states') return { states: [] };
+      if (url === '/api/tidal/playlist/t1') {
+        trackFetches += 1;
+        // the crawl's fetch is still out (nothing yet); the click's lands
+        return trackFetches === 1
+          ? { tracks: [] }
+          : { tracks: [{ id: 'd1', name: 'Drive', artists: ['A'], album: 'X', duration_ms: 1 }] };
+      }
+      return {};
+    };
+    render(<TidalHarness />);
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+    await waitFor(() => expect(screen.getByText('Driving Music')).toBeInTheDocument());
+    await waitFor(() => expect(trackFetches).toBe(1));
+    fireEvent.click(screen.getByText('Driving Music'));
+    await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('t1'));
+    await waitFor(() =>
+      expect(JSON.parse(screen.getByTestId('seeded').textContent!)).toEqual([
+        { id: 'd1', name: 'Drive', artists: ['A'], album: 'X', duration_ms: 1, track_number: 0 },
+      ]),
+    );
+    expect(screen.getByText('1 tracks')).toBeInTheDocument();
+  });
+
   it('the SYNC progress line replaces the discovery one, with (matched+failed)/total (1159-1197)', async () => {
     stubFetch();
     responder = (url) => {

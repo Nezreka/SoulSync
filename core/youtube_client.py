@@ -579,6 +579,44 @@ def _warn_if_no_js_runtime():
             logger.debug("cookie check during JS-runtime warning failed: %s", _cfg_err)
 
 
+def _staged_album_path(staging: Path, position: int, title: str, source_path: str) -> Path:
+    """``NN - Title.ext`` in the staging folder, never over an existing file."""
+    safe = re.sub(r'[\\/:*?"<>|]+', ' ', title or '').strip(' .') or f"Track {position}"
+    suffix = Path(source_path).suffix
+    candidate = staging / f"{position:02d} - {safe}{suffix}"
+    counter = 1
+    while candidate.exists():
+        candidate = staging / f"{position:02d} - {safe} ({counter}){suffix}"
+        counter += 1
+    return candidate
+
+
+def _tag_staged_track(path: Path, title: str, artist: str, album: str, position: int, total: int) -> None:
+    """Basic tags so the staging matcher sees real metadata, best effort.
+
+    The files come straight from YouTube, where the tags describe an uploaded
+    video, not the album track. Failing to tag is not fatal: the matcher also
+    reads the file name, which carries the position and the title.
+    """
+    try:
+        import mutagen
+        audio = mutagen.File(str(path), easy=True)
+        if audio is None:
+            return
+        audio['title'] = title
+        audio['artist'] = artist
+        audio['albumartist'] = artist
+        audio['album'] = album
+        audio['tracknumber'] = f"{position}/{total}"
+        audio.save()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Could not tag staged YouTube track %s: %s", path, exc)
+
+
+# Consecutive failures, before any track has downloaded, after which the album flow stops.
+_ALBUM_ABORT_AFTER_FAILURES = 2
+
+
 class YouTubeClient(DownloadSourcePlugin):
     """
     YouTube download client using yt-dlp.
@@ -1926,6 +1964,136 @@ class YouTubeClient(DownloadSourcePlugin):
             traceback.print_exc()
             return None
 
+    def download_album_to_staging(
+        self,
+        album_name: str,
+        artist_name: str,
+        staging_dir: str,
+        progress_callback=None,
+        *,
+        quality_profile_id=None,
+        expected_duration_seconds=None,
+        expected_tracks=None,
+    ) -> Dict[str, Any]:
+        """Stage a whole album from YouTube Music's own album playlist.
+
+        Opt-in (``download_source.youtube_album_bundle``). The per-track path
+        asks the song catalogue for each title, and albums whose songs the
+        catalogue lists as unavailable never answer it, although the album's
+        playlist is perfectly readable. This resolves artist + album to that
+        playlist and downloads its tracks into private staging; the normal
+        per-track workers then match the staged files, exactly as for the
+        Soulseek and release-based bundles.
+
+        ``quality_profile_id`` and ``expected_tracks`` are part of the shared
+        call and unused here: the audio format comes from the YouTube settings,
+        and every track of the playlist is staged for the matcher to pick from.
+        Fallback-eligible whenever nothing was staged, so a miss never costs the
+        per-track flow its turn.
+        """
+        import shutil
+        import time
+        from core.settings import config_manager
+        from core.youtube_album import (
+            album_playlist_id, check_entries, find_album, playlist_entries,
+        )
+
+        result: Dict[str, Any] = {
+            'success': False, 'files': [], 'error': None, 'fallback': True, 'partial': False,
+        }
+        if not config_manager.get('download_source.youtube_album_bundle', False):
+            result['error'] = 'YouTube album download is not enabled'
+            return result
+
+        def _emit(state: str, **extra) -> None:
+            if progress_callback:
+                try:
+                    progress_callback({'state': state, **extra})
+                except Exception as cb_exc:  # noqa: BLE001
+                    logger.debug("[YouTube album] progress callback failed: %s", cb_exc)
+
+        _emit('searching', query=f"{artist_name} {album_name}".strip())
+        try:
+            from ytmusicapi import YTMusic
+            from core.youtube_cookies import ytmusic_auth_from_config
+            auth = ytmusic_auth_from_config()
+            ytmusic = YTMusic(auth) if auth else YTMusic()
+        except Exception as exc:  # noqa: BLE001 - ytmusicapi missing or unusable
+            result['error'] = f'YouTube Music is unavailable: {exc}'
+            return result
+
+        album = find_album(artist_name, album_name, ytmusic)
+        if album is None:
+            result['error'] = 'No matching YouTube Music album'
+            return result
+        playlist_id = album_playlist_id(album['browse_id'], ytmusic)
+        if not playlist_id:
+            result['error'] = 'The YouTube Music album has no playlist'
+            return result
+        entries = playlist_entries(playlist_id, _resolve_cookie_opts())
+        usable, reason = check_entries(entries, expected_duration_seconds)
+        if not usable:
+            result['error'] = reason
+            return result
+
+        staging = Path(staging_dir)
+        try:
+            staging.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            result['error'] = f'Could not create the staging folder: {exc}'
+            return result
+
+        _emit('queued', release=album['title'], count=len(entries))
+        result['fallback'] = False
+        staged: List[str] = []
+        failed = 0
+        for position, entry in enumerate(entries, start=1):
+            if self.shutdown_check and self.shutdown_check():
+                logger.info("[YouTube album] Server shutting down, stopping after %d tracks", len(staged))
+                break
+            if not staged and failed >= _ALBUM_ABORT_AFTER_FAILURES:
+                # Some albums are readable but not playable for this account
+                # (YouTube Music Premium only, for one). Two misses in a row
+                # before a single success means the rest will fail the same
+                # way, so stop instead of walking the whole playlist.
+                logger.warning("[YouTube album] First %d tracks failed, giving up on '%s'", failed, album_name)
+                break
+            _emit('downloading', release=album['title'], count=len(entries),
+                  downloaded=len(staged), failed=failed)
+            source_path = self._download_sync(
+                f"https://www.youtube.com/watch?v={entry['id']}", entry['title'],
+            )
+            if not source_path or not os.path.isfile(source_path):
+                failed += 1
+                logger.warning("[YouTube album] Track %d/%d failed: %s", position, len(entries), entry['title'])
+                continue
+            final_path = _staged_album_path(staging, position, entry['title'], source_path)
+            try:
+                shutil.move(source_path, str(final_path) + ".part")
+                os.replace(str(final_path) + ".part", final_path)
+            except OSError as exc:
+                failed += 1
+                logger.warning("[YouTube album] Could not stage %s: %s", entry['title'], exc)
+                continue
+            _tag_staged_track(final_path, entry['title'], artist_name, album_name, position, len(entries))
+            staged.append(str(final_path))
+            if position < len(entries):
+                time.sleep(max(0.0, float(self._download_delay or 0)))
+
+        if not staged:
+            result['fallback'] = True
+            result['error'] = 'No track of the YouTube Music album could be downloaded'
+            return result
+
+        partial = len(staged) < len(entries)
+        if partial:
+            logger.warning("[YouTube album] Staged partial album for '%s': %d/%d tracks",
+                           album_name, len(staged), len(entries))
+        _emit('staged', count=len(staged))
+        result.update(success=True, files=staged, partial=partial,
+                      expected_count=len(entries), completed_count=len(staged))
+        return result
+
     def download_music_video(self, video_url: str, output_path: str,
                               progress_callback=None, should_cancel=None) -> Optional[str]:
         """Download a YouTube video as a music video file (keeps video, not audio-only).
@@ -2242,7 +2410,7 @@ class YouTubeClient(DownloadSourcePlugin):
         """
         try:
             # Import lyrics client
-            from core.lyrics_client import lyrics_client
+            from core.lyrics_client import PIPELINE_MAX_WAIT_SECONDS, lyrics_client
 
             if not lyrics_client.api:
                 logger.debug("   LRClib API not available - skipping lyrics")
@@ -2256,17 +2424,34 @@ class YouTubeClient(DownloadSourcePlugin):
             album_name = spotify_track.album
             duration_seconds = int(spotify_track.duration_ms / 1000) if spotify_track.duration_ms else None
 
-            # Create LRC file
-            success = lyrics_client.create_lrc_file(
-                audio_file_path=audio_file_path,
-                track_name=track_name,
-                artist_name=artist_name,
-                album_name=album_name,
-                duration_seconds=duration_seconds
-            )
+            # Create LRC file (detailed variant when available, #1879:
+            # a transient failure is not "no lyrics found")
+            detailed = getattr(lyrics_client, 'create_lrc_file_detailed', None)
+            if callable(detailed):
+                success, fetch_reason = detailed(
+                    audio_file_path=audio_file_path,
+                    track_name=track_name,
+                    artist_name=artist_name,
+                    album_name=album_name,
+                    duration_seconds=duration_seconds,
+                    max_wait_seconds=PIPELINE_MAX_WAIT_SECONDS,
+                )
+            else:
+                success = lyrics_client.create_lrc_file(
+                    audio_file_path=audio_file_path,
+                    track_name=track_name,
+                    artist_name=artist_name,
+                    album_name=album_name,
+                    duration_seconds=duration_seconds
+                )
+                fetch_reason = None
 
             if success:
                 logger.debug("   Created .lrc lyrics file")
+            elif fetch_reason:
+                # Warning, not debug (#1879): a transient LRCLib failure
+                # must be visible at the default log level.
+                logger.warning(f"   Lyrics fetch incomplete: {fetch_reason}")
             else:
                 logger.debug("   No lyrics found on LRClib")
 

@@ -130,8 +130,10 @@ TABS: list[tuple[str, str]] = [
     ("Downloads", "downloads"),
     ("Quality", "quality"),
     ("Library", "library"),
+    ("Discovery", "discovery"),
     ("Appearance", "appearance"),
-    ("Advanced", "advanced"),
+    # #1822: the Advanced tab is labelled System; its slug stays
+    ("System", "advanced"),
     ("Logs", "logs"),
 ]
 

@@ -17,6 +17,8 @@ import json
 import logging
 from typing import Any, Optional
 
+from core.automation.migrate_repair_jobs import mirror_automation_toggle
+
 logger = logging.getLogger(__name__)
 
 
@@ -277,6 +279,10 @@ def bulk_toggle(
 
     updated = database.bulk_set_enabled(automation_ids, bool(enabled))
 
+    if updated > 0:
+        for aid in automation_ids:
+            mirror_automation_toggle(database, aid)
+
     if automation_engine and updated > 0:
         for aid in automation_ids:
             auto = database.get_automation(aid)
@@ -340,6 +346,7 @@ def toggle_automation(database, automation_engine, automation_id: int) -> tuple[
     success = database.toggle_automation(automation_id)
     if not success:
         return {'error': 'Automation not found'}, 404
+    mirror_automation_toggle(database, automation_id)
 
     if automation_engine:
         auto = database.get_automation(automation_id)

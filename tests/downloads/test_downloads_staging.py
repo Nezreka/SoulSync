@@ -683,3 +683,32 @@ def test_copy_failure_returns_false(tmp_path):
 
     assert result is False
     assert deps._post_process_calls == []
+
+
+# ---------------------------------------------------------------------------
+# A file the import turned down is not offered again
+# ---------------------------------------------------------------------------
+
+def test_a_staging_file_this_task_already_tried_is_not_offered_again(tmp_path):
+    """TheHomeGuy: old mp3s of an album sat in the staging folder. every
+    wishlist cycle claimed them, the import kept the library copy, the task
+    failed back to the wishlist, and the real search (tidal) never ran."""
+    src_file = tmp_path / 'staging' / 'Þú ert sólin.mp3'
+    src_file.parent.mkdir()
+    src_file.write_bytes(b'fake audio')
+    staged = [{'full_path': str(src_file), 'title': 'Þú ert sólin', 'artist': 'Ólafur Arnalds'}]
+    track = _Track(name='Þú ert sólin', artists=['Ólafur Arnalds'])
+
+    deps = _build_deps(transfer_path=str(tmp_path / 'transfer'), staging_files=staged)
+    _seed_task('t1')
+    assert ds.try_staging_match('t1', 'b1', track, deps) is True
+    assert download_tasks['t1']['staging_tried_paths'] == {str(src_file)}
+
+    # the import turned it down and the task goes around again
+    download_tasks['t1']['status'] = 'searching'
+    assert ds.try_staging_match('t1', 'b1', track, deps) is False
+    assert len(deps._post_process_calls) == 1
+
+    # another task wanting the same song still gets it
+    _seed_task('t2')
+    assert ds.try_staging_match('t2', 'b1', track, deps) is True

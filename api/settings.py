@@ -24,7 +24,11 @@ _SENSITIVE_KEYS = {
     "acoustid.api_key",
     "lastfm.api_key",
     "genius.access_token",
+    "pollinations.api_key",
     "hydrabase.api_key",
+    "metasync.pool_key",
+    "metasync.local_api_key",
+    "security.oidc_client_secret",
 }
 
 

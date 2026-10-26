@@ -632,3 +632,40 @@ def _self_heal_match_id(db: Any, match: Dict[str, Any], new_library_track_id: st
         )
     except Exception as e:
         logger.debug("manual match self-heal failed: %s", e)
+
+
+def reject_match(db: Any, profile_id: int, server_source: str,
+                 source_track_id: Any, server_track_id: Any) -> bool:
+    """The user says this source track is NOT this library track.
+
+    drops whatever pinned the pairing (the sync cache row and a durable
+    manual match, each only when it points at THIS track) and files a
+    rejection so neither the compare view nor the sync auto-matches the two
+    again. the server playlist itself is not touched."""
+    src = str(source_track_id or '').strip()
+    svr = str(server_track_id or '').strip()
+    if not src or not svr:
+        return False
+    try:
+        db.delete_sync_match_cache(src, server_source, server_track_id=svr)
+    except Exception as e:
+        logger.debug("unmatch: cache delete failed: %s", e)
+    try:
+        m = db.find_manual_library_match_by_source_track_id(profile_id, src, server_source)
+        if m and str(m.get('library_track_id')) == svr:
+            from core.library import manual_library_match as _mlm
+            _mlm.delete_match(db, m['id'], profile_id)
+    except Exception as e:
+        logger.debug("unmatch: manual match delete failed: %s", e)
+    return bool(db.add_server_match_rejection(profile_id, server_source, src, svr))
+
+
+def is_rejected_match(db: Any, profile_id: int, server_source: str,
+                      source_ids: List[str], server_track_id: Any) -> bool:
+    """whether the user unmatched any of these source ids from this track."""
+    svr = str(server_track_id)
+    try:
+        rejected = db.get_server_match_rejections(profile_id, server_source, source_ids)
+    except Exception:
+        return False
+    return any((str(s), svr) in rejected for s in source_ids)

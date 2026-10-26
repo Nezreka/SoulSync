@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="760" viewBox="0 0 1000 760" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <title>How MetaSync works: SoulSync, your MetaSync node, and the SIN network</title>
+  <defs>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#1db954"/></marker>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#e3b341"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#6e9eff"/></marker>
+  </defs>
+
+  <rect width="1000" height="760" fill="#0e1217"/>
+
+  <!-- public catalogues -->
+  <rect x="620" y="20" width="320" height="70" rx="12" fill="#161b22" stroke="#3a424d" stroke-dasharray="5 4"/>
+  <text x="780" y="48" text-anchor="middle" font-size="16" font-weight="700" fill="#e6e9ee">MusicBrainz + ListenBrainz</text>
+  <text x="780" y="70" text-anchor="middle" font-size="12.5" fill="#9aa4b2">Public music catalogues. They never see your data.</text>
+
+  <!-- zones -->
+  <rect x="20" y="120" width="400" height="580" rx="18" fill="rgba(29,185,84,0.05)" stroke="rgba(29,185,84,0.45)"/>
+  <text x="44" y="150" font-size="12" font-weight="700" letter-spacing="1.5" fill="#1db954">YOUR MACHINE</text>
+  <rect x="580" y="120" width="400" height="580" rx="18" fill="rgba(110,158,255,0.05)" stroke="rgba(110,158,255,0.45)"/>
+  <text x="604" y="150" font-size="12" font-weight="700" letter-spacing="1.5" fill="#6e9eff">SIN NETWORK (CLOUD)</text>
+
+  <!-- SoulSync -->
+  <rect x="60" y="170" width="320" height="160" rx="12" fill="#161b22" stroke="#2f3742"/>
+  <text x="84" y="202" font-size="18" font-weight="700" fill="#ffffff">SoulSync</text>
+  <text x="84" y="228" font-size="13" fill="#b7bfca">Your library, wishlist and watchlist</text>
+  <text x="84" y="250" font-size="13" fill="#b7bfca">Download counts, and listening if you opt in</text>
+  <text x="84" y="280" font-size="13" fill="#d6dae0">Matches each chart in the background,</text>
+  <text x="84" y="300" font-size="13" fill="#d6dae0">shows it under SoulSync Charts. You open</text>
+  <text x="84" y="320" font-size="13" fill="#d6dae0">it and decide whether to sync.</text>
+
+  <!-- node -->
+  <rect x="60" y="520" width="320" height="160" rx="12" fill="#161b22" stroke="#2f3742"/>
+  <text x="84" y="552" font-size="18" font-weight="700" fill="#ffffff">MetaSync node</text>
+  <text x="84" y="578" font-size="13" fill="#b7bfca">Turns last week into yes/no signals</text>
+  <text x="84" y="600" font-size="13" fill="#b7bfca">keyed only by MusicBrainz IDs</text>
+  <text x="84" y="630" font-size="13" fill="#b7bfca">Starts in Dry run: you see the exact</text>
+  <text x="84" y="650" font-size="13" fill="#b7bfca">report before anything is sent</text>
+
+  <!-- SoulSync <-> node (local) -->
+  <line x1="140" y1="334" x2="140" y2="514" stroke="#1db954" stroke-width="2.5" marker-end="url(#g)"/>
+  <text x="152" y="410" font-size="13" font-weight="600" fill="#e6e9ee">① weekly read</text>
+  <text x="152" y="428" font-size="12" fill="#9aa4b2">local API,</text>
+  <text x="152" y="444" font-size="12" fill="#9aa4b2">never leaves</text>
+  <text x="152" y="460" font-size="12" fill="#9aa4b2">your network</text>
+  <line x1="300" y1="516" x2="300" y2="336" stroke="#1db954" stroke-width="2.5" marker-end="url(#g)"/>
+  <text x="312" y="410" font-size="13" font-weight="600" fill="#e6e9ee">⑥ daily</text>
+  <text x="312" y="428" font-size="12" fill="#9aa4b2">SoulSync</text>
+  <text x="312" y="444" font-size="12" fill="#9aa4b2">pulls the</text>
+  <text x="312" y="460" font-size="12" fill="#9aa4b2">charts</text>
+
+  <!-- composer -->
+  <rect x="620" y="170" width="320" height="140" rx="12" fill="#161b22" stroke="#2f3742"/>
+  <text x="644" y="202" font-size="18" font-weight="700" fill="#ffffff">Composer</text>
+  <text x="644" y="228" font-size="13" fill="#b7bfca">Builds the weekly charts: 25 albums,</text>
+  <text x="644" y="250" font-size="13" fill="#b7bfca">each album's 2 best songs = 50 tracks</text>
+  <text x="644" y="272" font-size="13" fill="#b7bfca">Fills early gaps from ListenBrainz</text>
+  <text x="644" y="294" font-size="13" fill="#b7bfca">and says so in the chart's name</text>
+
+  <!-- counts -->
+  <rect x="620" y="360" width="320" height="90" rx="12" fill="#161b22" stroke="#2f3742"/>
+  <text x="644" y="392" font-size="18" font-weight="700" fill="#ffffff">Weekly counts</text>
+  <text x="644" y="418" font-size="13" fill="#b7bfca">"N installs" per album, nothing else</text>
+  <text x="644" y="438" font-size="13" fill="#b7bfca">Used only at 15+ installs (k = 15)</text>
+
+  <!-- pool -->
+  <rect x="620" y="520" width="320" height="160" rx="12" fill="#161b22" stroke="#2f3742"/>
+  <text x="644" y="552" font-size="18" font-weight="700" fill="#ffffff">Pool server</text>
+  <text x="644" y="578" font-size="13" fill="#b7bfca">Checks the report and adds +1 per</text>
+  <text x="644" y="600" font-size="13" fill="#b7bfca">album. The report itself is not kept.</text>
+  <text x="644" y="630" font-size="13" fill="#b7bfca">Only nodes you approved on the</text>
+  <text x="644" y="650" font-size="13" fill="#b7bfca">portal can use your pool key</text>
+
+  <!-- node <-> pool (crosses to the network) -->
+  <line x1="384" y1="575" x2="614" y2="575" stroke="#e3b341" stroke-width="2.5" marker-end="url(#a)"/>
+  <text x="499" y="550" text-anchor="middle" font-size="13" font-weight="600" fill="#e6e9ee">② one report a week</text>
+  <text x="499" y="566" text-anchor="middle" font-size="12" fill="#e3b341">album IDs only, 1 bit each</text>
+  <line x1="616" y1="635" x2="386" y2="635" stroke="#6e9eff" stroke-width="2.5" marker-end="url(#b)"/>
+  <text x="499" y="660" text-anchor="middle" font-size="13" font-weight="600" fill="#e6e9ee">⑤ node pulls the</text>
+  <text x="499" y="676" text-anchor="middle" font-size="13" font-weight="600" fill="#e6e9ee">finished charts</text>
+
+  <!-- pool -> counts -> composer -->
+  <line x1="780" y1="516" x2="780" y2="456" stroke="#6e9eff" stroke-width="2.5" marker-end="url(#b)"/>
+  <text x="792" y="491" font-size="13" font-weight="600" fill="#e6e9ee">③ +1 per album</text>
+  <line x1="780" y1="356" x2="780" y2="316" stroke="#6e9eff" stroke-width="2.5" marker-end="url(#b)"/>
+  <text x="792" y="341" font-size="13" font-weight="600" fill="#e6e9ee">④ 15+ installs only</text>
+
+  <!-- catalogues -> composer -->
+  <line x1="900" y1="94" x2="900" y2="164" stroke="#9aa4b2" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#b)"/>
+  <text x="888" y="114" text-anchor="end" font-size="12" fill="#9aa4b2">track lists, genres,</text>
+  <text x="888" y="130" text-anchor="end" font-size="12" fill="#9aa4b2">song popularity</text>
+
+  <!-- composer -> pool (charts stored for nodes) -->
+  <path d="M944 240 H962 V600 H946" fill="none" stroke="#6e9eff" stroke-width="2.5" marker-end="url(#b)"/>
+  <text x="972" y="420" font-size="12" font-weight="600" fill="#e6e9ee" transform="rotate(90 972 420)" text-anchor="middle">charts</text>
+
+  <!-- legend -->
+  <line x1="40" y1="730" x2="70" y2="730" stroke="#1db954" stroke-width="2.5"/>
+  <text x="78" y="734" font-size="12" fill="#9aa4b2">stays on your machine</text>
+  <line x1="240" y1="730" x2="270" y2="730" stroke="#e3b341" stroke-width="2.5"/>
+  <text x="278" y="734" font-size="12" fill="#9aa4b2">the only thing that leaves it</text>
+  <line x1="470" y1="730" x2="500" y2="730" stroke="#6e9eff" stroke-width="2.5"/>
+  <text x="508" y="734" font-size="12" fill="#9aa4b2">inside the network / coming back</text>
+</svg>

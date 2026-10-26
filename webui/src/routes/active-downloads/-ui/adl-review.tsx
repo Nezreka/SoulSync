@@ -32,6 +32,8 @@ export interface ReviewActionHandlers {
   /** Approve, or Recover for a legacy quarantine sidecar. */
   onApprove: () => void;
   onDelete: () => void;
+  /** reject it and search for the song that was asked for. unverified rows only. */
+  onWrongSong?: () => void;
 }
 
 const CheckIcon = (
@@ -173,6 +175,9 @@ export function AdlUnverifiedRow({
           onSelect: compare.run,
         },
         { key: 'audit', label: 'Download details', onSelect: handlers.onAudit },
+        ...(handlers.onWrongSong
+          ? [{ key: 'wrong', label: 'Wrong song…', onSelect: handlers.onWrongSong }]
+          : []),
         { key: 'delete', label: 'Delete file', danger: true, onSelect: handlers.onDelete },
       ]
     : [];
@@ -270,6 +275,9 @@ export function AdlUnverifiedRow({
                 </DlButton>
                 <DlButton onClick={handlers.onAudit}>Download details</DlButton>
                 <span className="dlc-spacer" />
+                {handlers.onWrongSong ? (
+                  <DlButton onClick={handlers.onWrongSong}>Wrong song</DlButton>
+                ) : null}
                 <DlButton danger onClick={handlers.onDelete}>
                   Delete file
                 </DlButton>

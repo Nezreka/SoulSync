@@ -14,7 +14,7 @@ the limiter dropped its underscore on the way over.
 
 import time
 
-from flask import Blueprint, jsonify, request, session
+from flask import Blueprint, jsonify, redirect, request, session
 
 from core.security.rate_limit import TargetedLimiter
 from utils.logging_config import get_logger
@@ -34,6 +34,9 @@ plex_start_limiter = TargetedLimiter(max_attempts=8, window_seconds=300)
 # a browser polls /check about every 1.5s; faster than this is answered
 # "pending" without asking plex.tv
 _PLEX_CHECK_MIN_INTERVAL = 1.0
+# every oidc start may fetch the provider's discovery document and sends the
+# browser to the provider. counted per ip on every start, like plex's
+oidc_start_limiter = TargetedLimiter(max_attempts=8, window_seconds=300)
 
 # injected by configure()
 get_database = None
@@ -194,12 +197,159 @@ def plex_signin_check():
         return jsonify({'success': False, 'error': "Plex sign-in failed. Try again."}), 502
 
 
+# -- sign in with oidc --
+#
+# a redirect flow, not a popup: /start sends the browser to the provider,
+# the provider sends it back to /callback, and /callback lands it on the app.
+# both are page navigations, so an outcome the login screen should show is
+# left in the session and handed over once by /available.
+
+OIDC_CALLBACK_PATH = '/api/auth/oidc/callback'
+
+
+def _app_root():
+    """where a finished flow sends the browser: the app's own root, which
+    is not / when soulsync is served under a subpath"""
+    return (request.script_root or '') + '/'
+
+
+def oidc_redirect_uri(settings):
+    """the callback address the provider must have registered. the admin can
+    pin it, for proxies that don't pass the public host through"""
+    if settings.redirect_uri:
+        return settings.redirect_uri
+    return request.url_root.rstrip('/') + OIDC_CALLBACK_PATH
+
+
+def _oidc_done(error=None, mode='signin'):
+    """land the browser back on the app. a sign-in's outcome waits for the
+    login screen (/available); a connect's for my account, which the shell
+    reopens when it sees ?oidc=connect"""
+    if mode == 'connect':
+        session['oidc_connect_result'] = {'connected': error is None, 'error': error}
+        return redirect(_app_root() + '?oidc=connect')
+    if error:
+        session['oidc_error'] = error
+    return redirect(_app_root())
+
+
+def oidc_begin(mode='signin', profile_id=None):
+    """send this browser to the provider. shared by sign-in and by connect
+    from my account, which differ only in what the callback does"""
+    from core.security import oidc_signin
+    settings = oidc_signin.read_settings(config_manager)
+    if settings is None:
+        return jsonify({'success': False, 'error': 'OIDC sign-in is turned off'}), 403
+    _ip = request.remote_addr or 'unknown'
+    _now = time.time()
+    _locked, _retry_after = oidc_start_limiter.is_locked(_ip, '<oidc>', _now)
+    if _locked:
+        return _oidc_done('Too many attempts — please wait and try again', mode)
+    oidc_start_limiter.record_failure(_ip, '<oidc>', _now)  # every start counts
+    try:
+        doc = oidc_signin.discover(settings.issuer)
+        url, flow = oidc_signin.start(settings, doc, oidc_redirect_uri(settings),
+                                      mode=mode, profile_id=profile_id)
+    except oidc_signin.OidcError as e:
+        return _oidc_done(str(e), mode)
+    session['oidc_flow'] = flow.to_session()
+    return redirect(url)
+
+
+@bp.route('/api/auth/oidc/available', methods=['GET'])
+def oidc_signin_available():
+    """whether the login screen offers sign in with oidc, the button's label,
+    and (once) why the last attempt in this browser didn't work"""
+    from core.security import oidc_signin
+    settings = oidc_signin.read_settings(config_manager)
+    return jsonify({'success': True, 'enabled': settings is not None,
+                    'label': settings.button_label if settings else oidc_signin.DEFAULT_BUTTON_LABEL,
+                    'error': session.pop('oidc_error', None)})
+
+
+@bp.route('/api/auth/oidc/start', methods=['GET'])
+def oidc_signin_start():
+    """send this browser to the provider to sign in"""
+    return oidc_begin('signin')
+
+
+@bp.route(OIDC_CALLBACK_PATH, methods=['GET'])
+def oidc_signin_callback():
+    """the provider sends the browser back here with a one-time code. only
+    the browser that started the flow can finish it (state and nonce live in
+    its session), and only once"""
+    from core.security import oidc_signin
+    from core.security.signup_defaults import signup_access
+    flow = oidc_signin.Flow.from_session(session.pop('oidc_flow', None))
+    mode = flow.mode if flow else 'signin'
+    if request.args.get('error'):
+        # the provider's description is its own text; only its code is logged
+        logger.info("OIDC sign-in: provider returned %s", request.args.get('error'))
+        cancelled = request.args.get('error') == 'access_denied'
+        return _oidc_done('Sign-in was cancelled.' if cancelled else 'The sign-in provider refused the sign-in.', mode)
+    try:
+        oidc_signin.check_callback(flow, request.args.get('state', ''))
+        settings = oidc_signin.read_settings(config_manager)
+        if settings is None:
+            return _oidc_done('OIDC sign-in is turned off', mode)
+        code = request.args.get('code', '')
+        if not code:
+            return _oidc_done('The sign-in provider refused the sign-in.', mode)
+        doc = oidc_signin.discover(settings.issuer)
+        tokens = oidc_signin.exchange_code(settings, doc, code, flow)
+        claims = oidc_signin.id_token_claims(tokens['id_token'], settings, doc, flow.nonce)
+        extra = oidc_signin.userinfo(doc, tokens.get('access_token', '')) \
+            if oidc_signin.needs_userinfo(claims, settings) else None
+        account = oidc_signin.account_from_claims(claims, doc, settings, extra)
+    except oidc_signin.OidcError as e:
+        return _oidc_done(str(e), mode)
+    except Exception as e:
+        logger.error(f"OIDC sign-in failed: {e}")
+        return _oidc_done('Sign-in failed. Try again.', mode)
+
+    database = get_database()
+    if mode == 'connect':
+        # connect from my account: still the profile that started it, or nothing
+        if not flow.profile_id or session.get('profile_id') != flow.profile_id:
+            return _oidc_done('Sign-in expired. Try again.', mode)
+        result = oidc_signin.connect_profile(database, flow.profile_id, account)
+        return _oidc_done(result.error, mode)
+
+    result = oidc_signin.sign_in(
+        database, account, settings,
+        allow_create=bool(config_manager.get('security.oidc_signin_auto_create', True)),
+        default_can_download=bool(config_manager.get('security.oidc_signin_default_can_download', False)),
+        access=signup_access(config_manager.get),
+    )
+    if result.error:
+        return _oidc_done(result.error)
+    _complete_sign_in(database, result.profile_id)
+    # the session lasts as long as the provider says (#1838). one whose
+    # clock can't be recorded would never end, so it isn't kept
+    from core.security import oidc_session
+    if not oidc_session.record_sign_in(database, session.get('device_id'), account.identity, tokens, claims):
+        logger.warning("OIDC sign-in for profile %s not kept: its session clock couldn't be saved",
+                       result.profile_id)
+        if session.get('device_id'):
+            oidc_session.end_device(database, session['device_id'])
+        for _k in ('login_authenticated', 'profile_id', 'profile_epoch', 'device_id', 'device_owner'):
+            session.pop(_k, None)
+        return _oidc_done('Sign-in failed. Try again.')
+    return _oidc_done()
+
+
 @bp.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
     """Log out — clears the authenticated session."""
     try:
         if session.get('device_id') and session.get('profile_id'):
             get_database().revoke_profile_device(session['profile_id'], session['device_id'])
+            # drop the in-process live cache too (the admin revoke endpoint
+            # does the same), so the revocation is visible at once — a
+            # replayed cookie or a still-open socket must not ride the
+            # cache's few-second TTL past the logout (#1837)
+            from core.security.devices import forget
+            forget(session['device_id'])
         session.pop('login_authenticated', None)
         session.pop('profile_id', None)
         session.pop('profile_epoch', None)

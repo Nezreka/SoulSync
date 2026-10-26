@@ -91,8 +91,10 @@ from core.prowlarr_client import (
     ProwlarrClient,
     ProwlarrSearchError,
     ProwlarrSearchResult,
+    SEARCH_FAILED_PREFIX,
     canonical_protocol,
 )
+from core.search.warnings import note_indexer_failure
 from core.torrent_clients import get_active_adapter as get_active_torrent_adapter
 from utils.async_helpers import run_async
 from utils.logging_config import get_logger
@@ -758,7 +760,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 self._prowlarr, query, 'torrent',
             ))
         except Exception as e:
-            result['error'] = f'Prowlarr search failed: {e}'
+            result['error'] = f'{SEARCH_FAILED_PREFIX}: {e}'
             return result
 
         candidates = [r for r in search_results
@@ -1393,6 +1395,14 @@ async def _prowlarr_search_query_with_variants(
                         protocol, len(failures), len(fan_out_ids), len(results),
                         '; '.join(failures),
                     )
+                    # and tell the search page, the results are real but
+                    # missing whatever these indexers had (#1831)
+                    for failure in failures:
+                        note_indexer_failure(
+                            protocol,
+                            getattr(failure, 'indexer_name', '') or str(failure).split(':', 1)[0],
+                            getattr(failure, 'error', '') or str(failure),
+                        )
             else:
                 results = await prowlarr.search(
                     variant,

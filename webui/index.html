@@ -212,6 +212,11 @@
                     <span class="login-plex-or">or</span>
                     <button id="login-plex-button" type="button" class="login-plex-button">Sign in with Plex</button>
                 </div>
+                <!-- shown when sign in with oidc is on (webui/src/shell/oidc-signin.ts) -->
+                <div id="login-oidc" class="login-oidc" hidden>
+                    <span class="login-oidc-or">or</span>
+                    <button id="login-oidc-button" type="button" class="login-oidc-button">Sign in with OIDC</button>
+                </div>
                 <p id="login-error" class="launch-pin-error" style="display: none;"></p>
                 <button class="launch-pin-forgot" onclick="showLoginRecovery()">Forgot password?</button>
             </div>
@@ -3001,7 +3006,7 @@
                                         <path
                                             d="M21.71 20.29l-5.4-5.4a8 8 0 1 0-1.42 1.42l5.4 5.4a1 1 0 0 0 1.42-1.42zM4 10a6 6 0 1 1 6 6 6 6 0 0 1-6-6z" />
                                     </svg>
-                                    <input type="text" id="stg-search-input" placeholder="Search settings..."
+                                    <input type="text" id="stg-search-input" placeholder="Search settings  (Ctrl K)"
                                         aria-label="Search settings" autocomplete="off"
                                         aria-controls="stg-search-results"
                                         onkeydown="if(event.key==='Escape'){this.value='';filterSettings('')}"
@@ -3059,6 +3064,15 @@
                                     </span>
                                     <span class="stg-tab-label">Library</span>
                                 </button>
+                                <button type="button" class="stg-tab" data-tab="discovery"
+                                    onclick="switchSettingsTab('discovery')">
+                                    <span class="stg-tab-badge badge-discovery">
+                                        <svg viewBox="0 0 24 24">
+                                            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm4.24 5.76-2.12 6.36-6.36 2.12 2.12-6.36zM12 13a1 1 0 1 0-1-1 1 1 0 0 0 1 1z" />
+                                        </svg>
+                                    </span>
+                                    <span class="stg-tab-label">Discovery</span>
+                                </button>
                                 <button type="button" class="stg-tab" data-tab="appearance"
                                     onclick="switchSettingsTab('appearance')">
                                     <span class="stg-tab-badge badge-appearance">
@@ -3077,7 +3091,7 @@
                                                 d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54A.48.48 0 0 0 13.9 2h-3.8a.49.49 0 0 0-.49.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.73 8.47c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.48.48 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.8c.24 0 .44-.17.49-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
                                         </svg>
                                     </span>
-                                    <span class="stg-tab-label">Advanced</span>
+                                    <span class="stg-tab-label">System</span>
                                 </button>
                                 <button type="button" class="stg-tab" data-tab="logs"
                                     onclick="switchSettingsTab('logs')">
@@ -3641,6 +3655,32 @@
                                                 </div>
                                                 <div class="form-actions">
                                                     <button class="test-button" type="button" onclick="testConnection('genius')">Test Connection</button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Pollinations (optional; playlist cover art works without a key) -->
+                                        <div class="api-service-frame stg-service" data-service="pollinations">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: #7ad3a7;"></span>
+                                                <h4 class="service-title">Pollinations</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>API Key (optional):</label>
+                                                    <input type="password" id="pollinations-api-key"
+                                                        placeholder="Pollinations API key" autocomplete="off">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-help">Makes cover art for playlists, from the ⋯ menu on any playlist.
+                                                        Works without a key: one image every 45 seconds, with a small Pollinations mark in the corner.</div>
+                                                    <div class="callback-help">A key from <a
+                                                            href="https://enter.pollinations.ai" target="_blank" rel="noopener noreferrer"
+                                                            style="color: #7ad3a7;">enter.pollinations.ai</a> removes the mark and the wait.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('pollinations')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -4210,8 +4250,18 @@
                                                 <option value="">Loading...</option>
                                             </select>
                                         </div>
+                                        <!-- Every other TV library on the server: tick Scan to read it as
+                                     well, Anime when its shows are anime (their new episodes then go
+                                     to the Anime folder). Filled by video-settings.js. -->
+                                        <div class="form-group video-library-selectors video-library-tv-more"
+                                            data-video-lib-tv-more-row hidden>
+                                            <label>Other TV Libraries:</label>
+                                            <div class="video-library-tv-more-list" data-video-lib-tv-more></div>
+                                        </div>
                                         <div class="setting-help-text video-library-note">
-                                            Which libraries the video side scans. <span data-video-lib-save-status></span>
+                                            Which libraries the video side scans. A library ticked Anime files
+                                            its shows' new episodes in the Anime folder (Settings &gt; Library).
+                                            <span data-video-lib-save-status></span>
                                         </div>
                                     </div>
                                     <!-- Video Library Organization — uses the SAME settings vocabulary as the
@@ -4649,6 +4699,17 @@
                                                     <span class="vq-check-box"></span>
                                                     <span>Prefer REPACK / PROPER re-releases</span>
                                                 </label>
+                                            </div>
+                                            <div class="vq-block">
+                                                <div class="vq-label">Audio language <span class="vq-hint">for
+                                                        dubbed or MULTI releases. a release with no language tag is
+                                                        the original audio</span></div>
+                                                <div class="vq-seg" id="vq-lang-mode">
+                                                    <button type="button" data-vq-lang-mode="off">Don't care</button>
+                                                    <button type="button" data-vq-lang-mode="prefer">Prefer</button>
+                                                    <button type="button" data-vq-lang-mode="require">Require</button>
+                                                </div>
+                                                <div class="vq-chips" id="vq-langs" style="margin-top:10px;" hidden></div>
                                             </div>
                                             <div class="vq-block">
                                                 <div class="vq-label">Max size <span class="vq-hint">skip anything
@@ -5353,6 +5414,26 @@
                                                     <div class="setting-help-text">
                                                         Seconds between YouTube downloads to avoid bot detection.
                                                         Default: 3
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <div class="setting-row">
+                                                        <label class="checkbox-label">
+                                                            <input type="checkbox" id="youtube-album-bundle">
+                                                            Download whole albums from YouTube Music
+                                                        </label>
+                                                        <span class="info-icon" role="button" tabindex="0"
+                                                            title="What's this?" onclick="toggleSettingHelp(this)"
+                                                            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    </div>
+                                                    <div class="setting-help-body" hidden>
+                                                        For an album, find the album itself on YouTube Music and
+                                                        download its playlist, instead of searching for each song.
+                                                        Helps with albums whose songs never show up in a song
+                                                        search. The artist and album title must both match; if
+                                                        they don't, SoulSync searches track by track as usual.
+                                                        Some albums need YouTube Music Premium cookies.
+                                                        Off by default.
                                                     </div>
                                                 </div>
                                                 <div class="form-group">
@@ -7168,9 +7249,12 @@
                                                 <div class="form-group">
                                                     <label>🍥 Anime Library (optional):</label>
                                                     <input type="text" id="video-anime-path" placeholder="/media/anime">
-                                                    <div class="setting-help-text">New episodes of anime shows
-                                                        (series type Anime, or tagged with the Anime genre) go here
-                                                        instead of the TV folder. Leave empty to keep anime with TV.
+                                                    <div class="setting-help-text">New episodes of anime shows go
+                                                        here instead of the TV folder: shows in a TV library ticked Anime
+                                                        (Settings &gt; Connections), shows set to Anime by hand, and shows
+                                                        not in your library yet that TMDB suggests are anime (an admin can
+                                                        change that on the show's page or when approving). Leave empty to
+                                                        keep anime with TV.
                                                     </div>
                                                 </div>
                                                 <div class="setting-help-text">
@@ -7296,7 +7380,27 @@
                                                         <code>$track_disambiguation</code> (the recording's version
                                                         note, like &ldquo;acoustic&rdquo;; added to the filename
                                                         automatically when your template leaves it out, unless the
-                                                        same toggle above is turned off). The
+                                                        same toggle above is turned off),
+                                                        <code>$explicit</code> ([E] on explicit tracks, nothing
+                                                        otherwise), <code>$contentrating</code> ([E] or [C]) and
+                                                        <code>$contentratingfull</code> ([Explicit] or [Clean]); these
+                                                        stay empty when the source doesn't say, and in a folder they
+                                                        follow the album, not the track.
+                                                        To tell same-named artists apart:
+                                                        <code>$albumartistdisambiguation</code> (MusicBrainz's note,
+                                                        like &ldquo;US grunge band&rdquo;),
+                                                        <code>$albumartistcountry</code> (US, GB, JM),
+                                                        <code>$albumartistgenre</code>,
+                                                        <code>$albumartistinfo</code> (the first of those three the
+                                                        artist has), <code>$albumartistcomposite</code> (the note, else
+                                                        country and genre together, like &ldquo;US Rock&rdquo;) and
+                                                        <code>$albumartistclash</code> (the same as info, but
+                                                        only when another artist in your library shares the name, so
+                                                        <code>$albumartist ($albumartistclash)</code> keeps unique
+                                                        artists plain). The <code>$artist</code> versions
+                                                        (<code>$artistinfo</code> and so on) describe the track
+                                                        artist. They come from enrichment, so an artist that hasn't
+                                                        been matched to MusicBrainz yet renders nothing. The
                                                         three disc variables work in a folder segment as well as in the
                                                         filename and are empty on a single-disc album, so
                                                         <code>$albumartist/$album/Disc $discnum/$track - $title</code>
@@ -7369,8 +7473,10 @@
                                      normally into Artist/Album and the Playlists/ folder is a symlink
                                      view that mirrors the real library filename, so this template no
                                      longer drives playlist-file naming. Kept in the DOM (display:none)
-                                     so settings load/save still round-trips the stored value. -->
-                                                <div class="form-group" style="display: none;">
+                                     so settings load/save still round-trips the stored value.
+                                     hidden, not style="display: none": the media card's
+                                     display:block !important beat the inline style. -->
+                                                <div class="form-group" hidden>
                                                     <label>Playlist Path Template:</label>
                                                     <input type="text" id="template-playlist-path"
                                                         placeholder="$playlist/$artist - $title">
@@ -7484,6 +7590,24 @@
                                                         <code>#/</code>). Accented letters fold to their base letter
                                                         (Édith Piaf → <code>E/</code>). Off = the literal first
                                                         character, exactly as before.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>
+                                                        <input type="checkbox" id="unicode-substitution">
+                                                        Keep symbols in names with lookalike characters
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Windows
+                                                        doesn't allow <code>: ? / \ " * | &lt; &gt;</code> in file or
+                                                        folder names. Off, they become <code>_</code>
+                                                        (<code>AC_DC</code>). On, they become lookalike characters
+                                                        that work everywhere (<code>AC∕DC</code>,
+                                                        <code>What's Going On？</code>), and a trailing dot is kept
+                                                        (<code>DAMN․</code>). Applies to new downloads; run
+                                                        Reorganize to rename what's already there.</small>
                                                 </div>
 
 
@@ -9087,7 +9211,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="settings-section-header collapsed" data-stg="library"
+                                    <div class="settings-section-header collapsed" data-stg="downloads"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -9096,8 +9220,8 @@
                                             data-stg-fallback="Explicit content &amp; genre whitelist">Explicit content
                                             &amp; genre whitelist</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="library">
-                                        <div class="settings-group" data-stg="library">
+                                    <div class="settings-section-body collapsed" data-stg="downloads">
+                                        <div class="settings-group" data-stg="downloads">
                                             <div class="form-group">
                                                 <label class="checkbox-label">
                                                     <input type="checkbox" id="allow-explicit" checked
@@ -9209,12 +9333,12 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="stg-cardgroup" data-stg="library">
-                                        <span class="stg-cardgroup-label">Your library</span>
+                                    <div class="stg-cardgroup" data-stg="discovery">
+                                        <span class="stg-cardgroup-label">Discovery &amp; playlists</span>
                                         <span class="stg-cardgroup-sub">Playlists, history and how recommendations
                                             behave</span>
                                     </div>
-                                    <div class="settings-section-header collapsed" data-stg="library"
+                                    <div class="settings-section-header collapsed" data-stg="discovery"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -9223,8 +9347,8 @@
                                             data-stg-fallback="M3U export &amp; server playlist sync">M3U export &amp;
                                             server playlist sync</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="library">
-                                        <div class="settings-group" data-stg="library">
+                                    <div class="settings-section-body collapsed" data-stg="discovery">
+                                        <div class="settings-group" data-stg="discovery">
                                             <div class="form-group">
                                                 <label class="checkbox-label">
                                                     <input type="checkbox" id="m3u-export-enabled">
@@ -9325,7 +9449,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="settings-section-header collapsed" data-stg="library"
+                                    <div class="settings-section-header collapsed" data-stg="discovery"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -9334,8 +9458,8 @@
                                             data-stg-fallback="Play history from your media server">Play history from
                                             your media server</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="library">
-                                        <div class="settings-group" data-stg="library">
+                                    <div class="settings-section-body collapsed" data-stg="discovery">
+                                        <div class="settings-group" data-stg="discovery">
                                             <div class="form-group">
                                                 <label class="checkbox-label">
                                                     <input type="checkbox" id="listening-stats-enabled">
@@ -9357,7 +9481,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="settings-section-header collapsed" data-stg="library"
+                                    <div class="settings-section-header collapsed" data-stg="discovery"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -9366,9 +9490,9 @@
                                             data-stg-fallback="How adventurous your recommendations are">How adventurous
                                             your recommendations are</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="library"
+                                    <div class="settings-section-body collapsed" data-stg="discovery"
                                         style="display:none">
-                                        <div class="settings-group" data-stg="library">
+                                        <div class="settings-group" data-stg="discovery">
                                             <div class="form-group">
                                                 <label>Adventurousness</label>
                                                 <div style="display:flex; align-items:center; gap:12px; margin-top:8px">
@@ -9388,6 +9512,10 @@
                                                 </div>
                                             </div>
                                         </div>
+                                    </div>
+                                    <div class="stg-cardgroup" data-stg="library">
+                                        <span class="stg-cardgroup-label">Video</span>
+                                        <span class="stg-cardgroup-sub">Where to watch and what detail pages show</span>
                                     </div>
                                     <div class="settings-section-header collapsed" data-stg="library"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
@@ -9613,6 +9741,111 @@
                                                     </label>
                                                 </div>
 
+                                                <div class="form-group">
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-oidc-signin"
+                                                            onchange="syncOidcProviderBlock()">
+                                                        <span>Sign in with OIDC</span>
+                                                    </label>
+                                                    <div class="setting-help-text">
+                                                        Adds a sign-in button for your own identity provider (Pocket ID,
+                                                        Authentik, Authelia, Keycloak or any other OpenID Connect
+                                                        provider). SoulSync never sees passwords. Create a client at the
+                                                        provider with this callback URL:
+                                                        <code id="security-oidc-callback-url">/api/auth/oidc/callback</code>.
+                                                        New OIDC profiles start with what New sign-ups below sets.
+                                                        Accounts are matched by the provider's account id, never by email,
+                                                        and nobody becomes an admin from a provider claim: to sign in as
+                                                        the admin, save these settings, then connect your own account
+                                                        at the bottom.
+                                                    </div>
+                                                    <!-- the provider's settings: one nested block inside the toggle's row -->
+                                                    <div class="security-nested security-nested-block" id="security-oidc-provider">
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-issuer">Issuer URL:</label>
+                                                            <input type="text" id="security-oidc-issuer" placeholder="https://id.example.com"
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-client-id">Client ID:</label>
+                                                            <input type="text" id="security-oidc-client-id" autocomplete="off"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-client-secret">Client secret:</label>
+                                                            <input type="password" id="security-oidc-client-secret" autocomplete="new-password"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-button-label">Button label:</label>
+                                                            <input type="text" id="security-oidc-button-label" placeholder="Sign in with OIDC"
+                                                                autocomplete="off" maxlength="40" style="width: 100%;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-icon-url">Icon URL
+                                                                <span style="opacity:0.6">(optional)</span>:</label>
+                                                            <input type="text" id="security-oidc-icon-url" placeholder="https://..."
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Your provider's logo, shown on the sign-in card in My Account
+                                                                (https only). Leave empty for a plain key icon.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-required-group">Required group
+                                                                <span style="opacity:0.6">(optional)</span>:</label>
+                                                            <input type="text" id="security-oidc-required-group" autocomplete="off"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Only accounts in this group get in. Leave empty to let every
+                                                                account at the provider sign in.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-groups-claim">Groups claim:</label>
+                                                            <input type="text" id="security-oidc-groups-claim" placeholder="groups"
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-scopes">Scopes:</label>
+                                                            <input type="text" id="security-oidc-scopes" placeholder="openid profile email"
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Add the scope your provider needs to send groups, if you set a
+                                                                required group (Pocket ID: <code>groups</code>). Add
+                                                                <code>offline_access</code> on Authentik or Authelia so signing
+                                                                someone out there signs them out here too.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-redirect-uri">Callback URL override
+                                                                <span style="opacity:0.6">(optional)</span>:</label>
+                                                            <input type="text" id="security-oidc-redirect-uri" autocomplete="off"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Only if your reverse proxy doesn't pass the public address through.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label class="toggle-label">
+                                                                <input type="checkbox" id="security-oidc-signin-auto-create" checked>
+                                                                <span>Let new OIDC users sign up (off: only accounts already
+                                                                    connected to a profile can sign in)</span>
+                                                            </label>
+                                                            <label class="toggle-label">
+                                                                <input type="checkbox" id="security-oidc-signin-can-download">
+                                                                <span>New OIDC profiles can download (off: request-only)</span>
+                                                            </label>
+                                                        </div>
+                                                        <!-- the admin's own connection (webui/src/shell/oidc-signin.ts):
+                                                             status, icon and disconnect when connected, else connect -->
+                                                        <div class="form-group security-oidc-admin" id="security-oidc-admin">
+                                                            <button type="button" class="auth-button"
+                                                                onclick="window.location.assign('/api/profiles/me/oidc-connect/start')">Connect
+                                                                my admin account</button>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                                 <div class="form-group" id="security-signup-defaults">
                                                     <label for="security-signup-sides">New sign-ups start on</label>
                                                     <select id="security-signup-sides" class="form-select">
@@ -9706,15 +9939,15 @@
 
                                     <!-- Discovery Settings -->
                                     <!-- Discovery Pool Settings (collapsible tile) -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced" data-music-only
+                                    <div class="settings-section-header collapsed" data-stg="discovery" data-music-only
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
                                         <h3>Discovery Pool Settings</h3>
                                         <span class="settings-section-hint">Lookback &amp; hemisphere</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced" data-music-only>
-                                        <div class="settings-group" data-stg="advanced" data-music-only>
+                                    <div class="settings-section-body collapsed" data-stg="discovery" data-music-only>
+                                        <div class="settings-group" data-stg="discovery" data-music-only>
 
                                             <div class="form-group">
                                                 <label>Lookback Period:</label>
@@ -10207,15 +10440,15 @@
                                     </div><!-- end Artwork Cache body -->
 
                                     <!-- Sidebar Weather (collapsible tile) -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                    <div class="settings-section-header collapsed" data-stg="appearance"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
                                         <h3>Sidebar Weather</h3>
                                         <span class="settings-section-hint">Time, temp &amp; forecast line</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced">
-                                        <div class="settings-group" data-stg="advanced">
+                                    <div class="settings-section-body collapsed" data-stg="appearance">
+                                        <div class="settings-group" data-stg="appearance">
 
                                             <div class="form-group">
                                                 <label>Location:</label>
@@ -10279,6 +10512,179 @@
                                             </div>
                                         </div>
                                     </div><!-- end Sidebar Weather body -->
+
+                                    <!-- MetaSync (collapsible tile) -->
+                                    <div class="settings-section-header collapsed" data-stg="connections"
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>MetaSync</h3>
+                                        <span class="settings-section-hint">Join SIN, the signal network,
+                                            through the MetaSync companion</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="connections">
+                                        <div class="settings-group" data-stg="connections">
+
+                                            <div class="help-text" style="margin-bottom:12px;">
+                                                MetaSync is a small companion program that runs next to
+                                                SoulSync and joins pools for you — the first pool is
+                                                SIN, the signal network from step 2 below. Two separate
+                                                steps happen on this page, and they are not the same
+                                                thing:
+                                                <br><strong>Step 1</strong> connects SoulSync and
+                                                MetaSync to each other, on this machine.
+                                                <br><strong>Step 2</strong> joins a pool. MetaSync does
+                                                the joining — SoulSync itself never talks to a pool, it
+                                                only hands MetaSync your pool key.
+                                                <br>Installing MetaSync joins nothing by itself.
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label>Step 1 — Connect SoulSync and MetaSync:</label>
+                                                <div class="help-text" style="margin-bottom:6px;">
+                                                    Connecting pairs the two programs. When you click
+                                                    Connect, a code appears here and in MetaSync's
+                                                    dashboard; approve it there and the two programs swap
+                                                    keys automatically — MetaSync gets a key to read this
+                                                    SoulSync, SoulSync gets a key to talk to MetaSync.
+                                                    You never type or see either key.
+                                                </div>
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                                    <button class="test-button"
+                                                        onclick="metasyncPairRequest()">Connect</button>
+                                                    <span id="metasync-connect-state" class="readonly-field">Not
+                                                        connected</span>
+                                                </div>
+                                                <div id="metasync-pair-box" style="display:none; margin-top:10px;">
+                                                    <div class="help-text">
+                                                        MetaSync is showing a pairing request. Open the
+                                                        MetaSync dashboard, check the code matches, and
+                                                        approve it there — then finish here.
+                                                    </div>
+                                                    <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top:6px;">
+                                                        <span>Code: <strong id="metasync-pair-code"
+                                                                style="font-size:18px; letter-spacing:2px;"></strong></span>
+                                                        <span>MetaSync's ID: <code
+                                                                id="metasync-pair-fingerprint"></code></span>
+                                                        <button class="test-button"
+                                                            onclick="metasyncPairClaim()">I've approved it —
+                                                            finish connecting</button>
+                                                    </div>
+                                                    <div class="help-text">
+                                                        Check the code and the ID match what MetaSync's
+                                                        dashboard shows. Codes last 10 minutes, and SoulSync
+                                                        can only finish after you approve — the code on its
+                                                        own connects nothing.
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label for="metasync-node-url">MetaSync URL:</label>
+                                                <input type="text" id="metasync-node-url"
+                                                    placeholder="http://localhost:8790">
+                                                <div class="help-text">
+                                                    Where the MetaSync program answers. If it runs on
+                                                    this same machine, SoulSync finds it on its own
+                                                    (port 8790) — type an address only if MetaSync
+                                                    lives somewhere else.
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <details>
+                                                    <summary style="cursor:pointer;">Rather type a key?
+                                                        Connect manually instead of pairing</summary>
+                                                    <div class="help-text" style="margin-top:6px;">
+                                                        Pairing above does this for you. The manual way:
+                                                        in MetaSync's dashboard, create a local API key
+                                                        and paste it here, then Save. SoulSync ends up
+                                                        holding the same kind of key either way.
+                                                    </div>
+                                                    <div style="display: flex; gap: 8px; margin-top:6px;">
+                                                        <input type="password" id="metasync-local-key"
+                                                            placeholder="MetaSync local API key (paste to connect manually)"
+                                                            style="flex:1;">
+                                                    </div>
+                                                </details>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label>Step 2 — Join a pool (optional):</label>
+                                                <div class="help-text">
+                                                    A pool is a network your MetaSync can join. The
+                                                    first pool is SIN, the SoulSync Intelligence
+                                                    Network: it collects anonymous taste signals from
+                                                    SoulSync installs — bulk counts of what people
+                                                    watchlist and wishlist, never your personal data —
+                                                    and turns them into shared playlists, like Trending
+                                                    and Most Wanted, which MetaSync brings back into
+                                                    this SoulSync. Get a key from your pool account,
+                                                    put it below, and send it to MetaSync. MetaSync
+                                                    joins and does all the talking — it swaps your key
+                                                    for short-lived access tokens, so the key itself
+                                                    stays between you and MetaSync. Nothing is joined
+                                                    until you send the key.
+                                                </div>
+                                                <div class="help-text">
+                                                    No key yet? <a href="https://metasync.ssync.net"
+                                                        target="_blank" rel="noopener">Get one at the SIN
+                                                        front desk</a> — sign in there, create a key, then
+                                                    come back and put it below.
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="metasync-pool-url">Pool URL:</label>
+                                                <input type="text" id="metasync-pool-url"
+                                                    placeholder="Pool URL from your pool account">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="metasync-pool-key">Pool key:</label>
+                                                <input type="password" id="metasync-pool-key"
+                                                    placeholder="Your pool account key">
+                                                <div class="help-text">
+                                                    Your own key for the pool, from your pool account.
+                                                    SoulSync stores it here only so it can hand it to
+                                                    MetaSync when you click Send — SoulSync never uses
+                                                    it itself.
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                                    <button class="test-button"
+                                                        onclick="metasyncHandoff()">Send pool key to
+                                                        MetaSync</button>
+                                                    <button class="test-button"
+                                                        onclick="saveMetaSyncSettings()">Save</button>
+                                                    <button class="test-button"
+                                                        onclick="refreshMetaSyncStatus()">Refresh
+                                                        status</button>
+                                                </div>
+                                                <div class="help-text">
+                                                    Send pool key is the button that joins the pool.
+                                                    Save only stores what you typed above, for later.
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label>Status:</label>
+                                                <span id="metasync-status" class="readonly-field">Loading...</span>
+                                                <div id="metasync-status-detail" class="help-text"></div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                                                    <button class="test-button"
+                                                        onclick="metasyncDisconnect()">Disconnect</button>
+                                                    <span class="help-text" style="margin:0;">Undoes step 1 and
+                                                        step 2: MetaSync leaves the pool, the key it reads
+                                                        this SoulSync with is revoked, and SoulSync forgets
+                                                        MetaSync's key. Your pool key stays saved above.</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div><!-- end MetaSync body -->
 
                                     <!-- Developer (collapsible tile): tools for checking how things look.
                                          Wired by webui/src/shell/weather-preview-settings.ts. Nothing here
@@ -10368,15 +10774,15 @@
                                  would do nothing on the music side. The retired video source picker
                                  rides along inside: it is hidden, and video-settings.js still reads its
                                  ids on load, so it has to stay somewhere in the page. -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced" data-video-only
+                                    <div class="settings-section-header collapsed" data-stg="connections" data-video-only
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
                                         <h3>Notifications</h3>
                                         <span class="settings-section-hint">Discord, webhooks &amp; Telegram</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced" data-video-only>
-                                        <div class="settings-group" data-stg="advanced" data-video-only>
+                                    <div class="settings-section-body collapsed" data-stg="connections" data-video-only>
+                                        <div class="settings-group" data-stg="connections" data-video-only>
                                             <!-- Was "Download Source". The source picker below is retired: the shared
                                      download-chain widget (Source Settings) is the one editor for the video
                                      chain now, and it carries a Video tab. The select and its arrow list stay
@@ -10426,7 +10832,7 @@
                                  background machinery lives. Still data-video-only - the endpoints are
                                  /api/video/downloads/config/import-lists and it feeds the VIDEO
                                  wishlist, so it would do nothing on the music side. -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced" data-video-only
+                                    <div class="settings-section-header collapsed" data-stg="discovery" data-video-only
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -10434,8 +10840,8 @@
                                         <span class="settings-section-hint">Auto-add movies &amp; shows from a
                                             list</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced" data-video-only>
-                                        <div class="settings-group" data-stg="advanced" data-video-only>
+                                    <div class="settings-section-body collapsed" data-stg="discovery" data-video-only>
+                                        <div class="settings-group" data-stg="discovery" data-video-only>
                                             <!-- Import lists (arr-parity P6) -->
                                             <div class="form-group" id="video-import-lists">
                                                 <label>Import lists:</label>
@@ -12855,6 +13261,7 @@
     <script src="{{ url_for('static', filename='docs-content/15-sample-studio.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='docs-content/16-api.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='docs-content/17-podcasts-audiobooks.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/18-metasync.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='helper.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='particles.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='worker-orbs.js', v=static_v) }}"></script>

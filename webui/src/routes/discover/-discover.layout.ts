@@ -38,6 +38,7 @@ export type DiscoverSectionId =
   | 'lastfm-radio'
   | 'listenbrainz'
   | 'deezer-editorial'
+  | 'sin-charts'
   | 'build-a-playlist';
 
 /** One entry: a full-width section, or a pair that renders two-up when both have content. */
@@ -71,6 +72,7 @@ export const DISCOVER_LAYOUT: DiscoverLayoutEntry[] = [
   single('adv-wave'), //                                              the dial
   pair('listening-recs-section', 'recommended-artists-section'), //   its two targets
   single('discover-bylt-sections'), //                                because you listen
+  single('sin-charts'), //                                            the network's weekly charts
   pair('recent-releases', 'cache-genre-releases'), //                 new
   pair('seasonal-albums-section', 'cache-undiscovered'), //           own the gaps
   pair('cache-label-explorer', 'your-albums-section'),
@@ -119,6 +121,8 @@ export const SECTION_EMPTY_POLICY: Partial<Record<DiscoverSectionId, EmptyPolicy
   'listening-recs-section': HIDE,
   'your-albums-section': HIDE,
   'your-artists-section': HIDE,
+  // no MetaSync connected, or nothing charted yet: nothing to offer
+  'sin-charts': HIDE,
 
   // hideWhenEmpty absent → the controller default (false): stay and explain.
   'recent-releases': emptyState('No recent releases found'),
@@ -227,6 +231,7 @@ export const DEFAULT_SECTION_ZONE: Record<DiscoverSectionId, DiscoverZoneId> = {
   'listening-recs-section': 'for-you',
   'recommended-artists-section': 'for-you',
   'discover-bylt-sections': 'for-you',
+  'sin-charts': 'new-missing',
   'recent-releases': 'new-missing',
   'cache-genre-releases': 'new-missing',
   'seasonal-albums-section': 'new-missing',

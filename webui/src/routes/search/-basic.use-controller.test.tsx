@@ -222,6 +222,24 @@ describe('search', () => {
     expect(toasts).toContainEqual({ message: 'Found 3 results', type: 'success' });
   });
 
+  it('keeps the failed indexers next to the results, and drops them on the next search (#1831)', async () => {
+    const warning = { source: 'torrent', indexer: 'BrokenTracker', error: 'HTTP 502' };
+    server.use(
+      http.post('/api/search', () =>
+        HttpResponse.json({ results: [trackRow()], warnings: [warning] }),
+      ),
+    );
+    const { result } = await mounted();
+
+    await act(async () => result.current.search('aphex'));
+    expect(result.current.state.warnings).toEqual([warning]);
+    expect(result.current.state.results).toHaveLength(1);
+
+    stubSearch([trackRow()]);
+    await act(async () => result.current.search('aphex twin'));
+    expect(result.current.state.warnings).toEqual([]);
+  });
+
   it('names the query when nothing is found', async () => {
     stubSearch([]);
     const { result } = await mounted();

@@ -534,12 +534,12 @@ def test_libraries_endpoint_lists_and_saves(tmp_path, monkeypatch):
         assert [m["title"] for m in data["movies"]] == ["Movies"]
         # one library of each kind and nothing ever picked: they're picked
         # for you, so a fresh install's first scan reads something
-        assert data["selected"] == {"movies": "Movies", "tv": "TV"}
+        assert data["selected"] == {"movies": "Movies", "tv": "TV", "tv_more": [], "anime": []}
 
         # "— None —" for tv is a choice and stays one on the next load
         assert client.post("/api/video/libraries", json={"movies": "Movies", "tv": ""}).status_code == 200
         data2 = client.get("/api/video/libraries").get_json()
-        assert data2["selected"] == {"movies": "Movies", "tv": ""}
+        assert data2["selected"] == {"movies": "Movies", "tv": "", "tv_more": [], "anime": []}
     finally:
         videoapi._video_db = None
 

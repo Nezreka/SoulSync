@@ -227,12 +227,18 @@ def emit_track_downloaded(context: Dict[str, Any], automation_engine=None) -> No
             first = artists[0]
             artist_name = first.get("name", str(first)) if isinstance(first, dict) else str(first)
 
+        # track_info's album is often the whole album record ({'name', 'id',
+        # 'images', ...}); a {album} tag wants its name, not the record
+        album = ti.get("album", "")
+        if isinstance(album, dict):
+            album = album.get("name") or album.get("title") or ""
+
         automation_engine.emit(
             "track_downloaded",
             {
                 "artist": artist_name,
                 "title": ti.get("name", ti.get("title", "")),
-                "album": ti.get("album", ""),
+                "album": album,
                 "quality": context.get("_audio_quality", "Unknown"),
             },
         )

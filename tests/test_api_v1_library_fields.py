@@ -340,6 +340,7 @@ _NEW_ALBUM_KEYS = {
     "discogs_last_attempted", "amazon_last_attempted",
     "jiosaavn_last_attempted", "bandcamp_last_attempted",
     "art_locked", "genres_locked", "metadata_locked",
+    "musicbrainz_release_group_id",
 }
 
 _OLD_TRACK_KEYS = {

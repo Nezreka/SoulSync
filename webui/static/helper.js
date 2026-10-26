@@ -376,12 +376,12 @@ const HELPER_CONTENT = {
         docsId: 'discover'
     },
     '#watchlist-global-settings-btn': {
-        title: 'Global Watchlist Settings',
-        description: 'Override download preferences for ALL watchlisted artists at once. When enabled, these settings replace individual artist configurations. Useful for applying the same release type and content filters across your entire watchlist.',
+        title: 'Watchlist Defaults',
+        description: 'The release rules every artist uses unless you give it its own. Find it in the watchlist menu (⋯).',
         tips: [
-            'Button shows "Global Override ON" when active',
-            'Overrides individual artist settings while enabled',
-            'Disable to return to per-artist configurations'
+            'Changing the defaults changes every artist that follows them',
+            'Artists with their own rules show a Custom badge',
+            'Reset all to defaults puts custom artists back on them'
         ]
     },
     '.watchlist-artist-card': {
@@ -396,7 +396,7 @@ const HELPER_CONTENT = {
 
     // ─── WATCHLIST ARTIST CONFIG MODAL ──────────────────────────────
 
-    '#watchlist-artist-config-modal .config-section:first-child': {
+    '#watchlist-artist-config-modal .wap-grab': {
         title: 'Download Preferences',
         description: 'Choose which types of releases to watch for this artist. Checked types will be monitored during scans and added to your Wishlist when found.',
         tips: [
@@ -405,13 +405,13 @@ const HELPER_CONTENT = {
             'Singles: Individual tracks and 2-3 track releases'
         ]
     },
-    '#watchlist-artist-config-modal .config-section:nth-child(2)': {
+    '#watchlist-artist-config-modal .wap-include': {
         title: 'Content Filters',
         description: 'Control which types of content to include or exclude when scanning for new releases. By default, live, remix, acoustic, compilation, and instrumental versions are all excluded — check the ones you want.',
         tips: [
             'Unchecked = excluded from scans (won\'t be added to wishlist)',
             'These filters apply during watchlist scans only',
-            'Global Settings can override these per-artist filters'
+            'Turn on Follow watchlist defaults to use the defaults instead'
         ]
     },
     '#config-include-live': {
@@ -451,12 +451,12 @@ const HELPER_CONTENT = {
     // ─── WATCHLIST GLOBAL CONFIG MODAL ──────────────────────────────
 
     '#watchlist-global-config-modal': {
-        title: 'Global Watchlist Settings',
-        description: 'When global override is enabled, these settings apply to ALL watched artists, replacing their individual configurations. Useful for uniform preferences across your entire watchlist.',
+        title: 'Watchlist Defaults',
+        description: 'The release rules every artist follows unless it has its own. Change them here and every following artist changes with them.',
         tips: [
-            'Toggle "Enable Global Override" at the top to activate',
             'Same options as per-artist: release types + content filters',
-            'Disable override to return to individual artist settings'
+            'Give one artist its own rules from its panel (Rules tab)',
+            'Reset all to defaults puts every custom artist back on these'
         ]
     },
 
@@ -3465,34 +3465,27 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
-    '3.5.9': [
-        { date: 'October 2026 · 3.5.9' },
-        { title: 'Lidarr compatible API', desc: 'Singarr and MusicSeerr 1.x can request albums from SoulSync by pointing their Lidarr URL at /lidarr with an admin API key. Requests land on the wishlist of the profile you pick. Off until turned on in Settings > Advanced (thanks @Topaze77 for the request) (#1799).', page: 'settings' },
-        { title: 'MCP endpoint', desc: 'An AI client can drive SoulSync through /mcp, with the same scopes and limits as your API key. Off until turned on in Settings > Advanced.', page: 'settings' },
-        { title: 'Choose what new sign-ups start with', desc: 'Settings > Security picks the side a profile made by Plex sign-in starts on (music, movies and TV, or both) and an optional request limit. Members can also open the video Requests page now (thanks @PapaBearDoes) (#1818, #1819).', page: 'settings' },
-        { title: 'Anime library folder', desc: 'An optional folder for anime. Episodes of anime-type shows import there instead of the TV folder, and scans, renames and subtitles cover it. Set it in video Settings > Downloads (thanks @PapaBearDoes) (#1820).' },
-        { title: 'Guided first-run setup', desc: 'Setup is rebuilt as a guided flow that finds your servers on the network, checks every part before it finishes, and can pick up where you left off. The dashboard shows a finish setting up checklist.', page: 'dashboard' },
-        { title: 'Downloads page rebuilt', desc: 'Music and video share one row style: status on the art, one action per row, and a detail sheet that explains what happened and shows asked for vs got. Albums read like a tracklist and history is grouped by day.', page: 'active-downloads' },
-        { title: 'Wishlist grouped by what is stuck', desc: 'Artists sit in zones like rejected, no match found and keeps failing, each with its own retry. Click an artist for a side panel that says why. Movies, TV and YouTube now live on the same page.', page: 'wishlist' },
-        { title: 'Matching fixes', desc: 'AcoustID judges a file by its real length (thanks @QT3496) (#1804), YouTube Music tracks match on their real title and artist (thanks @andreamassaro9) (#1817), and K/DA style names stop getting skipped.' },
-        { title: 'Sync and review fixes', desc: 'Deleting a wrong download in Review blacklists its source, and append drops an old wrong match once the right track is on the playlist (thanks @kevin2xk) (#1801).', page: 'sync' },
-        { title: 'Library fixes', desc: 'Redownloads stop leaving two rows (#1810), unicode hyphens stop splitting one artist (#1797), and batch tagging only fetches covers it writes (#1798) (thanks @glebosotov). Dead file findings close on their own (thanks @splitsec2) (#1802).', page: 'library' },
-        { title: 'Collections stop over-wishlisting', desc: 'Preset collections no longer start with wishlist missing ticked, and a removed movie stays removed (thanks @hilburn) (#1807).' },
-        { title: 'Smoother downloads', desc: 'The download modal no longer redraws blurs nobody could see every frame, so the GPU stops pegging while a sync runs (thanks @OlivierMartinez) (#1816).' },
-        { title: 'Earlier versions', desc: '3.5.8 added Request Lists, playlists that re-sync after their downloads land and Discover mixes on the dashboard.' },
-    ],
-    '3.5.8': [
-        { date: 'October 2026 · 3.5.8' },
-        { title: 'Request Lists', desc: 'A new Sync page tab for playlists that only download. Copy any playlist there, or start an empty one, and syncing it wishlists what is missing without building a playlist on your media server.', page: 'sync' },
-        { title: 'Spotify auto-remove', desc: 'A Spotify request list can remove tracks you now own from the Spotify playlist. It asks first, uses your own Spotify login, and only removes tracks the library holds under the same Spotify id.', page: 'sync' },
-        { title: 'Playlists sync after their downloads', desc: 'When a playlist\'s wishlist batch finishes and the database update runs, the playlist re-syncs so the new tracks reach your server playlist. The Sync Playlist automation can also sync every mirrored playlist.', page: 'automations' },
-        { title: 'Discover mixes on the dashboard', desc: 'The Listen band shows your Discover quick mixes. Click one to preview it, or press play to start it.', page: 'dashboard' },
-        { title: 'Chat uploads', desc: 'Uploads open a preview with a caption and progress bar, shared files get inline players and an image lightbox, and Movie Night is now Watch Together.' },
-        { title: 'Audiobook automations', desc: 'Audiobooks fire automation triggers now, including Import Complete, grabs, failed downloads, wishlist, follows and scans (thanks @SimpleSimonLA) (#1774).', page: 'automations' },
-        { title: 'No more first-visit bans', desc: 'A normal page load stopped sending the burst of refused calls CrowdSec and fail2ban read as a scanner, and deleting a profile no longer strands its browsers (thanks @PapaBearDoes) (#1763, #1786).' },
-        { title: 'Import and download fixes', desc: 'Artist letter folders follow the album artist (thanks @QT3496) (#1785), singles reuse a folder that differs only by case (#1788), No track picked imports from the file\'s own tags (thanks @edy80) (#1772), and Review no longer freezes on a big queue (thanks @QT3496) (#1775).', page: 'import' },
-        { title: 'Lost tracks come back', desc: 'A track your server no longer has gets wishlisted and stays wishlisted until it downloads, and re-identified tracks from a bad album import one by one (thanks @kevin2xk) (#1754, #1567).', page: 'sync' },
-        { title: 'Earlier versions', desc: '3.5.7 turned Beatport charts into playlists, added a second pass for missed tracks and brought automatic album completion.' },
+    '3.6.0': [
+        { date: 'October 2026 · 3.6.0' },
+        { title: 'MetaSync and SoulSync Charts', desc: 'Connect the optional MetaSync companion and your install can join SIN, a network of SoulSync installs that share anonymous weekly signals keyed only by MusicBrainz IDs. The charts come back once a day as ready-to-open playlists: Trending, Most Wanted, Just Landed, Loved & Kept, Rising, Breakout Artists, On Repeat and Top Tracks. An album only charts once 15+ installs reported it. Set it up in Settings > Connections > MetaSync, and read Help & Docs > MetaSync for what is shared.', page: 'discover' },
+        { title: 'Charts are offers, never orders', desc: 'SoulSync Charts show on the dashboard and on Discover only once every song is matched. Opening one gives you your own playlist on the Sync page, and nothing syncs, wishlists or downloads until you press Sync & download.', page: 'dashboard' },
+        { title: 'Sign in with OIDC', desc: 'Sign in with any OpenID Connect provider, like Pocket ID, Authentik, Authelia or Keycloak. Members link their own account from My Account, an optional required group keeps everyone else out, and new accounts start with your new sign-up defaults. Sessions now follow the provider, so turning someone off there signs them out here. Turn it on in Settings > Security (thanks @PapaBearDoes) (#1834, #1877).', page: 'settings' },
+        { title: 'Settings where you look', desc: 'Connections holds MetaSync and notifications, a new Discovery tab holds discovery, playlists and listening stats, Appearance has the sidebar weather, and Advanced is now System. The first line of each setting\'s help shows right under it, and Ctrl/Cmd+K jumps to settings search (#1822).', page: 'settings' },
+        { title: 'Watchlist, simpler', desc: 'One primary action with the monthly jobs in a menu, one artist panel for overview, rules and sources, and watchlist defaults an artist follows unless you give it its own rules. The overview shows your plays and what you own (#1822).', page: 'watchlist' },
+        { title: 'Wishlist download in one click', desc: 'Download now starts the whole wishlist and shows the run on the page with done and failed counts. Stop really stops every album of the run (#1822).', page: 'wishlist' },
+        { title: 'New naming tokens and a live preview', desc: 'Artist disambiguation, country and genre tokens so two artists called Nirvana get their own folders (#1859), $explicit and $contentrating badges (#1860), and an opt-in lookalike mode instead of underscores (#1867). Every template shows the path it makes as you type (#1868).', page: 'settings' },
+        { title: 'Generate playlist cover art', desc: 'Every playlist\'s menu can generate a cover from its genres, mood and decade with Pollinations. Free with no key, and an optional key lifts the wait and the mark.', page: 'sync' },
+        { title: 'Playlist imports and sync page', desc: 'NewPipe backups become mirrored playlists on the Import tab, every playlist tab has search, the server compare view can remove a wrong match for good, and the order check reads source and server numbering right (#1852). Big Tidal playlists open with their tracks instead of sitting at 0.', page: 'import' },
+        { title: 'Anime by library', desc: 'Anime is picked by library instead of guessed from a genre tag. Mark any TV library as anime, scan more than one TV library, and set a show\'s type by hand, even before you own it (thanks @PapaBearDoes) (#1835).' },
+        { title: 'Audio language for video', desc: 'The video quality profile can prefer or require dubbed and MULTI releases in the languages you pick. Subtitle-only tags like VOSTFR never count.' },
+        { title: 'Anime seasons follow TVDB', desc: 'Shows TMDB lists as one long season, like Jujutsu Kaisen, now follow TVDB\'s seasons, so downloads and subtitles look for S03E12 instead of S01E59. Needs a TVDB key.' },
+        { title: 'Downloads and imports', desc: 'An opt-in YouTube album bundle for albums whose songs are unavailable (#1851), audiobook parts claim their own staged files, track downloaded automations fire again (#1864), and Deezer says when your ARL stops signing in (#1865) (thanks @SimpleSimonLA and @PapaBearDoes).', page: 'automations' },
+        { title: 'Prowlarr outages handled', desc: 'Search names the indexers that failed (thanks @glebosotov) (#1831), and an outage no longer counts as a failed wishlist attempt or No releases found for audiobooks (thanks @SimpleSimonLA) (#1826, #1832).', page: 'search' },
+        { title: 'Fixes', desc: 'Album auto-fill takes a guest artist\'s track on its own album, & and and land in the same artist folder, album downloads take the album\'s own release of each track (#1866), listening stats use your local clock (#1840), reorganize keeps its place (#1857), LRCLib hiccups are no longer read as no lyrics (#1879), and the wishlist shows why a download failed.', page: 'library' },
+        { title: 'Audiobooks on your own store', desc: 'Library matching asks your configured Audible storefront instead of the US one, and a book already on disk counts for its wished episode by series and number (thanks @SimpleSimonLA) (#1875, #1876).' },
+        { title: 'Holiday skies', desc: 'Halloween, Thanksgiving, Christmas, New Year\'s and Lunar New Year each paint their own sky in the sidebar weather, with more of everything on the big day.' },
+        { title: 'Faster database', desc: 'Database connections are pooled instead of opened for every query (thanks @splitsec2) (#1847), and the CSS cleanup continued with a lint and a budget test (thanks @Thundernerd).' },
+        { title: 'Earlier versions', desc: '3.5.9 added the Lidarr and MCP APIs, guided first-run setup and rebuilt Downloads and Wishlist pages.' },
     ],
 };
 
@@ -3522,41 +3515,28 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: '3.5.9: lidarr and mcp apis, guided setup, and rebuilt downloads and wishlist',
-        description: 'SoulSync can answer as Lidarr for request apps and as an MCP server for AI clients, first-run setup is a guided flow, the Downloads page and Wishlist are rebuilt on both the music and video side, new sign-ups and anime get their own settings, and a round of matching, library and video fixes.',
+        title: '3.6.0: MetaSync charts, sign in with OIDC, and a simpler watchlist',
+        description: 'SoulSync installs can share anonymous taste signals through MetaSync and get weekly charts back as playlists. Also sign in with OIDC, anime by library, cleaner settings, watchlist and wishlist pages, new naming tokens with a live preview, generated playlist covers and audio language for video.',
         features: [
-            'Lidarr compatible API for Singarr and MusicSeerr 1.x, and an MCP endpoint for AI clients. Both off until turned on in Settings > Advanced (thanks @Topaze77 for the request) (#1799).',
-            'Choose what new Plex sign-ups start with, members can open video Requests, and anime can have its own library folder (thanks @PapaBearDoes) (#1818, #1819, #1820).',
-            'Guided first-run setup that finds your servers, checks every part before finishing and can resume later.',
-            'Downloads page rebuilt for music and video: status on the art, one action per row and a detail sheet for every download.',
-            'Wishlist grouped by what is stuck with a side panel that says why, and the video wishlist on the same page.',
-            'AcoustID judges real lengths and the duration tolerance is easier to find (thanks @QT3496) (#1804, #1805), and YouTube Music tracks match properly (thanks @andreamassaro9) (#1817).',
-            'Review deletes blacklist the source and append drops old wrong matches (thanks @kevin2xk) (#1801).',
-            'Redownload duplicates, unicode hyphen artist splits and batch cover fetches fixed (thanks @glebosotov) (#1810, #1797, #1798), and dead file findings close (thanks @splitsec2) (#1802).',
-            'Collections stop wishlisting movies nobody asked for (thanks @hilburn) (#1807), and empty usenet folders are cleaned up (thanks @PapaBearDoes) (#1815).',
-            'Audiobook matching fixes for German releases, short MP3 headers and dead album bundles (thanks @SimpleSimonLA) (#1795, #1796, #1800).',
-            'The GPU stops pegging during downloads (thanks @OlivierMartinez) (#1816).',
-            'Under the hood: the CSS token system and shared UI primitives (thanks @Thundernerd).',
+            'MetaSync and SIN: an optional companion that reports one week of yes/no signals keyed only by MusicBrainz IDs, nothing until you join a pool and turn off Dry run. An album charts only once 15+ installs reported it.',
+            'SoulSync Charts on the dashboard and Discover: Trending, Most Wanted, Just Landed, Loved & Kept, Rising, Breakout Artists, On Repeat and Top Tracks, each matched before it shows. Opening one makes your own playlist, and nothing downloads until you press Sync & download.',
+            'Sign in with OIDC: Pocket ID, Authentik, Authelia, Keycloak and more, with linked accounts, an optional required group, your sign-up defaults and sessions that follow the provider (thanks @PapaBearDoes) (#1834, #1877).',
+            'Settings sections where people look, help text under every setting, and Ctrl/Cmd+K for settings search (#1822).',
+            'Watchlist: one primary action, one artist panel, and defaults an artist follows. Wishlist: download now in one click, with a stop that stops (#1822).',
+            'Naming: artist disambiguation, country and genre tokens (#1859), explicit and clean badges (#1860), lookalike characters (#1867) and a live path preview under every template (#1868).',
+            'Playlists: generated cover art, NewPipe backup imports, search on every tab, remove match on the server compare view, the order check fixed (#1852), and big Tidal playlists that open with their tracks.',
+            'Anime by library (thanks @PapaBearDoes) (#1835), anime seasons that follow TVDB, and audio language for dubbed and MULTI releases.',
+            'An opt-in YouTube album bundle (thanks @SimpleSimonLA) (#1851), track downloaded automations firing again and Deezer sign-in alerts (thanks @PapaBearDoes) (#1864, #1865).',
+            'Search names failed Prowlarr indexers (thanks @glebosotov) (#1831), and outages stop counting as misses (thanks @SimpleSimonLA) (#1826, #1832).',
+            'Fixes for album auto-fill, & vs and artist folders, album release picks (#1866), listening stats on the local clock (#1840), websocket sessions (#1837), reorganize resume (#1857), LRCLib hiccups (#1879), import stats (#1874) and BPM comparison (#1871). Audiobook matching asks your own Audible store (thanks @SimpleSimonLA) (#1875, #1876).',
+            'Holiday skies in the sidebar weather, pooled database connections (thanks @splitsec2) (#1847) and more CSS cleanup (thanks @Thundernerd).',
         ],
+        usage_note: 'MetaSync is optional. Set it up in Settings > Connections > MetaSync, and Help & Docs > MetaSync explains exactly what is shared.',
     },
     {
-        title: 'Earlier in 3.5.8',
-        description: 'Request Lists, playlists that re-sync after their downloads land, Discover mixes on the dashboard and a new chat upload flow.',
+        title: 'Earlier in 3.5.9',
+        description: 'Lidarr and MCP APIs, guided first-run setup, rebuilt Downloads and Wishlist pages, new sign-up defaults and an anime library folder.',
         features: [],
-    },
-    {
-        title: '3.5.8: request lists, playlists that sync after downloads, and a round of fixes',
-        description: 'Request Lists download what a playlist is missing without building a server playlist, playlists re-sync once their downloads land, Discover mixes come to the dashboard, chat gets a new upload flow, and members stop getting banned by CrowdSec on their first visit.',
-        features: [
-            'Request Lists: copy a playlist to download what is missing without a server playlist, with opt-in Spotify auto-remove that only trusts Spotify ids.',
-            'Playlists re-sync after their wishlist downloads land, and Sync Playlist can sync every mirrored playlist.',
-            'Discover quick mixes on the dashboard, and chat uploads with previews, captions and inline players.',
-            'Audiobook automation triggers, including Import Complete (thanks @SimpleSimonLA) (#1774).',
-            'No more first-visit CrowdSec bans, and deleting a profile clears its sessions (thanks @PapaBearDoes) (#1763, #1786).',
-            'Artist letter folders, case-split singles, No track picked imports and a frozen Review page fixed (thanks @QT3496, @edy80) (#1785, #1788, #1772, #1775).',
-            'Lost tracks come back and re-identify fixes (thanks @kevin2xk) (#1754, #1567).',
-            'Under the hood: one descriptor per media server (thanks @splitsec2), about 12,000 lines of dead CSS gone (thanks @Thundernerd) and the replaced vanilla pages retired (thanks @AnonymousMorris).',
-        ],
     },
 ];
 

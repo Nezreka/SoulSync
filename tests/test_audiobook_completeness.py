@@ -107,14 +107,35 @@ def test_a_folder_holding_a_whole_series_is_rejected(tmp_path):
     with _durations({"01.mp3": 600 * 60.0 * 5}):
         verdict = assess(str(folder), expected_minutes=600)
     assert verdict["complete"] is False
-    assert "more than one title" in verdict["reason"]
+    assert verdict["overshoot"] is True
+    assert "far too long" in verdict["reason"]
 
 
 def test_a_modest_overshoot_is_fine(tmp_path):
     # Duplicated intros and bonus interviews overshoot legitimately.
     folder = _book_folder(tmp_path, ["01.mp3"])
     with _durations({"01.mp3": 600 * 60.0 * 1.2}):
-        assert assess(str(folder), expected_minutes=600)["complete"] is True
+        verdict = assess(str(folder), expected_minutes=600)
+    assert verdict["complete"] is True
+    assert not verdict.get("overshoot")
+
+
+def test_a_short_book_is_not_an_overshoot(tmp_path):
+    # #1833: only overshoot fails fast. short can still be arriving, so it
+    # keeps staging
+    folder = _book_folder(tmp_path, ["01.mp3"])
+    with _durations({"01.mp3": 300 * 60.0}):
+        verdict = assess(str(folder), expected_minutes=600)
+    assert verdict["complete"] is False
+    assert not verdict.get("overshoot")
+
+
+def test_unreadable_audio_far_too_big_is_an_overshoot(tmp_path):
+    folder = _book_folder(tmp_path, ["01.mp3"], size=50 * 1024 * 1024)
+    with _durations({}):
+        verdict = assess(str(folder), expected_minutes=1)
+    assert verdict["complete"] is False
+    assert verdict["overshoot"] is True
 
 
 def test_an_empty_download_is_never_complete(tmp_path):

@@ -286,7 +286,10 @@ def resolve_watchlist_content_settings(
         def get(self, key, default=None):
             return _watchlist_cfg_get(key, default)
 
-    if override_enabled:
+    # #1822: an artist following the watchlist defaults gets them; the legacy
+    # override still counts as everyone following
+    from core.watchlist_defaults import follows_defaults
+    if follows_defaults(artist_row, override_enabled):
         settings = load_global_content_filter_settings(_CfgAdapter())
         settings['include_compilations'] = bool(
             _watchlist_cfg_get('watchlist.global_include_compilations', False)

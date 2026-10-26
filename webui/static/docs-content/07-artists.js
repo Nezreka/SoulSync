@@ -123,12 +123,14 @@ Click the config icon on any watched artist to customize which release types to 
 - Acoustic versions
 - Compilations
 
-## Global settings
+## Watchlist defaults
 
-Override all per-artist settings at once. Enable **Global Override**, select which types to include, and every watchlist scan will follow the global config instead of individual artist preferences.
+Open **⋯ → Watchlist defaults** to set the release rules every artist uses. A new artist follows them, and changing them changes every artist that follows them.
+
+To give one artist its own rules, open it and change a rule on the **Rules** tab. It then shows a **Custom** badge. Turn **Follow watchlist defaults** back on to put it back, or use **Reset all to defaults** in the defaults to put every custom artist back at once.
 
 > [!TIP]
-> Global override is handy if you generally only want studio albums — turn it on, select Albums only, and your wishlist stays focused.
+> If you generally only want studio albums, set the defaults to Albums only and your wishlist stays focused.
 `
         },
     ]

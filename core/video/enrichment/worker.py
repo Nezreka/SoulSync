@@ -221,7 +221,11 @@ class VideoEnrichmentWorker:
         already-matched show that hasn't been synced, so library cards show real
         owned/total. TMDB-only (it owns season_episodes). Returns True if it did
         work (so the loop rate-limits between shows)."""
-        if not hasattr(self.client, "season_episodes"):
+        # tmdb's queue only. the tvdb client grew season_episodes for gap-fill,
+        # so a hasattr check let the tvdb worker take shows off this queue,
+        # choke on its list-shaped answer, and mark them synced with nothing
+        # pulled.
+        if self.service != "tmdb" or not hasattr(self.client, "season_episodes"):
             return False
         show = self.db.episode_sync_next()
         if not show:
@@ -293,17 +297,40 @@ class VideoEnrichmentWorker:
             except Exception:
                 logger.exception("episode backfill: season list failed for show %s", show_id)
                 return
+        tvdb_id = None
+        if self.service == "tmdb":
+            try:
+                tvdb_id = (self.db.show_match_info(show_id) or {}).get("tvdb_id")
+            except Exception:
+                logger.debug("episode backfill: no tvdb id for show %s", show_id, exc_info=True)
         for snum in seasons:
             try:
                 data = self.client.season_episodes(tv_id, snum)
                 if data and data.get("episodes"):
-                    self.db.backfill_episodes(
-                        show_id, snum, data["episodes"],
-                        data.get("overview"), data.get("poster_url"),
-                        # TMDB is the schedule source of truth: a rescheduled
-                        # premiere must move. Other providers (TVDB) stay
-                        # gap-fill so they never clobber TMDB's data.
-                        overwrite_air_date=(self.service == "tmdb"))
+                    groups, moved = {snum: data["episodes"]}, {}
+                    if tvdb_id:
+                        # TMDB lumps some anime into one season (Jujutsu Kaisen
+                        # S01E01-59); TVDB and everything that names files split
+                        # it. file those under TVDB's numbers, unless the server
+                        # already numbers them TMDB's way.
+                        from core.video.numbering import regroup_season
+                        groups, moved = regroup_season(self.db, tvdb_id, snum, data["episodes"])
+                        if moved and self.db.server_has_episodes(show_id, snum, list(moved)):
+                            groups, moved = {snum: data["episodes"]}, {}
+                    for gnum, eps in groups.items():
+                        if not eps:
+                            continue
+                        own = gnum == snum
+                        self.db.backfill_episodes(
+                            show_id, gnum, eps,
+                            data.get("overview") if own else None,
+                            data.get("poster_url") if own else None,
+                            # TMDB is the schedule source of truth: a rescheduled
+                            # premiere must move. Other providers (TVDB) stay
+                            # gap-fill so they never clobber TMDB's data.
+                            overwrite_air_date=(self.service == "tmdb"))
+                    if moved:
+                        self.db.retire_renumbered_episodes(show_id, snum, moved)
             except Exception:
                 logger.exception("episode backfill failed: show %s season %s", show_id, snum)
         if mark_synced:
@@ -322,7 +349,7 @@ class VideoEnrichmentWorker:
                       for b in breakdown.values() if not b.get("coverage_only"))
         # Shows still needing their full episode list pulled count as outstanding
         # work for the TMDB worker (so it isn't "Complete" while syncing).
-        if hasattr(self.client, "season_episodes"):
+        if self.service == "tmdb" and hasattr(self.client, "season_episodes"):
             try:
                 pending += self.db.episode_sync_pending_count()
             except Exception:

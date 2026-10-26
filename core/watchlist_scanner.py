@@ -1304,52 +1304,36 @@ class WatchlistScanner:
             artist.auto_download = effective_with_legacy(pref, legacy, g_auto)
 
     def _apply_global_watchlist_overrides(self, watchlist_artists: List[WatchlistArtist]):
-        """Apply global watchlist release-type overrides to a batch of artists."""
+        """Give every artist that follows the watchlist defaults the default
+        release rules (#1822). Artists with their own rules keep them.
+
+        A still-on legacy global override is retired first: every artist is
+        marked as following, which is what the switch meant."""
         # Runs first and unconditionally — see _apply_auto_download_default.
         self._apply_auto_download_default(watchlist_artists)
         try:
             from core.settings import config_manager
+            from core.watchlist_defaults import (
+                default_values, follows_defaults, legacy_override_on, retire_legacy_override)
         except Exception:
             return
 
-        if not config_manager.get('watchlist.global_override_enabled', False):
+        override_on = legacy_override_on(config_manager)
+        if override_on:
+            try:
+                retire_legacy_override(self.database, config_manager)
+            except Exception as e:  # noqa: BLE001 - the override still applies below
+                logger.warning("Could not retire the watchlist global override: %s", e)
+        defaults = default_values(config_manager)
+
+        following = [a for a in watchlist_artists or [] if follows_defaults(a, override_on)]
+        if not following:
             return
-
-        g_albums = config_manager.get('watchlist.global_include_albums', True)
-        g_eps = config_manager.get('watchlist.global_include_eps', True)
-        g_singles = config_manager.get('watchlist.global_include_singles', True)
-        g_live = config_manager.get('watchlist.global_include_live', False)
-        g_remixes = config_manager.get('watchlist.global_include_remixes', False)
-        g_acoustic = config_manager.get('watchlist.global_include_acoustic', False)
-        g_compilations = config_manager.get('watchlist.global_include_compilations', False)
-        g_instrumentals = config_manager.get('watchlist.global_include_instrumentals', False)
-        g_other_artists = config_manager.get('watchlist.global_include_other_artists', False)
-
-        logger.info(
-            "Applying global watchlist override to %s artists "
-            "(albums=%s, eps=%s, singles=%s, live=%s, remixes=%s, acoustic=%s, compilations=%s, instrumentals=%s, other_artists=%s)",
-            len(watchlist_artists),
-            g_albums,
-            g_eps,
-            g_singles,
-            g_live,
-            g_remixes,
-            g_acoustic,
-            g_compilations,
-            g_instrumentals,
-            g_other_artists,
-        )
-
-        for artist in watchlist_artists:
-            artist.include_albums = g_albums
-            artist.include_eps = g_eps
-            artist.include_singles = g_singles
-            artist.include_live = g_live
-            artist.include_remixes = g_remixes
-            artist.include_acoustic = g_acoustic
-            artist.include_compilations = g_compilations
-            artist.include_instrumentals = g_instrumentals
-            artist.include_other_artists = g_other_artists
+        logger.info("Applying watchlist defaults to %s of %s artists (%s)",
+                    len(following), len(watchlist_artists), defaults)
+        for artist in following:
+            for key, value in defaults.items():
+                setattr(artist, key, value)
 
     def _resolve_edition_unit(self, album_unit, album_fetcher, *,
                               edition_preference=EDITION_PREFERENCE_ALL,

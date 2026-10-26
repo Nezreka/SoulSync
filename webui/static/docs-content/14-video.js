@@ -593,6 +593,15 @@ A **quality profile** is an ordered ladder of allowed qualities — for example,
 - **Allowed qualities** — which rungs of the ladder are acceptable at all.
 - **Cutoff** — once a file at or above the cutoff is in your library, SoulSync stops looking for upgrades. Items below the cutoff stay on the wishlist with an "upgrade watch" flag until something better arrives.
 
+## Audio language
+
+For dubbed or MULTI copies, pick one or more **audio languages** on the profile and a mode:
+
+- **Prefer**: releases tagged with one of your languages (FRENCH, VFF, TRUEFRENCH, GERMAN, iTA, LATINO and so on) or with MULTI / Dual Audio rank first, even over a higher resolution.
+- **Require**: anything without one of those tags is skipped.
+
+A release with no language tag is the original audio, so Require skips it. Subtitle-only tags like VOSTFR or SUBFRENCH never count as audio.
+
 ## Custom formats
 
 **Custom formats** are scored release matchers layered on top of the profile. They nudge the ranker toward releases you like (a preferred release group, a specific HDR flavor, TrueHD audio) and away from ones you don't (extras, mislabeled scene tags). Positive scores boost a release; negative scores penalize it.

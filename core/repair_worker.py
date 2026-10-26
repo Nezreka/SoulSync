@@ -33,6 +33,38 @@ from utils.logging_config import get_logger
 
 logger = get_logger("repair_worker")
 
+# Consecutive transient LRCLib failures after which a background bulk
+# fix stops early instead of grinding through a whole lyrics backlog
+# against a service that is refusing (#1879; mirrors the Lyrics Filler
+# scan's MAX_CONSECUTIVE_UNKNOWN).
+MAX_CONSECUTIVE_LRCLIB_TRANSIENT = 5
+
+_LRCLIB_TRANSIENT_MARKERS = ('rate-limited', 'server error', 'timed out',
+                             'Could not reach', 'busy (', 'not available')
+
+
+def _is_lrclib_transient_error(error) -> bool:
+    """True when a fix error is an LRCLib TRANSIENT failure reason (the
+    tri-state reasons core.lyrics_client produces: rate-limited / server
+    error / timeout / unreachable / busy), as opposed to a definitive
+    answer like "no longer available"."""
+    if not isinstance(error, str) or 'LRCLib' not in error:
+        return False
+    return any(marker in error for marker in _LRCLIB_TRANSIENT_MARKERS)
+
+
+def _is_lrclib_definitive_error(error) -> bool:
+    """True when a fix error is a DEFINITIVE LRCLib answer: the service
+    responded — the lyrics are absent ("no longer available") or the
+    query was permanently rejected — as opposed to a transient failure
+    or a purely local error (missing file, write failure), which says
+    nothing about LRCLib at all."""
+    if not isinstance(error, str):
+        return False
+    if 'no longer available' in error:
+        return True
+    return error.startswith('LRCLib') and not _is_lrclib_transient_error(error)
+
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 # How long a RESOLVED finding keeps suppressing its own recurrence. See
@@ -617,20 +649,22 @@ class RepairWorker:
                 logger.info("Removed queued job %s from the run queue", job_id)
         return {'stopped': was_running or dequeued, 'was_running': was_running, 'dequeued': dequeued}
 
-    def set_job_enabled(self, job_id: str, enabled: bool):
-        """Enable or disable a specific job."""
+    def set_job_enabled(self, job_id: str, enabled: bool, bridge: bool = True):
+        """Enable or disable a specific job. bridge=False when the automation
+        row was the one flipped and already holds the new state."""
         if self._config_manager:
             self._config_manager.set(f'repair.jobs.{job_id}.enabled', enabled)
         # #1289 item 12: bridge to the system automation row so the engine's
         # scheduler honors the toggle. The row's enabled flag is the source of
         # truth for scheduling; the legacy config remains for the worker's
         # respect_enabled check on manual/Run Now paths.
-        try:
-            from core.automation.migrate_repair_jobs import set_system_job_enabled
-            set_system_job_enabled(self.db, getattr(self, '_automation_engine', None),
-                                   job_id, enabled)
-        except Exception as e:
-            logger.debug("Could not bridge job toggle to automation for %s: %s", job_id, e)
+        if bridge:
+            try:
+                from core.automation.migrate_repair_jobs import set_system_job_enabled
+                set_system_job_enabled(self.db, getattr(self, '_automation_engine', None),
+                                       job_id, enabled)
+            except Exception as e:
+                logger.debug("Could not bridge job toggle to automation for %s: %s", job_id, e)
         # Turning a job OFF must also stop it if it's mid-run — otherwise the toggle
         # only affects the NEXT scheduled run and the current scan keeps going (#970).
         if not enabled:
@@ -3798,17 +3832,37 @@ class RepairWorker:
         try:
             from core.lyrics_client import lyrics_client
             duration = details.get('duration')
-            ok = lyrics_client.create_lrc_file(
-                resolved,
-                details.get('track_title') or '',
-                details.get('artist') or '',
-                album_name=details.get('album_title'),
-                duration_seconds=int(duration) if duration else None,
-            )
+            # Prefer the detailed variant (#1879): it distinguishes a
+            # definitive "LRCLib has no lyrics" from a transient failure
+            # (429/503/timeout), whose real reason is surfaced instead of
+            # the old misleading "no longer available?" text. The finding
+            # stays pending either way, so a later run can retry.
+            detailed = getattr(lyrics_client, 'create_lrc_file_detailed', None)
+            if callable(detailed):
+                ok, fetch_reason = detailed(
+                    resolved,
+                    details.get('track_title') or '',
+                    details.get('artist') or '',
+                    album_name=details.get('album_title'),
+                    duration_seconds=int(duration) if duration else None,
+                )
+            else:
+                ok = lyrics_client.create_lrc_file(
+                    resolved,
+                    details.get('track_title') or '',
+                    details.get('artist') or '',
+                    album_name=details.get('album_title'),
+                    duration_seconds=int(duration) if duration else None,
+                )
+                fetch_reason = None
         except Exception as e:
             logger.error("Lyrics fix failed for %s: %s", os.path.basename(raw_path), e)
             return {'success': False, 'error': str(e)}
         if not ok:
+            if fetch_reason:
+                # Transient/permanent fetch failure — report the real
+                # reason (e.g. "LRCLib rate-limited (429) — retry later").
+                return {'success': False, 'error': fetch_reason}
             # Lyrics vanished between scan and apply (rare) — report, don't crash.
             return {'success': False, 'error': 'Could not fetch lyrics (no longer available?)'}
         return {'success': True, 'action': 'applied_lyrics', 'message': 'Wrote lyrics (.lrc) + embedded'}
@@ -5292,6 +5346,7 @@ class RepairWorker:
         skipped_count = 0
         track_details = []
         existing_track_ids = {t.id for t in existing_tracks}
+        _tracklist_cache: Dict[str, Any] = {}
 
         for mt in missing_tracks:
             track_name = mt.get('name', '')
@@ -5308,7 +5363,8 @@ class RepairWorker:
                 track_details.append({'track': track_name, 'status': 'skipped', 'reason': 'no track name'})
                 continue
 
-            if not _album_fill_target_artist_allows_track(artist_name, track_artists):
+            if (not _album_fill_target_artist_allows_track(artist_name, track_artists)
+                    and not self._album_tracklist_credits_artist(details, artist_name, _tracklist_cache)):
                 skipped_count += 1
                 logger.warning(
                     "Album auto-fill skipped '%s': source artist(s) %s do not match target album artist '%s'",
@@ -5473,6 +5529,47 @@ class RepairWorker:
             'skipped': skipped_count,
             'details': track_details,
         }
+
+    def _album_tracklist_credits_artist(self, details, artist_name, cache) -> bool:
+        """True when the album's own source tracklist credits the album artist
+        somewhere. a guest track on a soundtrack (Alexander Rybak on John
+        Powell's How to Train Your Dragon 2) is fine on its album. what the
+        artist check is really for is an album matched to the wrong release
+        (Gut's Light Years pointing at Jamiroquai's), and there the album
+        artist isn't on the tracklist at all. no tracklist, no pass."""
+        if 'credits' in cache:
+            return cache['credits']
+        cache['credits'] = False
+        album_sources = {
+            'spotify': details.get('spotify_album_id', ''),
+            'itunes': details.get('itunes_album_id', ''),
+            'deezer': details.get('deezer_album_id', ''),
+            'discogs': details.get('discogs_album_id', ''),
+            'hydrabase': details.get('hydrabase_album_id', ''),
+        }
+        primary = details.get('primary_source')
+        if primary and details.get('primary_album_id') and not album_sources.get(primary):
+            album_sources[primary] = details.get('primary_album_id')
+        for source in get_source_priority(primary or get_primary_source()):
+            fid = album_sources.get(source, '')
+            if not fid:
+                continue
+            try:
+                api_tracks = get_album_tracks_for_source(source, fid)
+            except Exception as e:
+                logger.debug("Album fill: %s tracklist failed for %s: %s", source, fid, e)
+                continue
+            items = (api_tracks or {}).get('items') or []
+            if not items:
+                continue
+            for item in items:
+                for a in item.get('artists', []) or []:
+                    name = a.get('name', '') if isinstance(a, dict) else str(a or '')
+                    if name and _album_fill_artist_names_match(artist_name, name):
+                        cache['credits'] = True
+                        return True
+            return False
+        return False
 
     def _refetch_missing_tracks(self, album_id, details):
         """Re-fetch missing track list from APIs when the stored list is empty."""
@@ -6329,6 +6426,10 @@ class RepairWorker:
                 'safe_only': bool(safe_only),
                 'errors': [],
                 'error': None,
+                # Run-level note (e.g. the LRCLib circuit breaker skipped
+                # the remaining lyrics findings in a mixed run) — shown
+                # in the completion toast when there is no stop error.
+                'note': None,
                 # Per-type tallies so a mixed run can say WHAT it is fixing
                 # ("312 cover art, 40 lyrics") instead of one opaque number.
                 'per_type': {},
@@ -6365,6 +6466,15 @@ class RepairWorker:
     def _run_bulk_fix(self, ids: List[int], fix_action: str = None):
         state = self._bulk_fix_state
         types = self._types_for_findings(ids)
+        # LRCLib circuit breaker (#1879): the Lyrics Filler scan stops
+        # after 5 consecutive transient unknowns; a Fix All over
+        # thousands of lyrics findings must do the same instead of
+        # grinding through every one against a service that is already
+        # refusing (each failure is honestly reported, but at library
+        # scale the run would take hours and record thousands of
+        # "failed" fixes for what is one outage).
+        lrclib_transient_streak = 0
+        lrclib_tripped = False
         try:
             for fid in ids:
                 if self._bulk_fix_stop_event.is_set() or self.should_stop:
@@ -6372,12 +6482,71 @@ class RepairWorker:
                     logger.info("Background bulk fix stopped at %d/%d",
                                 state['done'], state['total'])
                     break
+                if lrclib_tripped and types.get(fid) == 'missing_lyrics':
+                    # Breaker tripped earlier in this run: skip the
+                    # remaining lyrics findings (they stay pending) but
+                    # let other finding types finish — they have nothing
+                    # to do with LRCLib.
+                    state['done'] += 1
+                    continue
                 try:
                     result = self.fix_finding(fid, fix_action=fix_action)
                 except Exception as e:  # fix_finding shouldn't raise, but never kill the run
                     result = {'success': False, 'error': str(e)}
                 state['done'] += 1
                 slug = types.get(fid)
+                # Breaker bookkeeping only — the tallies below run as
+                # usual for this finding; the loop breaks afterwards
+                # only when nothing but lyrics findings remains. The
+                # streak counts LYRICS findings only: other types neither
+                # increment nor reset it (they say nothing about LRCLib),
+                # while a lyrics success or a definitive lyrics failure
+                # (LRCLib answered) resets it.
+                trip_lrclib_breaker = False
+                if slug == 'missing_lyrics':
+                    if result.get('success'):
+                        lrclib_transient_streak = 0
+                    elif _is_lrclib_transient_error(result.get('error')):
+                        lrclib_transient_streak += 1
+                        if lrclib_transient_streak >= MAX_CONSECUTIVE_LRCLIB_TRANSIENT \
+                                and not lrclib_tripped:
+                            lrclib_tripped = True
+                            trip_lrclib_breaker = True
+                            breaker_base = (
+                                f'LRCLib stopped answering reliably after '
+                                f'{lrclib_transient_streak} consecutive failed lyrics '
+                                f'fixes ({result.get("error")}).')
+                            remaining = ids[state['done']:]
+                            skipped_lyrics = sum(
+                                1 for r in remaining
+                                if types.get(r) == 'missing_lyrics')
+                            if remaining and skipped_lyrics == len(remaining):
+                                # Nothing left but lyrics — stop the run.
+                                state['stopped'] = True
+                                state['error'] = (
+                                    breaker_base + ' Bulk fix stopped early; the '
+                                    'remaining findings stay pending and can be '
+                                    'retried later.')
+                                logger.warning("Background bulk fix stopping early: %s",
+                                               state['error'])
+                            elif remaining:
+                                # Mixed run: skip only the lyrics rest
+                                # (which may be none, if the trip landed
+                                # on the last lyrics finding in the run).
+                                state['note'] = breaker_base + (
+                                    f' {skipped_lyrics} remaining lyrics '
+                                    f'finding(s) skipped — they stay pending '
+                                    f'and can be retried later.'
+                                    if skipped_lyrics else '')
+                                logger.warning("Background bulk fix: %s", state['note'])
+                            # No remaining findings: a completed run —
+                            # no stop claim at all.
+                    elif _is_lrclib_definitive_error(result.get('error')):
+                        # LRCLib answered definitively — reset.
+                        lrclib_transient_streak = 0
+                    # Any other failure (a purely local error: missing
+                    # file, write failure) says nothing about LRCLib —
+                    # it neither increments nor resets the streak.
                 if slug:
                     tally = state['per_type'].get(slug)
                     if tally is None:
@@ -6395,6 +6564,8 @@ class RepairWorker:
                     logger.warning("Bulk fix failed for finding #%s: %s", fid, error_msg)
                     if len(state['errors']) < 20:
                         state['errors'].append({'id': fid, 'error': error_msg})
+                if trip_lrclib_breaker and state['stopped']:
+                    break
         except Exception as e:
             logger.error("Background bulk fix crashed: %s", e, exc_info=True)
             state['error'] = str(e)

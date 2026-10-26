@@ -49,7 +49,7 @@
 #settings-page .stg-detail-pane { width: 100%; min-width: 0; }
 #settings-page .settings-nav-row {
     display: flex !important; flex-direction: row !important; align-items: center; justify-content: space-between;
-    gap: 24px; margin-bottom: 24px; border: 0 !important; box-shadow: none !important;
+    gap: 24px; margin-bottom: 24px; border: 0 !important; box-shadow: none !important; flex-wrap: nowrap !important;
 }
 #settings-page .stg-active-section-title { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 #settings-page .stg-active-title-text { font-size: 20px; font-weight: 650; letter-spacing: -.02em; }
@@ -100,6 +100,42 @@
     border: 1px solid var(--white-a14); background-color: rgba(0,0,0,.18);
     color: var(--text-bright); padding: 10px 12px; font: inherit; font-size: 13px;
 }
+/* #1822: each setting says what it does, the "i" holds the rest */
+#settings-page .stg-help-line {
+    display: block; flex-basis: 100%; grid-column: 1 / -1; order: 99;
+    font-size: 12px; line-height: 1.5; color: var(--stg-text-secondary); margin-top: 6px;
+}
+#settings-page .stg-help-line .info-icon { margin-left: 6px; vertical-align: middle; }
+/* #1868: what a naming template makes, under it */
+#settings-page .path-preview-scenarios {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 18px;
+}
+#settings-page .path-preview-scenarios[hidden] { display: none; }
+#settings-page .path-preview-scenarios-label { font-size: 12px; color: var(--stg-text-secondary); margin-right: 4px; }
+#settings-page .path-preview-scenarios button {
+    padding: 5px 11px; border-radius: 999px; border: 1px solid var(--white-a12); background: transparent;
+    color: var(--stg-text-secondary); font: inherit; font-size: 12px; cursor: pointer;
+}
+#settings-page .path-preview-scenarios button:hover { color: var(--text-bright); border-color: var(--white-a20); }
+#settings-page .path-preview-scenarios button[aria-checked="true"] {
+    color: var(--text-bright); border-color: rgba(var(--accent-rgb), .6); background: rgba(var(--accent-rgb), .14);
+}
+#settings-page .path-preview {
+    display: block; flex-basis: 100%; grid-column: 1 / -1; min-width: 0; margin-top: 8px;
+}
+#settings-page .path-preview[hidden] { display: none; }
+#settings-page .path-preview-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+#settings-page .path-preview-row + .path-preview-row { margin-top: 6px; }
+#settings-page .path-preview-path {
+    min-width: 0; max-width: 100%; overflow-wrap: anywhere; padding: 6px 10px; border-radius: var(--radius-md);
+    background: rgba(0,0,0,.22); border: 1px solid var(--white-a08);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5;
+}
+#settings-page .path-preview-folder { color: var(--stg-text-secondary); }
+#settings-page .path-preview-file { color: var(--text-bright); }
+#settings-page .path-preview-sep { color: var(--white-a25); margin: 0 1px; }
+#settings-page .path-preview-note { font-size: 11px; color: var(--stg-text-secondary); }
+#settings-page .path-preview-error { font-size: 12px; color: #f0a08f; }
 #settings-page input[type="checkbox"] { accent-color: var(--accent); }
 #settings-page button:focus-visible, #settings-page input:focus-visible,
 #settings-page select:focus-visible, #settings-page textarea:focus-visible {
@@ -140,13 +176,13 @@
 #settings-page .stg-media-card .form-group {
     display: block !important; padding: 12px 0 !important;
 }
+#settings-page .stg-media-card .form-group[hidden] { display: none !important; }
 #settings-page .stg-media-card .form-group > label { display: block; }
 #settings-page .stg-media-card .form-group > input:not([type="checkbox"]):not([type="radio"]),
 #settings-page .stg-media-card .form-group > select,
 #settings-page .stg-media-card .form-group > textarea {
     display: block; width: 100% !important; max-width: 100% !important;
 }
-#settings-page .settings-nav-row { flex-wrap: nowrap !important; }
 #settings-page .settings-nav-row .header-actions { width: auto !important; margin: 0 !important; }
 
 /* Legacy media pages require 960px; forms should fit beside the app sidebar. */
@@ -154,6 +190,7 @@
 .main-content:has(#settings-page.active) { min-width: 0 !important; }
 
 /* Keep saving within reach while scrolling a long category. */
+/* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
 #settings-page .settings-nav-row {
     position: sticky !important; top: 0; z-index: 20;
     background: rgb(15, 15, 15) !important; padding: 12px 0 !important;

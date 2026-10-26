@@ -104,9 +104,11 @@ import {
   reorderUserPlaylist,
 } from '../../../features/playlists/user-playlists';
 import { AutoSyncWeeklyEditor } from './autosync-weekly';
+import { CoverArtSheet } from './cover-art-sheet';
 import { ExportModal, ExportStatusSpan } from './export-modal';
 import { MirroredDetailModal } from './mirrored-detail-modal';
 import { PlaylistCard, playlistCardPrimaryLabel } from './playlist-card';
+import { PlaylistSearch } from './playlist-search';
 import { ScheduleMenu } from './schedule-menu';
 import { SourceIcon } from './source-icon';
 import { SourceRefModal } from './source-ref-modal';
@@ -191,6 +193,7 @@ function MirroredCardMenu({
   onCopyToMine,
   onCopyToRequests,
   onToggleAutoRemove,
+  onGenerateCover,
 }: {
   row: MirroredPlaylistRow;
   top: number;
@@ -212,6 +215,8 @@ function MirroredCardMenu({
   onCopyToRequests?: () => void;
   /** toggle Spotify auto-remove */
   onToggleAutoRemove?: () => void;
+  /** the same cover art sheet the detail modal's ⋯ opens */
+  onGenerateCover?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const pos = usePopoverPosition({ top, left }, ref);
@@ -333,6 +338,7 @@ function MirroredCardMenu({
         <>{onCopyToRequests && item('Copy to Request Lists', onCopyToRequests)}</>
       )}
       {!isUserPlaylist(row) && item('Edit source link', onEditSource)}
+      {onGenerateCover && item('Generate cover art', onGenerateCover)}
       {item('Export', onExport)}
       {/* Only offered when there IS a discovery to clear (575-582). */}
       {(row.discovered_count || 0) > 0 && item('Clear identification', onClear)}
@@ -418,6 +424,7 @@ export function MirroredTab({
   const [renameValue, setRenameValue] = useState('');
   /** The row whose export picker is open (exportMirroredPlaylist, 663). */
   const [exporting, setExporting] = useState<MirroredPlaylistRow | null>(null);
+  const [coverArtFor, setCoverArtFor] = useState<MirroredPlaylistRow | null>(null);
   /** The row whose 🔗 source-ref editor is open (auto-sync.js 2410). */
   const [editingRef, setEditingRef] = useState<MirroredPlaylistRow | null>(null);
   /**
@@ -1049,33 +1056,7 @@ export function MirroredTab({
         {/* The gap between the heading and Update list was the widest empty
             space on the page, and finding one playlist among thirty-eight had
             no answer but scrolling. */}
-        {allRows.length > 0 && (
-          <div className="library-search">
-            <input
-              type="search"
-              className="library-search-input"
-              placeholder="Search playlists"
-              aria-label="Search playlists"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                // Escape clears rather than blurs: a search box you cannot empty
-                // without selecting the text is a box you have to fight.
-                if (e.key === 'Escape') setQuery('');
-              }}
-            />
-            {query && (
-              <button
-                type="button"
-                className="library-search-clear"
-                aria-label="Clear search"
-                onClick={() => setQuery('')}
-              >
-                &times;
-              </button>
-            )}
-          </div>
-        )}
+        {allRows.length > 0 && <PlaylistSearch value={query} onChange={setQuery} />}
         {(userScope || requestsScope) && (
           <button
             type="button"
@@ -1472,6 +1453,16 @@ export function MirroredTab({
           onCopyToMine={() => void copyToMine(menu.row.id)}
           onCopyToRequests={() => void copyToRequests(menu.row.id)}
           onToggleAutoRemove={() => void toggleAutoRemove(menu.row)}
+          onGenerateCover={() => setCoverArtFor(menu.row)}
+        />
+      )}
+      {coverArtFor && (
+        <CoverArtSheet
+          playlistId={coverArtFor.id}
+          playlistName={coverArtFor.display_name || coverArtFor.name || 'this playlist'}
+          onClose={() => setCoverArtFor(null)}
+          // the card art is the cover, so the list refetches to show it
+          onApplied={reload}
         />
       )}
       {exporting && (

@@ -25,7 +25,7 @@ export type SearchSource = (typeof SOURCE_ORDER)[number];
 
 /**
  * Opt-in sources, hidden from the picker unless enabled in
- * Settings → Advanced → Experimental. The backend reports their state in the
+ * Settings → System → Experimental. The backend reports their state in the
  * `_experimental` payload.
  */
 export const EXPERIMENTAL_SOURCES: ReadonlySet<string> = new Set(['jiosaavn', 'bandcamp']);

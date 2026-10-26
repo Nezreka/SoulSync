@@ -44,10 +44,10 @@
 .primary {
   align-self: flex-start;
   padding: 8px 16px;
-  border: 1px solid #f5b942;
+  border: 1px solid var(--gold);
   border-radius: var(--radius-md);
   background: #2a2417;
-  color: #f5b942;
+  color: var(--gold);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -82,7 +82,7 @@
 .spinner {
   flex: none;
   border-color: #2c2a25;
-  border-top-color: #f5b942;
+  border-top-color: var(--gold);
   animation-duration: 0.9s;
 }
 
@@ -123,10 +123,10 @@
   align-items: center;
   gap: 6px;
   padding: 7px 14px;
-  border: 1px solid #f5b942;
+  border: 1px solid var(--gold);
   border-radius: var(--radius-pill);
   background: none;
-  color: #f5b942;
+  color: var(--gold);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -157,7 +157,7 @@
 }
 
 .stemRow.selected {
-  border-color: #f5b942;
+  border-color: var(--gold);
   background: #211d12;
 }
 
@@ -209,8 +209,8 @@
 }
 
 .soloOn {
-  border-color: #f5b942;
-  color: #f5b942;
+  border-color: var(--gold);
+  color: var(--gold);
   background: #2a2417;
 }
 

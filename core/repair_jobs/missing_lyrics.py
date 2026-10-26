@@ -21,6 +21,10 @@ from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.missing_lyrics")
 
+# Consecutive "unknown" LRCLib answers (429/503/timeout) after which the
+# scan stops early instead of mis-recording the rest of the library (#1879).
+MAX_CONSECUTIVE_UNKNOWN = 5
+
 
 def _has_lrc_sidecar(file_path: str) -> bool:
     """True if a .lrc (or .txt lyrics) sidecar already sits next to the file."""
@@ -101,6 +105,15 @@ class MissingLyricsJob(RepairJob):
                            if context.config_manager else '') or None
 
         total = len(rows)
+        # Tri-state probing (#1879): an LRCLib lookup can come back
+        # "unknown" (429/503/timeout) — that is NOT a definitive negative
+        # and must never be counted as a skip. A run of consecutive
+        # unknowns means LRCLib is pushing back; stop the scan early
+        # (stopped_early) instead of burning the whole library against a
+        # rate limit and recording thousands of false negatives.
+        unknown_count = 0
+        consecutive_unknown = 0
+        last_unknown_reason = ''
         if context.update_progress:
             context.update_progress(0, total)
         if context.report_progress:
@@ -142,14 +155,96 @@ class MissingLyricsJob(RepairJob):
                     duration_s = None
             except (TypeError, ValueError):
                 duration_s = None
+            # Tri-state probe (#1879): prefer the detailed check when the
+            # client offers it so the unknown reason is available for the
+            # log / stopped_early text; fall back to has_remote_lyrics
+            # (True = found, False = absent, None = unknown).
+            probe_status = 'absent'
+            probe_reason = ''
+            probe_kind = ''
             try:
-                available = lyrics_client.has_remote_lyrics(
-                    title, artist_name or '', album_title, duration_s)
+                check = getattr(lyrics_client, 'check_remote_lyrics', None)
+                if callable(check):
+                    outcome = check(title, artist_name or '', album_title, duration_s)
+                    if hasattr(outcome, 'status'):
+                        probe_status = outcome.status
+                        probe_reason = getattr(outcome, 'reason', '') or ''
+                        probe_kind = getattr(outcome, 'error_kind', '') or ''
+                        if probe_status not in ('found', 'absent', 'unknown'):
+                            # An unrecognized status string is a contract
+                            # we don't understand — never record it as a
+                            # definitive negative.
+                            probe_reason = probe_reason or f'unrecognized probe status: {probe_status!r}'
+                            probe_status = 'unknown'
+                    else:
+                        # A check that returns a bare bool/None instead of
+                        # a result object: map it like has_remote_lyrics
+                        # rather than guessing 'absent' for a truthy hit.
+                        probe_status = ('found' if outcome else
+                                        'unknown' if outcome is None else 'absent')
+                else:
+                    available = lyrics_client.has_remote_lyrics(
+                        title, artist_name or '', album_title, duration_s)
+                    probe_status = 'found' if available else ('unknown' if available is None else 'absent')
             except Exception as e:
-                logger.debug("[Lyrics Filler] availability check failed for '%s': %s", title, e)
-                available = False
+                # A raising probe is an unknown, not a negative (#1879).
+                # Warning, not debug: if the probe is raising for a
+                # programming reason (not LRCLib), that must be visible —
+                # and the consecutive-unknown abort below bounds this to
+                # a handful of lines before the scan stops. The full
+                # exception goes to the LOG; the user-facing reason (it
+                # can land in stopped_early) names only the error type.
+                logger.warning("[Lyrics Filler] availability check failed for '%s': %s", title, e)
+                probe_status = 'unknown'
+                probe_reason = f'LRCLib lookup failed ({type(e).__name__})'
 
-            if not available:
+            if probe_status == 'unknown':
+                unknown_count += 1
+                # Only TRANSIENT unknowns (429/5xx/timeout/network — or an
+                # unclassified one, e.g. a raising probe) count toward the
+                # early stop. A permanent query error (e.g. a 400 for one
+                # album's bad metadata) says something about that track's
+                # query, not about LRCLib's health: counting it would stop
+                # a whole-library scan with a false "LRCLib stopped
+                # answering" diagnosis over a cluster of bad rows. It does
+                # RESET the streak, though — LRCLib answered, and
+                # "consecutive" in the stop message should be literally
+                # true (same rule as the bulk-fix breaker).
+                if probe_kind == 'permanent':
+                    consecutive_unknown = 0
+                else:
+                    consecutive_unknown += 1
+                    last_unknown_reason = probe_reason
+                logger.warning(
+                    "[Lyrics Filler] LRCLib availability unknown for '%s' (%s) — not counted as missing lyrics",
+                    title, probe_reason or 'lookup failed')
+                if consecutive_unknown >= MAX_CONSECUTIVE_UNKNOWN:
+                    result.stopped_early = (
+                        f'LRCLib stopped answering reliably after {consecutive_unknown} '
+                        f'consecutive failed lookups ({last_unknown_reason or "unknown error"}). '
+                        f'Scan stopped early so the remaining tracks are not recorded as '
+                        f'having no lyrics; retry later.')
+                    logger.warning("[Lyrics Filler] %s", result.stopped_early)
+                    if context.report_progress:
+                        context.report_progress(
+                            scanned=i + 1, total=total,
+                            log_line=result.stopped_early,
+                            log_type='warning')
+                    if context.update_progress:
+                        context.update_progress(i + 1, total)
+                    logger.info("[Lyrics Filler] %d tracks checked, %d with lyrics found, "
+                                "%d skipped, %d unknown (LRCLib unavailable)",
+                                result.scanned, result.findings_created, result.skipped,
+                                unknown_count)
+                    return result
+                if context.update_progress and (i + 1) % 10 == 0:
+                    context.update_progress(i + 1, total)
+                continue
+
+            # A definitive answer (found OR absent) breaks the unknown run.
+            consecutive_unknown = 0
+
+            if probe_status != 'found':
                 result.skipped += 1
                 if context.update_progress and (i + 1) % 10 == 0:
                     context.update_progress(i + 1, total)
@@ -193,8 +288,9 @@ class MissingLyricsJob(RepairJob):
 
         if context.update_progress:
             context.update_progress(total, total)
-        logger.info("[Lyrics Filler] %d tracks checked, %d with lyrics found, %d skipped",
-                    result.scanned, result.findings_created, result.skipped)
+        logger.info("[Lyrics Filler] %d tracks checked, %d with lyrics found, %d skipped, "
+                    "%d unknown (LRCLib unavailable)",
+                    result.scanned, result.findings_created, result.skipped, unknown_count)
         return result
 
     def estimate_scope(self, context: JobContext) -> int:

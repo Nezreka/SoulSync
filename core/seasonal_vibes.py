@@ -130,7 +130,7 @@ def rewind_tracks(database, months: List[int], limit: int = 60) -> List[Dict[str
             cursor.execute(f"""
                 SELECT artist, title, album, COUNT(*) AS plays
                 FROM listening_history
-                WHERE CAST(strftime('%m', played_at) AS INTEGER) IN ({placeholders})
+                WHERE CAST(strftime('%m', played_at, 'localtime') AS INTEGER) IN ({placeholders})
                   AND artist IS NOT NULL AND artist != ''
                   AND title IS NOT NULL AND title != ''
                 GROUP BY LOWER(artist), LOWER(title)
@@ -256,7 +256,7 @@ def vibe_library_albums(database, season_key: str, months: List[int], source: st
             cursor.execute(f"""
                 SELECT artist, album, COUNT(*) AS plays
                 FROM listening_history
-                WHERE CAST(strftime('%m', played_at) AS INTEGER) IN ({placeholders})
+                WHERE CAST(strftime('%m', played_at, 'localtime') AS INTEGER) IN ({placeholders})
                   AND album IS NOT NULL AND album != ''
                   AND artist IS NOT NULL AND artist != ''
                 GROUP BY LOWER(artist), LOWER(album)

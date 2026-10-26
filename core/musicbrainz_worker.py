@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 from typing import Optional, Dict, Any
@@ -20,6 +21,50 @@ def track_match_artists(track_artist, library_artist):
         # same artist, keep the library's spelling so its mbid pin still works
         return [library_artist]
     return [own, library_artist] if library else [own]
+
+
+def _first_name(artists) -> str:
+    """The first artist name from a Spotify-shaped artists list
+    ([{'name': ...}] or [str]), or ''."""
+    if not isinstance(artists, list) or not artists:
+        return ''
+    first = artists[0]
+    if isinstance(first, dict):
+        return str(first.get('name') or '').strip()
+    return str(first or '').strip()
+
+
+# keys a wishlist row's track data may already carry a release group under
+# (MusicBrainz-sourced adds); taken as-is before any search
+WISHLIST_RG_KEYS = ('musicbrainz_release_group_id', 'musicbrainz_releasegroup_id', 'release_group_mbid')
+
+
+def wishlist_album_query(track_data) -> Dict[str, str]:
+    """What to match a wishlist row's album by: {'album', 'artist',
+    'release_group'}. The album's own artist wins over the track's (a
+    feature on a compilation is still that compilation); release_group is
+    set only when the row already carries one."""
+    if isinstance(track_data, str):
+        try:
+            track_data = json.loads(track_data)
+        except (ValueError, TypeError):
+            track_data = {}
+    if not isinstance(track_data, dict):
+        track_data = {}
+    album = track_data.get('album')
+    album_name = (album.get('name') if isinstance(album, dict) else album) or ''
+    album_artist = _first_name(album.get('artists')) if isinstance(album, dict) else ''
+    known = ''
+    for key in WISHLIST_RG_KEYS:
+        value = track_data.get(key)
+        if isinstance(value, str) and len(value.strip()) == 36:
+            known = value.strip().lower()
+            break
+    return {
+        'album': str(album_name).strip(),
+        'artist': album_artist or _first_name(track_data.get('artists')),
+        'release_group': known,
+    }
 
 
 class MusicBrainzWorker:
@@ -213,6 +258,35 @@ class MusicBrainzWorker:
             if row:
                 return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2]}
 
+            # Priority 2b: albums that have a release id (tags, a manual
+            # match, an earlier pass) but no release group yet: one lookup
+            cursor.execute("""
+                SELECT id, title, musicbrainz_release_id
+                FROM albums
+                WHERE musicbrainz_release_id IS NOT NULL AND musicbrainz_release_id != ''
+                  AND musicbrainz_release_group_id IS NULL
+                  AND musicbrainz_release_group_attempted IS NULL
+                ORDER BY id ASC
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            if row:
+                return {'type': 'album_group', 'id': row[0], 'name': row[1], 'release_id': row[2]}
+
+            # Priority 2c: unattempted wishlist rows — matched in the
+            # background so the wishlist carries a MusicBrainz release group
+            cursor.execute("""
+                SELECT id, spotify_data
+                FROM wishlist_tracks
+                WHERE musicbrainz_match_status IS NULL
+                ORDER BY id ASC
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            if row:
+                query = wishlist_album_query(row[1])
+                return {'type': 'wishlist', 'id': row[0], 'name': query['album'], **query}
+
             # Priority 3: Unattempted tracks
             cursor.execute("""
                 SELECT t.id, t.title, ar.name AS artist_name, t.duration, t.track_artist, t.isrc
@@ -253,6 +327,33 @@ class MusicBrainzWorker:
             row = cursor.fetchone()
             if row:
                 return {'type': 'album', 'id': row[0], 'name': row[1], 'artist': row[2]}
+
+            # Priority 5b: retry album group lookups that found nothing
+            cursor.execute("""
+                SELECT id, title, musicbrainz_release_id
+                FROM albums
+                WHERE musicbrainz_release_id IS NOT NULL AND musicbrainz_release_id != ''
+                  AND musicbrainz_release_group_id IS NULL
+                  AND musicbrainz_release_group_attempted < ?
+                ORDER BY musicbrainz_release_group_attempted ASC
+                LIMIT 1
+            """, (not_found_cutoff,))
+            row = cursor.fetchone()
+            if row:
+                return {'type': 'album_group', 'id': row[0], 'name': row[1], 'release_id': row[2]}
+
+            # Priority 5c: retry wishlist rows that found nothing
+            cursor.execute("""
+                SELECT id, spotify_data
+                FROM wishlist_tracks
+                WHERE musicbrainz_match_status IN ('not_found', 'error') AND musicbrainz_last_attempted < ?
+                ORDER BY musicbrainz_last_attempted ASC
+                LIMIT 1
+            """, (not_found_cutoff,))
+            row = cursor.fetchone()
+            if row:
+                query = wishlist_album_query(row[1])
+                return {'type': 'wishlist', 'id': row[0], 'name': query['album'], **query}
 
             # Priority 6: Retry 'not_found' tracks
             cursor.execute("""
@@ -428,13 +529,40 @@ class MusicBrainzWorker:
                 artist_name = item.get('artist')
                 result = self.mb_service.match_release(item_name, artist_name)
                 if result and result.get('mbid'):
-                    self.mb_service.update_album_mbid(item_id, result['mbid'], 'matched')
+                    self.mb_service.update_album_mbid(
+                        item_id, result['mbid'], 'matched',
+                        release_group_mbid=result.get('release_group_mbid'))
                     self.stats['matched'] += 1
                     logger.info(f"Matched album '{item_name}' → MBID: {result['mbid']}")
                 else:
                     self.mb_service.update_album_mbid(item_id, None, 'not_found')
                     self.stats['not_found'] += 1
                     logger.debug(f"No match for album '{item_name}'")
+
+            elif item_type == 'album_group':
+                group = self.mb_service.lookup_release_group(item['release_id'])
+                self.mb_service.update_album_release_group(item_id, group)
+                if group:
+                    self.stats['matched'] += 1
+                    logger.debug(f"Album '{item_name}' → release group {group}")
+                else:
+                    self.stats['not_found'] += 1
+
+            elif item_type == 'wishlist':
+                group = item.get('release_group') or None
+                if not group and item.get('album'):
+                    result = self.mb_service.match_release(item['album'], item.get('artist') or None)
+                    if result and result.get('mbid'):
+                        group = (result.get('release_group_mbid')
+                                 or self.mb_service.lookup_release_group(result['mbid']))
+                if group:
+                    self.mb_service.update_wishlist_release_group(item_id, group, 'matched')
+                    self.stats['matched'] += 1
+                    logger.info(f"Matched wishlist album '{item_name}' → release group {group}")
+                else:
+                    self.mb_service.update_wishlist_release_group(item_id, None, 'not_found')
+                    self.stats['not_found'] += 1
+                    logger.debug(f"No release group for wishlist album '{item_name}'")
 
             elif item_type == 'track':
                 # The artist pass runs before tracks (priority 1), so the
@@ -483,6 +611,10 @@ class MusicBrainzWorker:
                     self.mb_service.update_artist_mbid(item['id'], None, 'error')
                 elif item['type'] == 'album':
                     self.mb_service.update_album_mbid(item['id'], None, 'error')
+                elif item['type'] == 'album_group':
+                    self.mb_service.update_album_release_group(item['id'], None)
+                elif item['type'] == 'wishlist':
+                    self.mb_service.update_wishlist_release_group(item['id'], None, 'error')
                 elif item['type'] == 'track':
                     self.mb_service.update_track_mbid(item['id'], None, 'error')
             except Exception as e2:
@@ -500,6 +632,10 @@ class MusicBrainzWorker:
                 SELECT
                     (SELECT COUNT(*) FROM artists WHERE musicbrainz_match_status IS NULL AND id IS NOT NULL) +
                     (SELECT COUNT(*) FROM albums WHERE musicbrainz_match_status IS NULL AND id IS NOT NULL) +
+                    (SELECT COUNT(*) FROM albums WHERE musicbrainz_release_id IS NOT NULL
+                        AND musicbrainz_release_id != '' AND musicbrainz_release_group_id IS NULL
+                        AND musicbrainz_release_group_attempted IS NULL) +
+                    (SELECT COUNT(*) FROM wishlist_tracks WHERE musicbrainz_match_status IS NULL) +
                     (SELECT COUNT(*) FROM tracks WHERE musicbrainz_match_status IS NULL AND id IS NOT NULL)
                 AS pending
             """)

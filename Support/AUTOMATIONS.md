@@ -49,7 +49,7 @@ Action blocks have an optional **Delay** field (in minutes). The action waits th
 |---------|-----------|-----------------|-----------|
 | **App Started** | SoulSync starts up | — | — |
 | **Track Downloaded** | A track finishes downloading | artist, title, album, quality | artist, title, album, quality |
-| **Batch Complete** | An album/playlist download finishes | playlist_name | playlist_name, total_tracks, completed_tracks, failed_tracks |
+| **Batch Complete** | An album/playlist download finishes | playlist_name | playlist_name, artist, title, album, total_tracks, completed_tracks, failed_tracks |
 | **New Release Found** | Watchlist detects new music | artist | artist, new_tracks, added_to_wishlist |
 | **Playlist Synced** | A playlist sync completes | playlist_name | playlist_name, total_tracks, matched_tracks, synced_tracks, failed_tracks |
 | **Playlist Changed** | A mirrored playlist detects track changes | playlist_name | playlist_name, old_count, new_count, added, removed |

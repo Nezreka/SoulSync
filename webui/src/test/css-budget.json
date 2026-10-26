@@ -1,0 +1,39 @@
+{
+  "legacy": {
+    "hex": 3625,
+    "rgbLiterals": 4248,
+    "important": 2095,
+    "duplicateSelectors": 311
+  },
+  "modules": {
+    "hex": 621,
+    "rgbLiterals": 349,
+    "important": 219
+  },
+  "distinctZIndexValues": 84,
+  "distinctBreakpoints": 54,
+  "duplicateKeyframes": 0,
+  "undefinedCustomProperties": 0,
+  "stylesheetLinks": [
+    "tokens.css",
+    "style.css",
+    "media-player-v2.css",
+    "mobile.css",
+    "automations-redesign.css",
+    "automations-overhaul.css",
+    "video/video-side.css",
+    "video/video-overlay-editor.css",
+    "video/video-collection-editor.css",
+    "settings-premier.css",
+    "discover-premier.css",
+    "watchlist-premier.css",
+    "chat-overhaul.css",
+    "wishlist-premier.css",
+    "dashboard-premier.css",
+    "downloads-premier.css",
+    "profiles.css",
+    "docs.css",
+    "sidebar-weather.css",
+    "scrollbars.css"
+  ]
+}

@@ -97,7 +97,7 @@
   max-width: 100%;
   aspect-ratio: 1;
   border: 1.5px dashed var(--line-strong);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: repeating-linear-gradient(
     135deg,
     rgba(255, 255, 255, 0.015) 0 10px,
@@ -196,7 +196,7 @@
   min-width: 0;
   padding: 9px 11px;
   border: 1px solid var(--white-a07);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--mm-raised);
   outline: none;
 }
@@ -341,7 +341,7 @@
 .error {
   margin: 0;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: rgba(248, 113, 113, 0.1);
   color: #fca5a5;
   font-size: 13px;

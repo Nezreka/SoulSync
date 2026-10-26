@@ -120,6 +120,7 @@ class ConfigManager:
         'lastfm.api_secret',
         'lastfm.session_key',
         'genius.access_token',
+        'pollinations.api_key',
         # Deezer OAuth
         'deezer.app_id',
         'deezer.app_secret',
@@ -127,6 +128,12 @@ class ConfigManager:
         # Other
         'hydrabase.api_key',
         'discogs.token',
+        # MetaSync (pool key is the user's SIN account key; the local API key
+        # is issued by their MetaSync node during pairing)
+        'metasync.pool_key',
+        'metasync.local_api_key',
+        # Sign in with OIDC
+        'security.oidc_client_secret',
     })
 
     def _get_fernet(self) -> Fernet:
@@ -575,6 +582,13 @@ class ConfigManager:
                 # editing source.
                 "album_bundle_poll_interval_seconds": 2.0,
                 "album_bundle_timeout_seconds": 6 * 60 * 60,    # 6 hours
+                # Let YouTube fetch a whole album from YouTube Music's own album
+                # playlist (artist + album must match) instead of searching for
+                # its songs one by one. Helps for albums whose songs the catalogue
+                # lists as unavailable. Off by default: it changes how every
+                # YouTube album is fetched. Only applies where YouTube is a
+                # source in the chain; a miss falls back to the per-track flow.
+                "youtube_album_bundle": False,
                 # Stalled-torrent handling (noldevin): abandon a torrent that
                 # makes zero download progress for this long (dead magnet
                 # stuck on "downloading metadata", no seeders) instead of
@@ -694,6 +708,17 @@ class ConfigManager:
                 "search_min_gap_seconds": 2.0,
                 "max_searches_per_minute": 20,
             },
+            # LRCLib — the community lyrics service behind the Lyrics
+            # Filler, imports, retag and the player (core.lyrics_client).
+            # Pacing for core.lrclib_throttle: LRCLib's allowances are
+            # approximate (~45 req/min generic, ~90/min with an
+            # identifying User-Agent) and unpaced bursts earn 429/503s,
+            # which used to be misreported as "no lyrics" (#1879).
+            # 0 on either knob disables that half of the budget.
+            "lrclib": {
+                "request_min_gap_seconds": 0.75,
+                "max_requests_per_minute": 80,
+            },
             # Torrent client — receives .torrent / magnet URIs from the
             # torrent download plugin. ``type`` picks which adapter to
             # instantiate (qbittorrent | transmission | deluge).
@@ -763,6 +788,11 @@ class ConfigManager:
             },
             "genius": {
                 "access_token": ""
+            },
+            # optional. cover art works without it (one image every 45s with
+            # their logo); a key from enter.pollinations.ai lifts both
+            "pollinations": {
+                "api_key": ""
             },
             # Two providers answering two different questions: Ticketmaster for
             # upcoming dates, Setlist.fm for what was actually played. Both

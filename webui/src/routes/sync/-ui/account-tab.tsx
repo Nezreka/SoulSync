@@ -49,6 +49,7 @@ import { asString, deezerMirrorTracks } from '../-sync.url-tabs';
 import { fetchAndHydrateState } from '../-sync.use-vertical';
 import { cardProgressLine } from './card-progress';
 import { playlistArtUrl } from './playlist-art';
+import { PlaylistSearch, noMatchText, playlistNameMatches } from './playlist-search';
 import { SourceCard } from './source-card';
 import { hydrateStatesForLoaded } from './url-import-tab';
 
@@ -105,6 +106,7 @@ function AccountVerticalTab({
   );
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   const playlistsRef = useRef(playlists);
   playlistsRef.current = playlists;
   /** Invalidates the background mirror loop when Refresh re-runs. */
@@ -261,6 +263,26 @@ function AccountVerticalTab({
         const tracks = Array.isArray(playlist.tracks) ? playlist.tracks : [];
         vertical.seed(sourceId, { ...playlist, tracks });
         onOpen(sourceId);
+        if (tracks.length === 0) {
+          // opened before the background crawl got to this one: a big tidal
+          // playlist then sat at "0 tracks" with nothing moving for minutes.
+          // fetch it now (the backend shares this with the crawl and hands
+          // it to start identifying) and fill the modal in when it lands.
+          void fetchAccountPlaylist(chrome.base, sourceId)
+            .then((fullData) => {
+              const fetched = Array.isArray(fullData.tracks) ? (fullData.tracks as unknown[]) : [];
+              if (fetched.length === 0) return;
+              const filled = normalizeFreshTracks(fetched);
+              setPlaylistTracks(sourceId, filled);
+              vertical.patchState(sourceId, (s) => {
+                const has = Array.isArray(s.playlist?.tracks) && s.playlist.tracks.length > 0;
+                return has
+                  ? s
+                  : { ...s, playlist: { ...(s.playlist ?? playlist), tracks: filled } };
+              });
+            })
+            .catch(() => undefined);
+        }
         return;
       }
       // Qobuz (1649-1680) / YouTube Music: fetch the track list behind the overlay first.
@@ -293,6 +315,7 @@ function AccountVerticalTab({
     <div>
       <div className="playlist-header">
         <h3>{chrome.title}</h3>
+        {playlists && playlists.length > 0 && <PlaylistSearch value={query} onChange={setQuery} />}
         <button
           type="button"
           className={`refresh-button ${chrome.refreshBtnClass}`}
@@ -312,8 +335,11 @@ function AccountVerticalTab({
           </div>
         ) : playlists.length === 0 ? (
           <div className="playlist-placeholder">{`No ${chrome.noun} playlists found.`}</div>
+        ) : !playlists.some((p) => playlistNameMatches([p.name], query)) ? (
+          <div className="playlist-placeholder">{noMatchText(query)}</div>
         ) : (
           playlists.map((p) => {
+            if (!playlistNameMatches([p.name], query)) return null;
             const sourceId = String(p.id);
             const state = vertical.states[sourceId] ?? freshSourceState(config, sourceId);
             return (

@@ -4,6 +4,7 @@ Supports MP3 (ID3v2.4), FLAC, OGG Vorbis, and MP4/M4A.
 Reuses the same Mutagen patterns as _enhance_file_metadata in web_server.py.
 """
 
+import math
 import os
 import logging
 import re
@@ -125,6 +126,15 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             disk = audio.tags.get('disk', []) if audio.tags else []
             if disk:
                 result['disc_number'] = disk[0][0] if isinstance(disk[0], tuple) else None
+            # MP4 stores BPM in the integer `tmpo` atom — the writer sets
+            # it (_write_mp4), so the reader must read it back, or every
+            # MP4 with a DB BPM previews as changed forever (#1871).
+            tmpo = audio.tags.get('tmpo', []) if audio.tags else []
+            if tmpo:
+                try:
+                    result['bpm'] = float(tmpo[0])
+                except (ValueError, TypeError, OverflowError):
+                    pass
             result['has_cover_art'] = bool(audio.tags.get('covr', [])) if audio.tags else False
             vs = (audio.tags or {}).get('----:com.soulsync:VERIFICATION')
             if vs:
@@ -259,6 +269,36 @@ def _normalize_date_str(s: str) -> str:
     return date_part
 
 
+def _stored_bpm(value: Any) -> Optional[int]:
+    """The integer BPM a file tag actually stores for ``value`` (#1871).
+
+    SoulSync's tag writers store BPM as an integer — ID3 ``TBPM`` and
+    Vorbis ``bpm`` are written as integer text and MP4 ``tmpo`` is an
+    integer atom — while the DB keeps the fractional value (e.g. 128.7
+    from analysis). The stored integer is the ROUNDED value, matching the
+    repair worker's established rule (``int(round(bpm))``, pinned by
+    tests/repair/test_bpm_apply_writes_file.py: "rounded, not cut") and
+    the enrichment writer in core/metadata/source.py. ``round`` is
+    Python's round-half-even (128.5 → 128, 129.5 → 130) — the same
+    expression the repair worker already used, kept for consistency
+    rather than switched to a different half rule mid-flight.
+    Writers and ``build_tag_diff`` both go through this helper so a
+    track whose file already holds the stored form of the DB BPM is
+    never flagged as changed — and writing tags therefore settles the
+    preview instead of re-flagging the same track forever.
+
+    Returns ``None`` for values that are not a finite number: writers
+    skip such a BPM instead of failing the whole tag write, and the
+    comparison keeps its raw-string verdict for them.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(round(float(value)))
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
 def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Compare file tags against DB metadata. Returns a list of diffs:
@@ -331,6 +371,27 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
             # actual write outcome.
             if genre_write_value_is_subset_of_existing(file_str, db_str):
                 changed = False
+
+        if db_key == 'bpm':
+            # Compare BPM in the writer's stored (integer) form on BOTH
+            # sides (#1871): the DB's fractional 128.7 is stored as 129,
+            # so a file holding 129 — or a fractional tag that itself
+            # rounds to 129 — is unchanged, while a file whose stored
+            # form differs (128, 130, …) is a genuine change. Comparing
+            # the raw fractional strings re-flagged every written track
+            # forever and caused repeated file saves.
+            # A DB BPM that has no stored form at all (non-numeric or
+            # non-finite) is one the writers skip, so — like an empty DB
+            # value — it can never be a change: flagging it would
+            # re-flag the track on every preview while every write
+            # rewrites the file without ever settling it.
+            db_bpm = _stored_bpm(db_val)
+            if db_val is not None and db_bpm is None:
+                changed = False
+            elif changed:
+                file_bpm = _stored_bpm(file_val)
+                if file_bpm is not None and db_bpm is not None and file_bpm == db_bpm:
+                    changed = False
 
         # #800 — if the change would replace a real file value with a
         # placeholder (Various Artists / [Unknown Album] / …), hold it back:
@@ -656,9 +717,10 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
         audio.tags.delall('TPOS')
         audio.tags.add(TPOS(encoding=3, text=[str(disc_num)]))
         written.append('disc_number')
-    if bpm is not None:
+    stored_bpm = _stored_bpm(bpm)
+    if stored_bpm is not None:
         audio.tags.delall('TBPM')
-        audio.tags.add(TBPM(encoding=3, text=[str(int(bpm))]))
+        audio.tags.add(TBPM(encoding=3, text=[str(stored_bpm)]))
         written.append('bpm')
     return written
 
@@ -706,8 +768,9 @@ def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
     if disc_num is not None:
         audio['discnumber'] = [str(disc_num)]
         written.append('disc_number')
-    if bpm is not None:
-        audio['bpm'] = [str(int(bpm))]
+    stored_bpm = _stored_bpm(bpm)
+    if stored_bpm is not None:
+        audio['bpm'] = [str(stored_bpm)]
         written.append('bpm')
     return written
 
@@ -750,8 +813,9 @@ def _write_mp4(audio, title, artist, album_artist, album, year, genre,
     if disc_num is not None:
         audio['disk'] = [(disc_num, 0)]
         written.append('disc_number')
-    if bpm is not None:
-        audio['tmpo'] = [int(bpm)]
+    stored_bpm = _stored_bpm(bpm)
+    if stored_bpm is not None:
+        audio['tmpo'] = [stored_bpm]
         written.append('bpm')
     return written
 
@@ -834,6 +898,11 @@ def _normalize_for_compare(val) -> str:
         return ', '.join(str(v) for v in val) if val else ''
     # Normalize numeric types: 120.0 → '120', 120 → '120'
     if isinstance(val, float):
+        # Non-finite floats (a file tag literally reading 'nan'/'inf'
+        # parses to one via read_file_tags) have no int form — keep the
+        # raw string instead of raising out of build_tag_diff (#1871).
+        if not math.isfinite(val):
+            return str(val)
         return str(int(val)) if val == int(val) else str(val)
     if isinstance(val, int):
         return str(val)

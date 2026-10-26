@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.5.9"
+_SOULSYNC_BASE_VERSION = "3.6.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -795,6 +795,13 @@ def _set_profile_context():
         if not _signed_out and not _devices.device_is_live(
                 _device_id, lambda d: get_database().get_profile_device(d)):
             _signed_out = True
+        # a sign-in with oidc lasts as long as the provider says (#1838):
+        # past that it is renewed, and a renewal that fails ends it here
+        if not _signed_out and _device_id:
+            from core.security import oidc_session
+            if not oidc_session.check_device(_device_id, get_database(), config_manager):
+                oidc_session.end_device(get_database(), _device_id)
+                _signed_out = True
         if not _signed_out:
             _devices.touch(_device_id, lambda d: get_database().touch_profile_device(d))
         if _signed_out:
@@ -1761,7 +1768,13 @@ def _register_automation_handlers():
     # Idempotent — existing rows are never clobbered.
     if automation_engine is not None:
         try:
-            from core.automation.migrate_repair_jobs import ensure_repair_job_automations
+            from core.automation.migrate_repair_jobs import (
+                ensure_repair_job_automations, register_job_toggle_sink)
+            from core.video.repair.worker import get_video_repair_worker
+            register_job_toggle_sink(
+                'video_run_repair_job',
+                lambda job_id, enabled: get_video_repair_worker().set_job_config(
+                    job_id, enabled=enabled))
             try:
                 from api.video import get_video_db
                 _video_db = get_video_db()
@@ -4363,7 +4376,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'mcp']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'mcp']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -4565,6 +4578,22 @@ def prowlarr_indexers_endpoint():
     except Exception as e:
         logger.error(f"prowlarr indexers fetch error: {e}")
         return jsonify({"success": False, "error": str(e), "indexers": []}), 500
+
+
+@app.route('/api/settings/path-preview', methods=['POST'])
+@admin_only
+def settings_path_preview():
+    """example paths for the naming templates as they stand in the form (#1868)."""
+    from core.imports.path_preview import preview_paths
+    data = request.get_json(silent=True) or {}
+    templates = data.get('templates') if isinstance(data.get('templates'), dict) else {}
+    settings = data.get('settings') if isinstance(data.get('settings'), dict) else {}
+    try:
+        result = preview_paths(templates, settings, str(data.get('scenario') or 'standard'))
+    except Exception as e:
+        logger.error(f"path preview failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({"success": True, **result})
 
 
 @app.route('/api/settings/log-level', methods=['GET', 'POST'])
@@ -6313,9 +6342,11 @@ def search_music():
     add_activity_item("", "Search Started", f"'{query}'", "Now")
 
     try:
-        results = _search_basic.run_basic_search(query, download_orchestrator, run_async, source=requested_source)
+        warnings = []
+        results = _search_basic.run_basic_search(query, download_orchestrator, run_async,
+                                                 source=requested_source, warnings=warnings)
         add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
-        return jsonify({"results": results})
+        return jsonify({"results": results, "warnings": warnings})
     except ValueError as ve:
         # user-facing config problem (e.g. SoundCloud link with the source
         # disabled) — a clear 400, not a silent empty result
@@ -13902,6 +13933,9 @@ def _read_staging_file_metadata(full_path: str, filename: str) -> dict:
 def _sanitize_filename(filename: str) -> str:
     """Sanitize filename for file system compatibility."""
     import re
+    from core.imports.paths import substitute_lookalikes, unicode_substitution_enabled
+    if unicode_substitution_enabled():
+        filename = substitute_lookalikes(re.sub(r'\s+', ' ', filename).strip())
     sanitized = re.sub(r'[<>:"/\\|?*]', '_', filename)
     sanitized = re.sub(r'\s+', ' ', sanitized).strip()
     # Windows forbids trailing dots/spaces on files and folders.
@@ -15056,7 +15090,11 @@ def _apply_path_template(template: str, context: dict) -> str:
     # This prevents '/' in metadata from creating unintended path components
     clean_context = _sanitize_context_values(context)
 
-    result = template
+    # #1860: shared with core.imports.paths, so the M3U folder never keeps a
+    # literal $explicit
+    from core.imports.paths import apply_content_rating
+    result = apply_content_rating(template, context.get('explicit'), context.get('album_explicit'))
+    template = result
 
     # Replace variables in order from longest to shortest to avoid partial replacements
     # (e.g., $albumartist must be replaced before $album to prevent "Scorpionartist" from typo "$albumartis")
@@ -15112,6 +15150,10 @@ def _apply_path_template(template: str, context: dict) -> str:
     else:
         letter_artist_name = clean_context.get('artist', 'U')
     artist_letter_value = _shared_artist_letter(letter_artist_name)
+
+    # #1859: shared with core.imports.paths, before $albumartist eats the prefix
+    from core.imports.paths import apply_artist_facts
+    result = apply_artist_facts(result, album_artist_value, context.get('artist'), context)
 
     # Support ${var} delimited syntax (e.g. ${albumtype}s → Albums)
     # Must run before $var replacements to prevent partial matching
@@ -15382,6 +15424,26 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
     return slsk_track_meta # Fallback to original
 
 
+def _import_pipeline_runtime():
+    """The live controller dependencies for core.imports.pipeline.
+
+    The builder there takes them as keyword arguments, all defaulting to None,
+    so a bare call hands the pipeline an empty runtime: no track_downloaded or
+    download_quarantined event, no completion callback, no scan after a simple
+    download. Read at call time.
+
+    repair_worker stays None on purpose: registering a batch's folder runs the
+    track number repair over the whole album folder, existing files included.
+    that seam has been dormant since april and waking it is its own decision.
+    """
+    return _build_import_pipeline_runtime(
+        automation_engine=automation_engine,
+        on_download_completed=_on_download_completed,
+        web_scan_manager=web_scan_manager,
+        repair_worker=None,
+    )
+
+
 def _post_process_matched_download_with_verification(context_key, context, file_path, task_id, batch_id):
     """
     NEW VERIFICATION WORKFLOW: Enhanced post-processing with file verification.
@@ -15394,7 +15456,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         file_path,
         task_id,
         batch_id,
-        _build_import_pipeline_runtime(),
+        _import_pipeline_runtime(),
         _build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
@@ -15520,7 +15582,7 @@ def _post_process_matched_download(context_key, context, file_path):
         context_key,
         context,
         file_path,
-        _build_import_pipeline_runtime(),
+        _import_pipeline_runtime(),
         metadata_runtime=_build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
@@ -17651,6 +17713,48 @@ def _add_cancelled_task_to_wishlist(task):
     except Exception as e:
         logger.error(f"[Atomic Cancel] Critical error handling cancelled task: {e}")
 
+def _cancel_one_batch(batch_id):
+    """Cancel one batch and its unfinished tasks. Caller holds tasks_lock.
+    Returns how many tasks it cancelled."""
+    download_batches[batch_id]['phase'] = 'cancelled'
+    playlist_id = download_batches[batch_id].get('playlist_id')
+
+    # Reset wishlist auto-processing flag if this is a wishlist batch (auto-initiated only)
+    # Manual wishlist downloads don't set the flag, so only reset if auto-initiated
+    if playlist_id == 'wishlist':
+        if download_batches[batch_id].get('auto_initiated', False):
+            with wishlist_timer_lock:
+                _rt_state.wishlist_auto_processing = False
+                _rt_state.wishlist_auto_processing_timestamp = 0
+            logger.warning("[Wishlist Cancel] Reset wishlist auto-processing flag for cancelled auto-batch")
+        else:
+            logger.warning("ℹ️ [Wishlist Cancel] Manual wishlist batch cancelled (no flag reset needed)")
+
+    # Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist
+    if playlist_id and playlist_id.startswith('youtube_'):
+        url_hash = playlist_id.replace('youtube_', '')
+        if url_hash in youtube_playlist_states:
+            youtube_playlist_states[url_hash]['phase'] = 'discovered'
+            logger.warning(f"Reset YouTube playlist {url_hash} to discovered phase (batch cancelled)")
+
+    cancelled_count = 0
+    for task_id in download_batches[batch_id].get('queue', []):
+        if task_id in download_tasks:
+            task = download_tasks[task_id]
+            if task['status'] not in ['completed', 'failed', 'not_found', 'cancelled']:
+                task['status'] = 'cancelled'
+                cancelled_count += 1
+
+    # close the sync history row with what finished before the cancel.
+    # nothing else ever will: a cancelled batch never reaches a
+    # completion check, and the row read "In progress" for good
+    try:
+        _record_sync_history_completion(batch_id, download_batches[batch_id])
+    except Exception as hist_err:
+        logger.warning(f"[Cancel Batch] Could not close sync history for {batch_id}: {hist_err}")
+    return cancelled_count
+
+
 @app.route('/api/playlists/<batch_id>/cancel_batch', methods=['POST'])
 def cancel_batch(batch_id):
     """
@@ -17670,54 +17774,27 @@ def cancel_batch(batch_id):
             if batch_id not in download_batches:
                 return jsonify({"success": False, "error": "Batch not found"}), 404
 
-            # Mark batch as cancelled
-            download_batches[batch_id]['phase'] = 'cancelled'
+            # a wishlist run is split into one batch per album plus a per-track
+            # batch, all sharing wishlist_run_id. cancelling only the one id the
+            # page polls left the rest downloading
+            run_id = download_batches[batch_id].get('wishlist_run_id')
+            targets = [batch_id]
+            if run_id:
+                targets += [
+                    bid for bid, row in download_batches.items()
+                    if bid != batch_id and isinstance(row, dict)
+                    and row.get('wishlist_run_id') == run_id
+                    and row.get('phase') not in ('complete', 'error', 'cancelled')
+                ]
 
-            # Get playlist_id before doing resets
-            playlist_id = download_batches[batch_id].get('playlist_id')
+            cancelled_count = sum(_cancel_one_batch(bid) for bid in targets)
 
-            # Reset wishlist auto-processing flag if this is a wishlist batch (auto-initiated only)
-            # Manual wishlist downloads don't set the flag, so only reset if auto-initiated
-            if playlist_id == 'wishlist':
-                auto_initiated = download_batches[batch_id].get('auto_initiated', False)
-                if auto_initiated:
-                    with wishlist_timer_lock:
-                        _rt_state.wishlist_auto_processing = False
-                        _rt_state.wishlist_auto_processing_timestamp = 0
-                    logger.warning("[Wishlist Cancel] Reset wishlist auto-processing flag for cancelled auto-batch")
-                else:
-                    logger.warning("ℹ️ [Wishlist Cancel] Manual wishlist batch cancelled (no flag reset needed)")
-
-            # Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist
-            if playlist_id and playlist_id.startswith('youtube_'):
-                url_hash = playlist_id.replace('youtube_', '')
-                if url_hash in youtube_playlist_states:
-                    youtube_playlist_states[url_hash]['phase'] = 'discovered'
-                    logger.warning(f"Reset YouTube playlist {url_hash} to discovered phase (batch cancelled)")
-
-            # Cancel all individual tasks in the batch
-            cancelled_count = 0
-            for task_id in download_batches[batch_id].get('queue', []):
-                if task_id in download_tasks:
-                    task = download_tasks[task_id]
-                    if task['status'] not in ['completed', 'failed', 'not_found', 'cancelled']:
-                        task['status'] = 'cancelled'
-                        cancelled_count += 1
-
-            # close the sync history row with what finished before the cancel.
-            # nothing else ever will: a cancelled batch never reaches a
-            # completion check, and the row read "In progress" for good
-            try:
-                _record_sync_history_completion(batch_id, download_batches[batch_id])
-            except Exception as hist_err:
-                logger.warning(f"[Cancel Batch] Could not close sync history for {batch_id}: {hist_err}")
-
-            # Add activity for batch cancellation
             playlist_name = download_batches[batch_id].get('playlist_name', 'Unknown Playlist')
             add_activity_item("", "Batch Cancelled", f"'{playlist_name}' - {cancelled_count} downloads cancelled", "Now")
 
-            logger.warning(f"Cancelled batch {batch_id} with {cancelled_count} tasks")
-            return jsonify({"success": True, "cancelled_tasks": cancelled_count})
+            logger.warning(f"Cancelled batch {batch_id} ({len(targets)} batch(es)) with {cancelled_count} tasks")
+            return jsonify({"success": True, "cancelled_tasks": cancelled_count,
+                            "cancelled_batches": len(targets)})
 
     except Exception as e:
         logger.error(f"Error cancelling batch {batch_id}: {e}")
@@ -18190,7 +18267,9 @@ def get_server_playlist_tracks(playlist_id):
                         server_tracks.append({
                             'id': str(item.ratingKey),
                             'title': item.title,
-                            'artist': grandparent,
+                            # originalTitle is plex's per-track artist; grandparent is the
+                            # album artist ('Various Artists' on a compilation)
+                            'artist': getattr(item, 'originalTitle', None) or grandparent,
                             'album': parent,
                             'duration': item.duration or 0,
                             'thumb': thumb,
@@ -18321,7 +18400,16 @@ def get_server_playlist_tracks(playlist_id):
 
         _override_pairs = resolve_match_overrides(source_tracks, server_tracks, _override_lookup)
 
-        combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs)
+        # pairings the user unmatched here: never auto-paired again
+        try:
+            _rejected_pairs = _db_for_overrides.get_server_match_rejections(
+                _ov_profile, active_server,
+                [s.get('source_track_id') for s in source_tracks if isinstance(s, dict)])
+        except Exception as _rej_err:   # noqa: BLE001 - never fail the view over it
+            logger.debug("rejected-pair lookup failed: %s", _rej_err)
+            _rejected_pairs = set()
+
+        combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs, _rejected_pairs)
 
         # A durable manual match whose library track isn't in THIS playlist yet
         # can't be applied above, so its row renders as a plain "missing" with
@@ -18655,6 +18743,12 @@ def _persist_find_and_add_match(source_track_id, server_source, server_track_id,
             "revert on the next compare load.", server_track_title or source_title or server_track_id)
         return
     db = get_database()
+    # picking the very track the user once unmatched means it is right after all
+    try:
+        db.clear_server_match_rejection(get_current_profile_id(), server_source,
+                                        source_track_id, server_track_id)
+    except Exception as e:
+        logger.debug(f"[ServerPlaylist] rejection clear failed: {e}")
     try:
         from core.sync.match_overrides import record_manual_match
         ok = record_manual_match(
@@ -18890,6 +18984,40 @@ def server_playlist_add_track(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/server/playlist/<playlist_id>/unmatch-track', methods=['POST'])
+def server_playlist_unmatch_track(playlist_id):
+    """Break a wrong source/server pairing without touching the playlist.
+
+    the source row goes back to missing (Find & add), the server track stays
+    in the playlist as an extra, and the pairing is filed as rejected so the
+    compare view and the sync never auto-match the two again."""
+    try:
+        data = request.get_json(silent=True) or {}
+        source_track_id = str(data.get('source_track_id') or '').strip()
+        server_track_id = str(data.get('server_track_id') or '').strip()
+        playlist_name = data.get('playlist_name', '')
+        if not source_track_id or not server_track_id:
+            return jsonify({"success": False,
+                            "error": "source_track_id and server_track_id required"}), 400
+
+        active_server = config_manager.get_active_media_server()
+        # #1414: same guard as every other write here
+        _sp_client, playlist_id, playlist_name, _sp_refusal = _server_playlist_guard(
+            active_server, playlist_id, playlist_name)
+        if _sp_refusal is not None:
+            return _sp_refusal
+
+        from core.sync.match_overrides import reject_match
+        if not reject_match(get_database(), get_current_profile_id(), active_server,
+                            source_track_id, server_track_id):
+            return jsonify({"success": False, "error": "Could not save the unmatch"}), 500
+        logger.info(f"[ServerPlaylist] Unmatched {source_track_id} from {server_track_id} ({active_server})")
+        return jsonify({"success": True, "message": "Match removed"})
+    except Exception as e:
+        logger.error(f"Error unmatching server playlist track: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/server/playlist/<playlist_id>/remove-track', methods=['POST'])
 def server_playlist_remove_track(playlist_id):
     """Remove a track from a server playlist by its server track ID."""
@@ -19122,7 +19250,10 @@ def library_search_tracks():
             tracks.append({
                 'id': t.id,
                 'title': t.title,
-                'artist_name': t.artist_name,
+                # the track's own credit, not the album's: on a compilation
+                # every row read 'Various Artists' and remixes were unpickable
+                'artist_name': getattr(t, 'track_artist', None) or t.artist_name,
+                'album_artist': t.artist_name,
                 'album_title': getattr(t, 'album_title', ''),
                 'album_thumb_url': _resolve_search_thumb(getattr(t, 'album_thumb_url', '')),
                 'file_path': getattr(t, 'file_path', ''),
@@ -21176,6 +21307,38 @@ def get_active_media_server():
 
 # ── Mirrored Playlists ────────────────────────────────────────────────
 
+@app.route('/api/import/newpipe', methods=['POST'])
+def import_newpipe_backup():
+    """Read the playlists out of a NewPipe backup (the export .zip or newpipe.db).
+
+    parse only: the page shows them, the user picks, and each picked one is
+    saved through /api/mirror-playlist as source 'newpipe', keyed by its
+    newpipe uid so a later import of a newer backup overwrites it."""
+    upload = request.files.get('file')
+    if upload is None or not upload.filename:
+        return jsonify({"success": False, "error": "no file uploaded"}), 400
+    import tempfile
+    from core.playlists.newpipe_backup import NotANewPipeBackup, read_newpipe_backup
+    fd, tmp_path = tempfile.mkstemp(prefix='newpipe_upload_')
+    try:
+        with os.fdopen(fd, 'wb') as fh:
+            upload.save(fh)
+        result = read_newpipe_backup(tmp_path, clean_youtube_artist, clean_youtube_track_title)
+        logger.info("[NewPipe] parsed %d playlists (%d bookmarked skipped) from %s",
+                    len(result['playlists']), result['bookmarked'], upload.filename)
+        return jsonify({"success": True, **result})
+    except NotANewPipeBackup as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"[NewPipe] import failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "could not read that backup"}), 500
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
 @app.route('/api/mirror-playlist', methods=['POST'])
 def mirror_playlist_endpoint():
     """Save or update a mirrored playlist."""
@@ -21265,6 +21428,14 @@ def mirror_playlist_endpoint():
                 })
         except Exception as e:
             logger.debug("mirrored_playlist_created emit failed: %s", e)
+
+        # identify it in the background, like My Playlists, so it is ready to
+        # sync without pressing Identify (core/playlists/auto_identify)
+        try:
+            from core.playlists import auto_identify as _mirror_identify
+            _mirror_identify.request_if_unmatched(playlist_id, database.get_mirrored_playlist_tracks(playlist_id))
+        except Exception as _id_err:
+            logger.debug("mirror-time identify skipped: %s", _id_err)
 
         return jsonify({"success": True, "playlist_id": playlist_id})
     except ValueError as ve:
@@ -22596,11 +22767,26 @@ try:
     if automation_engine is not None:
         repair_worker._event_emit = automation_engine.emit
         repair_worker._automation_engine = automation_engine
+    # Automations-page toggles on a [System] job row land in Tools too
+    from core.automation.migrate_repair_jobs import register_job_toggle_sink
+    register_job_toggle_sink(
+        'run_repair_job',
+        lambda job_id, enabled: repair_worker.set_job_enabled(job_id, enabled, bridge=False))
     repair_worker.start()
     logger.info("Repair worker initialized and started")
 except Exception as e:
     logger.error(f"Repair worker initialization failed: {e}")
     repair_worker = None
+
+# Deezer sign-in events ('Deezer Sign-in Failed' / 'Restored' triggers): the
+# download client sends them itself once it knows where to.
+if automation_engine is not None and download_orchestrator is not None:
+    try:
+        _deezer_dl = download_orchestrator.client('deezer_dl')
+        if _deezer_dl is not None and hasattr(_deezer_dl, 'set_event_emitter'):
+            _deezer_dl.set_event_emitter(automation_engine.emit)
+    except Exception as e:
+        logger.debug(f"Deezer sign-in events not wired: {e}")
 
 # --- Repair Worker API Endpoints: lifted to api/repair.py (wired near the
 # chat/labels/beatport blueprints below) ---
@@ -23044,13 +23230,199 @@ def _emit_server_activity_loop():
 
 # --- Socket.IO event handlers ---
 
+# --- #1837: session revocation for sockets ---------------------------------
+# The HTTP gate drops a session server-side when it is revoked: logout (or an
+# admin) revokes the session's device row, and "sign out everywhere" / a
+# password change bumps the profile's session epoch. A replayed cookie keeps
+# its login/PIN flags, so on HTTP it now gets a 401 — but the WS gate only
+# ever read those flags, so the same replayed cookie still opened a socket,
+# and a socket opened before the revocation kept receiving everything.
+# Snapshot what each socket connected under and apply the same two checks.
+_ws_session_by_sid = {}
+_ws_session_by_sid_lock = threading.Lock()
+
+
+def _ws_snapshot_revoked(snapshot):
+    """True when the session in `snapshot` has been revoked — the same two
+    checks the HTTP profile gate applies (session epoch, device row), read
+    through the same fail-open helpers: a db hiccup signs nobody out. A
+    snapshot with no profile has nothing to revoke. NEVER raises: this is an
+    auxiliary check beside the gate, so any unexpected failure (no request
+    context, a broken db handle) reads as "not revoked" and the gate's own
+    fail-closed path decides, exactly as it did before revocation was added."""
+    try:
+        # Match HTTP's resolve: a missing/invalid profile id is no profile
+        # session at all, not a revocation.
+        try:
+            pid = int((snapshot or {}).get('profile_id'))
+        except (TypeError, ValueError):
+            return False
+        if pid <= 0:
+            return False
+        # A profile that no longer exists (or was disabled, for a non-admin)
+        # is revoked too: HTTP pops such a session and 401s it. A failed read
+        # is NOT a missing profile — that path stays fail-open below.
+        profile = None
+        profile_read = False
+        try:
+            profile = get_database().get_profile(pid)
+            profile_read = True
+        except Exception:  # noqa: BLE001 - unreadable ≠ deleted
+            profile_read = False
+        if profile_read:
+            if profile is None:
+                return True
+            if profile.get('disabled') and not profile.get('is_admin'):
+                return True
+        from core.security import devices as _devices
+        from core.security.session_epoch import session_is_current
+        from core.security.ws_gate import is_session_revoked
+        epoch_current = session_is_current(
+            pid, snapshot.get('profile_epoch', 0),
+            lambda p: (get_database().get_profile(p) or {}).get('session_epoch', 0))
+        device_live = _devices.device_is_live(
+            snapshot.get('device_id'),
+            lambda d: get_database().get_profile_device(d))
+        # #1838: the oidc session clock runs here too, not only on HTTP. a
+        # socket alone never makes a request, so without this a browser
+        # (or a replayed cookie) holding only a socket would outlive a
+        # renewal that fails. ending it revokes the device, the same as HTTP
+        if epoch_current and device_live and snapshot.get('device_id'):
+            from core.security import oidc_session
+            if not oidc_session.check_device(snapshot['device_id'], get_database(), config_manager):
+                oidc_session.end_device(get_database(), snapshot['device_id'])
+                device_live = False
+        return is_session_revoked(has_profile_session=True,
+                                  epoch_current=epoch_current,
+                                  device_live=device_live)
+    except Exception as e:  # noqa: BLE001 - fail open, see docstring
+        logger.debug(f"[WS gate] revocation check failed, treating as live: {e}")
+        return False
+
+
+def _ws_current_session_revoked():
+    """_ws_snapshot_revoked for the session of the request being handled.
+    Also never raises: with no usable session there is nothing to revoke."""
+    try:
+        snapshot = {
+            'profile_id': session.get('profile_id'),
+            'profile_epoch': session.get('profile_epoch', 0),
+            'device_id': session.get('device_id'),
+        }
+    except Exception:  # noqa: BLE001 - no session context ⇒ no profile session
+        return False
+    return _ws_snapshot_revoked(snapshot)
+
+
+def _ws_store_snapshot():
+    """Remember the session the current socket is acting under, so the
+    revocation sweep can re-check exactly that session later. Never raises:
+    a failed store just leaves the sweep nothing to check for this sid."""
+    try:
+        with _ws_session_by_sid_lock:
+            _ws_session_by_sid[request.sid] = {
+                'profile_id': session.get('profile_id'),
+                'profile_epoch': session.get('profile_epoch', 0),
+                'device_id': session.get('device_id'),
+            }
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[WS gate] session snapshot store failed: {e}")
+
+
+def _forget_sid(sid):
+    """Drop every per-sid trace (connected set, revocation snapshot, the
+    activity and log-live subscription sets). Shared by the disconnect
+    handler and the revocation sweep; all operations are idempotent."""
+    with _connected_sids_lock:
+        _connected_sids.discard(sid)
+    with _ws_session_by_sid_lock:
+        _ws_session_by_sid.pop(sid, None)
+    with _activity_sids_lock:
+        _activity_sids.discard(sid)
+    with _log_live_sids_lock:
+        _log_live_sids.discard(sid)
+
+
+def _drop_sid(sid, snapshot=None):
+    """Forget + disconnect one socket, with the reason in the log.
+    Forget BEFORE disconnecting, deliberately: disconnect can trigger the
+    disconnect handler synchronously (it forgets again — harmless), and on
+    a half-dead transport the handler may never run at all, in which case
+    an orphaned sid must not linger in any registry (a stale _activity_sids
+    entry would keep the activity poll loop fed forever)."""
+    logger.info("Disconnecting WebSocket client %s (profile %s) — session revoked (#1837)",
+                sid, (snapshot or {}).get('profile_id'))
+    _forget_sid(sid)
+    try:
+        socketio.server.disconnect(sid, namespace='/')
+    except Exception as e:  # noqa: BLE001 - already gone is fine
+        logger.debug(f"[WS gate] disconnect of revoked socket failed: {e}")
+
+
+def _disconnect_revoked_sockets():
+    """Drop already-connected sockets whose session has been revoked since
+    they connected, so delivery stops instead of streaming on to a
+    signed-out browser until it happens to reconnect.
+    (_ws_snapshot_revoked never raises — its contract is fail-open.)"""
+    with _ws_session_by_sid_lock:
+        items = list(_ws_session_by_sid.items())
+    # one check per distinct session: tabs of one browser share it
+    verdicts = {}
+    for sid, snapshot in items:
+        key = (snapshot.get('profile_id'), snapshot.get('profile_epoch'), snapshot.get('device_id'))
+        if key not in verdicts:
+            verdicts[key] = _ws_snapshot_revoked(snapshot)
+        if not verdicts[key]:
+            continue
+        # drop only on the evidence we checked: a sid whose snapshot was
+        # replaced or forgotten since the copy is left to the next sweep
+        with _ws_session_by_sid_lock:
+            if _ws_session_by_sid.get(sid) is not snapshot:
+                continue
+        _drop_sid(sid, snapshot)
+
+
+def _ws_drop_sid_if_revoked():
+    """Inbound-event re-gate for the current socket: True when its session
+    has been revoked — it is dropped now, not left to act (join rooms,
+    subscribe to admin streams) until the sweep notices."""
+    try:
+        sid = request.sid
+    except Exception:  # noqa: BLE001 - no socket context ⇒ nothing to drop
+        return False
+    with _ws_session_by_sid_lock:
+        snapshot = _ws_session_by_sid.get(sid)
+    if snapshot is None or not _ws_snapshot_revoked(snapshot):
+        return False
+    _drop_sid(sid, snapshot)
+    return True
+
+
+def _ws_revocation_loop():
+    """Re-check connected sockets against revocation state. The epoch/device
+    helpers cache their reads for a few seconds, so a 2s sweep is cheap and
+    a revoked socket is dropped within seconds of the revocation becoming
+    visible — the same visibility window HTTP has."""
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(2)
+        if not _has_connected_clients():
+            continue
+        try:
+            _disconnect_revoked_sockets()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Error in WebSocket revocation loop: {e}")
+
+
 def _ws_connection_blocked():
     """#852: mirror the HTTP launch-PIN / login gate for the socketio handshake
     (before_request doesn't run for it). Fails CLOSED on unexpected errors (#GHSA-j7g5-8j44-jqhm)."""
     try:
+        # #1837: revocation reads server-side state, not the cookie, and it
+        # applies even when neither gate is on — the same as HTTP.
+        revoked = _ws_current_session_revoked()
         require_login = _require_login_enabled()
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
-        if not require_login and not require_pin:
+        if not require_login and not require_pin and not revoked:
             return False
         proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
         from core.security.auth_proxy import trusted_proxy_user
@@ -23062,6 +23434,7 @@ def _ws_connection_blocked():
             require_pin=require_pin,
             pin_verified=bool(session.get('launch_pin_verified', False)),
             proxy_authed=proxy_authed,
+            session_revoked=revoked,
         )
     except Exception as e:
         logger.error(f"[WS gate] check failed, blocking unverified connection (fail-closed): {e}")
@@ -23078,26 +23451,26 @@ def handle_connect():
         return False
     with _connected_sids_lock:
         _connected_sids.add(request.sid)
+    # #1837: remember the session this socket connected under so the
+    # revocation sweep can drop it if that session is later revoked.
+    _ws_store_snapshot()
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    # Drop this client from the server-activity live set so the push loop goes
-    # idle again once the last drawer closes / navigates away.
+    # Drop this client from every per-sid set (activity live set included) so
+    # the push loops go idle again once the last drawer closes / navigates away.
     try:
-        with _activity_sids_lock:
-            _activity_sids.discard(request.sid)
-        with _log_live_sids_lock:
-            _log_live_sids.discard(request.sid)
+        _forget_sid(request.sid)
     except Exception:   # noqa: BLE001, S110 - cleanup only; a missing sid is fine
         pass
-    with _connected_sids_lock:
-        _connected_sids.discard(request.sid)
     logger.info("WebSocket client disconnected")
 
 @socketio.on('activity:subscribe')
 def handle_activity_subscribe():
     """A drawer opened → join the live room so the push loop starts feeding it."""
+    if _ws_drop_sid_if_revoked():
+        return
     join_room('activity:live')
     with _activity_sids_lock:
         _activity_sids.add(request.sid)
@@ -23113,6 +23486,8 @@ def handle_activity_unsubscribe():
 @socketio.on('downloads:subscribe')
 def handle_download_subscribe(data):
     """Client subscribes to download batch updates by joining rooms."""
+    if _ws_drop_sid_if_revoked():
+        return
     batch_ids = data.get('batch_ids', [])
     for bid in batch_ids:
         join_room(f'batch:{bid}')
@@ -23141,6 +23516,9 @@ def handle_profile_join(data):
     if pid is None:
         return
     target = requested if (is_admin and requested) else pid
+    # #1837: the connect snapshot stays the socket's credential. joining
+    # another profile's room (admins only) must not swap it for a
+    # device-less one, or logout / device revoke would stop reaching it.
     if target != requested and requested:
         logger.warning("profile:join — client asked for profile %s but session is %s; "
                        "joining the session's room", requested, pid)
@@ -23156,6 +23534,12 @@ def _ws_session_profile():
     truth for room joins. Fail-closed to the session profile; profile 1 or an
     is_admin-flagged profile counts as admin. no profile in the session is
     (None, False) except on a single-profile install, same rule as http."""
+    # #1837: a revoked session may not keep acting through inbound events
+    # while it waits for the sweep — drop it here, at the choke point the
+    # profile-scoped handlers (profile:join, logs/sync/discovery subscribe)
+    # all resolve their identity through.
+    if _ws_drop_sid_if_revoked():
+        return None, False
     from core.security.session_profile import resolve_session_profile
     _session_pid = session.get('profile_id')
     _count = 2
@@ -23694,6 +24078,10 @@ app.register_blueprint(_bp_mpl())
 from api.user_playlists import configure as _cfg_upl, create_blueprint as _bp_upl
 _cfg_upl(get_database=get_database, config_manager=config_manager)
 app.register_blueprint(_bp_upl())
+# MetaSync's SIN charts: offered as playlists, opened on demand
+from api.metasync_charts import configure as _cfg_msc, create_blueprint as _bp_msc
+_cfg_msc(get_database=get_database)
+app.register_blueprint(_bp_msc())
 # your own playlists identify themselves in the background after every edit,
 # so they are always ready to sync (core/playlists/auto_identify)
 from core.playlists import auto_identify as _auto_identify
@@ -23941,6 +24329,13 @@ app.register_blueprint(_create_audiobooks_blueprint())
 from api.sidebar_weather import configure as _cfg_sw, create_blueprint as _bp_sw
 _cfg_sw(config_manager=config_manager)
 app.register_blueprint(_bp_sw())
+
+# MetaSync connection (api/metasync_settings.py): pairing with the local
+# MetaSync node, pool-key handoff, status and disconnect for
+# Settings > Advanced > MetaSync. Blank metasync.node_url = not set up.
+from api.metasync_settings import configure as _cfg_ms, create_blueprint as _bp_ms
+_cfg_ms(config_manager=config_manager)
+app.register_blueprint(_bp_ms())
 
 # NOTE: the audiobook wishlist is NOT started here. It is drained by the shared
 # automation engine as the 'audiobook_process_wishlist' system automation, the same
@@ -24858,6 +25253,8 @@ def start_runtime_services():
         socketio.start_background_task(_chat_auto_prove_loop)
         # Server Activity — subscriber-gated live push (idle when no drawer open)
         socketio.start_background_task(_emit_server_activity_loop)
+        # #1837: drop sockets whose session gets revoked while connected
+        socketio.start_background_task(_ws_revocation_loop)
         # Phase 2: Dashboard pollers
         socketio.start_background_task(_emit_system_stats_loop)
         socketio.start_background_task(_emit_activity_feed_loop)

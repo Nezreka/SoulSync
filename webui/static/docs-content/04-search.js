@@ -74,6 +74,8 @@ SoulSync downloads from multiple sources. Connect each source in **Settings → 
 | **Usenet** | Full releases via your Usenet client and Prowlarr indexers | Fast, complete releases |
 | **Hybrid** | Tries your primary source first, then falls back through alternates automatically | Best overall success rate |
 
+Torrent and Usenet search each Prowlarr indexer on its own, so one slow or broken indexer never costs you the others' results. When some indexers fail, a note above the results names them (click **Details** for each one's error), so you know the list may be missing releases.
+
 > [!TIP]
 > **Hybrid mode** is recommended for most users. It tries your primary source first, then falls back through your configured priority order. Order all sources via drag-and-drop in Settings → Downloads.
 
@@ -84,6 +86,7 @@ YouTube has its own options in Settings:
 - **Cookies** — bypass bot detection; also unlocks Premium audio if your account has it
 - **Download delay** — seconds between requests, to stay under rate limits
 - **Re-encode YouTube audio** — MP3 320 by default
+- **Download whole albums from YouTube Music** — off by default. For an album download, SoulSync finds the album on YouTube Music and fetches its playlist instead of searching song by song, which rescues albums whose songs never appear in a song search. The artist and album title must both match, and any miss falls back to the normal track-by-track search. Some albums need YouTube Music Premium cookies
 
 On Docker, use **Paste cookies.txt**: Netscape/Mozilla format only (tab-separated rows). Paste the whole file from a "Get cookies.txt LOCALLY" browser extension — the header line alone is not enough.
 

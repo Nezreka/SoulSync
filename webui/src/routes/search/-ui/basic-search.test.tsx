@@ -51,6 +51,7 @@ function stateOf(over: Partial<BasicSearchState> = {}): BasicSearchState {
   return {
     query: '',
     results: [],
+    warnings: [],
     filters: DEFAULT_FILTERS,
     status: IDLE_STATUS,
     searching: false,
@@ -288,5 +289,39 @@ describe('stays out of the other tabs', () => {
     const panel = css.match(/\n\.panel \{([^}]*)\}/)?.[1] ?? '';
     expect(panel).toContain('--bs-surface');
     expect(panel).not.toMatch(/^\s*display\s*:/m);
+  });
+});
+
+describe('indexer warnings (#1831)', () => {
+  const broken = {
+    source: 'torrent',
+    indexer: 'BrokenTracker',
+    error: 'Prowlarr returned HTTP 502',
+  };
+
+  it('names the one indexer that failed, results still shown', () => {
+    renderPanel({ query: 'aphex', results: [track()], warnings: [broken] }, { visible: [track()] });
+    expect(
+      screen.getByText(
+        "BrokenTracker didn't answer, so these results might be missing some releases.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText('Prowlarr returned HTTP 502')).toBeTruthy();
+  });
+
+  it('counts them when several failed', () => {
+    renderPanel({
+      query: 'aphex',
+      warnings: [broken, { source: 'usenet', indexer: 'SlowNzb', error: 'no answer within 75s' }],
+    });
+    expect(screen.getByText(/^2 indexers didn't answer/)).toBeTruthy();
+  });
+
+  it('says nothing on a clean search, or while the next one runs', () => {
+    renderPanel({ query: 'aphex', results: [track()] }, { visible: [track()] });
+    expect(screen.queryByText(/didn't answer/)).toBeNull();
+    cleanup();
+    renderPanel({ query: 'aphex', searching: true, warnings: [broken] });
+    expect(screen.queryByText(/didn't answer/)).toBeNull();
   });
 });

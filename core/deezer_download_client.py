@@ -97,6 +97,15 @@ def _keep_album_artist(album_artists: dict, album_id: str, album_data) -> None:
 class DeezerDownloadClient(DownloadSourcePlugin):
     """Deezer download client using ARL token authentication."""
 
+    # sign-in event state (see __init__), declared here too so a client built
+    # without __init__ still has it: an alert must never be what breaks a login
+    _event_emit = None
+    _signin_lock = threading.Lock()
+    _signin_failing = False
+    _last_good_arl = None
+    # the sign-in check asks deezer from a session of its own (see check_signin)
+    _probe_session_factory = staticmethod(lambda: requests.Session())
+
     def __init__(self, download_path: str = None):
         from core.settings import config_manager
         self._config = config_manager
@@ -144,6 +153,16 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         self._reauth_lock = threading.Lock()
         self._reauth_thread = None
         self._auth_generation = 0
+
+        # sign-in failed / restored automation events. a dead arl is otherwise
+        # silent: downloads fall back to the next source and nothing says why.
+        # one 'failed' per episode (the retry backoff would repeat it), and
+        # 'restored' when deezer takes an arl again after a failure, or a
+        # different arl than the last one that worked. set by web_server.
+        self._event_emit = None
+        self._signin_lock = threading.Lock()
+        self._signin_failing = False
+        self._last_good_arl = config_manager.get('deezer_download.arl', '') or None
 
         # Quality preference
         self._quality = quality_tier_for_source('deezer', default='flac')
@@ -207,7 +226,16 @@ class DeezerDownloadClient(DownloadSourcePlugin):
     def _authenticate(self, arl: str) -> bool:
         """Authenticate with Deezer using ARL cookie token."""
         try:
-            self._session.cookies.set('arl', arl)
+            # a sign-in starts from nothing but the arl. the session keeps the
+            # 'sid' cookie deezer set at the last login, and while that is alive
+            # deezer answers as that account whatever arl is set, so a changed
+            # or dead arl would never actually be tried (it only took effect
+            # once the old session ended, often at the next restart)
+            cookies = self._session.cookies
+            clear = getattr(cookies, 'clear', None)
+            if callable(clear):
+                clear()
+            cookies.set('arl', arl)
             # The bootstrap must not present the previous session's token:
             # Deezer validates it before issuing a new one, so a dead token
             # would reject the very login meant to replace it (#1677). The
@@ -224,6 +252,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             user_id = user.get('USER_ID', 0)
             if not user_id or user_id == 0:
                 logger.error("Invalid ARL token — Deezer returned no user")
+                self._note_signin(False, arl)
                 return False
 
             self._api_token = resp.get('checkForm', '')
@@ -242,6 +271,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 tier = 'Premium'
 
             logger.info(f"Deezer authenticated as '{user_name}' (tier: {tier})")
+            self._note_signin(True, arl, user=user_name, tier=tier)
             return True
 
         except Exception as e:
@@ -345,6 +375,89 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 return False
             finally:
                 self._reauth_thread = None
+
+    # ─── Sign-in health ──────────────────────────────────────────
+
+    _SIGNIN_FAILED_DETAIL = ("Deezer returned no user for this ARL. It has expired or been "
+                             "signed out: paste a fresh one in Settings.")
+
+    def _note_signin(self, ok: bool, arl: str, *, user: str = "", tier: str = "") -> None:
+        """record what deezer said about the arl and send the event, if any.
+        only deezer's own answer counts: a dropped connection never comes
+        here, so an outage doesn't read as a dead arl"""
+        with self._signin_lock:
+            if ok:
+                changed = bool(self._last_good_arl) and arl != self._last_good_arl
+                event = 'deezer_signin_restored' if (self._signin_failing or changed) else None
+                self._signin_failing = False
+                self._last_good_arl = arl
+                data = {'user': user or 'Unknown', 'tier': tier or 'Unknown'}
+            else:
+                event = None if self._signin_failing else 'deezer_signin_failed'
+                self._signin_failing = True
+                data = {'reason': 'invalid_arl', 'detail': self._SIGNIN_FAILED_DETAIL}
+        if event:
+            logger.info("Deezer sign-in: %s", 'restored' if ok else 'failed (ARL rejected)')
+            emit = self._event_emit
+            if emit:
+                try:
+                    emit(event, data)
+                except Exception as e:  # noqa: BLE001 - an alert must never break a login
+                    logger.debug("deezer sign-in event failed: %s", e)
+
+    def set_event_emitter(self, emit) -> None:
+        """where sign-in events go (the automation engine's emit). a failure
+        already on record -- a sign-in at startup, before this was wired -- is
+        sent now, or its episode would never be announced"""
+        self._event_emit = emit
+        with self._signin_lock:
+            pending = self._signin_failing
+        if pending and emit:
+            try:
+                emit('deezer_signin_failed', {'reason': 'invalid_arl', 'detail': self._SIGNIN_FAILED_DETAIL})
+            except Exception as e:  # noqa: BLE001
+                logger.debug("deezer sign-in event failed: %s", e)
+
+    def check_signin(self) -> dict:
+        """ask deezer who the configured arl belongs to (the scheduled 'Check
+        Deezer Sign-in'). catches an arl that died while nothing needed it.
+
+        returns {'status': 'ok'|'failed'|'unreachable'|'skipped', ...}. a
+        logged-in client is probed from a fresh session, its own left alone; a
+        logged-out one gets a full sign-in, the same as its own retry would make."""
+        arl = self._config.get('deezer_download.arl', '')
+        if not arl:
+            return {'status': 'skipped', 'reason': 'no ARL set'}
+        if not self._authenticated:
+            if self.reconnect(arl):
+                return {'status': 'ok'}
+            return {'status': 'failed' if self._signin_failing else 'unreachable'}
+        with self._api_lock:
+            elapsed = time.time() - self._last_request
+            if elapsed < self._min_interval:
+                time.sleep(self._min_interval - elapsed)
+            self._last_request = time.time()
+        try:
+            # its own session holding only the arl: the live one carries deezer's
+            # 'sid', which would answer for the old login whatever the arl is,
+            # and the probe must not disturb the session downloads are using
+            probe = self._probe_session_factory()
+            probe.headers.update(dict(getattr(self._session, 'headers', None) or {}))
+            probe.cookies.set('arl', arl)
+            resp = probe.post(_GW_API, params={'method': 'deezer.getUserData',
+                                               'api_version': '1.0', 'api_token': 'null'},
+                              json={}, timeout=15)
+            resp.raise_for_status()
+            results = (resp.json() or {}).get('results') or {}
+        except Exception as e:  # noqa: BLE001 - unreachable is not a dead arl
+            logger.warning("Deezer sign-in check couldn't reach Deezer: %s", e)
+            return {'status': 'unreachable', 'reason': str(e)}
+        user = results.get('USER') or {}
+        if not user.get('USER_ID'):
+            self._note_signin(False, arl)
+            return {'status': 'failed'}
+        self._note_signin(True, arl, user=user.get('BLOG_NAME', ''))
+        return {'status': 'ok'}
 
     # ─── Status & Config ─────────────────────────────────────────
 

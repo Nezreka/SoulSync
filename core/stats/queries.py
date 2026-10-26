@@ -368,13 +368,14 @@ def get_listening_events(
         if not date:
             raise ValueError('date is required')
         if _is_month_bucket(date):
-            clauses.append("lh.played_at >= date(? || '-01')")
-            clauses.append("lh.played_at < date(? || '-01', '+1 month')")
+            # local month bounds, moved to utc so the played_at index still works
+            clauses.append("lh.played_at >= datetime(? || '-01', 'utc')")
+            clauses.append("lh.played_at < datetime(? || '-01', '+1 month', 'utc')")
             params.extend([date, date])
             title = date
         elif _is_day_bucket(date):
-            clauses.append('lh.played_at >= date(?)')
-            clauses.append("lh.played_at < date(?, '+1 day')")
+            clauses.append("lh.played_at >= datetime(?, 'utc')")
+            clauses.append("lh.played_at < datetime(?, '+1 day', 'utc')")
             params.extend([date, date])
             title = date
         else:
@@ -556,13 +557,13 @@ def _listening_streak(cursor, scope: str, today: date) -> int:
     only reads recent days. it used to pull the date of every play ever made
     to answer a question about the last few. the window doubles until the
     streak ends inside it, so a years-long streak still counts in full. the
-    2 day margin covers a played_at with a utc offset, where date() lands a
-    day off the text the index range compares."""
+    2 day margin covers the local day landing off the utc text the index
+    range compares."""
     window = _STREAK_FIRST_WINDOW_DAYS
     while True:
         since = (today - timedelta(days=window + 2)).isoformat()
         cursor.execute(
-            f"""SELECT DISTINCT date(lh.played_at)
+            f"""SELECT DISTINCT date(lh.played_at, 'localtime')
                 FROM listening_history lh
                 WHERE lh.played_at >= ? AND {scope}""",
             (since,),
@@ -593,9 +594,9 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
 
     Trailing 7 days, using the same ``datetime('now', '-7 days')`` window the
     stats page uses for its 7d range — the banner can never disagree with the
-    stats page about what "this week" means. (played_at is stored as local
-    naive wall-clock; the day buckets below read it as-is, which is the local
-    day the user actually listened.)
+    stats page about what "this week" means. (played_at is stored utc; the
+    day buckets below read it with 'localtime', the day the user actually
+    listened.)
 
     Owner-scoped throughout: a profile only ever sees its own pile.
 
@@ -652,7 +653,7 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
         discoveries = cursor.fetchone()[0] or 0
 
         cursor.execute(
-            f"""SELECT date(lh.played_at) AS d, COALESCE(SUM({play_duration_sql('lh')}), 0)
+            f"""SELECT date(lh.played_at, 'localtime') AS d, COALESCE(SUM({play_duration_sql('lh')}), 0)
                 FROM listening_history lh
                 WHERE {window} AND {scope}
                 GROUP BY d"""

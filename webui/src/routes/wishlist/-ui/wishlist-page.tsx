@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useRoutedArtists } from '@/features/audiobook-routes/audiobook-routes.queries';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
@@ -36,6 +36,12 @@ import {
   wishlistZones,
 } from '../-wishlist.helpers';
 import { useLiveWishlist } from '../-wishlist.live';
+import {
+  startWishlistDownload,
+  stopWishlistRun,
+  useWishlistRun,
+  type WishlistRunScope,
+} from '../-wishlist.run';
 import { Route } from '../route';
 import { NebulaStage, NebulaZone } from './nebula-parts';
 import { VideoWishlist } from './video-wishlist';
@@ -228,9 +234,78 @@ function MusicWishlistPage() {
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: WISHLIST_QUERY_KEY });
 
-  const { processing } = useLiveWishlist(() => {
+  const { processing: liveProcessing, batchId: liveBatchId } = useLiveWishlist(() => {
     void refresh();
   });
+  // the id from our own start shows the strip at once; the live poll takes over
+  // within a tick and also picks up runs the auto timer started
+  const [startedBatchId, setStartedBatchId] = useState<string | null>(null);
+  useEffect(() => {
+    if (liveBatchId) setStartedBatchId(null);
+  }, [liveBatchId]);
+  const runBatchId = liveBatchId ?? startedBatchId;
+  const processing = liveProcessing || startedBatchId !== null;
+  const run = useWishlistRun(runBatchId);
+  // our own start never confirmed by the live poll (a run that settled in
+  // under a tick, or a batch already cleaned up) must not pin the strip open
+  useEffect(() => {
+    if (!startedBatchId) return;
+    if (run?.stage === 'finished' || run?.stage === 'stopped') {
+      setStartedBatchId(null);
+      return;
+    }
+    const timer = window.setTimeout(() => setStartedBatchId(null), 15000);
+    return () => window.clearTimeout(timer);
+  }, [startedBatchId, run?.stage]);
+  // say how it went once the run is over, the strip is gone by then
+  const lastRun = useRef<typeof run>(null);
+  useEffect(() => {
+    if (processing) {
+      if (run) lastRun.current = run;
+      return;
+    }
+    const finished = lastRun.current;
+    lastRun.current = null;
+    if (finished && finished.total > 0) {
+      window.showToast?.(
+        `Wishlist run done: ${finished.done} downloaded${finished.failed ? `, ${finished.failed} failed` : ''}`,
+        finished.failed ? 'warning' : 'success',
+      );
+    }
+  }, [processing, run]);
+
+  const startRun = useMutation({
+    mutationFn: (scope: WishlistRunScope) => startWishlistDownload(scope),
+    onSuccess: (result) => {
+      if (result.alreadyRunning) {
+        window.showToast?.('The wishlist is already downloading', 'info');
+        return;
+      }
+      if (result.batchId) setStartedBatchId(result.batchId);
+    },
+    onError: (error: Error) => window.showToast?.(`Could not start: ${error.message}`, 'error'),
+  });
+
+  const stopRun = useMutation({
+    mutationFn: (batchId: string) => stopWishlistRun(batchId),
+    onSuccess: () => {
+      setStartedBatchId(null);
+      window.showToast?.('Stopped. Downloads already running will finish.', 'success');
+    },
+    onError: (error: Error) => window.showToast?.(`Could not stop: ${error.message}`, 'error'),
+  });
+
+  const onStopRun = async () => {
+    if (!runBatchId) return;
+    const confirmed = await window.showConfirmDialog?.({
+      title: 'Stop downloading?',
+      message: 'Nothing new will start. Tracks already downloading will finish.',
+      confirmText: 'Stop',
+      destructive: true,
+    });
+    if (confirmed === false) return;
+    stopRun.mutate(runBatchId);
+  };
 
   // The countdown lives in downloads.js: it is bound to wishlistCountdownInterval,
   // socketConnected and _lastWishlistStats, all module-scoped, and writes into
@@ -714,14 +789,87 @@ function MusicWishlistPage() {
                     </button>
                   )}
                 />
-                <button
-                  type="button"
-                  className="wlp-btn wlp-btn--primary"
-                  onClick={() => void window._nebulaDownload?.()}
-                >
-                  <span aria-hidden="true">⬇ </span>Download Wishlist
-                </button>
+                <div className="wlp-split" role="group" aria-label="Download the wishlist">
+                  <button
+                    type="button"
+                    className="wlp-btn wlp-btn--primary wlp-split-main"
+                    disabled={processing || startRun.isPending || total === 0}
+                    title="Download every wanted track now"
+                    onClick={() => startRun.mutate('all')}
+                  >
+                    <span aria-hidden="true">⬇ </span>
+                    {processing
+                      ? 'Downloading…'
+                      : startRun.isPending
+                        ? 'Starting…'
+                        : 'Download now'}
+                  </button>
+                  <ActionMenu
+                    className="wlp-menu"
+                    items={[
+                      {
+                        key: 'all',
+                        label: `Everything (${total})`,
+                        disabled: total === 0,
+                        onSelect: () => startRun.mutate('all'),
+                      },
+                      {
+                        key: 'albums',
+                        label: `Albums & EPs only (${albumCount})`,
+                        disabled: albumCount === 0,
+                        onSelect: () => startRun.mutate('albums'),
+                      },
+                      {
+                        key: 'singles',
+                        label: `Singles only (${singleCount})`,
+                        disabled: singleCount === 0,
+                        onSelect: () => startRun.mutate('singles'),
+                      },
+                    ]}
+                    trigger={(props) => (
+                      <button
+                        type="button"
+                        className="wlp-btn wlp-btn--primary wlp-split-more"
+                        aria-label="Choose what to download"
+                        disabled={processing || startRun.isPending}
+                        {...props}
+                        ref={props.ref as (el: HTMLButtonElement | null) => void}
+                      >
+                        ▾
+                      </button>
+                    )}
+                  />
+                </div>
               </div>
+
+              {processing ? (
+                <div className="wlp-run" role="status" aria-live="polite">
+                  <div className="wlp-run-head">
+                    <span className="wlp-run-label">{run?.label ?? 'Starting…'}</span>
+                    <span className="wlp-run-actions">
+                      <button
+                        type="button"
+                        className="wlp-btn"
+                        // the old modal, opened on the run that's already going
+                        onClick={() => void window._nebulaDownload?.()}
+                      >
+                        View details
+                      </button>
+                      <button
+                        type="button"
+                        className="wlp-btn"
+                        disabled={!runBatchId || stopRun.isPending}
+                        onClick={() => void onStopRun()}
+                      >
+                        {stopRun.isPending ? 'Stopping…' : 'Stop'}
+                      </button>
+                    </span>
+                  </div>
+                  <div className="wlp-run-bar">
+                    <i style={{ width: `${Math.round((run?.fraction ?? 0) * 100)}%` }} />
+                  </div>
+                </div>
+              ) : null}
 
               {view === 'list' ? (
                 <WishlistList

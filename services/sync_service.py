@@ -1343,6 +1343,22 @@ class PlaylistSyncService:
         """
         return await asyncio.to_thread(self._find_track_blocking, spotify_track, candidate_pool)
 
+    def _match_was_rejected(self, spotify_track, server_source, library_track_id) -> bool:
+        """whether the user unmatched this source track from this library track
+        on the server playlist compare view."""
+        try:
+            from core.sync.match_overrides import is_rejected_match, match_lookup_ids
+            from core.artists.map import get_current_profile_id
+            from database.music_database import MusicDatabase
+            ids = match_lookup_ids(spotify_track)
+            if not ids:
+                return False
+            profile_id = _sync_profile_id.get() or get_current_profile_id()
+            return is_rejected_match(MusicDatabase(), profile_id, server_source, ids, library_track_id)
+        except Exception as e:
+            logger.debug("rejected-match check failed: %s", e)
+            return False
+
     def _find_track_blocking(self, spotify_track: SpotifyTrack, candidate_pool: Optional[Dict[str, list]] = None) -> Tuple[Optional[TrackInfo], float]:
         """Find a track using the same improved database matching as Download Missing Tracks modal"""
         try:
@@ -1421,6 +1437,13 @@ class PlaylistSyncService:
                                     f"{cached['server_track_id']} no longer matches under "
                                     f"current rules; dropping the cached pairing")
                                 drop_stale_cached_match(cache_db, _match_id, active_server)
+                            elif self._match_was_rejected(spotify_track, active_server,
+                                                          cached['server_track_id']):
+                                # the discovered id can carry a cache row the
+                                # unmatch (keyed by the playlist's id) never saw
+                                cache_db.delete_sync_match_cache(
+                                    _match_id, active_server,
+                                    server_track_id=cached['server_track_id'])
                             else:
                                 logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
                                 return actual_track, cached['confidence']
@@ -1508,6 +1531,11 @@ class PlaylistSyncService:
                         )
                         if _cand_conf > confidence:
                             db_track, confidence = _cand_track, _cand_conf
+
+                    if db_track and confidence >= 0.7 and self._match_was_rejected(
+                            spotify_track, active_server, db_track.id):
+                        logger.info(f"Skipping '{db_track.title}' for '{original_title}': the user unmatched that pairing")
+                        db_track, confidence = None, 0.0
 
                     if db_track and confidence >= 0.7:
                         logger.debug(f"Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")

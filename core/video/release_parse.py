@@ -87,6 +87,61 @@ def _first(table, text) -> Any:
 _YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
 
 
+# audio language tags, the way the scene writes them. a bare release with no
+# tag is the original audio. subs-only tags (VOSTFR, SUBFRENCH, FRENCH.SUBS)
+# are not audio and never count.
+_LANG_TAGS = (
+    ("fr", r"truefrench|french|vff|vfq|vfi|vf2|vof|vf"),
+    ("de", r"german|deutsch"),
+    ("it", r"italian|ita"),
+    ("es", r"spanish|castellano|latino|esp|spa"),
+    ("pt", r"portuguese|dublado|nacional|pt-?br"),
+    ("ja", r"japanese|jpn"),
+    ("ko", r"korean|kor"),
+    ("zh", r"chinese|mandarin|cantonese"),
+    ("ru", r"russian|rus"),
+    ("pl", r"polish|pldub"),
+    ("nl", r"dutch|flemish"),
+    ("sv", r"swedish"),
+    ("da", r"danish"),
+    ("no", r"norwegian"),
+    ("fi", r"finnish"),
+    ("hi", r"hindi"),
+    ("tr", r"turkish"),
+    ("cs", r"czech"),
+    ("hu", r"hungarian"),
+    ("ar", r"arabic"),
+    ("uk", r"ukrainian"),
+    ("en", r"english|eng"),
+)
+_EDGE_L, _EDGE_R = r"(?<![a-z0-9])", r"(?![a-z0-9])"
+_LANG_RX = [(code, re.compile(_EDGE_L + "(?:" + words + ")" + _EDGE_R
+                              + r"(?![ ._-]?(?:subs?|subbed|subtitles?)" + _EDGE_R + ")", re.I))
+            for code, words in _LANG_TAGS]
+# MULTi / DUAL / Dual Audio, and the german 'GERMAN.DL' (dual language)
+_MULTI_RX = re.compile(_EDGE_L + r"(?:multi|dual(?:[ ._-]?audio)?"
+                       r"|(?<=german[ ._-]|french[ ._-])dl|(?<=italian[ ._-]|deutsch[ ._-])dl)"
+                       + _EDGE_R, re.I)
+
+
+def parse_languages(title: Any) -> tuple:
+    """(audio language codes, multi) from a release name's tags. only the part
+    after the title counts, so 'The.French.Dispatch.2021...' isn't french."""
+    t = str(title or "")
+    cut = None
+    years = list(_YEAR_TOKEN.finditer(t))
+    if years and _spaces(t[:years[-1].start()]):
+        cut = years[-1].start()
+    m = _META_BOUNDARY.search(t)
+    if m and _spaces(t[:m.start()]) and (cut is None or m.start() < cut):
+        cut = m.start()
+    if cut is None:
+        return [], False
+    tail = t[cut:]
+    codes = [code for code, rx in _LANG_RX if rx.search(tail)]
+    return codes, bool(_MULTI_RX.search(tail))
+
+
 def parse_release(title: Any) -> dict:
     """Parse a release name into quality + scope fields. Never raises."""
     t = str(title or "")
@@ -111,6 +166,7 @@ def parse_release(title: Any) -> dict:
         "is_season_pack": False,
         "is_series_pack": False,
     }
+    out["languages"], out["multi"] = parse_languages(t)
     # a DVD remux ('Duckman S01 NTSC DVD REMUX') is a disc at SD, not a
     # resolution-less blu-ray remux: read as remux it had no tier at all
     if (out["source"] == "remux" and not out["resolution"]

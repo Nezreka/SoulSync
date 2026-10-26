@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import re
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
 
@@ -50,8 +52,7 @@ def artist_letter(artist, symbol_fallback=None):
     literal = (artist or "U")[0].upper()
     if symbol_fallback is None:
         try:
-            from core.settings import config_manager
-            symbol_fallback = bool(config_manager.get(
+            symbol_fallback = bool(_get_config_manager().get(
                 "file_organization.artistletter_symbol_fallback", False))
         except Exception:   # config unavailable → historical behavior
             symbol_fallback = False
@@ -64,17 +65,52 @@ def artist_letter(artist, symbol_fallback=None):
     return lead if "A" <= lead <= "Z" else "#"
 
 
+# #1868: the settings page previews templates with values it hasn't saved
+# yet. set only inside preview_settings(); everyone else reads the real config.
+_PREVIEW_OVERRIDES: contextvars.ContextVar = contextvars.ContextVar(
+    "path_preview_overrides", default=None)
+
+
+class _PreviewConfig:
+    """the real config with a few keys answered from the preview instead."""
+
+    def __init__(self, base, overrides: dict):
+        self._base = base
+        self._overrides = overrides
+
+    def get(self, key, default=None):
+        if key in self._overrides:
+            return self._overrides[key]
+        return self._base.get(key, default)
+
+    def __getattr__(self, name):
+        return getattr(self._base, name)
+
+
+@contextmanager
+def preview_settings(overrides: dict):
+    """answer these config keys ("file_organization.disc_label" and so on)
+    from ``overrides`` for path building on this thread, nothing saved."""
+    token = _PREVIEW_OVERRIDES.set(dict(overrides or {}))
+    try:
+        yield
+    finally:
+        _PREVIEW_OVERRIDES.reset(token)
+
+
 def _get_config_manager():
     try:
         from core.settings import config_manager
-        return config_manager
+        base = config_manager
     except Exception:
         class _FallbackConfig:
             @staticmethod
             def get(key, default=None):
                 return default
 
-        return _FallbackConfig()
+        base = _FallbackConfig()
+    overrides = _PREVIEW_OVERRIDES.get()
+    return _PreviewConfig(base, overrides) if overrides else base
 
 
 def _extract_year_from_release_date(release_date) -> str:
@@ -385,8 +421,54 @@ def _truncate_utf8_bytes(value: str, max_bytes: int) -> str:
     return value[:1] if value else value
 
 
+# lookalikes that are legal on windows, smb, macos and linux (#1867, QT3496).
+# '"' is left out: it turns into curly quotes by position.
+_LOOKALIKES = {
+    ":": "\ua789",  # ꞉ modifier letter colon
+    "?": "\uff1f",  # ？ fullwidth question mark
+    "/": "\u2215",  # ∕ division slash
+    "\\": "\u29f5",  # ⧵ reverse solidus operator
+    "*": "\u204e",  # ⁎ low asterisk
+    "|": "\u2502",  # │ light vertical bar
+    "<": "\u2039",  # ‹ single left angle quote
+    ">": "\u203a",  # › single right angle quote
+}
+
+
+def unicode_substitution_enabled() -> bool:
+    """file_organization.unicode_substitution, off unless turned on."""
+    try:
+        return bool(_get_config_manager().get("file_organization.unicode_substitution", False))
+    except Exception:   # config unavailable → underscores, as always
+        return False
+
+
+def substitute_lookalikes(name: str) -> str:
+    """swap windows-forbidden characters for lookalikes instead of '_'.
+
+    'AC/DC' → 'AC∕DC', 'What's Going On?' → 'What's Going On？'. a quote opens
+    at the start or after a space or bracket and closes anywhere else. trailing
+    dots become one dot leaders ('DAMN.' → 'DAMN․') so windows can't eat them.
+    not the fullwidth stop: it is twice as wide and reads as ". " (#1873).
+    leading dots are left alone: the caller still strips those (#1129)."""
+    out = []
+    for i, ch in enumerate(name):
+        if ch == '"':
+            prev = name[i - 1] if i else " "
+            out.append("\u201c" if prev.isspace() or prev in "([{" else "\u201d")
+        else:
+            out.append(_LOOKALIKES.get(ch, ch))
+    text = "".join(out).rstrip()
+    body = text.rstrip(".")
+    if body.strip(". "):
+        text = body + "\u2024" * (len(text) - len(body))
+    return text
+
+
 def sanitize_filename(filename: str) -> str:
     """Sanitize filename for file system compatibility."""
+    if unicode_substitution_enabled():
+        filename = substitute_lookalikes(re.sub(r"\s+", " ", filename).strip())
     sanitized = re.sub(r'[<>:"/\\|?*]', "_", filename)
     sanitized = re.sub(r"\s+", " ", sanitized).strip()
     # Windows forbids TRAILING dots/spaces; Unix hides anything with a LEADING
@@ -532,9 +614,108 @@ def _first_album_artist_id(album_ctx) -> str:
     return str(first.get("id") or "").strip() if isinstance(first, dict) else ""
 
 
+def explicit_flag(value) -> Optional[bool]:
+    """True / False when the source said explicit or not, None when it didn't say.
+
+    sources spell it as a bool, 0/1, or apple's trackExplicitness words."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in ("true", "1", "yes", "explicit"):
+            return True
+        if word in ("false", "0", "no", "notexplicit", "cleaned", "clean"):
+            return False
+    return None
+
+
+# longest first: $contentratingfull starts with $contentrating
+_CONTENT_RATING_TOKENS = ("contentratingfull", "contentrating", "explicit")
+
+
+def _content_rating_values(flag: Optional[bool]) -> dict:
+    if flag is True:
+        return {"explicit": "[E]", "contentrating": "[E]", "contentratingfull": "[Explicit]"}
+    if flag is False:
+        return {"explicit": "", "contentrating": "[C]", "contentratingfull": "[Clean]"}
+    return {"explicit": "", "contentrating": "", "contentratingfull": ""}
+
+
+def apply_content_rating(template: str, track_explicit=None, album_explicit=None) -> str:
+    """Fill $explicit, $contentrating and $contentratingfull (#1860).
+
+    the filename reads the track's flag, folders read the album's: tracks of
+    one album can differ, and a per-track value in a folder would split the
+    album across two directories. unknown renders nothing, never a guess."""
+    if not template or "$" not in template:
+        return template
+    folder, sep, filename = template.rpartition("/")
+
+    def fill(part, flag):
+        values = _content_rating_values(explicit_flag(flag))
+        for name in _CONTENT_RATING_TOKENS:
+            part = part.replace("${" + name + "}", values[name]).replace("$" + name, values[name])
+        return part
+
+    if not sep:
+        return fill(template, track_explicit)
+    return fill(folder, album_explicit) + sep + fill(filename, track_explicit)
+
+
+# #1859: what tells same-named artists apart. replaced before $albumartist and
+# $artist, which would otherwise eat the front of these names.
+_ARTIST_FACT_NAMES = ("disambiguation", "country", "genre", "info", "composite", "clash")
+_ARTIST_FACT_RE = re.compile(
+    r"\$\{?(?:albumartist|artist)(?:disambiguation|country|genre|info|composite|clash)(?![a-z])")
+
+
+def apply_artist_facts(template: str, album_artist: str, track_artist: str, context: dict) -> str:
+    """Fill $albumartist{disambiguation,country,genre,info,composite,clash} and
+    the $artist... set for the track artist.
+
+    info is the first of disambiguation, country, genre. composite is the
+    disambiguation, else country and genre together ("US Rock"). clash is info, but
+    only when another artist in the library has the same name, so unique
+    artists keep a plain folder. all of it comes from what enrichment
+    stored; an artist the library doesn't know renders nothing."""
+    if not template or not _ARTIST_FACT_RE.search(template):
+        return template
+    from core.imports.artist_facts import artist_facts, composite_chain, info_chain
+    preset = context.get("_artist_facts")
+    if isinstance(preset, dict):
+        # the settings preview's made-up artists (#1868), not the library's
+        album = preset.get("album") or {}
+        track = preset.get("track") or album
+    else:
+        album = artist_facts(album_artist, mbid=context.get("_albumartist_mbid"),
+                             source=context.get("_albumartist_source"),
+                             source_id=context.get("_albumartist_source_id"))
+        same = str(track_artist or "").casefold() == str(album_artist or "").casefold()
+        track = album if same else artist_facts(track_artist)
+    result = template
+    for prefix, facts in (("albumartist", album), ("artist", track)):
+        info = info_chain(facts)
+        values = {
+            "disambiguation": facts.get("disambiguation", ""),
+            "country": facts.get("country", ""),
+            "genre": facts.get("genre", ""),
+            "info": info,
+            "composite": composite_chain(facts),
+            "clash": info if facts.get("clash") else "",
+        }
+        for name in _ARTIST_FACT_NAMES:
+            value = sanitize_filename(values[name]) if values[name] else ""
+            result = result.replace("${" + prefix + name + "}", value)
+            result = re.sub(r"\$" + prefix + name + r"(?![a-z])", lambda _m, v=value: v, result)
+    return result
+
+
 def _replace_template_variables(template: str, context: dict) -> str:
     clean_context = sanitize_context_values(context)
-    result = template
+    result = apply_content_rating(template, context.get("explicit"), context.get("album_explicit"))
+    template = result
 
     album_artist_value = clean_context.get("albumartist", clean_context.get("artist", "Unknown Artist"))
     collab_mode = _get_config_manager().get("file_organization.collab_artist_mode", "first")
@@ -590,6 +771,13 @@ def _replace_template_variables(template: str, context: dict) -> str:
     else:
         letter_artist_name = clean_context.get("artist", "U")
     artist_letter_value = artist_letter(letter_artist_name)
+
+    # the name the library knows the album artist by: the raw one, since the
+    # sanitized folder name ("AC_DC") isn't what the artists table holds
+    _facts_album_artist = (
+        str(context.get("albumartist") or context.get("artist") or "")
+        if album_artist_value == clean_context.get("albumartist") else album_artist_value)
+    result = apply_artist_facts(result, _facts_album_artist, context.get("artist"), context)
 
     bracket_map = {
         "albumartist": album_artist_value,
@@ -768,6 +956,14 @@ def template_uses_disc_variable(template: str) -> bool:
     """
     return any(token in (template or "")
                for token in ("$disc", "$cdnum", "${disc", "${cdnum"))
+
+
+def auto_disc_folder(template: str, total_discs: int, disc_number: int, disc_label: str) -> str:
+    """the "Disc 2" folder added under a multi-disc album, or "" when the album
+    has one disc or the template places the disc itself."""
+    if total_discs <= 1 or template_uses_disc_variable(template):
+        return ""
+    return f"{disc_label} {disc_number}"
 
 
 def _clean_folder_segment(part: str, disc_value: str, disc_value_raw: str,
@@ -1076,6 +1272,17 @@ def _configured_root_dirs() -> set[str]:
     return roots
 
 
+def _artist_identity(artist_context, source) -> dict:
+    """the ids that pin down which library artist this is (#1859)."""
+    if not isinstance(artist_context, dict):
+        return {}
+    return {
+        "_albumartist_mbid": str(artist_context.get("musicbrainz_id") or ""),
+        "_albumartist_source": str(source or ""),
+        "_albumartist_source_id": str(artist_context.get("id") or ""),
+    }
+
+
 def build_final_path_for_track(context, artist_context, album_info, file_ext, create_dirs: bool = True):
     """Shared path builder used by both post-processing and verification.
 
@@ -1367,6 +1574,11 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             # Record label for $label (MusicBrainz label-info; empty when
             # the source didn't provide one).
             "label": str((album_context or {}).get("label") or "").strip(),
+            # #1860: $explicit / $contentrating
+            "explicit": (track_info or {}).get("explicit"),
+            "album_explicit": (album_context or {}).get("explicit"),
+            # #1859: who the album artist is, for $albumartistinfo and friends
+            **_artist_identity(artist_context, source),
         }
         # A caller that KNOWS the disc count is authoritative: re-deriving it from
         # a live provider tracklist made the destination depend on whether that
@@ -1412,16 +1624,9 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         _template_key = "compilation_path" if raw_album_type in ("compilation", "compile", "compilations") else "album_path"
 
         album_template = _get_config_manager().get("file_organization.templates", {}).get(_template_key, "") or ""
-        # Suppress the auto-injected disc folder when the user already
-        # encodes the disc in the filename via $disc, $discnum, or $cdnum.
-        user_controls_disc = (
-            "$disc" in album_template
-            or "$cdnum" in album_template
-            or "${disc}" in album_template
-            or "${discnum}" in album_template
-            or "${cdnum}" in album_template
-        )
         disc_label = _get_config_manager().get("file_organization.disc_label", "Disc")
+        # no auto disc folder when the template places the disc itself
+        disc_folder = auto_disc_folder(album_template, total_discs, disc_number, disc_label)
 
         folder_path, filename_base = get_file_path_from_template(template_context, _template_key)
 
@@ -1494,8 +1699,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             # a path that is not how the directory is actually spelled.
             # Resolved once and used for BOTH the created directory and the
             # returned path, so the two can never disagree.
-            if total_discs > 1 and not user_controls_disc:
-                disc_folder = f"{disc_label} {disc_number}"
+            if disc_folder:
                 album_dir = resolve_existing_case_dir(
                     transfer_dir, os.path.join(folder_path, disc_folder))
             else:
@@ -1559,6 +1763,10 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         "_itunes_artist_id": _itunes_aid,
         # #1536: recording disambiguation for the single filename.
         "track_disambiguation": str((track_info or {}).get("disambiguation") or "").strip(),
+        # #1860: $explicit / $contentrating
+        "explicit": (track_info or {}).get("explicit"),
+        "album_explicit": (_album_ctx or {}).get("explicit"),
+        **_artist_identity(artist_context, source),
     }
 
     folder_path, filename_base = get_file_path_from_template(template_context, "single_path")

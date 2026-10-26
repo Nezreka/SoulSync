@@ -175,6 +175,13 @@ def process_download(
                 # of waiting turns an epub into a book you can listen to
                 patch["status"] = "failed"
                 patch["error"] = "No audio in this download, only other files (an ebook?)"
+            elif verdict.get("overshoot"):
+                # far longer than the book: a different title that shares its
+                # words, or a whole series. it never gets shorter, so staging it
+                # held the wishlist row for staging_days with nothing to wait
+                # for. failing blocks this release and goes on to the next (#1833)
+                patch["status"] = "failed"
+                patch["error"] = f"Wrong release: {verdict.get('reason') or 'far longer than the book'}"
             elif verdict.get("expired"):
                 patch["status"] = "failed"
                 patch["error"] = (

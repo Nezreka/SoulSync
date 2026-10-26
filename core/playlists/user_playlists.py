@@ -41,11 +41,14 @@ USER_PLAYLIST_SOURCE = 'soulsync'
 LIKED_SOURCE_ID = 'liked'
 LIKED_NAME = 'Liked Songs'
 
-# sources with nothing upstream to pull from. refresh skips them; the
+# sources with nothing upstream to pull from (a newpipe import is a phone
+# backup, re-imported by hand). refresh skips them; the
 # pipeline still runs identify / sync / download on them. beatport isn't one:
 # a beatport mirror keyed by its list ref refreshes like any other source,
 # only an old random-hash mirror or a release doesn't (has_upstream).
-NO_UPSTREAM_SOURCES = ('file', USER_PLAYLIST_SOURCE)
+# 'metasync' charts are pushed by the MetaSync node each week
+# (core/metasync_charts.py updates every copy), never pulled.
+NO_UPSTREAM_SOURCES = ('file', USER_PLAYLIST_SOURCE, 'newpipe', 'metasync')
 
 # sources the pipeline won't run at all (it 400s them). user playlists are
 # NOT in here, they get the whole pipeline. beatport is decided per mirror
@@ -525,12 +528,14 @@ def set_cover_from_track(db: Any, playlist: Dict[str, Any], position: Any) -> st
 
 
 def remove_cover_file(playlist_id: int, base_dir: Optional[str] = None) -> None:
-    """best-effort delete of an uploaded cover file. only user playlists ever
-    have one, so after any mirror delete this is a no-op for the rest."""
+    """best-effort delete of a playlist's cover file: an upload, or a generated
+    cover and any preview left over. a no-op for playlists with neither."""
     try:
         os.remove(cover_path(playlist_id, base_dir))
     except OSError:
         pass
+    from core.playlists import cover_art
+    cover_art.discard_preview(playlist_id, base_dir)
 
 
 def clear_cover(db: Any, playlist: Dict[str, Any], *, base_dir: Optional[str] = None) -> None:

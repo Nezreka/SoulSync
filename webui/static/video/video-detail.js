@@ -383,6 +383,7 @@
         renderActions(d);
         renderHealth(d);
         renderEssentials(d);
+        renderTypeChip(d);
 
         var l = q('[data-vd-links]');
         if (l && d.source === 'tmdb') {
@@ -456,6 +457,72 @@
         }
         host.innerHTML = chips.filter(Boolean).join('');
         host.hidden = !chips.length;
+    }
+
+    // Type chip on a show NOT in the library yet (TMDB preview page): which
+    // folder its episodes will be filed in once grabbed -- TV or Anime. Shown
+    // only when an Anime folder is set. The type is stored server-side when the
+    // show is followed / wished / approved (TMDB's suggestion); an admin can
+    // change it here. A show IN the library takes its type from its library
+    // (or by hand in Manage), so this chip is for previews only.
+    var TYPE_LABELS = { standard: 'TV', daily: 'Daily', anime: 'Anime' };
+    function renderTypeChip(d) {
+        var host = q('[data-vd-essentials]');
+        if (!host || !d || d.kind !== 'show' || d.source !== 'tmdb' || !d.tmdb_id || d.owned) return;
+        var admin = _canManualMatch();
+        var url = '/api/video/detail/tmdb/show/' + encodeURIComponent(d.tmdb_id) + '/series-type';
+        fetch(url + (admin ? '?suggest=1' : ''), { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (t) {
+                if (!t || t.owned || !t.anime_folder || data !== d) return;
+                var old = host.querySelector('[data-vd-type-chip]');
+                if (old) old.remove();
+                var chip = document.createElement('span');
+                chip.className = 'vd-essential vd-essential--type';
+                chip.setAttribute('data-vd-type-chip', '');
+                chip.title = t.source === 'hint-user' ? 'Set by an admin'
+                    : t.source === 'hint-tmdb' ? 'Suggested by TMDB' : 'Not set yet: files with TV';
+                var k = document.createElement('span');
+                k.className = 'vd-essential-k';
+                k.textContent = 'Files as';
+                chip.appendChild(k);
+                if (admin) {
+                    var sel = document.createElement('select');
+                    sel.className = 'vd-essential-v vd-type-select';
+                    sel.setAttribute('aria-label', 'File this show as');
+                    ['standard', 'anime', 'daily'].forEach(function (v) {
+                        var o = document.createElement('option');
+                        o.value = v;
+                        o.textContent = TYPE_LABELS[v];
+                        if (v === t.series_type) o.selected = true;
+                        sel.appendChild(o);
+                    });
+                    sel.addEventListener('change', function () {
+                        fetch(url, { method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                            body: JSON.stringify({ series_type: sel.value }) })
+                            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+                            .then(function (res) {
+                                if (!res.ok || !res.j.success) throw new Error((res.j && res.j.error) || 'save failed');
+                                chip.title = 'Set by an admin';
+                                toast('Will file as ' + TYPE_LABELS[sel.value], 'success');
+                            })
+                            .catch(function (e) {
+                                sel.value = t.series_type;
+                                toast('Could not save: ' + e.message, 'error');
+                            });
+                    });
+                    chip.appendChild(sel);
+                } else {
+                    var v = document.createElement('span');
+                    v.className = 'vd-essential-v';
+                    v.textContent = TYPE_LABELS[t.series_type] || 'TV';
+                    chip.appendChild(v);
+                }
+                host.appendChild(chip);
+                host.hidden = false;
+            })
+            .catch(function () { /* a chip, never an error */ });
     }
     // OMDb Awards line ("Won 2 Oscars. 154 wins & 87 nominations total.") — the
     // overlay system already fetches it; the detail page finally shows it.
@@ -1088,39 +1155,35 @@
         kick();   // the TMDB title is pre-filled — search it immediately
     }
 
-    // Remove a hand-made link. Two-click arm (no native confirm anywhere on
-    // this page): first click arms, second click unlinks.
-    function unlinkManualMatch(btn) {
+    // Remove a hand-made link. The button lives in the More menu, which
+    // closes on any pick, so a two-click arm never got its second click.
+    // Ask with the SoulSync confirm modal instead.
+    function unlinkManualMatch() {
         if (!data || data.source === 'tmdb' || !data._mm_tmdb) return;
-        if (!btn.getAttribute('data-vht-armed')) {
-            btn.setAttribute('data-vht-armed', '1');
-            btn.innerHTML = '<span class="vd-manage-ic">\uD83D\uDD17</span> Click again to unlink';
-            setTimeout(function () {
-                if (data && data._mm_tmdb && !btn.getAttribute('data-vht-done')) renderActions(data);
-            }, 4000);
-            return;
-        }
-        btn.setAttribute('data-vht-done', '1');
-        btn.disabled = true;
-        fetch('/api/video/manual-match', {
-            method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ kind: data.kind, tmdb_id: data._mm_tmdb })
-        })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (res) {
-                if (res && res.success) {
-                    data._mm_tmdb = null; data._mm_checked = false;
-                    toast('Manual link removed');
-                    renderActions(data);
-                } else {
-                    btn.disabled = false;
-                    toast('Couldn\u2019t remove the link', 'error');
-                }
+        var d = data;
+        var doUnlink = function () {
+            fetch('/api/video/manual-match', {
+                method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind: d.kind, tmdb_id: d._mm_tmdb })
             })
-            .catch(function () {
-                btn.disabled = false;
-                toast('Couldn\u2019t reach the server', 'error');
-            });
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (res && res.success) {
+                        d._mm_tmdb = null;
+                        toast('Manual link removed');
+                        if (data === d) renderActions(d);
+                    } else {
+                        toast('Couldn\u2019t remove the link', 'error');
+                    }
+                })
+                .catch(function () { toast('Couldn\u2019t reach the server', 'error'); });
+        };
+        if (typeof showConfirmDialog !== 'function') { doUnlink(); return; }
+        showConfirmDialog({ title: 'Remove manual link',
+            message: '\u201c' + (d.title || 'This title') + '\u201d was linked to your library by hand. ' +
+                'Remove the link? The TMDB page will read as not in your library again.',
+            confirmText: 'Unlink', cancelText: 'Cancel', destructive: true })
+            .then(function (ok) { if (ok) doUnlink(); });
     }
 
     // Continue Watching: played/unplayed toggle → POST /detail/<kind>/<id>/watched
@@ -3375,7 +3438,7 @@
             else if (which === 'sync-movie') syncMovieNow(act);
             else if (which === 'watched-toggle') toggleWatchedState(act);
             else if (which === 'ihavethis') openHaveThisModal();
-            else if (which === 'unlink') unlinkManualMatch(act);
+            else if (which === 'unlink') unlinkManualMatch();
             else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);

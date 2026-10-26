@@ -872,7 +872,10 @@ export function findingsBulkBarState(
  * even when nothing actually failed.
  */
 export function bulkFixRunMessage(
-  status: Pick<BulkFixStatus, 'fixed' | 'failed' | 'total' | 'stopped' | 'errors'>,
+  status: Pick<
+    BulkFixStatus,
+    'fixed' | 'failed' | 'total' | 'stopped' | 'error' | 'note' | 'errors'
+  >,
 ): { message: string; type: 'success' | 'error' } {
   const fixed = status.fixed || 0;
   const failed = status.failed || 0;
@@ -880,8 +883,19 @@ export function bulkFixRunMessage(
   if (status.stopped) {
     message = `Bulk fix stopped — ${message.charAt(0).toLowerCase()}${message.slice(1)}`;
   }
-  const errors = status.errors;
-  if (errors && errors.length > 0) message += `: ${errors[0].error}`;
+  // A run-level error (e.g. the LRCLib circuit breaker stopping the
+  // run, #1879) explains WHY the run stopped — prefer it over the
+  // first per-finding error. A run-level note (the breaker skipping
+  // the remaining lyrics findings in a mixed run that otherwise
+  // completed) takes the same slot.
+  if (status.stopped && status.error) {
+    message += `: ${status.error}`;
+  } else if (status.note) {
+    message += `: ${status.note}`;
+  } else {
+    const errors = status.errors;
+    if (errors && errors.length > 0) message += `: ${errors[0].error}`;
+  }
   return { message, type: fixed > 0 ? 'success' : 'error' };
 }
 

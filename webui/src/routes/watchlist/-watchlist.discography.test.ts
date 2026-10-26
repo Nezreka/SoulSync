@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { pickDiscographySource } from './-ui/watchlist-artist-detail';
+import { pickDiscographySource } from './-ui/watchlist-artist-panel';
 
 const NONE = {
   spotify_artist_id: null,

@@ -32,7 +32,7 @@ _SOURCE_LABELS = {
     'spotify': 'Spotify', 'spotify_public': 'Spotify', 'deezer': 'Deezer', 'tidal': 'Tidal',
     'qobuz': 'Qobuz', 'youtube': 'YouTube', 'listenbrainz': 'ListenBrainz',
     'beatport': 'Beatport', 'file': 'File', 'itunes': 'Apple Music',
-    'soulsync': 'SoulSync',
+    'soulsync': 'SoulSync', 'newpipe': 'NewPipe',
 }
 
 

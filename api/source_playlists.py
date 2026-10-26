@@ -1442,6 +1442,51 @@ def get_tidal_playlists():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# a big tidal playlist takes minutes to page through (1s between pages). the
+# sync page's background crawl, the modal opening it and start identifying
+# each used to fetch it again from scratch, so start sat behind a second
+# multi-minute fetch while the modal showed nothing. one fetch per playlist
+# at a time, and start takes the one that just landed.
+_TIDAL_FETCH_HANDOFF_SECONDS = 300
+_tidal_fetch_lock = threading.Lock()
+_tidal_fetch_inflight = {}  # (id(client), playlist_id) -> Event
+_tidal_fetch_recent = {}  # playlist_id -> (client, fetched_at, playlist)
+
+
+def _fetch_tidal_playlist(client, playlist_id, *, reuse_recent=False):
+    """client.get_playlist, shared. an identical fetch already running is
+    waited on, not repeated. reuse_recent takes a fetch from the last few
+    minutes (once, so a re-run after that still gets fresh tracks)."""
+    key = (id(client), playlist_id)
+    while True:
+        with _tidal_fetch_lock:
+            if reuse_recent:
+                recent = _tidal_fetch_recent.get(playlist_id)
+                if (recent and recent[0] is client
+                        and time.time() - recent[1] < _TIDAL_FETCH_HANDOFF_SECONDS):
+                    del _tidal_fetch_recent[playlist_id]
+                    return recent[2]
+            pending = _tidal_fetch_inflight.get(key)
+            if pending is None:
+                done = threading.Event()
+                _tidal_fetch_inflight[key] = done
+                break
+        # someone else is fetching it. wait, then take theirs (or fetch, if
+        # theirs failed). a fresh fetch only waits; it does not reuse.
+        pending.wait()
+        reuse_recent = True
+    playlist = None
+    try:
+        playlist = client.get_playlist(playlist_id)
+        return playlist
+    finally:
+        with _tidal_fetch_lock:
+            if playlist is not None and playlist.tracks:
+                _tidal_fetch_recent[playlist_id] = (client, time.time(), playlist)
+            _tidal_fetch_inflight.pop(key, None)
+        done.set()
+
+
 @bp.route('/api/tidal/playlist/<playlist_id>', methods=['GET'])
 def get_tidal_playlist_tracks(playlist_id):
     """Fetches full track details for a specific Tidal playlist (matches sync.py pattern)."""
@@ -1455,7 +1500,7 @@ def get_tidal_playlist_tracks(playlist_id):
         # `get_playlist` recognizes the virtual `tidal-favorites` ID and
         # dispatches to the userCollectionTracks endpoint internally, so
         # the rest of this handler treats it identically to a real playlist.
-        full_playlist = client.get_playlist(playlist_id)
+        full_playlist = _fetch_tidal_playlist(client, playlist_id)
         if not full_playlist:
             return jsonify({"error": "Playlist not found or unable to access. This may be due to privacy settings or Tidal API restrictions."}), 404
 
@@ -1501,16 +1546,50 @@ def get_tidal_playlist_tracks(playlist_id):
 tidal_discovery_states = {}  # Key: playlist_id, Value: discovery state
 tidal_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="tidal_discovery")
 
+def _ensure_tidal_mirror(playlist_id, playlist, profile_id):
+    """the mirror for this tidal playlist: its skipped counts brought up to
+    date, or the whole mirror made from the playlist in hand when there is
+    none. an existing mirror's tracks are left to its own refresh."""
+    from core.playlists.sources.base import to_mirror_track_dict
+    from core.playlists.sources.tidal import TidalPlaylistSource
+    from database.music_database import get_database as _get_db
+
+    database = _get_db()
+    skipped = _playlist_skipped_counts(playlist)
+    if database.get_mirrored_playlist_by_source('tidal', str(playlist_id), profile_id):
+        database.set_mirrored_playlist_source_skipped(
+            'tidal', playlist_id, skipped, profile_id=profile_id)
+        return
+    source = TidalPlaylistSource(lambda: None)
+    meta = source._meta_from_playlist(playlist)
+    tracks = [to_mirror_track_dict(source._track_from_tidal(t, i))
+              for i, t in enumerate(playlist.tracks or [])]
+    database.mirror_playlist(
+        source='tidal',
+        source_playlist_id=str(playlist_id),
+        name=meta.name,
+        tracks=tracks,
+        profile_id=profile_id,
+        description=meta.description,
+        owner=meta.owner,
+        image_url=getattr(playlist, 'image_url', None),
+        source_skipped=skipped,
+    )
+    logger.info("mirrored tidal playlist '%s' at discovery start (%s tracks)", meta.name, len(tracks))
+
+
 @bp.route('/api/tidal/discovery/start/<playlist_id>', methods=['POST'])
 def start_tidal_discovery(playlist_id):
     """Start Spotify discovery process for a Tidal playlist"""
     try:
-        # Get playlist data from Tidal
-        if not _tidal_client() or not _tidal_client().is_authenticated():
+        # Get playlist data from Tidal. the same client the page listed and
+        # fetched the playlist with, or a profile's own private playlist 404s
+        client = get_tidal_client_for_profile() or _tidal_client()
+        if not client or not client.is_authenticated():
             return jsonify({"error": "Tidal not authenticated."}), 401
 
-        # Fetch this single playlist directly — no need to re-fetch all playlists
-        target_playlist = _tidal_client().get_playlist(playlist_id)
+        # the fetch the modal or the page's crawl just made, if there is one
+        target_playlist = _fetch_tidal_playlist(client, playlist_id, reuse_recent=True)
 
         if not target_playlist:
             return jsonify({"error": "Tidal playlist not found"}), 404
@@ -1518,15 +1597,15 @@ def start_tidal_discovery(playlist_id):
         if not target_playlist.tracks:
             return jsonify({"error": "Playlist has no tracks"}), 400
 
-        # a fresh fetch has fresh counts, keep the mirror's note current
+        # a fresh fetch has fresh counts, keep the mirror's note current. and
+        # a playlist with no mirror yet gets one here: the sync page only
+        # mirrors from its background crawl, which a big playlist (minutes to
+        # page through) could lose, and it then synced but never showed in
+        # the mirrored list
         try:
-            from database.music_database import get_database as _get_db
-            _get_db().set_mirrored_playlist_source_skipped(
-                'tidal', playlist_id, _playlist_skipped_counts(target_playlist),
-                profile_id=get_current_profile_id(),
-            )
+            _ensure_tidal_mirror(playlist_id, target_playlist, get_current_profile_id())
         except Exception as e:
-            logger.debug("tidal skipped counts not saved to mirror: %s", e)
+            logger.debug("tidal mirror not saved at discovery start: %s", e)
 
         # Initialize discovery state if it doesn't exist, or update existing state
         if playlist_id in tidal_discovery_states:

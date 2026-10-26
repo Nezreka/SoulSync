@@ -189,6 +189,16 @@ def _run_wishlist_cycle(
     logger = runtime.logger
     from core.wishlist.album_grouping import group_wishlist_tracks_by_album
 
+    # stopped while the manual run was still preparing: the placeholder is
+    # about to be rebuilt as the first album batch, which would quietly undo
+    # the cancel and start the downloads anyway
+    if first_batch_id is not None:
+        with runtime.tasks_lock:
+            placeholder = runtime.download_batches.get(first_batch_id) or {}
+            if placeholder.get('phase') == 'cancelled':
+                logger.info(f"[Manual-Wishlist] {first_batch_id} was stopped before dispatch")
+                return {'submitted': [], 'album_batches': 0, 'residual_count': 0}
+
     extra_fields = None
     if auto_initiated:
         extra_fields = {
@@ -480,6 +490,19 @@ def record_failed_attempt(wishlist_service, track_data, failure_reason, profile_
     except Exception as e:
         logger.debug("wishlist attempt stamp failed for %s: %s", sp_id, e)
         return False
+
+
+def bundle_failure_counts_as_attempt(reason: str) -> bool:
+    """Whether a terminal album-bundle failure says anything about the release.
+
+    A Prowlarr search that did not complete (an indexer down and held back by
+    Prowlarr, a timeout, a 5xx) never looked at a release, so counting it
+    would push every wishlist track of the batch into the retry backoff for
+    something that is not theirs. Those tracks are simply tried again on the
+    next cycle, when the search can run.
+    """
+    from core.prowlarr_client import SEARCH_FAILED_PREFIX
+    return not str(reason or '').startswith(SEARCH_FAILED_PREFIX)
 
 
 def record_failed_attempts_for_tracks(wishlist_service, tracks, failure_reason, profile_id,
