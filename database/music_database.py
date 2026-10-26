@@ -278,16 +278,10 @@ class DatabaseTrackWithMetadata:
     # credit, compilation/soundtrack evidence was invisible to the artist
     # scorer and legitimate cached matches failed validation.
     track_artist: Optional[str] = None
-    # The Spotify track ID stored on the row. Only the spotify-ID
-    # getters (get_tracks_by_spotify_id) populate it; every other
-    # getter leaves it None, and provider-ID corroboration (#1885)
-    # only ever runs on rows those getters returned — a None here
-    # therefore means "this row did not come from an ID lookup",
-    # never "the ID matched".
+    # only get_tracks_by_spotify_id fills these two. None means the row
+    # didn't come from an id lookup, never "the id matched" (#1885).
+    # file_path lets the plex stale key rescue prefer the exact file.
     spotify_track_id: Optional[str] = None
-    # The local file path, when a getter selected it (the spotify-ID
-    # getters do, so the Plex stale-key rescue can prefer the exact
-    # file instead of a blind top search hit).
     file_path: Optional[str] = None
 
 @dataclass
@@ -12047,22 +12041,14 @@ class MusicDatabase:
             return None
 
     def get_tracks_by_spotify_id(self, spotify_track_id, server_source: str = None) -> List[DatabaseTrackWithMetadata]:
-        """All library tracks carrying this Spotify track ID on their row.
+        """every library track carrying this spotify id, in track id order
+        (text order, so it's stable across runs).
 
-        The ID is stamped from download provenance / import metadata, so an
-        exact hit is identity, not a name guess: it survives the artist being
-        filed under a different spelling or script than the source's
-        (transliteration, #1885), which title/artist matching cannot.
-        The column is NOT unique — the same recording can sit on an album
-        and a compilation, and a poison-stamped duplicate is exactly the
-        shape callers must see past — so every in-scope row comes back,
-        in track-id order (TEXT order — deterministic, not numeric), and
-        corroboration (title, duration) picks between them. When several
-        rows corroborate, the first in that order wins: any of them is
-        the same recording by the same ID, but the choice is at least
-        stable across runs. Same shape and profile scope as
-        get_track_by_id, with ``spotify_track_id`` populated so the caller
-        can verify the row really carries the ID."""
+        the id is mostly stamped by the enrichment worker from a name search,
+        so it's a strong hint, not proof. the column isn't unique either (album
+        and compilation copies, a wrong stamp next to the right one), so every
+        row comes back and core.sync.provider_match picks between them. same
+        shape and profile scope as get_track_by_id (#1885)."""
         try:
             spotify_id_str = str(spotify_track_id or '').strip()
             if not spotify_id_str:
@@ -12111,9 +12097,7 @@ class MusicDatabase:
             return []
 
     def get_track_by_spotify_id(self, spotify_track_id, server_source: str = None) -> Optional[DatabaseTrackWithMetadata]:
-        """The first library row (track-id TEXT order) for a Spotify
-        track ID, or None. Callers that corroborate should use
-        get_tracks_by_spotify_id and consider every row — see its docstring."""
+        """the first row get_tracks_by_spotify_id returns, or None."""
         rows = self.get_tracks_by_spotify_id(spotify_track_id, server_source=server_source)
         return rows[0] if rows else None
 
@@ -22054,15 +22038,9 @@ class MusicDatabase:
 
     def get_server_match_rejections_strict(self, profile_id: int, server_source: str,
                                            source_track_ids) -> set:
-        """{(source_track_id, server_track_id)} rejected for these source
-        ids — the fail-closed twin of get_server_match_rejections.
-
-        The lenient getter swallows any database error into an EMPTY
-        set, so a caller cannot tell "no rejections" from "the query
-        failed". A caller that must not honor a pairing when the
-        rejection state is unknown (the provider-ID sync match, #1885)
-        uses this one: errors RAISE, and the caller treats that as
-        "rejected"."""
+        """get_server_match_rejections, but a db error raises instead of
+        reading as "no rejections". the provider id sync match (#1885) treats
+        a raise as rejected, so an unknown state never re-pins an unmatch."""
         ids = [str(i) for i in (source_track_ids or []) if i]
         if not ids:
             return set()

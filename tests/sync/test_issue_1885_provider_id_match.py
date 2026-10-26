@@ -8,10 +8,11 @@ different artist, the track was reported missing, and
 ``_record_library_membership`` wrote ``in_library=False`` /
 ``library_track_id=None`` over the saved link.
 
-The fix checks the provider ID before the name-based matching: a library
-row whose stored ``spotify_track_id`` equals the source track's ID is the
-same track, corroborated by exact (normalized) title and, when both are
-known, duration — never by artist spelling.
+the fix checks the spotify id before the name-based matching. the id on a
+library row is stamped by the enrichment worker from a name search, so it
+isn't proof alone: the row also has to agree on title, duration, and artist
+(loosely, through the cyrillic folds). artists in two different scripts
+can't be compared, so there the id, title and a known duration carry it.
 """
 
 from __future__ import annotations
@@ -100,10 +101,19 @@ def test_duration_mismatch_rejects_the_row():
 
 
 def test_unknown_duration_on_either_side_does_not_block():
-    db = _FakeDb(_row(duration=None))
+    # artists agree here, so an unknown duration is no evidence either way
+    db = _FakeDb(_row(duration=None, artist_name="Latin Name"))
     assert provider_id_library_match(db, _track(), "soulsync") is not None
-    db2 = _FakeDb(_row())
+    db2 = _FakeDb(_row(artist_name="Latin Name"))
     assert provider_id_library_match(db2, _track(duration_ms=0), "soulsync") is not None
+
+
+def test_cross_script_artist_needs_both_durations():
+    # latin source, cyrillic library artist: no name evidence at all, so the
+    # duration has to really be there on both sides
+    assert provider_id_library_match(_FakeDb(_row()), _track(), "soulsync") is not None
+    assert provider_id_library_match(_FakeDb(_row(duration=None)), _track(), "soulsync") is None
+    assert provider_id_library_match(_FakeDb(_row()), _track(duration_ms=0), "soulsync") is None
 
 
 def test_row_carrying_a_different_spotify_id_is_rejected():
@@ -171,7 +181,7 @@ def test_plural_getter_returning_a_single_dict_row_still_counts():
     class _DictPluralDb:
         def get_tracks_by_spotify_id(self, sid, server_source=None):
             return {"id": "lib-9", "title": "Pesnya", "duration": 200_500,
-                    "spotify_track_id": "sp1885"}
+                    "spotify_track_id": "sp1885", "artist_name": "Latin Name"}
 
     row = provider_id_library_match(_DictPluralDb(), _track(), "soulsync")
     assert row is not None and row["id"] == "lib-9"
@@ -224,7 +234,7 @@ def test_duration_tolerance_boundary():
 
 def test_dict_rows_are_corroborated_including_duration():
     good = {"id": "lib-9", "title": "Pesnya", "duration": 200_500,
-            "spotify_track_id": "sp1885"}
+            "spotify_track_id": "sp1885", "artist_name": "Latin Name"}
     db = _FakeDb(good)
     row = provider_id_library_match(db, _track(), "soulsync")
     assert row is not None and row["id"] == "lib-9"
@@ -721,7 +731,7 @@ def test_media_plex_rescue_duration_checked_against_the_provider_row():
     # The source track's duration is unknown here, so the provider
     # row's own duration is the evidence the rescue must agree with.
     track = _track(duration_ms=0)
-    dt = _row(id="t88", title="Pesnya", duration=200_800)
+    dt = _row(id="t88", title="Pesnya", duration=200_800, artist_name="Latin Name")
     db = _media_fake(dt)
     db.get_track_by_id.side_effect = lambda i: dt if str(i) == "t88" else None
     wrong_cut = SimpleNamespace(ratingKey=999, title="Pesnya", duration=400_000)
@@ -894,3 +904,79 @@ def test_duplicate_spotify_id_rows_all_surface_in_id_order(real_db):
     # poison-stamped first row carrying the same ID.
     track = _track(name="Pesnya", duration_ms=200_800)
     assert provider_id_library_match(real_db, track, "soulsync").id == "lib-1"
+
+
+# ---------------------------------------------------------------------------
+# artist gate: the stamped id is a name guess, not provenance
+# ---------------------------------------------------------------------------
+
+def test_artists_agree_through_the_cyrillic_folds():
+    from core.sync.provider_match import artists_agree
+    # unidecode spells й as "i", spotify as "y". the folds bridge it
+    assert artists_agree(["Mumiy Troll"], ["Мумий Тролль"]) == "close"
+    assert artists_agree(["Kino"], ["Кино"]) == "close"
+    assert artists_agree(["Beyonce"], ["Beyoncé"]) == "close"
+    # latin vs cyrillic with nothing in common still can't be compared
+    assert artists_agree(["Boombox"], ["Бумбокс"]) in ("close", "cross_script")
+    assert artists_agree(["Drake"], ["Metallica"]) is None
+    # various artists is no evidence, and neither is a missing name
+    assert artists_agree(["Drake"], ["Various Artists"]) is None
+    assert artists_agree(["Drake"], [None, ""]) is None
+
+
+def test_same_script_different_artist_is_not_honored():
+    # the enrichment worker stamps spotify ids by title similarity with no
+    # artist check, so an obscure "Intro" can carry another band's "Intro" id.
+    # same title, same length, exact id, wrong band: must not count
+    row = _row(title="Intro", artist_name="Metallica", duration=200_000)
+    track = _track(name="Intro", artists=["The xx"], duration_ms=200_000)
+    assert provider_id_library_match(_FakeDb(row), track, "soulsync") is None
+
+
+def test_track_artist_counts_on_a_compilation_row():
+    row = _row(artist_name="Various Artists", track_artist="Latin Name")
+    assert provider_id_library_match(_FakeDb(row), _track(), "soulsync") is not None
+
+
+def _seed(db, *, artist, title, spotify_id, duration, server="jellyfin", tid="lib-1"):
+    with db._get_connection() as conn:
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute("INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
+                     (tid, artist, server))
+        conn.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, 'Album', ?)",
+                     (tid, tid, server))
+        conn.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, duration, server_source,"
+            " spotify_track_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (tid, tid, tid, title, duration, server, spotify_id))
+
+
+def _run_media_real(real_db, track):
+    fake_cm = MagicMock()
+    fake_cm.get_active_media_server.return_value = "jellyfin"
+    with patch("database.music_database.MusicDatabase", return_value=real_db), \
+         patch("core.settings.config_manager", fake_cm), \
+         patch("core.artists.map.get_current_profile_id", return_value=1):
+        return asyncio.run(_service()._find_track_in_media_server(track, candidate_pool={}))
+
+
+def test_issue_1885_real_fuzzy_miss_is_caught_by_the_id(real_db):
+    """#1885 (glebosotov): latin source artist, cyrillic library artist. the
+    real check_track_exists misses "Mumiy Troll" against "Мумий Тролль"
+    (unidecode says "mumii"), so before the fix the sync called it missing
+    and cleared the saved link. nothing is mocked on the matching side."""
+    _seed(real_db, artist="Мумий Тролль", title="Utekay", spotify_id="sp-utekay",
+          duration=220_400)
+    miss, conf = real_db.check_track_exists("Utekay", "Mumiy Troll",
+                                            confidence_threshold=0.7, server_source="jellyfin")
+    assert miss is None  # the fuzzy matcher really can't see it
+    track = _track(name="Utekay", artists=["Mumiy Troll"], id="sp-utekay", duration_ms=220_000)
+    match, conf = _run_media_real(real_db, track)
+    assert conf == 1.0 and str(match.ratingKey) == "lib-1"
+
+
+def test_wrong_stamped_id_never_pins_another_bands_song(real_db):
+    _seed(real_db, artist="Metallica", title="Intro", spotify_id="sp-intro", duration=120_000)
+    track = _track(name="Intro", artists=["The xx"], id="sp-intro", duration_ms=120_000)
+    assert _run_media_real(real_db, track) == (None, 0.0)
+

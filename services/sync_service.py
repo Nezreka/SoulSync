@@ -1497,123 +1497,44 @@ class PlaylistSyncService:
                     logger.debug(f"Durable manual match lookup error: {durable_err}")
             # --- End match fast-path ---
 
-            # Provider-ID match (#1885): a library row carrying this track's
-            # exact Spotify ID is the same track even when its artist is
-            # filed in another script (Latin source, Cyrillic tags) — the
-            # name-based matching below scores that as a different artist,
-            # the sync reported the track missing, and the mirrored row's
-            # saved library link was cleared. Runs after the cache/manual
-            # fast-paths above (user-confirmed pairings keep precedence)
-            # and before the fuzzy matcher. A pairing the user explicitly
-            # unmatched is never re-pinned by it.
+            # exact spotify id (#1885). a library artist filed in another
+            # script never matches by name below, so the track went missing
+            # and the mirror's saved link got cleared. runs after the
+            # user-confirmed paths above and before the fuzzy matcher. not
+            # cached: a 1.0 cache row reads as user-confirmed elsewhere, and
+            # the #1721 stale gate would drop it every run on artist evidence.
             if self._cancelled:
                 return None, 0.0
             try:
+                from core.artists.map import get_current_profile_id
                 from core.sync.provider_match import (
-                    durations_agree_ms, provider_id_library_matches,
-                    provider_match_rejected, provider_titles_agree)
-                # Every corroborated row gets its turn: the first may be
-                # the unmatched or stale duplicate while a sibling row
-                # carrying the same ID is the live match.
-                for provider_row in provider_id_library_matches(
-                        cache_db, spotify_track, active_server):
+                    honorable_provider_rows, rescue_is_the_provider_row)
+                _provider_profile = _sync_profile_id.get() or get_current_profile_id()
+                # every row gets a turn, the first can be a duplicate whose
+                # key went stale while a sibling is the live one
+                for provider_row in honorable_provider_rows(
+                        cache_db, spotify_track, active_server, _provider_profile):
                     _provider_id = (provider_row.get("id") if isinstance(provider_row, dict)
                                     else provider_row.id)
-                    # Strict rejection test (provider_match_rejected),
-                    # NOT the lenient _match_was_rejected the cache path
-                    # uses: that one fails open, and a provider match
-                    # honored at 1.0 on a maybe-unmatched pairing would
-                    # silently undo the user's unmatch. Unknown == no.
-                    try:
-                        from core.artists.map import get_current_profile_id
-                        _provider_profile = _sync_profile_id.get() or get_current_profile_id()
-                        _provider_rejected = provider_match_rejected(
-                            cache_db, _provider_profile, active_server,
-                            spotify_track, _provider_id)
-                    except Exception as _rej_err:
-                        logger.debug(f"Provider-ID rejection check failed, not honoring the match: {_rej_err}")
-                        _provider_rejected = True
-                    if not _provider_rejected:
-                        actual_track = _materialize(_provider_id)
-                        if actual_track:
-                            logger.info(f"Provider-ID match honored for '{original_title}' → {getattr(actual_track, 'ratingKey', _provider_id)}")
-                            return actual_track, 1.0
-                        # Plex re-keys tracks on a metadata refresh, so the
-                        # stored id can 404 in _materialize — re-resolve live
-                        # before giving up, like the fuzzy branch below
-                        # (#1047). The track EXISTS; the ID just proved it.
-                        # The rescue is a title+artist search whose top hit
-                        # is NOT the ID's row, though: it only rides on the
-                        # ID's authority when its title corroborates the
-                        # provider row's and its duration (when known)
-                        # agrees with the source's — never blind at 1.0.
-                        if server_type == "plex":
-                            # Dict rows carry the same fields as attributes
-                            # on the real db's rows — read both shapes.
-                            _provider_title = (provider_row.get("title", "")
-                                               if isinstance(provider_row, dict)
-                                               else getattr(provider_row, 'title', '')) or ''
-                            _provider_artist = (provider_row.get("artist_name", "")
-                                                if isinstance(provider_row, dict)
-                                                else getattr(provider_row, 'artist_name', '')) or ''
-                            _provider_duration = (provider_row.get("duration", None)
-                                                  if isinstance(provider_row, dict)
-                                                  else getattr(provider_row, 'duration', None))
-                            rescued = rescue_stale_plex_track(
-                                media_client, provider_row,
-                                _provider_artist or
-                                (_artist_name(spotify_track.artists[0]) if spotify_track.artists else ''))
-                            if rescued is not None and provider_titles_agree(
-                                    cache_db, _provider_title,
-                                    getattr(rescued, 'title', '')):
-                                _rescued_artist = getattr(rescued, 'grandparentTitle', '')
-                                if not isinstance(_rescued_artist, str) or not _rescued_artist:
-                                    _rescued_artist = getattr(rescued, 'artist', '')
-                                if not isinstance(_rescued_artist, str):
-                                    # plexapi's Track.artist is a method, not
-                                    # a name — a non-string is no evidence.
-                                    _rescued_artist = ''
-                                if _provider_artist and _rescued_artist \
-                                        and _provider_artist.strip().casefold() not in ("various artists", "various") \
-                                        and _rescued_artist.strip().casefold() not in ("various artists", "various") \
-                                        and not provider_titles_agree(
-                                        cache_db, _provider_artist, _rescued_artist):
-                                    # Same title, different artist: the search
-                                    # ranks artist→title but its top hit is not
-                                    # proof — a namesake track must not ride on
-                                    # the provider ID's authority either.
-                                    logger.debug(f"Provider-ID rescue for '{original_title}' rejected on artist")
-                                elif not (durations_agree_ms(
-                                        getattr(spotify_track, 'duration_ms', None),
-                                        getattr(rescued, 'duration', None))
-                                        and durations_agree_ms(
-                                        _provider_duration,
-                                        getattr(rescued, 'duration', None))):
-                                    # The rescued track must agree with every
-                                    # duration that is known — the source's,
-                                    # and the provider row's own (the rescue
-                                    # claims to be THAT row, re-keyed; when
-                                    # the source's duration is unknown the
-                                    # row's is the only evidence there is).
-                                    logger.debug(f"Provider-ID rescue for '{original_title}' rejected on duration")
-                                elif provider_match_rejected(
-                                        cache_db, _provider_profile, active_server,
-                                        spotify_track, rescued.ratingKey):
-                                    # A rejection filed against the RESCUED
-                                    # key itself: this live track is a
-                                    # pairing the user unmatched (the
-                                    # stored key's pair was already checked
-                                    # above, before materialize) — never
-                                    # re-pin it just because it arrived via
-                                    # the rescue instead of the stored id.
-                                    logger.debug(f"Provider-ID rescue for '{original_title}' rejected — rescued key was unmatched")
-                                else:
-                                    logger.info(f"[Stale-Key Rescue] '{original_title}' re-resolved live "
-                                                f"(stored id {_provider_id} → {rescued.ratingKey})")
-                                    return rescued, 1.0
-                            elif rescued is not None:
-                                logger.debug(f"Provider-ID rescue for '{original_title}' rejected on title")
-                        logger.debug(f"Provider-ID match for '{original_title}' pointed at library track {_provider_id}, which did not materialize")
+                    actual_track = _materialize(_provider_id)
+                    if actual_track:
+                        logger.debug(f"Provider-ID match for '{original_title}' → {getattr(actual_track, 'ratingKey', _provider_id)}")
+                        return actual_track, 1.0
+                    # plex re-keys tracks on a metadata refresh, so the stored
+                    # id can 404. re-resolve live like the fuzzy branch (#1047),
+                    # but only trust the hit when it really is this row
+                    if server_type == "plex":
+                        _row_artist = (provider_row.get("artist_name") if isinstance(provider_row, dict)
+                                       else getattr(provider_row, 'artist_name', '')) or ''
+                        rescued = rescue_stale_plex_track(
+                            media_client, provider_row,
+                            _row_artist or (_artist_name(spotify_track.artists[0]) if spotify_track.artists else ''))
+                        if rescue_is_the_provider_row(cache_db, spotify_track, provider_row, rescued,
+                                                      _provider_profile, active_server):
+                            logger.info(f"[Stale-Key Rescue] '{original_title}' re-resolved live "
+                                        f"(stored id {_provider_id} → {rescued.ratingKey})")
+                            return rescued, 1.0
+                    logger.debug(f"Provider-ID match for '{original_title}' pointed at {_provider_id}, which did not materialize")
             except Exception as provider_err:
                 logger.debug(f"Provider-ID match lookup error: {provider_err}")
 
