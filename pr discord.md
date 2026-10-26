@@ -12,4 +12,6 @@ Video can prefer or require dubbed and MULTI audio, and anime TMDB lumps into on
 
 Plus an opt-in YouTube album bundle (thanks @SimpleSimonLA), Deezer sign-in alerts and working track downloaded automations (thanks @PapaBearDoes), failed Prowlarr indexers named in search (thanks @glebosotov), pooled database connections (thanks @splitsec2), holiday skies in the sidebar weather, audiobook matching on your own Audible store (thanks @SimpleSimonLA), big Tidal playlists that open with their tracks, LRCLib hiccups no longer read as no lyrics, and a lot of fixes.
 
+Links: MetaSync <https://github.com/Nezreka/MetaSync> · pool keys <https://metasync.ssync.net> · SoulSync Companion browser extension <https://github.com/Nezreka/soulsync-extension>
+
 Full notes on GitHub.
