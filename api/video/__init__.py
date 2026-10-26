@@ -105,6 +105,9 @@ def create_video_blueprint() -> Blueprint:
                                  # management, same as the overrides below. The
                                  # GETs (search/status) stay open.
                                  "/api/video/manual-match",
+                                 # the library tab's file actions: rename to the
+                                 # template, delete to the recycle bin
+                                 "/api/video/files",
                                  # per-movie/per-show subtitle language overrides
                                  # (Phase 3) — per-title management, same as the
                                  # acquisition overrides. The GET stays open.
@@ -124,7 +127,9 @@ def create_video_blueprint() -> Blueprint:
                                   # release groups, season packs)
                                   "/overrides",
                                   # per-show Synchronize — mutates library rows
-                                  "/sync"))
+                                  "/sync",
+                                  # fix match + its undo — library identity
+                                  "/identify", "/identify/release"))
         if admin and not is_admin:
             return jsonify({"error": "Admin only."}), 403
 
@@ -179,6 +184,7 @@ def create_video_blueprint() -> Blueprint:
     from .watch import register_routes as reg_watch
     from .manual_match import register_routes as reg_manual_match
     from .subtitles import register_routes as reg_subtitles
+    from .library_manage import register_routes as reg_library_manage
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -206,5 +212,6 @@ def create_video_blueprint() -> Blueprint:
     reg_watch(bp)
     reg_manual_match(bp)
     reg_subtitles(bp)
+    reg_library_manage(bp)
 
     return bp

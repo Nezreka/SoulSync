@@ -352,6 +352,14 @@ def register_routes(bp):
                 except (TypeError, ValueError):
                     return jsonify({"error": "external_id must be numeric"}), 400
         from . import get_video_db
+        if service == "tmdb" and external_id is not None and kind in ("movie", "show"):
+            # the identity re-point: fills the new title's imdb/tvdb ids and
+            # name straight away, and locks them so a scan can't undo it
+            from core.video.identity import identify
+            res = identify(get_video_db(), kind, item_id, external_id)
+            if not res.get("success"):
+                return jsonify(res), 400
+            return jsonify(res)
         try:
             ok = get_video_db().rematch_item(kind, item_id, service, external_id)
             if not ok:

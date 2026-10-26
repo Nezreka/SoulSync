@@ -24,72 +24,22 @@ stripped a quality tag the file already carried.
 from __future__ import annotations
 
 import os
-import shutil
 
-from core.video.library_paths import file_quality
+from core.video.file_ops import (
+    expected_path, move_into_place, move_sidecars, naming_fields, same_path,
+    update_stored_path)
 from core.video.repair import register_job
 from core.video.repair.base import JobContext, JobResult, VideoRepairJob
 from utils.logging_config import get_logger
 
 logger = get_logger("video.repair.naming_conformance")
 
-_SIDECAR_SUFFIXES = (".nfo", "-thumb.jpg", "-thumb.jpeg", "-thumb.png", "-thumb.webp",
-                     ".srt", ".ass", ".sub", ".idx", ".jpg")
-
-
-def _fields_of(row: dict) -> dict:
-    return {"title": row.get("title"), "series": row.get("series"),
-            "year": row.get("year"), "season": row.get("season"),
-            "episode": row.get("episode"), "episode_title": row.get("episode_title"),
-            "quality": row.get("quality"), "resolution": row.get("resolution"),
-            "codec": row.get("video_codec"), "tmdbid": row.get("tmdb_id"),
-            "imdbid": row.get("imdb_id"), "tvdbid": row.get("tvdb_id")}
-
-
-def _update_stored_path(db, file_id, old_local: str, new_local: str) -> None:
-    try:
-        from core.video.mass_rename import _inverse_reroot
-        stored = db.media_file_stored_path(int(file_id))
-        if stored is None:
-            return
-        db.set_media_file_stored_path(int(file_id), _inverse_reroot(new_local, old_local, stored))
-    except Exception:   # noqa: BLE001 - the next server scan re-adopts the truth anyway
-        logger.debug("stored-path update failed for file %s", file_id, exc_info=True)
-
-
-def _same_path(a: str, b: str) -> bool:
-    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
-
-
-def _move_sidecars(old_path: str, new_path: str) -> int:
-    """Bring same-stem sidecars (nfo/thumb/subs incl. language-tagged .srt)
-    along with the video. Best-effort; returns how many moved."""
-    old_stem = os.path.splitext(old_path)[0]
-    new_stem = os.path.splitext(new_path)[0]
-    moved = 0
-    try:
-        names = os.listdir(os.path.dirname(old_path) or ".")
-    except OSError:
-        return 0
-    base = os.path.basename(old_stem)
-    for n in names:
-        full = os.path.join(os.path.dirname(old_path), n)
-        if full == old_path or not n.startswith(base):
-            continue
-        rest = n[len(base):]
-        # sidecars share the stem plus "." or "-thumb" and a known suffix —
-        # language subs like ".en.srt" pass via the .srt suffix; anything else
-        # sharing the stem (an unrelated file) is left alone
-        if not (rest.startswith(".") or rest.startswith("-thumb")):
-            continue
-        if not any(rest.endswith(sfx) for sfx in _SIDECAR_SUFFIXES):
-            continue
-        try:
-            shutil.move(full, new_stem + rest)
-            moved += 1
-        except OSError:   # noqa: PERF203 - per-sidecar resilience
-            continue
-    return moved
+# the naming + move logic lives in core.video.file_ops, shared with the
+# library tab on a title's page; these names stay for the job's callers
+_fields_of = naming_fields
+_update_stored_path = update_stored_path
+_same_path = same_path
+_move_sidecars = move_sidecars
 
 
 @register_job
@@ -121,7 +71,7 @@ class NamingConformanceJob(VideoRepairJob):
         result = JobResult()
         settings = organization.load(context.db)
         base_dirs = video_base_dirs(context.db)
-        from core.video.library_roots import library_roots, containing_root
+        from core.video.library_roots import library_roots
         roots = {kind: library_roots(context.db, kind) for kind in ("movie", "episode")}
         rows = context.db.repair_library_files() or []
         context.report(total=len(rows), phase="checking names")
@@ -139,15 +89,10 @@ class NamingConformanceJob(VideoRepairJob):
             if not real:
                 result.skipped += 1          # can't locate locally — never guess
                 continue
-            root = containing_root(real, configured_roots)
-            if not root:
+            expected = expected_path(r, real, configured_roots, settings)
+            if not expected:
                 result.skipped += 1
                 continue
-            ext = os.path.splitext(real)[1]
-            fields = _fields_of(r)
-            fields["quality"] = file_quality(fields.get("quality"), real)
-            expected = organization.render_path(r["scope"], root, fields,
-                                                settings, ext)["path"]
             if _same_path(real, expected):
                 continue
             entity_id = f"{r['scope']}:{r['item_id']}:{r['file_id']}"
@@ -174,27 +119,4 @@ class NamingConformanceJob(VideoRepairJob):
         cur, want = d.get("current_path"), d.get("expected_path")
         if not cur or not want:
             return {"success": False, "error": "finding has no paths"}
-        if not os.path.isfile(cur):
-            return {"success": False, "error": "the file moved since the scan — re-run it"}
-        if os.path.exists(want):
-            return {"success": False, "error": "destination already exists — nothing overwritten"}
-        try:
-            os.makedirs(os.path.dirname(want) or ".", exist_ok=True)
-            shutil.move(cur, want)
-        except OSError as e:
-            return {"success": False, "error": f"rename failed: {e}"}
-        moved = _move_sidecars(cur, want)
-        # the library's stored path must follow, or every lookup by that path
-        # (upgrades, a new episode finding its show's folder) misses the file
-        # until the media server rescans -- the same mirror Mass Rename keeps
-        _update_stored_path(context.db, d.get("file_id"), cur, want)
-        # tidy an emptied folder (only ever the file's own former dir)
-        try:
-            old_dir = os.path.dirname(cur)
-            if old_dir and not os.listdir(old_dir):
-                os.rmdir(old_dir)
-        except OSError:
-            pass
-        extra = f" (+{moved} sidecar{'s' if moved != 1 else ''})" if moved else ""
-        return {"success": True, "action": "renamed",
-                "message": f"Renamed to {os.path.basename(want)}{extra}"}
+        return move_into_place(context.db, d.get("file_id"), cur, want)

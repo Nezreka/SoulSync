@@ -901,7 +901,9 @@ class VideoDatabase:
         def build(include_ids, locked):
             sets = [f"{sc}=?", f"{ac}=CURRENT_TIMESTAMP"]
             params = [status]
-            if matched and external_id is not None and include_ids:
+            # a locked id is the user's re-point: a worker's own match never
+            # overrides it (status/metadata still record)
+            if matched and external_id is not None and include_ids and idc not in locked:
                 sets.append(f"{idc}=?")
                 params.append(external_id)
             for col, val in (metadata or {}).items():
@@ -2022,6 +2024,16 @@ class VideoDatabase:
                 sets.append("tmdb_match_status=" +
                             ("NULL" if external_id is not None else "'not_found'"))
                 sets.append("tmdb_last_attempted=NULL")
+                # the imdb/tvdb ids belong to the OLD identity: kept, they
+                # pulled the wrong title's ratings and fanart forever. cleared
+                # (and their old locks released) so the new match refills them.
+                for idc in ("imdb_id",) + (("tvdb_id",) if tbl == "shows" else ()):
+                    if idc in cols:
+                        sets.append(f"{idc}=NULL")
+                        locked = locked - {idc}
+                if tbl == "shows" and "tvdb_match_status" in cols:
+                    sets.append("tvdb_match_status=NULL")
+                    sets.append("tvdb_last_attempted=NULL")
                 # Clear what the old match derived (never a locked field).
                 for col in sorted(self._REMATCH_CLEAR_COLS & cols - locked):
                     sets.append(f"{col}=NULL")
@@ -2046,6 +2058,13 @@ class VideoDatabase:
                         if spec[2] in cols:
                             sets.append(f"{spec[2]}=NULL")
 
+            # a re-point is the user's word on identity, so it's locked: without
+            # this the next server scan wrote the server's (wrong) id straight
+            # back and the fix silently undid itself. a clear releases it.
+            idcol = {"tmdb": "tmdb_id", "imdb": "imdb_id", "tvdb": "tvdb_id"}[service]
+            locked = (locked | {idcol}) if external_id is not None else (locked - {idcol})
+            sets.append("locked_fields=?")
+            params.append(json.dumps(sorted(locked)) if locked else None)
             params.append(item_id)
             conn.execute(f"UPDATE {tbl} SET {', '.join(sets)} WHERE id=?", params)
             # Credits came from the old TMDB match (gap-filled only-when-empty, so
@@ -2090,6 +2109,105 @@ class VideoDatabase:
                     (item_id, item_id))
             conn.commit()
             return True
+        finally:
+            conn.close()
+
+    def title_identity(self, kind: str, item_id) -> dict | None:
+        """who one library movie/show is: title, year, the three ids, which of
+        them the user locked, and the tmdb match status. None for an unknown row."""
+        tbl = self._DETAIL_TBL.get(kind)
+        if not tbl:
+            return None
+        tvdb = "tvdb_id" if tbl == "shows" else "NULL AS tvdb_id"
+        conn = self._get_connection()
+        try:
+            r = conn.execute(
+                f"SELECT id, title, year, tmdb_id, imdb_id, {tvdb}, tmdb_match_status, "
+                f"locked_fields, server_source, content_rating FROM {tbl} WHERE id=?", (int(item_id),)).fetchone()
+            if not r:
+                return None
+            out = dict(r)
+            out["locked_fields"] = sorted(self._parse_locked(out.get("locked_fields")))
+            out["manual_link"] = None
+            m = conn.execute("SELECT tmdb_id FROM video_manual_matches WHERE kind=? AND library_id=?",
+                             (kind, int(item_id))).fetchone()
+            if m:
+                out["manual_link"] = int(m["tmdb_id"])
+            return out
+        except (sqlite3.Error, TypeError, ValueError):
+            return None
+        finally:
+            conn.close()
+
+    def set_identity_ids(self, kind: str, item_id: int, **ids) -> bool:
+        """write and lock the external ids a fix-match resolved (imdb_id, and a
+        show's tvdb_id), so scans and workers keep them. a None value is
+        skipped. a show's tvdb match is marked done so its worker enriches by
+        this id instead of searching again."""
+        tbl = self._DETAIL_TBL.get(kind)
+        allowed = {"imdb_id"} | ({"tvdb_id"} if tbl == "shows" else set())
+        ids = {k: v for k, v in ids.items() if k in allowed and v not in (None, "")}
+        if not tbl or not ids:
+            return False
+        conn = self._get_connection()
+        try:
+            if not conn.execute(f"SELECT 1 FROM {tbl} WHERE id=?", (item_id,)).fetchone():
+                return False
+            locked = self._locked_fields_set(conn, tbl, item_id) | set(ids)
+            sets = [f"{k}=?" for k in ids]
+            params = list(ids.values())
+            if "tvdb_id" in ids:
+                sets.append("tvdb_match_status='matched'")
+            sets.append("locked_fields=?")
+            params.extend([json.dumps(sorted(locked)), item_id])
+            try:
+                conn.execute(f"UPDATE {tbl} SET {', '.join(sets)} WHERE id=?", params)
+            except sqlite3.IntegrityError:
+                # legacy UNIQUE on an id: another row already holds it. keep the
+                # lock on what we could write, never fail the whole fix
+                conn.rollback()
+                return False
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def release_identity(self, kind: str, item_id: int) -> bool:
+        """undo a fix-match: drop the id locks and the title/year it adopted,
+        so the next scan takes the server's identity again whole. other text
+        locks (overview, genres...) stay the user's."""
+        tbl = self._DETAIL_TBL.get(kind)
+        if not tbl:
+            return False
+        conn = self._get_connection()
+        try:
+            if not conn.execute(f"SELECT 1 FROM {tbl} WHERE id=?", (item_id,)).fetchone():
+                return False
+            locked = self._locked_fields_set(conn, tbl, item_id) - {
+                "tmdb_id", "imdb_id", "tvdb_id", "title", "sort_title", "year"}
+            conn.execute(f"UPDATE {tbl} SET locked_fields=? WHERE id=?",
+                         (json.dumps(sorted(locked)) if locked else None, item_id))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def clear_manual_matches_for_library(self, kind: str, library_id, keep_tmdb=None) -> int:
+        """drop "I have this" links that point at a library row, except the
+        one for ``keep_tmdb``. after a fix-match the row's own tmdb id says
+        what it is; a link claiming it's some other title is stale."""
+        if kind not in ("movie", "show"):
+            return 0
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM video_manual_matches WHERE kind=? AND library_id=? "
+                "AND tmdb_id IS NOT ?", (kind, int(library_id),
+                                         int(keep_tmdb) if keep_tmdb else None))
+            conn.commit()
+            return cur.rowcount
+        except (sqlite3.Error, TypeError, ValueError):
+            return 0
         finally:
             conn.close()
 
@@ -7202,6 +7320,141 @@ class VideoDatabase:
                 "JOIN media_files f ON f.episode_id = e.id "
                 "WHERE e.has_file = 1")]
             return movies + eps
+        finally:
+            conn.close()
+
+    _TITLE_FILE_COLS = (
+        "f.id AS file_id, f.relative_path, f.size_bytes, f.quality, f.resolution, "
+        "f.video_codec, f.audio_codec, f.audio_channels, f.dynamic_range, f.atmos, "
+        "f.release_source, f.runtime_seconds, f.added_at, f.aspect")
+
+    def library_title_files(self, kind: str, item_id) -> list:
+        """every stored file of one movie, or of every episode of one show, one
+        row per FILE, carrying what the naming templates and the library tab
+        need. same field names as repair_library_files so the naming code reads
+        both. [] for an unknown title."""
+        try:
+            item_id = int(item_id)
+        except (TypeError, ValueError):
+            return []
+        conn = self._get_connection()
+        try:
+            if kind == "movie":
+                sql = ("SELECT 'movie' AS scope, m.id AS item_id, m.title, m.year, "
+                       "m.tmdb_id, m.imdb_id, NULL AS tvdb_id, NULL AS season, NULL AS episode, "
+                       "NULL AS episode_title, NULL AS series, " + self._TITLE_FILE_COLS + " "
+                       "FROM movies m JOIN media_files f ON f.movie_id = m.id "
+                       "WHERE m.id = ? ORDER BY f.size_bytes DESC")
+            elif kind == "show":
+                sql = ("SELECT 'episode' AS scope, e.id AS item_id, s.title AS title, "
+                       "COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER)) AS year, "
+                       "s.tmdb_id, s.imdb_id, s.tvdb_id, e.season_number AS season, "
+                       "e.episode_number AS episode, e.title AS episode_title, s.title AS series, "
+                       + self._TITLE_FILE_COLS + " "
+                       "FROM episodes e JOIN shows s ON e.show_id = s.id "
+                       "JOIN media_files f ON f.episode_id = e.id "
+                       "WHERE s.id = ? ORDER BY e.season_number, e.episode_number, f.size_bytes DESC")
+            else:
+                return []
+            return [dict(r) for r in conn.execute(sql, (item_id,))]
+        except sqlite3.Error:
+            logger.exception("library_title_files failed for %s %s", kind, item_id)
+            return []
+        finally:
+            conn.close()
+
+    def show_library_meta(self, show_id) -> dict | None:
+        """the show-level management fields the library tab reads."""
+        conn = self._get_connection()
+        try:
+            r = conn.execute("SELECT watched_episodes, series_type, monitored, quality_profile_id "
+                             "FROM shows WHERE id = ?", (int(show_id),)).fetchone()
+            return dict(r) if r else None
+        except (sqlite3.Error, TypeError, ValueError):
+            return None
+        finally:
+            conn.close()
+
+    def library_show_episodes(self, show_id) -> list:
+        """every episode row of one show, owned or not, for the library tab's
+        season breakdown. ordered by season, then episode."""
+        try:
+            show_id = int(show_id)
+        except (TypeError, ValueError):
+            return []
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT e.id, e.season_number, e.episode_number, e.title, e.air_date, "
+                "e.has_file, e.monitored, e.play_count, e.view_offset_ms, e.runtime_minutes, "
+                "COALESCE(se.monitored, 1) AS season_monitored "
+                "FROM episodes e LEFT JOIN seasons se ON se.id = e.season_id "
+                "WHERE e.show_id = ? ORDER BY e.season_number, e.episode_number", (show_id,))]
+        except sqlite3.Error:
+            logger.exception("library_show_episodes failed for %s", show_id)
+            return []
+        finally:
+            conn.close()
+
+    def library_file_row(self, file_id) -> dict | None:
+        """one stored file with its title's naming fields (the shape of a
+        library_title_files row), or None."""
+        try:
+            file_id = int(file_id)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            r = conn.execute("SELECT movie_id, episode_id FROM media_files WHERE id = ?",
+                             (file_id,)).fetchone()
+            if not r:
+                return None
+            if r["movie_id"] is not None:
+                kind, owner = "movie", r["movie_id"]
+            elif r["episode_id"] is not None:
+                row = conn.execute("SELECT show_id FROM episodes WHERE id = ?",
+                                   (r["episode_id"],)).fetchone()
+                if not row:
+                    return None
+                kind, owner = "show", row["show_id"]
+            else:
+                return None
+        finally:
+            conn.close()
+        for row in self.library_title_files(kind, owner):
+            if row["file_id"] == file_id:
+                return row
+        return None
+
+    def library_drop_file(self, file_id) -> dict | None:
+        """forget one stored file after it was deleted from disk, and flip its
+        movie/episode to fileless when it was the last copy -- the state the
+        next deep scan would find. returns {kind, item_id, remaining} or None."""
+        try:
+            file_id = int(file_id)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            r = conn.execute("SELECT movie_id, episode_id FROM media_files WHERE id = ?",
+                             (file_id,)).fetchone()
+            if not r:
+                return None
+            conn.execute("DELETE FROM media_files WHERE id = ?", (file_id,))
+            if r["movie_id"] is not None:
+                kind, item_id, col, table = "movie", r["movie_id"], "movie_id", "movies"
+            else:
+                kind, item_id, col, table = "episode", r["episode_id"], "episode_id", "episodes"
+            left = conn.execute(f"SELECT COUNT(*) AS n FROM media_files WHERE {col} = ?",
+                                (item_id,)).fetchone()["n"]
+            if not left:
+                extra = ", updated_at=datetime('now')" if table == "movies" else ""
+                conn.execute(f"UPDATE {table} SET has_file=0{extra} WHERE id = ?", (item_id,))
+            conn.commit()
+            return {"kind": kind, "item_id": item_id, "remaining": left}
+        except sqlite3.Error:
+            logger.exception("library_drop_file failed for %s", file_id)
+            return None
         finally:
             conn.close()
 
