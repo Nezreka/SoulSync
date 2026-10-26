@@ -7978,3 +7978,15 @@ body[data-side="video"] #gsearch-aura {
 .vd-ep-badge--soon { color: var(--white-a55) !important; background: var(--white-a05) !important; border: 1px solid var(--white-a12) !important; }
 .vd-ep-badge--none { padding: 0; border: 0 !important; background: none !important; }
 .vd-ep-badge--versions { color: var(--white-a70); background: var(--white-a05); border: 1px solid var(--white-a12); }
+/* the management sections that moved under Your library read like its own
+   cards: same heading size, same card, the page accent on Save */
+.vd-body--library > .vd-lib-extra .vd-section-h { font-size: 20px; font-weight: 800; margin-bottom: 14px; }
+.vd-body--library .vd-subcfg .vsub-card {
+    max-width: 720px; padding: 20px 22px; border-radius: var(--radius-xl);
+    background: var(--white-a04); border-color: var(--white-a08);
+}
+.vd-body--library .vd-subcfg .vsub-btn--primary {
+    background: rgba(var(--vd-accent-rgb), 0.85); border-color: rgba(var(--vd-accent-rgb), 0.7);
+    color: var(--vd-accent-fg);
+}
+.vd-body--library .vd-subcfg .vsub-btn--primary:hover { background: rgb(var(--vd-accent-rgb)); }
