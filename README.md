@@ -300,7 +300,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 - Non-admins get a **My Account** panel for their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
 - **Security**:
   - An admin PIN with brute-force limits, or full **username/password login** with recovery questions.
-  - Sign in with Plex or with your own OIDC provider, or **OIDC only**, which turns every other sign-in off. If the provider is ever down, `SOULSYNC_OIDC_ONLY_OVERRIDE=off` and a restart let the admin back in with their password.
+  - Sign in with Plex or with your own OIDC provider, or **OIDC only**, which turns every other sign-in off. If the provider is ever down, `SOULSYNC_OIDC_ONLY_OVERRIDE=off` and a restart let the admin back in with their password. Setup and troubleshooting: [docs/guides/OIDC.md](docs/guides/OIDC.md).
   - Or trust a forward-auth header from Authelia, Authentik or oauth2-proxy.
   - Reverse-proxy and sub-path aware.
 - **Own library per profile** (Plex / Jellyfin): a profile can have its own folder and server library.
@@ -537,6 +537,10 @@ Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and
 | Video | `/media/movies`, `/media/tv`, `/media/youtube` | Optional, for the video side |
 
 Useful environment variables: `PUID`, `PGID`, `UMASK`, `TZ`, `SOULSYNC_URL_BASE` (serve under a sub-path, see [docs/REVERSE_PROXY_SUBPATH.md](docs/REVERSE_PROXY_SUBPATH.md)), and `SOULSYNC_LOG_LEVEL`.
+
+### 5. Sign in with OIDC (optional)
+
+To let people sign in with Pocket ID, Authentik, Authelia, Keycloak or another OpenID Connect provider, follow [docs/guides/OIDC.md](docs/guides/OIDC.md).
 
 ---
 
