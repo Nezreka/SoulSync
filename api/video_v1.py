@@ -112,6 +112,21 @@ def register_routes(bp):
         ?tmdb_id=<show_tmdb_id>&season=<n>&episode=<n> → {in_library: bool}"""
         return _relay("video_library_episode")
 
+    @bp.route("/video/<kind>/<int:item_id>/library", methods=["GET"])
+    @require_api_key
+    def video_title_library(kind, item_id):
+        """What you own of one movie or show: every file, its quality and
+        where it lives, the match, and (for a show) every season with its
+        counts. ?season=<n> adds the disk checks for that season's files."""
+        return _relay("video_title_library")
+
+    @bp.route("/video/<kind>/<int:item_id>/identify", methods=["POST"])
+    @require_api_key
+    def video_identify(kind, item_id):
+        """Fix match. Body: {tmdb_id}. Re-points the title and locks it, so a
+        scan can't switch it back."""
+        return _relay("video_identify", error_code="MATCH_ERROR")
+
     # ---- search ----
 
     @bp.route("/video/search", methods=["GET"])

@@ -385,7 +385,39 @@ Every title has a rich **detail page**:
 - Format badges (HDR, Dolby Vision, Atmos, channel layout)
 - For shows: a full **season / episode** breakdown
 
-Movies and shows can come from either Plex or Jellyfin and render the same way. From a detail page you can manage metadata, change quality profiles, toggle watch state, and kick off downloads.
+Movies and shows can come from either Plex or Jellyfin and render the same way.
+
+The hero keeps one main action: **Play / Resume** on your server when you own it, otherwise **Get**. Trailer and the follow toggle (watchlist for an airing show, wishlist for a movie you don't own) sit beside it, and everything else is in one **More** menu, grouped into **Get**, **Library** (edit details, change poster, sync with server, mark watched, files and match) and **Open on** (IMDb, TMDB, TVDB, Letterboxd, official site).
+
+On a show, each episode row shows **Missing** or **Upcoming** only when there's a gap. A missing episode gets one **Get** button, and the rest (manual search, wishlist, download again for an upgrade, subtitles) is in the row's **⋯** menu. The season bar works the same way: **Grab season** plus a menu with manual search, wishlist, monitoring and clear failures.
+`
+        },
+        {
+            id: 'vdet-library',
+            title: 'Your Library Tab',
+            lede: 'Every copy you own of a title: where it lives, how good it is, and what you can do with it.',
+            body: `
+Every movie and show in your library has two tabs: the page itself (**Overview** for a movie, **Episodes** for a show) and **Your library**. The tab you used last is remembered.
+
+**What you have**: how many copies and how big, your best copy's resolution, and whether it meets the quality target of the title's profile. **Find an upgrade** opens a manual search when it doesn't; **Quality and download settings** opens the Manage panel.
+
+**Files**: one card per copy, with the quality tag, codecs, audio, size and runtime, the file name and its folder, the subtitle files beside it, and whether its name matches your [naming template](#vlib-manage). The **⋯** menu on each file:
+
+| Action | What it does |
+|--------|--------------|
+| **Rename to template** | Renames the file to what your template says, where it sits. Subtitles and sidecars move with it, nothing is overwritten, and the stored path follows. |
+| **Search subtitles** | The manual subtitle search, for that file. |
+| **Copy path** | The path as your media server reports it. |
+| **Delete to recycle bin** | Moves the file to the recycle bin. If it was the last copy the title shows as missing. A file outside your library folders is refused rather than deleted for good. |
+
+> [!NOTE]
+> A file on a drive only your media server can see (a different Docker mount or NAS path) still shows everything the server reports, but it can't be renamed or deleted from SoulSync. The page says so instead of guessing.
+
+For a **show**, the tab lists every season with what's owned, missing and upcoming, its size and resolution mix, and a **Monitored** switch. Open a season to see each episode's file, and **Rename all** when several have drifted from your template. **Where it lives** lists the folders the show's files are in; when it says *Split across 2 folders*, part of the show forked off somewhere else, usually an upgrade that couldn't find the original.
+
+**Match** shows the TMDB, IMDb and TVDB ids the title is matched to. **Fix match** searches TMDB (a title, a title and year, or a pasted TMDB id) and re-points the title. The ids are locked, so a library scan can't switch them back, and if your server named the title differently, SoulSync takes TMDB's name and year. **Use the server's match again** undoes it.
+
+Subtitle language overrides and the acquisition history for the title live under this tab too.
 `
         },
         {
@@ -399,7 +431,7 @@ SoulSync ingests per-episode and per-movie **watch state** from your server:
 - Powers a **Next Up** call-to-action on show pages
 - Lets you toggle **watched / unwatched** right on the page
 
-A per-title **History** tab shows grabs, imports, and upgrades over time — useful for answering "when did this land, and from where?"
+The **acquisition history** on the [Your library tab](#vdet-library) shows grabs, imports, and upgrades over time — useful for answering "when did this land, and from where?"
 `
         },
         {
@@ -411,6 +443,10 @@ Edit any metadata field and **lock** it so enrichment never overwrites your chan
 
 > [!WARNING]
 > A re-match changes the title's identity and can update its name and art — but it does **not** silently wipe your locked fields. Locked means locked.
+
+A re-point from the **Matches** list (or **Fix match** on the [Your library tab](#vdet-library)) is locked too: the next scan keeps it even if your server still reports the old match.
+
+On a TMDB page for something you own but SoulSync didn't recognise, **More → I have this** links it to your copy. An unmatched copy is re-identified as that title on the spot; a copy matched to a different title asks first.
 
 Episodes are treated as facts: a scan that no longer sees an episode **demotes** it to missing rather than deleting the row, so your history and watch state survive server hiccups.
 `

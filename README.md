@@ -220,9 +220,11 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 - **Bulk edit & field locks**: edits are written to SoulSync and pushed to your server, and locked fields are never overwritten by enrichment.
 
 **Detail pages**
-- Trailer-backed heroes with Play / Resume on your server.
+- Trailer-backed heroes with one primary action (Play / Resume on your server, else Get) and everything else in one More menu.
 - Every rating, cast and crew, where to watch, collections and acquisition history.
 - Four season views, and season tools: grab, search, wishlist, monitor.
+- A **Your library** tab on every movie and show: each copy you own with its quality, codecs, size, folder and subtitles, whether its name matches your template, and file actions (rename to template, delete to the recycle bin). Shows get every season with counts, size, a resolution mix and a monitored switch, plus the folders a show is split across.
+- **Fix match** that sticks: re-point a title to the right TMDB entry and scans can't switch it back.
 - Person, studio, channel and playlist pages.
 
 **Finding things**

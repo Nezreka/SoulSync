@@ -2324,6 +2324,14 @@ Titles in the video library. `kind=movies|shows` (default `movies`), plus `searc
 
 #### `GET /api/v1/video/library/genres`
 
+#### `GET /api/v1/video/<kind>/<id>/library`
+
+What you own of one library movie or show (`kind=movie|show`, `id` is the library id). Every file with its resolution, quality, codecs, audio, size, runtime and path, whether SoulSync can reach it, the subtitles beside it and whether its name matches your naming template; the title's match (`tmdb_id`, `imdb_id`, `tvdb_id`, `fixed`); and the quality verdict against its profile. For a show, every season with `owned`, `missing`, `upcoming`, `size_bytes`, `res_mix` and `monitored`, plus the folders the show lives in. `?season=<n>` adds the disk checks (reachability, subtitles, naming) for that season's files; without it a show is a database read.
+
+#### `POST /api/v1/video/<kind>/<id>/identify`
+
+Fix match. Body: `{"tmdb_id": 841}`. Re-points the library title to that TMDB entry, fills the imdb / tvdb ids TMDB gives for it, takes TMDB's title and year when your server named it differently, and locks the ids so a scan can't switch it back. Returns the new `tmdb_id`, `title` and `year`. `409` (with nothing changed) when TMDB doesn't answer for that id.
+
 #### `GET /api/v1/video/search?q=`
 
 TMDB multi-search over movies, shows and people.
