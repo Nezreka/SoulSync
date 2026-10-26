@@ -249,6 +249,72 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
             except Exception as e:
                 logger.debug("durable manual match fast-path failed: %s", e)
 
+        # Provider-ID match (#1885): a library row carrying this track's
+        # exact Spotify ID is the same track even when its artist is filed
+        # in another script (Latin source, Cyrillic tags) — the name-based
+        # matching below scores that as a different artist and the sync
+        # went on to clear the mirrored row's saved library link. Runs
+        # after the cache/manual fast-paths (user-confirmed pairings keep
+        # their precedence) and before the fuzzy matcher.
+        # Deliberately NOT written to sync_match_cache: a 1.0 cache row is
+        # read elsewhere as a user-confirmed pairing, and the #1721 stale
+        # gate would judge this row stale on artist evidence every run and
+        # drop it — churn for exactly the tracks this fixes. The provider
+        # lookup itself is an indexed query per lookup ID (plus one
+        # rejection query when a row hits); it needs no cache. And a
+        # pairing the user explicitly unmatched is never re-pinned by
+        # it (same guard as the media-server matcher).
+        try:
+            from core.sync.provider_match import (
+                provider_id_library_match, provider_match_rejected)
+            provider_row = provider_id_library_match(db, spotify_track, active_server)
+            if provider_row is not None:
+                _pid = provider_row.get("id") if isinstance(provider_row, dict) else provider_row.id
+                _ptitle = provider_row.get("title") if isinstance(provider_row, dict) else provider_row.title
+                # Fail CLOSED (provider_match_rejected): a pairing the
+                # user unmatched — or whose rejection state cannot be
+                # determined — is not honored. The fuzzy matcher below
+                # still runs, so the worst case is the pre-#1885
+                # behavior for one run.
+                try:
+                    # The sync's own profile first (this matcher is
+                    # patched onto sync_service, whose syncs carry their
+                    # profile in its contextvar), the ambient profile
+                    # second — same resolution as the media matcher.
+                    _profile_id = None
+                    try:
+                        from services.sync_service import _sync_profile_id
+                        _profile_id = _sync_profile_id.get()
+                    except Exception:
+                        _profile_id = None
+                    if not _profile_id:
+                        from core.artists.map import get_current_profile_id
+                        _profile_id = get_current_profile_id()
+                    _rejected = provider_match_rejected(
+                        db, _profile_id, active_server, spotify_track, _pid)
+                except Exception as e:
+                    logger.debug("provider-id rejection check failed, not honoring the match: %s", e)
+                    _rejected = True
+                if _rejected:
+                    logger.info(
+                        f"Provider-ID match for '{original_title}' not honored — "
+                        f"unmatched by user or rejection state unknown (library track {_pid})")
+                    provider_row = None
+            if provider_row is not None:
+                class DatabaseTrackProvider:
+                    def __init__(self, track_id, title, artist, album):
+                        self.ratingKey = track_id
+                        self.title = title
+                        self.id = track_id
+                        self.artist = artist
+                        self.album = album
+
+                _partist = provider_row.get("artist_name", "") if isinstance(provider_row, dict) else getattr(provider_row, 'artist_name', '')
+                _palbum = provider_row.get("album_title", "") if isinstance(provider_row, dict) else getattr(provider_row, 'album_title', '')
+                return DatabaseTrackProvider(_pid, _ptitle, _partist or '', _palbum or ''), 1.0
+        except Exception as e:
+            logger.debug("provider-id match failed: %s", e)
+
         # Try each artist
         for artist in spotify_track.artists:
             if isinstance(artist, str):

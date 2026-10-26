@@ -317,7 +317,13 @@ def rescue_stale_plex_track(media_client, db_track, artist_name):
     None. Best-effort — never raises; a miss just leaves the track unmatched
     exactly as before (#1047)."""
     try:
-        title = (getattr(db_track, 'title', '') or '').strip()
+        # db_track is a db row object; a dict-shaped row carries the same
+        # fields as keys (#1885's provider helper tolerates both shapes).
+        def _row_text(name):
+            value = (db_track.get(name, '') if isinstance(db_track, dict)
+                     else getattr(db_track, name, ''))
+            return value.strip() if isinstance(value, str) else ''
+        title = _row_text('title')
         if not title:
             return None
         results = media_client.search_tracks(title, artist_name or '', limit=15) or []
@@ -325,7 +331,7 @@ def rescue_stale_plex_track(media_client, db_track, artist_name):
             return None
 
         import os as _os
-        file_path = (getattr(db_track, 'file_path', '') or '').strip()
+        file_path = _row_text('file_path')
         want_base = _os.path.basename(file_path.replace('\\', '/')) if file_path else ''
         chosen = None
         if want_base:
@@ -1490,6 +1496,123 @@ class PlaylistSyncService:
                 except Exception as durable_err:
                     logger.debug(f"Durable manual match lookup error: {durable_err}")
             # --- End match fast-path ---
+
+            # Provider-ID match (#1885): a library row carrying this track's
+            # exact Spotify ID is the same track even when its artist is
+            # filed in another script (Latin source, Cyrillic tags) — the
+            # name-based matching below scores that as a different artist,
+            # the sync reported the track missing, and the mirrored row's
+            # saved library link was cleared. Runs after the cache/manual
+            # fast-paths above (user-confirmed pairings keep precedence)
+            # and before the fuzzy matcher. A pairing the user explicitly
+            # unmatched is never re-pinned by it.
+            if self._cancelled:
+                return None, 0.0
+            try:
+                from core.sync.provider_match import (
+                    durations_agree_ms, provider_id_library_match,
+                    provider_match_rejected, provider_titles_agree)
+                provider_row = provider_id_library_match(cache_db, spotify_track, active_server)
+                if provider_row is not None:
+                    _provider_id = (provider_row.get("id") if isinstance(provider_row, dict)
+                                    else provider_row.id)
+                    # Strict rejection test (provider_match_rejected),
+                    # NOT the lenient _match_was_rejected the cache path
+                    # uses: that one fails open, and a provider match
+                    # honored at 1.0 on a maybe-unmatched pairing would
+                    # silently undo the user's unmatch. Unknown == no.
+                    try:
+                        from core.artists.map import get_current_profile_id
+                        _provider_profile = _sync_profile_id.get() or get_current_profile_id()
+                        _provider_rejected = provider_match_rejected(
+                            cache_db, _provider_profile, active_server,
+                            spotify_track, _provider_id)
+                    except Exception as _rej_err:
+                        logger.debug(f"Provider-ID rejection check failed, not honoring the match: {_rej_err}")
+                        _provider_rejected = True
+                    if not _provider_rejected:
+                        actual_track = _materialize(_provider_id)
+                        if actual_track:
+                            logger.info(f"Provider-ID match honored for '{original_title}' → {getattr(actual_track, 'ratingKey', _provider_id)}")
+                            return actual_track, 1.0
+                        # Plex re-keys tracks on a metadata refresh, so the
+                        # stored id can 404 in _materialize — re-resolve live
+                        # before giving up, like the fuzzy branch below
+                        # (#1047). The track EXISTS; the ID just proved it.
+                        # The rescue is a title+artist search whose top hit
+                        # is NOT the ID's row, though: it only rides on the
+                        # ID's authority when its title corroborates the
+                        # provider row's and its duration (when known)
+                        # agrees with the source's — never blind at 1.0.
+                        if server_type == "plex":
+                            # Dict rows carry the same fields as attributes
+                            # on the real db's rows — read both shapes.
+                            _provider_title = (provider_row.get("title", "")
+                                               if isinstance(provider_row, dict)
+                                               else getattr(provider_row, 'title', '')) or ''
+                            _provider_artist = (provider_row.get("artist_name", "")
+                                                if isinstance(provider_row, dict)
+                                                else getattr(provider_row, 'artist_name', '')) or ''
+                            _provider_duration = (provider_row.get("duration", None)
+                                                  if isinstance(provider_row, dict)
+                                                  else getattr(provider_row, 'duration', None))
+                            rescued = rescue_stale_plex_track(
+                                media_client, provider_row,
+                                _provider_artist or
+                                (_artist_name(spotify_track.artists[0]) if spotify_track.artists else ''))
+                            if rescued is not None and provider_titles_agree(
+                                    cache_db, _provider_title,
+                                    getattr(rescued, 'title', '')):
+                                _rescued_artist = getattr(rescued, 'grandparentTitle', '')
+                                if not isinstance(_rescued_artist, str) or not _rescued_artist:
+                                    _rescued_artist = getattr(rescued, 'artist', '')
+                                if not isinstance(_rescued_artist, str):
+                                    # plexapi's Track.artist is a method, not
+                                    # a name — a non-string is no evidence.
+                                    _rescued_artist = ''
+                                if _provider_artist and _rescued_artist \
+                                        and _provider_artist.strip().casefold() not in ("various artists", "various") \
+                                        and _rescued_artist.strip().casefold() not in ("various artists", "various") \
+                                        and not provider_titles_agree(
+                                        cache_db, _provider_artist, _rescued_artist):
+                                    # Same title, different artist: the search
+                                    # ranks artist→title but its top hit is not
+                                    # proof — a namesake track must not ride on
+                                    # the provider ID's authority either.
+                                    logger.debug(f"Provider-ID rescue for '{original_title}' rejected on artist")
+                                elif not (durations_agree_ms(
+                                        getattr(spotify_track, 'duration_ms', None),
+                                        getattr(rescued, 'duration', None))
+                                        and durations_agree_ms(
+                                        _provider_duration,
+                                        getattr(rescued, 'duration', None))):
+                                    # The rescued track must agree with every
+                                    # duration that is known — the source's,
+                                    # and the provider row's own (the rescue
+                                    # claims to be THAT row, re-keyed; when
+                                    # the source's duration is unknown the
+                                    # row's is the only evidence there is).
+                                    logger.debug(f"Provider-ID rescue for '{original_title}' rejected on duration")
+                                elif provider_match_rejected(
+                                        cache_db, _provider_profile, active_server,
+                                        spotify_track, rescued.ratingKey):
+                                    # A rejection filed against the RESCUED
+                                    # key itself: this live track is a
+                                    # pairing the user unmatched (the
+                                    # stored key's pair was already checked
+                                    # above, before materialize) — never
+                                    # re-pin it just because it arrived via
+                                    # the rescue instead of the stored id.
+                                    logger.debug(f"Provider-ID rescue for '{original_title}' rejected — rescued key was unmatched")
+                                else:
+                                    logger.info(f"[Stale-Key Rescue] '{original_title}' re-resolved live "
+                                                f"(stored id {_provider_id} → {rescued.ratingKey})")
+                                    return rescued, 1.0
+                            elif rescued is not None:
+                                logger.debug(f"Provider-ID rescue for '{original_title}' rejected on title")
+                        logger.debug(f"Provider-ID match for '{original_title}' pointed at library track {_provider_id}, which did not materialize")
+            except Exception as provider_err:
+                logger.debug(f"Provider-ID match lookup error: {provider_err}")
 
             # Try each artist (same as modal logic)
             for artist in spotify_track.artists:
