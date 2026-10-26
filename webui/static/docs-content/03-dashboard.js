@@ -360,7 +360,7 @@ Every downloaded file is verified by **AcoustID audio fingerprinting** against t
 ### ⚠ Unverified
 Imported files AcoustID could not hard-confirm (shown only when AcoustID is configured). Row badges explain why: **FORCE-IMPORTED** ("Accepted as best candidate after the retry budget was exhausted") or **ACOUSTID UNCONFIRMED** ("ambiguous / cross-script / no fingerprint match"). Expanding a row shows **Why flagged**, download source, quality, file, and download date.
 
-Per-row actions: **▶ Play** (in the media player), **⇆ Compare** (finds the expected track on Soulseek/streaming and plays it for A/B comparison), **🔍 Audit** (full audit trail: lifecycle, embedded tags, lyrics), **✔ Approve** ("mark as human-verified — the AcoustID scanner will skip it"), **🗑 Delete** (wrong file: delete from disk and remove the entry).
+Per-row actions: **▶ Play** (in the media player), **⇆ Compare** (finds the expected track on Soulseek/streaming and plays it for A/B comparison), **🔍 Audit** (full audit trail: lifecycle, embedded tags, lyrics), **✔ Approve** ("mark as human-verified — the AcoustID scanner will skip it"), **Wrong song** (deletes the file, skips that source next time, puts the song you asked for back on the wishlist and opens Interactive Search on it so you can pick the right one; close it and the wishlist keeps looking), **🗑 Delete** (wrong file: delete from disk, remove the entry, and skip that source next time).
 
 Bulk: **✔ Approve all**, **🧹 Clean orphaned** (removes dead log rows whose file no longer exists — never deletes a file), **🗑 Delete all**, plus checkbox multi-select.
 

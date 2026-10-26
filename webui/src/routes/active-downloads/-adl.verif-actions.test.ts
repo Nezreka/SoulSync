@@ -1,6 +1,7 @@
 import { HttpResponse, http } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { openWishlistInspector } from '@/features/downloads/inspector-modal';
 import { server } from '@/test/msw';
 
 import type { AdlDownload, AdlQuarantineEntry } from './-adl.types';
@@ -24,7 +25,10 @@ import {
   unverifiedCompare,
   unverifiedDelete,
   unverifiedPlay,
+  unverifiedWrongSong,
 } from './-adl.verif-actions';
+
+vi.mock('@/features/downloads/inspector-modal', () => ({ openWishlistInspector: vi.fn() }));
 
 let toasts: { message: string; type?: string }[] = [];
 let confirmCalls: Record<string, unknown>[] = [];
@@ -419,5 +423,56 @@ describe('bulk actions', () => {
     expect(onDone).toHaveBeenCalled();
     // The toast uses the server's tally, not an invented local one.
     expect(toasts[0].message).toContain('4');
+  });
+});
+
+// ── Wrong song ────────────────────────────────────────────────────────────
+
+describe('wrong song', () => {
+  it('rejects the file, refreshes, and opens a search for what was asked for', async () => {
+    // TheHomeGuy: deleting a wrong grab told SoulSync nothing about which
+    // song he meant. now the asked-for song goes back on the wishlist and
+    // the interactive search opens on it.
+    vi.mocked(openWishlistInspector).mockClear();
+    const track = { id: 'sp-1', name: 'Dead or Alive', artist: 'Lil Yee', album: 'Alive' };
+    const calls = ok('/api/verification/:id/wrong-song', { success: true, wishlist_track: track });
+    const onDone = vi.fn();
+
+    await unverifiedWrongSong('42', '"Dead or Alive" by Lil Yee', onDone);
+
+    expect(confirmCalls).toHaveLength(1);
+    expect(String(confirmCalls[0].message)).toContain('"Dead or Alive" by Lil Yee');
+    expect(calls).toHaveLength(1);
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(openWishlistInspector).toHaveBeenCalledWith(track);
+  });
+
+  it('does nothing when the dialog is declined', async () => {
+    vi.mocked(openWishlistInspector).mockClear();
+    confirmAnswer = false;
+    const calls = ok('/api/verification/:id/wrong-song');
+    await unverifiedWrongSong('42', 'it', vi.fn());
+    expect(calls).toHaveLength(0);
+    expect(openWishlistInspector).not.toHaveBeenCalled();
+  });
+
+  it('says why when the server refuses, and opens no search', async () => {
+    vi.mocked(openWishlistInspector).mockClear();
+    server.use(
+      http.post('/api/verification/:id/wrong-song', () =>
+        HttpResponse.json(
+          { success: false, error: "There's no record of which song was asked for" },
+          { status: 400 },
+        ),
+      ),
+    );
+    const onDone = vi.fn();
+    await unverifiedWrongSong('42', 'it', onDone);
+    expect(toasts.at(-1)).toEqual({
+      message: "There's no record of which song was asked for",
+      type: 'error',
+    });
+    expect(onDone).not.toHaveBeenCalled();
+    expect(openWishlistInspector).not.toHaveBeenCalled();
   });
 });

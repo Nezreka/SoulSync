@@ -14,7 +14,7 @@ import os
 
 from flask import Blueprint, jsonify
 
-from core.profile_context import admin_only
+from core.profile_context import admin_only, get_current_profile_id
 from core.search import stream as _search_stream
 from utils.async_helpers import run_async
 from utils.logging_config import get_logger
@@ -320,22 +320,77 @@ def delete_verification_item(history_id):
         row = _get_library_history_row(history_id)
         if not row:
             return jsonify({"success": False, "error": "History entry not found"}), 404
-        on_disk = _resolve_history_audio_path(row)
-        blacklisted = _blacklist_rejected_source(db, row, on_disk)
-        file_deleted = False
-        if on_disk and os.path.exists(on_disk):
-            os.remove(on_disk)
-            file_deleted = True
-            logger.info(f"[Verification] Deleted rejected file: {on_disk}")
-            # drop its library row too. waiting for the mirror left it there
-            # (only a deep scan clears it), so playlist sync kept matching a
-            # file that was gone and it never went back on the wishlist (#1754)
-            db.delete_track_by_file_path(on_disk)
-        db.delete_library_history_rows([history_id])
+        file_deleted, blacklisted = _reject_review_item(db, row, history_id)
         return jsonify({"success": True, "file_deleted": file_deleted,
                         "blacklisted": blacklisted})
     except Exception as e:
         logger.error(f"[Verification] Delete failed for {history_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _reject_review_item(db, row, history_id):
+    """the file is wrong: its source is blacklisted, the file and its library
+    row are deleted, and the review entry goes. returns (file_deleted,
+    blacklisted)."""
+    on_disk = _resolve_history_audio_path(row)
+    blacklisted = _blacklist_rejected_source(db, row, on_disk)
+    file_deleted = False
+    if on_disk and os.path.exists(on_disk):
+        os.remove(on_disk)
+        file_deleted = True
+        logger.info(f"[Verification] Deleted rejected file: {on_disk}")
+        # drop its library row too. waiting for the mirror left it there
+        # (only a deep scan clears it), so playlist sync kept matching a
+        # file that was gone and it never went back on the wishlist (#1754)
+        db.delete_track_by_file_path(on_disk)
+    db.delete_library_history_rows([history_id])
+    return file_deleted, blacklisted
+
+
+@bp.route('/api/verification/<int:history_id>/wrong-song', methods=['POST'])
+@admin_only
+def wrong_song_verification_item(history_id):
+    """the file is the wrong song. it goes like a delete (file, library row,
+    blacklisted source), and the song that was asked for goes back on the
+    wishlist, so the interactive search can be opened on it to pick the
+    right one. closing that search leaves the wishlist to keep hunting."""
+    try:
+        db = get_database()
+        row = _get_library_history_row(history_id)
+        if not row:
+            return jsonify({"success": False, "error": "History entry not found"}), 404
+        title = (row.get('source_track_title') or '').strip()
+        if not title:
+            return jsonify({"success": False, "error": (
+                "There's no record of which song was asked for, so it can't be "
+                "searched again. Delete it and add the song yourself.")}), 400
+        artist = (row.get('source_artist') or '').strip()
+        album = (row.get('album_name') or '').strip()
+        track = {
+            'id': str(row.get('source_track_id') or f"review_{history_id}"),
+            'name': title,
+            'artists': [{'name': artist}] if artist else [],
+            'album': {'name': album} if album else {},
+        }
+        file_deleted, blacklisted = _reject_review_item(db, row, history_id)
+        outcome = db.add_to_wishlist_detailed(
+            track,
+            failure_reason='Wrong song, picked again from review',
+            source_type='review',
+            source_info={'history_id': history_id},
+            profile_id=get_current_profile_id(),
+            user_initiated=True,
+        )
+        if not outcome.get('applied'):
+            return jsonify({"success": False, "file_deleted": file_deleted,
+                            "blacklisted": blacklisted,
+                            "error": "The file is gone, but the song couldn't go back on the wishlist."}), 500
+        return jsonify({"success": True, "file_deleted": file_deleted,
+                        "blacklisted": blacklisted,
+                        "wishlist_track": {'id': outcome.get('track_id') or track['id'],
+                                           'name': title, 'artist': artist, 'album': album}})
+    except Exception as e:
+        logger.error(f"[Verification] Wrong song failed for {history_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
