@@ -2764,12 +2764,17 @@
     function episodeLinks(showTmdb, season, episode, ex) {
         if (data && data.source === 'tmdb') return '';
         var links = [];
+        // quiet text links in the panel's footer; a lone logo tile under the
+        // guest stars read as a stray image
+        function link(label, url) {
+            return '<a class="vd-ep-link" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer" ' +
+                'title="' + label + ' episode">' + label + ' \u2197</a>';
+        }
         if (showTmdb) {
-            links.push(badge(TMDB_LOGO, 'TMDB', 'TMDB episode',
-                'https://www.themoviedb.org/tv/' + showTmdb + '/season/' + season + '/episode/' + episode));
+            links.push(link('TMDB', 'https://www.themoviedb.org/tv/' + showTmdb + '/season/' + season + '/episode/' + episode));
         }
         if (ex && ex.imdb_id) {
-            links.push(badge('', 'IMDb', 'IMDb episode', 'https://www.imdb.com/title/' + ex.imdb_id + '/'));
+            links.push(link('IMDb', 'https://www.imdb.com/title/' + ex.imdb_id + '/'));
         }
         return links.length
             ? '<div class="vd-ep-links">' + links.join('') + '</div>' : '';
@@ -2810,7 +2815,7 @@
                     : '') +
                 '</div>';
         }
-        body += episodeLinks(showTmdb, season, episode, ex);
+        var foot = episodeLinks(showTmdb, season, episode, ex) + episodeReportButton(panel);
         // The empty-state used to be unreachable: the old code built the wrapper
         // div into `html` first, so `html || fallback` could never take the
         // fallback and an episode with no extras opened into a blank box.
@@ -2820,7 +2825,7 @@
                 : '') +
             '<div class="vd-ep-extra-body">' +
                 (body || '<div class="vd-ep-extra-empty">No extra info.</div>') +
-                episodeReportButton(panel) +
+                (foot ? '<div class="vd-ep-foot">' + foot + '</div>' : '') +
             '</div>';
     }
 

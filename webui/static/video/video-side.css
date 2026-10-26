@@ -2330,7 +2330,15 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     box-shadow: 0 6px 18px var(--black-a40); }
 .vd-ep-extra-body { flex: 1; min-width: 0; }
 /* Per-episode external deep-links (#1039) — a small badge row under the synopsis */
-.vd-ep-links { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.vd-ep-links { display: flex; gap: 14px; flex-wrap: wrap; }
+/* the panel's footer: episode links and report on one quiet line */
+.vd-ep-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-top: 14px; }
+.vd-ep-foot .vi-ep-report { margin-top: 0; }
+.vd-ep-link { font-size: 12px; font-weight: 700; color: var(--white-a45); text-decoration: none; }
+.vd-ep-link:hover { color: var(--text-1); }
+/* an open row shows its whole synopsis; the panel skips a repeat of it, so a
+   clamped one was otherwise never readable */
+.vd-ep--open .vd-ep-desc { display: block; -webkit-line-clamp: unset; overflow: visible; }
 .vd-ep-extra-ov { margin: 0 0 16px; font-size: 14px; line-height: 1.6; color: var(--white-a80); }
 .vd-ep-extra-empty { color: var(--white-a45); font-size: 13.5px; padding: 4px 0; }
 .vd-ep-extra-gh { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--white-a45); margin-bottom: 12px; }
