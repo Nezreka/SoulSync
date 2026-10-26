@@ -580,3 +580,43 @@ def test_strict_precheck_still_rejects_much_longer_candidates(monkeypatch):
     extended = _deezer_candidate(duration=310_000)
 
     assert get_valid_candidates([extended], expected, 'HALO Live Again') == []
+
+
+def _tidal_hit(title, artist, i=0):
+    from core.soulseek_client import TrackResult
+    return TrackResult(
+        username='tidal', filename=f'{i}||{artist} - {title}', size=0, bitrate=None,
+        duration=180_000, quality='flac', free_upload_slots=1, upload_speed=1,
+        queue_length=0, artist=artist, title=title, album=title)
+
+
+def test_a_shared_lil_does_not_make_two_artists_the_same(monkeypatch):
+    """TheHomeGuy: lil jon's "alive" was downloaded for lil yee's "dead or
+    alive". "lil yee" vs "lil jon" scored 0.57 on the shared "lil " alone,
+    over the 0.5 artist gate."""
+    from core.matching_engine import MusicMatchingEngine
+    from core.spotify_client import Track as SpotifyTrack
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    wanted = SpotifyTrack(id='x', name='Dead or Alive', artists=['Lil Yee'], album='',
+                          duration_ms=180_000, popularity=0)
+    hits = [_tidal_hit('Alive', 'Lil Jon', 0), _tidal_hit('Alive', 'Lil Wayne', 1),
+            _tidal_hit('Dead or Alive', 'Lil Yee', 2)]
+
+    kept = validation._score_streaming_candidates(hits, wanted)
+
+    assert [(r.artist, r.title) for r in kept] == [('Lil Yee', 'Dead or Alive')]
+
+
+def test_prefixed_artists_still_match_themselves(monkeypatch):
+    from core.matching_engine import MusicMatchingEngine
+    from core.spotify_client import Track as SpotifyTrack
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    for wanted_artist, got_artist in [('Lil Wayne', 'Lil Wayne feat. Drake'),
+                                      ('DJ Snake', 'DJ Snake'),
+                                      ('The Weeknd', 'Weeknd')]:
+        wanted = SpotifyTrack(id='x', name='Song Title', artists=[wanted_artist], album='',
+                              duration_ms=180_000, popularity=0)
+        kept = validation._score_streaming_candidates([_tidal_hit('Song Title', got_artist)], wanted)
+        assert len(kept) == 1, (wanted_artist, got_artist)
