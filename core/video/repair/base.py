@@ -5,7 +5,10 @@ a job is a registered class with UI-driving attributes and one ``scan(context)``
 that inspects the library and creates FINDINGS the user reviews on the Tools
 page. Approving a finding runs the job's ``fix`` (approve == fix == resolved);
 dismissing rejects it. Dedup lives in the DB layer — a re-scan never resurrects
-a finding the user already handled.
+a finding the user dismissed; a resolved one comes back only after a grace
+window (or at once when the claim itself changed, e.g. a new expected path),
+and only if the problem is genuinely back. See
+VideoDatabase.repair_create_finding for the full recurrence contract.
 """
 
 from __future__ import annotations

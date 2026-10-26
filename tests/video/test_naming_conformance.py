@@ -121,6 +121,59 @@ def test_template_change_reflags_and_conforming_retires(db, worker, tmp_path):
     assert _pending(db) == []                       # back to conforming → retired
 
 
+def _age_handled(db, fid, days=30):
+    conn = db._get_connection()
+    try:
+        conn.execute("UPDATE video_repair_findings "
+                     "SET resolved_at=datetime('now', ?) WHERE id=?",
+                     (f"-{days} days", fid))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_template_change_after_approve_reflags_immediately(db, worker, tmp_path):
+    """#1882: a finding resolved under the old template must not block the
+    new one — the expected path changed, so the claim changed."""
+    from core.video import organization
+    _seed_movie_file(db, tmp_path, title="Ronin", year=1998,
+                     rel="Movies/ronin.1998.mkv")
+    worker._run_job("naming_conformance", forced=True)
+    f = _pending(db)[0]
+    assert worker.fix_finding(f["id"])["success"]           # resolved, in grace
+    worker._run_job("naming_conformance", forced=True)
+    assert _pending(db) == []                               # conforms now
+
+    organization.save(db, {**organization.load(db), "movie_template": "$title/$title $year"})
+    worker._run_job("naming_conformance", forced=True)
+    assert len(_pending(db)) == 1                           # re-flagged at once
+
+
+def test_wrong_rename_comes_back_after_grace(db, worker, tmp_path):
+    """#1882: the file a fix placed gets renamed badly again (outside
+    SoulSync, same template): the resolved finding holds the re-raise off
+    for the grace window, then a re-scan flags it again."""
+    mid, messy = _seed_movie_file(db, tmp_path, title="Ronin", year=1998,
+                                  rel="Movies/ronin.1998.mkv")
+    worker._run_job("naming_conformance", forced=True)
+    f = _pending(db)[0]
+    assert worker.fix_finding(f["id"])["success"]
+    fid = f["id"]
+
+    fixed = Path(f["details"]["expected_path"])
+    fixed.rename(messy)                                     # bad rename returns
+    conn = db._get_connection()
+    conn.execute("UPDATE media_files SET relative_path=? WHERE movie_id=?",
+                 (str(messy), mid))
+    conn.commit(); conn.close()
+
+    worker._run_job("naming_conformance", forced=True)
+    assert _pending(db) == []                               # still inside grace
+    _age_handled(db, fid)
+    worker._run_job("naming_conformance", forced=True)
+    assert len(_pending(db)) == 1                           # flagged again
+
+
 def test_unlocatable_files_are_skipped_never_guessed(db, worker, tmp_path):
     mid = db.upsert_movie("plex", {"server_id": "svx", "title": "Ghost", "tmdb_id": 1})
     conn = db._get_connection()

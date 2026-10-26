@@ -29,6 +29,18 @@ from utils.logging_config import get_logger
 
 logger = get_logger("video_database")
 
+# Library Maintenance recurrence: how long a resolved finding keeps
+# suppressing a re-raise of the same problem (music's repair worker uses
+# the same window). Covers fixes that land asynchronously; past it, a
+# problem a scan still sees is real news again. See repair_create_finding.
+_RESOLVED_RECURRENCE_GRACE_DAYS = 7
+
+# user_action written by repair_dismiss_absent when a scan retires a
+# pending finding the library no longer produces. That is the SYSTEM
+# closing a finding, not a user dismissal — repair_create_finding tells
+# the two apart by this exact value, so it lives in one place.
+_SUPERSEDED_BY_SCAN_ACTION = "superseded by a newer scan"
+
 
 def _publish_video_event(event_type: str, data: dict) -> None:
     """Relay a library change to the video automation event bus. The DB layer is
@@ -6686,16 +6698,74 @@ class VideoDatabase:
             conn.close()
 
     # ── Library Maintenance: jobs & findings (mirrors music's repair standard) ─
-    # Findings: pending → resolved (approve == fix) | dismissed. Dedup treats
-    # EVERY status as already-seen, so a re-scan never resurrects a dismissed or
-    # fixed finding. Runs record per-job tallies for the History tab.
+    # Findings: pending → resolved (approve == fix) | dismissed. Dedup follows
+    # the recurrence contract in repair_create_finding: a dismissal silences a
+    # finding forever, a resolution only for a short grace window — past it, a
+    # scan that still sees the problem raises a fresh pending row. Runs record
+    # per-job tallies for the History tab.
+
+    @staticmethod
+    def _within_recurrence_grace(resolved_at) -> bool:
+        """Is a handled finding recent enough that re-raising it would be noise?
+
+        A fix often lands asynchronously — a rename waits on the next
+        media-server scan, a wishlist add on the next sync — so the very next
+        sweep would legitimately still see the problem and re-raise the row
+        the user just cleared. The grace window covers that gap; past it, a
+        problem that is STILL there is real news and deserves a fresh
+        pending row.
+
+        Unparseable or missing timestamps count as INSIDE the window: the
+        conservative direction is silence, not a flood of re-raised findings
+        on the first scan after an upgrade.
+        """
+        if not resolved_at:
+            return True
+        try:
+            dt = datetime.fromisoformat(str(resolved_at))
+        except (TypeError, ValueError):
+            return True
+        if dt.tzinfo is None:      # SQLite CURRENT_TIMESTAMP is naive UTC
+            dt = dt.replace(tzinfo=timezone.utc)
+        age_days = (datetime.now(timezone.utc) - dt).total_seconds() / 86400
+        return age_days < _RESOLVED_RECURRENCE_GRACE_DAYS
 
     def repair_create_finding(self, job_id: str, finding_type: str, *, title: str,
                               severity: str = "info", entity_type=None, entity_id=None,
                               file_path=None, description=None, details=None) -> bool:
-        """Insert a finding unless an equivalent one exists in ANY status —
-        same job+type and (same entity OR same non-null file_path). Returns
-        True only when a genuinely new row landed (music dedup semantics)."""
+        """Insert a finding unless an equivalent one already covers it — same
+        job+type and (same entity OR same non-null file_path).
+
+        Recurrence contract (mirrors music's RepairWorker._create_finding;
+        the old rule — "any status suppresses forever" — meant a problem the
+        user acted on could never be reported again even when it came BACK,
+        so a wrong fix could never be corrected by a re-scan, #1882):
+
+          * pending row exists   → REFRESH it in place (severity, title,
+            description, details, file_path) and report no new finding. The
+            stored row is the fix's input, so it must match the latest scan.
+          * dismissed row exists → stay silent, permanently. Dismiss means
+            "never tell me about this again". The one exception is a row the
+            system itself retired (_SUPERSEDED_BY_SCAN_ACTION, written by
+            repair_dismiss_absent): nobody dismissed that by hand, and the
+            scan that retired it verified the problem was GONE — so a scan
+            producing the finding again raises it at once, no grace window.
+            No fix is in flight that a grace window would protect.
+          * resolved row exists  → silent inside the grace window
+            (_within_recurrence_grace), a NEW pending row after it. The
+            handled row is left alone as history.
+          * target changed       → when the new finding's details carry an
+            expected_path that differs from the handled row's stored one,
+            the claim itself changed (a template edit, a naming-rule fix):
+            raise immediately, grace window or not. A user dismissal still
+            wins — this never resurrects a finding the user dismissed.
+
+        Music's fourth clause, supersede=True, is deliberately not ported:
+        no video caller needs it, and the target-changed clause covers the
+        case that motivated it (the world changed under a handled finding).
+
+        Returns True only when a genuinely new row landed.
+        """
         conn = self._get_connection()
         try:
             # Dedup basis: entity match (when the finding names one) OR same
@@ -6709,10 +6779,45 @@ class VideoDatabase:
                 conds.append("(file_path IS NOT NULL AND file_path=?)")
                 dparams.append(file_path)
             if conds:
-                dup_sql = ("SELECT 1 FROM video_repair_findings WHERE job_id=? AND finding_type=? "
-                           "AND (" + " OR ".join(conds) + ") LIMIT 1")
-                if conn.execute(dup_sql, dparams).fetchone():
+                rows = conn.execute(
+                    "SELECT id, status, user_action, resolved_at, details_json "
+                    "FROM video_repair_findings WHERE job_id=? AND finding_type=? "
+                    "AND (" + " OR ".join(conds) + ") ORDER BY id DESC",
+                    dparams).fetchall()
+                pending = next((r for r in rows if r["status"] == "pending"), None)
+                if pending is not None:
+                    conn.execute(
+                        "UPDATE video_repair_findings SET severity=?, title=?, "
+                        "description=?, details_json=?, "
+                        "file_path=COALESCE(?, file_path), "
+                        "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (severity, title, description, json.dumps(details or {}),
+                         file_path, pending["id"]))
+                    conn.commit()
                     return False
+                if any(r["status"] == "dismissed"
+                       and r["user_action"] != _SUPERSEDED_BY_SCAN_ACTION
+                       for r in rows):
+                    return False
+                handled = next((r for r in rows
+                                if r["status"] in ("resolved", "dismissed")), None)
+                if handled is not None:
+                    superseded = (handled["status"] == "dismissed"
+                                  and handled["user_action"] == _SUPERSEDED_BY_SCAN_ACTION)
+                    if not superseded:
+                        new_expected = (details.get("expected_path")
+                                        if isinstance(details, dict) else None)
+                        old_expected = None
+                        try:
+                            old_expected = json.loads(
+                                handled["details_json"] or "{}").get("expected_path")
+                        except (ValueError, TypeError, AttributeError):
+                            old_expected = None
+                        target_changed = bool(new_expected and old_expected
+                                              and new_expected != old_expected)
+                        if not target_changed and self._within_recurrence_grace(
+                                handled["resolved_at"]):
+                            return False
             conn.execute(
                 "INSERT INTO video_repair_findings (job_id, finding_type, severity, entity_type, "
                 "entity_id, file_path, title, description, details_json) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -6857,8 +6962,9 @@ class VideoDatabase:
                 marks = ",".join("?" * len(chunk))
                 cur = conn.execute(
                     "UPDATE video_repair_findings SET status='dismissed', "
-                    "user_action='superseded by a newer scan', resolved_at=CURRENT_TIMESTAMP, "
-                    f"updated_at=CURRENT_TIMESTAMP WHERE id IN ({marks})", chunk)
+                    "user_action=?, resolved_at=CURRENT_TIMESTAMP, "
+                    f"updated_at=CURRENT_TIMESTAMP WHERE id IN ({marks})",
+                    (_SUPERSEDED_BY_SCAN_ACTION, *chunk))
                 n += cur.rowcount
             conn.commit()
             return n
