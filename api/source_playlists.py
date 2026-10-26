@@ -1546,6 +1546,38 @@ def get_tidal_playlist_tracks(playlist_id):
 tidal_discovery_states = {}  # Key: playlist_id, Value: discovery state
 tidal_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="tidal_discovery")
 
+def _ensure_tidal_mirror(playlist_id, playlist, profile_id):
+    """the mirror for this tidal playlist: its skipped counts brought up to
+    date, or the whole mirror made from the playlist in hand when there is
+    none. an existing mirror's tracks are left to its own refresh."""
+    from core.playlists.sources.base import to_mirror_track_dict
+    from core.playlists.sources.tidal import TidalPlaylistSource
+    from database.music_database import get_database as _get_db
+
+    database = _get_db()
+    skipped = _playlist_skipped_counts(playlist)
+    if database.get_mirrored_playlist_by_source('tidal', str(playlist_id), profile_id):
+        database.set_mirrored_playlist_source_skipped(
+            'tidal', playlist_id, skipped, profile_id=profile_id)
+        return
+    source = TidalPlaylistSource(lambda: None)
+    meta = source._meta_from_playlist(playlist)
+    tracks = [to_mirror_track_dict(source._track_from_tidal(t, i))
+              for i, t in enumerate(playlist.tracks or [])]
+    database.mirror_playlist(
+        source='tidal',
+        source_playlist_id=str(playlist_id),
+        name=meta.name,
+        tracks=tracks,
+        profile_id=profile_id,
+        description=meta.description,
+        owner=meta.owner,
+        image_url=getattr(playlist, 'image_url', None),
+        source_skipped=skipped,
+    )
+    logger.info("mirrored tidal playlist '%s' at discovery start (%s tracks)", meta.name, len(tracks))
+
+
 @bp.route('/api/tidal/discovery/start/<playlist_id>', methods=['POST'])
 def start_tidal_discovery(playlist_id):
     """Start Spotify discovery process for a Tidal playlist"""
@@ -1565,15 +1597,15 @@ def start_tidal_discovery(playlist_id):
         if not target_playlist.tracks:
             return jsonify({"error": "Playlist has no tracks"}), 400
 
-        # a fresh fetch has fresh counts, keep the mirror's note current
+        # a fresh fetch has fresh counts, keep the mirror's note current. and
+        # a playlist with no mirror yet gets one here: the sync page only
+        # mirrors from its background crawl, which a big playlist (minutes to
+        # page through) could lose, and it then synced but never showed in
+        # the mirrored list
         try:
-            from database.music_database import get_database as _get_db
-            _get_db().set_mirrored_playlist_source_skipped(
-                'tidal', playlist_id, _playlist_skipped_counts(target_playlist),
-                profile_id=get_current_profile_id(),
-            )
+            _ensure_tidal_mirror(playlist_id, target_playlist, get_current_profile_id())
         except Exception as e:
-            logger.debug("tidal skipped counts not saved to mirror: %s", e)
+            logger.debug("tidal mirror not saved at discovery start: %s", e)
 
         # Initialize discovery state if it doesn't exist, or update existing state
         if playlist_id in tidal_discovery_states:

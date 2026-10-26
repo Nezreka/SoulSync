@@ -122,3 +122,36 @@ def test_start_uses_the_profiles_own_tidal_client(tidal):
     r = web_server.app.test_client().post('/api/tidal/discovery/start/P1')
     assert r.status_code == 200, r.get_json()
     assert tidal.calls == 1
+
+
+def test_start_mirrors_a_playlist_that_has_no_mirror(tidal):
+    """TheHomeGuy: Driving Music (1218 tracks) synced to the server and showed
+    on the dashboard, but never landed in the mirrored list. the page only
+    mirrored from its background crawl, which a big playlist could lose."""
+    from database.music_database import get_database
+
+    tidal.release.set()
+    db = get_database()
+    assert db.get_mirrored_playlist_by_source('tidal', 'NEW1', 1) is None
+
+    r = web_server.app.test_client().post('/api/tidal/discovery/start/NEW1')
+    assert r.status_code == 200, r.get_json()
+
+    mirror = db.get_mirrored_playlist_by_source('tidal', 'NEW1', 1)
+    assert mirror is not None
+    assert mirror['name'] == 'Driving Music'
+    tracks = db.get_mirrored_playlist_tracks(mirror['id'])
+    assert [t['source_track_id'] for t in tracks] == ['0', '1', '2']
+    assert tracks[0]['track_name'] == 't0' and tracks[0]['artist_name'] == 'a'
+
+
+def test_start_leaves_an_existing_mirrors_tracks_alone(tidal):
+    from database.music_database import get_database
+
+    tidal.release.set()
+    db = get_database()
+    pid = db.mirror_playlist('tidal', 'OLD1', 'Driving Music',
+                             [{'track_name': 'mine', 'artist_name': 'x', 'source_track_id': 'z'}],
+                             profile_id=1)
+    assert web_server.app.test_client().post('/api/tidal/discovery/start/OLD1').status_code == 200
+    assert [t['source_track_id'] for t in db.get_mirrored_playlist_tracks(pid)] == ['z']
