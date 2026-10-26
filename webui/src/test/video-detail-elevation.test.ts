@@ -228,3 +228,51 @@ describe('round two', () => {
     expect(SRC).toContain('VideoYoutube.openChannelSettings(data.id, data.title');
   });
 });
+
+describe('a page that cannot load', () => {
+  it('every load failure lands on the one error state, never a bare headline', () => {
+    for (const name of ['loadMovie', 'loadShow', 'loadChannel', 'loadPlaylist']) {
+      const body = extractFunction(name, SRC);
+      expect(body).toContain('showLoadError(');
+      expect(body).toContain('_retry = function');
+      expect(body).not.toMatch(
+        /setText\('\[data-vd-title\]', '(Not found|Could not load|\w+ unavailable)/,
+      );
+    }
+  });
+
+  it('offers a retry, and youtube pages keep a way out to youtube', () => {
+    const host = document.createElement('div');
+    host.innerHTML =
+      '<div class="vd-page"><h1 data-vd-title></h1><p data-vd-overview></p>' +
+      '<div data-vd-actions></div><div data-vd-tabs></div></div>';
+    (globalThis as Record<string, unknown>).__host = host;
+    const show = fn<(n: string, w: string, u?: string) => void>(
+      'showLoadError',
+      `function esc(s) { return String(s == null ? '' : s); }
+       function q(sel) { return globalThis.__host.querySelector(sel); }
+       function root() { return globalThis.__host.querySelector('.vd-page'); }
+       function setText(sel, t) { var n = q(sel); if (n) n.textContent = t || ''; }
+       function showLoading() {}
+       function renderOverview(t) { q('[data-vd-overview]').textContent = t; }`,
+    );
+    show('playlist', 'gone', 'https://www.youtube.com/playlist?list=PL1');
+    expect(host.querySelector('.vd-page')?.classList.contains('vd-page--error')).toBe(true);
+    expect(host.querySelector('[data-vd-title]')?.textContent).toBe('Couldn’t open this playlist');
+    expect(host.querySelector('[data-vd-overview]')?.textContent).toContain('private, deleted');
+    expect(host.querySelector('[data-vd-act="retry-load"]')).not.toBeNull();
+    expect(host.querySelector('a.vd-error-ext')?.getAttribute('href')).toContain('list=PL1');
+    expect((host.querySelector('[data-vd-tabs]') as HTMLElement).hidden).toBe(true);
+  });
+
+  it('the back pill never says "Back to Couldn\u2019t open this movie"', () => {
+    const side = readFileSync(resolve(process.cwd(), 'static/video/video-side.js'), 'utf8');
+    expect(extractFunction('detailTitleOf', side)).toContain(
+      "classList.contains('vd-page--error')",
+    );
+  });
+
+  it('the next load clears the error state', () => {
+    expect(extractFunction('resetExtras', SRC)).toContain("classList.remove('vd-page--error')");
+  });
+});

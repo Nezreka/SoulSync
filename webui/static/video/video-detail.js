@@ -1605,6 +1605,7 @@
 
     // ── live TMDB extras (trailer / where-to-watch / similar) ─────────────────
     function resetExtras() {
+        var r0 = root(); if (r0) r0.classList.remove('vd-page--error');
         ['[data-vd-providers-section]', '[data-vd-similar-section]', '[data-vd-collection-section]',
          '[data-vd-next-ep]', '[data-vd-crew-line]', '[data-vd-season-overview]',
          '[data-vd-facts-section]', '[data-vd-videos-section]', '[data-vd-gallery-section]',
@@ -2823,6 +2824,39 @@
         renderViewToggle(); renderSeasonNav();
     }
 
+    // A page that couldn't load says so calmly, explains, and offers a way
+    // forward. It used to print "Playlist unavailable" as a 5em headline over
+    // an empty Episodes section.
+    var _retry = null;
+    function showLoadError(noun, why, extUrl) {
+        var r0 = root(); if (!r0) return;
+        showLoading(false);
+        r0.classList.add('vd-page--error');
+        setText('[data-vd-title]', 'Couldn\u2019t open this ' + noun);
+        var t = q('[data-vd-title]'); if (t) t.classList.remove('vd-title--logo');
+        var logo = q('[data-vd-logo]'); if (logo) { logo.hidden = true; logo.removeAttribute('src'); }
+        var cover = q('[data-vd-cover]'); if (cover) { cover.hidden = true; cover.removeAttribute('src'); }
+        var bbc = q('.vd-bb-content'); if (bbc) bbc.classList.add('vd-bb-content--no-cover');
+        var bg = q('[data-vd-backdrop]'); if (bg) { bg.style.backgroundImage = ''; bg.classList.add('vd-bb-bg--empty'); }
+        ['[data-vd-meta]', '[data-vd-genres]', '[data-vd-links]', '[data-vd-crew-line]', '[data-vd-ratings]',
+         '[data-vd-awards]', '[data-vd-essentials]', '[data-vd-health]', '[data-vd-tagline]'].forEach(function (sel) {
+            var n = q(sel); if (n) { n.innerHTML = ''; if (sel !== '[data-vd-meta]' && sel !== '[data-vd-genres]') n.hidden = true; }
+        });
+        renderOverview(why === 'offline'
+            ? 'SoulSync couldn\u2019t reach the server for this ' + noun + '. Check your connection, then try again.'
+            : (noun === 'channel' || noun === 'playlist'
+                ? 'YouTube didn\u2019t return this ' + noun + '. It may be private, deleted, or YouTube may be rate-limiting for a moment.'
+                : 'This ' + noun + ' isn\u2019t in your library any more. It may have been removed on your media server.'));
+        var a = q('[data-vd-actions]');
+        if (a) {
+            a.innerHTML = '<button class="library-artist-watchlist-btn vd-action-main" type="button" data-vd-act="retry-load">' +
+                '<span class="watchlist-icon">\u21BB</span><span class="watchlist-text">Try again</span></button>' +
+                (extUrl ? '<a class="vd-manage-btn vd-more-link vd-error-ext" href="' + esc(extUrl) + '" target="_blank" rel="noopener noreferrer">' +
+                    '<span class="vd-manage-ic" aria-hidden="true">\u2197</span> Open on YouTube</a>' : '');
+        }
+        var tabs = q('[data-vd-tabs]'); if (tabs) tabs.hidden = true;
+    }
+
     function showLoading(on) { var l = q('[data-vd-loading]'); if (l) l.hidden = !on; }
 
     // ── watchlist (new curated system; airing shows only) ─────────────────────
@@ -2914,6 +2948,7 @@
     }
 
     function loadMovie(id, source) {
+        _retry = function () { loadMovie(id, source); };
         currentKind = 'movie'; currentSource = source || 'library';
         if (!root()) return;
         if (currentId !== id) artAttemptedFor = null;
@@ -2928,7 +2963,7 @@
             .then(function (d) {
                 showLoading(false);
                 if (d && d.redirect) { reopen(d.redirect); return; }
-                if (!d || d.error) { setText('[data-vd-title]', 'Not found'); return; }
+                if (!d || d.error) { if (currentId === id) showLoadError('movie', 'gone'); return; }
                 if (currentId !== id || currentKind !== 'movie') return;
                 data = d;
                 renderBillboard(d);
@@ -2948,7 +2983,7 @@
                     watchMovieDownload(id);           // live download progress chip (if any)
                 }
             })
-            .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load movie'); });
+            .catch(function () { showLoading(false); showLoadError('movie', 'offline'); });
     }
 
     // An owned title reached via a tmdb URL → bounce to the real library detail.
@@ -2989,6 +3024,7 @@
     }
 
     function loadShow(id, source) {
+        _retry = function () { loadShow(id, source); };
         currentKind = 'show'; currentSource = source || 'library';
         if (!root()) return;
         if (currentId !== id) artAttemptedFor = null;
@@ -3003,7 +3039,7 @@
             .then(function (d) {
                 showLoading(false);
                 if (d && d.redirect) { reopen(d.redirect); return; }
-                if (!d || d.error) { setText('[data-vd-title]', 'Not found'); return; }
+                if (!d || d.error) { if (currentId === id) showLoadError('show', 'gone'); return; }
                 if (currentId !== id || currentKind !== 'show') return;
                 d.seasons = specialsLast(d.seasons);
                 data = d; menuOpen = false; missingOnly = false; restoreView();
@@ -3025,7 +3061,7 @@
                     loadAcquisition('show', id);        // ...and where it stands now
                 }
             })
-            .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load show'); });
+            .catch(function () { showLoading(false); showLoadError('show', 'offline'); });
     }
 
     // Lazy art: if any season lacks a poster, pull it from TMDB on view and cache
@@ -3423,6 +3459,7 @@
     }
 
     function loadChannel(id) {
+        _retry = function () { loadChannel(id); };
         currentKind = 'show'; currentSource = 'youtube';   // render into the show container
         if (currentId !== id) artAttemptedFor = null;
         currentId = id;
@@ -3437,7 +3474,7 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (resp) {
                 showLoading(false);
-                if (!resp || !resp.success) { setText('[data-vd-title]', 'Channel unavailable'); return; }
+                if (!resp || !resp.success) { showLoadError('channel', 'gone', 'https://www.youtube.com/channel/' + encodeURIComponent(id)); return; }
                 if (currentId !== id) return;
                 data = ytToShow(resp); menuOpen = false; missingOnly = false; restoreView();
                 selectedSeason = data.seasons.length ? data.seasons[0].season_number : null;
@@ -3451,7 +3488,7 @@
                 // A remembered channel renders full from cache → refresh quietly.
                 ytLoadAllVideos(id, !!resp.from_cache);
             })
-            .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load channel'); });
+            .catch(function () { showLoading(false); showLoadError('channel', 'offline', 'https://www.youtube.com/channel/' + encodeURIComponent(id)); });
     }
 
     // A playlist → a single FLAT season in the curator's order (a partial set, so
@@ -3476,6 +3513,7 @@
     }
 
     function loadPlaylist(id) {
+        _retry = function () { loadPlaylist(id); };
         currentKind = 'show'; currentSource = 'youtube';
         if (currentId !== id) artAttemptedFor = null;
         currentId = id;
@@ -3490,7 +3528,7 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (resp) {
                 showLoading(false);
-                if (!resp || !resp.success || !resp.playlist) { setText('[data-vd-title]', 'Playlist unavailable'); return; }
+                if (!resp || !resp.success || !resp.playlist) { showLoadError('playlist', 'gone', 'https://www.youtube.com/playlist?list=' + encodeURIComponent(id)); return; }
                 if (currentId !== id) return;
                 data = ytPlaylistToShow(resp); menuOpen = false; missingOnly = false;
                 selectedSeason = 1;
@@ -3499,7 +3537,7 @@
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
                 if (sub) sub.scrollTop = 0;
             })
-            .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load playlist'); });
+            .catch(function () { showLoading(false); showLoadError('playlist', 'offline', 'https://www.youtube.com/playlist?list=' + encodeURIComponent(id)); });
     }
 
     function ytFindEp(id) {
@@ -3947,6 +3985,7 @@
             }
             else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);
+            else if (which === 'retry-load' && _retry) _retry();
             return;
         }
         var guestAll = e.target.closest('[data-vd-guests-all]');

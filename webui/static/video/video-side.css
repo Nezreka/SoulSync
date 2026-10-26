@@ -8098,3 +8098,10 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
 .vc-pl-all:hover { color: var(--text-1); background: var(--white-a06); }
 .vc-pl .vc-pl-watch:not(.watching) { background: transparent; border-color: var(--white-a14); color: var(--white-a75); box-shadow: none; }
 .vc-pl .vc-pl-watch:not(.watching):hover { color: var(--text-1); border-color: var(--white-a30); }
+
+/* a page that couldn't load: the hero explains, the empty body steps aside */
+.vd-page--error .vd-body { display: none; }
+.vd-page--error .vd-billboard { min-height: 62vh; }
+.vd-page--error .vd-title { font-size: clamp(2em, 3.4vw, 3em); }
+.vd-page--error .vd-overview { -webkit-line-clamp: unset; color: var(--white-a75); }
+.vd-page--error .vd-error-ext { text-decoration: none; }

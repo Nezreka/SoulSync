@@ -96,6 +96,9 @@
             return s ? (s.textContent || '').trim() : '';
         }
         var host = pageId === 'video-movie-detail' ? '[data-video-detail="movie"]' : '[data-video-detail="show"]';
+        // a page that failed to load isn't somewhere to go back to by name
+        var hostEl = document.querySelector(host);
+        if (hostEl && hostEl.classList.contains('vd-page--error')) return '';
         var t = document.querySelector(host + ' [data-vd-title]');
         return t ? (t.textContent || '').trim() : '';
     }

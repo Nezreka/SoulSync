@@ -393,6 +393,8 @@ The synopsis shows three lines; **More** opens the rest in place. Every score in
 
 A show's numbers count like you'd read them: **Specials** and episodes that haven't aired yet are never "missing", so a show with every aired episode reads **Complete**. Specials sit after the real seasons.
 
+If a page can't load (the title left your library, YouTube didn't return a channel or playlist, or the server didn't answer), it says which, with **Try again** and, for YouTube, **Open on YouTube**.
+
 On a show, each episode row shows **Missing** or **Upcoming** only when there's a gap. A missing episode gets one **Get** button, and the rest (manual search, wishlist, download again for an upgrade, subtitles) is in the row's **⋯** menu. The season bar works the same way: **Grab season** plus a menu with manual search, wishlist, monitoring and clear failures.
 `
         },
