@@ -4280,8 +4280,8 @@ def revoke_api_key_internal(key_id):
 def oidc_only_status():
     """settings > security's oidc-only row and the admin's override
     indicator (#1839): whether it's on, whether the environment override
-    has it off, who isn't linked yet, how many signed-in devices it would
-    sign out, and whether this session could turn it on"""
+    has it off, who isn't linked yet, how many recently used devices it
+    would sign out, and whether this session could turn it on"""
     from core.security import oidc_only
     db = get_database()
     out = oidc_only.status(config_manager, db=db)

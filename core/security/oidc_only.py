@@ -32,6 +32,10 @@ logger = get_logger("security.oidc_only")
 SETTING = "security.oidc_only"
 OVERRIDE_ENV = "SOULSYNC_OIDC_ONLY_OVERRIDE"
 
+# the settings status counts devices used this recently. a device row stays
+# unrevoked when its session ends some other way, so an older one is noise
+RECENT_DAYS = 7
+
 # what every closed sign-in answers, word for word
 REFUSED = "Sign-in is OIDC only on this server. Use the sign-in button for your provider."
 
@@ -96,10 +100,11 @@ def status(config_manager, *, db=None, profiles=None) -> Dict[str, Any]:
         "on": is_on(config_manager),
         "overridden": overridden(),
         "override_env": OVERRIDE_ENV,
+        "recent_days": RECENT_DAYS,
     }
     if db is not None:
         try:
-            out["would_sign_out"] = int(db.count_live_devices_without_oidc())
+            out["would_sign_out"] = int(db.count_live_devices_without_oidc(RECENT_DAYS))
         except Exception:  # noqa: BLE001
             out["would_sign_out"] = None
         try:

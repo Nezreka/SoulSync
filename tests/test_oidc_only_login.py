@@ -412,6 +412,27 @@ def test_the_status_counts_what_it_would_sign_out(client, monkeypatch):
     assert body['session_ok'] is True and body['overridden'] is False and body['on'] is False
 
 
+def test_the_count_skips_devices_not_used_lately(monkeypatch):
+    # a row outlives its session (cleared cookie, sign out everywhere), so a
+    # device last used before the window isn't counted; revoked ones never are
+    _config(monkeypatch)
+    db = web_server.get_database()
+    before = db.count_live_devices_without_oidc(7)
+    recent, stale, gone = ('pw-' + _uid() for _ in range(3))
+    for device in (recent, stale, gone):
+        db.add_profile_device(device, 1, 'test', '127.0.0.1')
+    with db._get_connection() as conn:
+        conn.execute("UPDATE profile_devices SET last_seen = datetime('now', '-8 days') WHERE id = ?", (stale,))
+        conn.commit()
+    db.revoke_profile_device(1, gone)
+    try:
+        assert db.count_live_devices_without_oidc(7) == before + 1
+        assert db.count_live_devices_without_oidc(30) == before + 2
+    finally:
+        for device in (recent, stale):
+            db.revoke_profile_device(1, device)
+
+
 # -- making profiles (B6) and passwords (B4, B10) --
 
 def test_a_profile_made_by_hand_is_refused(client, monkeypatch):

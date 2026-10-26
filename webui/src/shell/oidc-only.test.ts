@@ -105,10 +105,11 @@ describe('the settings row', () => {
       ],
       session_ok: false,
       would_sign_out: 3,
+      recent_days: 7,
     });
     expect(lines.join(' ')).toContain('Z, Kim');
     expect(lines.join(' ')).toContain('sign back in with OIDC');
-    expect(lines.join(' ')).toContain('3 signed-in devices');
+    expect(lines.join(' ')).toContain('3 devices used in the last 7 days');
   });
 
   it('says nothing more once it is on', () => {

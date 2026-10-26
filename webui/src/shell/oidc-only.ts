@@ -7,7 +7,7 @@
  *   it means and how to clear it. a member never sees it, and never asks.
  * - settings > security's oidc-only row says what turning it on would do:
  *   who isn't connected yet, whether this session can turn it on, how
- *   many signed-in devices it would sign out.
+ *   many recently used devices it would sign out.
  *
  * both read /api/security/oidc-only, which is admin only, so nothing is
  * asked until the shell knows an admin is signed in.
@@ -26,6 +26,7 @@ export interface OidcOnlyStatus {
   overridden?: boolean;
   override_env?: string;
   would_sign_out?: number | null;
+  recent_days?: number;
   unlinked?: { id: number; name: string }[];
   session_ok?: boolean;
 }
@@ -126,11 +127,14 @@ export function describeForSettings(st: OidcOnlyStatus): string[] {
           'Each needs to connect from My Account first.',
       );
     if (st.session_ok === false) lines.push('Sign out and sign back in with OIDC to turn this on.');
-    if (typeof st.would_sign_out === 'number' && st.would_sign_out > 0)
+    if (typeof st.would_sign_out === 'number' && st.would_sign_out > 0) {
+      const n = st.would_sign_out;
+      const days = st.recent_days ?? 7;
       lines.push(
-        `Turning it on signs out ${st.would_sign_out} signed-in ` +
-          `${st.would_sign_out === 1 ? 'device that' : 'devices that'} didn't use OIDC.`,
+        `Turning it on signs out ${n} ${n === 1 ? 'device' : 'devices'} used in the last ` +
+          `${days} days that signed in without OIDC.`,
       );
+    }
   }
   return lines;
 }
