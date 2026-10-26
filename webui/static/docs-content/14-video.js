@@ -967,7 +967,7 @@ It's visual-first: channels get artwork and a proper detail page showing their v
 
 Videos show as a **grid** of thumbnails, like YouTube's own Videos tab: title, views, date, length, and a **Downloaded** or **In wishlist** badge. Click a thumbnail to play it. Each card has a download button for videos you don't have, and a **⋯** menu with wishlist, download again and Open on YouTube. Prefer the old wide rows? The **Grid / List** switch next to the sort menu remembers your choice.
 
-Upload years show as pills above the videos, and search, sort and the Downloaded / Not downloaded / length filters work in both layouts. **Grab year** downloads every missing video in the selected year.
+Upload years show as pills above the videos, and search, sort and the Downloaded / Not downloaded / length filters work in both layouts. **Grab year** downloads every missing video in the selected year. A playlist page has no years: **Grab all** downloads every missing video in it.
 
 A channel without a banner uses a blurred version of its most-viewed video as the page backdrop. The first six playlists are listed under the videos, with **Show all** for the rest.
 

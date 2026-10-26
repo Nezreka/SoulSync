@@ -7383,6 +7383,8 @@ body[data-side="video"] #gsearch-aura {
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.64), 0 0 0 1px var(--white-a14);
     background: var(--white-a06);
 }
+.vd-cover--wide { aspect-ratio: 16 / 9; }
+.vd-bb-content--wide-cover { grid-template-columns: clamp(180px, 16vw, 260px) minmax(0, 690px); }
 .vd-cover--channel {
     aspect-ratio: 1;
     border-radius: var(--radius-circle);

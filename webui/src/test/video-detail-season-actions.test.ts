@@ -32,6 +32,7 @@ function bar(season: Record<string, unknown>, ctx: Ctx = {}): HTMLElement {
     var data = ${JSON.stringify(data)};
     var ytFilter = { q: ${JSON.stringify(ctx.q ?? '')}, state: 'all', duration: 'all' };
     window.VideoGrab = ${ctx.grab === false ? 'undefined' : '{}'};
+    ${extractFunction('grabScope', SRC)}
   `;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const build = new Function(
@@ -120,6 +121,14 @@ describe('the season action bar', () => {
     expect(buttons(host)).toEqual(['Grab year', 'Wishlist year']);
     expect(host.querySelector('[data-vd-season-monitor]')).toBeNull();
     expect(host.querySelector('[data-vd-season-clearfail]')).toBeNull();
+  });
+
+  it('a playlist grabs all of it, not a year it does not have', () => {
+    const host = bar(partial(), { source: 'youtube', kind: 'playlist' });
+    expect(buttons(host)).toEqual(['Grab all', 'Wishlist all']);
+    expect(host.querySelector('[data-vd-pop]')?.getAttribute('aria-label')).toBe(
+      'More for this playlist',
+    );
   });
 
   it('treats a filtered youtube view as not-the-season', () => {

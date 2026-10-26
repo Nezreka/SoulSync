@@ -315,7 +315,9 @@
         var bg = q('[data-vd-backdrop]');
         if (bg) {
             var url = bbBackdrop(d);
-            bg.style.backgroundImage = url ? "url('" + url + "')" : '';
+            // a youtube maxres thumbnail doesn't always exist; the layer under it shows then
+            bg.style.backgroundImage = url
+                ? "url('" + url + "')" + (d._backdrop_fallback ? ", url('" + d._backdrop_fallback + "')" : '') : '';
             bg.classList.toggle('vd-bb-bg--poster', !d.has_backdrop && !!d.has_poster);
             bg.classList.toggle('vd-bb-bg--empty', !d.has_backdrop && !d.has_poster);
             bg.classList.toggle('vd-bb-bg--ambient', !!d._ambient_backdrop);
@@ -331,8 +333,11 @@
             var coverNeeded = !!posterUrl && (d.source === 'youtube' || (!d.logo && !d.has_backdrop));
             cover.hidden = !coverNeeded;
             cover.classList.toggle('vd-cover--channel', d.source === 'youtube' && d.kind === 'channel');
+            // a playlist's cover is a video thumbnail: show it 16:9, not cropped to a poster
+            cover.classList.toggle('vd-cover--wide', d.source === 'youtube' && d.kind === 'playlist');
             var bbContent = q('.vd-bb-content');
             if (bbContent) bbContent.classList.toggle('vd-bb-content--no-cover', !coverNeeded);
+            if (bbContent) bbContent.classList.toggle('vd-bb-content--wide-cover', d.source === 'youtube' && d.kind === 'playlist');
             if (coverNeeded) {
                 cover.src = sizedArt(posterUrl, d.source === 'youtube' ? 342 : 500);
                 cover.alt = d.source === 'youtube' ? ((d.title || 'Channel') + ' avatar') : ((d.title || 'Title') + ' poster');
@@ -2771,6 +2776,7 @@
         if (!canAcquire && !seasonManage) return '';
         // One visible action (Grab), the rest behind one menu. The bar used to be
         // five same-weight pills on every season.
+        var scope = grabScope();
         var menu =
             (canAcquire && !isYt ?
             '<button class="discog-download-btn discog-btn-compact" type="button" role="menuitem" data-vd-season-search ' +
@@ -2778,9 +2784,8 @@
                 '<span class="discog-btn-icon">⌕</span><span class="discog-btn-text">Manual search</span></button>' : '') +
             (canAcquire ?
             '<button class="discog-download-btn discog-btn-compact" type="button" role="menuitem" data-vd-season-wish ' +
-                'title="' + (isYt ? 'Add every missing video in this year to the wishlist'
-                                  : 'Add every missing episode in this season to the wishlist') + '">' +
-                '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist ' + (isYt ? 'year' : 'season') + '</span></button>' : '') +
+                'title="Add every missing ' + (isYt ? 'video ' : 'episode ') + scope.what + ' to the wishlist">' +
+                '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist ' + scope.word + '</span></button>' : '') +
             (seasonManage ?
             '<button class="discog-download-btn discog-btn-compact vd-season-mon' + (monitored ? ' vd-season-mon--on' : '') +
                 '" type="button" role="menuitem" data-vd-season-monitor="' + (monitored ? '0' : '1') + '" ' +
@@ -2798,13 +2803,13 @@
             '<span class="vd-season-actions-count">' + status + '</span>' +
             (canAcquire ?
             '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-grab ' +
-                'title="' + (isYt ? 'Download every missing video in this year'
+                'title="' + (isYt ? 'Download every missing video ' + scope.what
                                   : 'Auto-search &amp; download every missing episode in this season') + '">' +
-                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab ' + (isYt ? 'year' : 'season') + '</span>' +
+                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab ' + scope.word + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>' : '') +
             (menu ? '<span class="vd-pop">' +
                 '<button class="vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +
-                    'aria-label="More for this ' + (isYt ? 'year' : 'season') + '" title="More">⋯</button>' +
+                    'aria-label="More for this ' + (scope.word === 'all' ? 'playlist' : scope.word) + '" title="More">⋯</button>' +
                 '<div class="vd-pop-menu" data-vd-pop-menu role="menu" hidden>' + menu + '</div></span>' : '') +
             '</div>';
     }
@@ -3444,19 +3449,20 @@
         var seasons = ytGroupByYear(ch.videos || [], ch, false);
         // no banner: the channel's most-viewed upload in full resolution reads as
         // channel art; the avatar blown up to 1400px was a blur
-        var backdrop = ch.banner_url ? ytProx(ch.banner_url) : '';
+        var backdrop = ch.banner_url ? ytProx(ch.banner_url) : '', fallback = '';
         if (!backdrop) {
             var top = (ch.videos || []).filter(function (v) { return v.thumbnail_url; })
                 .sort(function (a, b) { return (Number(b.view_count) || 0) - (Number(a.view_count) || 0); })[0];
-            if (top) backdrop = ytProx(ytHiRes(top.thumbnail_url));
+            if (top) { backdrop = ytProx(ytHiRes(top.thumbnail_url)); fallback = ytProx(top.thumbnail_url); }
         }
         var ambient = !ch.banner_url && !!backdrop;
+        if (!ambient) fallback = '';
         return { kind: 'channel', source: 'youtube', id: ch.youtube_id, title: ch.title || 'Channel',
             overview: ch.description || '', backdrop_url: backdrop, has_backdrop: !!backdrop,
             poster_url: ytProx(ch.avatar_url), has_poster: !!ch.avatar_url, genres: ch.tags || [], handle: ch.handle,
             subscriber_count: ch.subscriber_count, video_count: ch.video_count, view_count: ch.view_count,
             following: !!resp.following, _channel: ch, seasons: seasons, season_count: seasons.length,
-            _ambient_backdrop: ambient,
+            _ambient_backdrop: ambient, _backdrop_fallback: fallback,
             episode_total: (ch.videos || []).length, episode_owned: ytOwnedCount(ch.videos) };
     }
 
@@ -3561,7 +3567,8 @@
             episode_owned: ytOwnedCount(vids), episode_total: vids.length, episodes: vids.map(ytEpisodeOf) };
         return { kind: 'playlist', source: 'youtube', id: pl.playlist_id, title: pl.title || 'Playlist',
             overview: note, poster_url: ytProx(pl.thumbnail_url), has_poster: !!pl.thumbnail_url,
-            backdrop_url: ytProx(pl.thumbnail_url), has_backdrop: !!pl.thumbnail_url,
+            backdrop_url: ytProx(ytHiRes(pl.thumbnail_url)), has_backdrop: !!pl.thumbnail_url,
+            _backdrop_fallback: ytProx(pl.thumbnail_url),
             genres: pl.channel_title ? [pl.channel_title] : [], handle: null,
             subscriber_count: null, view_count: null, video_count: pl.video_count,
             following: !!resp.following, _playlist: pl, seasons: [season], season_count: 1,
@@ -4197,6 +4204,12 @@
             }
         }).catch(function () { _setEpSynthetic(id, 'none'); btn.disabled = false; toast('Could not start the download', 'error'); });
     }
+    // what one Grab covers: a show's season, a channel's upload year, or a whole playlist
+    function grabScope() {
+        if (data && data.kind === 'playlist') return { word: 'all', what: 'in this playlist' };
+        if (data && data.source === 'youtube') return { word: 'year', what: 'in this year' };
+        return { word: 'season', what: 'in this season' };
+    }
     function ytGrabSeasonInline(btn) {
         var missing = _seasonMissing();
         if (!missing.length) { toast('Nothing missing here', 'info'); return; }
@@ -4204,7 +4217,7 @@
         var done = 0;
         var next = function (i) {
             if (i >= missing.length) {
-                btn.disabled = false; _btnLabel(btn, 'Grab year');
+                btn.disabled = false; _btnLabel(btn, 'Grab ' + grabScope().word);
                 toast('Queued ' + done + ' of ' + missing.length + ' video' + (missing.length === 1 ? '' : 's'), done ? 'success' : 'info');
                 if (done) document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
                 startDlTracking();
