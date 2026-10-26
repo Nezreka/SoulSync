@@ -375,8 +375,15 @@ def _album_fill_track_is_other_artist(album_artist: str, track_artists: List[str
         # credited to the same blanket, is the album's own track.
         return False
 
+    # "X feat. Y" / "X (feat. Y)" is still X's track. the credit splitter
+    # breaks band names that carry an "&" ("Above & Beyond feat. Zoe"
+    # splits into Above, Beyond, Zoe), so also compare the feat-stripped
+    # credit against the album artist exactly.
+    album_clean = _album_fill_normalized_name(album_artist)
     return not any(
-        _album_fill_artist_names_match(album_artist, artist) for artist in source_artists)
+        _album_fill_artist_names_match(album_artist, artist)
+        or (album_clean and _album_fill_normalized_name(artist) == album_clean)
+        for artist in source_artists)
 
 
 def _split_acoustid_credit(credit: str) -> List[str]:

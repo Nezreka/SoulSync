@@ -577,6 +577,11 @@ def test_other_artist_helper_edges():
     # this only holds because member matching is exact.
     assert is_other("Above & Beyond", ["Beyond"]) is False
     assert is_other("Above & Beyond", ["Beyonder"]) is True
+    # a feat credit on the album artist's own track is still theirs, even
+    # when the band name carries the "&" the credit splitter breaks on
+    assert is_other("Above & Beyond", ["Above & Beyond feat. Zoë Johnston"]) is False
+    assert is_other("Daft Punk", ["Daft Punk (feat. Pharrell Williams)"]) is False
+    assert is_other("Daft Punk", ["Pharrell Williams (feat. Daft Punk)"]) is True
     # no usable album artist: placeholders matching proves nothing
     assert is_other("", ["YOTTO"]) is True
     assert is_other(None, ["YOTTO"]) is True

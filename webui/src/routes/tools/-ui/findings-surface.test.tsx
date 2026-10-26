@@ -1349,9 +1349,9 @@ describe('bulk selection', () => {
     await flush();
 
     const bodyFor = (id: number) => bodyOf(`/${id}/fix`);
-    expect(bodyFor(1)).toEqual({ fix_action: 'staging' });
-    expect(bodyFor(2)).toEqual({ fix_action: 'staging' });
-    expect(bodyFor(3)).toEqual({ fix_action: 'remove' });
+    expect(bodyFor(1)).toEqual({ fix_action: 'staging', bulk: true });
+    expect(bodyFor(2)).toEqual({ fix_action: 'staging', bulk: true });
+    expect(bodyFor(3)).toEqual({ fix_action: 'remove', bulk: true });
     expect(toastSpy).toHaveBeenCalledWith('Fixed 3', 'success');
   });
 
