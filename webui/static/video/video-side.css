@@ -1119,7 +1119,9 @@ body[data-side="video"] .dashboard-header-sweep {
 @media (max-width: 820px) {
     .vd-bb-content { padding-left: 24px; padding-right: 24px; }
     .vd-body { padding: 24px 22px 60px; }
-    .vd-ep { grid-template-columns: 36px 1fr auto; }
+    /* index · info · badge · get · chevron on one line: three columns for five
+       items wrapped get and the chevron onto an empty second row */
+    .vd-ep { grid-template-columns: 36px minmax(0, 1fr) auto auto auto; gap: 10px; }
     .vd-ep-thumb { display: none; }
 }
 /* The detail page full-bleeds with -40px margins over the .page padding — but
@@ -4409,6 +4411,21 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vd-yt-pl-section { margin-top: 34px; }
 /* YouTube episode rows have no index/badge → 4 columns (thumb · info · wish · chev) */
 .vd-ep--yt { grid-template-columns: 150px minmax(0, 900px) auto auto; }
+/* narrow screens hide episode stills, but a video's thumbnail is the video:
+   keep a smaller one so the title gets the rest of the row */
+@media (max-width: 820px) {
+    .vd-ep--yt { grid-template-columns: 112px minmax(0, 1fr) auto auto; gap: 12px; }
+    .vd-ep--yt .vd-ep-thumb { display: flex; width: 112px; }
+}
+/* phone: the Downloaded badge and grab button ran off the right edge; they
+   sit under the title instead */
+@media (max-width: 620px) {
+    .vd-ep--yt { grid-template-columns: 112px minmax(0, 1fr) auto; row-gap: 8px; }
+    .vd-ep--yt .vd-ep-get { grid-column: 2; grid-row: 2; }
+    .vd-ep--yt .vd-ep-chev { grid-column: 3; grid-row: 1; }
+    .vd-ep--yt .vd-ep-thumb { grid-row: 1 / span 2; align-self: start; }
+    .vd-ep--yt .vd-ep-rt { white-space: normal; }
+}
 /* per-video Wish button inside an episode row */
 /* Per-video wishlist toggle = the standard watchlist button (.library-artist-
    watchlist-btn), shrunk for the dense rows; .watching → "on the wishlist" green. */
