@@ -116,18 +116,28 @@ function _qpHandleProfileControlChange(event) {
     return true;
 }
 
+// A field the video side saves through its own /api/video/* endpoints: inside a
+// video-only block, or wired by a data-video-* hook.
+function _isVideoOwnedField(el) {
+    if (!el || typeof el.closest !== 'function') return false;
+    if (el.closest('[data-video-only]')) return true;
+    return Array.from(el.attributes || []).some(a => a.name.startsWith('data-video-'));
+}
+
 function debouncedAutoSaveSettings(event) {
     // Ignore changes made while the page is programmatically populating its
     // fields on load — those aren't user edits and must not trigger a full
     // save (which re-initializes every backend service client).
     if (window._suppressSettingsAutoSave) return;
     if (_qpHandleProfileControlChange(event)) return;
-    // ISOLATION: the video side reuses this shared settings page, so editing a
-    // VIDEO field (TMDB key, region, autoplay…) would otherwise fire this MUSIC
-    // auto-save — which reads the server toggle from the DOM and would persist
-    // active_media_server, letting the video side change the music server. Video
-    // settings save themselves via /api/video/*; never auto-save music here.
-    if (document.body.getAttribute('data-side') === 'video') return;
+    // On the video side, a VIDEO field (TMDB key, region, autoplay...) saves
+    // itself via /api/video/*, so it must not also fire this full save. Every
+    // other field on the page - the shared tabs, System, Security - has no
+    // saver but this one, so it auto-saves here as it does on the music side.
+    // saveSettings keeps the stored active_media_server on the video side, so
+    // this can't change the music server. A call with no event is a music write
+    // made from code (the download chain's music and audiobook tabs), so it saves.
+    if (document.body.getAttribute('data-side') === 'video' && _isVideoOwnedField(event?.target)) return;
     // #879: never auto-save while the last settings load failed — the form is
     // showing defaults, not the real config, so saving would wipe it.
     if (window._settingsLoadFailed) return;
