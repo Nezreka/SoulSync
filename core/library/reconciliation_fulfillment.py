@@ -49,6 +49,23 @@ def record_request_on_connection(conn, details, slot):
     wanted.add(_wanted_slot_key(slot))
     conn.execute('INSERT OR REPLACE INTO reconcile_wanted_slots VALUES (?, ?, ?, ?)',
                  (album, source, release, json.dumps(sorted(wanted))))
+    # A deliberate replacement of the delivered file is a new acquisition.
+    # Reusing its old publication receipt would leave it permanently "checking".
+    target = details.get('replacement_for_path')
+    if details.get('replacement_request') and target:
+        row = conn.execute('''SELECT published_path FROM reconcile_fulfillment WHERE
+            case_id=? AND source=? AND release_id=? AND source_track_id=? AND state='published' ''',
+            (review_case_key(details, None), source, details.get('exact_release_id') or release,
+             str(slot.get('source_track_id') or ''))).fetchone()
+        try:
+            same_delivery = bool(row and row[0] and os.path.samefile(target, row[0]))
+        except OSError:
+            same_delivery = False
+        if same_delivery:
+            conn.execute('''UPDATE reconcile_fulfillment SET state='requested',published_path='',
+                refresh_needed=0,updated_at=CURRENT_TIMESTAMP WHERE case_id=? AND source=?
+                AND release_id=? AND source_track_id=?''', (review_case_key(details, None), source,
+                details.get('exact_release_id') or release, str(slot.get('source_track_id') or '')))
     conn.execute("""INSERT INTO reconcile_fulfillment
         (case_id, profile_id, album_id, album_folder, source, release_id, source_track_id, replacement_request)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET

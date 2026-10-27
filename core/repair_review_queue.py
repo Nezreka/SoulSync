@@ -246,6 +246,7 @@ def _numbering_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str]:
 
 
 _CATEGORY_LABELS = {
+    'apply_blockers': 'Saved actions need attention',
     'metadata': 'Metadata changes', 'title_conventions': 'Title conventions',
     'title_issues': 'Title identity',
     'numbering': 'Numbering convention', 'release_conflicts': 'Release or edition',
@@ -280,6 +281,9 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if category == 'folder_conflicts':
             decision_label = 'Resolve album ownership'
             summary = rows[0].get('description') or 'Review the library albums represented by these files.'
+        elif category == 'apply_blockers':
+            decision_label = 'Resolve blocked actions'
+            summary = f'{len(rows)} saved actions could not be applied. Review their blockers; your choices are still saved.'
         elif category == 'numbering':
             decision_label, summary = _numbering_change_summary(rows)
         elif category == 'title_conventions':
@@ -431,6 +435,9 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
         """, [*params, status, *([job_id] if job_id else [])]).fetchall()
         # The small ordered ID list keeps album navigation independent of the
         # visible page. Hydrate evidence only for the requested page below.
+        if q.strip():
+            from core.repair_review_search import rank
+            rows.sort(key=lambda row: rank(row[3], row[4], q))
         ordered_case_ids = [row[0] for row in rows]
         page = min(page, max(0, (len(rows) - 1) // limit))
         rows = rows[page * limit:(page + 1) * limit]

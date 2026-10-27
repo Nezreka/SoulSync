@@ -74,6 +74,7 @@ const finding = {
 };
 
 function auxiliary(url: string) {
+  if (url.includes('/playlist-references')) return reply({ playlists: [] });
   if (url.startsWith('/api/repair/review-queue/summary?'))
     return reply({ all: 1, review: 1, ready: 0, files: 0, ready_total: 0 });
   if (url === '/api/repair/finding-types') return reply({ types: [] });
@@ -217,6 +218,19 @@ describe('library reconciliation review queue', () => {
             album: id,
             count: 1,
             status: complete && id === 'album30' ? 'completed' : 'pending',
+            album_plan:
+              complete && id === 'album30'
+                ? {
+                    assignments: [
+                      {
+                        status: 'confirmed',
+                        fulfillment_state: 'downloaded',
+                        current_title: 'Reflections',
+                      },
+                    ],
+                    counts: { confirmed: 1 },
+                  }
+                : undefined,
             items: [],
             refresh: { state: 'complete' },
           }),
@@ -1136,10 +1150,11 @@ describe('library reconciliation review queue', () => {
         fetchMock.mock.calls.some(([url]) => String(url).endsWith('/folder%3A1%3Aloose/reanalyze')),
       ).toBe(true),
     );
+    fireEvent.click(screen.getByRole('button', { name: 'Album maintenance options' }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Refresh catalog evidence' })).not.toBeDisabled(),
+      expect(screen.getByRole('menuitem', { name: 'Refresh catalog evidence' })).not.toBeDisabled(),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh catalog evidence' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Refresh catalog evidence' }));
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(
@@ -1427,7 +1442,7 @@ describe('library reconciliation review queue', () => {
   });
 });
 
-it('discards a delayed manual refresh and totals after changing filters', async () => {
+it('discards a delayed automatic refresh and totals after changing filters', async () => {
   const pending: Array<(value: unknown) => void> = [];
   let delay = false;
   fetchMock.mockImplementation((url: string) => {
@@ -1450,7 +1465,8 @@ it('discards a delayed manual refresh and totals after changing filters', async 
   render(<ReviewPage />);
   await screen.findByText('1 album');
   delay = true;
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh view' }));
+  expect(screen.queryByRole('button', { name: 'Refresh view' })).toBeNull();
+  fireEvent(window, new Event('focus'));
   await waitFor(() => expect(pending).toHaveLength(2));
   fireEvent.change(screen.getByPlaceholderText('Search findings'), { target: { value: 'new' } });
   await screen.findByText('2 albums in this view');

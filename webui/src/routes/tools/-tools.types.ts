@@ -161,6 +161,9 @@ export interface BulkFixStatus {
   total?: number;
   fixed?: number;
   failed?: number;
+  blocked?: number;
+  not_attempted?: number;
+  organize_failed?: number;
   stopped?: boolean;
   error?: string | null;
   organize_queued?: number;

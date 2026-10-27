@@ -139,6 +139,9 @@ export function reviewFixture(ready: boolean, configure?: (review: ReviewCase) =
   };
   configure?.(reviewCase as unknown as ReviewCase);
   return [
+    http.get('*/api/repair/review-queue/:caseId/playlist-references', () =>
+      HttpResponse.json({ playlists: [] }),
+    ),
     ...shellHandlers,
     http.get('*/api/repair/review-queue/summary', () =>
       HttpResponse.json({

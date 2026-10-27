@@ -96,6 +96,8 @@ def finding_category(item: dict[str, Any]) -> str:
     finding_type = str(item.get('finding_type') or '')
     details = item.get('details') if isinstance(item.get('details'), dict) else {}
     changes = details.get('changes') if isinstance(details.get('changes'), dict) else {}
+    if item.get('last_error') and (details.get('plan_approved') or details.get('plan_keep')):
+        return 'apply_blockers'
     if finding_type == 'reconciliation_release':
         return 'release_conflicts'
     if (finding_type == 'reconciliation_missing' and
@@ -172,7 +174,7 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
     details = item.get('details') if isinstance(item.get('details'), dict) else {}
     changes = details.get('changes') if isinstance(details.get('changes'), dict) else {}
     if item.get('last_error'):
-        return 'manual', 'The previous apply attempt failed'
+        return 'blocked', 'The saved action needs attention before it can be applied'
     if (finding_type == 'reconciliation_missing' and
             details.get('fulfillment_state') in ('wishlisted', 'downloading', 'downloaded')):
         return 'blocked', ('Downloaded; waiting for a verified library assignment' if details.get('fulfillment_state') == 'downloaded' else 'Another copy is already on the wishlist' if details.get('replacement_request') else 'The missing track is already on the wishlist')
@@ -244,9 +246,10 @@ def queue_filter(*, conn, case_modes=None, status: str, job_id: str = "", q: str
         params.append(job_id)
     search = ''
     if q.strip():
-        search = "AND (title LIKE ? OR file_path LIKE ? OR details_json LIKE ?)"
-        needle = f'%{q.strip()}%'
-        params.extend([needle] * 3)
+        import json
+        from core.repair_review_search import matching_cases
+        search = 'AND review_case_key IN (SELECT value FROM json_each(?))'
+        params.append(json.dumps(matching_cases(conn, status=status, job_id=job_id, query=q)))
     if category:
         import json
         modes = case_modes if case_modes is not None else effective_case_modes(conn, status=status, job_id=job_id, compact=True)

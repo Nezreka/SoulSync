@@ -2950,6 +2950,7 @@ async function loadSettingsData() {
 
         // Populate Navidrome settings
         document.getElementById('navidrome-url').value = settings.navidrome?.base_url || '';
+        document.getElementById('navidrome-browser-url').value = settings.navidrome?.browser_url || '';
         document.getElementById('navidrome-username').value = settings.navidrome?.username || '';
         document.getElementById('navidrome-password').value = settings.navidrome?.password || '';
         loadNavidromePlaylistLogin();
@@ -6385,6 +6386,7 @@ async function saveSettings(quiet = false) {
         },
         navidrome: {
             base_url: document.getElementById('navidrome-url').value,
+            browser_url: document.getElementById('navidrome-browser-url').value,
             username: document.getElementById('navidrome-username').value,
             password: document.getElementById('navidrome-password').value
         },

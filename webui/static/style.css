@@ -76672,6 +76672,6 @@ body:has([data-shared-modal]) .toast-container {
 #album-review-nav[hidden] { display: none !important; }
 .review-preview-badge { font-size: 10px; font-weight: 500; border: 1px solid var(--border-color, #444); border-radius: 5px; padding: 2px 5px; color: var(--text-secondary, #bbb); vertical-align: middle; }
 
-.nav-button[data-page="review"] .nav-text { display: flex; flex: 1; min-width: 0; max-width: none; align-items: center; gap: 6px; white-space: nowrap; }
-.nav-button[data-page="review"] .review-nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.nav-button[data-page="review"] .nav-text { display: flex; flex: 1; min-width: 0; max-width: none; flex-direction: column; align-items: flex-start; gap: 3px; white-space: nowrap; }
+.nav-button[data-page="review"] .review-nav-label { min-width: 0; white-space: nowrap; }
 .nav-button[data-page="review"] .review-preview-badge { flex: none; line-height: 1; padding: 3px 5px; font-size: 9px; border-radius: 4px; }

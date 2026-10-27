@@ -26,6 +26,51 @@ _CACHE_SECONDS = 300
 
 _lock = threading.Lock()
 _cache: Dict[str, Any] = {'at': 0.0, 'server': None, 'map': {}}
+_reference_cache: Dict[str, Any] = {'at': 0.0, 'server': None, 'map': {}}
+
+
+def playlist_url(server, client, playlist_id, browser_url=''):
+    from urllib.parse import quote, urlsplit
+    if server == 'plex':
+        build_url = getattr(getattr(client, 'server', None), '_buildWebURL', None)
+        return build_url(base=browser_url or None, endpoint='details', key=f'/playlists/{playlist_id}') if callable(build_url) else ''
+    base = str(browser_url or getattr(client, 'base_url', '') or '').rstrip('/')
+    parsed = urlsplit(base)
+    if parsed.scheme not in ('http', 'https') or parsed.username or parsed.password:
+        return ''
+    identity = quote(str(playlist_id), safe='')
+    if server == 'navidrome':
+        return f'{base}/app/#/playlist/{identity}/show'
+    if server == 'jellyfin':
+        return f'{base}/web/index.html#!/details?id={identity}'
+    return ''
+
+
+def server_playlist_references(*, refresh=False, resolve=None):
+    """Current playlist IDs and links for recovery. Failures are not empty success."""
+    server, client = (resolve or _active_server_and_client)()
+    if server not in ('navidrome', 'plex', 'jellyfin') or client is None:
+        raise ValueError('The music server is unavailable; playlist references could not be checked')
+    from core.settings import config_manager
+    browser_url = config_manager.get(f'{server}.browser_url', '')
+    cache_key = (server, getattr(client, 'base_url', None), browser_url)
+    with _lock:
+        if not refresh and _reference_cache['server'] == cache_key and time.monotonic() - _reference_cache['at'] < _CACHE_SECONDS:
+            return _reference_cache['map']
+    references = {}
+    for playlist in client.get_all_playlists() or []:
+        identity = str(getattr(playlist, 'id', '') or '')
+        if not identity:
+            continue
+        entry = {'id': identity, 'title': getattr(playlist, 'title', '') or 'Untitled',
+                 'server': server, 'url': playlist_url(server, client, identity, browser_url)}
+        for track_id in _playlist_track_ids(server, client, playlist):
+            references.setdefault(str(track_id), []).append(entry)
+    with _lock:
+        _reference_cache.update(at=time.monotonic(), server=cache_key, map=references)
+        _cache.update(at=time.monotonic(), server=server,
+                      map={key: [entry['title'] for entry in entries] for key, entries in references.items()})
+    return references
 
 
 def _playlist_track_ids(server: str, client: Any, playlist: Any) -> List[str]:
@@ -101,6 +146,7 @@ def server_playlist_membership(
 def clear_cache() -> None:
     with _lock:
         _cache.update(at=0.0, server=None, map={})
+        _reference_cache.update(at=0.0, server=None, map={})
 
 
 def tag_tracks(tracks: List[Dict[str, Any]], membership: Dict[str, List[str]]) -> None:

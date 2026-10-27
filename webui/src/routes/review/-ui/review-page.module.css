@@ -3660,53 +3660,7 @@
   border-color: var(--danger);
   background: rgba(var(--danger-rgb), 0.08);
 }
-@media (max-width: 1000px) {
-  .queueHeader {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 16px;
-  }
-  .queueHeader > :last-child,
-  .headerTools {
-    display: contents;
-  }
-  .headerCount {
-    grid-column: 2;
-    grid-row: 1;
-    align-self: start;
-    text-align: right;
-    max-width: 240px;
-  }
-  .headerTools > .safeAction {
-    grid-column: 1;
-    grid-row: 2;
-    justify-self: start;
-  }
-  .headerTools > .inlineActions {
-    grid-column: 2;
-    grid-row: 2;
-    justify-content: flex-end;
-  }
-}
 @media (max-width: 520px) {
-  .queueHeader {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .headerCount {
-    grid-column: 1;
-    grid-row: 2;
-    text-align: left;
-    max-width: none;
-  }
-  .headerTools > .safeAction {
-    grid-column: 1;
-    grid-row: 3;
-  }
-  .headerTools > .inlineActions {
-    grid-column: 1;
-    grid-row: 4;
-    justify-content: flex-start;
-  }
   .pairingChecks dl {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3842,4 +3796,47 @@
 }
 .tabWorkspace[data-unidentified='true'] > .tabContext {
   display: none;
+}
+
+/* Album review follow-up: normal controls, with summaries above at narrow widths. */
+.queueHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+.queueHeader > div {
+  width: 100%;
+}
+.headerTools {
+  width: 100%;
+  justify-content: flex-start;
+}
+.headerCount {
+  margin-right: auto;
+}
+.requestStep {
+  display: grid;
+  gap: 12px;
+}
+.page .requestStep .decisionActions {
+  align-items: center;
+  padding: 0;
+}
+.abandonAlbum {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.abandonAlbum > button {
+  flex-shrink: 0;
+}
+@media (max-width: 600px) {
+  .headerCount {
+    flex-basis: 100%;
+  }
+  .abandonAlbum {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }

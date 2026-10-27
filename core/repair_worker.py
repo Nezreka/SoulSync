@@ -1850,6 +1850,13 @@ class RepairWorker:
             finally:
                 conn.close()
         if case is not None:
+            if case.get('status') == 'completed':
+                # Historical missing findings must not turn a fulfilled slot
+                # back into a current wishlist request in the terminal view.
+                for assignment in (case.get('album_plan') or {}).get('assignments') or []:
+                    for field in ('fulfillment_state', 'finding_id', 'planned_choice'):
+                        assignment.pop(field, None)
+                    assignment['action_state'] = 'resolved'
             if hasattr(self, '_album_refresh_lock'):
                 with self._album_refresh_lock:
                     case['refresh'] = dict(self._album_refreshes.get(case_id) or
@@ -1860,6 +1867,24 @@ class RepairWorker:
             if bulk.get('running') and case_id in bulk.get('review_case_ids', []):
                 case['refresh'] = {'state': 'running'}
         return case
+
+    def review_playlist_references(self, case_id, file_path, *, refresh=False):
+        case = self.get_review_case(case_id, job_id='library_reconciliation')
+        items = (case or {}).get('items') or []
+        rows = [*items, *((case or {}).get('album_plan') or {}).get('assignments', [])]
+        members = [row for row in rows if row.get('file_path') == file_path]
+        if not file_path or not members:
+            raise ValueError('This file is no longer part of the album review')
+        track_ids = {str(value) for row in members for value in
+                     (row.get('track_id'), (row.get('details') or {}).get('track_id')) if value is not None}
+        from core.library.playlist_membership import server_playlist_references
+        membership = server_playlist_references(refresh=refresh)
+        refs = {entry['id']: entry for tid in track_ids for entry in membership.get(tid, [])}
+        if refresh and not refs:
+            for item in items:
+                if item.get('file_path') == file_path and 'playlist' in (item.get('last_error') or '').lower():
+                    self._set_finding_error(item['id'], None)
+        return {'success': True, 'playlists': list(refs.values())}
 
     def _schedule_review_refresh(self, case_id: str, folder: str,
                                  snapshot: dict, *, scope: str = 'album', refresh_catalogue: bool = False) -> bool:
@@ -2335,7 +2360,17 @@ class RepairWorker:
             key = missing_slot_key(details.get('album_id'), details.get('source'), details.get('release_id'), slot)
             existing = next((row for row in case['items'] if row.get('finding_type') == 'reconciliation_missing'
                              and row.get('entity_id') == key), None)
-            if existing and existing['details'].get('fulfillment_state') in ('wishlisted', 'downloading', 'downloaded'):
+            new_delivery_request = False
+            if existing and existing['details'].get('fulfillment_state') == 'downloaded' and item.get('file_path'):
+                with self.db._get_connection() as conn:
+                    receipt = conn.execute('''SELECT published_path FROM reconcile_fulfillment
+                        WHERE case_id=? AND source=? AND release_id=? AND source_track_id=? AND state='published' ''',
+                        (case_id, details.get('source'), details.get('exact_release_id') or details.get('release_id'), str(slot.get('source_track_id')))).fetchone()
+                try:
+                    new_delivery_request = bool(receipt and receipt[0] and os.path.samefile(receipt[0], item['file_path']))
+                except OSError:
+                    pass
+            if existing and existing['details'].get('fulfillment_state') in ('wishlisted', 'downloading', 'downloaded') and not new_delivery_request:
                 continue
             common = {key: value for key, value in details.items() if key not in
                       ('planned_choice', 'plan_approved', 'plan_keep', 'changes', 'replacement_track')}
@@ -2344,6 +2379,7 @@ class RepairWorker:
                 title=f"Request replacement: {slot.get('name') or slot.get('title')}",
                 description='Submit the replacement request before applying the saved file decision.',
                 details={**common, 'replacement_request': True, 'replacement_for_finding': item['id'],
+                         'replacement_for_path': item.get('file_path'), 'fulfillment_state': '',
                          'missing_tracks': [slot]})
         with self.db._get_connection() as conn:
             rows = conn.execute("SELECT id, details_json FROM repair_findings WHERE review_case_key=? AND finding_type='reconciliation_missing' AND status='pending'", (case_id,)).fetchall()
@@ -5616,7 +5652,7 @@ class RepairWorker:
                 _resolve_file_path(row[1], self.transfer_folder, config_manager=self._config_manager) or '', path):
             return {'success': False, 'error': 'The replacement file moved or changed albums; reanalyze first'}
         if parts[1] == 'quarantine' and _server_playlist_membership().get(str(details.get('track_id'))):
-            return {'success': False, 'error': 'The current file is in a playlist; review that reference first'}
+            return {'success': False, 'blocked': True, 'error': 'The current file is in a playlist; review that reference first'}
         from core.repair_jobs.library_reconciliation import _wanted_slot_key
         assigned = self._fix_reconciliation_assignment('track', parts[2], path, {
             **details, **candidate, '_replace_assignment_path': file_path, '_fix_action': 'assign:' + _wanted_slot_key(target)})
@@ -5662,7 +5698,7 @@ class RepairWorker:
             if action != 'request_missing':
                 playlists = _server_playlist_membership()
                 if playlists.get(str(track_id)) or playlists.get(track_id):
-                    return {'success': False,
+                    return {'success': False, 'blocked': True,
                             'error': 'This copy is in a playlist; review that reference first'}
         replacement_name = ''
         if action in ('replace', 'request_missing'):
@@ -5693,10 +5729,16 @@ class RepairWorker:
             }
             if details.get('plan_approved') and action == 'replace':
                 with self.db._get_connection() as conn:
-                    accepted = conn.execute('SELECT state FROM reconcile_fulfillment WHERE album_id=? AND source=? AND release_id=? AND source_track_id=?',
+                    accepted = conn.execute('SELECT state,published_path FROM reconcile_fulfillment WHERE album_id=? AND source=? AND release_id=? AND source_track_id=?',
                         (str(details.get('album_id')), source, exact_release_id, str(slot['source_track_id']))).fetchone()
                 if not accepted or accepted[0] not in ('requested', 'published', 'fulfilled'):
                     return {'success': False, 'error': 'Submit this replacement request before applying file changes'}
+                try:
+                    delivered_target = accepted[0] == 'published' and accepted[1] and os.path.samefile(file_path, accepted[1])
+                except OSError:
+                    delivered_target = False
+                if delivered_target:
+                    return {'success': False, 'blocked': True, 'error': 'This is the downloaded copy. Confirm its match or request another replacement before removing it.'}
                 outcome = {'applied': True}
             else:
                 outcome = self.db.add_to_wishlist_detailed(
@@ -8243,6 +8285,9 @@ class RepairWorker:
                 'organizing_album_ids': [],
                 'reconciliation_queued': False,
                 'organize_queued': 0,
+                'organize_failed': 0,
+                'blocked': 0,
+                'not_attempted': 0,
                 'errors': [],
                 'error': None,
                 # Per-type tallies so a mixed run can say WHAT it is fixing
@@ -8397,7 +8442,8 @@ class RepairWorker:
                         # ordinary bulk runs and test/deployment wrappers.
                         result = self.fix_finding(fid, fix_action=fix_action)
                 except Exception as e:  # fix_finding shouldn't raise, but never kill the run
-                    result = {'success': False, 'error': str(e)}
+                    result = {'success': False, 'error': str(e),
+                              'not_attempted': case_by_finding.get(fid) in failed_cases}
                 remaining_by_case.get(case_by_finding.get(fid), set()).discard(fid)
                 self._record_review_timing('applying', time.perf_counter() - apply_started)
                 state['done'] += 1
@@ -8408,29 +8454,33 @@ class RepairWorker:
                         # Seeded whole, never key-by-key: get_bulk_fix_status
                         # copies this dict from another thread and a partial
                         # insert could be observed mid-write.
-                        tally = {'fixed': 0, 'failed': 0}
+                        tally = {'fixed': 0, 'failed': 0, 'blocked': 0, 'not_attempted': 0}
                         state['per_type'][slug] = tally
-                    tally['fixed' if result.get('success') else 'failed'] += 1
+                    tally_key = ('fixed' if result.get('success') else 'not_attempted' if result.get('not_attempted')
+                                 else 'blocked' if result.get('blocked') else 'failed')
+                    tally[tally_key] = tally.get(tally_key, 0) + 1
                 if result.get('success'):
                     state['fixed'] += 1
                 else:
-                    state['failed'] += 1
+                    outcome_key = 'not_attempted' if result.get('not_attempted') else 'blocked' if result.get('blocked') else 'failed'
+                    state[outcome_key] = state.get(outcome_key, 0) + 1
                     if case_by_finding.get(fid):
                         failed_cases.add(case_by_finding[fid])
                     error_msg = result.get('error', 'unknown error')
                     logger.warning("Bulk fix failed for finding #%s: %s", fid, error_msg)
                     if len(state['errors']) < 20:
-                        state['errors'].append({'id': fid, 'error': error_msg})
+                        state['errors'].append({'id': fid, 'error': error_msg, 'outcome': outcome_key})
                 self._save_bulk_fix_report(state)
             if review_approved and state['fixed'] and not state['stopped']:
                 review_choices.remember_applied_releases(self.db, [
                     json.loads(raw) for fid, raw in (reviewed_details or {}).items()
                     if case_by_finding.get(fid) not in failed_cases])
-            if (organize_album_ids and not state['failed'] and not state['stopped'] and
+            if (organize_album_ids and not state['failed'] and not state.get('blocked') and not state.get('not_attempted') and not state['stopped'] and
                     not state.get('error')):
                 state['phase'] = 'queueing_organization'
                 state['organizing_album_ids'] = list(dict.fromkeys(str(a) for a in organize_album_ids))
                 from core.reorganize_queue import get_queue
+                from core.library.reconciliation_organization import approve_organization
                 queue = get_queue()
                 organization_ids = []
                 for album_id in dict.fromkeys(organize_album_ids):
@@ -8444,7 +8494,8 @@ class RepairWorker:
                         album_id=str(album_id), album_title=meta['album_title'],
                         artist_id=meta['artist_id'], artist_name=meta['artist_name'],
                         source=None, metadata_source='tags', rename_only=True,
-                        review_context=getattr(self, '_review_organization_contexts', {}).get(str(album_id)),
+                        review_context=approve_organization(
+                            self.db, album_id, getattr(self, '_review_organization_contexts', {}).get(str(album_id)) or {}),
                     )
                     if queued.get('queued') or queued.get('reason') == 'already_queued':
                         state['organize_queued'] += 1
@@ -8461,7 +8512,8 @@ class RepairWorker:
                         outcome = queue.wait_for(queue_id, timeout=1.0)
                         if outcome['status'] not in ('queued', 'running'):
                             if outcome['status'] != 'done':
-                                state['error'] = outcome.get('error') or 'Folder organization did not finish; review the album before retrying'
+                                state['organize_failed'] = state.get('organize_failed', 0) + 1
+                                state['error'] = 'Folder organization needs attention: ' + (outcome.get('error') or 'Review the album before retrying')
                             break
                 self._record_review_timing('organizing', time.perf_counter() - organization_started)
                 if self.should_stop:
@@ -8525,7 +8577,7 @@ class RepairWorker:
             if review_approved and getattr(self, '_on_job_finish', None):
                 try:
                     self._on_job_finish('review_apply',
-                        'error' if state['failed'] or state.get('stopped') or state.get('error') else 'finished',
+                        'error' if state['failed'] or state.get('blocked') or state.get('not_attempted') or state.get('stopped') or state.get('error') else 'finished',
                         JobResult(scanned=state['done'], auto_fixed=state['fixed'], errors=state['failed']))
                 except Exception:
                     logger.exception('Could not publish review operation completion')

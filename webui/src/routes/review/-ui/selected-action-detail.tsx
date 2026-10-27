@@ -8,6 +8,7 @@ import type { FindingTypeInfo } from '../../tools/-tools.groups';
 
 import { findingTypeLabel } from '../../tools/-tools.core';
 import { CompletenessChoice } from './completeness-choice';
+import { PlaylistReferences } from './playlist-references';
 import { ReconciliationEvidence, type ReleaseEvidence } from './reconciliation-evidence';
 import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';
@@ -24,6 +25,7 @@ export function SelectedActionDetail({
   onAct,
   onSelect,
   onReset,
+  onRecheck,
   previousId,
   nextId,
   comparisonPath,
@@ -41,6 +43,7 @@ export function SelectedActionDetail({
   onAct: (action: 'fix' | 'dismiss', choice?: string) => void;
   onSelect: (findingId: number | null) => void;
   onReset?: () => void;
+  onRecheck?: (cleared: boolean) => void;
   previousId?: number;
   nextId?: number;
   comparisonPath?: string;
@@ -93,6 +96,7 @@ export function SelectedActionDetail({
   );
   const assignmentConfirmed = Boolean(details.saved_assignment);
   const plannedAction = textValue(planned.fix_action);
+  const requestState = finding.requests?.[0]?.state || textValue(details.fulfillment_state);
   const plannedLabel =
     planned.action === 'dismiss'
       ? 'Leave as-is planned'
@@ -126,6 +130,17 @@ export function SelectedActionDetail({
         </div>
       )}
       <h3>{findingHeading(finding)}</h3>
+      <PlaylistReferences
+        caseId={caseId}
+        path={finding.file_path}
+        names={Array.isArray(details.playlists) ? details.playlists.map(String) : []}
+        removal={
+          ['quarantine', 'replace'].includes(plannedAction) ||
+          plannedAction.startsWith('existing:quarantine')
+        }
+        lastError={finding.last_error}
+        onRecheck={onRecheck}
+      />
       {planned.category === 'numbering' && !hasPlan && (
         <div className={styles.confirmedStatus}>
           <strong>Numbering choice saved</strong>
@@ -147,7 +162,11 @@ export function SelectedActionDetail({
           <strong>{plannedLabel}</strong>
           <span>
             {plannedAction === 'replace'
-              ? `Request ${textValue(replacement.name || details.expected_title)} from Plan first. Applying then quarantines the current file.`
+              ? ['wishlisted', 'downloading'].includes(requestState)
+                ? 'The replacement is requested. Applying this plan quarantines the current file.'
+                : requestState === 'downloaded'
+                  ? 'A download has arrived. Review its audio match before applying the saved file action.'
+                  : `Request ${textValue(replacement.name || details.expected_title)} from Plan first. Applying then quarantines the current file.`
               : 'Saved in this album plan. Files change when you apply it.'}
           </span>
           <div className={styles.inlineActions}>

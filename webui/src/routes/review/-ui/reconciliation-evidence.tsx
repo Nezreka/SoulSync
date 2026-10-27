@@ -17,6 +17,7 @@ import type {
 
 import { DisclosureFooter } from './disclosure-footer';
 import { PairingEvidence } from './pairing-evidence';
+import { PlaylistReferences } from './playlist-references';
 import { ReviewArtwork } from './review-artwork';
 import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';
@@ -1368,13 +1369,19 @@ export function AssignmentEvidence({
         previewUrl={row.slot_preview_url || ''}
         previewSource={album.album_plan?.source || ''}
       />
+      <PlaylistReferences
+        key={row.file_path}
+        caseId={album.case_id}
+        path={row.file_path}
+        names={Array.isArray(details.playlists) ? details.playlists.map(String) : []}
+      />
+      <PairingEvidence checks={row.pairing_checks} reasons={row.reasons} />
       <Facts
         finding={{ file_path: row.file_path || null }}
         details={details}
         release={release}
         caseId={album.case_id}
       />
-      <PairingEvidence checks={row.pairing_checks} reasons={row.reasons} />
     </section>
   );
 }
@@ -1537,22 +1544,20 @@ export function ReconciliationEvidence({
       {controls}
       {audioControl}
       {!prominent && <AudioEvidence details={details} explain />}
+      <PairingEvidence checks={details.pairing_checks} reasons={reasons} />
       {prominent && (
         <div className={styles.prominentEvidence}>
           <Facts finding={finding} details={details} release={release} caseId={caseId} />
         </div>
       )}
-      {prominent && <PairingEvidence checks={details.pairing_checks} reasons={reasons} />}
       {(!prominent || objects(details.checked_files).length > 0) && (
         <div className={styles.technicalGrid}>
           {!prominent && (
             <Facts finding={finding} details={details} release={release} caseId={caseId} />
           )}
           <CheckedFiles details={details} />
-          {!prominent && <PairingEvidence checks={details.pairing_checks} reasons={reasons} />}
         </div>
       )}
-      {finding.last_error && <p className={styles.error}>Last attempt: {finding.last_error}</p>}
     </div>
   );
 }

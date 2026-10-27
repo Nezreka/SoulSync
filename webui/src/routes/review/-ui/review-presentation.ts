@@ -57,7 +57,7 @@ export function severeLengthMismatch(local?: number | null, release?: number | n
 }
 
 export function statusLabel(status: string, row?: AlbumAssignment) {
-  if (row?.fulfillment_state === 'downloaded') return 'Checking download';
+  if (row?.fulfillment_state === 'downloaded') return 'Downloaded · review match';
   if (row && metadataNeedsReview(row))
     return row.planned_choice?.category === 'numbering' && row.planned_choice.action === 'dismiss'
       ? 'Review metadata · numbering kept'

@@ -272,9 +272,11 @@ def build_runner(
     @album_maintenance_mutation
     def notifying_runner(item):
         from core.library.reconciliation_authority import conflict
+        from core.library.reconciliation_organization import approved_organization
         db = get_database()
-        protected = conflict(db, 'path_mismatch', entity_type='album', entity_id=item.album_id)
-        if not protected and (getattr(item, 'metadata_source', 'api') or 'api') != 'tags':
+        approved = approved_organization(db, item)
+        protected = None if approved else conflict(db, 'path_mismatch', entity_type='album', entity_id=item.album_id)
+        if not approved and not protected and (getattr(item, 'metadata_source', 'api') or 'api') != 'tags':
             # API organization may rewrite accepted identity fields as well as
             # paths; tag-based organization retains the already reviewed tags.
             protected = conflict(db, 'library_retag', entity_type='album', entity_id=item.album_id)

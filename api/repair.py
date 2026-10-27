@@ -145,6 +145,19 @@ def repair_review_queue_case(case_id):
         return jsonify({'error': 'Could not load review case'}), 500
 
 
+@bp.route('/api/repair/review-queue/<path:case_id>/playlist-references', methods=['GET', 'POST'])
+def repair_review_playlist_references(case_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker not initialized'}), 503
+    try:
+        body = request.get_json(silent=True) or {} if request.method == 'POST' else request.args
+        return jsonify(worker.review_playlist_references(case_id, body.get('path', ''), refresh=request.method == 'POST'))
+    except Exception as exc:
+        logger.info('Could not check playlist references: %s', exc)
+        return jsonify({'error': 'Could not check playlist references. Check the music server connection and try again.'}), 422
+
+
 @bp.route('/api/repair/review-queue/<path:case_id>/file-metadata', methods=['GET'])
 def repair_review_file_metadata(case_id):
     """Inspect a current file belonging to this review case, never a free path."""
