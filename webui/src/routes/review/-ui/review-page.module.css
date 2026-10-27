@@ -398,7 +398,8 @@
   background: var(--surface-1);
   overflow: hidden;
 }
-.decisionGrid article[data-risk='manual'] {
+.decisionGrid article[data-risk='manual'],
+.decisionGrid article[data-risk='blocked'] {
   border-color: rgba(var(--warning-rgb), 0.45);
   background: var(--surface-1);
 }
@@ -3830,6 +3831,11 @@
 }
 .abandonAlbum > button {
   flex-shrink: 0;
+}
+.playlistReferences a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 @media (max-width: 600px) {
   .headerCount {

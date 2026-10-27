@@ -92,7 +92,7 @@ export function PlaylistReferences({
   if (!references.length && !lastError && !error && !(removal && checked)) return null;
   return (
     <section
-      className={styles.problemCard}
+      className={`${styles.problemCard} ${styles.playlistReferences}`}
       data-tone={lastError || (removal && references.length) ? 'warning' : 'info'}
       aria-label="Playlist references"
     >

@@ -114,13 +114,15 @@ function caseStatusSummary(item: ReviewCaseSummary): string {
   );
   const primary = ordered.find((decision) => decision.risk !== 'ready') || ordered[0];
   const status =
-    primary?.category === 'pending_fulfillment'
-      ? 'Waiting for download'
-      : item.plan.status === 'waiting'
+    primary?.category === 'apply_blockers'
+      ? 'Needs attention'
+      : primary?.category === 'pending_fulfillment'
         ? 'Waiting for download'
-        : item.plan.status === 'ready'
-          ? 'Ready'
-          : 'Needs input';
+        : item.plan.status === 'waiting'
+          ? 'Waiting for download'
+          : item.plan.status === 'ready'
+            ? 'Ready'
+            : 'Needs input';
   const more = ordered.length > 1 ? ` · +${ordered.length - 1} more` : '';
   return `${status}${primary ? ` · ${primary.label}` : ''} · ${item.pending} action${item.pending === 1 ? '' : 's'}${more}`;
 }
@@ -473,6 +475,12 @@ export function ReviewPage() {
     decisionMembers,
     releaseOrderedAssignments,
   } = albumModel;
+  const blockedActionCount = reviewDecisions
+    .filter((decision) => decision.category === 'apply_blockers')
+    .reduce((total, decision) => total + decision.action_count, 0);
+  const choiceCount = reviewDecisions.filter(
+    (decision) => decision.category !== 'apply_blockers',
+  ).length;
   const albumReady = plan.can_apply_ready && reviewDecisions.length === 0;
   const sourceFolders = useMemo(
     () =>
@@ -1691,7 +1699,9 @@ export function ReviewPage() {
                     <span>{item.artist || item.case_id.split(':')[0]}</span>
                     <small>
                       {caseStatusSummary(item)}
-                      {item.error_count ? ` · ${item.error_count} failed` : ''}
+                      {item.error_count
+                        ? ` · ${item.error_count} apply issue${item.error_count === 1 ? '' : 's'}`
+                        : ''}
                     </small>
                   </span>
                 </Button>
@@ -2122,20 +2132,24 @@ export function ReviewPage() {
                           <div>
                             <div className={styles.eyebrow}>Album review</div>
                             <h3>
-                              {reviewDecisions.length
-                                ? `${reviewDecisions.length} choice${reviewDecisions.length === 1 ? '' : 's'} need${reviewDecisions.length === 1 ? 's' : ''} your input`
-                                : plan.status === 'waiting'
-                                  ? 'Waiting for requested tracks'
-                                  : 'Decisions complete'}
+                              {blockedActionCount && !choiceCount
+                                ? `${blockedActionCount} saved action${blockedActionCount === 1 ? '' : 's'} need${blockedActionCount === 1 ? 's' : ''} attention`
+                                : reviewDecisions.length
+                                  ? `${choiceCount} choice${choiceCount === 1 ? '' : 's'} need${choiceCount === 1 ? 's' : ''} your input${blockedActionCount ? ` · ${blockedActionCount} blocked action${blockedActionCount === 1 ? '' : 's'}` : ''}`
+                                  : plan.status === 'waiting'
+                                    ? 'Waiting for requested tracks'
+                                    : 'Decisions complete'}
                             </h3>
                             <p>
-                              {releaseChoicePending
-                                ? 'Choose the release first. Track and numbering proposals will be recalculated for that edition.'
-                                : plan.status === 'waiting'
-                                  ? 'Your requests are saved. The album stays here until the downloaded files are assigned. Other approved changes can be applied now.'
-                                  : reviewDecisions.length
-                                    ? 'Resolve these choices before applying the album. Inspect affected tracks to compare exact values.'
-                                    : 'All decisions are complete. There are no remaining changes to apply.'}
+                              {blockedActionCount && !choiceCount
+                                ? 'Your choices are saved. Resolve the apply issues below before retrying this album plan.'
+                                : releaseChoicePending
+                                  ? 'Choose the release first. Track and numbering proposals will be recalculated for that edition.'
+                                  : plan.status === 'waiting'
+                                    ? 'Your requests are saved. The album stays here until the downloaded files are assigned. Other approved changes can be applied now.'
+                                    : reviewDecisions.length
+                                      ? 'Resolve these choices before applying the album. Inspect affected tracks to compare exact values.'
+                                      : 'All decisions are complete. There are no remaining changes to apply.'}
                             </p>
                           </div>
                         </div>

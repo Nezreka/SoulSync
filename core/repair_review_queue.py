@@ -283,7 +283,7 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             summary = rows[0].get('description') or 'Review the library albums represented by these files.'
         elif category == 'apply_blockers':
             decision_label = 'Resolve blocked actions'
-            summary = f'{len(rows)} saved actions could not be applied. Review their blockers; your choices are still saved.'
+            summary = f'{len(rows)} saved action{"s" if len(rows) != 1 else ""} could not be applied. Review the blocker{"s" if len(rows) != 1 else ""}; your choices are still saved.'
         elif category == 'numbering':
             decision_label, summary = _numbering_change_summary(rows)
         elif category == 'title_conventions':

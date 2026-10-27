@@ -1546,3 +1546,63 @@ it('keeps an album selected when reopening the already visible ready batch', asy
   fireEvent.click(screen.getByRole('button', { name: /^Ready to apply/ }));
   expect(screen.getByRole('heading', { name: 'Ready Album' })).toBeTruthy();
 });
+
+it('describes a saved removal blocker without asking for another choice', async () => {
+  const decision = {
+    id: 'apply_blockers',
+    category: 'apply_blockers',
+    label: 'Resolve blocked actions',
+    risk: 'blocked',
+    action_count: 1,
+    finding_ids: [7],
+  };
+  const plan = {
+    ready: 0,
+    blocked: 1,
+    manual: 0,
+    destructive: 0,
+    total: 1,
+    status: 'needs_review',
+    can_apply_ready: false,
+    can_organize: false,
+    decisions: [decision],
+  };
+  const album = {
+    case_id: 'blocked',
+    album: 'Chopin',
+    artist: 'Chopin',
+    status: 'pending',
+    count: 1,
+    pending: 1,
+    plan,
+    decisions: [decision],
+    items: [
+      {
+        ...finding,
+        last_error: 'This copy is in a playlist',
+        details: {
+          plan_approved: true,
+          planned_choice: { action: 'fix', fix_action: 'quarantine', category: 'audio_conflicts' },
+        },
+      },
+    ],
+  };
+  fetchMock.mockImplementation((url: string) => {
+    const common = auxiliary(url);
+    if (common) return Promise.resolve(common);
+    if (url.startsWith('/api/repair/review-queue?'))
+      return Promise.resolve(reply({ items: [album], total: 1, page: 0, limit: 30 }));
+    if (url.includes('/api/repair/review-queue/blocked?')) return Promise.resolve(reply(album));
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  render(<ReviewPage />);
+  expect(
+    await screen.findByRole('heading', { name: '1 saved action needs attention' }),
+  ).toBeVisible();
+  expect(screen.queryByText('1 choice needs your input')).toBeNull();
+  expect(
+    screen.getByText(
+      'Your choices are saved. Resolve the apply issues below before retrying this album plan.',
+    ),
+  ).toBeVisible();
+});

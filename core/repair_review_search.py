@@ -11,6 +11,11 @@ def normalize(value):
     return ' '.join(re.sub(r'[^\w]+', ' ', ''.join(c for c in value if not unicodedata.combining(c))).split())
 
 
+def matches(text, tokens):
+    words = normalize(text).split()
+    return all(any(word.startswith(token) for word in words) for token in tokens)
+
+
 def names(title, raw):
     try:
         detail = json.loads(raw or '{}')
@@ -34,8 +39,8 @@ def names(title, raw):
 def rank(album, artist, query):
     album, artist, query = normalize(album), normalize(artist), normalize(query)
     return (0 if album == query else 1 if album.startswith(query) else
-            2 if all(token in album for token in query.split()) else
-            3 if all(token in artist for token in query.split()) else 4)
+            2 if matches(album, query.split()) else
+            3 if matches(artist, query.split()) else 4)
 
 
 def matching_cases(conn, *, status, job_id, query):
@@ -47,4 +52,4 @@ def matching_cases(conn, *, status, job_id, query):
         group_concat(review_search_names(title, details_json), ' ')
         FROM repair_findings WHERE status=? AND (?='' OR job_id=?)
         GROUP BY review_case_key''', (status, job_id, job_id))
-    return [key for key, text in rows if all(token in (text or '') for token in tokens)]
+    return [key for key, text in rows if matches(text, tokens)]

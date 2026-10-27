@@ -42,6 +42,7 @@ def test_search_uses_names_and_ranks_album_matches_without_playlist_noise():
         (2, 'TRON: Legacy', 'Daft Punk', {}),
         (3, 'Other album', 'Artist', {'expected_title': 'Tron theme'}),
         (4, 'Études, No. 5', 'Philip Glass', {}),
+        (5, 'Forty Licks', 'Rolling Stones', {'expected_title': 'Love Is Strong'}),
     ):
         db.add(fid, f'/music/{fid}/track.flac', {'album_id': fid, 'album_title': album, 'artist_name': artist, **extra})
     result = list_cases(db, q='tron', limit=1)
@@ -131,9 +132,9 @@ def test_new_replacement_of_delivered_file_resets_receipt_but_retry_does_not(tmp
 def test_playlist_references_have_real_ids_and_recheck_keeps_saved_choice(monkeypatch):
     playlist_membership.clear_cache()
     tracks = [SimpleNamespace(ratingKey='track')]
-    client = SimpleNamespace(base_url='https://music.example',
-        get_all_playlists=lambda: [SimpleNamespace(id='list-1', title='88 Keys')],
-        get_playlist_tracks=lambda key: tracks)
+    client = SimpleNamespace(base_url='https://music.example', ensure_connection=lambda: True,
+        _make_request=lambda path, params=None: {'playlists': {'playlist': [{'id': 'list-1', 'name': '88 Keys'}]}}
+        if path == 'getPlaylists' else {'playlist': {'entry': [{'id': track.ratingKey} for track in tracks]}})
     monkeypatch.setattr(playlist_membership, '_active_server_and_client', lambda: ('navidrome', client))
     db = _Database()
     db.add(1, '/music/file.flac', {'track_id': 'track'})
@@ -149,3 +150,32 @@ def test_playlist_references_have_real_ids_and_recheck_keeps_saved_choice(monkey
     with pytest.raises(ValueError):
         worker.review_playlist_references('case', '/elsewhere.flac', refresh=True)
     playlist_membership.clear_cache()
+
+
+@pytest.mark.parametrize('failed_endpoint', ['getPlaylists', 'getPlaylist'])
+def test_failed_playlist_recheck_does_not_erase_cached_membership(failed_endpoint):
+    playlist_membership.clear_cache()
+    client = SimpleNamespace(base_url='https://music.example', ensure_connection=lambda: True,
+        _make_request=lambda path, params=None: None if path == failed_endpoint else
+        {'playlists': {'playlist': [{'id': 'list-1', 'name': '88 Keys'}]}})
+    playlist_membership._cache.update(at=time.monotonic(), server='navidrome', map={'track': ['88 Keys']})
+    with pytest.raises(ValueError, match='complete playlist information'):
+        playlist_membership.server_playlist_references(refresh=True, resolve=lambda: ('navidrome', client))
+    assert playlist_membership._cache['map'] == {'track': ['88 Keys']}
+    playlist_membership.clear_cache()
+
+
+def test_jellyfin_reference_check_uses_playlist_entries_and_reads_all_pages():
+    calls = []
+    def request(path, params):
+        calls.append((path, params))
+        if path == '/Users/user/Items':
+            return {'Items': [{'Id': 'list-1', 'Name': 'Long playlist'}]}
+        assert path == '/Playlists/list-1/Items'
+        assert params['UserId'] == 'user'
+        return {'Items': [{'Id': str(i)} for i in range(1000)] if params['StartIndex'] == 0 else [{'Id': 'last'}]}
+    client = SimpleNamespace(user_id='user', ensure_connection=lambda: True, _make_request=request)
+    rows = list(playlist_membership._read_reference_rows('jellyfin', client))
+    assert rows[0][:2] == ('list-1', 'Long playlist')
+    assert len(rows[0][2]) == 1001 and rows[0][2][-1] == 'last'
+    assert len(calls) == 3

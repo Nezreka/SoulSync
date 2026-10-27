@@ -6,8 +6,8 @@ playlists). library track ids ARE the server's ids (tracks.id is the plex
 ratingKey / jellyfin Id / navidrome id), so a playlist's track ids line up with
 library rows directly.
 
-only sees playlists the connected server account can see. best effort: any
-failure is an empty map, never a failed scan or fix.
+only sees playlists the connected server account can see. discovery is best
+effort; explicit recovery checks preserve failures instead of reporting empty.
 """
 
 from __future__ import annotations
@@ -58,19 +58,57 @@ def server_playlist_references(*, refresh=False, resolve=None):
         if not refresh and _reference_cache['server'] == cache_key and time.monotonic() - _reference_cache['at'] < _CACHE_SECONDS:
             return _reference_cache['map']
     references = {}
-    for playlist in client.get_all_playlists() or []:
-        identity = str(getattr(playlist, 'id', '') or '')
+    for playlist_id, title, track_ids in _read_reference_rows(server, client):
+        identity = str(playlist_id or '')
         if not identity:
             continue
-        entry = {'id': identity, 'title': getattr(playlist, 'title', '') or 'Untitled',
+        entry = {'id': identity, 'title': title or 'Untitled',
                  'server': server, 'url': playlist_url(server, client, identity, browser_url)}
-        for track_id in _playlist_track_ids(server, client, playlist):
+        for track_id in track_ids:
             references.setdefault(str(track_id), []).append(entry)
     with _lock:
         _reference_cache.update(at=time.monotonic(), server=cache_key, map=references)
         _cache.update(at=time.monotonic(), server=server,
                       map={key: [entry['title'] for entry in entries] for key, entries in references.items()})
     return references
+
+
+def _read_reference_rows(server, client):
+    """Recovery must distinguish an empty playlist from an unavailable server.
+
+    The normal discovery client helpers deliberately return [] on failure. Use
+    their transport here so a failed recheck cannot clear a removal blocker.
+    """
+    if not client.ensure_connection():
+        raise ValueError('The music server is unavailable')
+    def response(path, params=None, required='Items'):
+        value = client._make_request(path, params) if params is not None else client._make_request(path)
+        if not isinstance(value, dict) or required not in value:
+            raise ValueError('The music server did not return complete playlist information')
+        return value[required]
+    if server == 'navidrome':
+        playlists = response('getPlaylists', required='playlists').get('playlist') or []
+        for playlist in playlists:
+            identity = playlist['id']
+            songs = response('getPlaylist', {'id': identity}, required='playlist').get('entry') or []
+            yield identity, playlist.get('name'), [song['id'] for song in songs]
+    elif server == 'jellyfin':
+        path = f'/Users/{client.user_id}/Items'
+        playlists = response(path, {'IncludeItemTypes': 'Playlist', 'Recursive': True})
+        for playlist in playlists:
+            identities, offset = [], 0
+            while True:
+                batch = response(f"/Playlists/{playlist['Id']}/Items", {'UserId': client.user_id,
+                    'StartIndex': offset, 'Limit': 1000})
+                identities.extend(song['Id'] for song in batch)
+                if len(batch) < 1000:
+                    break
+                offset += 1000
+            yield playlist['Id'], playlist.get('Name'), identities
+    elif server == 'plex':
+        for playlist in client.server.playlists():
+            if getattr(playlist, 'playlistType', None) == 'audio':
+                yield playlist.ratingKey, playlist.title, [song.ratingKey for song in playlist.items()]
 
 
 def _playlist_track_ids(server: str, client: Any, playlist: Any) -> List[str]:
