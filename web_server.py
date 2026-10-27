@@ -25205,6 +25205,15 @@ def start_runtime_services():
             # Recovery must not crash startup — the files are still on disk.
             logger.warning("[Startup] Atomic staging reconciliation failed: %s", _recover_err)
 
+        # Albums published from staging before the ledger followed them left
+        # track_downloads / library_history rows naming a staging folder that no
+        # longer exists. Point them at where the files went (idempotent).
+        try:
+            from core.downloads.atomic_recovery import repair_staged_path_records
+            repair_staged_path_records(get_database())
+        except Exception as _repair_err:
+            logger.warning("[Startup] Staged-path repair failed: %s", _repair_err)
+
         # Start simple background monitor when server starts
         logger.info("Starting simple background monitor...")
         start_simple_background_monitor()
