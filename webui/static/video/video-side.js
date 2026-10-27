@@ -366,7 +366,7 @@
     var VIDEO_WISHLIST_TABS = { movies: 1, tv: 1, youtube: 1 };
     // video pages that are really a React route on a video tab: navigate()
     // hands them off, so their /video-<page> url never stays in the bar.
-    var HANDED_OFF = { 'video-wishlist': 1 };
+    var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1 };
     function lastVideoWishlistTab() {
         try {
             var t = sessionStorage.getItem('soulsync.videoWishlistTab');
@@ -378,9 +378,13 @@
     // Not a bootPage: those re-assert their /video-<page> URL for 700ms, which
     // would overwrite the React URL the page lives at.
     function parseSharedPath(pathname, search) {
-        if (String(pathname || '').replace(/\/+$/, '') !== '/wishlist') return null;
+        var path = String(pathname || '').replace(/\/+$/, '');
         var media = null;
         try { media = new URLSearchParams(search || '').get('media'); } catch (e) { media = null; }
+        // /tools?media=video is the video tools page (the music tools page on
+        // its video media)
+        if (path === '/tools') return media === 'video' ? 'video-tools' : null;
+        if (path !== '/wishlist') return null;
         if (!VIDEO_WISHLIST_TABS[media]) return null;
         try { sessionStorage.setItem('soulsync.videoWishlistTab', media); } catch (e2) { /* ignore */ }
         return 'video-wishlist';
@@ -403,7 +407,30 @@
         catch (e2) { window.location.href = '/wishlist?media=' + media; }
     }
 
-    function navigate(pageId, mode) {
+    // the video tools page is the React /tools page on ?media=video: same
+    // hand-off as the wishlist. the side stays video, data-video-page keys the
+    // reveal css, and nothing re-asserts /video-tools over the react url.
+    // job (optional) lands on that job's card: /tools?media=video&job=<id>
+    function gotoUnifiedTools(mode, job) {
+        _backStack = [];
+        setActiveNav('video-tools');
+        document.body.setAttribute('data-video-page', 'video-tools');
+        var replace = mode === 'replace' || mode === 'restore';
+        try {
+            var wsr = window.SoulSyncWebRouter;
+            if (wsr && typeof wsr.navigateToPage === 'function') {
+                var query = { media: 'video' };
+                if (job) query.job = job;
+                wsr.navigateToPage('tools', { query: query, replace: replace });
+                return;
+            }
+        } catch (e) { /* fall through to a real redirect */ }
+        var href = '/tools?media=video' + (job ? '&job=' + encodeURIComponent(job) : '');
+        try { window.location.assign(href); }
+        catch (e2) { window.location.href = href; }
+    }
+
+    function navigate(pageId, mode, job) {
         // Music-only profile: there is no video page to fall back to — punt the
         // whole navigation back to the music side instead.
         if (!sideAllowed('video')) { switchSide('music', { force: true }); return; }
@@ -414,6 +441,7 @@
         // /video-downloads deep link lands on the unified page's video view.
         if (pageId === 'video-downloads') { gotoUnifiedDownloads(mode); return; }
         if (pageId === 'video-wishlist') { gotoUnifiedWishlist(mode); return; }
+        if (pageId === 'video-tools') { gotoUnifiedTools(mode, job); return; }
         setActiveNav(pageId);
         showPage(pageId);
         if (DETAIL_PAGES[pageId] || mode === 'restore') return;
@@ -510,7 +538,8 @@
         // button in the download modal / a detail page's live-progress chip).
         document.addEventListener('soulsync:video-navigate', function (e) {
             var pageId = e && e.detail && (e.detail.page || e.detail);
-            if (typeof pageId === 'string') navigate(pageId);
+            var job = e && e.detail && typeof e.detail === 'object' ? e.detail.job : null;
+            if (typeof pageId === 'string') navigate(pageId, undefined, job || undefined);
         });
 
         // Drill-in: a card fires soulsync:video-open-detail {kind, id, source}. We

@@ -228,19 +228,20 @@ def test_video_library_module_referenced_and_isolated():
 
 
 def test_video_tools_page_has_three_scan_modes():
-    block = _block(
-        _INDEX, r'<section class="video-subpage" data-video-subpage="video-tools"', "</section>")
-    # Mode dropdown + single Scan button, same shape as the music tool card.
+    # the video tools page is the React /tools page on ?media=video now; its
+    # library scan card sits on the music ToolCard chassis
+    cards = (_ROOT / "webui" / "src" / "routes" / "tools" / "-ui" /
+             "video-tool-cards.tsx").read_text(encoding="utf-8")
+    block = cards.split("export function VideoLibraryScanCard")[1].split("// ── Server scan")[0]
     for mode in ("incremental", "full", "deep"):
         assert f'value="{mode}"' in block, f"tools page missing scan mode {mode}"
-    assert "data-video-scan-run" in block and "data-video-scan-select" in block
-    assert "data-video-scan-phase" in block          # reuses music progress markup
-    assert "tool-card" in block and "tool-card-controls" in block  # reuses music classes
-    # Matches the music Database Updater card: help button, last-scan line, stats grid.
-    assert "tool-help-button" in block
-    assert "data-video-scan-last" in block
-    assert "tool-card-stats" in block and 'data-video-scan-stat="movies"' in block
-    assert "onclick" not in block
+    assert "<ToolCard" in block and "<ToolProgress" in block      # the music chassis
+    assert 'helpTool="video-scan"' in block                       # the ? button
+    assert "Last full scan" in block and "'Movies:'" in block      # last-scan line + stats
+    # started through the one scan controller, never by writing its nodes
+    assert "soulsync:video-scan-start" in block
+    assert "data-video-scan-" not in block
+    assert '<section class="video-subpage" data-video-subpage="video-tools"' not in _INDEX
 
 
 def test_dashboard_library_card_has_refresh_and_deep_buttons():

@@ -195,6 +195,25 @@ Repair and maintenance moved to the **Tools** page, which has two tabs:
 - **Operations** — the findings inbox. Repair scans surface problems here (missing tags, duplicates, dead files, …) and you fix them individually or in bulk.
 - **Tools** — launcher cards for scans and maintenance: **Media Server Scan**, **Metadata Updater**, **Backup Manager**, **Download Blacklist**, **Metadata Cache**, **Discovery Pool**, and more.
 
+## Working through findings
+
+**Simple mode** opens with one health score (the same one Advanced shows) and sorts every open finding by what fixing it would do:
+
+| Card | What's in it |
+|------|--------------|
+| **Safe to fix** | Fixes that only write tags and data. **Fix all** runs them in the background. |
+| **Needs your call** | Fixes that move, delete or replace files. Each asks first. |
+| **Review only** | Things worth a look that have no automatic fix. |
+
+Each card lists the finding types inside it; click one to open its findings.
+
+**Advanced mode** lands on **Issue Types**: one row per kind of finding, worst first, each with its own fix-all and dismiss-all. **Albums & Releases** is a lens on the findings that belong to an album; it says how many findings it can't show (orphan files have no album) and links to the rest.
+
+- **Dismiss** means "don't raise this again". Every dismiss shows an **Undo** for a few seconds, and dismissed findings can be reopened from the Dismissed view.
+- **Delete matching…** forgets findings outright (the next scan can raise them again). It's not the same as dismiss.
+- A fix that fails keeps its reason on the row, with **Retry Fix**.
+- Keyboard, in any open list: \`j\`/\`k\` move, \`x\` select, \`Enter\` details, \`f\` fix, \`d\` dismiss, \`z\` undo, \`/\` search.
+
 ## Repair jobs
 
 The background repair worker runs automated jobs on configurable schedules, including:

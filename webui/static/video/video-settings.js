@@ -1989,23 +1989,11 @@
             })
             .catch(function () { /* status is best-effort */ });
     }
-    // Jump to Tools and bring the job's card into view (cards render async).
+    // Jump to Tools on this job: the React tools page opens the job's card
+    // (advanced view) and lights it up from ?job=.
     function openMissingSubsJob() {
         document.dispatchEvent(new CustomEvent('soulsync:video-navigate',
-            { detail: { page: 'video-tools' } }));
-        var tries = 0;
-        var t = setInterval(function () {
-            var card = document.querySelector('.repair-job-card[data-job-id="' + MISSING_SUBS_JOB + '"]');
-            if (card || ++tries > 40) {
-                clearInterval(t);
-                if (!card) return;
-                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                // a brief accent ring so the eye lands on the right card
-                card.style.transition = 'box-shadow .35s ease';
-                card.style.boxShadow = '0 0 0 2px rgba(var(--accent-rgb), .85)';
-                setTimeout(function () { card.style.boxShadow = ''; }, 2200);
-            }
-        }, 100);
+            { detail: { page: 'video-tools', job: MISSING_SUBS_JOB } }));
     }
     function fillOrg() {
         if (!_videoOrg) return;

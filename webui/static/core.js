@@ -1093,7 +1093,9 @@ function initializeWebSocket() {
     socket.on('collections:sync', (data) => { if (typeof updateCollectionSyncTask === 'function') updateCollectionSyncTask(data); });
     socket.on('collections:artwork', (data) => { if (typeof updateCollectionArtTask === 'function') updateCollectionArtTask(data); });
     socket.on('video:bulk', (data) => { if (typeof updateVideoBulkTask === 'function') updateVideoBulkTask(data); });
-    socket.on('video:repair:progress', (data) => { if (typeof updateVideoRepairProgressFromData === 'function') updateVideoRepairProgressFromData(data); });
+    // the video tools page is React now (/tools?media=video): hand the frame
+    // over the same ss: seam the music maintenance hero listens on.
+    socket.on('video:repair:progress', (data) => { window.dispatchEvent(new CustomEvent('ss:video-repair-progress', { detail: data })); });
 }
 
 // ── Quick Actions tiles: animation == gauge ──

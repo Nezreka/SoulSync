@@ -2160,6 +2160,8 @@ function profileAllowedSides() {
 // being on), not the music page's. /wishlist?media=tv is the video wishlist.
 const SHARED_VIDEO_VIEWS = {
     wishlist: { media: ['movies', 'tv', 'youtube'], videoPage: 'video-wishlist' },
+    // /tools?media=video is the video tools page
+    tools: { media: ['video'], videoPage: 'video-tools' },
 };
 
 function isPageAccessAllowed(pageId, search) {

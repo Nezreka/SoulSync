@@ -1062,7 +1062,11 @@ Each collection hands a title to the wishlist **once**. Remove it from the wishl
             title: 'Library Maintenance',
             lede: 'Repair jobs that find library problems and fix them — individually or in bulk.',
             body: `
-**Library Maintenance** runs ten repair jobs that scan the video library for problems. Each job produces rich, lazy-loaded **findings** you can fix individually, fix in bulk, resolve, or dismiss — with a full run history and live progress while jobs execute. Run jobs on demand, on the Tools page's interval, or from an automation via the **Run Maintenance Job** action (chain it with the *Maintenance Finding Raised* trigger for alerts).
+**Library Maintenance** runs eleven repair jobs that scan the video library for problems. Each job produces rich, lazy-loaded **findings** you can fix individually, fix in bulk, resolve, or dismiss — with a full run history and live progress while jobs execute. Run jobs on demand, on their schedule, or from an automation via the **Run Maintenance Job** action (chain it with the *Maintenance Finding Raised* trigger for alerts).
+
+The video **Tools** page is the same page as music's: an **Operations** tab (Simple and Advanced mode, the findings inbox, the jobs and their history) and a **Tools** tab (Library Scan, Server Scan, the Overlay and Collection Studios, Backups and Mass Rename). Findings work the same way on both sides, see [Repair & Maintenance](#dash-repair).
+
+On the video side, **Fix all safe** only runs fixes that change SoulSync's own data. Anything that renames or recycles a file (Naming, Watched Cleanup) or starts a download (Missing Episodes, Collections, Quality Upgrades, Broken Files) is left for you to fix by type, and a file-changing fix asks before it runs. Duplicate Copies stays review-only.
 
 | Job | What it scans | What approving a finding does |
 |-----|---------------|------------------------------|
@@ -1306,7 +1310,9 @@ Base path: \`/api/video\`. **Admin-only** for every method.
 | POST | \`/collections/{id}/sync\`, \`/collections/sync\`, \`/collections/server/adopt\` | Sync collections to Plex/Jellyfin; adopt existing |
 | POST | \`/collections/{id}/wishlist_missing\`, \`/collections/posters/regenerate\` | Wishlist gaps; regenerate posters |
 | GET/POST/PUT | \`/repair/jobs...\`, \`/repair/status\`, \`/repair/toggle\`, \`/repair/pause\`, \`/repair/resume\` | Library Maintenance jobs & scheduler |
-| GET/POST | \`/repair/findings...\` | Findings: fix, bulk-fix, resolve, dismiss, clear |
+| GET/POST | \`/repair/findings...\` | Findings: list (type, search, sort), counts, fix, resolve, dismiss, reopen, bulk, clear |
+| GET | \`/repair/findings/groups\`, \`/repair/finding-types\` | Findings folded by type; the type catalog (label, verb, fixable, touches files, downloads) |
+| POST | \`/repair/findings/bulk-fix-start\`, \`/repair/bulk-fix/stop\` · GET \`/repair/bulk-fix/status\` | Fix all in the background (by type, or safe only) |
 | GET/POST | \`/import/failed\`, \`/import/{id}/place\`, \`/import/{id}/dismiss\` | Manual import of failed downloads |
 | GET | \`/backups\` | List backups |
 | POST | \`/backups\` | Create a backup |

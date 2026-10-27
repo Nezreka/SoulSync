@@ -697,54 +697,59 @@ export function Operations({
   return (
     <div className="operations-wrapper">
       {/* ── Mode Switcher Bar ────────────────────────────────────────────── */}
-      <div className="operations-mode-bar">
-        <div className="operations-mode-meta">
-          <div className="operations-mode-heading">
-            <span className="operations-mode-pill">
-              {mode === 'simple' ? '✦ Simple View' : '⚙ Advanced View'}
-            </span>
-            <span className="operations-mode-label">
+      {/* the maintenance hero has its own switch at the top of the page and
+          drives this one (controlledMode). a second identical switch half a
+          page down was the same control twice, so it only shows standalone. */}
+      {controlledMode === undefined ? (
+        <div className="operations-mode-bar">
+          <div className="operations-mode-meta">
+            <div className="operations-mode-heading">
+              <span className="operations-mode-pill">
+                {mode === 'simple' ? '✦ Simple View' : '⚙ Advanced View'}
+              </span>
+              <span className="operations-mode-label">
+                {mode === 'simple'
+                  ? 'Checks and areas'
+                  : `All ${(jobs || []).length} jobs, their schedules and settings`}
+              </span>
+            </div>
+            <p className="operations-mode-description">
               {mode === 'simple'
-                ? 'Curated Playbooks & 4 Operational Pillars'
-                : '30 Low-Level Scripts & Cadence Control'}
-            </span>
+                ? 'Run a few jobs together, or put a whole area on its schedule.'
+                : 'Every job on its own: turn it on or off, run it now, change how often it runs and what it looks for.'}
+            </p>
           </div>
-          <p className="operations-mode-description">
-            {mode === 'simple'
-              ? 'Outcome-based curation designed for everyday library management. Trigger composite tune-ups or manage high-level domains with 1-click.'
-              : 'Detailed crontab engine room. Configure custom intervals per job, worker thread pools, spectral cutoff thresholds, and historical metrics.'}
-          </p>
-        </div>
 
-        <div
-          className="operations-mode-toggle-group"
-          role="tablist"
-          aria-label="Workstation View Mode"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'simple'}
-            className={`operations-mode-toggle-btn ${mode === 'simple' ? 'active' : ''}`}
-            onClick={() => handleModeSwitch('simple')}
-            title="Switch to Simple Studio Mode (Recommended)"
+          <div
+            className="operations-mode-toggle-group"
+            role="tablist"
+            aria-label="Workstation View Mode"
           >
-            <span className="operations-mode-toggle-icon">✦</span>
-            <span>Simple Mode</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === 'advanced'}
-            className={`operations-mode-toggle-btn ${mode === 'advanced' ? 'active' : ''}`}
-            onClick={() => handleModeSwitch('advanced')}
-            title="Switch to Advanced Mode (30 Micro-Jobs)"
-          >
-            <span className="operations-mode-toggle-icon">⚙</span>
-            <span>Advanced Mode</span>
-          </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'simple'}
+              className={`operations-mode-toggle-btn ${mode === 'simple' ? 'active' : ''}`}
+              onClick={() => handleModeSwitch('simple')}
+              title="The overview (recommended)"
+            >
+              <span className="operations-mode-toggle-icon">✦</span>
+              <span>Simple Mode</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'advanced'}
+              className={`operations-mode-toggle-btn ${mode === 'advanced' ? 'active' : ''}`}
+              onClick={() => handleModeSwitch('advanced')}
+              title="Every job, one by one"
+            >
+              <span className="operations-mode-toggle-icon">⚙</span>
+              <span>Advanced Mode</span>
+            </button>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {/* ── Simple Mode (Studio) View ────────────────────────────────────── */}
       {mode === 'simple' ? (

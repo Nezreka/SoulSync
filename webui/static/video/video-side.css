@@ -298,18 +298,17 @@ body[data-side="video"][data-video-page="video-chat"] #video-page-host {
    above hides it). Reveal it the same way and hide the video host.
    data-video-page is set by gotoUnifiedDownloads() in video-side.js —
    navigate() hands off before showPage() can set it. */
-body[data-side="video"][data-video-page="video-downloads"] #webui-react-root {
+body[data-side="video"][data-video-page="video-downloads"] #webui-react-root,
+/* The wishlist and the tools page are the same kind of shared React page (the
+   wishlist's video tabs, /tools?media=video), handed off by
+   gotoUnifiedWishlist() / gotoUnifiedTools() in video-side.js. */
+body[data-side="video"][data-video-page="video-wishlist"] #webui-react-root,
+body[data-side="video"][data-video-page="video-tools"] #webui-react-root {
     display: block !important;
 }
-body[data-side="video"][data-video-page="video-downloads"] #video-page-host {
-    display: none !important;
-}
-/* The wishlist is the same kind of shared React page (its video tabs),
-   handed off by gotoUnifiedWishlist() in video-side.js. */
-body[data-side="video"][data-video-page="video-wishlist"] #webui-react-root {
-    display: block !important;
-}
-body[data-side="video"][data-video-page="video-wishlist"] #video-page-host {
+body[data-side="video"][data-video-page="video-downloads"] #video-page-host,
+body[data-side="video"][data-video-page="video-wishlist"] #video-page-host,
+body[data-side="video"][data-video-page="video-tools"] #video-page-host {
     display: none !important;
 }
 /* Video-only additions inside the shared settings page (e.g. the Movies/TV
@@ -5268,15 +5267,15 @@ img.vdh-poster--none { font-size: 0; }
    one more than music's two, so the shared no-wrap flex row overflowed and clipped
    the button. Scoped to the video Tools page (music's .tool-card-controls is
    untouched): let the row wrap, two selects share the top row, the button drops
-   to its own full-width row. */
-.video-subpage[data-video-subpage="video-tools"] .tool-card-controls {
+   to its own full-width row. The page is the React tools page on ?media=video. */
+.tools-page--video .tool-card-controls {
     flex-wrap: wrap;
 }
-.video-subpage[data-video-subpage="video-tools"] .tool-card-controls select {
+.tools-page--video .tool-card-controls select {
     flex: 1 1 140px;          /* two selects share the top row, each ≥140px */
     min-width: 0;
 }
-.video-subpage[data-video-subpage="video-tools"] .tool-card-controls button {
+.tools-page--video .tool-card-controls button {
     flex: 1 1 100%;           /* action button takes its own full-width row */
 }
 

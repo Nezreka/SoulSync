@@ -158,15 +158,16 @@ def test_inverse_reroot_maps_back_to_server_view():
 
 
 def test_ui_and_api_wiring():
-    index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-    repair_js = (_ROOT / "webui" / "static" / "video" / "video-repair.js").read_text(encoding="utf-8")
+    cards = (_ROOT / "webui" / "src" / "routes" / "tools" / "-ui" / "video-tool-cards.tsx").read_text(encoding="utf-8")
+    api_ts = (_ROOT / "webui" / "src" / "routes" / "tools" / "-video-tools.api.ts").read_text(encoding="utf-8")
+    page = (_ROOT / "webui" / "src" / "routes" / "tools" / "-ui" / "tools-page.tsx").read_text(encoding="utf-8")
     dl_api = (_ROOT / "api" / "video" / "downloads.py").read_text(encoding="utf-8")
-    assert "data-video-rename-card" in index
-    assert "wireRename()" in repair_js and "showConfirmDialog" in repair_js
+    assert "<VideoMassRenameCard />" in page
+    assert "export function VideoMassRenameCard" in cards and "showConfirmDialog" in cards
     assert '"/organization/rename/preview"' in dl_api and '"/organization/rename/apply"' in dl_api
     # background preview: the UI polls the status endpoint for a live count
     assert '"/organization/rename/preview/status"' in dl_api
-    assert "rename/preview/status" in repair_js and "Scanning your library" in repair_js
+    assert "rename/preview/status" in api_ts and "Scanning your library" in cards
 
 
 # ── background preview (slow-library fix) ─────────────────────────────────────

@@ -196,7 +196,8 @@ describe('finding labels', () => {
     expect(Object.keys(FINDING_SEVERITY_ICONS)).toHaveLength(4);
     expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(25);
     expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(23);
-    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(16);
+    // 16 music + obsolete + the 10 video fix actions + the scan retirement
+    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(28);
   });
 
   it('labels known finding types', () => {

@@ -298,6 +298,21 @@ export const FINDING_ACTION_LABELS: Record<string, string> = {
   removed_duplicates: 'Duplicates Removed',
   genres_applied: 'Genres Applied',
   ignored: 'Ignored',
+  // the file a finding was about vanished before it was fixed (#1143)
+  obsolete: 'File Gone',
+  // the video side's fix actions
+  wishlisted: 'Wishlisted',
+  grabbed: 'Grabbed',
+  refreshed: 'Refreshed',
+  removed: 'Removed',
+  marked_deleted: 'Marked Deleted',
+  forgotten: 'Forgotten',
+  flagged: 'Flagged',
+  cleaned: 'Cleaned',
+  renamed: 'Renamed',
+  queued: 'Queued',
+  // retired by a later scan that no longer saw the problem
+  'superseded by a newer scan': 'Gone on rescan',
 };
 
 /** The badge shown on a non-pending finding: the user action if we have a label

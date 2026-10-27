@@ -21,6 +21,7 @@ import {
   libraryHealth,
   sparklinePoints,
 } from '../-tools.groups';
+import { useToolsMedia } from '../-tools.media';
 
 export interface HealthHeroProps {
   groups: readonly FindingGroup[];
@@ -29,6 +30,12 @@ export interface HealthHeroProps {
   /** Library size, for the per-1,000-tracks normalisation. Null until the
    *  database stats land. */
   trackCount: number | null;
+  /** what the library size is, said in its own words ("8,864 movies · 105,472
+   *  episodes"). absent = tracks. */
+  sizeLabel?: string | null;
+  /** the groups haven't arrived yet: say so instead of scoring an empty
+   *  list as a perfect library */
+  loading?: boolean;
   runs: readonly RepairJobRun[];
   runningJobs: number;
   /** How many pending findings "Fix all safe" would touch. */
@@ -46,6 +53,8 @@ export function HealthHero({
   groups,
   typeInfo,
   trackCount,
+  sizeLabel,
+  loading = false,
   runs,
   runningJobs,
   safeCount,
@@ -53,6 +62,7 @@ export function HealthHero({
   fixAllBusy,
   onPickType,
 }: HealthHeroProps) {
+  const video = useToolsMedia() === 'video';
   const health = libraryHealth(groups, trackCount);
   const labelOf = (findingType: string) =>
     typeInfo(findingType)?.label || findingType.replace(/_/g, ' ');
@@ -60,17 +70,26 @@ export function HealthHero({
   const trend = findingsTrend(runs);
 
   const meta: string[] = [];
-  if (trackCount) meta.push(`${trackCount.toLocaleString()} tracks`);
+  if (sizeLabel) meta.push(sizeLabel);
+  else if (trackCount) meta.push(`${trackCount.toLocaleString()} tracks`);
   meta.push(
-    health.pending > 0 ? `${health.pending.toLocaleString()} open findings` : 'nothing outstanding',
+    loading
+      ? 'looking at your findings…'
+      : health.pending > 0
+        ? `${health.pending.toLocaleString()} open findings`
+        : 'nothing outstanding',
   );
   if (runningJobs > 0) meta.push(`${runningJobs} job${runningJobs === 1 ? '' : 's'} running`);
 
   return (
     <div className="repair-health" id="repair-section-health">
       <div className="repair-health-score-block">
-        <div className={`repair-health-score ${health.band}`}>{health.score}</div>
-        <div className={`repair-health-band ${health.band}`}>{healthBandLabel(health.band)}</div>
+        <div className={`repair-health-score ${loading ? '' : health.band}`}>
+          {loading ? '–' : health.score}
+        </div>
+        <div className={`repair-health-band ${loading ? '' : health.band}`}>
+          {loading ? 'checking' : healthBandLabel(health.band)}
+        </div>
       </div>
 
       <div className="repair-health-body">
@@ -94,7 +113,7 @@ export function HealthHero({
               />
             ))}
           </div>
-        ) : (
+        ) : loading ? null : (
           <div className="repair-health-bar-empty">Nothing is dragging your library down.</div>
         )}
 
@@ -107,7 +126,9 @@ export function HealthHero({
             title={
               safeCount === 0
                 ? 'Nothing safe to fix right now'
-                : 'Fixes every finding that only writes metadata — never deletes or moves a file'
+                : video
+                  ? "Fixes every finding that only changes SoulSync's data: no file is touched, nothing downloads"
+                  : 'Fixes every finding that only writes metadata — never deletes or moves a file'
             }
           >
             {fixAllBusy
@@ -115,7 +136,9 @@ export function HealthHero({
               : `Fix all safe${safeCount > 0 ? ` (${safeCount.toLocaleString()})` : ''}`}
           </button>
           <span className="repair-health-actions-note">
-            Safe fixes never delete or move a file.
+            {video
+              ? 'Safe fixes never touch a file or start a download.'
+              : 'Safe fixes never delete or move a file.'}
           </span>
         </div>
       </div>

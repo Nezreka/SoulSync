@@ -184,6 +184,7 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 ## Tools & library maintenance
 
 - **Library health score** with a findings inbox that turns thousands of findings into a few decisions, and **Fix all safe** for metadata-only repairs.
+- Findings sorted by what a fix would do (safe, needs your call, review only), **undo** on every dismiss, and keyboard triage (\`j\`/\`k\`/\`f\`/\`d\`).
 - **31 maintenance jobs**, each with its own schedule: duplicate and single/album dedup, dead and orphan files, AcoustID scanning, fake-lossless and corrupt-file detection, cover art, lyrics and ReplayGain fillers, metadata gaps, album completeness, discography backfill, quality upgrades, lossy conversion, reorganize and re-tag, MBID mismatches, album tag consistency, unknown-artist and comma-artist fixes, genre cleanup and enrichment, and more.
 - **Database updater** (incremental, full refresh or deep scan), manual library matching, **backups with restore**, a metadata cache browser, and **config export/import** (optionally with credentials).
 
@@ -265,7 +266,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Smart-filter and list collections from TMDB, IMDb, Trakt and MDBList.
   - Presets, seasonal windows, generated artwork, and wishlisting missing members.
 - **Poster Manager** for TMDB posters, including textless ones.
-- **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more. Plus backups and mass rename.
+- **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more, on the same Tools page as music (health score, findings inbox, fix-all in the background). Plus backups and mass rename.
 - **Server Activity**: a Tautulli-style live view of streams, history and stats.
 - **Watch Together** in chat: vote on a title and watch together.
 

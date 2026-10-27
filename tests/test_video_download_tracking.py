@@ -142,4 +142,4 @@ def test_episode_grab_uses_the_shared_single_grab_path():
 
 def test_video_side_handles_navigate_event():
     assert "'soulsync:video-navigate'" in _SIDE
-    assert 'navigate(pageId)' in _SIDE
+    assert 'navigate(pageId, undefined, job || undefined)' in _SIDE
