@@ -64,6 +64,15 @@ def make_db_path_updater(db):
     ever written by ``record_soulsync_library_entry``, which is gated on that.
     Reading a legitimate 0 as failure is what stranded albums in staging for
     Navidrome/Plex/Jellyfin users in the first place.
+
+    The download ledger (``track_downloads``) records the path an import landed
+    at, which for a staged batch is the staging path, and is repointed by the
+    same call (so a rollback takes it back too). The count returned is the
+    ``tracks`` count only: ledger rows exist on every install and prove nothing
+    about whose library rows these are. Left on the staging path, the ledger
+    went stale the moment the folder was emptied, and everything that asks it
+    "is this download still on disk?" (ownership for artists routed to the
+    audiobook library, for one) answered no and fetched the album again.
     """
     def _update(old_path: str, new_path: str):
         conn = db._get_connection()
@@ -71,8 +80,14 @@ def make_db_path_updater(db):
             cur = conn.cursor()
             cur.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
                         (new_path, old_path))
-            conn.commit()
             rowcount = getattr(cur, 'rowcount', None)
+            try:
+                cur.execute("UPDATE track_downloads SET file_path = ? WHERE file_path = ?",
+                            (new_path, old_path))
+            except Exception as exc:  # noqa: BLE001 - an old db without the ledger must still publish
+                logger.debug("[Atomic Publish] could not repoint the download ledger for %s: %s",
+                             old_path, exc)
+            conn.commit()
         finally:
             conn.close()
         try:
