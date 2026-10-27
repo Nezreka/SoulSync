@@ -3016,7 +3016,9 @@ async function deleteProfile(p) {
 function openProfilePasswordModal(p) {
     const modal = pfModal({
         title: `${p.name}'s login password`,
-        subtitle: 'Used to sign in when login mode is on. The PIN is separate.',
+        subtitle: window.__soulsyncOidcOnly
+            ? 'Sign-in is OIDC only right now, so this is kept but only works once OIDC-only is turned off.'
+            : 'Used to sign in when login mode is on. The PIN is separate.',
         size: 'small', layerClass: 'pf-layer--small',
     });
     const pw = pfEl('input', { type: 'password', class: 'pf-input', autocomplete: 'new-password', maxlength: '200', 'aria-label': 'New password', placeholder: 'New password' });
@@ -3411,7 +3413,9 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             pfEl('div', { class: 'pf-group' }, [pinSwitch.row, pinExtra]),
             pfEl('div', { class: 'pf-section-title', text: 'Login password' }),
             pfEl('div', { class: 'pf-field' }, [passwordInput, passwordError,
-                pfEl('p', { class: 'pf-help', text: 'For signing in when login mode is on. Separate from the PIN.' })]),
+                pfEl('p', { class: 'pf-help', text: window.__soulsyncOidcOnly
+                    ? 'Sign-in is OIDC only right now, so this is kept but only works once OIDC-only is turned off.'
+                    : 'For signing in when login mode is on. Separate from the PIN.' })]),
             pfEl('div', { class: 'pf-section-title', text: 'Home' }),
             homeField,
         );
@@ -4003,8 +4007,15 @@ async function showInviteLanding(token) {
             pfEl('p', { class: 'pf-help', id: pwId + '-help', text: 'At least 6 characters. You sign in with your name and this.' }),
         ]));
     }
+    // sign-in is oidc only (#1839): no password here, the provider signs
+    // them in and their account there is linked to the new profile
+    if (invite.oidc) {
+        fields.push(pfEl('p', { class: 'pf-help', text: `You'll sign in with your account at the provider. It's linked to this profile, and that's how you sign in from now on.` }));
+    }
     const formError = pfEl('p', { class: 'pf-form-error', role: 'alert', 'aria-live': 'polite' });
-    const join = pfEl('button', { type: 'submit', class: 'pf-btn pf-btn--primary pf-btn--block', text: 'Join' });
+    if (invite.error) formError.textContent = invite.error;
+    const joinText = invite.oidc ? (invite.oidc_label || 'Continue') : 'Join';
+    const join = pfEl('button', { type: 'submit', class: 'pf-btn pf-btn--primary pf-btn--block', text: joinText });
     form.append(...fields, formError, join);
     inner.append(form);
     renderPreview();
@@ -4035,6 +4046,10 @@ async function showInviteLanding(token) {
                 body: JSON.stringify({ name, avatar_color: st.color, pin: pin || undefined, password: password || undefined }),
             });
             const data = await pfReadJson(res);
+            if (res.ok && data.success && data.oidc && data.url) {
+                window.location.assign(data.url);
+                return;
+            }
             if (res.ok && data.success) {
                 if (pin) {
                     try { localStorage.setItem(_pfPinLengthKey(data.profile_id), String(pin.length)); } catch (err) { /* ignore */ }
@@ -4061,7 +4076,7 @@ async function showInviteLanding(token) {
             formError.textContent = 'Connection error, try again';
         }
         join.disabled = false;
-        join.textContent = 'Join';
+        join.textContent = joinText;
     });
 }
 

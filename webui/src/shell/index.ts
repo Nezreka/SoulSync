@@ -46,6 +46,7 @@ import {
   openPersonalSettings,
   saveMyAccountToken,
 } from './my-accounts';
+import { initOidcOnlyAdmin } from './oidc-only';
 import { initOidcAdminStatus, initOidcSignIn } from './oidc-signin';
 import {
   closeDownloadOriginsModal,
@@ -158,6 +159,7 @@ const onReady = () => {
   void initPlexSignIn();
   void initOidcSignIn();
   initOidcAdminStatus();
+  initOidcOnlyAdmin();
 };
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', onReady, { once: true });

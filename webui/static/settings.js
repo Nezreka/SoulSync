@@ -3925,6 +3925,8 @@ async function loadSettingsData() {
             if (plexDl) plexDl.checked = settings.security?.plex_signin_default_can_download || false;
             const oidcOn = document.getElementById('security-oidc-signin');
             if (oidcOn) oidcOn.checked = settings.security?.oidc_signin || false;
+            const oidcOnly = document.getElementById('security-oidc-only');
+            if (oidcOnly) oidcOnly.checked = settings.security?.oidc_only || false;
             syncOidcProviderBlock();
             for (const [id, key] of [
                 ['security-oidc-issuer', 'oidc_issuer'],
@@ -3946,7 +3948,7 @@ async function loadSettingsData() {
             if (oidcDl) oidcDl.checked = settings.security?.oidc_signin_default_can_download || false;
             // the address to register at the provider, as this browser sees it
             const oidcCb = document.getElementById('security-oidc-callback-url');
-            if (oidcCb) oidcCb.textContent = window.location.origin + '/api/auth/oidc/callback';
+            if (oidcCb) oidcCb.textContent = window.location.origin + window.SoulSyncURL.resolve('/api/auth/oidc/callback');
             const signupSides = document.getElementById('security-signup-sides');
             if (signupSides) {
                 const sides = settings.security?.signup_sides;
@@ -7132,6 +7134,7 @@ async function saveSettings(quiet = false) {
             plex_signin_auto_create: _cfgBool('security-plex-signin-auto-create'),
             plex_signin_default_can_download: _cfgBool('security-plex-signin-can-download'),
             oidc_signin: _cfgBool('security-oidc-signin'),
+            oidc_only: _cfgBool('security-oidc-only'),
             oidc_issuer: _cfgStr('security-oidc-issuer', { trim: true }),
             oidc_client_id: _cfgStr('security-oidc-client-id', { trim: true }),
             oidc_client_secret: _cfgStr('security-oidc-client-secret'),
