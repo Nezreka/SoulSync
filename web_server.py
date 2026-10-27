@@ -12056,15 +12056,20 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
             policy_profile=_inspection_profile,
         )
 
+    # what the rows were judged against, so the "wanted" column can show it
+    _expected_ms = int(getattr(track_obj, 'duration_ms', 0) or 0)
+
     def generate_stream():
         with ThreadPoolExecutor(max_workers=4) as pool:
             futures = {pool.submit(_search_one_source, name, client): name for name, client in download_clients.items()}
             for future in as_completed(futures):
                 source_name = futures[future]
                 try:
-                    yield json.dumps({'source': source_name, **future.result()}) + '\n'
+                    yield json.dumps({'source': source_name, 'expected_duration_ms': _expected_ms,
+                                      **future.result()}) + '\n'
                 except Exception as e:
-                    yield json.dumps({'source': source_name, **empty_source_rows(
+                    yield json.dumps({'source': source_name, 'expected_duration_ms': _expected_ms,
+                                      **empty_source_rows(
                         str(e), provenance=_inspection_provenance,
                         policy=_inspection_policy)}) + '\n'
         yield json.dumps({'done': True}) + '\n'
@@ -12162,6 +12167,13 @@ def _wishlist_track_for_inspector(track_id):
     return WishlistService.format_track_for_download(row)
 
 
+def _wishlist_search_override(track, data):
+    """the title/artist typed into the interactive search, when the row's
+    own were wrong."""
+    from core.wishlist.service import WishlistService
+    return WishlistService.apply_search_override(track, data.get('name'), data.get('artist'))
+
+
 @app.route('/api/wishlist/inspect', methods=['POST'])
 def inspect_wishlist_sources():
     """Search manually for one wishlist track: every source, with the verdicts."""
@@ -12170,6 +12182,7 @@ def inspect_wishlist_sources():
         track = _wishlist_track_for_inspector(data.get('track_id'))
         if not track:
             return jsonify({"success": False, "error": "That track isn't on your wishlist"}), 404
+        track = _wishlist_search_override(track, data)
         return _inspect_sources_stream(
             _pinned_batch.track_object(track), track.get('quality_profile_id'),
             log_tag='Inspector',
@@ -12202,6 +12215,8 @@ def download_wishlist_pick():
         track = _wishlist_track_for_inspector(data.get('track_id'))
         if not track:
             return jsonify({"success": False, "error": "That track isn't on your wishlist"}), 404
+        # the pick downloads as what was searched for, not what the row said
+        track = _wishlist_search_override(track, data)
 
         from core.downloads.decisions import is_quality_override
         name = f"Wishlist: {track.get('artist_name') or 'Unknown'} - {track.get('name') or 'Unknown'}"

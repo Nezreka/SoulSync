@@ -56199,6 +56199,25 @@ tr.tag-diff-same {
 .redownload-current-title { font-size: 16px; font-weight: 700; color: rgba(255,255,255,0.95); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .redownload-current-meta { font-size: 12px; color: var(--white-a35); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .redownload-current-badges { display: flex; gap: 4px; flex-shrink: 0; }
+/* interactive search: retype the title/artist when the row's own are wrong */
+.redownload-btn.rdl-query-edit { flex-shrink: 0; padding: 8px 14px; font-size: 12px; }
+.rdl-query-form { flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.rdl-query-form label { flex: 1 1 180px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.rdl-query-form label span {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--white-a35);
+}
+.rdl-query-form input {
+    width: 100%; box-sizing: border-box; padding: 9px 12px; font-size: 14px;
+    color: rgba(255,255,255,0.95); background: rgba(0,0,0,0.25);
+    border: 1px solid var(--white-a10); border-radius: var(--radius-lg);
+    transition: border-color var(--dur-moderate), box-shadow var(--dur-moderate);
+}
+.rdl-query-form input:focus {
+    outline: none; border-color: rgba(var(--accent-rgb), 0.6);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.15);
+}
+.rdl-query-form .redownload-btn { padding: 9px 16px; font-size: 13px; }
 .redownload-badge {
     font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: var(--radius-sm);
     letter-spacing: 0.03em;
