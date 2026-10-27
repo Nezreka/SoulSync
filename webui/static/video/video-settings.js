@@ -2325,17 +2325,22 @@
                 });
             })(testBtns[k]);
         }
-        // The shared "Save Settings" button belongs to MUSIC (it runs music's
-        // saveSettings, which would fire a music-config write from the video page).
-        // On the video side we intercept it (capture phase, before music's bubble
-        // listener), block music's handler, flush all video settings, and toast —
-        // so the button is real here and can't reach into music. Music side: this
-        // does nothing, so its behaviour is unchanged.
+        // The shared "Save Settings" button. On the video side it flushes the
+        // video settings here (capture phase), then lets the click through to the
+        // button's own handler, which saves the rest of the page exactly as it
+        // does on the music side - and shows the one toast.
+        //
+        // It used to stop the click here. That was right while the video side
+        // could only show video settings; once Sources, Downloads, Library and
+        // Quality became shared it meant every music field on those tabs, and all
+        // of System (Security & Access included), was editable on the video side
+        // and could never be saved there - while this toasted "Settings saved".
+        // saveSettings is safe to run from here: it keeps the stored
+        // active_media_server on the video side, so the video side still can't
+        // change the music server. Music side: this does nothing.
         document.addEventListener('click', function (e) {
             if (document.body.getAttribute('data-side') !== 'video') return;
             if (!e.target.closest('#save-settings')) return;
-            e.preventDefault();
-            e.stopImmediatePropagation();
             // saveSlskd is NOT in this list any more. Its form is retired - the
             // shared Sources tab's Soulseek card is the single editor now - but
             // the fields are still in the DOM holding whatever they loaded with.
@@ -2345,8 +2350,7 @@
             // The music panel saves through the main settings save.
             Promise.all([saveConn(true), save(true), saveKeys(true), savePrefs(true),
                          saveDownloads(true), saveQuality(true), saveYtQuality(true)])
-                .then(function () { toast('Settings saved', 'success'); })
-                .catch(function () { toast('Some settings could not be saved', 'error'); });
+                .catch(function () { toast('Some video settings could not be saved', 'error'); });
         }, true);
         document.addEventListener('soulsync:video-page-shown', onPageShown);
         document.addEventListener('soulsync:library-settings-shown', loadSharedLibrary);
