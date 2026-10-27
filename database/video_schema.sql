@@ -784,6 +784,7 @@ CREATE TABLE IF NOT EXISTS video_repair_findings (
     description   TEXT,
     details_json  TEXT DEFAULT '{}',                 -- per-finding-type payload (fix input)
     user_action   TEXT,                              -- what the fix did (badge label)
+    last_error    TEXT,                              -- why the last fix attempt failed (v57)
     resolved_at   TIMESTAMP,
     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -803,7 +804,8 @@ CREATE TABLE IF NOT EXISTS video_repair_job_runs (
     findings_created  INTEGER DEFAULT 0,
     auto_fixed        INTEGER DEFAULT 0,
     errors            INTEGER DEFAULT 0,
-    status            TEXT NOT NULL DEFAULT 'running'   -- running | completed
+    status            TEXT NOT NULL DEFAULT 'running',  -- running | completed | failed | cancelled
+    error_text        TEXT                               -- why a failed run failed (v57)
 );
 CREATE INDEX IF NOT EXISTS idx_vrjr_job ON video_repair_job_runs(job_id);
 

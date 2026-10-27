@@ -53,6 +53,50 @@ def _find_system_automation(database, profile_id: int, job_id: str,
     return matches[0] if matches else None
 
 
+def system_job_schedules(database, action_type: str = "run_repair_job",
+                         profile_id: int = 1) -> dict:
+    """the system automation behind each job, in one scan.
+
+    {job_id: {'automation_id', 'interval_hours', 'next_run'}}. the tools page
+    edits a job's cadence through its automation row, so both sides need the
+    id. music passes run_repair_job, video passes video_run_repair_job.
+    database=None reads the app db, so the video api never imports music.
+    """
+    result = {}
+    try:
+        if database is None:
+            from database.music_database import get_database
+            database = get_database()
+        automations = database.get_automations(profile_id)
+    except Exception as e:
+        logger.debug("Could not scan system automations: %s", e)
+        return result
+    for a in automations or []:
+        if a.get("owned_by") != _SYSTEM_OWNER or a.get("action_type") != action_type:
+            continue
+        try:
+            cfg = a.get("action_config") or "{}"
+            if isinstance(cfg, str):
+                cfg = json.loads(cfg)
+            job_id = cfg.get("job_id")
+            if not job_id or job_id in result:
+                continue  # duplicates: the migration logs them
+            interval_hours = None
+            if a.get("trigger_type") == "schedule":
+                tcfg = a.get("trigger_config") or "{}"
+                if isinstance(tcfg, str):
+                    tcfg = json.loads(tcfg)
+                interval_hours = tcfg.get("interval")
+            result[job_id] = {
+                "automation_id": a.get("id"),
+                "interval_hours": interval_hours,
+                "next_run": a.get("next_run"),
+            }
+        except Exception:
+            continue
+    return result
+
+
 def set_system_job_enabled(database, engine, job_id: str, enabled: bool,
                            action_type: str = "run_repair_job") -> bool:
     """Mirror a Tools toggle onto the job's system automation and (re)arm or

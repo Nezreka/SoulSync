@@ -187,7 +187,8 @@ def test_finding_lifecycle_and_counts(db):
     ids = [f["id"] for f in db.repair_get_findings()["items"]]
     assert db.repair_bulk_update_findings(ids[:2], "dismissed") == 2
     c = db.repair_counts()
-    assert c["pending"] == 1 and c["dismissed"] == 2 and c["by_job"] == {"job": 1}
+    assert c["pending"] == 1 and c["dismissed"] == 2
+    assert c["by_job"]["job"]["total"] == 1 and c["by_job"]["job"]["types"] == {"t": 1}
     db.repair_set_finding_status(ids[2], "resolved", action="wishlisted")
     f = db.repair_get_finding(ids[2])
     assert f["status"] == "resolved" and f["user_action"] == "wishlisted" and f["resolved_at"]

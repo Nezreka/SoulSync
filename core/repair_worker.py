@@ -875,41 +875,14 @@ class RepairWorker:
 
         Returns {job_id: {'automation_id': int, 'interval_hours': float,
         'next_run': str|None}}. Used by get_all_job_info to avoid N+1 queries.
+        the scan itself is shared with the video side (system_job_schedules).
         """
-        result = {}
         try:
-            from core.automation.migrate_repair_jobs import _SYSTEM_OWNER
-            import json
-            automations = self.db.get_automations(1)
-            for a in automations or []:
-                if a.get("owned_by") != _SYSTEM_OWNER:
-                    continue
-                if a.get("action_type") != "run_repair_job":
-                    continue
-                try:
-                    cfg = a.get("action_config") or "{}"
-                    if isinstance(cfg, str):
-                        cfg = json.loads(cfg)
-                    job_id = cfg.get("job_id")
-                    if not job_id or job_id in result:
-                        continue  # Skip duplicates; migration logs them.
-                    # Extract interval from trigger_config if it's a schedule trigger.
-                    interval_hours = None
-                    if a.get("trigger_type") == "schedule":
-                        tcfg = a.get("trigger_config") or "{}"
-                        if isinstance(tcfg, str):
-                            tcfg = json.loads(tcfg)
-                        interval_hours = tcfg.get("interval")
-                    result[job_id] = {
-                        "automation_id": a.get("id"),
-                        "interval_hours": interval_hours,
-                        "next_run": a.get("next_run"),
-                    }
-                except Exception:
-                    continue
+            from core.automation.migrate_repair_jobs import system_job_schedules
         except Exception as e:
             logger.debug("Could not scan system automations: %s", e)
-        return result
+            return {}
+        return system_job_schedules(self.db, "run_repair_job", 1)
 
     def _get_pending_count_by_job(self) -> dict:
         """Return ``{job_id: pending_count}`` for every job that has

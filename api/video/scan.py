@@ -34,7 +34,16 @@ def register_routes(bp):
     def video_scan_status():
         from . import get_video_db
         from core.video.scanner import get_video_scanner
-        return jsonify(get_video_scanner(get_video_db()).get_status())
+        from core.video.stats import _iso_utc
+        db = get_video_db()
+        status = dict(get_video_scanner(db).get_status() or {})
+        # when the whole library was last read in, so the tools card can say
+        # "last scan: 2 days ago" instead of "Never" after every reload
+        try:
+            status.setdefault("last_scan_at", _iso_utc(db.get_setting("video_last_scan_at")))
+        except Exception:   # noqa: BLE001 - a nicety on a status poll
+            status.setdefault("last_scan_at", None)
+        return jsonify(status)
 
     @bp.route("/scan/stop", methods=["POST"])
     def video_scan_stop():

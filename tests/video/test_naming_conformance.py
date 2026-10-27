@@ -18,7 +18,7 @@ from core.video.repair.worker import VideoRepairWorker
 from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-_REPAIR_JS = (_ROOT / "webui" / "static" / "video" / "video-repair.js").read_text(encoding="utf-8")
+_DETAIL_TSX = (_ROOT / "webui" / "src" / "routes" / "tools" / "-ui" / "video-finding-detail.tsx").read_text(encoding="utf-8")
 
 
 @pytest.fixture()
@@ -192,10 +192,14 @@ def test_surfaces_are_wired():
     block = next(b for b in blocks_for_scope("video")["actions"]
                  if b["type"] == "video_run_repair_job")
     assert "naming_conformance" in [o["value"] for o in block["config_fields"][0]["options"]]
-    assert "naming_mismatch: 'Naming'" in _REPAIR_JS
-    assert "naming_mismatch: 'Rename'" in _REPAIR_JS
-    assert "renamed: 'Renamed'" in _REPAIR_JS
-    assert "function namingDetailHTML" in _REPAIR_JS
+    # the tools page is React now: labels come from the served catalog, the
+    # panel from video-finding-detail.tsx
+    from core.video.repair.catalog import VIDEO_ACTION_LABELS, VIDEO_FINDING_TYPE_META
+    assert VIDEO_FINDING_TYPE_META["naming_mismatch"]["label"] == "Naming"
+    assert VIDEO_FINDING_TYPE_META["naming_mismatch"]["verb"] == "Rename"
+    assert VIDEO_ACTION_LABELS["renamed"] == "Renamed"
+    assert "function NamingDetail(" in _DETAIL_TSX
+    assert "type === 'naming_mismatch'" in _DETAIL_TSX
 
 
 def test_renaming_an_extra_library_keeps_the_file_on_its_drive(db, worker, tmp_path):

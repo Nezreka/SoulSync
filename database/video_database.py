@@ -88,7 +88,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 56   # v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 57   # v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -463,6 +463,10 @@ _COLUMN_MIGRATIONS = [
     # subtitle_wanted last_upgrade_check_at ("Replace Bazarr" Phase 3): the
     # upgrade loop's per-row re-check cooldown. Same story as user_set above.
     ("subtitle_wanted", "last_upgrade_check_at", "TEXT"),
+    # maintenance findings (v57, the music standard): why the last fix attempt
+    # failed, kept on the row; why a job run failed, kept on the run.
+    ("video_repair_findings", "last_error", "TEXT"),
+    ("video_repair_job_runs", "error_text", "TEXT"),
 ]
 
 
@@ -6838,23 +6842,229 @@ class VideoDatabase:
             d["details"] = {}
         return d
 
-    def repair_get_findings(self, job_id=None, status=None, severity=None,
-                            page: int = 1, limit: int = 50) -> dict:
+    # severities the video jobs emit. 'critical' is the video word for what
+    # music calls 'error' (youtube_mass_missing). the inbox filters and ranks
+    # them as one band, so a filter on either finds both.
+    _SEVERITY_BAND = {"critical": ("critical", "error"), "error": ("critical", "error")}
+
+    # sort keys the findings list offers. whitelisted, never interpolated from
+    # the request, because it lands in ORDER BY.
+    _FINDING_SORTS = {
+        "newest": "created_at DESC, id DESC",
+        "oldest": "created_at ASC, id ASC",
+        "severity": ("CASE severity WHEN 'critical' THEN 0 WHEN 'error' THEN 0 "
+                     "WHEN 'warning' THEN 1 ELSE 2 END, created_at DESC, id DESC"),
+        "title": "title COLLATE NOCASE ASC, id DESC",
+        "path": "file_path IS NULL, file_path ASC, created_at DESC, id DESC",
+    }
+
+    @classmethod
+    def _repair_filter(cls, job_id=None, status=None, severity=None,
+                       finding_type=None, q=None):
+        """the WHERE shared by listing and clearing findings.
+
+        one function on purpose (music #1142): clear used to build its own
+        clause with only job + status, so clearing a searched or filtered view
+        deleted rows that were never on screen. a new filter goes here and
+        both callers get it."""
         where, params = [], []
-        for col, val in (("job_id", job_id), ("status", status), ("severity", severity)):
+        for col, val in (("job_id", job_id), ("status", status),
+                         ("finding_type", finding_type)):
             if val:
                 where.append(f"{col}=?")
                 params.append(val)
-        w = (" WHERE " + " AND ".join(where)) if where else ""
-        page, limit = max(1, int(page or 1)), max(1, min(200, int(limit or 50)))
+        if severity:
+            band = cls._SEVERITY_BAND.get(severity, (severity,))
+            where.append("severity IN (%s)" % ",".join("?" * len(band)))
+            params.extend(band)
+        if q and str(q).strip():
+            needle = f"%{str(q).strip()}%"
+            # details too: a show's missing episodes and a collection's films
+            # only live there, and that's what people search for
+            where.append("(title LIKE ? OR file_path LIKE ? OR details_json LIKE ?)")
+            params.extend([needle, needle, needle])
+        return ((" WHERE " + " AND ".join(where)) if where else ""), params
+
+    def repair_get_findings(self, job_id=None, status=None, severity=None,
+                            page: int = 0, limit: int = 50, finding_type=None,
+                            sort=None, q=None) -> dict:
+        """a page of findings. page is 0-based, the same as music's, so one
+        client pages both sides."""
+        w, params = self._repair_filter(job_id, status, severity, finding_type, q)
+        try:
+            page = max(0, int(page or 0))
+        except (TypeError, ValueError):
+            page = 0
+        try:
+            limit = max(1, min(200, int(limit or 50)))
+        except (TypeError, ValueError):
+            limit = 50
+        order = self._FINDING_SORTS.get(sort or "newest", self._FINDING_SORTS["newest"])
         conn = self._get_connection()
         try:
             total = conn.execute(f"SELECT COUNT(*) FROM video_repair_findings{w}", params).fetchone()[0]
             rows = conn.execute(
-                f"SELECT * FROM video_repair_findings{w} ORDER BY created_at DESC, id DESC "
-                "LIMIT ? OFFSET ?", (*params, limit, (page - 1) * limit)).fetchall()
+                f"SELECT * FROM video_repair_findings{w} ORDER BY {order} "
+                "LIMIT ? OFFSET ?", (*params, limit, page * limit)).fetchall()
             return {"items": [self._finding_row(r) for r in rows],
                     "total": total, "page": page, "limit": limit}
+        finally:
+            conn.close()
+
+    def repair_finding_groups(self) -> list:
+        """one row per finding TYPE, every status counted, worst first.
+
+        the music inbox shape (RepairWorker.get_finding_groups) so the same
+        client renders both sides."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT finding_type, status, severity, COUNT(*) n, MAX(created_at) last "
+                "FROM video_repair_findings GROUP BY finding_type, status, severity").fetchall()
+            jobs = conn.execute(
+                "SELECT DISTINCT finding_type, job_id FROM video_repair_findings").fetchall()
+        finally:
+            conn.close()
+        rank = {"error": 0, "warning": 1, "info": 2}
+        groups: dict = {}
+        for r in rows:
+            g = groups.setdefault(r["finding_type"], {
+                "finding_type": r["finding_type"], "pending": 0, "resolved": 0,
+                "dismissed": 0, "auto_fixed": 0, "total": 0, "severity_max": "info",
+                "last_seen": None, "job_ids": []})
+            if r["status"] in ("pending", "resolved", "dismissed", "auto_fixed"):
+                g[r["status"]] += r["n"]
+            g["total"] += r["n"]
+            sev = "error" if r["severity"] in ("critical", "error") else (r["severity"] or "info")
+            # the worst PENDING row decides the colour. a cleared critical
+            # must not keep the group red forever.
+            if r["status"] == "pending" and rank.get(sev, 2) < rank.get(g["severity_max"], 2):
+                g["severity_max"] = sev
+            if r["last"] and (g["last_seen"] is None or r["last"] > g["last_seen"]):
+                g["last_seen"] = r["last"]
+        by_type: dict = {}
+        for r in jobs:
+            by_type.setdefault(r["finding_type"], set()).add(r["job_id"])
+        for t, g in groups.items():
+            g["job_ids"] = sorted(by_type.get(t, ()))
+        return sorted(groups.values(),
+                      key=lambda g: (rank.get(g["severity_max"], 2), -g["pending"],
+                                     g["finding_type"]))
+
+    def repair_finding_job_ids(self) -> dict:
+        """finding_type -> the jobs that have raised it on this install."""
+        conn = self._get_connection()
+        try:
+            out: dict = {}
+            for r in conn.execute(
+                    "SELECT DISTINCT finding_type, job_id FROM video_repair_findings").fetchall():
+                out.setdefault(r["finding_type"], []).append(r["job_id"])
+            return {k: sorted(v) for k, v in out.items()}
+        finally:
+            conn.close()
+
+    def repair_reopen_finding(self, finding_id: int) -> bool:
+        """resolved/dismissed back to pending, the undo for dismiss. clears
+        resolved_at so the recurrence grace doesn't swallow the row we just
+        brought back."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE video_repair_findings SET status='pending', user_action=NULL, "
+                "resolved_at=NULL, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND status IN ('resolved','dismissed')", (int(finding_id),))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def repair_reopen_dismissed(self, job_id=None, finding_type=None) -> int:
+        """bulk undo for dismiss. dismissed rows only: a resolved row is work
+        that happened, and reopening it in bulk would redo that work. empty
+        string filters are refused, they'd quietly widen to everything."""
+        if job_id == "" or finding_type == "":
+            return 0
+        sql = ("UPDATE video_repair_findings SET status='pending', user_action=NULL, "
+               "resolved_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE status='dismissed'")
+        params = []
+        if job_id:
+            sql += " AND job_id=?"
+            params.append(job_id)
+        if finding_type:
+            sql += " AND finding_type=?"
+            params.append(finding_type)
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(sql, params)
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def repair_dismiss_by_type(self, finding_type: str) -> int:
+        """dismiss every PENDING finding of one type (the inbox's dismiss all).
+        handled rows stay as they are, they're history."""
+        if not finding_type:
+            return 0
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE video_repair_findings SET status='dismissed', "
+                "resolved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP "
+                "WHERE finding_type=? AND status='pending'", (finding_type,))
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def repair_pending_ids(self, job_id=None, severity=None, ids=None,
+                           finding_types=None) -> list:
+        """ids of pending findings, narrowed. finding_types None = any type."""
+        w, params = self._repair_filter(job_id, "pending", severity)
+        if finding_types is not None:
+            types = sorted(set(finding_types))
+            if not types:
+                return []
+            w += (" AND " if w else " WHERE ") + "finding_type IN (%s)" % ",".join("?" * len(types))
+            params.extend(types)
+        if ids:
+            clean = [int(i) for i in ids]
+            w += " AND id IN (%s)" % ",".join("?" * len(clean))
+            params.extend(clean)
+        conn = self._get_connection()
+        try:
+            return [r[0] for r in conn.execute(
+                f"SELECT id FROM video_repair_findings{w} ORDER BY id", params).fetchall()]
+        finally:
+            conn.close()
+
+    def repair_types_for(self, ids) -> dict:
+        """finding id -> type, one read for a bulk run."""
+        clean = [int(i) for i in (ids or [])]
+        if not clean:
+            return {}
+        conn = self._get_connection()
+        try:
+            out = {}
+            for i in range(0, len(clean), 500):
+                chunk = clean[i:i + 500]
+                for r in conn.execute(
+                        "SELECT id, finding_type FROM video_repair_findings WHERE id IN (%s)"
+                        % ",".join("?" * len(chunk)), chunk).fetchall():
+                    out[r[0]] = r[1]
+            return out
+        finally:
+            conn.close()
+
+    def repair_set_finding_error(self, finding_id: int, error) -> None:
+        """why the last fix attempt failed, kept on the row (None clears it).
+        without it a finding that refuses to fix looks like a missed click."""
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "UPDATE video_repair_findings SET last_error=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=?", (str(error)[:500] if error else None, int(finding_id)))
+            conn.commit()
         finally:
             conn.close()
 
@@ -6910,15 +7120,12 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def repair_clear_findings(self, job_id=None, status=None) -> int:
-        where, params = [], []
-        if job_id:
-            where.append("job_id=?")
-            params.append(job_id)
-        if status:
-            where.append("status=?")
-            params.append(status)
-        w = (" WHERE " + " AND ".join(where)) if where else ""
+    def repair_clear_findings(self, job_id=None, status=None, severity=None,
+                              finding_type=None, q=None) -> int:
+        """DELETE findings matching the same filters the list shows. every
+        filter the caller has must come through, a dropped one widens what
+        gets deleted (music #1142)."""
+        w, params = self._repair_filter(job_id, status, severity, finding_type, q)
         conn = self._get_connection()
         try:
             cur = conn.execute(f"DELETE FROM video_repair_findings{w}", params)
@@ -6928,16 +7135,26 @@ class VideoDatabase:
             conn.close()
 
     def repair_counts(self) -> dict:
+        """counts by status, plus pending per job in the music shape
+        ({total, error, warning, info, types}) so one client reads both."""
         conn = self._get_connection()
         try:
-            out = {"pending": 0, "resolved": 0, "dismissed": 0, "total": 0, "by_job": {}}
+            out = {"pending": 0, "resolved": 0, "dismissed": 0, "auto_fixed": 0,
+                   "total": 0, "by_job": {}}
             for r in conn.execute("SELECT status, COUNT(*) n FROM video_repair_findings "
                                   "GROUP BY status").fetchall():
                 out[r["status"]] = r["n"]
                 out["total"] += r["n"]
-            for r in conn.execute("SELECT job_id, COUNT(*) n FROM video_repair_findings "
-                                  "WHERE status='pending' GROUP BY job_id").fetchall():
-                out["by_job"][r["job_id"]] = r["n"]
+            for r in conn.execute(
+                    "SELECT job_id, finding_type, severity, COUNT(*) n FROM video_repair_findings "
+                    "WHERE status='pending' GROUP BY job_id, finding_type, severity").fetchall():
+                j = out["by_job"].setdefault(r["job_id"], {"total": 0, "types": {},
+                                                           "error": 0, "warning": 0, "info": 0})
+                j["total"] += r["n"]
+                j["types"][r["finding_type"]] = j["types"].get(r["finding_type"], 0) + r["n"]
+                sev = "error" if r["severity"] in ("critical", "error") else r["severity"]
+                if sev in ("error", "warning", "info"):
+                    j[sev] += r["n"]
             return out
         finally:
             conn.close()
@@ -7656,16 +7873,23 @@ class VideoDatabase:
             conn.close()
 
     def repair_record_job_finish(self, run_id: int, *, items_scanned=0, findings_created=0,
-                                 auto_fixed=0, errors=0) -> None:
+                                 auto_fixed=0, errors=0, status="completed",
+                                 error_text=None) -> None:
+        """status is what really happened: completed, failed (the scan raised)
+        or cancelled (stopped by hand). it was always 'completed', so the
+        history couldn't tell a crash from a clean scan."""
+        if status not in ("completed", "failed", "cancelled"):
+            status = "completed"
         conn = self._get_connection()
         try:
             conn.execute(
                 "UPDATE video_repair_job_runs SET finished_at=datetime('now'), "
                 "duration_seconds=(julianday(datetime('now'))-julianday(started_at))*86400, "
                 "items_scanned=?, findings_created=?, auto_fixed=?, errors=?, "
-                "status='completed' WHERE id=?",
+                "status=?, error_text=? WHERE id=?",
                 (int(items_scanned), int(findings_created), int(auto_fixed),
-                 int(errors), int(run_id)))
+                 int(errors), status, (str(error_text)[:500] if error_text else None),
+                 int(run_id)))
             conn.commit()
         finally:
             conn.close()

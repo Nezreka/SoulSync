@@ -63,7 +63,10 @@ def test_findings_lifecycle_over_http(client):
     got = c.get("/api/video/repair/findings?status=pending").get_json()
     assert got["total"] == 3 and got["items"][0]["details"]["episodes"]
     counts = c.get("/api/video/repair/findings/counts").get_json()
-    assert counts["pending"] == 3 and counts["by_job"] == {"missing_episodes": 3}
+    assert counts["pending"] == 3
+    # the music shape, so one client reads both sides
+    assert counts["by_job"] == {"missing_episodes": {
+        "total": 3, "types": {"missing_episodes": 3}, "error": 0, "warning": 0, "info": 3}}
 
     ids = [f["id"] for f in got["items"]]
     # Fix fails cleanly (no tmdb match) → 400 with the error, stays pending.

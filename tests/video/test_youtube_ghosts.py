@@ -22,7 +22,7 @@ from core.video.repair.worker import VideoRepairWorker
 from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-_REPAIR_JS = (_ROOT / "webui" / "static" / "video" / "video-repair.js").read_text(encoding="utf-8")
+_DETAIL_TSX = (_ROOT / "webui" / "src" / "routes" / "tools" / "-ui" / "video-finding-detail.tsx").read_text(encoding="utf-8")
 _YOUTUBE_API = (_ROOT / "api" / "video" / "youtube.py").read_text(encoding="utf-8")
 
 _ids = itertools.count(1)
@@ -296,19 +296,24 @@ def test_channel_page_annotation_uses_the_owned_variant():
 
 # ── frontend contract ────────────────────────────────────────────────────────
 def test_repair_ui_knows_the_new_type():
-    assert "youtube_ghost: 'YouTube Ghost'" in _REPAIR_JS
-    assert "youtube_ghost: 'Mark Deleted'" in _REPAIR_JS
-    assert "marked_deleted: 'Marked Deleted'" in _REPAIR_JS
-    assert "forgotten: 'Forgotten'" in _REPAIR_JS
-    assert "function ghostDetailHTML" in _REPAIR_JS
-    assert "youtube_mass_missing: 'Mass Missing'" in _REPAIR_JS
-    assert "youtube_mass_missing: 'Flag Individually'" in _REPAIR_JS
-    assert "flagged: 'Flagged'" in _REPAIR_JS
-    assert "function massMissingDetailHTML" in _REPAIR_JS
+    from core.video.repair.catalog import VIDEO_ACTION_LABELS, VIDEO_FINDING_TYPE_META
+    assert VIDEO_FINDING_TYPE_META["youtube_ghost"]["label"] == "YouTube Ghosts"
+    assert VIDEO_FINDING_TYPE_META["youtube_ghost"]["verb"] == "Mark Deleted"
+    assert VIDEO_ACTION_LABELS["marked_deleted"] == "Marked Deleted"
+    assert VIDEO_ACTION_LABELS["forgotten"] == "Forgotten"
+    assert "function GhostDetail(" in _DETAIL_TSX
+    assert VIDEO_FINDING_TYPE_META["youtube_mass_missing"]["verb"] == "Flag Individually"
+    assert VIDEO_ACTION_LABELS["flagged"] == "Flagged"
+    assert "function MassMissingDetail(" in _DETAIL_TSX
 
 
 def test_repair_ui_sends_the_forget_action():
-    assert "data-vjr-fix-action=\"forget\"" in _REPAIR_JS
-    handler = _REPAIR_JS.split("data-vjr-fix-action]')")[1].split("data-vjr-fix]")[0]
-    assert "fix_action" in handler                      # posts the chosen action
-    assert "'/fix'" in handler                          # same endpoint as approve
+    # the ghost panel's Forget hands 'forget' to the row's fix, which posts it
+    # as fix_action to the same /fix endpoint approve uses
+    assert "onFixAction(finding, 'forget')" in _DETAIL_TSX
+    surface = (_ROOT / "webui" / "src" / "routes" / "tools" / "-ui" /
+               "findings-surface.tsx").read_text(encoding="utf-8")
+    assert "onFixAction={(target, action) => void onFix(target, action)}" in surface
+    api = (_ROOT / "webui" / "src" / "routes" / "tools" / "-tools.api.ts").read_text(encoding="utf-8")
+    assert "if (fixAction) body.fix_action = fixAction;" in api
+    assert "repairUrl(`/findings/${id}/fix`)" in api
