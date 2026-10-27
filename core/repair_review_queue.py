@@ -369,14 +369,16 @@ def classify_case(items: list[dict[str, Any]]) -> dict[str, Any]:
         if tier != 'ready' and reason not in reasons:
             reasons.append(reason)
     decisions = build_decisions(items)
+    remaining = [item for item in items if finding_category(item) != 'pending_fulfillment']
     return {
         **counts,
         'total': len(items),
         'status': ('needs_review' if case_mode(items) in ('manual', 'destructive') else 'waiting' if items and case_mode(items) == 'waiting' else 'ready'),
         'blocker_reasons': reasons,
         'can_apply_ready': counts['ready'] > 0 and case_mode(items) == 'ready',
-        'can_organize': bool(items and all(item.get('finding_type') == 'reconciliation_metadata' for item in items) and not counts['manual'] and
-                             not counts['destructive'] and not counts['blocked']),
+        'can_organize': bool(remaining and all(
+            item.get('finding_type') == 'reconciliation_metadata' and item['review_tier'] == 'ready'
+            for item in remaining)),
         'decision_count': len(decisions),
         'categories': sorted({row['category'] for row in decisions}),
         'decisions': decisions,

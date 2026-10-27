@@ -213,7 +213,7 @@ export interface ReviewCase {
   plan?: ReviewPlan;
   decisions?: ReviewDecision[];
   album_plan?: AlbumReconciliationPlan | null;
-  refresh?: { state: 'idle' | 'running' | 'complete' | 'error'; error?: string };
+  refresh?: { state: 'idle' | 'running' | 'complete' | 'error'; error?: string; scope?: string };
   items: ReviewFinding[];
 }
 

@@ -1923,9 +1923,10 @@ export function ReviewPage() {
               {!(applyBusy && operationCase === reviewCase.case_id) &&
                 (reanalyzing || reviewCase.refresh?.state === 'running') && (
                   <Notice tone="info" className={styles.refreshBanner} role="status">
-                    <span className={styles.loadingSpinner} aria-hidden="true" /> Reanalyzing this
-                    album. The previous decisions remain visible while dependent track actions are
-                    recalculated.
+                    <span className={styles.loadingSpinner} aria-hidden="true" />
+                    {reviewCase.refresh?.scope === 'plan'
+                      ? 'Updating the album plan from the evidence already reviewed. Your saved choices remain visible.'
+                      : 'Reanalyzing this album. The previous decisions remain visible while dependent track actions are recalculated.'}
                   </Notice>
                 )}
 

@@ -93,6 +93,17 @@ def test_unknown_release_has_local_files_and_can_be_left_as_is(tmp_path, monkeyp
     assert album.worker.get_review_case(case['case_id'])['plan']['can_apply_ready']
 
 
+def test_requested_tracks_allow_folder_review_but_unsubmitted_requests_block_it(tmp_path, monkeypatch):
+    album = build_album(tmp_path, monkeypatch, 'partial')
+    case = scan_case(album)
+    intent = next(item for item in case['items'] if item['finding_type'] == 'reconciliation_intent')
+    assert album.worker.apply_review_decision(case['case_id'], intent['id'],
+        evidence_token=intent['evidence_token'], action='fix', fix_action='complete')['success']
+    assert not album.worker.get_review_case(case['case_id'])['plan']['can_organize']
+    assert album.worker.start_review_missing_tracks(case['case_id'])['success']
+    assert album.worker.get_review_case(case['case_id'])['plan']['can_organize']
+
+
 def test_remove_all_files_offers_stop_collecting_and_retires_only_after_apply(tmp_path, monkeypatch):
     album = build_album(tmp_path, monkeypatch, 'supported')
     case = scan_case(album)

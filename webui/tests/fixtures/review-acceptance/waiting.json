@@ -354,7 +354,7 @@
         "The missing track is already on the wishlist"
       ],
       "can_apply_ready": true,
-      "can_organize": false,
+      "can_organize": true,
       "decision_count": 2,
       "categories": [
         "metadata",
@@ -745,7 +745,7 @@
             "The missing track is already on the wishlist"
           ],
           "can_apply_ready": true,
-          "can_organize": false,
+          "can_organize": true,
           "decision_count": 2,
           "categories": [
             "metadata",
