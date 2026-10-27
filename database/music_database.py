@@ -1320,8 +1320,9 @@ class MusicDatabase:
             # Backfill match_status for rows that already have an external ID but
             # NULL status. Prevents enrichment workers from re-processing these
             # rows forever. Must run AFTER all *_match_status columns have been
-            # created by the migrations above.
-            self._backfill_match_status_for_existing_ids(cursor)
+            # created by the migrations above. Once per column, not every boot:
+            # see _backfill_match_status_once.
+            self._backfill_match_status_once(cursor)
 
             # Bubble snapshots table for persisting UI state across page refreshes
             cursor.execute("""
@@ -5517,7 +5518,68 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding Bandcamp columns: {e}")
 
-    def _backfill_match_status_for_existing_ids(self, cursor):
+    # (table, id_column, status_column) the match-status backfill covers
+    _MATCH_STATUS_BACKFILL_TARGETS = (
+        ('artists', 'lastfm_url', 'lastfm_match_status'),
+        ('albums', 'lastfm_url', 'lastfm_match_status'),
+        ('tracks', 'lastfm_url', 'lastfm_match_status'),
+        ('artists', 'musicbrainz_id', 'musicbrainz_match_status'),
+        ('albums', 'musicbrainz_release_id', 'musicbrainz_match_status'),
+        ('tracks', 'musicbrainz_recording_id', 'musicbrainz_match_status'),
+        ('artists', 'tidal_id', 'tidal_match_status'),
+        ('albums', 'tidal_id', 'tidal_match_status'),
+        ('tracks', 'tidal_id', 'tidal_match_status'),
+        ('artists', 'qobuz_id', 'qobuz_match_status'),
+        ('albums', 'qobuz_id', 'qobuz_match_status'),
+        ('tracks', 'qobuz_id', 'qobuz_match_status'),
+        ('albums', 'bandcamp_url', 'bandcamp_match_status'),
+        ('tracks', 'bandcamp_url', 'bandcamp_match_status'),
+        ('artists', 'jiosaavn_id', 'jiosaavn_match_status'),
+        ('albums', 'jiosaavn_id', 'jiosaavn_match_status'),
+        ('tracks', 'jiosaavn_id', 'jiosaavn_match_status'),
+    )
+
+    # metadata key holding the targets the backfill has already run for
+    _MATCH_STATUS_BACKFILL_KEY = 'match_status_backfill_done'
+
+    def _backfill_match_status_once(self, cursor):
+        """Run the match-status backfill once per (table, status column).
+
+        It used to run on every boot. None of its UPDATEs can use an index, so
+        each one reads the whole table, and on a big library on spinning disks
+        that held the database (and the web ui) for 19 minutes on one restart
+        (#1889). It only ever needed to heal rows from before the workers learned
+        to mark an existing id themselves (f4c8c231a), or from before a status
+        column existed. So each target runs the first time it's seen and is
+        remembered; a column added later still gets its one pass.
+        """
+        done = set()
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = ?",
+                           (self._MATCH_STATUS_BACKFILL_KEY,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                done = set(json.loads(row[0]))
+        except Exception as e:
+            # can't tell what ran: running it again is slow but safe
+            logger.debug("match-status backfill marker unreadable: %s", e)
+            done = set()
+
+        pending = [t for t in self._MATCH_STATUS_BACKFILL_TARGETS
+                   if f"{t[0]}.{t[2]}" not in done]
+        if not pending:
+            return
+        finished = self._backfill_match_status_for_existing_ids(cursor, pending)
+        done.update(finished)
+        try:
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value, updated_at) "
+                "VALUES (?, ?, CURRENT_TIMESTAMP)",
+                (self._MATCH_STATUS_BACKFILL_KEY, json.dumps(sorted(done))))
+        except Exception as e:
+            logger.debug("could not record the match-status backfill: %s", e)
+
+    def _backfill_match_status_for_existing_ids(self, cursor, targets=None):
         """Set `<provider>_match_status = 'matched'` for rows that already have a
         populated external ID but NULL match_status.
 
@@ -5526,30 +5588,14 @@ class MusicDatabase:
         pre-migration legacy data) without a corresponding status update.
 
         Only runs columns that actually exist, so pre-migration databases are
-        handled safely. UPDATE statements are cheap no-ops when nothing matches.
+        handled safely. Returns the "table.status_column" keys that ran (a
+        missing column doesn't count, so it runs once it exists).
         """
-        # (table, id_column, status_column)
-        targets = [
-            ('artists', 'lastfm_url', 'lastfm_match_status'),
-            ('albums', 'lastfm_url', 'lastfm_match_status'),
-            ('tracks', 'lastfm_url', 'lastfm_match_status'),
-            ('artists', 'musicbrainz_id', 'musicbrainz_match_status'),
-            ('albums', 'musicbrainz_release_id', 'musicbrainz_match_status'),
-            ('tracks', 'musicbrainz_recording_id', 'musicbrainz_match_status'),
-            ('artists', 'tidal_id', 'tidal_match_status'),
-            ('albums', 'tidal_id', 'tidal_match_status'),
-            ('tracks', 'tidal_id', 'tidal_match_status'),
-            ('artists', 'qobuz_id', 'qobuz_match_status'),
-            ('albums', 'qobuz_id', 'qobuz_match_status'),
-            ('tracks', 'qobuz_id', 'qobuz_match_status'),
-            ('albums', 'bandcamp_url', 'bandcamp_match_status'),
-            ('tracks', 'bandcamp_url', 'bandcamp_match_status'),
-            ('artists', 'jiosaavn_id', 'jiosaavn_match_status'),
-            ('albums', 'jiosaavn_id', 'jiosaavn_match_status'),
-            ('tracks', 'jiosaavn_id', 'jiosaavn_match_status'),
-        ]
+        if targets is None:
+            targets = self._MATCH_STATUS_BACKFILL_TARGETS
 
         total_backfilled = 0
+        finished = []
         for table, id_col, status_col in targets:
             try:
                 cursor.execute(f"PRAGMA table_info({table})")
@@ -5560,6 +5606,7 @@ class MusicDatabase:
                     f"UPDATE {table} SET {status_col} = 'matched' "
                     f"WHERE {status_col} IS NULL AND {id_col} IS NOT NULL AND {id_col} != ''"
                 )
+                finished.append(f"{table}.{status_col}")
                 if cursor.rowcount and cursor.rowcount > 0:
                     total_backfilled += cursor.rowcount
                     logger.info(
@@ -5571,6 +5618,7 @@ class MusicDatabase:
 
         if total_backfilled == 0:
             logger.debug("Match-status backfill: no rows needed updating.")
+        return finished
 
     def _add_deezer_columns(self, cursor):
         """Add Deezer tracking + generic metadata columns for enrichment (artists, albums, tracks)"""
