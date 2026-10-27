@@ -13355,6 +13355,9 @@ class MusicDatabase:
                 routed = self._routed_download_match(title, artist, confidence_threshold)
                 if routed is not None:
                     return routed
+                downloaded = self._downloaded_file_match(title, artist, confidence_threshold)
+                if downloaded is not None:
+                    return downloaded
 
             logger.debug(f"No confident track match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
             return None, best_confidence
@@ -13397,7 +13400,46 @@ class MusicDatabase:
                 candidate.file_path = found
                 best, best_confidence = candidate, confidence
         return (best, best_confidence) if best else None
-    
+
+    def _downloaded_file_match(self, title: str, artist: str, confidence_threshold: float):
+        """Ownership for a file SoulSync downloaded that the media server hasn't
+        scanned in yet.
+
+        the ``tracks`` table only learns a download after the server scans it
+        and the mirror refreshes. a sync or wishlist run in that window saw the
+        song as missing and fetched it again, so one song piled up as an .mp3
+        and a .flac side by side, each with its own review row. a completed
+        download whose file is still on disk counts as owned. a deleted file
+        doesn't, so it can still come back. Returns ``(track, confidence)`` or None.
+        """
+        variations = {v.strip().lower() for v in self._generate_track_title_variations(title) if v and v.strip()}
+        variations.add(str(title or '').strip().lower())
+        variations.discard('')
+        if not variations:
+            return None
+        marks = ','.join('?' * len(variations))
+        with self._get_connection() as conn:
+            rows = conn.cursor().execute(
+                "SELECT id, file_path, track_title, track_artist, track_album "
+                "FROM track_downloads WHERE status = 'completed' AND file_path IS NOT NULL "
+                f"AND track_artist IS NOT NULL AND LOWER(TRIM(track_title)) IN ({marks}) "
+                "ORDER BY id DESC", tuple(variations)).fetchall()
+        best, best_confidence = None, 0.0
+        for row in rows:
+            candidate = DatabaseTrack(
+                id=f"download:{row['id']}", album_id=None, artist_id=None,
+                title=row['track_title'] or '', file_path=row['file_path'])
+            candidate.artist_name = row['track_artist']
+            candidate.album_title = row['track_album'] or ''
+            confidence = self._calculate_track_confidence(title, artist, candidate)
+            if confidence <= best_confidence or confidence < confidence_threshold:
+                continue
+            if os.path.isfile(row['file_path']):
+                best, best_confidence = candidate, confidence
+        if best is not None:
+            logger.debug(f"Downloaded-file match for '{title}' by '{artist}' -> {best.file_path} (confidence: {best_confidence:.3f})")
+        return (best, best_confidence) if best else None
+
     def routed_album_owned_tracks(self, album: str, artist: str) -> int:
         """How many tracks of ``album`` a routed artist has on disk.
 

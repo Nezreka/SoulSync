@@ -129,14 +129,15 @@ def test_deleted_file_is_no_longer_owned(db, folders):
     assert track is None
 
 
-def test_unrouted_artist_download_is_not_owned_by_the_ledger(db, folders):
+def test_unrouted_artist_download_is_owned_but_not_as_routed(db, folders):
+    # any download still on disk counts now, but it isn't an audiobook route
     _, books = folders
     episode = books / "Queen" / "song.mp3"
     episode.parent.mkdir(parents=True)
     episode.write_bytes(b"x")
     _record_download(db, episode, "Bohemian Rhapsody", "Queen")
     track, _ = db.check_track_exists("Bohemian Rhapsody", "Queen", include_downloads=True)
-    assert track is None
+    assert track is not None and str(track.id).startswith("download:")
 
 
 def _episode_files(books, album, names):
