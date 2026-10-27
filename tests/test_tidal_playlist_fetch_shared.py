@@ -45,12 +45,12 @@ class _SlowTidal:
         )
 
 
-class _NoExecutor:
-    def __init__(self):
-        self.submitted = []
+class _InlineExecutor:
+    """runs start's fetch-and-mirror step right away. the discovery itself
+    is stubbed out in the fixture."""
 
     def submit(self, fn, *args):
-        self.submitted.append(args)
+        fn(*args)
         return None
 
 
@@ -59,7 +59,9 @@ def tidal(monkeypatch):
     client = _SlowTidal()
     monkeypatch.setattr(sp, 'get_tidal_client_for_profile', lambda: client)
     monkeypatch.setattr(sp, '_tidal_client', lambda: _SlowTidal(authenticated=False))
-    monkeypatch.setattr(sp, 'tidal_discovery_executor', _NoExecutor())
+    monkeypatch.setattr(sp, 'tidal_discovery_executor', _InlineExecutor())
+    monkeypatch.setattr(sp, '_run_tidal_discovery_worker', lambda *a: None)
+    monkeypatch.setattr(sp, 'add_activity_item', lambda *a, **k: None)
     monkeypatch.setattr(sp, '_tidal_fetch_recent', {})
     monkeypatch.setattr(sp, '_tidal_fetch_inflight', {})
     monkeypatch.setattr(sp, 'tidal_discovery_states', {})
@@ -155,3 +157,40 @@ def test_start_leaves_an_existing_mirrors_tracks_alone(tidal):
                              profile_id=1)
     assert web_server.app.test_client().post('/api/tidal/discovery/start/OLD1').status_code == 200
     assert [t['source_track_id'] for t in db.get_mirrored_playlist_tracks(pid)] == ['z']
+
+
+def test_start_answers_before_the_fetch_lands(tidal, monkeypatch):
+    """TheHomeGuy: start waited on the whole 1218-track fetch inside the
+    request, so the reverse proxy 504'd and the modal said it couldn't start,
+    then discovery kicked off on its own minutes later."""
+    class _Later:
+        def __init__(self):
+            self.jobs = []
+
+        def submit(self, fn, *args):
+            self.jobs.append((fn, args))
+
+    later = _Later()
+    monkeypatch.setattr(sp, 'tidal_discovery_executor', later)
+    c = web_server.app.test_client()
+
+    r = c.post('/api/tidal/discovery/start/P1')
+    assert r.status_code == 200, r.get_json()
+    assert tidal.calls == 0  # nothing fetched inside the request
+    assert c.get('/api/tidal/discovery/status/P1').get_json()['phase'] == 'discovering'
+
+    tidal.release.set()
+    fn, args = later.jobs[0]
+    fn(*args)
+    assert tidal.calls == 1
+    assert sp.tidal_discovery_states['P1']['spotify_total'] == 3
+
+
+def test_a_failed_fetch_parks_the_state_on_error(tidal, monkeypatch):
+    monkeypatch.setattr(tidal, 'get_playlist', lambda pid: None)
+    c = web_server.app.test_client()
+    assert c.post('/api/tidal/discovery/start/P1').status_code == 200
+    body = c.get('/api/tidal/discovery/status/P1').get_json()
+    assert body['phase'] == 'error'
+    # and a second go is allowed, not 'already in progress'
+    assert c.post('/api/tidal/discovery/start/P1').status_code == 200
