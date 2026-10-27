@@ -1400,6 +1400,11 @@ def candidate_preview(files: list[dict], row: tuple, release_meta: dict) -> dict
 
 
 @deferred('plan')
+def _persist_unidentified_plan(db, common: dict, payload: dict) -> str:
+    return persist_album_plan(db, common, payload)
+
+
+@deferred('plan')
 @timed('plan_preparation_inclusive')
 def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                            *, candidates: list[tuple] | None = None,
@@ -1410,6 +1415,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                            action_changes: dict[str, dict] | None = None,
                            numbering_mode: str = '',
                            inventory: dict | None = None,
+                           recording_checks: dict | None = None,
                            wanted_slots: set[str] | None = None,
                            wishlisted_slots: set[tuple[str, str, str]] | None = None) -> str:
     clear, matched, _extras, source, release_id, slots, plan = scored
@@ -1420,7 +1426,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                  str(common.get('exact_release_id') or release_id)) in
                 (wishlisted_slots or set())):
             assignment['fulfillment_state'] = 'wishlisted'
-    if intent_scope == 'partial':
+    if intent_scope in ('partial', 'discard'):
         for assignment in assignments:
             if (assignment.get('status') == 'missing' and not assignment.get('fulfillment_state') and
                     _wanted_slot_key({'source_track_id': assignment.get('source_track_id'),
@@ -1474,6 +1480,12 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
             'current_release': common.get('current_release'),
             'numbering_mode': numbering_mode,
             'inventory': inventory,
+            '_planning': {'files': files, 'recordings': {mbid: (recording_checks or {})[mbid]
+                for file in files for mbid in [(file.get('tags') or {}).get('mbid')]
+                if mbid in (recording_checks or {})}, 'candidates': [
+                {'source': row[3], 'release_id': row[4], 'slots': row[5],
+                 'metadata': (candidate_metadata or {}).get((row[3], row[4])) or {}}
+                for row in candidate_rows[:6]]},
             'release_track_count': len(slots), 'local_file_count': len(files),
             'matched': matched, 'clear': clear, 'assignments': assignments,
             'categories': sorted(set(categories)),
@@ -1776,6 +1788,9 @@ def _checked_file_evidence(files: list[dict]) -> list[dict]:
                   default={})
         checked.append({
             'file': os.path.basename(file['path']),
+            'file_path': file['path'],
+            'track_id': (file.get('db') or {}).get('id'),
+            'duration_ms': file['tags'].get('duration_ms') or 0,
             'tag_title': file['tags'].get('title') or '',
             'audio_status': file['acoustid'].get('status'),
             'audio_title': top.get('title') or '',
@@ -2109,11 +2124,14 @@ class LibraryReconciliationJob(RepairJob):
              scope: ScanScope | str = ScanScope.ALBUM) -> JobResult:
         scan_started = time.perf_counter()
         result = JobResult()
+        roots = all_library_roots(context)
+        inventory_request = load_inventory_request(context.db, target_folder, ScanScope(scope), roots=roots)
+        plan_only = inventory_request.scope == ScanScope.PLAN
         client = context.acoustid_client
-        if client is None:
+        if not plan_only and client is None:
             result.stopped_early = 'AcoustID client is unavailable'
             return result
-        available, reason = client.is_available()
+        available, reason = (True, '') if plan_only else client.is_available()
         if not available:
             result.stopped_early = reason or 'AcoustID unavailable'
             return result
@@ -2129,8 +2147,8 @@ class LibraryReconciliationJob(RepairJob):
             result.stopped_early = 'A configured library root is unavailable'
             return result
         from core.library.reconciliation_migration import repair_legacy_ids
-        repair_legacy_ids(context.db)
-        inventory_request = load_inventory_request(context.db, target_folder, ScanScope(scope), roots=roots)
+        if not plan_only:
+            repair_legacy_ids(context.db)
         def selection_for(request):
             return track_selection(context.db, request, title_key=_album_identity_title,
                 base_title_key=lambda title: normalize(re.split(r'\s*[\[(]', str(title or ''), maxsplit=1)[0]))
@@ -2163,16 +2181,17 @@ class LibraryReconciliationJob(RepairJob):
         assignment_overrides = self._assignment_overrides(context)
         from core.library import reconciliation_choices as review_choices
         kept_numbering = review_choices.applied_numbering_choices(context.db)
-        review_choices.backfill_applied_releases(context.db)
+        if not plan_only:
+            review_choices.backfill_applied_releases(context.db)
         reviewed_releases = review_choices.load_release_choices(context.db)
         numbering_history = review_choices.flattened_numbering_history(context.db)
         playlist_membership = {}
-        if context.playlist_membership:
+        if context.playlist_membership and not plan_only:
             try:
                 playlist_membership = context.playlist_membership() or {}
             except Exception as exc:
                 logger.debug('Could not read playlist membership: %s', exc)
-        if inventory_request.scope == ScanScope.ALBUM:
+        if inventory_request.scope in (ScanScope.ALBUM, ScanScope.PLAN):
             folders = {os.path.normpath(target_folder): list(inventory_request.saved['paths'])}
             trusted_logical_groups = {}
             if inventory_request.saved.get('trusted_album_id') is not None:
@@ -2247,7 +2266,7 @@ class LibraryReconciliationJob(RepairJob):
             album_folder_counts.update({tracks[os.path.normpath(path)]['album_id']
                 for path in paths if os.path.normpath(path) in tracks and
                 tracks[os.path.normpath(path)].get('album_id') is not None})
-        if inventory_request.scope == ScanScope.ALBUM:
+        if inventory_request.scope in (ScanScope.ALBUM, ScanScope.PLAN):
             for album_id in inventory_request.album_ids:
                 album_folder_counts[album_id] = inventory_request.saved.get(
                     'album_folder_counts', {}).get(str(album_id), 1)
@@ -2257,12 +2276,21 @@ class LibraryReconciliationJob(RepairJob):
         release_cache = {}
         companion_extensions = lossy_companion_exts(context.config_manager, context.db, logger)
         release_meta_cache = {}
-        recording_checks = {}
+        recording_checks = dict((inventory_request.planning or {}).get('recordings') or {})
         tool_evidence = ToolEvidence(context.db)
         release_search_cache = {}
         release_group_cache = {}
         exact_musicbrainz_releases: set[str] = set()
         cache = ReconciliationEvidence(context.db, client)
+        cached_files = {file['path']: file for file in (inventory_request.planning or {}).get('files', [])}
+        cached_candidates = (inventory_request.planning or {}).get('candidates', [])
+        if plan_only:
+            for candidate in cached_candidates:
+                key = (candidate['source'], candidate['release_id'])
+                release_cache[key] = candidate['slots']
+                release_meta_cache[key] = candidate['metadata']
+                if key[0] == 'musicbrainz':
+                    exact_musicbrainz_releases.add(key[1])
         lookup_error_reported = False
         try:
             for folder_index, (folder, paths) in enumerate(sorted(folders.items())):
@@ -2286,6 +2314,10 @@ class LibraryReconciliationJob(RepairJob):
                         except OSError:
                             result.skipped += 1
                             completed = False
+                            continue
+                        if plan_only:
+                            files.append({**cached_files[path], 'db': db_row})
+                            result.scanned += 1
                             continue
                         audio = cache.identify(path)
                         if audio.get('status') == 'error':
@@ -2368,9 +2400,9 @@ class LibraryReconciliationJob(RepairJob):
                         album_folder_counts={key: album_folder_counts[key] for key in album_counts},
                         roots=roots, observations=directory_cache[parents])
                     _mark_lossy_companions(files, companion_extensions)
-                    candidates = self._release_candidates(
-                        files, album, context,
-                        exact_musicbrainz_releases=exact_musicbrainz_releases)
+                    candidates = ([(row['source'], row['release_id']) for row in cached_candidates]
+                        if plan_only else self._release_candidates(files, album, context,
+                            exact_musicbrainz_releases=exact_musicbrainz_releases))
                     reviewed_release = reviewed_releases.get(str(album_id))
                     if reviewed_release and reviewed_release not in candidates:
                         candidates.insert(0, reviewed_release)
@@ -2380,7 +2412,7 @@ class LibraryReconciliationJob(RepairJob):
                     scored = _score_release_candidates(
                         files, candidates, release_cache, exact_musicbrainz_releases)
                     best_initial = (max(scored, key=rank_candidate) if scored else None)
-                    if (not best_initial or best_initial[6]['extra_files']
+                    if not plan_only and (not best_initial or best_initial[6]['extra_files']
                             or best_initial[6]['missing_slots']):
                         additional = [candidate for candidate in self._release_candidates(
                             files, album, context, include_audio=True,
@@ -2394,7 +2426,7 @@ class LibraryReconciliationJob(RepairJob):
                     # only a tie breaker after audio/tracklist fit, and has no
                     # effect on the positions written to file or library metadata.
                     needs_digital = bool(
-                        best_expanded and not _edition_preference(_release_metadata(
+                        not plan_only and best_expanded and not _edition_preference(_release_metadata(
                             best_expanded, release_meta_cache, exact_musicbrainz_releases))[0]
                     )
                     if needs_digital and not any(row.source == 'musicbrainz' for row in scored):
@@ -2412,7 +2444,7 @@ class LibraryReconciliationJob(RepairJob):
                         key=rank_candidate,
                         default=None,
                     )
-                    if (best_expanded and group_seed and
+                    if (not plan_only and best_expanded and group_seed and
                             (best_expanded[6]['extra_files'] or
                              best_expanded[6]['missing_slots'] or
                              _systematic_numbering_drift(files, best_expanded) or
@@ -2428,7 +2460,7 @@ class LibraryReconciliationJob(RepairJob):
                         candidates.extend(editions)
                         scored.extend(_score_release_candidates(
                             files, editions, release_cache, exact_musicbrainz_releases))
-                    if not scored or max(row.matched for row in scored) == 0:
+                    if not plan_only and (not scored or max(row.matched for row in scored) == 0):
                         searched = [candidate for candidate in _search_release_candidates(
                             album, context, release_search_cache) if candidate not in candidates]
                         exact_musicbrainz_releases.update(
@@ -2438,6 +2470,25 @@ class LibraryReconciliationJob(RepairJob):
                         scored.extend(_score_release_candidates(
                             files, searched, release_cache, exact_musicbrainz_releases))
                     if not scored:
+                        unidentified_header = {'album_id': album_id,
+                            'album_title': album.get('album_title') if album else os.path.basename(folder),
+                            'profile_id': album.get('owner_profile_id') if album else 1,
+                            'artist_name': album.get('artist_name') if album else '',
+                            'album_folder': folder, 'source': '', 'release_id': '',
+                            'evidence_signature': _evidence_signature(files, candidates)}
+                        unknown_case = _persist_unidentified_plan(context.db, unidentified_header, {
+                            'state': 'unidentified', 'source': '', 'release_id': '',
+                            'local_file_count': len(files), 'release_track_count': 0,
+                            'library_root': next((root for root in sorted(roots, key=len, reverse=True)
+                                if folder.startswith(root.rstrip(os.sep) + os.sep)), ''),
+                            'inventory': album_inventory, 'candidates': [],
+                            'assignments': [{'status': 'uncertain', 'file_path': file['path'],
+                                'file': os.path.basename(file['path']), 'track_id': (file.get('db') or {}).get('id'),
+                                'current_title': file['tags'].get('title') or os.path.basename(file['path']),
+                                'file_duration_ms': file['tags'].get('duration_ms') or 0,
+                                'current_tags': file['tags'], 'acoustid': file['acoustid']}
+                                for file in files], 'categories': ['release_conflicts']})
+                        observed_plans.add(unknown_case)
                         if emit(
                             job_id=self.job_id, finding_type='reconciliation_unresolved',
                             severity='info', entity_type='album' if album_id else 'folder',
@@ -2484,7 +2535,7 @@ class LibraryReconciliationJob(RepairJob):
                     # surface the album identity conflict instead of retagging the
                     # file and inventing a nearly complete album's missing tracks.
                     release_meta = {}
-                    if len(files) == 1 and album and not linked_candidates:
+                    if not plan_only and len(files) == 1 and album and not linked_candidates:
                         release_meta = _release_metadata(
                             scored[0], release_meta_cache, exact_musicbrainz_releases)
                         if _single_file_album_context_conflict(album, release_meta):
@@ -3237,6 +3288,8 @@ class LibraryReconciliationJob(RepairJob):
                                         'duration_ms': slot.get('duration_ms') or 0,
                                         'source_track_id': slot['source_track_id'],
                                     }
+                        duplicate_slot = next((slots[pair['slot_index']] for pair in plan['pairs']
+                            if pair['file_index'] in duplicate_indexes), {}) if duplicate_copies else {}
                         details = {**common, 'current_title': file['tags'].get('title'),
                                    'tool_checks': file.get('tool_checks') or [],
                                    'current_tags': file['tags'], 'acoustid': audio,
@@ -3248,6 +3301,11 @@ class LibraryReconciliationJob(RepairJob):
                                    'competing_copies': competing_paths,
                                    'same_audio_copies': same_audio_paths,
                                    'duplicate_copies': duplicate_copies,
+                                   **({'expected_title': duplicate_slot.get('title'),
+                                       'expected_duration_ms': duplicate_slot.get('duration_ms'),
+                                       'expected_track_number': duplicate_slot.get('track_number'),
+                                       'expected_disc_number': duplicate_slot.get('disc_number')}
+                                      if duplicate_slot else {}),
                                    'recommended_keeper': str(recommended_copy.get('track_id') or ''),
                                    'keeper_reason': ('Preserves playlist membership; quality breaks ties'
                                        if recommended_copy.get('playlists') else
@@ -3343,9 +3401,7 @@ class LibraryReconciliationJob(RepairJob):
                                 (source, str(slot.get('source_track_id') or ''),
                                  str(exact_release_id)) in wishlisted_slots else '')
                             wanted = intent_scope == 'complete' or _wanted_slot_key(slot) in wanted_slots
-                            if not wanted and not fulfillment_state:
-                                continue
-                            if not assignment_settled and not fulfillment_state:
+                            if intent_scope == 'discard' or (not wanted and not fulfillment_state):
                                 continue
                             if (source, str(slot.get('source_track_id') or ''), str(exact_release_id)) in getattr(self, '_published_by_profile', {}).get(int(common.get('profile_id') or 1), set()):
                                 fulfillment_state = 'downloaded'
@@ -3368,7 +3424,7 @@ class LibraryReconciliationJob(RepairJob):
                                 }] }):
                                 result.findings_created += 1
                     case_id = _persist_selected_plan(
-                        context.db, common, files, scored[0], inventory=album_inventory, candidates=scored,
+                        context.db, common, files, scored[0], inventory=album_inventory, candidates=scored, recording_checks=recording_checks,
                         candidate_metadata={
                             (row.source, row.release_id): _release_metadata(
                                 row, release_meta_cache, exact_musicbrainz_releases)

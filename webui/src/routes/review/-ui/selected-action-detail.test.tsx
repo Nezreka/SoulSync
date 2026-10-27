@@ -335,3 +335,25 @@ it('shows a saved replacement with edit and undo instead of repeating the replac
   fireEvent.click(screen.getByRole('button', { name: 'Undo choice' }));
   expect(onReset).toHaveBeenCalledOnce();
 });
+
+it('distinguishes a confirmed match from approval of its remaining metadata edits', () => {
+  render(
+    <SelectedActionDetail
+      finding={{
+        ...finding,
+        review_tier: 'manual',
+        details: { ...finding.details, saved_assignment: true },
+      }}
+      itemIndex={0}
+      itemCount={1}
+      busy={false}
+      compact
+      onAct={vi.fn()}
+      onSelect={vi.fn()}
+      typeInfo={{ fixable: true } as FindingTypeInfo}
+    />,
+  );
+  expect(screen.getByText('Match confirmed')).toBeVisible();
+  expect(screen.queryByText('Changes planned')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Accept changes' })).toBeVisible();
+});

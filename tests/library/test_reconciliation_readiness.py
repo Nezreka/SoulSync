@@ -214,7 +214,7 @@ def test_filename_cleanup_is_not_a_title_tag_convention():
     assert finding_category(item) == 'title_conventions'
 
 
-def test_requested_downloads_hold_the_album_until_assignment():
+def test_requested_downloads_hold_only_their_slots_until_assignment():
     from core.repair_review_policy import case_mode
     from core.repair_review_queue import classify_case
     ready = {'finding_type': 'reconciliation_metadata', 'details': {
@@ -223,10 +223,11 @@ def test_requested_downloads_hold_the_album_until_assignment():
     items = [ready, waiting]
     plan = classify_case(items)
     assert plan['ready'] == 1
-    assert plan['status'] == case_mode(items) == 'waiting'
-    assert not plan['can_apply_ready']
+    assert plan['status'] == case_mode(items) == 'ready'
+    assert plan['can_apply_ready']
+    assert classify_case([waiting])['status'] == 'waiting'
     waiting['details']['fulfillment_state'] = 'downloaded'
-    assert not classify_case(items)['can_apply_ready']
+    assert classify_case(items)['can_apply_ready']
     waiting['details']['fulfillment_state'] = ''
     assert classify_case(items)['status'] == 'needs_review'
     assert classify_case([ready])['can_apply_ready']

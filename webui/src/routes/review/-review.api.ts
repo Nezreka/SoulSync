@@ -100,7 +100,7 @@ export interface AlbumAssignment {
 
 export interface AlbumReconciliationPlan {
   library_root?: string;
-  state: 'confirmed' | 'changes' | 'review' | 'release_conflict';
+  state: 'confirmed' | 'changes' | 'review' | 'release_conflict' | 'unidentified';
   source?: string;
   release_id?: string;
   intent_scope?: string;
@@ -201,6 +201,7 @@ export interface ReviewCase {
   case_id: string;
   plan_signature?: string;
   saved_for_later?: boolean;
+  can_stop_collecting?: boolean;
   album: string | null;
   current_album_title?: string;
   artist: string | null;
@@ -400,7 +401,7 @@ export async function applyReviewDecision(
       }),
     },
   );
-  return response.json();
+  return readJson(response);
 }
 
 export async function reopenReviewAssignment(
@@ -423,6 +424,7 @@ export async function startReadyChanges(
   signature: string,
   caseId?: string,
   organize = false,
+  selection?: { case_ids: string[]; organize_case_ids: string[] },
 ): Promise<{
   started: boolean;
   operation_id?: string;
@@ -434,7 +436,7 @@ export async function startReadyChanges(
     await fetch('/api/repair/review-queue/apply-ready', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ case_id: caseId, organize, signature }),
+      body: JSON.stringify({ case_id: caseId, organize, signature, ...selection }),
     }),
   );
 }
@@ -442,7 +444,14 @@ export async function startReadyChanges(
 export async function startMissingTrackRequests(
   caseId: string,
   findingIds?: number[],
-): Promise<{ started: boolean; operation_id?: string; total?: number; error?: string }> {
+): Promise<{
+  started: boolean;
+  success?: boolean;
+  requested?: number;
+  operation_id?: string;
+  total?: number;
+  error?: string;
+}> {
   return readJson(
     await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/request-missing`, {
       method: 'POST',
@@ -474,6 +483,16 @@ export async function resetAlbumScope(caseId: string) {
   return readJson<{ success: boolean }>(
     await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/reset-scope`, {
       method: 'POST',
+    }),
+  );
+}
+
+export async function stopCollectingAlbum(caseId: string, signature: string) {
+  return readJson<{ success: boolean; error?: string; message?: string }>(
+    await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/stop-collecting`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signature }),
     }),
   );
 }

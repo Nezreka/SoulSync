@@ -7,6 +7,7 @@ import {
   metadataNeedsReview,
   shortDuration,
   statusLabel,
+  severeLengthMismatch,
 } from './review-presentation';
 
 export function AssignmentRow({
@@ -46,7 +47,8 @@ export function AssignmentRow({
       data-review-assignment="true"
       className={styles.matrixRow}
       data-status={
-        row.audio_conflict === 'different_recording' &&
+        (row.audio_conflict === 'different_recording' ||
+          severeLengthMismatch(row.file_duration_ms, row.slot_duration_ms)) &&
         !row.planned_choice &&
         row.status !== 'settled'
           ? 'audio_conflict'

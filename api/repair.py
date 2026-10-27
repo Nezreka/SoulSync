@@ -324,6 +324,7 @@ def repair_review_queue_apply_ready():
             case_id=case_id,
             organize=bool(data.get('organize')),
             expected_signature=data['signature'],
+            case_ids=data.get('case_ids'), organize_case_ids=data.get('organize_case_ids'),
         )
         return jsonify(result), 200 if result.get('started') else (409 if result.get('stale') else 400)
     except Exception as exc:
@@ -354,10 +355,20 @@ def repair_review_queue_request_missing(case_id):
         if not isinstance(payload, dict):
             return jsonify({'started': False, 'error': 'Expected a request object'}), 400
         result = worker.start_review_missing_tracks(case_id, finding_ids=payload.get('finding_ids'))
-        return jsonify(result), 200 if result.get('started') else 400
+        return jsonify(result), 200 if result.get('started') or result.get('success') else 400
     except Exception as exc:
         logger.error('Error requesting album missing tracks: %s', exc, exc_info=True)
         return jsonify({'started': False, 'error': 'Could not request missing tracks'}), 500
+
+@bp.route('/api/repair/review-queue/<path:case_id>/stop-collecting', methods=['POST'])
+def repair_review_stop_collecting(case_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker unavailable'}), 503
+    data = request.get_json(silent=True) or {}
+    result = worker.stop_collecting_review_album(case_id, data.get('signature'))
+    return jsonify(result), 200 if result.get('success') else 409
+
 
 @bp.route('/api/repair/status', methods=['GET'])
 def repair_status():

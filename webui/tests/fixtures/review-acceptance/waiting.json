@@ -70,7 +70,17 @@
         "evidence_token": "waiting:evidence_token:3",
         "review_tier": "blocked",
         "review_reason": "The missing track is already on the wishlist",
-        "category": "pending_fulfillment"
+        "category": "pending_fulfillment",
+        "requests": [
+          {
+            "source_track_id": "00000000-0000-4000-8000-000000000002",
+            "title": "Open Water",
+            "release": "Northbound",
+            "source": "musicbrainz",
+            "release_id": "11111111-1111-4111-8111-111111111111",
+            "state": "wishlisted"
+          }
+        ]
       },
       {
         "id": 1,
@@ -339,11 +349,11 @@
       "destructive": 0,
       "blocked": 1,
       "total": 2,
-      "status": "waiting",
+      "status": "ready",
       "blocker_reasons": [
         "The missing track is already on the wishlist"
       ],
-      "can_apply_ready": false,
+      "can_apply_ready": true,
       "can_organize": false,
       "decision_count": 2,
       "categories": [
@@ -730,11 +740,11 @@
           "destructive": 0,
           "blocked": 1,
           "total": 2,
-          "status": "waiting",
+          "status": "ready",
           "blocker_reasons": [
             "The missing track is already on the wishlist"
           ],
-          "can_apply_ready": false,
+          "can_apply_ready": true,
           "can_organize": false,
           "decision_count": 2,
           "categories": [
@@ -773,23 +783,48 @@
       "album:10:acceptance"
     ],
     "total": 1,
-    "ready_total": 0,
+    "ready_total": 1,
     "page": 0,
     "limit": 30
   },
   "summary": {
     "all": 1,
     "review": 0,
-    "ready": 0,
+    "ready": 1,
     "files": 0,
-    "waiting": 1,
-    "ready_total": 0,
-    "ready_albums_total": 0
+    "waiting": 0,
+    "ready_total": 1,
+    "ready_albums_total": 1
   },
   "ready_preview": {
     "signature": "waiting:signature:6",
-    "albums": [],
-    "action_count": 0,
+    "albums": [
+      {
+        "artist": "Acceptance Artist",
+        "case_id": "album:10:acceptance",
+        "album": "Northbound",
+        "actions": [
+          {
+            "id": 1,
+            "description": "Update 01 - Home.flac: musicbrainz recording id, library recording mbid",
+            "file_path": "/music/Acceptance Artist/Northbound/01 - Home.flac",
+            "title": "Home",
+            "changes": [
+              {
+                "field": "musicbrainz_recording_id",
+                "old": "",
+                "new": "00000000-0000-4000-8000-000000000001",
+                "kind": "fills"
+              }
+            ],
+            "file_decision": null,
+            "requests": [],
+            "file_action": false
+          }
+        ]
+      }
+    ],
+    "action_count": 1,
     "file_actions": 0
   },
   "finding_types": [

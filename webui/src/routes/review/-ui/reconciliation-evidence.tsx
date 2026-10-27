@@ -21,6 +21,7 @@ import { ReviewArtwork } from './review-artwork';
 import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';
 import { formatTrackPosition } from './review-position';
+import { severeLengthMismatch } from './review-presentation';
 import { libraryRelativePath } from './review-presentation';
 import {
   record as object,
@@ -379,6 +380,17 @@ function DuplicateCopies({
           <p>These files identify as the same track. Choose the copy SoulSync should keep.</p>
         </div>
       </div>
+      {Boolean(details.expected_title || details.expected_duration_ms) && (
+        <p className={styles.duplicateRelease}>
+          <strong>Selected release track: {label(details.expected_title)}</strong>
+          <span>
+            Length:{' '}
+            {details.expected_duration_ms
+              ? formatDuration(details.expected_duration_ms)
+              : 'Not available'}
+          </span>
+        </p>
+      )}
       <div className={styles.duplicateList}>
         {copies.map((copy, index) => {
           const path = label(copy.file_path);
@@ -401,9 +413,17 @@ function DuplicateCopies({
             <article key={`${trackId}-${path}-${index}`}>
               <div>
                 <strong>{path.split('/').pop() || label(copy.title) || 'Unknown file'}</strong>
-                <small>{path}</small>
+                <small>{libraryRelativePath(path, label(details.library_root))}</small>
                 {audioFacts.length > 0 && (
                   <span className={styles.audioFacts}>{audioFacts.join(' · ')}</span>
+                )}
+                {Boolean(copy.duration && details.expected_duration_ms) && (
+                  <small>
+                    {((count(copy.duration) - count(details.expected_duration_ms)) / 1000).toFixed(
+                      1,
+                    )}{' '}
+                    seconds relative to release
+                  </small>
                 )}
                 {Boolean(copy.recording_disambiguation) && (
                   <span>Recording: {label(copy.recording_disambiguation)}</span>
@@ -489,20 +509,25 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
     details.expected_duration_ms || object(details.replacement_track).duration_ms,
   );
   const delta = localLength && releaseLength ? Math.abs(localLength - releaseLength) : 0;
+  const severeLength = explain && severeLengthMismatch(localLength, releaseLength);
   if (!status && !reasons.length && !wrong && !(explain && delta > 3000)) return null;
   return (
     <section
       className={styles.audioEvidence}
-      data-tone={wrong ? 'danger' : reasons.length || unsupported ? 'warning' : undefined}
+      data-tone={
+        wrong || severeLength ? 'danger' : reasons.length || unsupported ? 'warning' : undefined
+      }
       aria-label="Audio identity"
     >
       <h4>
         <EvidenceIcon name={wrong ? 'x' : reasons.length ? 'warning' : 'audio'} />
         {wrong
           ? 'Audio does not support this release track'
-          : reasons.length
-            ? 'Why this needs review'
-            : 'Audio identity'}
+          : severeLength
+            ? 'Large length mismatch — review the file and release'
+            : reasons.length
+              ? 'Why this needs review'
+              : 'Audio identity'}
         <HelpHint label="AcoustID audio evidence">
           AcoustID compares an audio fingerprint with submitted recordings. The percentage measures
           fingerprint similarity. Several MusicBrainz recordings can share one fingerprint, so equal
@@ -510,6 +535,13 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
           other files on this release. “Selected recording” identifies the recording in this plan.
         </HelpHint>
       </h4>
+      {severeLength && (
+        <p>
+          The fingerprint can identify part of a recording. This length gap may indicate another
+          version, combined tracks, an incomplete file, or an incorrect catalogue length. Listen and
+          check the release before accepting the match.
+        </p>
+      )}
       {(wrong || unsupported) && (
         <p>
           No AcoustID candidate names this release track: <strong>{expected}</strong>. Listen before
@@ -563,7 +595,7 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
         </section>
       )}
       {explain && delta > 3000 && (
-        <div className={styles.durationWarning}>
+        <div className={styles.durationWarning} data-tone={severeLength ? 'danger' : undefined}>
           <strong>Length differs by {(delta / 1000).toFixed(1)} seconds</strong>
           <span>
             Local {formatDuration(localLength)} · Release {formatDuration(releaseLength)}

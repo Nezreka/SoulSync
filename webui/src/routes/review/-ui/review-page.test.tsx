@@ -865,6 +865,7 @@ describe('library reconciliation review queue', () => {
             albums: [
               {
                 album: 'Ashes of the Wake',
+                case_id: 'album:1:ashes',
                 actions: [{ description: 'Update artist metadata' }],
               },
             ],
@@ -875,6 +876,8 @@ describe('library reconciliation review queue', () => {
           case_id: 'album:1:ashes',
           organize: false,
           signature: 'reviewed',
+          case_ids: ['album:1:ashes'],
+          organize_case_ids: [],
         });
         return Promise.resolve(reply({ started: true, total: 1 }));
       }
@@ -945,7 +948,7 @@ describe('library reconciliation review queue', () => {
       expect(screen.getByRole('button', { name: 'Apply 1 ready change' })).not.toBeDisabled(),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Apply plans' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply selected plans' }));
     await waitFor(() => expect(screen.getByText('1 album action completed.')).toBeTruthy(), {
       timeout: 3000,
     });

@@ -1041,6 +1041,7 @@
     "signature": "supported:signature:7",
     "albums": [
       {
+        "artist": "Acceptance Artist",
         "case_id": "album:10:acceptance",
         "album": "Northbound",
         "actions": [

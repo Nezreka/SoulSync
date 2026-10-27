@@ -310,9 +310,10 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if any(row.get('finding_type') == 'reconciliation_intent' for row in rows):
                 summary = 'Choose whether this album should be complete.'
             else:
-                summary = (f'{len(rows)} expected track'
+                decision_label = 'Submit track requests'
+                summary = (f'{len(rows)} wanted track'
                            f'{"s are" if len(rows) != 1 else " is"} absent from the '
-                           'intended complete album.')
+                           'selected release. Submit the requests before applying file changes.')
         elif category == 'pending_fulfillment':
             replacement = any((row.get('details') or {}).get('replacement_request') for row in rows)
             decision_label = 'Waiting for requested copies' if replacement else 'Waiting for missing tracks'
@@ -565,13 +566,15 @@ def get_case(db, case_id: str, *, status: str = 'pending',
             })
         plan = classify_case(items)
         for item in items:
+            if requests := _ready_requests(item, items):
+                item['requests'] = requests
             if (item['review_tier'] == 'ready'
-                    and item['finding_type'] != 'reconciliation_metadata'
+                    and (item['finding_type'] != 'reconciliation_metadata' or (item['details'].get('planned_choice') or {}).get('fix_action'))
                     and not item['details'].get('plan_keep')):
                 item['planned_file_action'] = _ready_action_description(
                     item, item['file_path'], item['title'])
                 item['file_decision'] = _ready_file_decision(item, item['file_path'])
-                item['requests'] = _ready_requests(item)
+                item['requests'] = _ready_requests(item, items)
         tier_rank = {'manual': 0, 'destructive': 1, 'blocked': 2, 'ready': 3}
         items.sort(key=lambda item: (tier_rank.get(item.get('review_tier'), 9), item['id']))
         first = items[0]
@@ -765,10 +768,23 @@ def get_case(db, case_id: str, *, status: str = 'pending',
             'album_thumb_url': album_art,
             'plan': plan,
             'album_plan': album_plan,
+            **({'can_stop_collecting': True} if all_files_planned_for_removal(items, album_plan) and (album_plan or {}).get('intent_scope') != 'discard' else {}),
             'decisions': plan['decisions'],
         }
     finally:
         conn.close()
+
+
+def all_files_planned_for_removal(items, album_plan):
+    paths = {row.get('file_path') for row in (album_plan or {}).get('assignments') or [] if row.get('file_path')}
+    removed = set()
+    for item in items:
+        details = item.get('details') or {}
+        if not details.get('plan_approved'):
+            continue
+        if (details.get('planned_choice') or {}).get('fix_action') == 'quarantine' and item.get('file_path'):
+            removed.add(item['file_path'])
+    return bool(paths and paths == removed)
 
 
 def _ready_action_description(item: dict, file_path: str | None, title: str | None) -> str:
@@ -794,7 +810,7 @@ def _ready_action_description(item: dict, file_path: str | None, title: str | No
         chosen = next((row for row in details.get('replacement_files') or [] if str(row.get('track_id')) == track_id), {})
         return f"Use {os.path.basename(chosen.get('file_path') or '')} for {details.get('expected_title') or filename}; {'keep' if mode == 'keep' else 'quarantine'} the current file"
     if action == 'replace':
-        return f'Move {filename} to recoverable quarantine and request its release-track replacement'
+        return f'Move {filename} to recoverable quarantine; the replacement request is submitted separately'
     if action == 'request_missing':
         return f'Request {(details.get("replacement_track") or {}).get("title") or details.get("expected_title") or filename or "the missing release track"}'
     return f'Move {filename} to recoverable quarantine and remove its library entry'
@@ -827,15 +843,16 @@ def _ready_file_decision(item, file_path):
                        if action in ('replace', 'request_missing') else ''}
 
 
-def _ready_requests(item):
+def _ready_requests(item, peers=None):
     details = item.get('details') or {}
     action = (details.get('planned_choice') or {}).get('fix_action') or ''
     slots = (details.get('missing_tracks') or []) if item['finding_type'] == 'reconciliation_missing' else (
         [details.get('replacement_track') or {}] if action in ('replace', 'request_missing') else [])
-    return [{'title': slot.get('name') or slot.get('title') or details.get('expected_title'),
+    requested = {str(slot.get('source_track_id') or ''): row['details'].get('fulfillment_state') for row in peers or [] if row.get('finding_type') == 'reconciliation_missing' for slot in row['details'].get('missing_tracks') or []}
+    return [{'source_track_id': slot.get('source_track_id'), 'title': slot.get('name') or slot.get('title') or details.get('expected_title'),
              'release': details.get('album_title') or '', 'source': details.get('source'),
              'release_id': details.get('exact_release_id') or details.get('release_id'),
-             'state': details.get('fulfillment_state') or 'planned'} for slot in slots]
+             'state': details.get('fulfillment_state') or requested.get(str(slot.get('source_track_id') or '')) or 'planned'} for slot in slots]
 
 
 def _ready_action_changes(details):
@@ -880,10 +897,10 @@ def ready_batch_preview(db, *, case_id: str = '', include_snapshot: bool = False
                                 'title': (details.get('current_tags') or {}).get('title') or '',
                                 'changes': _ready_action_changes(details),
                                 'file_decision': _ready_file_decision(item, row[0] if row else ''),
-                                'requests': _ready_requests(item),
+                                'requests': _ready_requests(item, value['items']),
                                 'file_action': bool(_ready_file_decision(item, row[0] if row else ''))})
             actions.sort(key=lambda action: not action['file_action'])
-            albums.append({'case_id': key, 'album': next((item['details'].get('album_title') for item in value['items'] if item['details'].get('album_title')), key), 'actions': actions})
+            albums.append({'artist': next((item['details'].get('artist_name') for item in value['items'] if item['details'].get('artist_name')), ''), 'case_id': key, 'album': next((item['details'].get('album_title') for item in value['items'] if item['details'].get('album_title')), key), 'actions': actions})
         signature = hashlib.sha256(json.dumps(snapshot, sort_keys=True, default=str).encode()).hexdigest()
         result = {'signature': signature, 'albums': albums, 'action_count': len(snapshot),
                   'file_actions': sum(action['file_action'] for album in albums for action in album['actions'])}

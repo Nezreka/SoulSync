@@ -3652,7 +3652,13 @@
   white-space: nowrap;
 }
 .trackInspector > .decisionNavigation {
-  margin: 0 14px 12px;
+  margin: 0;
+  padding: 8px 18px 16px;
+}
+.decisionGrid article[data-risk='destructive'] .decisionStep {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: rgba(var(--danger-rgb), 0.08);
 }
 @media (max-width: 1000px) {
   .queueHeader {
@@ -3733,4 +3739,107 @@
   .albumHeader .nav {
     justify-content: space-between;
   }
+}
+
+.confirmedStatus {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--accent, #3ee47c);
+  border-radius: 10px;
+  background: rgb(62 228 124 / 8%);
+  padding: 14px;
+  margin-bottom: 16px;
+}
+.confirmedStatus strong {
+  color: #3ee47c;
+}
+.durationWarning[data-tone='danger'] {
+  border-color: #ff5252;
+  color: #ff7777;
+  background: rgb(255 82 82 / 10%);
+}
+.duplicateRelease {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.unidentifiedAlbum {
+  padding: 20px;
+  border: 1px solid #9a7b31;
+  border-radius: 12px;
+  background: rgb(255 196 36 / 4%);
+}
+.unidentifiedAlbum h3 {
+  margin: 0 0 12px;
+}
+.unidentifiedFiles {
+  list-style: none;
+  padding: 0;
+  margin: 20px 0 0;
+}
+.unidentifiedFiles li {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0;
+  border-top: 1px solid #444;
+}
+.unidentifiedFiles small {
+  overflow-wrap: anywhere;
+}
+
+.batchSearch {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: #222;
+  border-radius: 10px;
+}
+.batchSearch > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.batchAlbum {
+  margin: 18px 0;
+}
+.batchSelection {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+}
+.batchFolders {
+  padding: 12px;
+  border: 1px solid #444;
+  border-radius: 8px;
+  margin-top: 12px;
+}
+.batchFolders td {
+  overflow-wrap: anywhere;
+}
+.batchFolders table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.abandonAlbum {
+  padding: 18px;
+  border: 1px solid #b84848;
+  border-radius: 12px;
+  background: rgb(255 82 82 / 7%);
+  margin-bottom: 16px;
+}
+.abandonAlbum h3 {
+  margin: 0;
+}
+
+.tabWorkspace[data-unidentified='true'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.tabWorkspace[data-unidentified='true'] > .tabContext {
+  display: none;
 }

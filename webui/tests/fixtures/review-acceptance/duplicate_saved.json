@@ -395,6 +395,10 @@
               "playlists": []
             }
           ],
+          "expected_title": "Home",
+          "expected_duration_ms": 200000,
+          "expected_track_number": 1,
+          "expected_disc_number": 1,
           "recommended_keeper": "3",
           "keeper_reason": "Highest format and bitrate rank among these copies",
           "resolution_kind": "duplicate_copies",
@@ -1135,6 +1139,7 @@
     "signature": "duplicate_saved:signature:8",
     "albums": [
       {
+        "artist": "Acceptance Artist",
         "case_id": "album:10:acceptance",
         "album": "Northbound",
         "actions": [

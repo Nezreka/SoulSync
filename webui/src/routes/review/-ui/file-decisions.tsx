@@ -7,20 +7,37 @@ import { DisclosureFooter } from './disclosure-footer';
 import styles from './review-page.module.css';
 
 export type FileDecision = { title: string; keep: string[]; quarantine: string[]; request: string };
-export type TrackRequest = { title: string; release?: string; state?: string };
+export type TrackRequest = {
+  title: string;
+  release?: string;
+  state?: string;
+  source_track_id?: string;
+  release_id?: string;
+};
 
 export function TrackRequests({
   items,
 }: {
   items: Array<{ requests?: TrackRequest[]; file_decision?: FileDecision | null }>;
 }) {
-  const requests = items.flatMap((item) =>
+  const candidates = items.flatMap((item) =>
     item.requests?.length
       ? item.requests
       : item.file_decision?.request
         ? [{ title: item.file_decision.request }]
         : [],
   );
+  const requests = [
+    ...new Map(
+      candidates.map(
+        (request) =>
+          [
+            `${request.release_id || request.release || ''}:${request.source_track_id || request.title}`,
+            request,
+          ] as const,
+      ),
+    ).values(),
+  ];
   if (!requests.length) return null;
   return (
     <section className={styles.requestList} aria-label="Request tracks">

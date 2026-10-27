@@ -46,6 +46,16 @@ export function metadataNeedsReview(row: AlbumAssignment): boolean {
   );
 }
 
+/** A large absolute and relative gap needs explicit listening/version review. */
+export function severeLengthMismatch(local?: number | null, release?: number | null): boolean {
+  return Boolean(
+    local &&
+    release &&
+    Math.abs(local - release) >= 30000 &&
+    Math.abs(local - release) / release >= 0.2,
+  );
+}
+
 export function statusLabel(status: string, row?: AlbumAssignment) {
   if (row?.fulfillment_state === 'downloaded') return 'Checking download';
   if (row && metadataNeedsReview(row))
@@ -69,6 +79,12 @@ export function statusLabel(status: string, row?: AlbumAssignment) {
   if (row?.fulfillment_state === 'wishlisted') return 'Wishlisted';
   if (row?.numbering_preview && status === 'change') return 'Numbering proposal';
   if (row?.audio_conflict === 'different_recording') return 'Audio conflicts with this track';
+  if (
+    row &&
+    status !== 'settled' &&
+    severeLengthMismatch(row.file_duration_ms, row.slot_duration_ms)
+  )
+    return 'Large length mismatch';
   if (row?.relationship === 'version_conflict') return 'Compare versions';
   if (row?.companion_of && status === 'confirmed') return 'Intentional companion';
   return (

@@ -24,6 +24,7 @@ import {
   runReconciliationScan,
   reanalyzeReviewCase,
   startMissingTrackRequests,
+  stopCollectingAlbum,
   startReadyChanges,
   type AlbumAssignment,
   type ReconciliationRun,
@@ -56,6 +57,7 @@ import styles from './review-page.module.css';
 import { libraryRelativePath } from './review-presentation';
 import { assignmentKey, record, records, textValue } from './review-presentation';
 import { SelectedActionDetail } from './selected-action-detail';
+import { UnidentifiedAlbum } from './unidentified-album';
 
 const requireChoice = new Set([
   'reconciliation_extra',
@@ -131,7 +133,9 @@ function decisionInstruction(
     case 'release_conflicts':
       return 'Choose the release this album should follow';
     case 'album_completeness':
-      return 'Choose whether this folder represents the complete album';
+      return decision.label === 'Submit track requests'
+        ? 'Request the wanted tracks before applying changes'
+        : 'Choose whether this folder represents the complete album';
     case 'numbering':
       if (decision.label === 'Disc numbering') return decision.summary || 'Update disc numbering';
       if (!multipleDiscs) return 'Renumber tracks to match the selected release';
@@ -432,6 +436,12 @@ export function ReviewPage() {
   const folderFinding = !reviewCase?.album_plan
     ? reviewCase?.items.find((item) => item.details?.folder_issue)
     : undefined;
+  const unidentified =
+    reviewCase?.album_plan?.state === 'unidentified' ||
+    Boolean(reviewCase?.items.some((item) => !item.file_path && item.details?.attempted_releases));
+  const unidentifiedFinding = reviewCase?.items.find(
+    (item) => !item.file_path && item.finding_type === 'reconciliation_unresolved',
+  );
   const albumTitleChange = reviewCase?.items
     .filter((item) => !item.details?.plan_keep)
     .map((item) => record(record(item.details?.changes).library_album_title))
@@ -462,8 +472,7 @@ export function ReviewPage() {
     decisionMembers,
     releaseOrderedAssignments,
   } = albumModel;
-  const albumReady =
-    plan.can_apply_ready && reviewDecisions.length === 0 && pendingDecisions.length === 0;
+  const albumReady = plan.can_apply_ready && reviewDecisions.length === 0;
   const sourceFolders = useMemo(
     () =>
       [
@@ -960,8 +969,15 @@ export function ReviewPage() {
       const preview = (await response.json()) as ReadyPreview;
       if (!preview.action_count)
         throw new Error('No fully decided album plans are ready to apply.');
+      let selection = {
+        case_ids: preview.albums.map((album) => album.case_id),
+        organize_case_ids: organize && scopeCaseId ? [scopeCaseId] : [],
+      };
       const message = (
         <ApplyPlanPreview
+          onSelectionChange={(value) => {
+            selection = value;
+          }}
           preview={preview}
           expanded={Boolean(scopeCaseId)}
           destinations={organize ? organizationMoves : []}
@@ -971,11 +987,11 @@ export function ReviewPage() {
         title: 'Apply ready album plans',
         message,
         destructive: preview.file_actions > 0,
-        confirmText: 'Apply plans',
+        confirmText: 'Apply selected plans',
       });
       if (!confirmed) return;
       setApplyBusy(true);
-      const started = await startReadyChanges(preview.signature, scopeCaseId, organize);
+      const started = await startReadyChanges(preview.signature, scopeCaseId, organize, selection);
       if (!started.started) throw new Error(started.error || 'Could not start album changes');
       rememberOperation(started.operation_id, scopeCaseId);
     } catch (cause) {
@@ -991,7 +1007,24 @@ export function ReviewPage() {
     if (!reviewCase || !missingCount) return;
     const confirmed = await confirm({
       title: 'Request missing album tracks',
-      message: `Request ${missingCount === 1 ? 'the missing track' : `${findingIds ? 'the selected' : 'all'} ${missingCount} missing tracks`} from the selected release? ${missingCount === 1 ? 'It will' : 'They will'} be added to the wishlist.`,
+      message: (
+        <>
+          <p>
+            These tracks will be added to the wishlist for the selected release. File changes are
+            applied separately.
+          </p>
+          <TrackRequests
+            items={reviewCase.items.filter(
+              (item) =>
+                item.finding_type === 'reconciliation_missing' &&
+                (!findingIds || findingIds.includes(item.id)) &&
+                !['wishlisted', 'downloading', 'downloaded'].includes(
+                  textValue(item.details?.fulfillment_state),
+                ),
+            )}
+          />
+        </>
+      ),
       confirmText: `Request ${missingCount} track${missingCount === 1 ? '' : 's'}`,
     });
     if (!confirmed) return;
@@ -1000,12 +1033,45 @@ export function ReviewPage() {
     setApplyProgress(`Requesting 0 of ${missingCount} missing tracks…`);
     try {
       const started = await startMissingTrackRequests(reviewCase.case_id, findingIds);
-      if (!started.started) throw new Error(started.error || 'Could not request missing tracks');
-      rememberOperation(started.operation_id, reviewCase.case_id);
+      if (started.success) {
+        setApplyBusy(false);
+        setApplyProgress('');
+        setNotice(
+          `${started.requested || missingCount} tracks requested. Approved file changes can now be applied.`,
+        );
+        await refresh();
+      } else if (started.started) {
+        rememberOperation(started.operation_id, reviewCase.case_id);
+      } else {
+        await refresh();
+        throw new Error(started.error || 'Could not request missing tracks');
+      }
     } catch (cause) {
       setApplyBusy(false);
       setApplyProgress('');
       setError((cause as Error).message);
+    }
+  };
+
+  const stopCollecting = async () => {
+    if (!reviewCase?.plan_signature) return;
+    const accepted = await confirm({
+      title: 'Stop collecting this album?',
+      message: `All ${assignments.filter((row) => row.file_path).length} remaining local files have removal planned. Stop requesting this release and withdraw its album wishlist requests? Files will move to recoverable quarantine when you apply the plan.`,
+      confirmText: 'Stop collecting this album',
+      destructive: true,
+    });
+    if (!accepted) return;
+    setBusy(true);
+    try {
+      const result = await stopCollectingAlbum(reviewCase.case_id, reviewCase.plan_signature);
+      if (!result.success) throw new Error(result.error || 'Could not update this album');
+      setNotice(result.message || 'Album collection stopped.');
+      await refresh();
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1044,6 +1110,7 @@ export function ReviewPage() {
       ),
     );
     if (next != null) {
+      setTrackFilter('');
       setActiveId(next);
       const row = reviewCase.album_plan?.assignments.find((entry) => entry.finding_id === next);
       setActiveRowKey(row ? assignmentKey(row) : null);
@@ -1873,11 +1940,13 @@ export function ReviewPage() {
                       <p>
                         {intentFinding
                           ? 'Not decided'
-                          : reviewCase.album_plan.intent_scope === 'complete'
-                            ? 'Collect the complete album'
-                            : reviewCase.album_plan.intent_scope === 'partial'
-                              ? 'Keep a partial album'
-                              : 'Not decided'}
+                          : reviewCase.album_plan.intent_scope === 'discard'
+                            ? 'Collection stopped · file removals planned'
+                            : reviewCase.album_plan.intent_scope === 'complete'
+                              ? 'Collect the complete album'
+                              : reviewCase.album_plan.intent_scope === 'partial'
+                                ? 'Keep a partial album'
+                                : 'Not decided'}
                       </p>
                     </div>
                     {intentFinding ? (
@@ -1907,13 +1976,41 @@ export function ReviewPage() {
                   </Button>
                 </Notice>
               )}
-              <div className={styles.tabWorkspace} data-view={albumView}>
+              <div
+                className={styles.tabWorkspace}
+                data-view={albumView}
+                data-unidentified={unidentified || undefined}
+              >
                 <div
                   className={styles.tabMain}
                   id="review-tab-panel"
                   role="tabpanel"
                   aria-labelledby={`review-tab-${albumView}`}
                 >
+                  {unidentified && albumView !== 'release' && (
+                    <UnidentifiedAlbum
+                      reviewCase={reviewCase}
+                      busy={mutationBusy}
+                      onIdentify={() => setAlbumView('release')}
+                      onLeave={
+                        unidentifiedFinding
+                          ? () => void act(unidentifiedFinding, 'dismiss')
+                          : undefined
+                      }
+                    />
+                  )}
+                  {albumView === 'plan' && reviewCase.can_stop_collecting && (
+                    <section className={styles.abandonAlbum}>
+                      <h3>All remaining files have removal planned</h3>
+                      <p>
+                        If you do not want this album, stop collecting it before applying the file
+                        removals.
+                      </p>
+                      <Button disabled={mutationBusy} onClick={() => void stopCollecting()}>
+                        I don’t want this album
+                      </Button>
+                    </section>
+                  )}
                   {folderFinding && (
                     <section
                       className={styles.folderConflict}
@@ -1988,6 +2085,7 @@ export function ReviewPage() {
                   {albumView === 'plan' &&
                     !albumReady &&
                     !folderFinding &&
+                    !unidentified &&
                     (reviewCase.album_plan || decisions.length > 0) && (
                       <section className={styles.decisionBoard} aria-label="Album decisions">
                         <div className={styles.sectionHeading}>
@@ -2004,7 +2102,7 @@ export function ReviewPage() {
                               {releaseChoicePending
                                 ? 'Choose the release first. Track and numbering proposals will be recalculated for that edition.'
                                 : plan.status === 'waiting'
-                                  ? 'Your planned changes are saved. This album becomes ready to apply after its requested files are received and assigned.'
+                                  ? 'Your requests are saved. The album stays here until the downloaded files are assigned. Other approved changes can be applied now.'
                                   : 'Resolve these choices before applying the album. Inspect affected tracks to compare exact values.'}
                             </p>
                           </div>
@@ -2168,6 +2266,11 @@ export function ReviewPage() {
                                         />
                                       ) : (
                                         <div className={styles.decisionActions}>
+                                          <TrackRequests
+                                            items={reviewCase.items.filter((item) =>
+                                              decision.finding_ids.includes(item.id),
+                                            )}
+                                          />
                                           <Button
                                             type="button"
                                             disabled={
@@ -2345,7 +2448,7 @@ export function ReviewPage() {
                       </section>
                     )}
 
-                  {albumView === 'tracks' && assignments.length > 0 && (
+                  {albumView === 'tracks' && !unidentified && assignments.length > 0 && (
                     <div className={styles.trackWorkspace} data-detail={inspectorOpen || undefined}>
                       <section
                         className={styles.trackMatrix}
@@ -2667,6 +2770,7 @@ export function ReviewPage() {
                             );
                             const go = (row: AlbumAssignment | undefined) => {
                               if (!row) return;
+                              setTrackFilter('');
                               setActiveId(row.finding_id ?? null);
                               setActiveRowKey(assignmentKey(row));
                               setInspectorOpen(true);
@@ -2676,14 +2780,11 @@ export function ReviewPage() {
                                 className={styles.decisionNavigation}
                                 aria-label="Track decision navigation"
                               >
-                                <Button
-                                  disabled={mutationBusy || index <= 0}
-                                  onClick={() => go(rows[index - 1])}
-                                >
+                                <Button disabled={index <= 0} onClick={() => go(rows[index - 1])}>
                                   ← Previous decision
                                 </Button>
                                 <Button
-                                  disabled={mutationBusy || index < 0 || index >= rows.length - 1}
+                                  disabled={index < 0 || index >= rows.length - 1}
                                   onClick={() => go(rows[index + 1])}
                                 >
                                   Next decision →
@@ -2781,7 +2882,7 @@ export function ReviewPage() {
                     </div>
                   )}
 
-                  {albumView === 'tracks' && assignments.length === 0 && (
+                  {albumView === 'tracks' && !unidentified && assignments.length === 0 && (
                     <>
                       <div className={styles.empty}>
                         No track assignment data is available for this album.
@@ -2866,6 +2967,7 @@ export function ReviewPage() {
                   )}
 
                   {albumView === 'plan' &&
+                    !unidentified &&
                     active &&
                     !activeAssignment &&
                     !activeDecision &&
@@ -2873,7 +2975,7 @@ export function ReviewPage() {
                 </div>
                 {albumView !== 'tracks' && (
                   <aside className={styles.tabContext} aria-label={`${albumView} context`}>
-                    {albumView === 'plan' && reviewCase.album_plan && (
+                    {albumView === 'plan' && !unidentified && reviewCase.album_plan && (
                       <section className={styles.planContext} aria-label="Album plan context">
                         <div>
                           <div className={styles.eyebrow}>Album context</div>

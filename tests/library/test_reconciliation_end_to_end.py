@@ -2398,6 +2398,14 @@ def test_wrong_audio_can_request_exact_replacement_before_quarantine(tmp_path, m
     with db._get_connection() as conn:
         assert conn.execute('SELECT COUNT(*) FROM wishlist_tracks').fetchone()[0] == 0
     result = worker.fix_finding(extra['id'], review_approved=True)
+    assert not result['success'] and path.exists()
+    case = worker.get_review_case(case_id)
+    intent = next((item for item in case['items'] if item['finding_type'] == 'reconciliation_intent'), None)
+    if intent:
+        assert worker.apply_review_decision(case_id, intent['id'], evidence_token=intent['evidence_token'], action='fix', fix_action='partial')['success']
+    assert worker.start_review_missing_tracks(case_id)['success']
+    assert path.exists()
+    result = worker.fix_finding(extra['id'], review_approved=True)
     assert result['success'], result
     assert not path.exists()
     assert (root / '.deleted' / path.name).exists()

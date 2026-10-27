@@ -15,6 +15,7 @@ from enum import Enum
 
 
 class ScanScope(str, Enum):
+    PLAN = 'plan'
     ALBUM = 'album'
     DISCOVERY = 'discovery'
     LIBRARY = 'library'
@@ -67,6 +68,7 @@ def directory_observations(folders: list[str], roots: list[str] | None = None) -
 class InventoryRequest:
     scope: ScanScope
     saved: dict | None = None
+    planning: dict | None = None
 
     @property
     def album_ids(self) -> list:
@@ -100,11 +102,25 @@ def load_inventory_request(db, folder: str | None, scope: ScanScope, *,
                 path.startswith(root.rstrip(os.sep) + os.sep) for root in roots)
                 for path in saved['paths']):
             return InventoryRequest(ScanScope.LIBRARY)
+        planning = document.get('_planning') if scope == ScanScope.PLAN else None
+        if scope == ScanScope.PLAN:
+            # Draft choices reuse the evidence the user reviewed. Changed files
+            # require a real album refresh; unrelated downloads do not.
+            try:
+                from core.library.reconciliation_evidence import file_identity
+                if not planning or not planning.get('files') or any(
+                        os.stat(file['path']).st_size != file['size_bytes'] or
+                        os.stat(file['path']).st_mtime_ns != file['mtime_ns'] or
+                        file_identity(os.stat(file['path'])) != file.get('file_identity')
+                        for file in planning['files']):
+                    scope, planning = ScanScope.ALBUM, None
+            except (OSError, KeyError):
+                scope, planning = ScanScope.ALBUM, None
         if scope == ScanScope.ALBUM and (
                 not saved.get('directory_observations') or
                 directory_observations(saved['folders']) != saved['directory_observations']):
             scope = ScanScope.DISCOVERY
-        return InventoryRequest(scope, saved)
+        return InventoryRequest(scope, saved, planning)
     except (ValueError, TypeError, KeyError, sqlite3.OperationalError):
         return InventoryRequest(ScanScope.LIBRARY)
     finally:
@@ -141,7 +157,7 @@ def track_selection(db, request: InventoryRequest, *, title_key, base_title_key)
     if request.scope == ScanScope.LIBRARY:
         return None
     ids = request.album_ids
-    if request.scope == ScanScope.ALBUM:
+    if request.scope in (ScanScope.ALBUM, ScanScope.PLAN):
         return ('t.album_id IN (' + ','.join('?' for _ in ids) + ')', ids)
     conn = db._get_connection()
     try:

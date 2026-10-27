@@ -88,7 +88,10 @@ export function SelectedActionDetail({
   const details = record(finding.details);
   const planned = record(details.planned_choice);
   const [editing, setEditing] = useState(false);
-  const hasPlan = Boolean(planned.action || details.saved_assignment);
+  const hasPlan = Boolean(
+    planned.action && (planned.category !== 'numbering' || details.plan_keep),
+  );
+  const assignmentConfirmed = Boolean(details.saved_assignment);
   const plannedAction = textValue(planned.fix_action);
   const plannedLabel =
     planned.action === 'dismiss'
@@ -123,12 +126,28 @@ export function SelectedActionDetail({
         </div>
       )}
       <h3>{findingHeading(finding)}</h3>
+      {planned.category === 'numbering' && !hasPlan && (
+        <div className={styles.confirmedStatus}>
+          <strong>Numbering choice saved</strong>
+          <span>Review the remaining metadata changes below.</span>
+        </div>
+      )}
+      {assignmentConfirmed && !hasPlan && (
+        <div className={styles.confirmedStatus} role="status">
+          <strong>Match confirmed</strong>
+          <span>
+            {finding.review_tier === 'ready'
+              ? 'The proposed changes below are ready to apply.'
+              : 'Review the proposed metadata changes below.'}
+          </span>
+        </div>
+      )}
       {hasPlan && (
         <div className={styles.plannedStatus} role="status">
           <strong>{plannedLabel}</strong>
           <span>
             {plannedAction === 'replace'
-              ? `Request ${textValue(replacement.name || details.expected_title)} and quarantine the current file when applied.`
+              ? `Request ${textValue(replacement.name || details.expected_title)} from Plan first. Applying then quarantines the current file.`
               : 'Saved in this album plan. Files change when you apply it.'}
           </span>
           <div className={styles.inlineActions}>

@@ -150,7 +150,7 @@ it('groups overlapping changes while retaining one action total and exact values
       }}
     />,
   );
-  expect(screen.getByText('1 planned action')).toBeVisible();
+  expect(screen.getByText('1 selected action')).toBeVisible();
   expect(screen.getByText('Disc and track numbering')).toBeVisible();
   fireEvent.click(screen.getByText('Metadata corrections'));
   expect(screen.getByText('Old title')).toBeVisible();
@@ -197,11 +197,11 @@ it('shows matcher checks with their actual decision explanation', () => {
     />,
   );
   expect(screen.queryByRole('table')).toBeNull();
-  expect(screen.getAllByText('Differs')).toHaveLength(2);
+  expect(screen.getAllByText('Differs')).toHaveLength(1);
   fireEvent.click(screen.getByText('Artist credit'));
   expect(screen.getByText('Noah Kahan & Hozier')).toBeVisible();
   fireEvent.click(screen.getByText('Album assignment'));
-  fireEvent.click(screen.getByText('Decision'));
+  fireEvent.click(screen.getByText('Assessment'));
   expect(screen.getByText('Other files fit their own slots')).toBeVisible();
   expect(screen.getByText('Listen for a track boundary error')).toBeVisible();
 });
@@ -246,4 +246,74 @@ it('separates exact track requests from quarantine and labels both ends of a fol
   expect(screen.getByLabelText('Destination folders')).toHaveTextContent('Current folder');
   expect(screen.getByLabelText('Destination folders')).toHaveTextContent('Planned folder');
   expect(screen.getByLabelText('Destination folders')).toHaveTextContent('Artist/Approved album');
+});
+
+it('searches albums and artists without silently changing the batch selection', () => {
+  const onSelectionChange = vi.fn();
+  render(
+    <ApplyPlanPreview
+      expanded={false}
+      destinations={[]}
+      onSelectionChange={onSelectionChange}
+      preview={{
+        signature: 'batch',
+        action_count: 2,
+        file_actions: 0,
+        albums: [
+          {
+            case_id: 'one',
+            album: 'Northbound',
+            artist: 'First artist',
+            actions: [{ id: 1, description: 'Update title' }],
+          },
+          {
+            case_id: 'two',
+            album: 'Southbound',
+            artist: 'Second artist',
+            actions: [{ id: 2, description: 'Update title' }],
+          },
+        ],
+      }}
+    />,
+  );
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search ready albums' }), {
+    target: { value: 'Second artist' },
+  });
+  expect(screen.getByText('2 of 2 albums selected')).toBeVisible();
+  expect(screen.queryByRole('checkbox', { name: /Northbound/ })).toBeNull();
+  expect(onSelectionChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Select only shown albums' }));
+  expect(onSelectionChange).toHaveBeenLastCalledWith({ case_ids: ['two'], organize_case_ids: [] });
+  expect(screen.getByText('1 selected action')).toBeVisible();
+});
+
+it('marks a large length mismatch red even when the fingerprint identifies the selected recording', () => {
+  render(
+    <ReconciliationEvidence
+      prominent
+      finding={
+        {
+          id: 1,
+          finding_type: 'reconciliation_unresolved',
+          file_path: '/music/Lotus.flac',
+          details: {
+            expected_title: 'Lotus',
+            file_duration_ms: 300910,
+            expected_duration_ms: 104850,
+            recording_mbid: 'lotus',
+            acoustid: {
+              status: 'ok',
+              recordings: [{ mbid: 'lotus', title: 'Lotus', artist: 'YIN YIN', score: 0.97 }],
+            },
+          },
+        } as unknown as ReviewFinding
+      }
+    />,
+  );
+  expect(screen.getByRole('region', { name: 'Audio identity' })).toHaveAttribute(
+    'data-tone',
+    'danger',
+  );
+  expect(screen.getByText('Length differs by 196.1 seconds')).toBeVisible();
+  expect(screen.getByText(/incorrect catalogue length/)).toBeVisible();
 });

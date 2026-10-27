@@ -13,7 +13,7 @@ for (const width of [1800, 390]) {
     await page.goto(`${ORIGIN}/review?mode=all`);
     await page.getByRole('button', { name: /^Apply 2 ready changes$/ }).click();
     const dialog = page.getByRole('dialog', { name: 'Apply ready album plans' });
-    await expect(dialog).toContainText('2 planned actions');
+    await expect(dialog).toContainText('2 selected actions');
     await dialog.locator('summary').filter({ hasText: 'Metadata fills' }).click();
     if (width > 520) {
       const current = dialog.getByRole('columnheader', { name: 'Current', exact: true });

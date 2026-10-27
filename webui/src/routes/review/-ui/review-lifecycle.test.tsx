@@ -435,3 +435,48 @@ it('advances after saving a track choice and keeps navigation when returning to 
   expect(screen.getByRole('status')).toHaveTextContent('Leave as-is planned');
   expect(screen.getByRole('button', { name: /Next decision/ })).toBeEnabled();
 });
+
+it('presents an unidentified release with actual local files and a path to identify it', async () => {
+  const current = {
+    ...album,
+    items: [
+      {
+        id: 7,
+        finding_type: 'reconciliation_unresolved',
+        title: 'Identify release',
+        file_path: null,
+        details: {
+          attempted_releases: [],
+          checked_files: [
+            { file: '01 - Études.mp3', file_path: '/music/First/01.mp3', audio_status: 'no_match' },
+          ],
+        },
+      },
+    ],
+    album_plan: {
+      ...album.album_plan,
+      state: 'unidentified',
+      source: '',
+      release_id: '',
+      candidates: [],
+      assignments: [
+        {
+          status: 'uncertain',
+          file_path: '/music/First/01.mp3',
+          file: '01 - Études.mp3',
+          current_title: 'Études',
+          file_duration_ms: 190000,
+          acoustid: { status: 'no_match' },
+        },
+      ],
+    },
+  };
+  setup(current);
+  render(<ReviewPage />);
+  await screen.findByRole('heading', { name: 'Release not identified' });
+  expect(screen.getByText(/1 local file found/)).toBeVisible();
+  expect(screen.queryByText(/No track assignment data/)).toBeNull();
+  expect(screen.queryByText(/Choose the correct action after/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Identify release…' }));
+  expect(screen.getByRole('textbox', { name: 'MusicBrainz release MBID or URL' })).toBeVisible();
+});

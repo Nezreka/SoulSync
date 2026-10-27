@@ -189,24 +189,21 @@ def test_album_apply_all_includes_reviewed_metadata_but_not_other_decisions():
 
 def test_complete_album_can_request_all_missing_slots_after_scope_choice():
     worker = RepairWorker.__new__(RepairWorker)
-    case = {
-        'folder': '/music/album',
-        'items': [
-            {'id': 1, 'finding_type': 'reconciliation_missing'},
-            {'id': 2, 'finding_type': 'reconciliation_missing'},
-            {'id': 3, 'finding_type': 'reconciliation_metadata'},
-        ],
-    }
+    worker.db = _Database()
+    worker._review_apply_lock = threading.RLock()
+    case = {'folder': '/music/album', 'items': [
+        {'id': 1, 'finding_type': 'reconciliation_missing', 'details': {}},
+        {'id': 2, 'finding_type': 'reconciliation_missing', 'details': {}},
+        {'id': 3, 'finding_type': 'reconciliation_metadata', 'details': {}},
+    ]}
     worker.get_review_case = lambda *_args, **_kwargs: case
-    captured = {}
-    worker.start_bulk_fix = lambda **kwargs: captured.update(kwargs) or {'started': True}
-
-    assert worker.start_review_missing_tracks('album-case')['started']
-    assert captured['finding_ids'] == [1, 2]
-    assert not captured.get('review_case_folders')
+    calls = []
+    worker._fix_reconciliation_missing = lambda *args: calls.append(args) or {'success': True}
+    assert worker.start_review_missing_tracks('album-case')['requested'] == 2
+    assert len(calls) == 2
     case['items'][1]['details'] = {'fulfillment_state': 'wishlisted'}
-    assert worker.start_review_missing_tracks('album-case')['started']
-    assert captured['finding_ids'] == [1]
+    assert worker.start_review_missing_tracks('album-case')['requested'] == 1
+    assert len(calls) == 3
     case['items'].append({'id': 4, 'finding_type': 'reconciliation_intent'})
     assert not worker.start_review_missing_tracks('album-case')['started']
 
@@ -986,7 +983,7 @@ def test_review_http_api_returns_exact_case_and_rejects_stale_apply(monkeypatch)
     })
     assert response.status_code == 200
     assert response.json == {'started': True, 'total': 4}
-    assert calls == [{'case_id': case_id, 'organize': True,
+    assert calls == [{'case_id': case_id, 'organize': True, 'case_ids': None, 'organize_case_ids': None,
                       'expected_signature': client.get('/api/repair/review-queue/apply-ready', query_string={'case_id': case_id}).json['signature']}]
 
 
@@ -1189,7 +1186,7 @@ def test_requested_missing_track_stays_pending_without_reanalysis():
     worker.db = db
     worker._config_manager = None
     worker._review_apply_lock = threading.Lock()
-    worker._execute_fix = lambda *args: {'success': True, 'action': 'wishlisted'}
+    worker._fix_reconciliation_missing = lambda *args: {'success': True, 'action': 'wishlisted'}
     worker._schedule_review_refresh = lambda *args: (_ for _ in ()).throw(AssertionError('No rescan needed'))
     case = worker.get_review_case(case_id)
     result = worker.apply_review_decision(case_id, 1, evidence_token=case['items'][0]['evidence_token'], action='fix')
@@ -1357,7 +1354,7 @@ def test_reopen_assignment_is_case_scoped_and_clears_only_its_saved_choice(tmp_p
     worker.db = db
     worker._review_apply_lock = threading.RLock()
     refreshed = []
-    worker._schedule_album_refresh = lambda *args: refreshed.append(args) or True
+    worker._schedule_album_refresh = lambda *args, **kwargs: refreshed.append(args) or True
 
     assert worker.reopen_review_assignment('another-case', 1)['stale']
     assert not refreshed
@@ -1655,17 +1652,19 @@ def test_verified_manual_assignment_allows_harmless_metadata_but_not_new_title_d
 
 def test_missing_track_subset_rejects_foreign_stale_and_invalid_selections():
     worker = RepairWorker.__new__(RepairWorker)
+    worker.db = _Database()
+    worker._review_apply_lock = threading.RLock()
     case = {'items': [
-        {'id': 1, 'finding_type': 'reconciliation_missing'},
-        {'id': 2, 'finding_type': 'reconciliation_missing'},
+        {'id': 1, 'entity_id': 'one', 'finding_type': 'reconciliation_missing', 'details': {}},
+        {'id': 2, 'entity_id': 'two', 'finding_type': 'reconciliation_missing', 'details': {}},
         {'id': 3, 'finding_type': 'reconciliation_missing', 'details': {'fulfillment_state': 'wishlisted'}},
         {'id': 4, 'finding_type': 'reconciliation_metadata'},
     ]}
     worker.get_review_case = lambda *_args, **_kwargs: case
     calls = []
-    worker.start_bulk_fix = lambda **kwargs: calls.append(kwargs) or {'started': True}
-    assert worker.start_review_missing_tracks('album', finding_ids=[2])['started']
-    assert calls[0]['finding_ids'] == [2]
+    worker._fix_reconciliation_missing = lambda *args: calls.append(args) or {'success': True}
+    assert worker.start_review_missing_tracks('album', finding_ids=[2])['success']
+    assert calls[0][1] == 'two'
     for invalid in ([], [3], [4], [99], [True], ['1'], '1'):
         assert not worker.start_review_missing_tracks('album', finding_ids=invalid)['started']
     assert len(calls) == 1
@@ -1690,7 +1689,7 @@ def test_queue_navigation_spans_pages_in_the_same_filtered_order():
     assert list_cases(db, page=99, limit=2)['page'] == 2
 
 
-def test_pending_download_with_saved_metadata_has_no_ready_actions():
+def test_pending_download_does_not_block_independent_ready_metadata():
     from core.repair_review_queue import queue_summary
     db = _Database()
     common = {'album_folder': '/music/Waiting'}
@@ -1699,8 +1698,30 @@ def test_pending_download_with_saved_metadata_has_no_ready_actions():
     db.add(2, None, {**common, 'fulfillment_state': 'wishlisted'},
            job_id='library_reconciliation', kind='reconciliation_missing')
     totals = queue_summary(db, job_id='library_reconciliation')
-    assert totals['waiting'] == 1 and totals['ready'] == totals['ready_total'] == 0
-    assert ready_batch_preview(db)['action_count'] == 0
+    assert totals['waiting'] == 0 and totals['ready'] == totals['ready_total'] == 1
+    assert ready_batch_preview(db)['action_count'] == 1
     case = get_case(db, list_cases(db)['items'][0]['case_id'])
-    assert case['plan']['status'] == 'waiting'
-    assert not case['plan']['can_apply_ready']
+    assert case['plan']['status'] == 'ready'
+    assert case['plan']['can_apply_ready']
+
+
+def test_batch_selection_applies_only_selected_albums_and_organization():
+    db = _Database()
+    for index in (1, 2):
+        db.add(index, f'/music/Album{index}/song.flac', {'album_id': index, 'album_folder': f'/music/Album{index}',
+            'album_title': f'Album {index}', 'artist_name': 'Artist', 'confidence': 'clear',
+            'changes': {'title': {'old': 'song', 'new': 'Song'}}},
+            job_id='library_reconciliation', kind='reconciliation_metadata')
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    captured = []
+    worker.start_bulk_fix = lambda **kwargs: captured.append(kwargs) or {'started': True}
+    preview = ready_batch_preview(db)
+    selected = preview['albums'][1]
+    result = worker.start_review_safe(expected_signature=preview['signature'], case_ids=[selected['case_id']], organize_case_ids=[selected['case_id']])
+    assert result['started']
+    assert captured[0]['finding_ids'] == [action['id'] for action in selected['actions']]
+    assert len(captured[0]['review_case_folders']) == 1
+    assert len(captured[0]['organize_album_ids']) == 1
+    assert not worker.start_review_safe(expected_signature=preview['signature'], case_ids=[])['started']
+    assert not worker.start_review_safe(expected_signature=preview['signature'], case_ids=[selected['case_id']], organize_case_ids=[preview['albums'][0]['case_id']])['started']

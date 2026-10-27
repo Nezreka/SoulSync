@@ -132,14 +132,14 @@ test('album metadata decisions lead to their affected tracks before approval', a
   await expect(page.getByText('Recording ID needs review', { exact: true })).toBeVisible();
 });
 
-test('plans awaiting acquisition show the edits and hold apply until files are assigned', async ({
+test('plans awaiting acquisition still allow independent approved edits', async ({
   page,
 }) => {
   await installShell(
     page,
     reviewFixture(true, (review) => {
-      review.plan!.status = 'waiting';
-      review.plan!.can_apply_ready = false;
+      review.plan!.status = 'ready';
+      review.plan!.can_apply_ready = true;
       review.decisions!.push({
         id: 'waiting',
         category: 'pending_fulfillment',
@@ -163,7 +163,7 @@ test('plans awaiting acquisition show the edits and hold apply until files are a
   await expect(page.getByText('Waiting for missing tracks', { exact: true })).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Apply 1 ready change', exact: true }),
-  ).toHaveCount(0);
+  ).toHaveCount(1);
   await expect(page.getByLabel('Ready change summary', { exact: true })).toHaveCount(1);
   await expect(page.getByLabel('Proposed metadata by field', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Decisions complete' })).toHaveCount(0);

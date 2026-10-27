@@ -18,19 +18,30 @@ export function PairingEvidence({ checks, reasons }: { checks: unknown; reasons?
         rows.map((row) => (
           <details key={textValue(row.check)} data-result={textValue(row.result)}>
             <summary>
-              <span>{textValue(row.check)}</span>
-              <strong>{outcomes[textValue(row.result)] || 'Context'}</strong>
+              <span>{row.check === 'Decision' ? 'Assessment' : textValue(row.check)}</span>
+              <strong>
+                {row.check === 'Decision'
+                  ? {
+                      agrees: 'Supported',
+                      conflicts: 'Needs review',
+                      manual: 'Confirmed by you',
+                      unavailable: 'More evidence needed',
+                    }[textValue(row.result)] || 'Needs review'
+                  : outcomes[textValue(row.result)] || 'Context'}
+              </strong>
             </summary>
-            <dl>
-              <div>
-                <dt>Local evidence</dt>
-                <dd>{textValue(row.local) || 'Not available'}</dd>
-              </div>
-              <div>
-                <dt>Release</dt>
-                <dd>{textValue(row.release) || 'Not available'}</dd>
-              </div>
-            </dl>
+            {row.check !== 'Decision' && (
+              <dl>
+                <div>
+                  <dt>Local evidence</dt>
+                  <dd>{textValue(row.local) || 'Not available'}</dd>
+                </div>
+                <div>
+                  <dt>Release</dt>
+                  <dd>{textValue(row.release) || 'Not available'}</dd>
+                </div>
+              </dl>
+            )}
             {Boolean(row.detail) && <p>{textValue(row.detail)}</p>}
           </details>
         ))

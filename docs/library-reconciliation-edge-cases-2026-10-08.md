@@ -89,7 +89,7 @@ This catalogue records the real-library cases used while designing and tuning th
 - A lone track currently referenced by a playlist is positive evidence of a partial acquisition and should not request the rest of the release.
 - Without persisted intent, ask one **Album completeness** question and list the absent slots inside it.
 - Once the user chooses complete, absent slots become actionable missing-track requests. Once partial is chosen, they become intentionally uncollected slots.
-- Defer completeness questions until the release is selected. Then keep completeness editable even while track assignments need review; requesting files still waits for the dependent assignment decisions. Preserve already requested slots when revisiting this choice.
+- Defer completeness questions until the release is selected. Then keep completeness editable while track assignments need review. Show every wanted missing slot and planned replacement in a separate request step before applying files. Submitted requests remain decided across scans and do not block independent approved edits. Preserve already requested slots when revisiting this choice.
 - “Album intent” and “Missing tracks” are phases of the same concern and share one queue filter.
 
 Examples encountered: Snow Patrol’s *Up to Now* should remain partial; the single Alicia Keys playlist track should not imply ownership of the full *Girl on Fire* release; *Amélie* needs an explicit complete-versus-partial choice when acquisition history is absent.

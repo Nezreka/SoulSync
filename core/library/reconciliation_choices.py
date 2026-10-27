@@ -77,7 +77,7 @@ def project(details, saved, *, case_id=None, raw_json=None):
         result['plan_keep'] = not bool(result.get('changes'))
     if category != 'numbering' and choice == 'fix':
         result['plan_approved'] = True
-        if result['planned_choice']['fix_action'] in ('replace', 'request_missing') or result['planned_choice']['fix_action'].startswith('existing:'):
+        if result['planned_choice']['fix_action'] in ('quarantine', 'replace', 'request_missing') or result['planned_choice']['fix_action'].startswith('existing:'):
             result['changes'] = {}
     elif category != 'numbering' and choice == 'dismiss':
         result['plan_keep'] = True
@@ -220,6 +220,8 @@ def same_annotated_evidence(previous, current):
             annotations.add(added)
     if previous and not previous.get('file_identity'):
         annotations.add('file_identity')
+    if previous and previous.get('duplicate_copies'):
+        annotations.update(key for key in ('expected_title', 'expected_duration_ms', 'expected_track_number', 'expected_disc_number') if key not in previous)
     empty_defaults = {'metadata_review_reason', 'album_consistency', 'companion_count',
                       'recording_id_conflict', 'catalogue_disagreement'}
     def substantive(details):

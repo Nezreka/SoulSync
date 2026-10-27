@@ -126,7 +126,10 @@ def load_album_plan(conn, case_id: str) -> dict[str, Any] | None:
         value = json.loads(row[0])
     except (TypeError, ValueError):
         return None
-    return value if isinstance(value, dict) else None
+    if isinstance(value, dict):
+        value.pop('_planning', None)
+        return value
+    return None
 
 
 def retire_unseen_plans(db, observed_case_ids: set[str], *,

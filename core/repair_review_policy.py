@@ -176,6 +176,12 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
     if (finding_type == 'reconciliation_missing' and
             details.get('fulfillment_state') in ('wishlisted', 'downloading', 'downloaded')):
         return 'blocked', ('Downloaded; waiting for a verified library assignment' if details.get('fulfillment_state') == 'downloaded' else 'Another copy is already on the wishlist' if details.get('replacement_request') else 'The missing track is already on the wishlist')
+    local = details.get('file_duration_ms') or (details.get('current_tags') or {}).get('duration_ms') or 0
+    release = details.get('expected_duration_ms') or 0
+    if (finding_type in ('reconciliation_unresolved', 'reconciliation_metadata') and local and release
+            and abs(local - release) >= 30000 and abs(local - release) / release >= .2
+            and details.get('confidence') != 'manual' and not (details.get('plan_approved') or details.get('plan_keep'))):
+        return 'destructive', 'Large length mismatch; listen and verify the release before accepting'
     if finding_type == 'reconciliation_unresolved' and (details.get('plan_approved') or details.get('plan_keep')):
         return ('blocked', 'Choose the intended release first') if global_blocked else ('ready', 'File action saved in the album plan')
     if finding_type in _DESTRUCTIVE_TYPES:
@@ -264,7 +270,7 @@ def case_mode(items: list[dict]) -> str:
         return 'destructive'
     if unresolved:
         return 'manual'
-    return 'waiting' if len(required) < len(items) else 'ready'
+    return 'ready' if required else 'waiting' if items else 'ready'
 
 
 def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', case_id: str = '', compact: bool = False) -> dict:
@@ -283,7 +289,7 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
                   'title_difference_kind', 'confidence', 'numbering_mode',
                   'release_disc_count', 'local_file_count', 'release_track_count',
                   'recording_mbid', 'expected_duration_ms', 'expected_title',
-                  'metadata_review_reason', 'assignment_evidence', 'companion_count',
+                  'metadata_review_reason', 'assignment_evidence', 'companion_count', 'file_duration_ms',
                   'expected_artist_names', 'artist_aliases', 'routine_numbering', 'numbering_recovery')
         raw_details = "CASE WHEN json_valid(f.details_json) THEN f.details_json ELSE '{}' END"
         pairs = [f"'{field}', json_extract({raw_details}, '$.{field}')" for field in fields]
@@ -313,7 +319,7 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
         for item in items:
             item['review_tier'], _ = _finding_tier(item, global_blocked=blocked)
         mode = case_mode(items)
-        ready = [item['id'] for item in items] if mode == 'ready' else []
+        ready = [item['id'] for item in items if item['review_tier'] == 'ready'] if mode == 'ready' else []
         result[key] = {'mode': mode, 'ready_ids': ready, 'items': items}
     return result
 
