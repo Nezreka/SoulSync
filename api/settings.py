@@ -62,6 +62,20 @@ def register_routes(bp):
 
         try:
             cfg = current_app.soulsync["config_manager"]
+            # the same sign-in rules the settings page passes (#1839): a key
+            # has no oidc session, so it can never be the one that turns
+            # oidc-only on, and it can't strand a member either
+            security_in = {k[len("security."):]: v for k, v in body.items()
+                           if isinstance(k, str) and k.startswith("security.")}
+            if isinstance(body.get("security"), dict):
+                security_in.update(body["security"])
+            if security_in:
+                from core.security.oidc_only import check_security_change
+                from database.music_database import get_database
+                refusal = check_security_change(cfg, security_in, get_database(),
+                                                device_id=None, profile_id=None)
+                if refusal:
+                    return api_error("BAD_REQUEST", refusal["error"], 400)
             updated = []
             for key, value in body.items():
                 # Block writing API keys through settings endpoint

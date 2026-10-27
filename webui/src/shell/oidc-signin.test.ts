@@ -78,6 +78,43 @@ describe('the oidc button', () => {
   });
 });
 
+describe('oidc only (#1839)', () => {
+  function loginDom() {
+    document.body.innerHTML = `
+      <div id="login-entry">
+        <p class="launch-pin-subtitle">Enter your account name and password</p>
+        <form id="login-form"></form>
+        <div id="login-plex"></div>
+        <div id="login-oidc" class="login-oidc" hidden>
+          <span class="login-oidc-or">or</span>
+          <button id="login-oidc-button" type="button">Sign in with OIDC</button>
+        </div>
+        <p id="login-error" style="display:none"></p>
+        <button class="launch-pin-forgot">Forgot password?</button>
+      </div>`;
+  }
+
+  it('leaves only the provider button on the login screen', async () => {
+    loginDom();
+    available({ enabled: true, label: 'Sign in with Pocket ID', error: null, oidc_only: true });
+    await initOidcSignIn(vi.fn());
+    expect(document.getElementById('login-form')!.style.display).toBe('none');
+    expect(document.getElementById('login-plex')!.style.display).toBe('none');
+    expect(document.querySelector<HTMLElement>('.launch-pin-forgot')!.style.display).toBe('none');
+    expect(document.querySelector<HTMLElement>('.login-oidc-or')!.style.display).toBe('none');
+    expect(document.getElementById('login-oidc')!.hidden).toBe(false);
+    expect(window.__soulsyncOidcOnly).toBe(true);
+  });
+
+  it('changes nothing while it is off', async () => {
+    loginDom();
+    available({ enabled: true, label: 'Sign in with Pocket ID', error: null, oidc_only: false });
+    await initOidcSignIn(vi.fn());
+    expect(document.getElementById('login-form')!.style.display).toBe('');
+    expect(window.__soulsyncOidcOnly).toBe(false);
+  });
+});
+
 describe('coming back from a connect', () => {
   it('reopens my account and drops the marker', () => {
     const open = vi.fn();
@@ -210,5 +247,44 @@ describe("the admin's own connection in settings", () => {
     window.dispatchEvent(new CustomEvent('ss:webui-profile-context-changed'));
     await new Promise((r) => setTimeout(r, 20));
     expect(calls).toBe(1);
+  });
+});
+
+describe('under a url base (SOULSYNC_URL_BASE)', () => {
+  // location.assign gets no sub-path from url-base.js, so the shell adds it
+  let meta: HTMLMetaElement;
+  beforeEach(() => {
+    meta = document.createElement('meta');
+    meta.name = 'soulsync-url-base';
+    meta.content = '/soulsync';
+    document.head.append(meta);
+  });
+  afterEach(() => meta.remove());
+
+  it('the sign-in button keeps the sub-path', async () => {
+    available({ enabled: true, label: 'Sign in with Pocket ID', error: null });
+    const go = vi.fn();
+    await initOidcSignIn(go);
+    (document.getElementById('login-oidc-button') as HTMLButtonElement).click();
+    expect(go).toHaveBeenCalledWith('/soulsync' + OIDC_START_URL);
+  });
+
+  it("the admin's connect keeps the sub-path", async () => {
+    document.body.innerHTML = '<div id="security-oidc-admin"></div>';
+    const box = document.getElementById('security-oidc-admin') as HTMLElement;
+    server.use(
+      http.get('*/api/profiles/me/oidc', () =>
+        HttpResponse.json({ success: true, enabled: true, label: 'x', icon: '', connected: false }),
+      ),
+      http.get('*/api/auth/oidc/available', () =>
+        HttpResponse.json({ success: true, enabled: true }),
+      ),
+    );
+    const go = vi.fn();
+    await renderOidcAdmin(box, go);
+    (box.querySelector('button') as HTMLButtonElement).click();
+    await vi.waitFor(() =>
+      expect(go).toHaveBeenCalledWith('/soulsync/api/profiles/me/oidc-connect/start'),
+    );
   });
 });

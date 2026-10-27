@@ -472,6 +472,12 @@ def _init_flask_secret_key():
         return _secrets.token_hex(32)
 
 app.secret_key = _init_flask_secret_key()
+# an oidc-only override left set is said at every start (#1839)
+try:
+    from core.security.oidc_only import log_start_state as _oidc_only_log_start
+    _oidc_only_log_start(config_manager)
+except Exception as _e:  # noqa: BLE001
+    logger.debug("oidc-only start check failed: %s", _e)
 # Flask's default cookie name is "session". Browsers don't scope cookies by port,
 # so another app on the same host using "session" overwrote this one, dropping the
 # selected profile and falling back to profile 1 (admin).
@@ -801,6 +807,13 @@ def _set_profile_context():
             from core.security import oidc_session
             if not oidc_session.check_device(_device_id, get_database(), config_manager):
                 oidc_session.end_device(get_database(), _device_id)
+                _signed_out = True
+        # every sign-in makes a device row, so a session without one didn't
+        # sign in with oidc, and oidc-only (#1839) ends it. the discover
+        # warmer's in-process sessions are marked and stay
+        if not _signed_out and not _device_id and not session.get('internal_warmup'):
+            from core.security import oidc_only
+            if oidc_only.is_on(config_manager):
                 _signed_out = True
         if not _signed_out:
             _devices.touch(_device_id, lambda d: get_database().touch_profile_device(d))
@@ -4262,6 +4275,21 @@ def revoke_api_key_internal(key_id):
     return api_success({"message": "API key revoked"})
 
 
+@app.route('/api/security/oidc-only', methods=['GET'])
+@admin_only
+def oidc_only_status():
+    """settings > security's oidc-only row and the admin's override
+    indicator (#1839): whether it's on, whether the environment override
+    has it off, who isn't linked yet, how many devices that didn't sign in
+    with oidc were used lately, and whether this session could turn it on"""
+    from core.security import oidc_only
+    db = get_database()
+    out = oidc_only.status(config_manager, db=db)
+    out['session_ok'] = oidc_only.session_signed_in_with_oidc(
+        db, session.get('device_id'), session.get('profile_id'))
+    return jsonify({'success': True, **out})
+
+
 @app.route('/api/settings', methods=['GET', 'POST'])
 @admin_only
 def handle_settings():
@@ -4295,17 +4323,16 @@ def handle_settings():
                 if not get_database().profile_has_password(1):
                     return jsonify({"success": False,
                                     "error": "Set an admin password before enabling login mode."}), 400
-                # No-gaps: every member must have a password too, or they'd be
-                # locked out the moment login turns on.
-                from core.security.login_provisioning import members_without_password
-                _stranded = members_without_password(get_database().get_all_profiles())
-                if _stranded:
-                    _names = ', '.join(str(m.get('name') or '?') for m in _stranded)
-                    return jsonify({"success": False,
-                                    "error": f"These members have no login password and "
-                                             f"couldn't sign in: {_names}. Set their passwords "
-                                             f"in Manage Profiles first.",
-                                    "members_without_password": _stranded}), 400
+            # No-gaps: every member keeps a way in (a password, or a plex or
+            # oidc link whose sign-in is on), and oidc-only (#1839) only turns
+            # on from a session that signed in with oidc, with everyone linked.
+            if isinstance(_sec_in, dict) and _sec_in:
+                from core.security.oidc_only import check_security_change
+                _refusal = check_security_change(
+                    config_manager, _sec_in, get_database(),
+                    device_id=session.get('device_id'), profile_id=session.get('profile_id'))
+                if _refusal:
+                    return jsonify({"success": False, **_refusal}), 400
 
             # YouTube pasted cookies.txt (server/Docker path): pull it out BEFORE the
             # generic persist so the raw cookie blob never lands in config.json — it's
@@ -22398,6 +22425,8 @@ def _discover_warm_sweep(paths=None):
                 sess['profile_epoch'] = epoch
                 sess['login_authenticated'] = True
                 sess['launch_pin_verified'] = True
+                # in-process, no device row: oidc-only (#1839) leaves it be
+                sess['internal_warmup'] = True
             for p in (paths or _DISCOVER_WARM_PATHS):
                 try:
                     # recompute, don't read. a sweep inside the 30 min ttl
@@ -23291,6 +23320,12 @@ def _ws_snapshot_revoked(snapshot):
             from core.security import oidc_session
             if not oidc_session.check_device(snapshot['device_id'], get_database(), config_manager):
                 oidc_session.end_device(get_database(), snapshot['device_id'])
+                device_live = False
+        # oidc-only (#1839): a socket of a session that has no device row
+        # never signed in with oidc, the same rule as http
+        if epoch_current and device_live and not snapshot.get('device_id'):
+            from core.security import oidc_only
+            if oidc_only.is_on(config_manager):
                 device_live = False
         return is_session_revoked(has_profile_session=True,
                                   epoch_current=epoch_current,

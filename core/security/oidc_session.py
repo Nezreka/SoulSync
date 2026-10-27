@@ -21,6 +21,7 @@ socket, asks ``check_device``:
   turns renewal on for them
 - oidc turned off, or the profile no longer linked to that account: the
   session ends too, since it could never be renewed
+- not an oidc session while sign-in is oidc only (#1839): it ends
 
 a failed READ of the row keeps the session, like the epoch and device
 checks: a db hiccup must not sign everyone out.
@@ -105,6 +106,12 @@ def check_device(device_id: Optional[str], db, config_manager, *,
         logger.debug("oidc session read failed, keeping the session: %s", e)
         return True
     if not row or not row.get("identity"):
+        # a sign-in some other way. while sign-in is oidc only (#1839) it
+        # ends, so a password session can't outlive the switch
+        from core.security import oidc_only
+        if oidc_only.is_on(config_manager):
+            logger.info("Session ended: it didn't sign in with OIDC, and sign-in is OIDC only")
+            return False
         return True
     if row.get("revoked"):
         return False
