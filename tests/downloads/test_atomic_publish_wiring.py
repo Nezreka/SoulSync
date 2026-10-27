@@ -371,3 +371,167 @@ def test_a_soulsync_install_still_fails_on_a_dangling_row_count(monkeypatch, tmp
     assert lc._publish_atomic_album("B", batch) is False
     assert os.path.isfile(staged), "the failed publish must keep the staged copy"
     assert not os.path.isfile(final)
+
+
+def _ledger_row(db, path):
+    conn = db._get_connection()
+    conn.execute(
+        "INSERT INTO track_downloads (track_id, file_path, source_service, track_title, status) "
+        "VALUES ('t1', ?, 'youtube', 'Song', 'completed')", (path,))
+    conn.commit()
+    conn.close()
+
+
+def _ledger_path(db):
+    conn = db._get_connection()
+    try:
+        return conn.execute("SELECT file_path FROM track_downloads").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_publish_repoints_the_download_ledger(monkeypatch, tmp_path):
+    """The ledger records the staging path the import landed at. After the
+    publish that folder is gone, and anything asking the ledger whether a
+    download still exists (ownership for artists routed to the audiobook
+    library) answered no, so the album was fetched again on every scan.
+    On a media-server install there is no ``tracks`` row to follow the file,
+    so the ledger is the only record that has to move."""
+    batch, staged, final = _real_db_batch(monkeypatch, tmp_path, "navidrome")
+    import database.music_database as mdb_mod
+    db = mdb_mod.MusicDatabase()
+    _ledger_row(db, staged)
+
+    assert lc._publish_atomic_album("B", batch) is True
+
+    assert _ledger_path(db) == final
+    assert os.path.isfile(_ledger_path(db)), "the ledger points at a file that is not there"
+
+
+def test_rollback_takes_the_download_ledger_back(monkeypatch, tmp_path):
+    """The same function publishes and un-publishes a row, so a failed batch
+    leaves the ledger on the staging path, with the files."""
+    import database.music_database as mdb_mod
+    import core.imports.file_ops as fops
+    from pathlib import Path
+
+    db = mdb_mod.MusicDatabase(database_path=str(tmp_path / "music.db"))
+    monkeypatch.setattr(mdb_mod, "MusicDatabase", lambda *a, **k: db)
+    batch = {"is_album_download": True}
+    transfer = _wire(monkeypatch, tmp_path, flag=True, batch=batch)
+    one = pl._maybe_stage_album_track(
+        {"batch_id": "B"}, os.path.join(transfer, "Artist", "Album", "01.flac"))
+    two = os.path.join(os.path.dirname(one), "02.flac")
+    for p in (one, two):
+        Path(p).parent.mkdir(parents=True, exist_ok=True)
+        Path(p).write_bytes(b"AUDIO")
+    _ledger_row(db, one)
+
+    real_move = fops.safe_move_file
+
+    def _second_fails(src, dst):
+        if str(src).endswith("02.flac"):
+            raise OSError("disk full")
+        return real_move(src, dst)
+
+    monkeypatch.setattr(fops, "safe_move_file", _second_fails)
+
+    assert lc._publish_atomic_album("B", batch) is False
+    assert _ledger_path(db) == one
+    assert os.path.isfile(one)
+
+
+def test_a_database_without_the_ledger_still_publishes(monkeypatch, tmp_path):
+    """An old database may not have the table yet; that must not strand an album
+    in staging."""
+    batch, staged, final = _real_db_batch(monkeypatch, tmp_path, "navidrome")
+    import database.music_database as mdb_mod
+    db = mdb_mod.MusicDatabase()
+    conn = db._get_connection()
+    conn.execute("DROP TABLE track_downloads")
+    conn.commit()
+    conn.close()
+
+    assert lc._publish_atomic_album("B", batch) is True
+    assert os.path.isfile(final)
+
+
+def _history_row(db, path):
+    conn = db._get_connection()
+    conn.execute("INSERT INTO library_history (event_type, title, file_path) "
+                 "VALUES ('download', 'Song', ?)", (path,))
+    conn.commit()
+    conn.close()
+
+
+def _history_path(db):
+    conn = db._get_connection()
+    try:
+        return conn.execute("SELECT file_path FROM library_history").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_publish_repoints_library_history_too(monkeypatch, tmp_path):
+    batch, staged, final = _real_db_batch(monkeypatch, tmp_path, "navidrome")
+    import database.music_database as mdb_mod
+    db = mdb_mod.MusicDatabase()
+    _history_row(db, staged)
+
+    assert lc._publish_atomic_album("B", batch) is True
+
+    assert _history_path(db) == final
+
+
+def _staged_pair(tmp_path, *, staged_exists=False, final_exists=True):
+    from core.downloads import atomic_album_publish as pub
+    transfer = tmp_path / "Transfer"
+    staged = transfer / pub.STAGING_DIRNAME / "batch1" / "Artist" / "Album" / "01.flac"
+    final = transfer / "Artist" / "Album" / "01.flac"
+    for flag, path in ((staged_exists, staged), (final_exists, final)):
+        if flag:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"AUDIO")
+    return str(staged), str(final)
+
+
+def _repair_db(tmp_path):
+    import database.music_database as mdb_mod
+    return mdb_mod.MusicDatabase(database_path=str(tmp_path / "music.db"))
+
+
+def test_repair_repoints_records_naming_a_staging_path(tmp_path):
+    """Albums published before the publish repointed the ledger left rows on a
+    staging folder that is long gone. The staged path says where the file went."""
+    from core.downloads.atomic_recovery import repair_staged_path_records
+    db = _repair_db(tmp_path)
+    staged, final = _staged_pair(tmp_path)
+    _ledger_row(db, staged)
+    _history_row(db, staged)
+
+    fixed = repair_staged_path_records(db)
+
+    assert fixed == {"track_downloads": 1, "library_history": 1}
+    assert _ledger_path(db) == final
+    assert _history_path(db) == final
+    assert repair_staged_path_records(db) == {}, "a second run must find nothing to do"
+
+
+def test_repair_leaves_a_batch_that_is_still_in_staging(tmp_path):
+    from core.downloads.atomic_recovery import repair_staged_path_records
+    db = _repair_db(tmp_path)
+    staged, _final = _staged_pair(tmp_path, staged_exists=True, final_exists=False)
+    _ledger_row(db, staged)
+
+    assert repair_staged_path_records(db) == {}
+    assert _ledger_path(db) == staged
+
+
+def test_repair_leaves_a_row_whose_file_is_gone_everywhere(tmp_path):
+    from core.downloads.atomic_recovery import repair_staged_path_records
+    db = _repair_db(tmp_path)
+    staged, _final = _staged_pair(tmp_path, final_exists=False)
+    _ledger_row(db, staged)
+
+    assert repair_staged_path_records(db) == {}
+    assert _ledger_path(db) == staged

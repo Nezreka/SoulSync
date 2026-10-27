@@ -258,12 +258,12 @@ def test_the_downloads_tab_holds_only_download_settings():
 def test_the_video_save_button_cannot_write_a_retired_form():
     """A live clobber, and a consequence of making the settings tabs shared.
 
-    On the video side the Save Settings button is a CAPTURE-phase listener that
-    calls stopImmediatePropagation, so only the video savers run - the music
-    save, a bubble-phase listener on the button itself, never fires. That was
-    harmless while the video side could only show video settings.
+    On the video side the Save Settings button first runs a CAPTURE-phase
+    listener that flushes the video savers. (It used to stop the click there, so
+    the music save never ran on the video side; it lets it through now - see
+    test_the_video_save_button_saves_the_whole_page below.)
 
-    Now the Sources tab is shared, so this sequence lost data:
+    Once the Sources tab was shared, this sequence lost data:
 
         1. on the video side, open Sources and change the Soulseek URL
         2. autosave stores it
@@ -277,7 +277,7 @@ def test_the_video_save_button_cannot_write_a_retired_form():
     """
     js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 
-    save_handler = js.split("e.stopImmediatePropagation();", 1)[1]
+    save_handler = js.split("if (!e.target.closest('#save-settings')) return;", 1)[1]
     chain = save_handler.split("Promise.all([", 1)[1].split("])", 1)[0]
     assert "saveSlskd" not in chain, (
         "the video save button posts the retired slskd form again"
@@ -290,6 +290,46 @@ def test_the_video_save_button_cannot_write_a_retired_form():
     assert "addEventListener('change', function () { saveSlskd(true); })" not in js, (
         "a retired hidden field can still trigger a save"
     )
+
+
+def test_the_video_save_button_saves_the_whole_page():
+    """The Settings page is shared, so most of what it shows on the video side
+    - every music field on Sources, Downloads, Library and Quality, and all of
+    System including Security & Access - has no saver but the music one.
+
+    The video side's Save Settings handler used to call preventDefault and
+    stopImmediatePropagation, so the music save never ran there, and it toasted
+    "Settings saved" anyway. Reported live: tick OIDC only on the video side,
+    Save, reload - unticked, and no POST /api/settings in the log.
+
+    The capture listener must flush the video savers and let the click through
+    to the button's own handler, and it must not claim a save of its own.
+    """
+    js = (_WEBUI / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
+    handler = js.split("if (!e.target.closest('#save-settings')) return;", 1)[1]
+    handler = handler.split("}, true);", 1)[0]
+    for blocker in ("stopImmediatePropagation", "stopPropagation", "preventDefault"):
+        assert blocker not in handler, f"the video save button still calls {blocker}"
+    assert "'Settings saved'" not in handler, (
+        "the video handler toasts a save it didn't make; the music handler owns the toast"
+    )
+
+
+def test_the_music_autosave_runs_on_the_video_side_for_shared_fields():
+    """The other half of the same gap: debouncedAutoSaveSettings returned for
+    EVERY edit on the video side, so a shared or System field changed there was
+    never auto-saved either. Only a field the video side saves itself (inside a
+    data-video-only block or wired by a data-video-* hook) may skip it - that
+    one already saves through /api/video/*."""
+    js = (_WEBUI / "static" / "settings.js").read_text(encoding="utf-8")
+    body = js.split("function debouncedAutoSaveSettings(", 1)[1].split("\nfunction ", 1)[0]
+    blanket = re.search(r"getAttribute\('data-side'\)\s*===\s*'video'\)\s*return;", body)
+    assert not blanket, "the music auto-save still stands down for every field on the video side"
+    assert "_isVideoOwnedField(event?.target)" in body
+
+    helper = js.split("function _isVideoOwnedField(", 1)[1].split("\nfunction ", 1)[0]
+    assert "[data-video-only]" in helper
+    assert "data-video-" in helper
 
 
 def test_the_ytdlp_card_loads_where_it_actually_lives():
