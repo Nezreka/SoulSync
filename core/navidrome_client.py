@@ -1,5 +1,9 @@
 from core.library.navidrome_identity import validated_playlist_write
+import http.cookiejar
+import threading
+
 import requests
+from requests.adapters import HTTPAdapter
 import hashlib
 import secrets
 import time
@@ -17,6 +21,30 @@ from core.settings import config_manager
 from core.media_server.types import TrackInfo, PlaylistInfo
 
 logger = get_logger("navidrome_client")
+
+
+# one kept-alive connection pool for every subsonic call. a bare requests.get
+# opens a new connection, and python caches no dns, so each api call was also
+# a dns lookup: a pi-hole saw 1,000+ an hour from soulsync. the pool reuses
+# connections, so a lookup happens per new connection, not per call. subsonic
+# auth rides in the params, and cookies are refused so nothing one caller
+# (or one profile acting as its own user) gets back can follow another's call.
+_http_session: Optional[requests.Session] = None
+_http_session_lock = threading.Lock()
+
+
+def _http() -> requests.Session:
+    global _http_session
+    if _http_session is None:
+        with _http_session_lock:
+            if _http_session is None:
+                session = requests.Session()
+                session.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(allowed_domains=[]))
+                adapter = HTTPAdapter(pool_connections=4, pool_maxsize=16)
+                session.mount('http://', adapter)
+                session.mount('https://', adapter)
+                _http_session = session
+    return _http_session
 
 
 from core.media_server.items import MediaAlbum, MediaArtist, MediaTrack, parse_iso_date
@@ -512,9 +540,9 @@ class NavidromeClient(MediaServerBase):
             # Use POST for write operations to avoid URL length limits
             # (e.g., createPlaylist with 161 songId params would exceed GET URL limits)
             if endpoint in self._WRITE_ENDPOINTS:
-                response = requests.post(url, data=auth_params, timeout=timeout if timeout is not None else 30)
+                response = _http().post(url, data=auth_params, timeout=timeout if timeout is not None else 30)
             else:
-                response = requests.get(url, params=auth_params, timeout=timeout if timeout is not None else 60)
+                response = _http().get(url, params=auth_params, timeout=timeout if timeout is not None else 60)
             response.raise_for_status()
 
             data = response.json()

@@ -262,11 +262,13 @@ def test_a_failed_request_cannot_leave_a_stale_empty_message(monkeypatch):
     so a dropped connection could inherit a previous call's 'empty' and read
     as a verified-empty candidate. Any failure now overwrites the message.
 
-    Patches MODULE-LEVEL requests.get/post — _make_request does not use a
-    session. A first draft of this test stubbed ``c.session`` and passed
-    anyway, by making a real connection attempt to an unresolvable hostname:
-    same assertion, wrong seam, live network."""
+    Patches the module's shared http session (_http), the seam _make_request
+    actually calls. A first draft of this test stubbed ``c.session`` and
+    passed anyway, by making a real connection attempt to an unresolvable
+    hostname: same assertion, wrong seam, live network."""
     import requests as _rq
+
+    import core.navidrome_client as nc
 
     c = NavidromeClient()
     c.base_url = "http://navidrome"
@@ -278,8 +280,10 @@ def test_a_failed_request_cannot_leave_a_stale_empty_message(monkeypatch):
     def boom(*a, **kw):
         raise _rq.exceptions.ConnectionError("connection dropped")
 
-    monkeypatch.setattr(_rq, 'get', boom)
-    monkeypatch.setattr(_rq, 'post', boom)
+    class _Session:
+        get = post = staticmethod(boom)
+
+    monkeypatch.setattr(nc, '_http', lambda: _Session())
     assert c._make_request('getArtists') is None
     assert 'empty' not in (c.last_api_error or '').lower()
     assert 'request failed' in (c.last_api_error or '').lower()
