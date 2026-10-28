@@ -3969,3 +3969,17 @@
   height: 15px;
   object-fit: contain;
 }
+.confirmationCopy {
+  display: grid;
+  gap: 1rem;
+  line-height: 1.5;
+}
+
+.confirmationCopy p,
+.confirmationCopy ul {
+  margin: 0;
+}
+
+.confirmationCopy ul {
+  padding-left: 1.5rem;
+}

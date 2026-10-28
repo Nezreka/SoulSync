@@ -95,7 +95,7 @@ export function PlaylistReferences({
       destructive: true,
       confirmText: 'Save removal override',
       message: (
-        <>
+        <div className={styles.confirmationCopy}>
           <p>Applying this removal will leave unavailable entries in these playlists:</p>
           <ul>
             {references.map((entry) => (
@@ -106,7 +106,7 @@ export function PlaylistReferences({
             The file will go to recoverable quarantine. SoulSync will not edit the playlists. This
             acknowledgement applies only to this saved file action.
           </p>
-        </>
+        </div>
       ),
     });
     if (!accepted || !caseId || findingId == null) return;
