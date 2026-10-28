@@ -7,6 +7,19 @@ import {
 } from '../-library-v2.api';
 import styles from './migration-banner.module.css';
 
+/** The bootstrap's stage ids as the banner says them; finalize:* is one step. */
+const STAGE_LABELS: Record<string, string> = {
+  wanted: 'wanted tracks',
+  tags: 'file tags',
+  artist_rollup: 'artist list',
+};
+
+function stageLabel(stage: string | null | undefined): string {
+  if (!stage) return '';
+  if (stage.startsWith('finalize')) return 'finishing';
+  return STAGE_LABELS[stage] ?? stage.replace(/_/g, ' ');
+}
+
 /**
  * The library upgrade holds downloads, sync and automations until it finishes.
  * Its state used to be visible only on an empty Library page, so a failed
@@ -33,9 +46,15 @@ export function MigrationBanner() {
   if (bootstrap?.status !== 'running' && bootstrap?.status !== 'failed') return null;
 
   const failed = bootstrap.status === 'failed';
+  // the stage and its numbers: a percentage alone ran from 0 to 100 once per
+  // stage, which read as an upgrade starting over (#1062 review, point 4)
+  const stage = stageLabel(bootstrap.stage);
   const progress = bootstrap.total
-    ? ` — ${Math.round((bootstrap.current / bootstrap.total) * 100)}%`
-    : '';
+    ? ` — ${stage} ${bootstrap.current.toLocaleString()} of ${bootstrap.total.toLocaleString()}` +
+      ` (${Math.round((bootstrap.current / bootstrap.total) * 100)}%)`
+    : stage
+      ? ` — ${stage}`
+      : '';
   return (
     <div className={`${styles.banner} ${failed ? styles.failed : ''}`} role="status">
       <span className={styles.text}>

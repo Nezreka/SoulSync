@@ -54,7 +54,8 @@ def prepare_startup_upgrade(database_path: Path) -> StartupUpgrade | None:
     snapshot = directory / f'{path.stem}.pre-upgrade-v{STARTUP_UPGRADE_VERSION}-{uuid.uuid4().hex}.db'
     temporary = snapshot.with_suffix('.db.tmp')
     try:
-        db_integrity.safe_backup(str(path), str(temporary), verify_source=True, verify_result=True)
+        db_integrity.safe_backup(str(path), str(temporary), verify_source=True, verify_result=True,
+                                 progress=_report_to_startup_page(path.stat().st_size))
         with temporary.open('rb') as handle:
             os.fsync(handle.fileno())
         os.replace(temporary, snapshot)
@@ -73,6 +74,32 @@ def prepare_startup_upgrade(database_path: Path) -> StartupUpgrade | None:
         raise
     _prune_failed_attempts(directory, path.stem, keep=snapshot)
     return StartupUpgrade(backup_path=snapshot)
+
+
+#: The upgrade's phases as the startup page counts them; the schema step comes
+#: after the backup, in ``MusicDatabase._initialize_database``.
+STARTUP_PHASES = {"check": (1, "Checking the database"), "copy": (2, "Backing up the database"),
+                  "verify": (3, "Checking the backup"), "schema": (4, "Updating the database")}
+
+
+def report_startup_phase(stage: str, *, size=None) -> None:
+    from core import startup_progress
+    step, label = STARTUP_PHASES[stage]
+    startup_progress.begin(label, step=step, steps=len(STARTUP_PHASES), size=size)
+
+
+def _report_to_startup_page(size: int):
+    """``safe_backup``'s progress callback, feeding the startup page."""
+    from core import startup_progress
+    current = []
+
+    def report(stage, done, total):
+        if current[-1:] != [stage]:
+            current.append(stage)
+            report_startup_phase(stage, size=size)
+        if stage == "copy" and total:
+            startup_progress.advance(done, total)
+    return report
 
 
 def _prune_failed_attempts(directory: Path, stem: str, *, keep: Path, retained: int = 2) -> None:

@@ -152,3 +152,28 @@ def test_repeated_failed_upgrade_attempts_do_not_fill_the_disk(tmp_path):
     snapshots = [prepare_startup_upgrade(database).backup_path for _ in range(5)]
     survivors = sorted((tmp_path / 'backups').glob('*.db'))
     assert len(survivors) == 2 and snapshots[-1] in survivors
+
+
+def test_the_startup_page_follows_every_upgrade_phase(tmp_path, monkeypatch):
+    """#1062 review, point 4: check, copy (with bytes), verify, schema, then
+    the rest of the boot -- each phase the startup page can name."""
+    from core import startup_progress
+    path = tmp_path / 'music.db'
+    _populated(path)
+    seen = []
+    begin, advance = startup_progress.begin, startup_progress.advance
+    monkeypatch.setattr(startup_progress, 'begin',
+                        lambda label, **kw: (seen.append((label, kw.get('step'))), begin(label, **kw)))
+    monkeypatch.setattr(startup_progress, 'advance',
+                        lambda current, total: (seen.append(('copied', current == total)),
+                                                advance(current, total)))
+
+    MusicDatabase(str(path))
+
+    assert [s for s in seen if s[0] != 'copied'] == [
+        ('Checking the database', 1), ('Backing up the database', 2),
+        ('Checking the backup', 3), ('Updating the database', 4), ('Starting SoulSync', None)]
+    assert ('copied', True) in seen
+    seen.clear()
+    _restart(path)
+    assert seen == []  # an upgraded database starts without the phases

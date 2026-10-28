@@ -53,3 +53,23 @@ def test_start_page_polls_under_reverse_proxy_prefix():
     finally:
         release.set()
         app.wait(5)
+
+
+def test_status_carries_the_running_phase_and_its_numbers():
+    import json
+    from core import startup_progress
+    from core.startup_application import StartupApplication
+    release = threading.Event()
+    app = StartupApplication(lambda: (release.wait(5), None)[1])
+    try:
+        startup_progress.begin('Backing up the database', step=2, steps=4, size=4096)
+        startup_progress.advance(1024, 4096)
+        status = json.loads(_request(app, '/api/startup-status')[1])
+        assert {k: status[k] for k in ('status', 'label', 'step', 'steps', 'current', 'total')} == {
+            'status': 'starting', 'label': 'Backing up the database', 'step': 2, 'steps': 4,
+            'current': 1024, 'total': 4096}
+        assert isinstance(status['elapsed'], int)
+        assert b'id="phase"' in _request(app)[1]
+    finally:
+        release.set()
+        app.wait(5)

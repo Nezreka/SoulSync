@@ -46,12 +46,25 @@ describe('MigrationBanner', () => {
   it('shows progress while running and nothing once done', async () => {
     server.use(
       http.get('/api/library/v2/import/status', () =>
-        HttpResponse.json(status({ status: 'running', current: 1, total: 4 })),
+        HttpResponse.json(
+          status({ status: 'running', stage: 'tracks', current: 1200, total: 4800 }),
+        ),
       ),
     );
     const { unmount } = renderBanner();
-    expect(await screen.findByText(/Upgrading your library — 25%/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Upgrading your library — tracks 1,200 of 4,800 \(25%\)/),
+    ).toBeInTheDocument();
     unmount();
+
+    server.use(
+      http.get('/api/library/v2/import/status', () =>
+        HttpResponse.json(status({ status: 'running', stage: 'finalize:links' })),
+      ),
+    );
+    const second = renderBanner();
+    expect(await screen.findByText(/Upgrading your library — finishing\./)).toBeInTheDocument();
+    second.unmount();
 
     server.use(
       http.get('/api/library/v2/import/status', () =>

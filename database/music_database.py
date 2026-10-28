@@ -815,9 +815,13 @@ class MusicDatabase:
     
     def _initialize_database(self):
         """Create database tables if they don't exist"""
-        from core.library2.upgrade_backup import prepare_startup_upgrade, record_startup_upgrade
+        from core.library2.upgrade_backup import (
+            prepare_startup_upgrade, record_startup_upgrade, report_startup_phase,
+        )
         # A harness with no file behind it has nothing to snapshot.
         upgrade = prepare_startup_upgrade(self.database_path) if getattr(self, 'database_path', None) else None
+        if upgrade is not None and upgrade.backup_path:
+            report_startup_phase("schema")
         if getattr(self, 'database_path', None):
             self._ensure_wal_mode()
         conn = None
@@ -2072,6 +2076,9 @@ class MusicDatabase:
             record_startup_upgrade(conn, upgrade)
 
             conn.commit()
+            if upgrade is not None and upgrade.backup_path:
+                from core import startup_progress
+                startup_progress.begin("Starting SoulSync")
 
             # Any config.json write the quality-profile migration queued (e.g.
             # pointing Auto-Import at its migrated relaxed profile) is applied
