@@ -200,3 +200,104 @@ def test_a_candidate_below_every_rung_reports_no_rung():
     facet = out['rejected'][0]['policy']
     assert facet['target_index'] == 3
     assert facet['target_label'] == ''
+
+
+def test_encoded_dispatch_keys_show_the_song_not_the_key():
+    # Streaming sources encode `id||name`; the row must show the name (#1911).
+    row = candidate_row(_row(username='youtube', filename='dQw4w9WgXcQ||Artist - Song'),
+                        accept(0.9), source_name='youtube', query='q')
+    assert row['display_name'] == 'Artist - Song'
+    assert row['filename'] == 'dQw4w9WgXcQ||Artist - Song'
+    row = candidate_row(_row(username='tidal', filename='12345||Artist - Song'),
+                        accept(0.9), source_name='tidal', query='q')
+    assert row['display_name'] == 'Artist - Song'
+
+
+def test_soundcloud_three_part_key_shows_the_song_not_the_slug():
+    # SoundCloud encodes `id||permalink||name`: basename-splitting showed
+    # `christmas-in-july||Andrew Bundy - Christmas in July` (#1911).
+    fn = ('1207415400||https://soundcloud.com/andrewbundy/christmas-in-july'
+          '||Andrew Bundy - Christmas in July')
+    row = candidate_row(_row(username='soundcloud', filename=fn),
+                        accept(0.8), source_name='soundcloud', query='q')
+    assert row['display_name'] == 'Andrew Bundy - Christmas in July'
+
+
+def test_peer_paths_keep_the_basename_rule_even_with_separators_in_names():
+    # A Soulseek peer's filename is a real path, never a dispatch key.
+    row = candidate_row(_row(username='alice', filename='A||B/01 - Song.flac'),
+                        accept(0.9), source_name='soulseek', query='q')
+    assert row['display_name'] == '01 - Song.flac'
+    row = candidate_row(_row(username='alice', filename='A/B/01 - Song.flac'),
+                        accept(0.9), source_name='soulseek', query='q')
+    assert row['display_name'] == '01 - Song.flac'
+
+
+def test_encoded_key_with_empty_name_shows_the_key_itself():
+    row = candidate_row(_row(username='youtube', filename='abc||'),
+                        accept(0.9), source_name='youtube', query='q')
+    assert row['display_name'] == 'abc||'
+
+
+def test_soundcloud_title_containing_separator_survives_whole():
+    # The SoundCloud worker splits its key with maxsplit=2, so a title that
+    # itself contains '||' is one name, not two segments.
+    fn = '999||https://soundcloud.com/u/slug||Artist - Song || Live'
+    row = candidate_row(_row(username='soundcloud', filename=fn),
+                        accept(0.8), source_name='soundcloud', query='q')
+    assert row['display_name'] == 'Artist - Song || Live'
+
+
+def test_key_encoding_no_name_shows_the_key_not_a_fragment():
+    row = candidate_row(_row(username='soundcloud', filename='id||https://soundcloud.com/u/slug||'),
+                        accept(0.8), source_name='soundcloud', query='q')
+    assert row['display_name'] == 'id||https://soundcloud.com/u/slug||'
+    row = candidate_row(_row(username='youtube', filename='id|| '),
+                        accept(0.8), source_name='youtube', query='q')
+    assert row['display_name'] == 'id|| '
+
+
+def test_encoded_row_quality_comes_from_the_candidate():
+    row = candidate_row(_row(username='youtube', filename='vid||Artist - Song', quality='opus'),
+                        accept(0.8), source_name='youtube', query='q')
+    assert row['display_name'] == 'Artist - Song'
+    assert row['quality'] == 'opus'
+
+
+def test_release_sources_show_the_title_not_the_store_token():
+    # Torrent/Usenet filenames are `token||title` too, and the token is an
+    # opaque candidate-store id that must never be displayed (#1911 review).
+    row = candidate_row(_row(username='torrent', filename='tok123||Release - Title'),
+                        accept(0.8), source_name='torrent', query='q')
+    assert row['display_name'] == 'Release - Title'
+    row = candidate_row(_row(username='usenet', filename='tok456||Release - Title'),
+                        accept(0.8), source_name='usenet', query='q')
+    assert row['display_name'] == 'Release - Title'
+
+
+def test_dotted_title_does_not_override_the_candidates_format():
+    # A decoded title is not a file name: 'Song.Mp3' in it is part of the
+    # title, so the row's quality stays the candidate's own (#1911 gate).
+    row = candidate_row(_row(username='youtube', filename='vid||Artist - Song.Mp3', quality='opus'),
+                        accept(0.8), source_name='youtube', query='q')
+    assert row['display_name'] == 'Artist - Song.Mp3'
+    assert row['quality'] == 'opus'
+
+
+def test_every_keyed_source_decodes_and_slash_titles_survive():
+    # The remaining dispatch-key sources, plus a title whose '/' the old
+    # basename rule would have cut the name at (#1911 gate).
+    for username in ('qobuz', 'hifi', 'deezer_dl', 'amazon', 'lidarr'):
+        row = candidate_row(_row(username=username, filename='id42||Artist - Song'),
+                            accept(0.8), source_name=username, query='q')
+        assert row['display_name'] == 'Artist - Song', username
+    row = candidate_row(_row(username='youtube', filename='vid||AC/DC - Song'),
+                        accept(0.8), source_name='youtube', query='q')
+    assert row['display_name'] == 'AC/DC - Song'
+
+
+def test_dotted_release_title_keeps_the_candidates_format():
+    row = candidate_row(_row(username='torrent', filename='tok||Album.2020.FLAC', quality='mp3'),
+                        accept(0.8), source_name='torrent', query='q')
+    assert row['display_name'] == 'Album.2020.FLAC'
+    assert row['quality'] == 'mp3'

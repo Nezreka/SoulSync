@@ -66,6 +66,8 @@ interface TrackDetailPayload {
 /** A stored candidate, as core/downloads/candidate_pool.py summarizes it. */
 export interface DecisionCandidate {
   username?: string;
+  /** The row's identity (a peer path or a source's dispatch key); not rendered. */
+  filename?: string;
   display_name?: string;
   source_service?: string;
   quality?: string;

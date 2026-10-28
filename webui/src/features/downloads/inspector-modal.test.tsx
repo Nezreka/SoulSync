@@ -350,3 +350,58 @@ describe('the host and its entry points', () => {
     expect(calls[1].body.override).toBeUndefined();
   });
 });
+
+describe('row name hover text', () => {
+  it('shows the song name, not the dispatch key, for a keyed row', async () => {
+    const KEYED = {
+      display_name: 'Christmas in July',
+      filename: '1207415400||https://soundcloud.com/u/christmas-in-july||Christmas in July',
+      username: 'soundcloud',
+      source_service: 'soundcloud',
+      confidence: 0.8,
+      size_display: '0.0 MB',
+      decision: { accepted: true, code: 'accepted', stage: 'decision', detail: '', score: 0.8 },
+    };
+    vi.stubGlobal('fetch', stream({ source: 'soundcloud', candidates: [KEYED] }));
+    render(<CandidateInspectorModal target={target()} onClose={vi.fn()} />);
+    const name = await screen.findByText('Christmas in July');
+    expect(name.getAttribute('title')).toBe('Christmas in July');
+  });
+
+  it('still shows the full remote path for a peer row whose folder contains ||', async () => {
+    const PEER_KEYED_PATH = {
+      ...ACCEPTED,
+      filename: 'Music||Flac/04 - Fade Into You.flac',
+      source_service: 'soulseek',
+    };
+    vi.stubGlobal('fetch', stream({ source: 'soulseek', candidates: [PEER_KEYED_PATH] }));
+    render(<CandidateInspectorModal target={target()} onClose={vi.fn()} />);
+    const name = await screen.findByText('Fade Into You.flac');
+    expect(name.getAttribute('title')).toBe('Music||Flac/04 - Fade Into You.flac');
+  });
+
+  it('still shows the full remote path for a peer row', async () => {
+    vi.stubGlobal('fetch', stream({ source: 'soulseek', candidates: [ACCEPTED] }));
+    render(<CandidateInspectorModal target={target()} onClose={vi.fn()} />);
+    const name = await screen.findByText('Fade Into You.flac');
+    expect(name.getAttribute('title')).toBe('Mazzy Star/So Tonight/04 - Fade Into You.flac');
+  });
+});
+
+describe('row name hover for release sources', () => {
+  it('shows the release title, not the store token, whatever the source label says', async () => {
+    const RELEASE = {
+      display_name: 'So Tonight That I Might See [FLAC]',
+      filename: 'tok123||So Tonight That I Might See [FLAC]',
+      username: 'torrent',
+      source_service: 'hybrid',
+      confidence: 0.9,
+      size_display: '400 MB',
+      decision: { accepted: true, code: 'accepted', stage: 'decision', detail: '', score: 0.9 },
+    };
+    vi.stubGlobal('fetch', stream({ source: 'torrent', candidates: [RELEASE] }));
+    render(<CandidateInspectorModal target={target()} onClose={vi.fn()} />);
+    const name = await screen.findByText('So Tonight That I Might See [FLAC]');
+    expect(name.getAttribute('title')).toBe('So Tonight That I Might See [FLAC]');
+  });
+});

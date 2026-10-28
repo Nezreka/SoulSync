@@ -37,6 +37,37 @@ export interface SourceColumnData {
   rejected: RejectedSummary;
 }
 
+/** Sources whose filename is a dispatch key, mirroring the backend's
+ * decode set (core/downloads/candidate_pool.py `DECODE_USERNAMES`). */
+const KEYED_SERVICES = new Set([
+  'youtube',
+  'tidal',
+  'qobuz',
+  'hifi',
+  'deezer_dl',
+  'lidarr',
+  'soundcloud',
+  'amazon',
+  'torrent',
+  'usenet',
+]);
+
+/**
+ * The hover text for a row's name: a peer's full remote path is worth
+ * showing (even with `||` in a folder name), but a dispatch-key source's
+ * filename is a key (`id||name`, torrent/usenet: an opaque store token) —
+ * for those the decoded display name is the meaningful hover (#1911).
+ */
+export function nameTip(row: InspectorCandidate): string {
+  const filename = String(row.filename || '');
+  // The backend decodes on the row's username, not its source label:
+  // a torrent row's source can read 'hybrid' on the fallback search path
+  // while its username is still 'torrent'.
+  return filename.includes('||') && KEYED_SERVICES.has(String(row.username || ''))
+    ? String(row.display_name || '')
+    : filename;
+}
+
 export function SourceColumn({
   column,
   selectedIdx,
@@ -96,7 +127,7 @@ export function SourceColumn({
                 )}
                 <div className="rdl-src-item-body">
                   <div className="rdl-src-item-top">
-                    <div className="rdl-src-item-name" title={String(c.filename || '')}>
+                    <div className="rdl-src-item-name" title={nameTip(c)}>
                       {c.display_name}
                     </div>
                     {isRec ? <span className="rdl-src-recommended">Best</span> : null}
@@ -225,7 +256,7 @@ function RejectedRow({
       <div className="rdl-src-radio-placeholder" />
       <div className="rdl-src-item-body">
         <div className="rdl-src-item-top">
-          <div className="rdl-src-item-name" title={String(row.filename || '')}>
+          <div className="rdl-src-item-name" title={nameTip(row)}>
             {row.display_name}
           </div>
           <span className={`rdl-rej-pill stage-${stage}`}>
