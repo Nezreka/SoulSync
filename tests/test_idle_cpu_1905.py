@@ -182,8 +182,14 @@ def test_run_wakes_promptly_on_a_real_event_set(monkeypatch):
     import time as _time
 
     ticks = []
+    thread = None
 
     def _tick(db):
+        # in a full run another test may have left a real monitor thread
+        # alive; it calls this same patched _tick and shares the wake
+        # event, so only this test's thread counts
+        if threading.current_thread() is not thread:
+            return False
         ticks.append(1)
         if len(ticks) >= 2:
             raise _StopThread
