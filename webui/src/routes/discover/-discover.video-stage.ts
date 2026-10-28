@@ -180,13 +180,18 @@ function wireStage(stage: VideoStage) {
     },
     true,
   );
+  // touch, not recompute, for these two: the stage switching off or back
+  // on with nothing live changes no live set, so a bare recompute would
+  // tell nobody — and `enabled` itself is watched (the hero hands out
+  // its video id by it), so a silent flip leaves readers on a stale
+  // answer until something unrelated happens to render.
   document.addEventListener('visibilitychange', () => {
     stage.pageVisible = !document.hidden;
-    stage.recompute();
+    stage.touch();
   });
   window.matchMedia?.('(prefers-reduced-motion: reduce)').addEventListener?.('change', (e) => {
     stage.reducedMotion = e.matches;
-    stage.recompute();
+    stage.touch();
   });
 }
 

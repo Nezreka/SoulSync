@@ -20,6 +20,7 @@ import {
   WATCH_ALL_IDLE,
   heroIds,
 } from '../-discover.hero';
+import { BackdropVideo } from './backdrop-video';
 import { FeedbackMenu } from './feedback-menu';
 
 /**
@@ -68,6 +69,29 @@ export interface DiscoverHeroProps {
   onPauseChange?: (paused: boolean) => void;
   /** 'r, g, b' from the artist's photo: the glow matches the picture */
   glowRgb?: string | null;
+  /** the hero root's element, for the video stage's visibility watch */
+  rootRef?: (el: HTMLElement | null) => void;
+  /**
+   * the active artist's music video, hidden behind the still until the
+   * reader asks for the preview. null (or absent) means no button, no video.
+   */
+  videoId?: string | null;
+  /** mount the video's player: the preview is on and the stage granted it */
+  videoPlaying?: boolean;
+  /** the reader asked for the preview */
+  preview?: boolean;
+  /** the reader is closing the preview: the exit crossfade is running */
+  closing?: boolean;
+  /** the video is actually playing: the still fades out over it */
+  videoLive?: boolean;
+  /** the hero's video is the one with sound */
+  soundOn?: boolean;
+  /** start the preview, or close it */
+  onTogglePreview?: () => void;
+  /** youtube refused this video: fall back to the still */
+  onUnplayable?: (videoId: string) => void;
+  /** the video started or stopped actually playing (the crossfade's cue) */
+  onLiveChange?: (live: boolean) => void;
 }
 
 /** the reason line, with the artists it names set apart from the words around them. */
@@ -150,6 +174,16 @@ export function DiscoverHero({
   artists,
   onPauseChange,
   glowRgb,
+  rootRef,
+  videoId = null,
+  videoPlaying = false,
+  preview = false,
+  closing = false,
+  videoLive = false,
+  soundOn = false,
+  onTogglePreview,
+  onUnplayable,
+  onLiveChange,
 }: DiscoverHeroProps) {
   const empty = !artist;
   const watchLabel = watchlist?.label ?? heroWatchlistLabel(false);
@@ -158,10 +192,21 @@ export function DiscoverHero({
   // One artist is not a slideshow: arrows and dots that go nowhere read as
   // broken controls.
   const rotates = count > 1;
+  // the crossfade engages only when the video is really playing: before
+  // that the still stays, so the reader never watches a black gap load.
+  // while the exit fade runs the live class comes off, so the still's own
+  // transition carries it back in over the video fading out above it.
+  const videoShown = preview && videoLive && !closing;
+  // the preview switch describes the click it will take, not the state it
+  // is leaving: while the exit fade runs a click reopens the preview, so
+  // the switch already reads as the offer again — unlit and unpressed —
+  // instead of a lit "close" that would do the opposite of its label.
+  const activelyPreviewing = preview && !closing;
 
   return (
     <div
-      className={`discover-hero${empty ? ' discover-hero--empty' : ''}${loading ? ' discover-hero--loading' : ''}`}
+      ref={rootRef}
+      className={`discover-hero${empty ? ' discover-hero--empty' : ''}${loading ? ' discover-hero--loading' : ''}${videoShown ? ' discover-hero--video-live' : ''}${closing ? ' discover-hero--video-closing' : ''}`}
       style={glowRgb ? ({ '--hero-rgb': glowRgb } as React.CSSProperties) : undefined}
       onMouseEnter={() => onPauseChange?.(true)}
       onMouseLeave={() => onPauseChange?.(false)}
@@ -183,6 +228,15 @@ export function DiscoverHero({
             : undefined
         }
       />
+      {videoId ? (
+        <BackdropVideo
+          videoId={videoId}
+          playing={videoPlaying}
+          onUnplayable={onUnplayable}
+          muted={!soundOn}
+          onLiveChange={onLiveChange}
+        />
+      ) : null}
       <div className="discover-hero-overlay" />
 
       {rotates && (
@@ -227,6 +281,35 @@ export function DiscoverHero({
           <path d="M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </svg>
       </button>
+      {/* the preview switch sits in the same frosted cluster as help and
+          block: it is a property of the billboard, not of the artist, so it
+          doesn't belong in the actions row with watchlist and discography.
+          it exists only when this artist has a video to preview. */}
+      {videoId && onTogglePreview ? (
+        <button
+          type="button"
+          className={`discover-hero-preview-btn${activelyPreviewing ? ' on' : ''}`}
+          title={activelyPreviewing ? 'Close preview' : 'Preview music video'}
+          aria-label={activelyPreviewing ? 'Close preview' : 'Preview music video'}
+          aria-pressed={activelyPreviewing}
+          onClick={onTogglePreview}
+        >
+          {activelyPreviewing ? (
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path
+                d="M6 6l12 12M18 6L6 18"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+              />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path d="M8 5.5v13l11-6.5z" fill="currentColor" />
+            </svg>
+          )}
+        </button>
+      ) : null}
 
       <div className="discover-hero-content">
         <div className="discover-hero-info">
