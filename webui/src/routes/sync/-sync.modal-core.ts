@@ -258,3 +258,19 @@ export function buildDownloadTracks(results: RawDiscoveryResult[]): unknown[] {
       return resTrack;
     });
 }
+
+/**
+ * The status cell's words (#1910). The row data keeps the vanilla's '✅ Found'
+ * (every found-test above reads it), but on screen "Found" read as "you have
+ * this song". It means the song was matched on the metadata source, so it
+ * says Identified. Owning it is a separate question, answered at download or
+ * sync time.
+ */
+export function discoveryStatusLabel(row: { status: string; status_class?: string }): string {
+  const found =
+    row.status_class === 'found' ||
+    row.status === '✅ Found' ||
+    row.status === 'Found' ||
+    row.status === 'found';
+  return found ? '✅ Identified' : row.status;
+}

@@ -1531,6 +1531,49 @@ def get_beatport_list():
     return jsonify({"success": True, **chart_data(listed)})
 
 
+@bp.route('/api/beatport/import', methods=['POST'])
+def import_beatport_list():
+    """import a beatport list into soulsync: the live mirror a list's
+    identification has always made (keyed by its ref, so it refreshes with the
+    chart), made on purpose, then identified in the background like any other
+    import. answers the mirror's id, and the key it's filed under."""
+    from core.beatport.fetch import fetch_list
+    from core.beatport.playlist import chart_data, mirror_chart
+    from core.beatport.refs import parse_ref, ref_from_url
+    from core.profile_context import get_current_profile_id
+    from database.music_database import get_database
+
+    body = request.get_json(silent=True) or {}
+    ref = body.get('ref') or ''
+    parsed = parse_ref(ref) if ref else ref_from_url(body.get('url') or '')
+    if parsed is None:
+        return jsonify({"success": False, "error": "That isn't a Beatport list SoulSync can follow"}), 400
+    listed = fetch_list(parsed, genre_name=body.get('genre_name') or '')
+    if not listed or not listed.get('tracks'):
+        return jsonify({
+            "success": False,
+            "error": "Beatport didn't return this list. If it keeps happening Beatport is blocking "
+                     "requests, and a FlareSolverr at localhost:8191 gets past it.",
+        }), 502
+    chart = chart_data(listed)
+    db = get_database()
+    playlist_id = mirror_chart(db, str(parsed), chart, get_current_profile_id())
+    if playlist_id is None:
+        return jsonify({"success": False, "error": f"Couldn't import {chart.get('name') or 'this list'}"}), 500
+    try:
+        from core.playlists import auto_identify
+        auto_identify.request_if_unmatched(playlist_id, db.get_mirrored_playlist_tracks(playlist_id))
+    except Exception as e:  # noqa: BLE001 - the import stands without the head start
+        logger.debug("beatport import identify skipped: %s", e)
+    return jsonify({
+        "success": True,
+        "playlist_id": playlist_id,
+        "source_playlist_id": str(parsed),
+        "name": chart.get('name') or '',
+        "track_count": len(chart.get('tracks') or []),
+    })
+
+
 @bp.route('/api/beatport/snapshot', methods=['POST'])
 def save_beatport_snapshot():
     """freeze a beatport list as it is today, as a dated mirrored playlist."""

@@ -137,6 +137,8 @@ def refresh_mirrored_library_flags(
                 "in_library": True,
                 "library_track_id": library_track_id,
                 "library_checked_at": checked_at,
+                # a user's own answer: the library check never re-asks it
+                "library_checked_via": "manual",
             }):
                 updated += 1
         except Exception as exc:  # noqa: BLE001
@@ -215,6 +217,8 @@ def clear_mirrored_library_flags(
                 "in_library": False,
                 "library_track_id": None,
                 "library_checked_at": checked_at,
+                # a user's own answer: the library check never re-asks it
+                "library_checked_via": "manual",
             }):
                 updated += 1
         except Exception as exc:  # noqa: BLE001

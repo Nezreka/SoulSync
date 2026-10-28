@@ -167,9 +167,20 @@ export async function fetchActiveProcesses(): Promise<{
 }
 
 /** GET /api/spotify/playlists (loadSpotifyPlaylists, sync-spotify.js 1598). */
+/**
+ * An account list's rows. A list the server couldn't load ({error}, e.g. a 401
+ * when the account isn't connected) throws, so the tab says why instead of
+ * "No playlists found".
+ */
+function accountListRows(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
+  const body = data as { playlists?: unknown[]; error?: unknown } | null;
+  if (typeof body?.error === 'string' && body.error) throw new Error(body.error);
+  return body?.playlists ?? [];
+}
+
 export async function fetchSpotifyPlaylists(): Promise<unknown[]> {
-  const data = await readJson<unknown>(await fetch('/api/spotify/playlists'));
-  return Array.isArray(data) ? data : ((data as { playlists?: unknown[] })?.playlists ?? []);
+  return accountListRows(await readJson<unknown>(await fetch('/api/spotify/playlists')));
 }
 
 /** GET /api/deezer/arl-status (initializeSyncPage deezer tab, 3698). */
@@ -179,8 +190,7 @@ export async function fetchDeezerArlStatus(): Promise<{ authenticated?: boolean 
 
 /** GET /api/deezer/arl-playlists (loadDeezerArlPlaylists, sync-services.js 2437). */
 export async function fetchDeezerArlPlaylists(): Promise<unknown[]> {
-  const data = await readJson<unknown>(await fetch('/api/deezer/arl-playlists'));
-  return Array.isArray(data) ? data : ((data as { playlists?: unknown[] })?.playlists ?? []);
+  return accountListRows(await readJson<unknown>(await fetch('/api/deezer/arl-playlists')));
 }
 
 /** A playlist's tracks, as both account tabs' details modals read them. */
@@ -486,6 +496,22 @@ export async function clearMirroredDiscovery(
   );
 }
 
+/**
+ * POST .../check-library (#1910): check the tracks nothing has checked against
+ * the library yet. a slice per call; `remaining` says how many are left.
+ */
+export async function checkMirroredLibrary(playlistId: number | string): Promise<{
+  success?: boolean;
+  checked?: number;
+  found?: number;
+  remaining?: number;
+  error?: string;
+}> {
+  return readJson(
+    await fetch(`/api/mirrored-playlists/${playlistId}/check-library`, { method: 'POST' }),
+  );
+}
+
 /** One mirrored playlist with its tracks (openMirroredPlaylistModal, 1069). */
 export interface MirroredPlaylistDetail {
   error?: string;
@@ -519,6 +545,9 @@ export interface MirroredPlaylistDetail {
   }[];
   /** how many tracks sit in each status (#1721) */
   status_counts?: Partial<Record<MirroredTrackStatus, number>>;
+  /** tracks the detail's library check should look at: unchecked, plus its
+      own misses old enough to ask again (#1910) */
+  library_check_due?: number;
   is_request_list?: boolean;
   auto_remove_fulfilled?: boolean;
   upstream_playlist_id?: string | null;
@@ -892,22 +921,6 @@ export async function patchMirroredPreferences(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(preferences),
   });
-}
-
-/**
- * GET /api/logs — the sidebar log area's HTTP half (`loadLogs`, api-monitor.js
- * 1114-1127). Returns null on any failure so the caller keeps the text it has,
- * matching the vanilla, which only overwrites the textarea on error when it is
- * still showing its own placeholder.
- */
-export async function fetchSyncLogs(): Promise<{ logs?: unknown } | null> {
-  try {
-    const response = await fetch('/api/logs');
-    if (!response.ok) return null;
-    return (await response.json()) as { logs?: unknown };
-  } catch {
-    return null;
-  }
 }
 
 /**

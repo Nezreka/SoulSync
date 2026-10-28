@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import type { DetectedSource } from './-sync.url-detect';
 
 import { SYNC_TABS } from './-sync.shell';
+import { SYNC_SOURCES } from './-sync.sources';
 import {
   DETECTED_SOURCE_SERVICE_LABELS,
   DETECTED_SOURCE_TAB_IDS,
@@ -21,7 +22,6 @@ import {
 } from './-sync.url-detect';
 import { deezerInputResult, spotifyPublicUrlError } from './-sync.url-tabs';
 import { extractDeezerPlaylistId, extractITunesLinkId, extractSpotifyPublicId } from './-sync.urls';
-import { SYNC_VERTICAL_IDS } from './-sync.verticals';
 
 describe('detectPlaylistUrl — the happy routes', () => {
   it('routes a Spotify playlist, carrying the id and kind', () => {
@@ -158,7 +158,7 @@ describe('detection never disagrees with the parse that follows it', () => {
 
     expect(routed).toEqual(['spotify_public', 'itunes_link', 'deezer', 'youtube']);
     for (const source of routed) {
-      expect(SYNC_VERTICAL_IDS).toContain(source);
+      expect(Object.keys(SYNC_SOURCES)).toContain(source);
     }
   });
 });

@@ -753,22 +753,6 @@ const HELPER_CONTENT = {
         tips: ['Progress shows: total tracks / matched / failed / percentage', 'Phase colors: gray=fresh, blue=identifying, green=identified, orange=syncing'],
     },
 
-    // Sidebar
-    '.sync-sidebar': {
-        title: 'Sync Actions',
-        description: 'Select playlists from the left panel, then use these controls to start syncing. Progress and logs appear below.',
-        docsId: 'sync-overview'
-    },
-    '#start-sync-btn': {
-        title: 'Start Sync',
-        description: 'Begin downloading missing tracks from all selected playlists. Playlists are processed sequentially — each one completes before the next starts.',
-        tips: ['Select playlists first using checkboxes on the cards', 'Progress bar and log update in real-time', 'Button is disabled until at least one playlist is selected'],
-    },
-    '#sync-log-area': {
-        title: 'Sync Log',
-        description: 'Live log of sync operations. Shows each track as it\'s matched, downloaded, or skipped. Auto-scrolls to show the latest activity.',
-    },
-
     // Import file elements
     '#import-file-dropzone': {
         title: 'File Drop Zone',
@@ -2358,8 +2342,6 @@ const HELPER_TOURS = {
             { page: 'sync', selector: '.sync-tab-button[data-tab="import-file"]', title: 'File Import', description: 'Import a playlist from a local file — M3U, CSV, or plain text. Map columns to track/artist/album fields.' },
             { page: 'sync', selector: '.sync-tab-button[data-tab="mirrored"]', title: 'Mirrored Playlists', description: 'Every imported playlist is saved here permanently. Re-sync anytime to catch new additions, check match status, or view the Match Review for unmatched tracks.' },
 
-            // Sidebar
-            { page: 'sync', selector: '.sync-sidebar', title: 'Sync Controls', description: 'The command center. Select playlists with checkboxes on the left, then click "Start Sync" here. Progress bars, match counts, and logs update in real-time. That\'s the sync flow! 🎉' },
         ]
     },
     // 'artists-browse' tour retired — the Artists sidebar entry was replaced by the

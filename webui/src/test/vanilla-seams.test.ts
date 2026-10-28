@@ -41,24 +41,6 @@ const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[]
     usedBy: 'the same card — the select renders EMPTY without it, silently',
   },
   {
-    file: 'static/core.js',
-    symbol: 'getSyncAccountPlaylists',
-    // The `.slice()` is part of the contract, not styling: handing out the
-    // live array would let any caller sort or splice the engine's own
-    // playlist list, which startPlaylistSync resolves every id against.
-    pattern:
-      /window\.getSyncAccountPlaylists = function \(\) \{\s*return spotifyPlaylists\.slice\(\);/,
-    usedBy:
-      "the sync page's queue order and the sidebar's name lookup (routes/sync) — spotifyPlaylists is a top-level `let`, so it is NOT on window",
-  },
-  {
-    file: 'static/core.js',
-    symbol: 'isPlaylistSyncing',
-    pattern: /window\.isPlaylistSyncing = function isPlaylistSyncing\b/,
-    usedBy:
-      "the sequential-sync runner's completion watch (routes/sync/-sync.use-sequential.ts) — activeSyncPollers is a top-level `let`, so it is NOT on window and this accessor is the only way to read it",
-  },
-  {
     file: 'static/pages-extra.js',
     symbol: 'openSyncDetailModal',
     pattern: /async function openSyncDetailModal\b/,
@@ -95,24 +77,6 @@ const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[]
     usedBy: 'the dashboard, to rehydrate the download-bubble registries',
   },
   {
-    file: 'static/sync-spotify.js',
-    symbol: 'openDownloadMissingModal',
-    pattern: /async function openDownloadMissingModal\b/,
-    usedBy: "React's account tabs, for the download hand-off",
-  },
-  {
-    file: 'static/downloads.js',
-    symbol: 'updateCardToSyncing',
-    pattern: /function updateCardToSyncing\b/,
-    usedBy: "React's Deezer-ARL tab, when rehydrating a sync in flight",
-  },
-  {
-    file: 'static/downloads.js',
-    symbol: 'startSyncPolling',
-    pattern: /function startSyncPolling\b/,
-    usedBy: "React's Deezer-ARL tab, when rehydrating a sync in flight",
-  },
-  {
     file: 'static/shared-helpers.js',
     symbol: 'registerBeatportDownload',
     pattern: /function registerBeatportDownload\b/,
@@ -125,14 +89,6 @@ const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[]
     symbol: 'startDiscoverVirtualSync',
     pattern: /window\.startDiscoverVirtualSync\s*=/,
     usedBy: 'the React discover page — a bridge added BY this migration',
-  },
-  {
-    file: 'static/core.js',
-    symbol: 'registerSyncAccountPlaylist',
-    pattern: /window\.registerSyncAccountPlaylist\s*=/,
-    usedBy:
-      "React's account tabs — a bridge added BY this migration, because " +
-      '`spotifyPlaylists` is a top-level let no module can reach',
   },
   /*
    * The five below were found by sweeping every `window.x` the sync route reads

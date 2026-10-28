@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   asString,
-  checkNoteCounts,
   deezerAlreadyLoaded,
   deezerInputResult,
   deezerMirrorTracks,
@@ -18,8 +17,6 @@ import {
   itunesLinkTypeBadge,
   itunesLinkUrlError,
   readUrlHistory,
-  slashTextCounts,
-  slashTextProgressLine,
   spotifyPublicAlreadyLoaded,
   spotifyPublicCardIcon,
   spotifyPublicMirrorTracks,
@@ -29,8 +26,6 @@ import {
   youtubeAlreadyLoaded,
   youtubeMirrorTracks,
   youtubeUrlError,
-  ytActionButtonText,
-  ytProgressVisible,
 } from './-sync.url-tabs';
 
 afterEach(() => {
@@ -244,44 +239,6 @@ describe('card presentation', () => {
     });
     expect(itunesLinkTypeBadge({ type: 'track' })).toEqual({ text: 'Track', color: '#fa586a' });
   });
-
-  it("youtube button map drift (8982-9037): 'Start Identifying' / 'View Details' ×2 / 'View Results'", () => {
-    expect(ytActionButtonText('fresh')).toBe('Start Identifying');
-    expect(ytActionButtonText('discovering')).toBe('View Progress');
-    expect(ytActionButtonText('discovered')).toBe('View Details');
-    expect(ytActionButtonText('syncing')).toBe('View Progress');
-    expect(ytActionButtonText('sync_complete')).toBe('View Details');
-    expect(ytActionButtonText('downloading')).toBe('View Downloads');
-    expect(ytActionButtonText('download_complete')).toBe('View Results');
-  });
-
-  it('youtube progress visibility: only while work runs', () => {
-    expect(ytProgressVisible('discovering')).toBe(true);
-    expect(ytProgressVisible('syncing')).toBe(true);
-    expect(ytProgressVisible('downloading')).toBe(true);
-    expect(ytProgressVisible('fresh')).toBe(false);
-    expect(ytProgressVisible('discovered')).toBe(false);
-    expect(ytProgressVisible('sync_complete')).toBe(false);
-    expect(ytProgressVisible('download_complete')).toBe(false);
-  });
-});
-
-describe('card progress lines', () => {
-  it('slash-text (updateYouTubeCardProgress 9120-9125): failed = total - matches', () => {
-    expect(slashTextProgressLine({ spotify_total: 10, spotify_matches: 7 })).toBe(
-      '♪ 10 / ✓ 7 / ✗ 3 / 70%',
-    );
-    expect(slashTextProgressLine({})).toBe('♪ 0 / ✓ 0 / ✗ 0 / 0%');
-  });
-
-  it('check-note counts: null (no paint) when total is 0', () => {
-    expect(checkNoteCounts({ spotify_total: 5, spotify_matches: 2 })).toEqual({
-      total: 5,
-      matches: 2,
-    });
-    expect(checkNoteCounts({ spotify_total: 0, spotify_matches: 0 })).toBeNull();
-    expect(checkNoteCounts({})).toBeNull();
-  });
 });
 
 describe('url-history storage (getUrlHistory 8662-8669)', () => {
@@ -295,39 +252,5 @@ describe('url-history storage (getUrlHistory 8662-8669)', () => {
     localStorage.setItem('soulsync-url-history-youtube', 'not-json');
     expect(readUrlHistory('youtube')).toEqual([]);
     expect(readUrlHistory('unknown-source')).toEqual([]);
-  });
-});
-
-describe('slashTextCounts — one arithmetic for the card bar and the legacy string', () => {
-  it('failed is total-matches and percent is matches/total', () => {
-    expect(slashTextCounts({ spotify_total: 10, spotify_matches: 7 })).toEqual({
-      total: 10,
-      matches: 7,
-      failed: 3,
-      percentage: 70,
-    });
-  });
-
-  it('missing counters default to zero rather than NaN', () => {
-    expect(slashTextCounts({})).toEqual({ total: 0, matches: 0, failed: 0, percentage: 0 });
-  });
-
-  it('an inflated counter clamps to the total instead of painting 105%', () => {
-    expect(slashTextCounts({ spotify_total: 100, spotify_matches: 105 })).toEqual({
-      total: 100,
-      matches: 100,
-      failed: 0,
-      percentage: 100,
-    });
-  });
-
-  it('the string is built FROM it, so the two can never disagree', () => {
-    // The card renders the numbers and the vanilla string renders the text;
-    // splitting them was only safe because both read this one function.
-    const input = { spotify_total: 9, spotify_matches: 5 };
-    const c = slashTextCounts(input);
-    expect(slashTextProgressLine(input)).toBe(
-      `♪ ${c.total} / ✓ ${c.matches} / ✗ ${c.failed} / ${c.percentage}%`,
-    );
   });
 });

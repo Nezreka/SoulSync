@@ -31,11 +31,10 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 
 import type { BeatportGenre } from '../-beatport.api';
 import type { BeatportDownloadEnv } from '../-beatport.downloads';
-import type { BeatportListEnv } from '../-beatport.lists';
-import type { SourceVertical } from '../-sync.use-vertical';
+import type { BeatportListRequest } from '../-beatport.lists';
 
 import { defaultBeatportDownloadEnv } from '../-beatport.downloads';
-import { openBeatportList } from '../-beatport.lists';
+import { importBeatportList } from '../-beatport.lists';
 import {
   BeatportDJChartsSection,
   BeatportFeaturedChartsSection,
@@ -46,49 +45,39 @@ import {
 import { BeatportTop10Lists, BeatportTop10Releases } from './beatport-top10';
 import { GenreBrowserModal } from './genre-browser-modal';
 import { GenrePage } from './genre-page';
+import { useImporter } from './use-importer';
 
-export interface BeatportTabProps {
-  /** the beatport vertical: every chart-type list opens as its discovery */
-  vertical?: SourceVertical;
-  /** opens the discovery modal for a list ref */
-  onOpen?: (sourceId: string) => void;
-}
-
-export function BeatportTab({ vertical, onOpen }: BeatportTabProps = {}) {
+export function BeatportTab() {
   /**
-   * the vertical and the opener change every render; the env must not (every
-   * section would get a new object each time), so the list opener reads them
-   * through a ref.
+   * every chart-type list imports into SoulSync and lands on it (a release
+   * still opens its album download). the importer changes every render; the
+   * env must not, or every section would get a new object, so the list
+   * opener reads it through a ref.
    */
-  const listEnvRef = useRef<BeatportListEnv | null>(null);
-  listEnvRef.current =
-    vertical && onOpen
-      ? {
-          showToast: (message, type) => window.showToast?.(message, type),
-          showLoadingOverlay: (message) => window.showLoadingOverlay?.(message),
-          hideLoadingOverlay: () => window.hideLoadingOverlay?.(),
-          phaseOf: (id) => vertical.states[id]?.phase,
-          seed: (id, playlist) => vertical.seed(id, playlist),
-          open: onOpen,
-          startDiscovery: (id, chart) => vertical.startDiscovery(id, chart),
-        }
-      : null;
+  const importer = useImporter();
+  const importerRef = useRef(importer);
+  importerRef.current = importer;
 
   /**
    * ONE env for the whole tab. `defaultBeatportDownloadEnv()` builds a bag of
    * injected vanilla functions (toast, overlay, openDownloadModal) for the
-   * release cards; `openList` sends every chart-type list to discovery.
+   * release cards; `openList` imports every chart-type list.
    */
   const env = useMemo<BeatportDownloadEnv>(
     () => ({
       ...defaultBeatportDownloadEnv(),
-      openList: (request) => {
-        const listEnv = listEnvRef.current;
-        if (!listEnv) {
-          window.showToast?.('Beatport lists are not available here', 'error');
+      openList: (request: BeatportListRequest) => {
+        const key = request.ref || request.url;
+        if (!key) {
+          window.showToast?.(`No link for ${request.label}`, 'error');
           return;
         }
-        void openBeatportList(request, listEnv);
+        void importerRef.current.importOrOpen({
+          source: 'beatport',
+          sourceId: key,
+          name: request.label,
+          save: () => importBeatportList(request),
+        });
       },
     }),
     [],

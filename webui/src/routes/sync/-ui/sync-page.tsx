@@ -40,15 +40,15 @@ import { AutoSyncModal } from './autosync-modal';
 import { BeatportTab } from './beatport-tab';
 import { ImportFileTab } from './import-file-tab';
 import { LastfmSyncTab } from './lastfm-sync-tab';
-import { ListenBrainzSyncTab, useLbCardOpen } from './lb-sync-tab';
+import { ListenBrainzSyncTab } from './lb-sync-tab';
 import { MirroredTab } from './mirrored-tab';
 import { ServerCompareEditor } from './server-compare-editor';
 import { ServerPlaylistList } from './server-playlist-list';
 import { SoulsyncDiscoveryTab } from './soulsync-discovery-tab';
 import { SyncModals } from './sync-modals';
 import { SyncShell } from './sync-shell';
-import { SyncSidebar } from './sync-sidebar';
 import { DeezerLinkTab, ITunesLinkTab, SpotifyPublicTab, YouTubeTab } from './url-import-tab';
+import { type ImportLanding, ImportLandingProvider } from './use-importer';
 
 /** The server tab's two views (2226-2236 vs the compare editor). */
 interface CompareView {
@@ -196,17 +196,33 @@ export function SyncPage() {
   const { boardActions, weeklyActions } = useAutoSyncActions(autoSync);
 
   const openSourceModal = page.modals.openModal;
-  const openLbModal = useCallback(
-    // The vertical applies its own `listenbrainz_` prefix downstream, so the
-    // page passes the BARE mbid. Last.fm radios live in the same table and
-    // share the LB vertical (sync-lastfm.js) — one source id, two tabs.
-    (mbid: string) => openSourceModal('listenbrainz', mbid),
-    [openSourceModal],
+
+  /**
+   * Where an import from a source tab lands: the Mirrored tab, with the new
+   * playlist's window open. The source tabs only find playlists now; the
+   * Mirrored tab is where one is managed, and importing starts its
+   * identification in the background.
+   */
+  const importLanding = useMemo<ImportLanding>(
+    () => ({
+      land: (mirrorId, name, already) => {
+        openTab.current?.('mirrored');
+        page.reloadMirrored();
+        showMirroredDetail(mirrorId);
+        window.showToast?.(
+          already
+            ? `${name} is already in SoulSync`
+            : `Imported ${name}. It's identifying in the background`,
+          already ? 'info' : 'success',
+        );
+      },
+      showList: () => {
+        openTab.current?.('mirrored');
+        page.reloadMirrored();
+      },
+    }),
+    [page, showMirroredDetail],
   );
-  // fetch the tracks and seed the state before opening. the modal renders
-  // nothing for a state that doesn't exist, so opening straight away made
-  // Discover do nothing on any playlist that was never discovered.
-  const openLbCard = useLbCardOpen(page.verticals.listenbrainz, openLbModal);
 
   const onImported = useCallback(() => {
     // importFileSubmit's tail (449-455): show the mirrored tab, then reload it.
@@ -226,81 +242,36 @@ export function SyncPage() {
         onOpenCompare={(playlist, mirrored) => setCompare({ playlist, mirrored })}
       />
     ),
-    spotify: (
-      <SpotifyTab
-        selectedIds={page.selection.selected}
-        onToggleSelect={page.selection.toggle}
-        registerRows={page.registerSpotifyRows}
-      />
-    ),
+    // the source tabs find playlists and import them (use-importer); the
+    // imported playlist is managed under Mirrored
+    spotify: <SpotifyTab />,
     'spotify-public': (
       <SpotifyPublicTab
-        vertical={page.verticals.spotify_public}
-        onOpen={(sourceId) => openSourceModal('spotify_public', sourceId)}
         pendingUrl={pendingFor('spotify-public')}
         onPendingConsumed={clearPending}
       />
     ),
     'itunes-link': (
-      <ITunesLinkTab
-        vertical={page.verticals.itunes_link}
-        onOpen={(sourceId) => openSourceModal('itunes_link', sourceId)}
-        pendingUrl={pendingFor('itunes-link')}
-        onPendingConsumed={clearPending}
-      />
+      <ITunesLinkTab pendingUrl={pendingFor('itunes-link')} onPendingConsumed={clearPending} />
     ),
-    tidal: (
-      <TidalTab
-        vertical={page.verticals.tidal}
-        onOpen={(sourceId) => openSourceModal('tidal', sourceId)}
-      />
-    ),
-    qobuz: (
-      <QobuzTab
-        vertical={page.verticals.qobuz}
-        onOpen={(sourceId) => openSourceModal('qobuz', sourceId)}
-      />
-    ),
-    beatport: (
-      <BeatportTab
-        vertical={page.verticals.beatport}
-        onOpen={(sourceId) => openSourceModal('beatport', sourceId)}
-      />
-    ),
+    tidal: <TidalTab />,
+    qobuz: <QobuzTab />,
+    beatport: <BeatportTab />,
     deezer: <DeezerArlTab />,
     // The link variant is the same SERVICE: one config, one vertical, one
     // modal id space. Only the way a playlist arrives differs.
     'deezer-link': (
-      <DeezerLinkTab
-        vertical={page.verticals.deezer}
-        onOpen={(sourceId) => openSourceModal('deezer', sourceId)}
-        pendingUrl={pendingFor('deezer-link')}
-        onPendingConsumed={clearPending}
-      />
+      <DeezerLinkTab pendingUrl={pendingFor('deezer-link')} onPendingConsumed={clearPending} />
     ),
-    youtube: (
-      <YouTubeTab
-        vertical={page.verticals.youtube}
-        onOpen={(sourceId) => openSourceModal('youtube', sourceId)}
-        pendingUrl={pendingFor('youtube')}
-        onPendingConsumed={clearPending}
-      />
-    ),
-    ytmusic: (
-      <YTMusicTab
-        vertical={page.verticals.ytmusic}
-        onOpen={(sourceId) => openSourceModal('ytmusic', sourceId)}
-      />
-    ),
-    'listenbrainz-sync': (
-      <ListenBrainzSyncTab vertical={page.verticals.listenbrainz} onOpen={openLbCard} />
-    ),
-    'lastfm-sync': <LastfmSyncTab vertical={page.verticals.listenbrainz} onOpen={openLbCard} />,
-    'soulsync-discovery-sync': <SoulsyncDiscoveryTab onOpenMirrored={showMirroredDetail} />,
+    youtube: <YouTubeTab pendingUrl={pendingFor('youtube')} onPendingConsumed={clearPending} />,
+    ytmusic: <YTMusicTab />,
+    'listenbrainz-sync': <ListenBrainzSyncTab />,
+    'lastfm-sync': <LastfmSyncTab />,
+    'soulsync-discovery-sync': <SoulsyncDiscoveryTab />,
     'import-file': <ImportFileTab onImported={onImported} />,
     mirrored: (
       <MirroredTab
-        vertical={page.verticals.mirrored}
+        vertical={page.mirrored}
         onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
         sourceName={sourceName}
         pipeline={page.pipeline}
@@ -312,7 +283,7 @@ export function SyncPage() {
     'my-playlists': (
       <MirroredTab
         scope="user"
-        vertical={page.verticals.mirrored}
+        vertical={page.mirrored}
         onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
         sourceName={sourceName}
         pipeline={page.pipeline}
@@ -322,7 +293,7 @@ export function SyncPage() {
     'request-lists': (
       <MirroredTab
         scope="requests"
-        vertical={page.verticals.mirrored}
+        vertical={page.mirrored}
         onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
         sourceName={sourceName}
         pipeline={page.pipeline}
@@ -332,7 +303,7 @@ export function SyncPage() {
   };
 
   return (
-    <>
+    <ImportLandingProvider value={importLanding}>
       {addAnchor && (
         <AddPlaylistSheet
           anchor={{ top: addAnchor.top, left: addAnchor.left }}
@@ -347,20 +318,11 @@ export function SyncPage() {
         onAddPlaylist={(next) => setAddAnchor((prev) => (prev ? null : next))}
         onAutoSync={() => setAutoSyncOpen(true)}
         onActivity={() => setActivityOpen(true)}
-        sidebar={
-          <SyncSidebar
-            state={page.actions}
-            onStartSync={page.onStartSync}
-            visible={page.sidebarVisible}
-          />
-        }
-        sidebarVisible={page.sidebarVisible}
-        onTabChange={page.onTabChange}
         registerOpenTab={registerOpenTab}
       />
 
       <SyncModals
-        verticals={page.verticals}
+        vertical={page.mirrored}
         modals={page.modals}
         standalone={page.standalone}
         mirroredSource={sourceName}
@@ -431,6 +393,6 @@ export function SyncPage() {
           onDraggingChange={autoSync.setDragging}
         />
       ) : null}
-    </>
+    </ImportLandingProvider>
   );
 }

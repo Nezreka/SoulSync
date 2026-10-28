@@ -341,7 +341,7 @@ function MirroredCardMenu({
       {onGenerateCover && item('Generate cover art', onGenerateCover)}
       {item('Export', onExport)}
       {/* Only offered when there IS a discovery to clear (575-582). */}
-      {(row.discovered_count || 0) > 0 && item('Clear identification', onClear)}
+      {(row.discovered_count || 0) > 0 && item('Clear & re-identify', onClear)}
       {item('Delete', onDelete, true)}
     </div>
   );
@@ -545,13 +545,21 @@ export function MirroredTab({
     }
   }, [rows, pipeline]);
 
-  /** clearMirroredDiscovery (1175-1205). */
+  // runDiscovery is declared further down (it closes over state onClear
+  // doesn't need); the clear reaches it through this
+  const runDiscoveryRef = useRef<((playlistId: number) => Promise<void>) | null>(null);
+
+  /**
+   * clearMirroredDiscovery (1175-1205), then straight into a fresh
+   * identification (#1910): clearing used to leave you with nowhere to run it
+   * again from.
+   */
   const onClear = useCallback(
     async (row: MirroredPlaylistRow) => {
       const name = row.name ?? '';
       const ok = await window.showConfirmDialog?.({
-        title: 'Clear Identification Data',
-        message: `Clear identification data for "${name}"? You can re-identify afterwards to get updated cover art.`,
+        title: 'Clear and re-identify',
+        message: `Clear the identification for "${name}" and start over? The identification window opens so you can run it again.`,
       });
       if (!ok) return;
       try {
@@ -580,6 +588,9 @@ export function MirroredTab({
         }
         vertical.dropState(hash);
         await load();
+        // a tick later, so it reads the render where the cleared state is gone
+        // and opens a fresh identification rather than the old results
+        window.setTimeout(() => void runDiscoveryRef.current?.(row.id), 0);
       } catch (err) {
         window.showToast?.(
           `Error: ${err instanceof Error ? err.message : 'unknown error'}`,
@@ -908,6 +919,7 @@ export function MirroredTab({
     },
     [config, vertical, onOpen],
   );
+  runDiscoveryRef.current = runDiscovery;
 
   /**
    * the card always opens the tracks detail. it used to jump straight to the

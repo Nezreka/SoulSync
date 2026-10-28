@@ -15,40 +15,30 @@
  * `spotifyPlaylists` are top-level `let`s and have no window property at all.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 
-import type { SyncActionsState } from './-sync.sidebar';
 import type { SyncModals } from './-sync.use-modals';
 import type { PipelineController } from './-sync.use-pipeline';
-import type { SyncSelection } from './-sync.use-selection';
-import type { SequentialSyncEngine } from './-sync.use-sequential';
-import type { SyncVerticals } from './-sync.verticals';
+import type { SourceVertical } from './-sync.use-vertical';
 
 import { mirroredPipelineStateWriter } from './-sync.mirrored';
-import { syncSidebarVisible } from './-sync.sidebar';
+import { SYNC_SOURCES } from './-sync.sources';
 import { useSyncModals } from './-sync.use-modals';
 import { useMirroredPipeline } from './-sync.use-pipeline';
-import { useSyncSelection } from './-sync.use-selection';
-import { useSequentialSync } from './-sync.use-sequential';
 import { useStandalone } from './-sync.use-standalone';
-import { useSyncVerticals } from './-sync.verticals';
+import { useSourceVertical } from './-sync.use-vertical';
 
 export interface SyncPage {
-  verticals: SyncVerticals;
-  selection: SyncSelection;
+  /**
+   * The mirrored playlists' identify/sync state. The one vertical left: every
+   * source tab imports into a mirror now, so a playlist is only ever
+   * identified, synced or downloaded from there.
+   */
+  mirrored: SourceVertical;
   modals: SyncModals;
   /** The page's ONE controller — see -sync.use-pipeline and S3b-i. */
   pipeline: PipelineController;
   standalone: boolean;
-  /** What the sidebar renders. */
-  actions: SyncActionsState;
-  /** Playlist selection is frozen for the duration of a run. */
-  locked: boolean;
-  /** Start Sync's single toggle. */
-  onStartSync: () => void;
-  sidebarVisible: boolean;
-  /** The shell calls this on every tab switch — the vanilla re-hides there. */
-  onTabChange: () => void;
   /** Handed to MirroredTab. `key` names the instance: the Mirrored and My
    *  Playlists tabs are two of them, and a pipeline run has to refresh both. */
   registerMirroredReload: (reload: () => void, key?: string) => void;
@@ -61,20 +51,11 @@ export interface SyncPage {
    * there to refresh yet.
    */
   reloadMirrored: () => void;
-  /** Handed to SpotifyTab. */
-  registerSpotifyRows: (playlistIds: string[]) => void;
 }
 
 export function useSyncPage(): SyncPage {
   const standalone = useStandalone();
-  const selection = useSyncSelection();
   const modals = useSyncModals();
-
-  /** The Spotify tab's rendered order — the sequential queue's order. */
-  const spotifyOrder = useRef<string[]>([]);
-  const registerSpotifyRows = useCallback((playlistIds: string[]) => {
-    spotifyOrder.current = playlistIds;
-  }, []);
 
   /** Each mirrored tab's row refetch, filled on its mount. */
   const mirroredReloads = useRef(new Map<string, () => void>());
@@ -82,12 +63,9 @@ export function useSyncPage(): SyncPage {
     mirroredReloads.current.set(key, reload);
   }, []);
 
-  const verticals = useSyncVerticals();
+  const mirrored = useSourceVertical(SYNC_SOURCES.mirrored);
 
-  const onPipelineState = useMemo(
-    () => mirroredPipelineStateWriter(verticals.mirrored),
-    [verticals.mirrored],
-  );
+  const onPipelineState = useMemo(() => mirroredPipelineStateWriter(mirrored), [mirrored]);
   const reloadMirrored = useCallback(() => {
     for (const reload of mirroredReloads.current.values()) reload();
   }, []);
@@ -109,66 +87,12 @@ export function useSyncPage(): SyncPage {
     };
   }, [reloadMirrored]);
 
-  /**
-   * Names come from the ENGINE's array, which is what `updateUI` resolves
-   * against (core.js 1413) — including its 'Unknown' fallback for anything it
-   * cannot find. ORDER does not: that array is never pruned and also holds
-   * virtual playlists, so it is a superset of what is on screen.
-   */
-  const nameFor = useCallback((playlistId: string) => {
-    const rows = window.getSyncAccountPlaylists?.() ?? [];
-    const match = rows.find((row) => String(row.id) === playlistId);
-    return match?.name;
-  }, []);
-
-  const engine = useMemo<SequentialSyncEngine>(
-    () => ({
-      startPlaylistSync: async (playlistId) => {
-        await window.startPlaylistSync?.(playlistId);
-      },
-      isSyncing: (playlistId) => Boolean(window.isPlaylistSyncing?.(playlistId)),
-      setSelectionDisabled: (disabled) => window.disablePlaylistSelection?.(disabled),
-      refreshButtons: () => window.updateRefreshButtonState?.(),
-      toast: (message, kind) => window.showToast?.(message, kind),
-    }),
-    [],
-  );
-
-  const sequential = useSequentialSync({
-    engine,
-    selectedCount: selection.count,
-    nameFor,
-  });
-
-  /**
-   * The vanilla's tab handler re-hides the sidebar on EVERY switch, without
-   * asking whether a run is in progress (sync-services.js 3759). Transcribed:
-   * switching tabs mid-sync drops the progress panel until the next run.
-   */
-  const [hiddenByTabSwitch, setHiddenByTabSwitch] = useState(false);
-  const onTabChange = useCallback(() => {
-    setHiddenByTabSwitch(true);
-  }, []);
-
-  const onStartSync = useCallback(() => {
-    // A start un-hides: showSyncSidebar runs on every start (downloads.js 4092).
-    setHiddenByTabSwitch(false);
-    sequential.toggle(spotifyOrder.current, selection.selected);
-  }, [sequential, selection.selected]);
-
   return {
-    verticals,
-    selection,
+    mirrored,
     modals,
     pipeline,
     standalone,
-    actions: sequential.actions,
-    locked: sequential.locked,
-    onStartSync,
-    sidebarVisible: syncSidebarVisible(sequential.state.running, hiddenByTabSwitch),
-    onTabChange,
     registerMirroredReload,
     reloadMirrored,
-    registerSpotifyRows,
   };
 }

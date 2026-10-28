@@ -1,19 +1,20 @@
 /**
- * The Tidal/Qobuz account-vertical tabs against a captured fetch and the REAL
- * useSourceVertical hook — refresh → list → background tracks + mirror →
- * states hydration/resume → the two fresh-click drifts.
+ * The Tidal / Qobuz / YouTube Music tabs: your playlists on that service,
+ * each one ready to import. Rendered against a captured fetch inside an
+ * import landing, so what's asserted is the whole path: refresh lists them
+ * (and mirrors nothing), import fetches that one playlist and saves it, and
+ * you land on it.
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useState } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { forgetAccountPlaylists } from '../-sync.account-cache';
 import { fetchAccountPlaylist } from '../-sync.api';
 import { SYNC_SOURCES } from '../-sync.sources';
-import { useSourceVertical } from '../-sync.use-vertical';
 import { QobuzTab, TidalTab, YTMusicTab } from './account-tab';
 import { hydrateStatesForLoaded, resumeIfInFlight } from './url-import-tab';
+import { type ImportLanding, ImportLandingProvider } from './use-importer';
 
 interface Call {
   url: string;
@@ -22,26 +23,49 @@ interface Call {
 }
 let calls: Call[] = [];
 let responder: (url: string) => unknown = () => ({});
+let mirrors: { id: number; source: string; source_playlist_id: string }[] = [];
+let nextMirrorId = 50;
 
 function stubFetch(): void {
   calls = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
-      calls.push({
-        url,
-        method: init?.method ?? 'GET',
-        body: init?.body ? JSON.parse(init.body as string) : undefined,
-      });
+      const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      calls.push({ url, method: init?.method ?? 'GET', body });
+      if (url === '/api/mirrored-playlists') return new Response(JSON.stringify(mirrors));
+      if (url === '/api/mirror-playlist') {
+        return new Response(JSON.stringify({ success: true, playlist_id: nextMirrorId++ }));
+      }
       return new Response(JSON.stringify(responder(url)));
     }),
   );
 }
 
+function renderTab(tab: React.ReactNode) {
+  const land = vi.fn<ImportLanding['land']>();
+  const showList = vi.fn();
+  const view = render(
+    <ImportLandingProvider value={{ land, showList }}>{tab}</ImportLandingProvider>,
+  );
+  return { land, showList, view };
+}
+
+const mirrorBodies = () =>
+  calls
+    .filter((c) => c.url === '/api/mirror-playlist')
+    .map((c) => c.body as Record<string, unknown>);
+
+beforeEach(() => {
+  forgetAccountPlaylists();
+  mirrors = [];
+  nextMirrorId = 50;
+});
+
 afterEach(() => {
   // The account cache is module-level, so it outlives a test. Left alone it
   // would hand the NEXT case a pre-loaded tab, and the failure would depend on
-  // file order — the worst kind to debug.
+  // file order.
   forgetAccountPlaylists();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -50,577 +74,246 @@ afterEach(() => {
   delete (window as { hideLoadingOverlay?: unknown }).hideLoadingOverlay;
 });
 
-function TidalHarness({ onOpen }: { onOpen?: (id: string) => void }) {
-  const vertical = useSourceVertical(SYNC_SOURCES.tidal);
-  const [openId, setOpenId] = useState<string | null>(null);
-  return (
-    <div>
-      <TidalTab vertical={vertical} onOpen={onOpen ?? setOpenId} />
-      <span data-testid="open-id">{openId ?? 'none'}</span>
-      <span data-testid="phase">{vertical.states.t1?.phase ?? 'unseeded'}</span>
-      <span data-testid="seeded">
-        {JSON.stringify(vertical.states[openId ?? 't1']?.playlist?.tracks ?? null)}
-      </span>
-    </div>
-  );
+const TIDAL_LIST = [
+  { id: 't1', name: 'Gappy', track_count: 30, owner: 'Me', image_url: 'http://art/1' },
+  { id: 't2', name: 'Whole', track_count: 12 },
+];
+
+function tidalResponder(url: string) {
+  if (url === '/api/tidal/playlists') return TIDAL_LIST;
+  if (url === '/api/tidal/playlist/t1') {
+    return {
+      tracks: [{ name: 'S1', artists: ['A1'], album: 'Al', duration_ms: 5, id: 'x' }],
+      source_skipped: { videos: 1, unavailable: 29 },
+    };
+  }
+  if (url === '/api/tidal/playlist/t2') {
+    return { tracks: [{ name: 'S2', artists: ['A2'], id: 'y' }], source_skipped: null };
+  }
+  return {};
 }
 
 describe('TidalTab', () => {
-  it('starts on the click-Refresh placeholder and loads nothing', () => {
+  it('starts on the click-Refresh placeholder and loads nothing but the index', () => {
     stubFetch();
-    render(<TidalHarness />);
+    renderTab(<TidalTab />);
     expect(screen.getByText("Click 'Refresh' to load your Tidal playlists.")).toBeInTheDocument();
-    expect(calls).toEqual([]);
+    expect(calls.filter((c) => c.url !== '/api/mirrored-playlists')).toEqual([]);
   });
 
-  it('refresh: list → cards → background track fetch updates count + mirrors → states hydrate', async () => {
+  it('refresh lists the playlists and mirrors NOTHING, with no per-playlist crawl', async () => {
     stubFetch();
-    window.showToast = vi.fn() as typeof window.showToast;
-    responder = (url) => {
-      if (url === '/api/tidal/playlists') {
-        return [
-          {
-            id: 't1',
-            name: 'Tidal Mix',
-            track_count: 0,
-            owner: 'Me',
-            image_url: 'http://img',
-            description: 'desc-meta',
-          },
-        ];
-      }
-      if (url === '/api/tidal/playlist/t1') {
-        return { tracks: [{ name: 'S1', artists: ['A1'], album: 'Al', duration_ms: 3, id: 'x' }] };
-      }
-      if (url === '/api/tidal/playlists/states') {
-        return {
-          states: [
-            { playlist_id: 't1', phase: 'discovered', spotify_matches: 1, spotify_total: 1 },
-          ],
-        };
-      }
-      return { success: true };
-    };
-    render(<TidalHarness />);
+    responder = tidalResponder;
+    renderTab(<TidalTab />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('Tidal Mix')).toBeInTheDocument());
-    // Background fetch landed: the card count updates (46-47).
-    await waitFor(() => expect(screen.getByText('1 tracks')).toBeInTheDocument());
-    // Mirror carries the account metadata incl. description (30-34).
-    const mirror = calls.find((c) => c.url === '/api/mirror-playlist');
-    expect(mirror!.body).toMatchObject({
+    await waitFor(() => expect(screen.getByText('Gappy')).toBeInTheDocument());
+    expect(screen.getByText('30 tracks · Me')).toBeInTheDocument();
+    expect(screen.getByText('12 tracks')).toBeInTheDocument();
+    expect(screen.getAllByText('Import')).toHaveLength(2);
+    expect(screen.getByText('Import all 2')).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls.some((c) => c.url.startsWith('/api/tidal/playlist/'))).toBe(false);
+    expect(mirrorBodies()).toEqual([]);
+  });
+
+  it('importing fetches that one playlist, saves it with what tidal skipped, and lands', async () => {
+    stubFetch();
+    responder = tidalResponder;
+    const { land } = renderTab(<TidalTab />);
+    fireEvent.click(screen.getByText('🔄 Refresh'));
+    await waitFor(() => expect(screen.getByText('Gappy')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText('Import Gappy into SoulSync'));
+    await waitFor(() => expect(land).toHaveBeenCalledWith(50, 'Gappy', false));
+    expect(calls.filter((c) => c.url.startsWith('/api/tidal/playlist/')).map((c) => c.url)).toEqual(
+      ['/api/tidal/playlist/t1'],
+    );
+    const [body] = mirrorBodies();
+    expect(body).toMatchObject({
       source: 'tidal',
       source_playlist_id: 't1',
-      name: 'Tidal Mix',
+      name: 'Gappy',
       owner: 'Me',
-      image_url: 'http://img',
-      description: 'desc-meta',
+      image_url: 'http://art/1',
+      source_skipped: { videos: 1, unavailable: 29 },
     });
-    // States applied after the list (61-62).
-    await waitFor(() => expect(screen.getByText('Identification Complete')).toBeInTheDocument());
-    expect(screen.getByText('1 / 1')).toBeInTheDocument();
-    expect(screen.getByText('100%')).toBeInTheDocument();
+    expect((body.tracks as Record<string, unknown>[])[0]).toMatchObject({
+      track_name: 'S1',
+      artist_name: 'A1',
+      album_name: 'Al',
+      source_track_id: 'x',
+    });
+    // the card says it's in now
+    await waitFor(() => expect(screen.getByText('In SoulSync')).toBeInTheDocument());
   });
 
-  it("#1613: the mirror carries what tidal couldn't load, and only when tidal said", async () => {
+  it('#1613: a whole playlist sends source_skipped null, so a stored note clears', async () => {
     stubFetch();
-    window.showToast = vi.fn() as typeof window.showToast;
-    responder = (url) => {
-      if (url === '/api/tidal/playlists') {
-        return [
-          { id: 't1', name: 'Gappy', track_count: 0 },
-          { id: 't2', name: 'Whole', track_count: 0 },
-        ];
-      }
-      if (url === '/api/tidal/playlist/t1') {
-        return {
-          tracks: [{ name: 'S1', artists: ['A1'], id: 'x' }],
-          source_skipped: { videos: 1, unavailable: 29 },
-        };
-      }
-      if (url === '/api/tidal/playlist/t2') {
-        return { tracks: [{ name: 'S2', artists: ['A2'], id: 'y' }], source_skipped: null };
-      }
-      return { success: true };
-    };
-    render(<TidalHarness />);
+    responder = tidalResponder;
+    const { land } = renderTab(<TidalTab />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() =>
-      expect(calls.filter((c) => c.url === '/api/mirror-playlist')).toHaveLength(2),
-    );
-    const bodies = calls
-      .filter((c) => c.url === '/api/mirror-playlist')
-      .map((c) => c.body as Record<string, unknown>);
-    const gappy = bodies.find((b) => b.source_playlist_id === 't1')!;
-    const whole = bodies.find((b) => b.source_playlist_id === 't2')!;
-    expect(gappy.source_skipped).toEqual({ videos: 1, unavailable: 29 });
-    // null is sent, so the stored note clears
-    expect(whole).toHaveProperty('source_skipped', null);
+    await waitFor(() => expect(screen.getByText('Whole')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Import Whole into SoulSync'));
+    await waitFor(() => expect(land).toHaveBeenCalled());
+    expect(mirrorBodies()[0]).toHaveProperty('source_skipped', null);
   });
 
-  it('a playlist that arrives WITH tracks mirrors immediately, no per-playlist fetch (28-36)', async () => {
+  it('one already in reads In SoulSync and opens without importing again', async () => {
     stubFetch();
-    responder = (url) => {
-      if (url === '/api/tidal/playlists') {
-        return [
-          {
-            id: 't9',
-            name: 'Prefilled',
-            track_count: 1,
-            owner: 'O',
-            tracks: [{ name: 'PT', artists: ['PA'], album: 'PAl', duration_ms: 1, id: 'pt' }],
-          },
-        ];
-      }
-      if (url === '/api/tidal/playlists/states') return { states: [] };
-      return { success: true };
-    };
-    render(<TidalHarness />);
+    responder = tidalResponder;
+    mirrors = [{ id: 7, source: 'tidal', source_playlist_id: 't1' }];
+    const { land } = renderTab(<TidalTab />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('Prefilled')).toBeInTheDocument());
-    const mirror = await waitFor(() => {
-      const found = calls.find((c) => c.url === '/api/mirror-playlist');
-      expect(found).toBeDefined();
-      return found!;
-    });
-    expect((mirror.body as { tracks: { track_name: string }[] }).tracks[0].track_name).toBe('PT');
-    // The skip-if-tracks branch never hits the per-playlist endpoint.
-    expect(calls.some((c) => c.url === '/api/tidal/playlist/t9')).toBe(false);
+    await waitFor(() => expect(screen.getByText('In SoulSync')).toBeInTheDocument());
+    // only the one that isn't in counts toward Import all
+    expect(screen.queryByText(/^Import all/)).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('Open Gappy in SoulSync'));
+    await waitFor(() => expect(land).toHaveBeenCalledWith(7, 'Gappy', true));
+    expect(mirrorBodies()).toEqual([]);
   });
 
-  it('a settled discovered card with no results refetches state before opening (173-193)', async () => {
+  it('Import all brings in every one not in yet, then shows the list', async () => {
     stubFetch();
-    responder = (url) => {
-      if (url === '/api/tidal/playlists') return [{ id: 't1', name: 'Settled', track_count: 2 }];
-      if (url === '/api/tidal/playlists/states') {
-        return { states: [{ playlist_id: 't1', phase: 'discovered' }] };
-      }
-      if (url === '/api/tidal/state/t1') {
-        return { phase: 'discovered', discovery_results: [{ spotify_data: { name: 'R' } }] };
-      }
-      return { tracks: [] };
-    };
-    render(<TidalHarness />);
-    fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('Identification Complete')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Settled'));
-    await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('t1'));
-    expect(calls.some((c) => c.url === '/api/tidal/state/t1')).toBe(true);
-  });
-
-  it('Refresh is disabled for the whole load — the double-click race cannot start (9-10, 67-69)', async () => {
-    calls = [];
-    let releaseStates: (value: unknown) => void = () => undefined;
-    const statesGate = new Promise((resolve) => {
-      releaseStates = resolve;
-    });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        calls.push({ url, method: 'GET', body: undefined });
-        if (url === '/api/tidal/playlists') {
-          return new Response(JSON.stringify([{ id: 't1', name: 'Racer', track_count: 1 }]));
-        }
-        if (url === '/api/tidal/playlists/states') {
-          await statesGate;
-          return new Response(JSON.stringify({ states: [] }));
-        }
-        return new Response(JSON.stringify({ tracks: [] }));
-      }),
-    );
-
-    render(<TidalHarness />);
-    fireEvent.click(screen.getByText('🔄 Refresh'));
-    // Loading label + disabled button hold until the states tail resolves —
-    // this is WHY hydrateStatesForLoaded's staleness guard is belt-and-braces
-    // rather than load-bearing (unit-tested directly below).
-    await waitFor(() => expect(screen.getByText('🔄 Loading...')).toBeDisabled());
-    releaseStates(undefined);
-    await waitFor(() => expect(screen.getByText('🔄 Refresh')).toBeEnabled());
-    expect(screen.getByText('Racer')).toBeInTheDocument();
-  });
-
-  it('Specialmed: Refresh releases when the CARDS paint, not when the track crawl ends', async () => {
-    // Discord, Aug 11: Tidal's Refresh sat on "Loading" for 3-5 minutes after
-    // the playlists had visibly rendered. The per-playlist track crawl that
-    // feeds auto-mirroring was awaited INSIDE the load, so the button reported
-    // the crawl rather than the list. (Fixed once in the vanilla page — three
-    // days after /sync flipped to React, so it landed in a dead file.)
-    calls = [];
-    let releaseTracks: (value: unknown) => void = () => undefined;
-    const tracksGate = new Promise((resolve) => {
-      releaseTracks = resolve;
-    });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        calls.push({ url, method: 'GET', body: undefined });
-        if (url === '/api/tidal/playlists') {
-          return new Response(
-            JSON.stringify([
-              { id: 't1', name: 'Racer', track_count: 1 },
-              { id: 't2', name: 'Chaser', track_count: 1 },
-            ]),
-          );
-        }
-        if (url === '/api/tidal/playlists/states') {
-          return new Response(JSON.stringify({ states: [] }));
-        }
-        // The crawl — still in flight while we assert below.
-        await tracksGate;
-        return new Response(JSON.stringify({ tracks: [{ id: 'x', name: 'Song' }] }));
-      }),
-    );
-
-    render(<TidalHarness />);
-    fireEvent.click(screen.getByText('🔄 Refresh'));
-
-    // The cards are up and the button is BACK, with the crawl still hanging.
-    await waitFor(() => expect(screen.getByText('Racer')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('🔄 Refresh')).toBeEnabled());
-    await waitFor(() => expect(calls.some((c) => c.url === '/api/tidal/playlist/t1')).toBe(true));
-
-    releaseTracks(undefined);
-    await waitFor(() => expect(calls.some((c) => c.url === '/api/tidal/playlist/t2')).toBe(true));
-  });
-
-  it('a failed list paints the ❌ placeholder and toasts (64-66)', async () => {
-    calls = [];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(JSON.stringify({ error: 'Tidal down' }), { status: 502 })),
-    );
+    responder = (url) =>
+      url === '/api/tidal/playlists'
+        ? [...TIDAL_LIST, { id: 't3', name: 'Third', track_count: 1 }]
+        : url === '/api/tidal/playlist/t3'
+          ? { tracks: [{ name: 'S3', artists: ['A3'], id: 'z' }] }
+          : tidalResponder(url);
+    mirrors = [{ id: 7, source: 'tidal', source_playlist_id: 't2' }];
     const toast = vi.fn();
     window.showToast = toast as typeof window.showToast;
-    render(<TidalHarness />);
+    const { land, showList } = renderTab(<TidalTab />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('❌ Error: Tidal down')).toBeInTheDocument());
-    expect(toast).toHaveBeenCalledWith('Error loading Tidal playlists: Tidal down', 'error');
-  });
+    await waitFor(() => expect(screen.getByText('Import all 2')).toBeInTheDocument());
 
-  it('#867: a fresh card click opens IMMEDIATELY without a track fetch', async () => {
-    stubFetch();
-    responder = (url) => {
-      if (url === '/api/tidal/playlists') {
-        return [{ id: 't1', name: 'Instant', track_count: 1 }];
-      }
-      if (url === '/api/tidal/playlists/states') return { states: [] };
-      // The background loop caches these before the click.
-      return { tracks: [{ id: 'c1', name: 'Cached' }] };
-    };
-    render(<TidalHarness />);
-    fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('Instant')).toBeInTheDocument());
-    await waitFor(() => expect(calls.some((c) => c.url === '/api/tidal/playlist/t1')).toBe(true));
-    const before = calls.length;
-    fireEvent.click(screen.getByText('Instant'));
-    await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('t1'));
-    // No fetch on click at all — the modal opens on what is already cached.
-    expect(calls.length).toBe(before);
-    // #867's payoff: the cached rows seed instantly (162-166).
-    expect(JSON.parse(screen.getByTestId('seeded').textContent!)).toEqual([
-      { id: 'c1', name: 'Cached' },
-    ]);
-  });
-
-  it('a fresh tidal card with NO cached tracks still opens, seeded with [] (162-165)', async () => {
-    stubFetch();
-    responder = (url) => {
-      if (url === '/api/tidal/playlists') return [{ id: 't1', name: 'Bare', track_count: 9 }];
-      if (url === '/api/tidal/playlists/states') return { states: [] };
-      return { tracks: [] };
-    };
-    render(<TidalHarness />);
-    fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('Bare')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Bare'));
-    await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('t1'));
-    expect(screen.getByTestId('seeded')).toHaveTextContent('[]');
-  });
-
-  it('opened before the crawl reached it: the tracks are fetched and fill the open modal', async () => {
-    // TheHomeGuy: a big tidal playlist sat at "0 tracks" with nothing
-    // happening, because the click came before the background crawl did.
-    stubFetch();
-    let trackFetches = 0;
-    responder = (url) => {
-      if (url === '/api/tidal/playlists')
-        return [{ id: 't1', name: 'Driving Music', track_count: 2 }];
-      if (url === '/api/tidal/playlists/states') return { states: [] };
-      if (url === '/api/tidal/playlist/t1') {
-        trackFetches += 1;
-        // the crawl's fetch is still out (nothing yet); the click's lands
-        return trackFetches === 1
-          ? { tracks: [] }
-          : { tracks: [{ id: 'd1', name: 'Drive', artists: ['A'], album: 'X', duration_ms: 1 }] };
-      }
-      return {};
-    };
-    render(<TidalHarness />);
-    fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('Driving Music')).toBeInTheDocument());
-    await waitFor(() => expect(trackFetches).toBe(1));
-    fireEvent.click(screen.getByText('Driving Music'));
-    await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('t1'));
-    await waitFor(() =>
-      expect(JSON.parse(screen.getByTestId('seeded').textContent!)).toEqual([
-        { id: 'd1', name: 'Drive', artists: ['A'], album: 'X', duration_ms: 1, track_number: 0 },
-      ]),
+    fireEvent.click(screen.getByText('Import all 2'));
+    await waitFor(() => expect(showList).toHaveBeenCalled());
+    expect(mirrorBodies().map((b) => b.source_playlist_id)).toEqual(['t1', 't3']);
+    expect(land).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(
+      "Imported 2 playlists. They're identifying in the background",
+      'success',
     );
-    expect(screen.getByText('1 tracks')).toBeInTheDocument();
   });
 
-  it('the SYNC progress line replaces the discovery one, with (matched+failed)/total (1159-1197)', async () => {
+  it('a failed import says why and lands nowhere', async () => {
     stubFetch();
-    responder = (url) => {
-      if (url === '/api/tidal/playlists')
-        return [{ id: 't1', name: 'Syncing One', track_count: 10 }];
-      if (url === '/api/tidal/playlists/states') {
-        return {
-          states: [
-            {
-              playlist_id: 't1',
-              phase: 'syncing',
-              spotify_matches: 4,
-              spotify_total: 10,
-              sync_progress: { total_tracks: 10, matched_tracks: 6, failed_tracks: 2 },
-            },
-          ],
-        };
-      }
-      return { tracks: [] };
-    };
-    render(<TidalHarness />);
+    responder = (url) =>
+      url === '/api/tidal/playlists'
+        ? TIDAL_LIST
+        : url === '/api/tidal/playlist/t1'
+          ? { error: 'Tidal token expired' }
+          : {};
+    const toast = vi.fn();
+    window.showToast = toast as typeof window.showToast;
+    const { land } = renderTab(<TidalTab />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
-    // 6 matched + 2 failed of 10 = 80%, NOT the discovery 4/10 = 40%.
-    await waitFor(() => expect(screen.getByText('80%')).toBeInTheDocument());
-    expect(screen.getByText('6 / 10')).toBeInTheDocument();
-    expect(screen.getByText('✗ 2')).toBeInTheDocument();
-    // The discovery numbers must NOT be what got painted.
-    expect(screen.queryByText('40%')).not.toBeInTheDocument();
-    expect(screen.queryByText('4 / 10')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Gappy')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Import Gappy into SoulSync'));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('Tidal token expired', 'error'));
+    expect(land).not.toHaveBeenCalled();
+    expect(mirrorBodies()).toEqual([]);
+    // and the card can be tried again
+    expect(screen.getAllByText('Import')).toHaveLength(2);
   });
 
-  it('a non-fresh account card at zero shows the zero line, bar visible (961-967)', async () => {
+  it('a failed list paints the ❌ placeholder and toasts', async () => {
     stubFetch();
-    responder = (url) => {
-      if (url === '/api/tidal/playlists') return [{ id: 't1', name: 'Quiet', track_count: 0 }];
-      if (url === '/api/tidal/playlists/states') {
-        return { states: [{ playlist_id: 't1', phase: 'discovered', spotify_total: 0 }] };
-      }
-      return { tracks: [] };
-    };
-    render(<TidalHarness />);
+    const toast = vi.fn();
+    window.showToast = toast as typeof window.showToast;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url === '/api/mirrored-playlists'
+          ? new Response('[]')
+          : new Response(JSON.stringify({ error: 'boom' }), { status: 500 }),
+      ),
+    );
+    renderTab(<TidalTab />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('Identification Complete')).toBeInTheDocument());
-    const bar = document.querySelector('#tidal-card-t1 .playlist-card-progress')!;
-    // Still VISIBLE (not hidden) and still zeroed — the distinction from the
-    // check-note sources, which render empty at total 0.
-    expect(bar.className).not.toContain('hidden');
-    expect(bar.querySelector('.pcc-count')?.textContent).toBe('0 / 0');
-    expect(bar.querySelector('.pcc-pct')?.textContent).toBe('0%');
+    await waitFor(() => expect(screen.getByText('❌ Error: boom')).toBeInTheDocument());
+    expect(toast).toHaveBeenCalledWith('Error loading Tidal playlists: boom', 'error');
   });
 });
 
-function QobuzHarness({ onOpen }: { onOpen?: (id: string) => void }) {
-  const vertical = useSourceVertical(SYNC_SOURCES.qobuz);
-  const [openId, setOpenId] = useState<string | null>(null);
-  return (
-    <div>
-      <QobuzTab vertical={vertical} onOpen={onOpen ?? setOpenId} />
-      <span data-testid="open-id">{openId ?? 'none'}</span>
-      <span data-testid="seeded">
-        {JSON.stringify(vertical.states[openId ?? 'q1']?.playlist?.tracks ?? null)}
-      </span>
-    </div>
-  );
-}
-
 describe('QobuzTab', () => {
-  it('a fresh click fetches tracks behind the overlay, projects them, then opens (1649-1680)', async () => {
+  it('imports from the qobuz endpoints under the qobuz source', async () => {
     stubFetch();
-    const overlay = vi.fn();
-    const hideOverlay = vi.fn();
-    window.showLoadingOverlay = overlay as typeof window.showLoadingOverlay;
-    window.hideLoadingOverlay = hideOverlay as typeof window.hideLoadingOverlay;
-    let clickFetches = 0;
-    responder = (url) => {
-      if (url === '/api/qobuz/playlists') {
-        return { playlists: [{ id: 'q1', name: 'Qz List', track_count: 0 }] };
-      }
-      if (url === '/api/qobuz/playlist/q1') {
-        clickFetches += 1;
-        // First call: the background loop (returns nothing). Later: the click.
-        return clickFetches === 1
-          ? { tracks: [] }
-          : {
-              tracks: [
-                {
-                  id: 'qt',
-                  name: 'QS',
-                  artists: ['QA'],
-                  album: 'QAl',
-                  duration_ms: 7,
-                  track_number: 3,
-                  extra: 'dropped-by-the-projection',
-                },
-                { id: 'qt2', name: 'QS2' },
-              ],
-            };
-      }
-      if (url === '/api/qobuz/playlists/states') return { states: [] };
-      return { success: true };
-    };
-    render(<QobuzHarness />);
+    responder = (url) =>
+      url === '/api/qobuz/playlists'
+        ? [{ id: 'q1', name: 'Hi-Res', track_count: 2 }]
+        : url === '/api/qobuz/playlist/q1'
+          ? { tracks: [{ name: 'Q', artists: ['QA'], id: 'qq' }] }
+          : {};
+    const { land } = renderTab(<QobuzTab />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('Qz List')).toBeInTheDocument());
-    await waitFor(() =>
-      expect(calls.some((c) => c.url === '/api/qobuz/playlists/states')).toBe(true),
-    );
-
-    fireEvent.click(screen.getByText('Qz List'));
-    await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('q1'));
-    expect(overlay).toHaveBeenCalledWith('Loading Qz List...');
-    expect(hideOverlay).toHaveBeenCalled();
-    // The card count came from the click's fetch, not the fixture (1662-1663).
-    expect(screen.getByText('2 tracks')).toBeInTheDocument();
-    // The projection kept exactly the vanilla's six fields (1657-1661).
-    expect(JSON.parse(screen.getByTestId('seeded').textContent!)).toEqual([
-      { id: 'qt', name: 'QS', artists: ['QA'], album: 'QAl', duration_ms: 7, track_number: 3 },
-      { id: 'qt2', name: 'QS2', artists: [], album: '', duration_ms: 0, track_number: 0 },
-    ]);
+    await waitFor(() => expect(screen.getByText('Hi-Res')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Import Hi-Res into SoulSync'));
+    await waitFor(() => expect(land).toHaveBeenCalledWith(50, 'Hi-Res', false));
+    expect(mirrorBodies()[0]).toMatchObject({ source: 'qobuz', source_playlist_id: 'q1' });
   });
 
-  it("no tracks → 'Could not load tracks for this playlist', no open (1672-1676)", async () => {
+  it('an empty playlist says it has nothing to import', async () => {
     stubFetch();
+    responder = (url) =>
+      url === '/api/qobuz/playlists'
+        ? [{ id: 'q1', name: 'Nothing', track_count: 0 }]
+        : url === '/api/qobuz/playlist/q1'
+          ? { tracks: [] }
+          : {};
     const toast = vi.fn();
     window.showToast = toast as typeof window.showToast;
-    responder = (url) => {
-      if (url === '/api/qobuz/playlists') {
-        return { playlists: [{ id: 'q2', name: 'Empty One', track_count: 0 }] };
-      }
-      if (url === '/api/qobuz/playlists/states') return { states: [] };
-      return { tracks: [] };
-    };
-    render(<QobuzHarness />);
+    const { land } = renderTab(<QobuzTab />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('Empty One')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Empty One'));
+    await waitFor(() => expect(screen.getByText('Nothing')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Import Nothing into SoulSync'));
     await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith('Could not load tracks for this playlist', 'error'),
+      expect(toast).toHaveBeenCalledWith('Nothing has no tracks to import', 'error'),
     );
-    expect(screen.getByTestId('open-id')).toHaveTextContent('none');
+    expect(land).not.toHaveBeenCalled();
   });
 
-  it("empty account list paints 'No Qobuz playlists found.'", async () => {
+  it("an empty account says 'No Qobuz playlists found.'", async () => {
     stubFetch();
-    responder = (url) => (url === '/api/qobuz/playlists' ? { playlists: [] } : { states: [] });
-    render(<QobuzHarness />);
+    responder = (url) => (url === '/api/qobuz/playlists' ? [] : {});
+    renderTab(<QobuzTab />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
     await waitFor(() => expect(screen.getByText('No Qobuz playlists found.')).toBeInTheDocument());
   });
 });
 
-function YTMusicHarness({ onOpen }: { onOpen?: (id: string) => void }) {
-  const vertical = useSourceVertical(SYNC_SOURCES.ytmusic);
-  const [openId, setOpenId] = useState<string | null>(null);
-  return (
-    <div>
-      <YTMusicTab vertical={vertical} onOpen={onOpen ?? setOpenId} />
-      <span data-testid="open-id">{openId ?? 'none'}</span>
-      <span data-testid="seeded">
-        {JSON.stringify(vertical.states[openId ?? 'ytm1']?.playlist?.tracks ?? null)}
-      </span>
-    </div>
-  );
-}
-
 describe('YTMusicTab', () => {
-  it('starts on the click-Refresh placeholder and loads nothing', () => {
+  it('imports from the ytmusic endpoints (not qobuz)', async () => {
     stubFetch();
-    render(<YTMusicHarness />);
-    expect(
-      screen.getByText("Click 'Refresh' to load your YouTube Music playlists."),
-    ).toBeInTheDocument();
-    expect(calls).toEqual([]);
-  });
-
-  it('a fresh click fetches tracks from the ytmusic endpoint (not qobuz), then opens', async () => {
-    stubFetch();
-    const overlay = vi.fn();
-    const hideOverlay = vi.fn();
-    window.showLoadingOverlay = overlay as typeof window.showLoadingOverlay;
-    window.hideLoadingOverlay = hideOverlay as typeof window.hideLoadingOverlay;
-    let clickFetches = 0;
-    responder = (url) => {
-      if (url === '/api/ytmusic/playlists') {
-        return [{ id: 'ytm1', name: 'YTM Mix', track_count: 0 }];
-      }
-      if (url === '/api/ytmusic/playlist/ytm1') {
-        clickFetches += 1;
-        return clickFetches === 1
-          ? { tracks: [] }
-          : { tracks: [{ id: 'v1', name: 'Vid', artists: ['Ch'], duration_ms: 5 }] };
-      }
-      if (url === '/api/ytmusic/playlists/states') return { states: [] };
-      return { success: true };
-    };
-    render(<YTMusicHarness />);
+    responder = (url) =>
+      url === '/api/ytmusic/playlists'
+        ? [{ id: 'LM', name: 'Liked Music', track_count: 1 }]
+        : url === '/api/ytmusic/playlist/LM'
+          ? { tracks: [{ name: 'Y', artists: ['YA'], id: 'yy' }] }
+          : {};
+    const { land } = renderTab(<YTMusicTab />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('YTM Mix')).toBeInTheDocument());
-    await waitFor(() =>
-      expect(calls.some((c) => c.url === '/api/ytmusic/playlists/states')).toBe(true),
-    );
-
-    fireEvent.click(screen.getByText('YTM Mix'));
-    await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('ytm1'));
-    expect(overlay).toHaveBeenCalledWith('Loading YTM Mix...');
-    expect(hideOverlay).toHaveBeenCalled();
-    // Every track fetch — background crawl AND the click — hit ytmusic's own
-    // endpoint. The bug this guards against sent the click's fetch to qobuz's.
-    expect(calls.some((c) => c.url === '/api/qobuz/playlist/ytm1')).toBe(false);
-    expect(clickFetches).toBe(2);
-    expect(JSON.parse(screen.getByTestId('seeded').textContent!)).toEqual([
-      { id: 'v1', name: 'Vid', artists: ['Ch'], album: '', duration_ms: 5, track_number: 0 },
-    ]);
+    await waitFor(() => expect(screen.getByText('Liked Music')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Import Liked Music into SoulSync'));
+    await waitFor(() => expect(land).toHaveBeenCalled());
+    expect(calls.some((c) => c.url === '/api/ytmusic/playlist/LM')).toBe(true);
+    expect(mirrorBodies()[0]).toMatchObject({ source: 'ytmusic', source_playlist_id: 'LM' });
   });
 
-  it("no tracks → 'Could not load tracks for this playlist', no open", async () => {
-    stubFetch();
-    const toast = vi.fn();
-    window.showToast = toast as typeof window.showToast;
-    responder = (url) => {
-      if (url === '/api/ytmusic/playlists') {
-        return [{ id: 'ytm2', name: 'Empty Mix', track_count: 0 }];
-      }
-      if (url === '/api/ytmusic/playlists/states') return { states: [] };
-      return { tracks: [] };
-    };
-    render(<YTMusicHarness />);
-    fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('Empty Mix')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Empty Mix'));
-    await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith('Could not load tracks for this playlist', 'error'),
-    );
-    expect(screen.getByTestId('open-id')).toHaveTextContent('none');
-  });
-
-  it('unauthenticated account (401) surfaces the backend error, not a blank list', async () => {
-    // The list route 401s when Settings → YouTube has no cookies configured;
-    // fetchSourcePlaylists throws on !ok, same as every other account vertical,
-    // and AccountVerticalTab.load() renders that into the error placeholder.
-    calls = [];
+  it('an unauthenticated account (401) surfaces the backend error, not a blank list', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) => {
-        calls.push({ url, method: 'GET', body: undefined });
-        return new Response(JSON.stringify({ error: 'YouTube Music not authenticated.' }), {
-          status: 401,
-        });
-      }),
+      vi.fn(async (url: string) =>
+        url === '/api/mirrored-playlists'
+          ? new Response('[]')
+          : new Response(JSON.stringify({ error: 'YouTube Music not authenticated.' }), {
+              status: 401,
+            }),
+      ),
     );
-    render(<YTMusicHarness />);
+    renderTab(<YTMusicTab />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
     await waitFor(() =>
       expect(screen.getByText('❌ Error: YouTube Music not authenticated.')).toBeInTheDocument(),
@@ -740,56 +433,25 @@ describe('shared helpers', () => {
 });
 
 describe('Specialmed: playlists survive leaving the page', () => {
-  it('a remounted tab shows what it already loaded, and does NOT re-fetch', async () => {
+  it('a remounted tab shows what it already loaded, and does NOT re-fetch the list', async () => {
     stubFetch();
-    responder = (url) => {
-      if (url === '/api/tidal/playlists') {
-        return [{ id: 't1', name: 'My Mix 1', track_count: 3, owner: 'Me' }];
-      }
-      if (url === '/api/tidal/playlists/states') return {};
-      if (url === '/api/tidal/playlist/t1') return { tracks: [] };
-      return {};
-    };
-
-    const first = render(<TidalHarness />);
+    responder = (url) =>
+      url === '/api/tidal/playlists' ? [{ id: 't1', name: 'My Mix 1', track_count: 3 }] : {};
+    const first = renderTab(<TidalTab />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
     await waitFor(() => expect(screen.getByText('My Mix 1')).toBeInTheDocument());
+    first.view.unmount();
+    const listCalls = () => calls.filter((c) => c.url === '/api/tidal/playlists').length;
+    const before = listCalls();
 
-    // Leave /sync — React unmounts the tab and its state goes with it.
-    first.unmount();
-    const callsBefore = calls.length;
-
-    render(<TidalHarness />);
-    // The rows are back immediately, with no placeholder in between...
+    renderTab(<TidalTab />);
     expect(screen.getByText('My Mix 1')).toBeInTheDocument();
     expect(
       screen.queryByText("Click 'Refresh' to load your Tidal playlists."),
     ).not.toBeInTheDocument();
-    // ...and crucially without paying for the account fetch again, which for
-    // Tidal is the multi-minute crawl this whole report is about.
-    expect(calls.length).toBe(callsBefore);
-  });
+    expect(listCalls()).toBe(before);
 
-  it('Refresh still re-fetches even when rows are remembered', async () => {
-    stubFetch();
-    responder = (url) => {
-      if (url === '/api/tidal/playlists') {
-        return [{ id: 't1', name: 'My Mix 1', track_count: 0, owner: 'Me' }];
-      }
-      if (url === '/api/tidal/playlists/states') return {};
-      if (url === '/api/tidal/playlist/t1') return { tracks: [] };
-      return {};
-    };
-    const first = render(<TidalHarness />);
     fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() => expect(screen.getByText('My Mix 1')).toBeInTheDocument());
-    first.unmount();
-
-    render(<TidalHarness />);
-    const before = calls.filter((c) => c.url === '/api/tidal/playlists').length;
-    fireEvent.click(screen.getByText('🔄 Refresh'));
-    await waitFor(() =>
-      expect(calls.filter((c) => c.url === '/api/tidal/playlists').length).toBe(before + 1),
-    );
+    await waitFor(() => expect(listCalls()).toBe(before + 1));
   });
 });
