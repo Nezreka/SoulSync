@@ -204,6 +204,8 @@ export interface DatabaseStats {
   tracks: number;
   database_size_mb: number;
   last_full_refresh?: string | null;
+  /** the weekly deep scan reads the whole server too; same naive local time */
+  last_deep_scan?: string | null;
   /** Drives the "<Plex|Jellyfin|Navidrome> Database Updater" card title. */
   server_source?: string | null;
 }

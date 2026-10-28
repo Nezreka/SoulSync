@@ -366,7 +366,7 @@
     var VIDEO_WISHLIST_TABS = { movies: 1, tv: 1, youtube: 1 };
     // video pages that are really a React route on a video tab: navigate()
     // hands them off, so their /video-<page> url never stays in the bar.
-    var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1 };
+    var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1, 'video-dashboard': 1 };
     function lastVideoWishlistTab() {
         try {
             var t = sessionStorage.getItem('soulsync.videoWishlistTab');
@@ -386,6 +386,9 @@
         if (path === '/tools') return media === 'video' ? 'video-tools' : null;
         // the calendar only exists on the video side
         if (path === '/calendar') return 'video-calendar';
+        // /dashboard?media=video is the video dashboard (the music dashboard's
+        // layout on video's data)
+        if (path === '/dashboard') return media === 'video' ? 'video-dashboard' : null;
         if (path !== '/wishlist') return null;
         if (!VIDEO_WISHLIST_TABS[media]) return null;
         try { sessionStorage.setItem('soulsync.videoWishlistTab', media); } catch (e2) { /* ignore */ }
@@ -459,6 +462,33 @@
     }
     window.videoOpenCalendar = function (opts) { gotoUnifiedCalendar('push', opts); };
 
+    // the video dashboard is the React /dashboard page on ?media=video: the
+    // same hand-off as tools and the calendar.
+    function gotoUnifiedDashboard(mode) {
+        _backStack = [];
+        setActiveNav('video-dashboard');
+        document.body.setAttribute('data-video-page', 'video-dashboard');
+        var replace = mode === 'replace' || mode === 'restore';
+        try {
+            var wsr = window.SoulSyncWebRouter;
+            if (wsr && typeof wsr.navigateToPage === 'function') {
+                wsr.navigateToPage('dashboard', { query: { media: 'video' }, replace: replace });
+                return;
+            }
+        } catch (e) { /* fall through to a real redirect */ }
+        try { window.location.assign('/dashboard?media=video'); }
+        catch (e2) { window.location.href = '/dashboard?media=video'; }
+    }
+
+    // a React page on its video view (/tools?media=video, /active-downloads?media=video...)
+    function onSharedVideoUrl() {
+        var path = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname).replace(/\/+$/, '');
+        if (parseSharedPath(path, window.location.search)) return true;
+        var media = null;
+        try { media = new URLSearchParams(window.location.search).get('media'); } catch (e) { media = null; }
+        return path === '/active-downloads' && media === 'video';
+    }
+
     function navigate(pageId, mode, job) {
         // Music-only profile: there is no video page to fall back to — punt the
         // whole navigation back to the music side instead.
@@ -472,6 +502,7 @@
         if (pageId === 'video-wishlist') { gotoUnifiedWishlist(mode); return; }
         if (pageId === 'video-tools') { gotoUnifiedTools(mode, job); return; }
         if (pageId === 'video-calendar') { gotoUnifiedCalendar(mode); return; }
+        if (pageId === 'video-dashboard') { gotoUnifiedDashboard(mode); return; }
         setActiveNav(pageId);
         showPage(pageId);
         if (DETAIL_PAGES[pageId] || mode === 'restore') return;
@@ -513,6 +544,16 @@
             // Land on the last-active video page and give it a real URL.
             var active = document.querySelector('.video-nav .nav-button.active');
             navigate(active ? active.getAttribute('data-video-page') : DEFAULT_VIDEO_PAGE);
+        } else if (onSharedVideoUrl()) {
+            // a React page on its video view stays mounted when the side flips,
+            // so music would show the video page under its own sidebar. take
+            // music home instead.
+            var home = typeof getProfileHomePage === 'function' ? getProfileHomePage() : 'dashboard';
+            try {
+                var wsr = window.SoulSyncWebRouter;
+                if (wsr && typeof wsr.navigateToPage === 'function') { wsr.navigateToPage(home); return; }
+            } catch (e) { /* fall through to a real redirect */ }
+            try { window.location.assign('/'); } catch (e2) { window.location.href = '/'; }
         } else if (parseDetailPath((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname)) || parsePagePath((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname))) {
             // Back to music from a video URL → drop it so a reload stays on music.
             try { history.replaceState(null, '', '/'); } catch (e) { /* ignore */ }
@@ -570,6 +611,26 @@
             var pageId = e && e.detail && (e.detail.page || e.detail);
             var job = e && e.detail && typeof e.detail === 'object' ? e.detail.job : null;
             if (typeof pageId === 'string') navigate(pageId, undefined, job || undefined);
+        });
+
+        // the studio launchers: any [data-video-overlay-studio] /
+        // [data-video-collection-studio] / [data-video-poster-manager] opens its
+        // editor (the tools page's studio cards carry them). the editors are
+        // admin-only, so a non-admin click does nothing even if one shows.
+        document.addEventListener('click', function (e) {
+            var t = e.target && e.target.closest ? e.target : null;
+            if (!t) return;
+            var admin = !(typeof currentProfile !== 'undefined' && currentProfile && !currentProfile.is_admin);
+            if (t.closest('[data-video-poster-manager]')) {
+                e.preventDefault();
+                if (window.VideoPoster) window.VideoPoster.openSearch();
+            } else if (t.closest('[data-video-overlay-studio]')) {
+                e.preventDefault();
+                if (admin && window.VideoOverlayEditor) window.VideoOverlayEditor.open();
+            } else if (t.closest('[data-video-collection-studio]')) {
+                e.preventDefault();
+                if (admin && window.VideoCollectionEditor) window.VideoCollectionEditor.open();
+            }
         });
 
         // Drill-in: a card fires soulsync:video-open-detail {kind, id, source}. We

@@ -1,18 +1,18 @@
 /**
  * Every chart-type beatport list (the top 10s, the top 100s, a genre's lists,
- * featured and dj charts) opens the way every other playlist source opens:
- * as a beatport discovery, in the same React modal.
+ * featured and dj charts) imports the way every other playlist source does:
+ * into SoulSync, landing on it under Mirrored.
  *
- * the old flow handed each list straight to the download modal as a fake
- * "Various Artists" compilation named after the chart. the chart name landed
- * in album tags and folders, track ids were the chart position (so a second
- * chart inherited the first one's sync matches), and nothing was ever matched
- * to a metadata source. now the backend fetches the list by its ref, discovery
- * identifies each track (isrc first), the list is mirrored by that ref so it
- * can refresh, and sync / download use the identified tracks with their real
- * albums.
+ * the backend fetches the list by its ref and saves the live mirror under it,
+ * so it refreshes with the chart, then identifies each track (isrc first) in
+ * the background like any import. sync / download use the identified tracks
+ * with their real albums. "Save snapshot" (a dated copy that never refreshes)
+ * is on the imported playlist's menu.
  *
- * releases are not lists: a release card still opens its album download.
+ * the oldest flow handed each list straight to the download modal as a fake
+ * "Various Artists" compilation named after the chart; the one after it
+ * identified the list in a beatport-only window. releases are not lists: a
+ * release card still opens its album download.
  */
 
 /** what a card asks for. a ref when the card knows its list, a url for charts. */
@@ -24,117 +24,37 @@ export interface BeatportListRequest {
   genreName?: string;
 }
 
-export interface BeatportChartTrack {
-  id: string;
-  name: string;
-  artists: string[];
-  isrc?: string;
-  duration_ms?: number;
-  album?: string;
-  image_url?: string;
-  url?: string;
+export interface BeatportImportResult {
+  success?: boolean;
+  error?: string;
+  playlist_id?: number;
+  /** the canonical ref the mirror is filed under */
+  source_playlist_id?: string;
+  name?: string;
+  track_count?: number;
 }
 
-/** the chart_data discovery/start takes, as /api/beatport/list returns it */
-export interface BeatportChartData {
-  hash: string;
-  ref: string;
-  name: string;
-  image?: string;
-  url?: string;
-  creator?: string;
-  refreshable?: boolean;
-  track_count: number;
-  tracks: BeatportChartTrack[];
-}
-
-export function beatportListUrl(request: BeatportListRequest): string {
-  const params = new URLSearchParams();
-  if (request.ref) params.set('ref', request.ref);
-  else if (request.url) params.set('url', request.url);
-  if (request.genreName) params.set('genre_name', request.genreName);
-  return `/api/beatport/list?${params.toString()}`;
-}
-
-export async function fetchBeatportList(request: BeatportListRequest): Promise<BeatportChartData> {
-  const response = await fetch(beatportListUrl(request));
-  let data: { success?: boolean; error?: string } & Partial<BeatportChartData>;
+/** POST /api/beatport/import: save the live list as a mirror. Answers its id. */
+export async function importBeatportList(request: BeatportListRequest): Promise<number> {
+  const response = await fetch('/api/beatport/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ref: request.ref,
+      url: request.ref ? undefined : request.url,
+      genre_name: request.genreName,
+    }),
+  });
+  let data: BeatportImportResult;
   try {
-    data = (await response.json()) as typeof data;
+    data = (await response.json()) as BeatportImportResult;
   } catch {
-    throw new Error(`Beatport list failed (${response.status})`);
+    throw new Error(`Couldn't import ${request.label} (${response.status})`);
   }
-  if (!data.success || !data.ref || !Array.isArray(data.tracks)) {
-    throw new Error(data.error || `Beatport list failed (${response.status})`);
+  if (!data.success || typeof data.playlist_id !== 'number') {
+    throw new Error(data.error || `Couldn't import ${request.label}`);
   }
-  if (data.tracks.length === 0) throw new Error(`No tracks found in ${data.name || request.label}`);
-  return data as BeatportChartData;
-}
-
-export interface BeatportListEnv {
-  showToast: (message: string, type?: string) => void;
-  showLoadingOverlay: (message: string) => void;
-  hideLoadingOverlay: () => void;
-  /** the beatport vertical's state for this list, if it has one */
-  phaseOf: (id: string) => string | undefined;
-  seed: (id: string, playlist: Record<string, unknown>) => void;
-  open: (id: string) => void;
-  startDiscovery: (id: string, chart: BeatportChartData) => void | Promise<void>;
-}
-
-/** phases a list can be re-identified from without stepping on running work */
-const RESTARTABLE = new Set(['fresh']);
-
-let opening = false;
-
-export function resetBeatportListLatch(): void {
-  opening = false;
-}
-
-/**
- * fetch, seed, open, identify. one click at a time: a second click while a
- * list is loading is dropped rather than racing the first.
- *
- * a list already being identified, synced or downloaded just reopens its
- * modal; Rediscover in the modal starts it over with this week's tracks.
- */
-export async function openBeatportList(
-  request: BeatportListRequest,
-  env: BeatportListEnv,
-): Promise<void> {
-  if (opening) return;
-  if (!request.ref && !request.url) {
-    env.showToast(`No link for ${request.label}`, 'error');
-    return;
-  }
-  opening = true;
-  try {
-    env.showLoadingOverlay(`Loading ${request.label}...`);
-    const chart = await fetchBeatportList(request);
-    env.hideLoadingOverlay();
-
-    const phase = env.phaseOf(chart.ref);
-    env.seed(chart.ref, {
-      name: chart.name,
-      tracks: chart.tracks,
-      description: `${chart.tracks.length} tracks from ${chart.name}`,
-      source: 'beatport',
-      image_url: chart.image ?? '',
-      chart_data: chart,
-    });
-    env.open(chart.ref);
-    if (phase === undefined || RESTARTABLE.has(phase)) {
-      await env.startDiscovery(chart.ref, chart);
-    }
-  } catch (error) {
-    env.hideLoadingOverlay();
-    env.showToast(
-      `Error loading ${request.label}: ${error instanceof Error ? error.message : String(error)}`,
-      'error',
-    );
-  } finally {
-    opening = false;
-  }
+  return data.playlist_id;
 }
 
 /** the refs for the lists the tab and the genre page show */

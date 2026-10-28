@@ -7,8 +7,6 @@
 
 import type { MirrorPayload } from './-sync.import';
 
-import { detectLbSeries, postMirrorPlaylist } from './-sync.api';
-
 /* ── JSPF unwrap (sync-listenbrainz.js 89-105 / sync-lastfm.js 65-73) ─────── */
 
 export interface LbCardData {
@@ -150,75 +148,6 @@ export async function fetchLbPlaylistTracks(mbid: string): Promise<LbTrack[]> {
   }));
 }
 
-/* ── The LB card's coverage numbers (_refreshOneLbSyncCard 253-283) ──────── */
-
-export interface LbProgressInput {
-  phase: string;
-  lastSyncProgress?: {
-    matched_tracks?: number;
-    spotify_matches?: number;
-    total_tracks?: number;
-    spotify_total?: number;
-    failed_tracks?: number;
-  };
-  spotifyTotal: number;
-  spotifyMatches: number;
-  discoveryProgress: number;
-}
-
-export interface LbCoverageCounts {
-  total: number;
-  matched: number;
-  failed: number;
-  percentage: number;
-}
-
-/**
- * ListenBrainz/Last.fm's own four numbers.
- *
- * syncing/sync_complete read lastSyncProgress (failed falls back to
- * total-matched); other non-fresh phases read the discovery counters, whose
- * percent falls back to the discovery progress when total is 0. Fresh → null,
- * and the card hides the element.
- *
- * The vanilla rendered these as "♪ T / ✓ M / ✗ F / P%"; the cards render the
- * shared coverage bar now, so only the numbers survive. Note the percentage is
- * matched/total in BOTH branches —
- * including the sync branch, where every other source on the page uses
- * (matched+failed)/total. That is deliberate parity with sync-listenbrainz.js
- * 271, not drift, so it is computed here and never re-derived downstream.
- */
-export function lbCoverageCounts(input: LbProgressInput): LbCoverageCounts | null {
-  if (input.phase === 'fresh') return null;
-  if ((input.phase === 'syncing' || input.phase === 'sync_complete') && input.lastSyncProgress) {
-    const sp = input.lastSyncProgress;
-    // clamped like the modal line (matchLineNumbers): the match counter can
-    // drift above total (blind +1s racing the poll, unmatch never
-    // decrementing client-side), and after discovery ends no frame corrects
-    // it - an inflated counter must not paint a card at 105%
-    const matchedRaw = sp.matched_tracks || sp.spotify_matches || 0;
-    const total = sp.total_tracks || sp.spotify_total || 0;
-    const matched = total > 0 ? Math.min(matchedRaw, total) : matchedRaw;
-    const failed = sp.failed_tracks !== undefined ? sp.failed_tracks : Math.max(0, total - matched);
-    return {
-      total,
-      matched,
-      failed,
-      percentage: total > 0 ? Math.min(100, Math.round((matched / total) * 100)) : 0,
-    };
-  }
-  const total = input.spotifyTotal || 0;
-  const matchedRaw = input.spotifyMatches || 0;
-  const matched = total > 0 ? Math.min(matchedRaw, total) : matchedRaw;
-  return {
-    total,
-    matched,
-    failed: Math.max(0, total - matched),
-    percentage:
-      total > 0 ? Math.min(100, Math.round((matched / total) * 100)) : input.discoveryProgress || 0,
-  };
-}
-
 /* ── SoulSync Discovery (sync-soulsync-discovery.js) ──────────────────────── */
 
 export interface SsdRecord {
@@ -340,19 +269,6 @@ export async function fetchSsdRecords(): Promise<{ records: SsdRecord[]; error?:
   return { records };
 }
 
-/** Staleness line + color (86-90). */
-export function ssdStaleness(record: SsdRecord): { text: string; color: string } {
-  const stale = Boolean(record.is_stale);
-  return {
-    text: record._never_generated
-      ? 'Not built yet — Refresh & Mirror builds it'
-      : stale
-        ? 'Stale — refresh to regenerate'
-        : 'Ready',
-    color: stale ? '#facc15' : '#14b8a6',
-  };
-}
-
 export interface SsdTrack {
   track_name?: string;
   artist_name?: string;
@@ -430,56 +346,7 @@ export function buildSsdMirrorPayload(
   };
 }
 
-/* ── The post-discovery LB mirror (_mirrorListenBrainzAfterDiscovery, 10928) ─ */
-
-/**
- * Project the MATCHED discovery results into the mirror contract (10937-10962).
- *
- * Only rows carrying spotify_data.id survive — the vanilla filters at 10938 and
- * abandons the whole mirror when nothing does (10964-10967), which the caller
- * reproduces by checking for an empty array. The artist/album/image ladders are
- * transcribed exactly: artists may be an array of objects, an array of strings
- * or a bare string; album may be an object or a string; the image comes from
- * album.images[0].url, else sp.image_url, else null.
- */
-export function buildLbMirrorTracks(results: unknown[]): MirrorPayload['tracks'] {
-  return results
-    .filter((r) => {
-      const row = r as { spotify_data?: { id?: string } } | null;
-      return Boolean(row && row.spotify_data && row.spotify_data.id);
-    })
-    .map((r) => {
-      const row = r as { spotify_data: Record<string, unknown>; confidence?: number };
-      const sp = row.spotify_data;
-      const artists = sp.artists;
-      const artistName = Array.isArray(artists)
-        ? typeof artists[0] === 'object' && artists[0] !== null
-          ? ((artists[0] as { name?: string }).name ?? '')
-          : ((artists[0] as string | undefined) ?? '')
-        : ((artists as string | undefined) ?? '');
-      const album = sp.album as { name?: string; images?: { url?: string }[] } | string | undefined;
-      const albumName =
-        album && typeof album === 'object' ? (album.name ?? '') : (album as string) || '';
-      const albumImage =
-        album && typeof album === 'object' && album.images && album.images[0]
-          ? (album.images[0].url ?? null)
-          : ((sp.image_url as string | undefined) ?? null);
-      return {
-        track_name: (sp.name as string) || '',
-        artist_name: artistName || '',
-        album_name: albumName || '',
-        duration_ms: (sp.duration_ms as number) || 0,
-        image_url: albumImage,
-        source_track_id: (sp.id as string) || '',
-        extra_data: JSON.stringify({
-          discovered: true,
-          provider: (sp.source as string) || 'spotify',
-          confidence: row.confidence || 1.0,
-          matched_data: sp,
-        }),
-      };
-    });
-}
+/* ── Where an LB / Last.fm import is filed (the old post-discovery mirror's target, 10975-11004) ─ */
 
 /** What detectLbSeries returns, as the vanilla reads it (10990-10993). */
 export interface LbSeriesMatch {
@@ -527,50 +394,6 @@ export function resolveLbMirrorTarget(
   }
   const ownerFallback = source === 'lastfm' ? 'Last.fm' : 'ListenBrainz';
   return { source, sourcePlaylistId, name, owner: creator || ownerFallback };
-}
-
-/**
- * The whole post-discovery mirror (10929-11019), fire-and-forget like the
- * vanilla's mirrorPlaylist.
- *
- * Three guards precede the work, all the vanilla's: no state/playlist (10931),
- * no results (10935), and no MATCHED results (10964) — the last one abandons
- * rather than mirroring an empty playlist. The series lookup is best-effort;
- * a failure falls through to the per-playlist mbid (11000-11002).
- */
-export async function mirrorLbAfterDiscovery(
-  playlistMbid: string,
-  state: { playlist?: Record<string, unknown>; rawResults?: readonly unknown[] } | undefined | null,
-): Promise<void> {
-  if (!state || !state.playlist) return;
-  const results = state.rawResults ?? [];
-  if (!results.length) return;
-  const tracks = buildLbMirrorTracks([...results]);
-  if (!tracks.length) return;
-
-  const playlist = state.playlist;
-  const rawTitle = (playlist.name as string) || 'ListenBrainz Playlist';
-  let series: LbSeriesMatch | null = null;
-  try {
-    series = await detectLbSeries(rawTitle);
-  } catch {
-    // Non-fatal — fall through to the per-playlist mirror id.
-  }
-  const target = resolveLbMirrorTarget(
-    playlistMbid,
-    rawTitle,
-    playlist.creator as string | undefined,
-    series,
-  );
-  void postMirrorPlaylist({
-    source: target.source,
-    source_playlist_id: target.sourcePlaylistId,
-    name: target.name,
-    tracks,
-    owner: target.owner,
-    description: (playlist.description as string) || '',
-    image_url: (playlist.image_url as string) || '',
-  });
 }
 
 /** POST the kind's generator (144-152). */

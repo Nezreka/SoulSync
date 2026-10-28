@@ -125,6 +125,21 @@ describe('BackdropVideo', () => {
     expect(players[0].destroyed).toBe(false);
   });
 
+  it('reports each change of the live signal outwards', async () => {
+    const onLiveChange = vi.fn();
+    const { rerender } = render(<BackdropVideo videoId="v1" playing onLiveChange={onLiveChange} />);
+    await waitFor(() => expect(players).toHaveLength(1));
+    // it starts not-live, and says so once
+    expect(onLiveChange.mock.calls).toEqual([[false]]);
+    fire('onStateChange', 3); // buffering is not playing
+    expect(onLiveChange.mock.calls).toEqual([[false]]);
+    fire('onStateChange', 1); // playing
+    expect(onLiveChange.mock.calls).toEqual([[false], [true]]);
+    // losing the stage ends the signal, so a crossfade keyed on it reverses
+    rerender(<BackdropVideo videoId="v1" playing={false} onLiveChange={onLiveChange} />);
+    expect(onLiveChange.mock.calls).toEqual([[false], [true], [false]]);
+  });
+
   it('counts as unplayable when youtube itself cannot load', async () => {
     apiAvailable = false;
     const onUnplayable = vi.fn();

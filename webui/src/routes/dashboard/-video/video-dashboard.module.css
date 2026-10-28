@@ -1,0 +1,628 @@
+/* The video dashboard's own pieces. Everything else (hero, rails, rail cards,
+   tiles, footer) is the music dashboard's #dashboard-page styling, so the two
+   read as one product. */
+
+/* ── next up: the calendar's billboard, without its page margin ─────────── */
+.next > section {
+  margin-bottom: 0;
+}
+
+/* ── recently added: poster cards in the music rail ─────────────────────── */
+.poster {
+  color: inherit;
+  text-decoration: none;
+}
+
+.posterArt {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-card);
+  background: var(--white-a05);
+  place-items: center;
+  transition: transform var(--dur-quick) var(--ease-out);
+}
+
+.posterArt img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.poster:hover .posterArt {
+  transform: translateY(-3px);
+}
+
+.posterLetter {
+  color: var(--white-a30);
+  font-size: 44px;
+  font-weight: 800;
+}
+
+.posterKind {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--black-a60);
+  color: var(--white-a80);
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity var(--dur-quick) ease;
+}
+
+.poster:hover .posterKind {
+  opacity: 1;
+}
+
+.posterName {
+  margin-top: 10px;
+  overflow: hidden;
+  color: var(--text-bright);
+  font-size: 13.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.posterSub {
+  margin-top: 3px;
+  color: var(--white-a45);
+  font-size: 12px;
+}
+
+/* ── studios ──────────────────────────────────────────────────────────────
+   each card tells its studio's story on hover, slowly: the overlay poster
+   straightens and the badges land on it; the collection fan opens. */
+.studios {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.studio {
+  --studio-rgb: var(--accent-rgb);
+  --studio-ease: var(--ease-emphasized);
+  --studio-dur: calc(var(--dur-slowest) * 1.4);
+
+  position: relative;
+  display: flex;
+  overflow: hidden;
+  min-height: 210px;
+  padding: 0;
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-xl);
+  background: var(--black-a30);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  isolation: isolate;
+  container-type: inline-size;
+  transition:
+    border-color var(--studio-dur) var(--studio-ease),
+    box-shadow var(--studio-dur) var(--studio-ease),
+    transform var(--studio-dur) var(--studio-ease);
+}
+
+.studio[data-studio='collection'] {
+  --studio-rgb: var(--info-rgb);
+}
+
+/* the colour wash, brightened on hover (a gradient can't transition, its
+   opacity can) */
+.studio::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(110% 130% at 100% 0%, rgba(var(--studio-rgb), 0.22), transparent 62%);
+  opacity: 0.6;
+  transition: opacity var(--studio-dur) var(--studio-ease);
+  content: '';
+}
+
+.studio:hover {
+  border-color: rgba(var(--studio-rgb), 0.45);
+  box-shadow: 0 22px 50px -24px rgba(var(--studio-rgb), 0.55);
+  transform: translateY(-3px);
+}
+
+.studio:hover::before {
+  opacity: 1;
+}
+
+.studio:focus-visible {
+  outline: 2px solid rgba(var(--studio-rgb), 0.7);
+  outline-offset: 3px;
+}
+
+/* the lead poster again, blurred into an ambient backdrop behind the art */
+/* masked to a soft blob: a blurred rectangle still shows its edges, and a
+   wide card would show the poster itself */
+.studioWash {
+  position: absolute;
+  top: -30%;
+  right: -8%;
+  z-index: 0;
+  width: 380px;
+  height: 160%;
+  object-fit: cover;
+  opacity: 0.2;
+  filter: blur(48px) saturate(1.4);
+  mask-image: radial-gradient(closest-side, var(--black-a90), transparent);
+  transform: scale(1);
+  transition:
+    opacity var(--studio-dur) var(--studio-ease),
+    transform var(--studio-dur) var(--studio-ease);
+  pointer-events: none;
+}
+
+.studio:hover .studioWash {
+  opacity: 0.34;
+  transform: scale(1.12);
+}
+
+.studioText {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(58%, 420px);
+  padding: 24px 26px;
+}
+
+.studioKicker {
+  color: rgb(var(--studio-rgb));
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.studioName {
+  color: var(--text-bright);
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.studioBlurb {
+  max-width: 40ch;
+  margin-bottom: 12px;
+  color: var(--white-a60);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.studioCta {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  margin-top: auto;
+  padding: 7px 14px;
+  border: 1px solid rgba(var(--studio-rgb), 0.35);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--studio-rgb), 0.12);
+  color: var(--text-bright);
+  font-size: 12px;
+  font-weight: 700;
+  transition:
+    background var(--studio-dur) var(--studio-ease),
+    border-color var(--studio-dur) var(--studio-ease);
+}
+
+.studioCta span {
+  transition: transform var(--studio-dur) var(--studio-ease);
+}
+
+.studio:hover .studioCta {
+  border-color: rgba(var(--studio-rgb), 0.6);
+  background: rgba(var(--studio-rgb), 0.28);
+}
+
+.studio:hover .studioCta span {
+  transform: translateX(4px);
+}
+
+.studioArt {
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: 1;
+  width: 48%;
+  pointer-events: none;
+}
+
+/* fades the art into the text side */
+.studio::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: linear-gradient(90deg, var(--black-a60) 30%, transparent 70%);
+  pointer-events: none;
+  content: '';
+}
+
+/* the poster and its badges move as one, so the badges always land on it */
+.studioCanvas {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  width: 112px;
+  aspect-ratio: 2 / 3;
+}
+
+.studioPoster {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  box-shadow: 0 18px 40px var(--black-a60);
+  transform: rotate(5deg);
+  transition:
+    transform var(--studio-dur) var(--studio-ease),
+    box-shadow var(--studio-dur) var(--studio-ease);
+}
+
+.studio:hover .studioPoster {
+  box-shadow: 0 26px 50px var(--black-a70);
+  transform: rotate(0deg) translateY(-6px) scale(1.04);
+}
+
+/* the badges wait beside the poster, then land on it one after another */
+.studioBadges {
+  position: absolute;
+  top: 10px;
+  right: calc(100% + 10px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.studioBadges span {
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--white-a90);
+  box-shadow: 0 6px 14px var(--black-a40);
+  color: var(--black-a90);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+  transition: transform var(--studio-dur) var(--studio-ease);
+}
+
+.studioBadges span:nth-child(1) {
+  background: rgb(var(--studio-rgb));
+  color: var(--text-bright);
+}
+
+.studioBadges span:nth-child(2) {
+  background: rgb(var(--gold-rgb));
+  transition-delay: 60ms;
+}
+
+.studioBadges span:nth-child(3) {
+  transition-delay: 120ms;
+}
+
+.studio:hover .studioBadges span {
+  transform: translate(58px, -6px);
+}
+
+.studioStack {
+  position: absolute;
+  top: 22px;
+  right: 30px;
+  display: flex;
+}
+
+.studioStack img {
+  width: 88px;
+  aspect-ratio: 2 / 3;
+  margin-left: -38px;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  box-shadow: 0 14px 30px var(--black-a60);
+  transition: transform var(--studio-dur) var(--studio-ease);
+}
+
+.studioStack img:nth-child(1) {
+  transform: rotate(-8deg) translateY(10px);
+}
+
+.studioStack img:nth-child(2) {
+  z-index: 1;
+}
+
+.studioStack img:nth-child(3) {
+  transform: rotate(8deg) translateY(10px);
+}
+
+/* the fan opens */
+.studio:hover .studioStack img:nth-child(1) {
+  transform: rotate(-14deg) translate(-14px, 12px);
+}
+
+.studio:hover .studioStack img:nth-child(2) {
+  transform: translateY(-8px) scale(1.06);
+}
+
+.studio:hover .studioStack img:nth-child(3) {
+  transform: rotate(14deg) translate(14px, 12px);
+}
+
+/* a wide card (studios full width under the rail) has room for bigger art,
+   and the art moves in from the edge so the middle isn't empty */
+@container (min-width: 760px) {
+  .studioArt {
+    right: 6%;
+  }
+
+  .studioCanvas {
+    top: 18px;
+    width: 134px;
+  }
+
+  .studioBadges span {
+    font-size: 11px;
+  }
+
+  .studioStack {
+    top: 18px;
+  }
+
+  .studioStack img {
+    width: 108px;
+    margin-left: -44px;
+  }
+}
+
+/* a narrow card (two studios beside the rail) tucks the art in so the
+   badges never run into the words */
+@container (max-width: 520px) {
+  .studioText {
+    max-width: 58%;
+  }
+
+  .studioCanvas {
+    right: 18px;
+    width: 90px;
+  }
+
+  .studioBadges {
+    right: calc(100% - 26px);
+  }
+
+  .studio:hover .studioBadges span {
+    transform: translate(34px, -6px);
+  }
+
+  .studioStack {
+    right: 16px;
+  }
+
+  .studioStack img {
+    width: 64px;
+    margin-left: -30px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio,
+  .studio *,
+  .studio::before {
+    transition: none;
+  }
+}
+
+/* coverage rings, in the masthead */
+.rings {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ringsLabel {
+  color: var(--white-a45);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.ring {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.ring svg {
+  width: 40px;
+  height: 40px;
+  transform: rotate(-90deg);
+}
+
+.ringBg {
+  fill: none;
+  stroke: var(--white-a08);
+  stroke-width: 4;
+}
+
+.ringFill {
+  fill: none;
+  stroke: rgb(var(--accent-rgb));
+  stroke-linecap: round;
+  stroke-width: 4;
+}
+
+.ring[data-ring='tmdb-movies'] .ringFill {
+  stroke: var(--info);
+}
+
+.ring[data-ring='tvdb-shows'] .ringFill {
+  stroke: var(--wanted);
+}
+
+.ringPct {
+  position: absolute;
+  top: 0;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  color: var(--text-bright);
+  font-size: 11px;
+  font-weight: 750;
+  place-items: center;
+}
+
+.ringLabel {
+  color: var(--white-a45);
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
+.ringLabel b {
+  color: var(--white-a70);
+}
+
+/* ── this week (rail) ───────────────────────────────────────────────────── */
+.week {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.weekFigure {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.weekNum {
+  color: var(--text-bright);
+  font-size: 34px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.weekNum small {
+  color: var(--white-a40);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.weekCaption {
+  color: var(--white-a50);
+  font-size: 12px;
+}
+
+.meter {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background: var(--white-a05);
+}
+
+.meter i {
+  display: block;
+  flex-basis: 0;
+  background: var(--white-a30);
+}
+
+.meter i[data-state='owned'] {
+  background: var(--success);
+}
+
+.meter i:is([data-state='downloading'], [data-state='queued']) {
+  background: var(--info);
+}
+
+.meter i[data-state='wanted'] {
+  background: var(--wanted);
+}
+
+.meter i[data-state='failed'] {
+  background: var(--danger-light);
+}
+
+.meter i[data-state='missing'] {
+  background: var(--warning);
+}
+
+.meter i[data-state='unmatched'] {
+  background: var(--danger-soft);
+}
+
+.weekLine {
+  margin: 0;
+  color: var(--white-a80);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.weekLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.weekMeta {
+  margin: 0;
+  color: var(--white-a45);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.weekMeta:empty {
+  display: none;
+}
+
+.weekAction {
+  align-self: flex-start;
+  padding: 8px 16px;
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--text-bright);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background var(--dur-quick) ease;
+}
+
+.weekAction:hover:not(:disabled) {
+  background: rgba(var(--accent-rgb), 0.24);
+}
+
+.weekAction:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* an issues or findings tile only exists when something needs a human */
+.tileAttention {
+  border-color: rgba(var(--warning-rgb), 0.35);
+}
+
+@media (max-width: 768px) {
+  .studios {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rings {
+    display: none;
+  }
+}

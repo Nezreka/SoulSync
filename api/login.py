@@ -60,7 +60,8 @@ def _complete_sign_in(database, profile_id):
     session['profile_epoch'] = (database.get_profile(profile_id) or {}).get('session_epoch', 0)
     from core.security.devices import start_device
     start_device(session, database.add_profile_device, profile_id,
-                 request.headers.get('User-Agent', ''), request.remote_addr or '')
+                 request.headers.get('User-Agent', ''), request.remote_addr or '',
+                 revoke_row=database.revoke_profile_device)
     session['device_owner'] = profile_id
     # A fresh login also clears any stale launch-PIN flag.
     session.pop('launch_pin_verified', None)
@@ -554,7 +555,8 @@ def auth_recovery_reset():
         session['profile_epoch'] = (database.get_profile(profile['id']) or {}).get('session_epoch', 0)
         from core.security.devices import start_device
         start_device(session, database.add_profile_device, profile['id'],
-                     request.headers.get('User-Agent', ''), request.remote_addr or '')
+                     request.headers.get('User-Agent', ''), request.remote_addr or '',
+                     revoke_row=database.revoke_profile_device)
         session['device_owner'] = profile['id']
         session.pop('launch_pin_verified', None)
         return jsonify({'success': True})

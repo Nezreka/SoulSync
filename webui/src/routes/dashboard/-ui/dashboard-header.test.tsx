@@ -181,7 +181,9 @@ describe('the orb stage', () => {
     // the vanilla orb layer and the React stage have to agree on these
     // selectors or the orbs silently fall back to the whole header
     const orbs = readFileSync(resolve(process.cwd(), 'static/worker-orbs.js'), 'utf8');
-    expect(orbs).toContain("document.querySelector('#dashboard-page .orb-stage')");
+    expect(orbs).toContain(
+      "document.querySelector('#dashboard-page .orb-stage:not([data-foreign-orbs])')",
+    );
     expect(orbs).toContain("dashboardHeader.querySelector('.header-actions')");
 
     const view = await mountHeader();
@@ -189,6 +191,8 @@ describe('the orb stage', () => {
     expect(stage.querySelector(':scope > .header-actions')).not.toBeNull();
     // the greeting lives outside the stage, so orbs never drift over it
     expect(stage.querySelector('.hello-greeting')).toBeNull();
+    // the music stage is never marked foreign, or its own orbs would skip it
+    expect(stage.hasAttribute('data-foreign-orbs')).toBe(false);
   });
 
   it('says how many workers are busy', async () => {

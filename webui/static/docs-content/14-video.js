@@ -117,7 +117,7 @@ See [Video: Settings](#video-settings) and [Multi-Profile](#profiles) for how to
     ]
 });
 
-// Video: Dashboard — overview & health, continue watching, recent & activity.
+// Video: Dashboard: overview, continue watching, this week and the rail.
 registerDocsSection({
     id: 'video-dashboard',
     title: 'Video: Dashboard',
@@ -125,19 +125,18 @@ registerDocsSection({
     pages: [
         {
             id: 'vdash-overview',
-            title: 'Overview & Health',
-            lede: 'Your at-a-glance home for the video side: library counts, download activity, enrichment coverage, and service health.',
+            title: 'Overview',
+            lede: 'Your home for the video side, laid out like the music dashboard: what you watch on the left, the system on the right.',
             body: `
-The Video **Dashboard** is your at-a-glance home for the video side:
+The Video **Dashboard** uses the same layout as the music one.
 
-- **Library counts** — movies, shows, and episodes tracked in \`video_library.db\`
-- **Download activity** — what's grabbing, importing, or upgrading right now
-- **Enrichment coverage** — how much of your library has full metadata and art
-- **Attention** — open issues and pending maintenance findings that need you
-- **System stats** — live memory and uptime
+- **Hero**: a greeting, your movies, shows, episodes and disk size (click one for the library), and the scan strip. **Scan** picks up what changed on your server; the **⋯** menu has a deep scan, the library, the poster manager and repair.
+- **Worker orbs**: every video enrichment worker on its own stage, the same animation as music. Hover to open them into a grid; click one to pause or resume it, or **Manage Workers** for the full view.
+- **Next up**: the calendar's billboard for the next episodes on your watchlist, each with its state. Click one to open it on the calendar.
+- **Make it yours** (admins): Overlay Studio and Collection Studio, with how much of your library has the metadata they draw on.
 
 > [!NOTE]
-> There is no health strip here. Server, indexer, and download-client reachability surfaces through the scan flows that actually use them. \`/api/video/health\` checks local state only — library roots, disk space, the recycle folder, maintenance errors, monitor liveness — and the notification panel header surfaces it (fetched by the downloads page, which is the only page that queries it).
+> There is no health block here. System health is a state, not news, so it lives in the notification panel header.
 `
         },
         {
@@ -154,12 +153,14 @@ See [Watch State & History](#vdet-watch) for how watch state works per title.
         },
         {
             id: 'vdash-activity',
-            title: 'Recently Added & Attention',
-            lede: 'What just landed in your library, plus open issues and maintenance findings that need you.',
+            title: 'This Week, Recently Added & the Rail',
+            lede: 'Whether this week\'s episodes landed, what just arrived, and what needs you.',
             body: `
-**Recently added** titles show what's landed in your library. The dashboard's **attention** area surfaces open issues and pending maintenance findings — the things that actually need your input.
+**This week** answers one question: did what aired land? It counts the episodes on your watchlist that aired in the last seven days and how many you have, with a meter by state (in library, downloading, wanted, failed, missing). Underneath: how many more air in the next seven days and when auto-wishlist last ran. If any aired episodes are missing, **Wishlist N missing** adds them in one go (not shown to profiles that have to ask first).
 
-Use it as a quick sanity check after an overnight run: if an automation grabbed something, you'll see it in recently-added; if it found a problem, it's in attention. There is no running activity feed.
+**Recently added** shows what landed on your server, newest first, with **Movies** and **Shows** tabs when there's a mix. **Downloading now** appears only while something is in flight.
+
+The rail also has the next **video automations** to run, your **watchlist** and **wishlist** counts, and **open issues** / **findings to review** tiles that only show up when there's something to look at.
 `
         },
     ]

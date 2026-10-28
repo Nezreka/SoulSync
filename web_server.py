@@ -307,11 +307,11 @@ app.config['TEMPLATES_AUTO_RELOAD'] = DEV_STATIC_NO_CACHE
 app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 # Static assets (library.js / style.css / etc.) get aggressive browser
 # caching (1 year). Safe because every static URL is bust-tagged with
-# `?v=static_v` (computed once per process start — see below) so each
-# server restart effectively invalidates every cached asset for every
-# user. Within a single deploy, repeat page loads hit zero round-trips
-# on static files — was a 304 round-trip per asset under the old
-# max-age=0 setting.
+# `?v=static_v` (the newest static-file mtime, cached for a short TTL —
+# see _get_static_v below) so each server restart effectively invalidates
+# every cached asset for every user. Within a single deploy, repeat page
+# loads hit zero round-trips on static files — was a 304 round-trip per
+# asset under the old max-age=0 setting.
 #
 # In dev, DEV_STATIC_NO_CACHE flips this back to 0 so iterating on JS
 # / CSS doesn't require a server restart between edits.
@@ -396,12 +396,13 @@ def _hold_catalogue_jobs_during_upgrade():
     return None
 
 
-# Cache-bust query string for static assets. Computed once per process
-# start so each server restart invalidates the browser's cached copy of
-# every JS/CSS file. This is the surefire fix for "user has stale JS
-# even after Ctrl+Shift+R" — the URL itself changes, so the browser
-# cannot reuse a previously-cached response no matter what its
-# Cache-Control header said.
+# Cache-bust query string for static assets. _STATIC_CACHE_BUST is the
+# process-start fallback; the live value is the newest static-file mtime
+# (see _get_static_v), so a restart — or a newer file — invalidates the
+# browser's cached copy of every JS/CSS file. This is the surefire fix
+# for "user has stale JS even after Ctrl+Shift+R" — the URL itself
+# changes, so the browser cannot reuse a previously-cached response no
+# matter what its Cache-Control header said.
 import time as _cache_bust_time
 _STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
 
@@ -505,8 +506,25 @@ def _initial_appearance_context():
     }
 
 
-@app.context_processor
-def _inject_static_cache_bust():
+# The scan below walks + stats every .css/.js file under webui/static
+# (~460 files). It used to run inside the context processor — i.e. on EVERY
+# template render, including the Docker healthcheck's render of / every
+# 30s — which made it a steady idle-CPU cost (#1905). Cache the computed
+# value for a short TTL instead. In production static files change on a
+# deploy / restart (which resets the cache anyway); a same-process rebuild
+# is picked up within the TTL. Dev mode (DEV_STATIC_NO_CACHE, whose promise
+# is edit-and-refresh with no restart) bypasses the cache entirely.
+_STATIC_V_TTL_SECONDS = 60
+_static_v_cache = None
+_static_v_cache_at = 0.0
+_static_v_lock = threading.Lock()
+
+
+def _compute_static_v():
+    """Newest .css/.js mtime under the static dir, or the process-start bust
+    value when there are no such files. None on a scan ERROR (e.g. a file
+    vanished mid-walk) so the caller can fall back WITHOUT caching the
+    fallback — a transient failure must not stick for a whole TTL."""
     try:
         static_dir = Path(app.static_folder)
         mtimes = [
@@ -514,10 +532,35 @@ def _inject_static_cache_bust():
             for p in static_dir.rglob('*')
             if p.is_file() and p.suffix.lower() in {'.css', '.js'}
         ]
-        static_v = str(max(mtimes)) if mtimes else _STATIC_CACHE_BUST
+        return str(max(mtimes)) if mtimes else _STATIC_CACHE_BUST
     except Exception:
-        static_v = _STATIC_CACHE_BUST
-    return {'static_v': static_v, **_initial_appearance_context()}
+        return None
+
+
+def _get_static_v():
+    global _static_v_cache, _static_v_cache_at
+    if DEV_STATIC_NO_CACHE:
+        return _compute_static_v() or _STATIC_CACHE_BUST
+    # The lock is held across the scan (a few ms, once per TTL) so racing
+    # renders at expiry neither duplicate the walk nor let a slower scan
+    # overwrite a newer value and extend its staleness.
+    with _static_v_lock:
+        now = _cache_bust_time.monotonic()
+        if _static_v_cache is None or now - _static_v_cache_at >= _STATIC_V_TTL_SECONDS:
+            computed = _compute_static_v()
+            if computed is None:
+                # Scan error: serve the last good value if there is one
+                # (the boot-time bust value otherwise) and leave the
+                # timestamp stale so the next render retries the scan.
+                return _static_v_cache or _STATIC_CACHE_BUST
+            _static_v_cache = computed
+            _static_v_cache_at = now
+        return _static_v_cache
+
+
+@app.context_processor
+def _inject_static_cache_bust():
+    return {'static_v': _get_static_v(), **_initial_appearance_context()}
 
 
 @app.context_processor

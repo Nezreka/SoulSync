@@ -330,7 +330,7 @@ async function backupNow(): Promise<void> {
   }
 }
 
-const MORE_ICON = (
+export const MORE_ICON = (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
     <circle cx="5" cy="12" r="1.8" />
     <circle cx="12" cy="12" r="1.8" />
@@ -339,7 +339,7 @@ const MORE_ICON = (
 );
 
 /** Closes an open menu on an outside click or Escape. */
-function useDismiss(open: boolean, close: () => void, ref: RefObject<HTMLElement | null>) {
+export function useDismiss(open: boolean, close: () => void, ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (e: MouseEvent) => {

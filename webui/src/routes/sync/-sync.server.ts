@@ -121,7 +121,11 @@ export async function fetchServerPlaylistData(): Promise<{
   try {
     const mirrored = await mirroredRes.json();
     if (Array.isArray(mirrored)) {
-      mirroredNames = (mirrored as { name?: string }[]).map((p) => p.name ?? '');
+      // every name a mirror can sit on the server under (#1907): the sync
+      // name it was written as, its alias, and the upstream name
+      mirroredNames = (mirrored as Partial<MirroredMatch>[]).flatMap((p) =>
+        [p.sync_name, p.display_name, p.name].filter((n): n is string => Boolean(n)),
+      );
     }
   } catch {
     // 48: a failed mirrored fetch must not sink the list.
@@ -141,12 +145,17 @@ export async function fetchServerPlaylistData(): Promise<{
 /** The mirrored rows a server playlist's NAME matches (openServerPlaylistEditor, 158). */
 export interface MirroredMatch {
   id: number;
-  /** The UPSTREAM name. The server-playlist match keys on this, so a rename
-      must not touch it (#1219). */
+  /** The UPSTREAM name. A rename never touches it (#1219). */
   name: string;
   /** The alias when the user has renamed this mirror, else the upstream name.
       The endpoint sends both; showing this is what makes a rename useful. */
   display_name?: string;
+  /** The name sync writes the server playlist under: the alias, with a
+      profile or source suffix when two mirrors would land on one name
+      (core/playlists/sync_names). */
+  sync_name?: string;
+  /** The server playlist this mirror was last opened against, once linked. */
+  server_playlist_id?: string | null;
   source?: string;
   source_ref?: string;
   owner?: string;
@@ -156,21 +165,44 @@ export interface MirroredMatch {
 }
 
 /**
+ * The mirrors a server playlist belongs to (#1907). Tried strongest first, the
+ * first tier with any match wins:
+ *
+ * 1. the server playlist id the mirror was linked to when last opened here
+ * 2. its sync name, the exact name sync wrote the server playlist under
+ * 3. its alias, then its upstream name (older syncs, or no sync name sent)
+ *
+ * Matching the upstream name alone missed every renamed mirror, and every one
+ * sync had to give a suffix, so the page said no mirror existed. Names compare
+ * trimmed and case-insensitive.
+ *
  * A failed lookup is SWALLOWED (168-170): the vanilla logs and carries on with
  * an empty list, which lands the user in the server-only view rather than an
- * error. Reproduced — throwing here would change a working path into a dead end.
- *
- * Declared divergence: `p.name` is guarded. The vanilla calls .trim() on it
- * unguarded (164), so a nameless row would throw and take the whole lookup with
- * it into that same empty-list catch.
+ * error.
  */
-export async function fetchMirroredMatches(playlistName: string): Promise<MirroredMatch[]> {
+export async function fetchMirroredMatches(
+  playlistName: string,
+  serverPlaylistId?: string,
+): Promise<MirroredMatch[]> {
   try {
     const response = await fetch('/api/mirrored-playlists');
     const rows = await response.json();
     if (!Array.isArray(rows)) return [];
+    const mirrors = rows as MirroredMatch[];
     const key = playlistName.trim().toLowerCase();
-    return (rows as MirroredMatch[]).filter((p) => (p.name ?? '').trim().toLowerCase() === key);
+    const same = (value: string | null | undefined) =>
+      Boolean(value) && String(value).trim().toLowerCase() === key;
+    const tiers: Array<(p: MirroredMatch) => boolean> = [
+      (p) => Boolean(serverPlaylistId) && String(p.server_playlist_id ?? '') === serverPlaylistId,
+      (p) => same(p.sync_name),
+      (p) => same(p.display_name),
+      (p) => same(p.name),
+    ];
+    for (const tier of tiers) {
+      const hits = mirrors.filter(tier);
+      if (hits.length) return hits;
+    }
+    return [];
   } catch {
     return [];
   }

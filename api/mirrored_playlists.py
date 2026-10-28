@@ -221,8 +221,40 @@ def _stamp_track_statuses(database, playlist):
         for t in tracks:
             t['status'] = track_status(t, wishlisted)
         playlist['status_counts'] = status_counts(t['status'] for t in tracks)
+        # how many the detail's library check should look at (#1910): the
+        # unchecked ones plus its own stale misses
+        from core.playlists.library_check import unchecked_rows
+        playlist['library_check_due'] = len(unchecked_rows(tracks))
     except Exception as e:
         logger.debug(f"track statuses unavailable for mirror {playlist.get('id')}: {e}")
+
+
+@bp.route('/api/mirrored-playlists/<int:playlist_id>/check-library', methods=['POST'])
+def check_mirrored_playlist_library_endpoint(playlist_id):
+    """check the tracks nobody has checked against the library yet (#1910).
+
+    stamps the same in_library fields a sync does, so the track statuses stop
+    reading "not checked yet" for a playlist that was never synced through the
+    pipeline. a slice per call (remaining says how many are left), read-only
+    toward the wishlist, downloads and the server playlist."""
+    try:
+        from core.playlists.library_check import check_mirror_tracks
+        database = get_database()
+        playlist = _owned_mirrored_playlist(database, playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+        tracks = database.get_mirrored_playlist_tracks(playlist_id)
+        active = config_manager.get_active_media_server() if config_manager else None
+        result = check_mirror_tracks(
+            database, tracks,
+            profile_id=int(playlist.get('profile_id') or get_current_profile_id() or 1),
+            source=playlist.get('source'),
+            active_server=active,
+        )
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        logger.error(f"Error checking mirrored playlist {playlist_id} against the library: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>', methods=['GET'])

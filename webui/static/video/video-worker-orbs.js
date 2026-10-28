@@ -88,10 +88,14 @@
     // ── Init ──
 
     function init() {
-        const sub = document.querySelector('.video-subpage[data-video-subpage="video-dashboard"]');
-        dashboardHeader = sub ? sub.querySelector('.dashboard-header') : null;
-        headerActions = sub ? sub.querySelector('.header-actions') : null;
-        if (!dashboardHeader || !headerActions) return;
+        // the React video dashboard (routes/dashboard/-video) owns the stage.
+        // it is mounted on arrival and destroyed on leave, so this anchors
+        // lazily, the same way worker-orbs.js does for music.
+        const stage = document.querySelector('[data-video-orb-stage]');
+        const actions = stage ? stage.querySelector('.header-actions') : null;
+        if (!stage || !actions) return;
+        dashboardHeader = stage;
+        headerActions = actions;
 
         if (!hubImage) {
             hubImage = new Image();
@@ -1067,9 +1071,48 @@
         }
     }
 
+    // dropped before every re-anchor, or each visit would stack another set
+    // of listeners on a stage that is gone
+    function teardown() {
+        stopLoop();
+        if (collapseDelay) { clearTimeout(collapseDelay); collapseDelay = null; }
+        onDashboard = false;
+        state = 'idle';
+        sparks = [];
+        ripples = [];
+        inflows = [];
+        orbs = [];
+        canvas = null;
+        ctx = null;
+        dashboardHeader = null;
+        headerActions = null;
+        window.removeEventListener('resize', onResize);
+        document.removeEventListener('visibilitychange', onVisibility);
+    }
+
+    // the page is announced before React paints the stage, so this retries
+    // frame by frame (about 2s) until the stage exists
+    let stageRetry = null;
+    function cancelStageRetry() {
+        if (stageRetry !== null) { cancelAnimationFrame(stageRetry); stageRetry = null; }
+    }
+    function awaitStage() {
+        cancelStageRetry();
+        teardown();
+        const tryInit = (attempt) => {
+            stageRetry = null;
+            if (!onVideoDashboard()) return;
+            init();
+            if (dashboardHeader) { activate(); return; }
+            if (attempt < 120) stageRetry = requestAnimationFrame(() => tryInit(attempt + 1));
+        };
+        tryInit(0);
+    }
+
     function refresh() {
-        if (onVideoDashboard()) activate();
-        else deactivate();
+        if (!onVideoDashboard()) { cancelStageRetry(); deactivate(); return; }
+        if (!dashboardHeader || !dashboardHeader.isConnected) { awaitStage(); return; }
+        activate();
     }
 
     // ── Real telemetry → pulses ──
@@ -1118,9 +1161,8 @@
     // ── Bootstrap ──
 
     function bootstrap() {
-        init();
-        if (!dashboardHeader) return;
-
+        // published up front: the stage does not exist until the React page
+        // mounts, and the page pings refresh() when it does
         window.videoWorkerOrbs = { refresh, onStatus };
 
         // The video side announces page changes; switching back to the music

@@ -281,12 +281,13 @@ declare global {
      */
     /**
      * THE app-wide download flow for an ACCOUNT playlist — sync-spotify.js
-     * 2193. Twelve call sites across both worlds; the Spotify and Deezer-ARL
-     * tabs hand off to it rather than reimplementing any of it.
+     * 2193. The vanilla pages still call it; the React Spotify and Deezer
+     * tabs no longer do (they import into SoulSync, and an imported playlist
+     * downloads through Sync & download under Mirrored).
      *
      * It reads the playlist out of the script-scoped `spotifyPlaylists` array,
-     * which is why an ARL playlist must be shimmed into that array first
-     * (sync-services.js 2646-2654) — see arlShimRow in -sync.accounts.ts.
+     * which is why an ARL playlist had to be shimmed into that array first
+     * (sync-services.js 2646-2654).
      */
     openDownloadMissingModal?: (playlistId: string) => Promise<void> | void;
     /**
@@ -683,6 +684,17 @@ declare global {
         poster?: string | null;
       }) => void;
     };
+    /** video-poster-modal.js: the poster manager (search, then pick art). */
+    VideoPoster?: { openSearch?: () => void };
+    /** video-overlay-editor.js / video-collection-editor.js: the two studios. */
+    VideoOverlayEditor?: { open?: () => void };
+    VideoCollectionEditor?: { open?: () => void };
+    /** video-worker-orbs.js: re-anchor to the video dashboard's orb stage. */
+    videoWorkerOrbs?: { refresh: () => void; onStatus: (id: string, data: unknown) => void };
+    /** video-enrichment.js: fill the worker buttons now, not at the next push. */
+    videoEnrichmentPrime?: () => void;
+    /** video-side.js: the calendar on a day, optionally with an episode open. */
+    videoOpenCalendar?: (opts?: { date?: string; ep?: number | string }) => void;
     /** video-side.js: flip the shell chrome music <-> video (does NOT navigate). */
     _switchAppSide?: (side: 'music' | 'video', opts?: { force?: boolean }) => void;
     /** unified downloads page: true while any video download is active.

@@ -24,6 +24,12 @@ export interface BackdropVideoProps {
   onUnplayable?: (videoId: string) => void;
   /** false plays its sound. it starts muted every time it mounts */
   muted?: boolean;
+  /**
+   * the video is (or stopped being) actually playing, as youtube reports it.
+   * the hero needs this to time its crossfade: its still only fades out once
+   * the video underneath is real.
+   */
+  onLiveChange?: (live: boolean) => void;
 }
 
 type MutablePlayer = YouTubePlayer & { mute?: () => void; unMute?: () => void };
@@ -33,6 +39,7 @@ export function BackdropVideo({
   playing,
   onUnplayable,
   muted = true,
+  onLiveChange,
 }: BackdropVideoProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<MutablePlayer | null>(null);
@@ -41,6 +48,13 @@ export function BackdropVideo({
   const [live, setLive] = useState(false);
   const unplayable = useRef(onUnplayable);
   unplayable.current = onUnplayable;
+  const liveChange = useRef(onLiveChange);
+  liveChange.current = onLiveChange;
+
+  // report the live signal outwards, once per change (the hero's crossfade)
+  useEffect(() => {
+    liveChange.current?.(live);
+  }, [live]);
 
   useEffect(() => {
     setLive(false);

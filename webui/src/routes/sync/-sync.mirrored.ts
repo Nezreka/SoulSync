@@ -433,7 +433,7 @@ export function mirroredPipelineStateWriter(
 
 /**
  * the chip a track row carries. in library is the resting state and says
- * nothing, same as a healthy card, and "not synced yet" would sit on every row
+ * nothing, same as a healthy card, and "not checked yet" would sit on every row
  * of a fresh playlist, so the strip says that once instead.
  */
 export function trackStatusChip(status: MirroredTrackStatus | undefined): string | null {
@@ -479,7 +479,9 @@ export function trackStatusSegments(
       case 'missing':
         return 'not downloaded';
       default:
-        return 'not synced yet';
+        // nothing has checked these against the library yet. the detail
+        // modal checks them on open (#1910), so this is a passing state
+        return 'not checked yet';
     }
   };
   return STRIP_ORDER.flatMap((status) => {

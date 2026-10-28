@@ -1418,14 +1418,34 @@ async function addModalTracksToWishlist(playlistId) {
 
     // Filter tracks based on checkbox selection (if checkboxes exist in this modal)
     const wishlistTbody = document.getElementById(`download-tracks-tbody-${playlistId}`);
-    let tracks = process.tracks;
+    let selectedIndices = null;
     if (wishlistTbody) {
         const allCbs = wishlistTbody.querySelectorAll('.track-select-cb');
         if (allCbs.length > 0) {
             const checkedCbs = wishlistTbody.querySelectorAll('.track-select-cb:checked');
-            const selectedIndices = new Set([...checkedCbs].map(cb => parseInt(cb.dataset.trackIndex)));
-            tracks = process.tracks.filter((_, i) => selectedIndices.has(i));
+            selectedIndices = new Set([...checkedCbs].map(cb => parseInt(cb.dataset.trackIndex)));
         }
+    }
+
+    // songs you already own don't go on the wishlist (#1910): the same
+    // ownership answer the modal shows. Force Download All means you asked
+    // for everything, owned or not.
+    const forceAll = document.getElementById(`force-download-all-${playlistId}`)?.checked;
+    if (!forceAll && !process.ownedIndices && typeof previewModalOwnership === 'function') {
+        await previewModalOwnership(playlistId);
+    }
+    const owned = (!forceAll && process.ownedIndices) || new Set();
+    let ownedSkipped = 0;
+    const tracks = process.tracks.filter((_, i) => {
+        if (selectedIndices && !selectedIndices.has(i)) return false;
+        if (owned.has(i)) { ownedSkipped++; return false; }
+        return true;
+    });
+    if (!tracks.length) {
+        showToast(ownedSkipped
+            ? `All ${ownedSkipped} selected track${ownedSkipped !== 1 ? 's are' : ' is'} already in your library`
+            : 'No tracks selected', ownedSkipped ? 'success' : 'info');
+        return;
     }
 
     // Get album context if available (for artist album downloads)
@@ -1455,7 +1475,9 @@ async function addModalTracksToWishlist(playlistId) {
     try {
         let successCount = 0;
         let errorCount = 0;
-        let skippedCount = 0;   // already-in-library tracks the backend declined to add (#825)
+        // already-in-library tracks: the ones the modal knew about (#1910) plus
+        // any the backend declined to add (#825)
+        let skippedCount = ownedSkipped;
         const addedRows = [];   // what "Monitor" downloads (and monitors) right after the adds
 
         // Add each track to wishlist individually
@@ -1566,9 +1588,11 @@ async function addModalTracksToWishlist(playlistId) {
 
                 const result = await response.json();
 
-                if (result.success) {
+                if (result.success && result.skipped) {
+                    skippedCount++;
+                } else if (result.success) {
                     successCount++;
-                    if (!result.skipped) addedRows.push({ id: result.wishlist_id || track.id, album: result.lib2_album_id });
+                    addedRows.push({ id: result.wishlist_id || track.id, album: result.lib2_album_id });
                 } else {
                     errorCount++;
                     console.error(`❌ Failed to add "${track.name}" to wishlist: ${result.error}`);

@@ -93,7 +93,7 @@ The home screen is split in two: your music on the left, the machine on the righ
 
 Bring a playlist in from anywhere, keep a mirror of it, and keep your media server's copy in step on a schedule.
 
-- **Add playlist**: paste any link and SoulSync works out the service, or pick from a connected account, or drop a CSV / TSV / TXT / M3U file and map its columns, or a NewPipe backup to bring its playlists over.
+- **Add playlist**: paste any link and SoulSync works out the service and imports it, or open a connected account and press **Import** on the playlists you want (or **Import all**), or drop a CSV / TSV / TXT / M3U file and map its columns, or a NewPipe backup to bring its playlists over. Either way you land on the imported playlist under Mirrored, already identifying itself in the background.
 - **Mirrored library**: every playlist as a card whose artwork carries its state (a coverage ring, a pulse while syncing, desaturated when something's wrong). Filter by *Needs attention / Working / Discovered / Scheduled*, search, sort, bulk delete.
 - **Discovery**: matches each source track to real metadata with live progress. Fix any match by hand (including by MusicBrainz ID), retry the failures, or let **Wing It** make best-effort guesses that you can review later in the **Wing It Pool**.
 - **Sync modes**: *Replace*, *Reconcile* (edit in place, keep the server playlist's image and description) or *Append*.
@@ -214,6 +214,13 @@ A full web player built into the sidebar.
 # Video: movies, TV & YouTube
 
 A complete video side with its own database, pages and pipeline. Switch sides from the header; each profile can be given music, video, or both.
+
+**Dashboard**
+- The music dashboard's layout on video: a greeting with your library's size, a scan strip, and the video enrichment workers on their own orb stage.
+- **Next up**: the calendar's billboard for what airs next, each episode with its state.
+- **Continue watching**, **Downloading now** (only while something is), and **Recently added** with Movies / Shows tabs.
+- **This week** in the rail: how many of the episodes that aired this week you have, a meter by state, when auto-wishlist last ran, and one button to wishlist what's missing.
+- **Up next** video automations, watchlist and wishlist counts, and issue / findings tiles that only appear when something needs you.
 
 **Library**
 - Movies, shows and YouTube channels from **Plex** or **Jellyfin**, with incremental, full and deep scans, per-title sync, and a path resolver for mismatched Docker / NAS mounts.

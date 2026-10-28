@@ -524,6 +524,9 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                                     virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
                                         virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
                                             virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                                                // a mirror's id is youtube_mirrored_<n>, not a youtube
+                                                // playlist (#1910)
+                                                virtualPlaylistId.startsWith('youtube_mirrored_') ? 'Playlist' :
                                                 'YouTube';
 
     // Store metadata for discover download sidebar (will be added when Begin Analysis is clicked)
@@ -617,6 +620,9 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
     modal.style.display = 'flex';
     hideLoadingOverlay();
+    // owned/missing per track straight away, not a column of 'pending' until
+    // Begin Analysis (#1910)
+    void previewModalOwnership(virtualPlaylistId);
 }
 
 async function closeDownloadMissingModal(playlistId) {
@@ -2009,6 +2015,8 @@ async function previewModalOwnership(playlistId) {
         return;
     }
     updateTrackAnalysisResults(playlistId, data.results);
+    // Add to Wishlist reads this so it doesn't queue songs you own (#1910)
+    process.ownedIndices = new Set(data.results.filter(r => r.found).map(r => r.track_index));
     const found = data.results.filter(r => r.found).length;
     const missing = data.results.length - found;
     const foundEl = document.getElementById(`stat-found-${playlistId}`);

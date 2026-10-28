@@ -151,7 +151,9 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8008/" ]
+      # Lightweight JSON probe, not / (rendering the index every 30s was a
+      # steady idle-CPU cost, #1905); allowlisted by every auth gate.
+      test: [ "CMD", "curl", "-f", "http://localhost:8008/api/setup/status" ]
       interval: 30s
       timeout: 10s
       retries: 3

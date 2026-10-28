@@ -49,6 +49,7 @@ import type { DiscoveryRow } from '../-sync.transform';
 import { discoveryRowAction } from '../-sync.core';
 import {
   descriptionSourceWord,
+  discoveryStatusLabel,
   initialProgressText,
   metadataSourceLabel,
   modalDescription,
@@ -409,6 +410,11 @@ function FooterActions(props: DiscoveryModalProps) {
             key="download-missing-btn"
             type="button"
             className="modal-btn modal-btn-primary"
+            title={
+              standalone
+                ? "Download the identified songs you don't have yet"
+                : "Download the identified songs you don't have yet. Push to server (or the next sync) adds them to your server playlist"
+            }
             onClick={() => onDownloadMissing()}
           >
             🔍 Download Missing Tracks
@@ -497,6 +503,12 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
                 : initialProgressText(state.phase)}
             </div>
             {skippedNote && <div className="progress-skipped-note">{skippedNote}</div>}
+            {showLine && (
+              <div className="discovery-meaning-note">
+                Identified means the song was matched on {metadataLabel}. Whether you already have
+                it is checked when you download or sync.
+              </div>
+            )}
           </div>
 
           <div className="discovery-table-container">
@@ -505,7 +517,7 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
                 <tr>
                   <th>{sourceLabel} Track</th>
                   <th>{sourceLabel} Artist</th>
-                  <th>Status</th>
+                  <th>Match</th>
                   <th>{metadataLabel} Track</th>
                   <th>{metadataLabel} Artist</th>
                   <th>Album</th>
@@ -530,7 +542,9 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
                         ? row.spotify_artist
                         : row.yt_artist}
                     </td>
-                    <td className={`discovery-status ${row.status_class}`}>{row.status}</td>
+                    <td className={`discovery-status ${row.status_class}`}>
+                      {discoveryStatusLabel(row)}
+                    </td>
                     <td className="spotify-track">{row.spotify_track}</td>
                     <td className="spotify-artist">{row.spotify_artist}</td>
                     <td className="spotify-album">{row.spotify_album}</td>

@@ -612,7 +612,7 @@ export function VideoMassRenameCard() {
 /**
  * the two visual editors, launchable from here as well as the dashboard. the
  * buttons carry the same data attributes the dashboard's launchers do, and
- * video-dashboard.js opens the editor from a document-level click handler, so
+ * video-side.js opens the editor from a document-level click handler, so
  * there is exactly one way each studio opens.
  */
 export function VideoStudioCards() {

@@ -23,6 +23,7 @@ import type { SourceVertical } from '../-sync.use-vertical';
 
 import { postUnmatch } from '../-sync.fix';
 import { retryFailedMirroredDiscovery } from '../-sync.mirrored';
+import { mirroredDetailSourceLabel } from '../-sync.mirrored';
 import { buildDownloadTracks } from '../-sync.modal-core';
 import { applyFixedMatch, applyUnmatched } from '../-sync.state';
 import { DiscoveryModal } from './discovery-modal';
@@ -136,7 +137,22 @@ export function SourceModals({
             forcePlaylistFolder: options?.forcePlaylistFolder ?? false,
           });
         } else {
-          await window.openDownloadMissingModalForYouTube?.(vpid, name, tracks);
+          // the modal sniffs the id prefix for its "by …" line, and a mirror's
+          // youtube_mirrored_ id read as YouTube. a mirror says its own source
+          // (#1910); the real youtube vertical keeps the sniff.
+          if (config.id === 'mirrored') {
+            const label = mirroredDetailSourceLabel(mirroredSource || '') || 'Playlist';
+            await window.openDownloadMissingModalForYouTube?.(
+              vpid,
+              name,
+              tracks,
+              null,
+              null,
+              label,
+            );
+          } else {
+            await window.openDownloadMissingModalForYouTube?.(vpid, name, tracks);
+          }
         }
       } catch (error) {
         window.showToast?.(
@@ -145,7 +161,7 @@ export function SourceModals({
         );
       }
     },
-    [config, vertical, state, openId, hideWithoutReset],
+    [config, vertical, state, openId, hideWithoutReset, mirroredSource],
   );
 
   const onUnmatchTrack = useCallback(

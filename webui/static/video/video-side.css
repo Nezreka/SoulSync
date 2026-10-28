@@ -123,62 +123,6 @@ html[data-sidebar="collapsed"] .side-toggle-btn .side-toggle-icon {
 /* Overlay Studio (poster builder) is admin-only — hide its launcher for non-admins. */
 body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
 
-/* Video dashboard bento order + column spans. SCOPED to the video subpage because
-   these data-card names (stats/library/tools) also exist on the music dashboard —
-   an unscoped rule would reorder music's grid too. Three balanced 2/3 + 1/3 rows:
-     Row 1  Recently Added (2 cols) · Library (1 col)
-     Row 2  Quick Actions (1 col) · Studios [Overlay + Collection] (2 cols)
-     Row 3  Upcoming (2 cols) · System Stats (1 col) */
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="recent"] { order: 1; grid-column: span 2; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="library"] { order: 2; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="tools"] { order: 3; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="studios"] { order: 4; grid-column: span 2; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="upcoming"] { order: 5; grid-column: span 2; }
-.video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { order: 6; }
-
-/* ── Dashboard responsive (tablet + phone) ──────────────────────────────────
-   The shared .dash-grid (style.css) collapses 3→2 cols at 1499px and →1 col at
-   699px, but its mobile reset only covers the music helper classes
-   (.dash-card--wide/--full) — NOT the raw span-2 rules above. Without the reset
-   below, the three spanning cards force an IMPLICIT second column into the
-   1-col phone grid (double-width cards, sideways page scroll). */
-@media (max-width: 1499px) and (min-width: 700px) {
-    /* 2-col tablet range: Stats is the last card and sat alone at half width —
-       let it finish the grid full-width (its six stat tiles flow 3-up there). */
-    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { grid-column: span 2; }
-}
-@media (max-width: 699px) {
-    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="recent"],
-    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="studios"],
-    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="upcoming"],
-    .video-subpage[data-video-subpage="video-dashboard"] .dash-card[data-card="stats"] { grid-column: auto; }
-    /* The studios "Metadata ready" rings wrap under the title on phones —
-       left-align the wrapped row so it reads cleanly. */
-    .vcov { align-items: flex-start; }
-}
-
-/* Phone enrichment strip — worker orbs are disabled ≤768px (video-worker-orbs.js)
-   so the 13 accent buttons + the Manage Workers pill render as real elements.
-   Mirror music's treatment (style.css scopes it to #dashboard-page, which never
-   reaches this subpage): an even auto-fit grid of the 46px buttons, with the
-   pill on its own full-width row instead of dangling inline. */
-@media (max-width: 768px) {
-    .video-subpage[data-video-subpage="video-dashboard"] .header-actions {
-        width: 100%;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(46px, 1fr));
-        justify-items: center;
-        align-items: center;
-        gap: 12px 10px;
-    }
-    .video-subpage[data-video-subpage="video-dashboard"] .header-actions .em-manage-btn {
-        grid-column: 1 / -1;
-        width: 100%;
-        margin-left: 0;
-        justify-content: center;
-    }
-}
-
 /* Touch devices get no hover — an enrichment tooltip would pop on tap and sit
    stuck over the buttons. Music hides its worker tooltips at this width
    (style.css @900px); same for the video workers. */
@@ -186,62 +130,6 @@ body:not(.video-admin) [data-video-overlay-studio] { display: none !important; }
     .video-enrich-tooltip { display: none !important; }
 }
 
-/* Dashboard "Recently Added" — a single full-width, horizontally-scrolling row. */
-.video-recent-grid { display: flex; align-items: flex-start; gap: 14px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
-.video-recent-grid::-webkit-scrollbar { height: 6px; }
-.video-recent-grid::-webkit-scrollbar-thumb { background: var(--white-a12); border-radius: 3px; }
-/* Fixed-width tiles. min-width:0 stops a long title from ballooning the flex item
-   past its 96px basis (flex items default to min-width:auto = content width). */
-.video-recent-item { flex: 0 0 96px; width: 96px; min-width: 0; display: block; text-decoration: none; color: inherit; scroll-snap-align: start; }
-.video-recent-poster { width: 96px; height: 144px; border-radius: 9px; overflow: hidden; position: relative;
-    background: var(--white-a05); border: 1px solid var(--white-a08);
-    transition: transform .14s ease, border-color .14s ease; }
-.video-recent-item:hover .video-recent-poster { transform: translateY(-3px); border-color: rgba(56, 189, 248, .55); }
-.video-recent-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.video-recent-poster.is-empty { display: grid; }
-.video-recent-poster.is-empty img { display: none; }
-.video-recent-poster.is-empty::after { content: "\1F3AC"; place-self: center; font-size: 22px; opacity: .3; }
-.video-recent-title { font-size: 12px; font-weight: 600; color: var(--white-a85); margin-top: 7px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.video-recent-year { font-size: 11px; color: var(--white-a40); margin-top: 1px; }
-.video-recent-empty { flex: 1; padding: 24px 8px; text-align: center; font-size: 13px; color: var(--white-a40); }
-
-/* Dashboard "Upcoming" — mini-billboards for the next few calendar episodes. */
-.dash-card__link { font-size: 11px; font-weight: 600; color: rgba(56, 189, 248, .95); text-decoration: none; margin-left: 4px; white-space: nowrap; }
-.dash-card__link:hover { text-decoration: underline; }
-/* A single horizontally-scrolling row of landscape backdrop cards. */
-.video-upcoming { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
-.video-upcoming::-webkit-scrollbar { height: 6px; }
-.video-upcoming::-webkit-scrollbar-thumb { background: var(--white-a12); border-radius: 3px; }
-/* Fixed-width tiles styled after the calendar's "next up" billboard (.vcal-bb) —
-   per-show hue (--vcal-h), hue-tinted scrim glow, pulsing eyebrow dot, bold title.
-   flex:0 0 so they never shrink; min-width:0 stops a long title ballooning the item. */
-.vup-row { --vcal-h: 230; position: relative; display: flex; align-items: flex-end; flex: 0 0 248px; width: 248px;
-    min-width: 0; aspect-ratio: 16 / 10; border-radius: var(--radius-card); overflow: hidden; scroll-snap-align: start;
-    text-decoration: none; color: inherit; border: 1px solid var(--white-a08); cursor: pointer;
-    box-shadow: 0 14px 34px var(--black-a50); transition: transform var(--dur-quick) ease, box-shadow var(--dur-slow) ease; }
-.vup-row:hover { transform: translateY(-3px);
-    box-shadow: 0 22px 54px var(--black-a60), 0 0 40px hsla(var(--vcal-h), 72%, 50%, .24); }
-.vup-bg { position: absolute; inset: 0; background-size: cover; background-position: center 22%;
-    transform: scale(1.08); transition: transform .35s ease; }
-.vup-row:hover .vup-bg { transform: scale(1.13); }
-.vup-scrim { position: absolute; inset: 0;
-    background: linear-gradient(0deg, rgba(8, 8, 12, .95) 4%, rgba(8, 8, 12, .55) 46%, transparent 82%),
-        radial-gradient(130% 130% at 0% 100%, hsla(var(--vcal-h), 72%, 45%, .42), transparent 60%); }
-.vup-content { position: relative; z-index: 1; padding: 13px 15px 14px; width: 100%; }
-.vup-when { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 800;
-    text-transform: uppercase; letter-spacing: .09em; color: hsl(var(--vcal-h), 88%, 80%); }
-.vup-dot { width: 6px; height: 6px; border-radius: var(--radius-circle); background: hsl(var(--vcal-h), 88%, 62%);
-    box-shadow: 0 0 10px hsl(var(--vcal-h), 88%, 60%); animation: vcalPulse 2s ease-in-out infinite; }
-@keyframes vcalPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.6); } }
-.vup-owned { margin-left: auto; font-size: 9.5px; font-weight: 700; color: rgba(99, 214, 139, .95);
-    background: rgba(99, 214, 139, .14); padding: 2px 6px; border-radius: var(--radius-pill); text-transform: none; letter-spacing: 0; }
-.vup-title { font-size: 16px; font-weight: 900; letter-spacing: -.02em; color: #fff; margin-top: 6px;
-    text-shadow: 0 2px 14px var(--black-a60); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vup-sub { font-size: 12px; color: rgba(255, 255, 255, .78); font-weight: 600; margin-top: 3px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vup-se { font-weight: 800; color: #fff; }
-@media (prefers-reduced-motion: reduce) { .vup-dot { animation: none; } }
 body[data-side="video"] nav.sidebar-nav:not(.video-nav) {
     display: none;
 }
@@ -300,19 +188,21 @@ body[data-side="video"][data-video-page="video-chat"] #video-page-host {
    data-video-page is set by gotoUnifiedDownloads() in video-side.js —
    navigate() hands off before showPage() can set it. */
 body[data-side="video"][data-video-page="video-downloads"] #webui-react-root,
-/* The wishlist, the tools page and the calendar are the same kind of shared
-   React page (the wishlist's video tabs, /tools?media=video,
-   /calendar?media=video), handed off by gotoUnifiedWishlist() /
-   gotoUnifiedTools() / gotoUnifiedCalendar() in video-side.js. */
+/* The wishlist, the tools page, the calendar and the dashboard are the same
+   kind of shared React page (the wishlist's video tabs, /tools?media=video,
+   /calendar?media=video, /dashboard?media=video), handed off by the
+   gotoUnified*() functions in video-side.js. */
 body[data-side="video"][data-video-page="video-wishlist"] #webui-react-root,
 body[data-side="video"][data-video-page="video-tools"] #webui-react-root,
-body[data-side="video"][data-video-page="video-calendar"] #webui-react-root {
+body[data-side="video"][data-video-page="video-calendar"] #webui-react-root,
+body[data-side="video"][data-video-page="video-dashboard"] #webui-react-root {
     display: block !important;
 }
 body[data-side="video"][data-video-page="video-downloads"] #video-page-host,
 body[data-side="video"][data-video-page="video-wishlist"] #video-page-host,
 body[data-side="video"][data-video-page="video-tools"] #video-page-host,
-body[data-side="video"][data-video-page="video-calendar"] #video-page-host {
+body[data-side="video"][data-video-page="video-calendar"] #video-page-host,
+body[data-side="video"][data-video-page="video-dashboard"] #video-page-host {
     display: none !important;
 }
 /* Video-only additions inside the shared settings page (e.g. the Movies/TV
@@ -381,10 +271,6 @@ body[data-side="video"] .dashboard-header-sweep {
 /* Music's dashboard blows its header icon up to 176px (#dashboard-page scope) —
    the video dashboard fell back to the 48px default, so its whole header read
    smaller. Same treatment, same size. */
-.video-subpage[data-video-subpage="video-dashboard"] .page-header-icon {
-    width: 176px;
-    height: 176px;
-}
 
 /* ── Dashboard enrichment-worker buttons (isolated; music untouched) ────── */
 .video-enrich-container { position: relative; }
@@ -491,8 +377,14 @@ body[data-side="video"] .dashboard-header-sweep {
     transform: translateX(-50%) translateY(0);
 }
 
-/* The Manage Workers button reuses music's .em-manage-btn* classes verbatim
-   (see index.html), so it needs no styling of its own here — identical by reuse. */
+/* The Manage Workers button reuses music's .em-manage-btn* classes verbatim,
+   so it needs no styling of its own here. */
+
+/* the dashboard orb grid. music's orbs carry a 12px margin the video ones
+   don't, so the column gap makes up the difference: same pitch, five a row,
+   and the hub button breaks onto its own centred row. */
+#dashboard-page [data-video-orb-stage] .header-actions { gap: 12px 30px; }
+#dashboard-page [data-video-orb-stage] .orb-stage-break { flex-basis: 100%; height: 0; }
 
 /* Service logo in the settings API-config frame headers (TMDB/TVDB). */
 .video-svc-logo { width: 18px; height: 18px; object-fit: contain; margin-right: 2px; }
@@ -541,12 +433,6 @@ body[data-side="video"] .dashboard-header-sweep {
 }
 
 /* Empty-state line inside reused dashboard cards (e.g. Recent Downloads). */
-.video-empty-note {
-    margin: 0;
-    padding: 8px 2px;
-    color: var(--text-secondary);
-    font-size: 14px;
-}
 
 /* ── Library page ──────────────────────────────────────────────────────── */
 /* The grid/cards/search/alphabet all reuse the music library CSS verbatim.
@@ -1290,7 +1176,6 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     filter: drop-shadow(0 2px 4px var(--black-a40)); transition: transform var(--dur-slow) ease;
 }
 .video-enrich-button:hover .video-enrich-glyph { transform: scale(1.1); }
-
 
 /* ══════════════════════════════════════════════════════════════════════════
    In-app SEARCH + PERSON pages — cinematic, Netflix-grade (isolated, video).
@@ -2377,8 +2262,6 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     display: flex;
 }
 
-
-
 /* ══════════════════════════════════════════════════════════════════════════
    Watchlist — shared "add to watchlist" button (.vwl-btn) + the Watchlist page
    (.vwlp-*). The button is the video mirror of the music ya-watchlist-btn.
@@ -2666,117 +2549,6 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 /* the follow eye sits opposite the cog on studio cards */
 .vwlp-card--studio .vwl-btn { position: absolute; top: 8px; left: 8px; z-index: 4; }
 
-/* ── Studio enrichment-coverage rings (Overlay/Collection Studio dashboard cards) ──
-   Circular progress rings à la the music artist page: a number in the middle, per-source
-   colour, animated fill + a coverage-scaled glow (the fuller the ring, the brighter it
-   burns). Purely visual. */
-/* Lives top-right of the Studio card header (opposite the title) — a compact readiness
-   cluster, right-aligned. */
-.dash-card__head--cov { flex-wrap: wrap; gap: 10px 16px; }
-.dash-card__head-txt { min-width: 0; }
-.vcov { display: flex; flex-direction: column; align-items: flex-end; }
-.vcov-title { display: inline-flex; align-items: center; gap: 5px; font-size: 9.5px; font-weight: 800;
-    letter-spacing: 0.06em; text-transform: uppercase; color: rgba(255, 255, 255, 0.42); margin-bottom: 9px; }
-.vcov-info { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px;
-    border-radius: var(--radius-circle); border: 1px solid rgba(255, 255, 255, 0.28); color: var(--white-a55);
-    font-size: 9px; font-weight: 800; cursor: help; }
-.vcov-info:hover { color: #fff; border-color: var(--white-a60); }
-.vcov-grid { display: flex; gap: 16px; }
-.vcov-item { display: flex; flex-direction: column; align-items: center; gap: 6px;
-    transition: transform var(--dur-moderate) var(--ease-standard); }
-.vcov-item:hover { transform: translateY(-2px) scale(1.05); }
-.vcov-ring { position: relative; width: 46px; height: 46px; transition: filter var(--dur-slower) ease; }
-.vcov-ring svg { width: 46px; height: 46px; transform: rotate(-90deg); }
-.vcov-bg { fill: none; stroke: var(--white-a08); stroke-width: 3.5; }
-.vcov-fill { fill: none; stroke-width: 3.5; stroke-linecap: round;
-    animation: vcovFill 1s cubic-bezier(0.34, 0.1, 0.2, 1) var(--d, 0s) both; }
-.vcov-pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-size: 13px; font-weight: 800; color: #fff; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
-    animation: vcovPct 0.65s ease var(--d, 0s) both; }
-.vcov-label { display: flex; flex-direction: column; align-items: center; line-height: 1.15; text-align: center; }
-.vcov-label b { font-size: 10px; font-weight: 800; color: rgba(255, 255, 255, 0.78); letter-spacing: 0.02em; }
-.vcov-label span { font-size: 8.5px; font-weight: 600; color: rgba(255, 255, 255, 0.38);
-    text-transform: uppercase; letter-spacing: 0.04em; }
-@keyframes vcovFill { from { stroke-dashoffset: var(--c); } to { stroke-dashoffset: var(--o); } }
-@keyframes vcovPct { 0% { opacity: 0; transform: scale(0.6); } 55% { opacity: 0; } 100% { opacity: 1; transform: scale(1); } }
-@media (prefers-reduced-motion: reduce) {
-    .vcov-fill, .vcov-pct { animation: none; }
-    .vcov-fill { stroke-dashoffset: var(--o); }
-}
-/* On a narrow card the header wraps: the cluster drops below the title, left-aligned. */
-@media (max-width: 560px) {
-    .dash-card__head--cov { justify-content: flex-start; }
-    .vcov { align-items: flex-start; }
-}
-
-/* ── Combined Studios card (Overlay + Collection) ───────────────────────────────
-   One 2/3-wide card: the shared 'Metadata ready' rings live in the header; the body is
-   two whole-clickable halves, each with real library art behind a gradient scrim. */
-.vst-combo { overflow: hidden; }
-.vst-combo .dash-card__head { margin-bottom: 0; padding-bottom: 16px; }
-.vst-combo-panels { display: grid; grid-template-columns: 1fr 1fr;
-    margin: 0 -24px -22px;   /* bleed past the card's 22px/24px padding to the edges */
-}
-.vst-half { position: relative; overflow: hidden; min-height: 208px; padding: 0; border: 0; cursor: pointer;
-    background: #101017; text-align: left; display: block; isolation: isolate; appearance: none; -webkit-appearance: none;
-    border-top: 1px solid var(--white-a07); font: inherit; color: inherit; }
-.vst-half + .vst-half { border-left: 1px solid var(--white-a07); }
-.vst-half:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: -2px; }
-
-.vst-half-bg { position: absolute; inset: 0; z-index: 0; overflow: hidden;
-    transition: transform 0.6s var(--ease-out); }
-.vst-half:hover .vst-half-bg { transform: scale(1.05); }
-.vst-half-bg img { position: absolute; object-fit: cover; border-radius: var(--radius-control);
-    box-shadow: 0 16px 34px var(--black-a55); }
-/* Overlay side: one poster up-right, tilted, with example badge chips dropped on it. */
-.vst-half--overlay .vst-ov-poster { top: -14px; right: 26px; width: 118px; height: 177px; transform: rotate(5deg); }
-.vst-ov-badge { position: absolute; z-index: 1; font-size: 10px; font-weight: 800; letter-spacing: .02em;
-    padding: 4px 8px; border-radius: 7px; box-shadow: 0 4px 10px var(--black-a40); }
-/* Collection side: a fanned stack of posters (a 'collection'). */
-.vst-half--collection .vst-col-poster { top: -10px; width: 104px; height: 156px; transition: transform 0.6s ease; }
-.vst-half--collection .vst-col-poster:nth-child(1) { right: 96px; transform: rotate(-9deg); z-index: 1; }
-.vst-half--collection .vst-col-poster:nth-child(2) { right: 44px; transform: rotate(-1deg); z-index: 2; }
-.vst-half--collection .vst-col-poster:nth-child(3) { right: -4px; transform: rotate(8deg); z-index: 3; }
-.vst-half--collection:hover .vst-col-poster:nth-child(1) { transform: rotate(-13deg) translateY(-4px); }
-.vst-half--collection:hover .vst-col-poster:nth-child(3) { transform: rotate(12deg) translateY(-4px); }
-
-/* Scrim: darken bottom-left where the text sits, let the art breathe top-right. */
-.vst-half-scrim { position: absolute; inset: 0; z-index: 1; pointer-events: none;
-    background:
-        linear-gradient(120deg, rgba(14, 15, 22, 0.97) 30%, rgba(14, 15, 22, 0.72) 52%, transparent 82%),
-        linear-gradient(0deg, rgba(14, 15, 22, 0.9) 0%, transparent 55%); }
-.vst-half--overlay .vst-half-scrim { background:
-        linear-gradient(120deg, rgba(16, 14, 24, 0.97) 30%, rgba(16, 14, 24, 0.72) 52%, transparent 82%),
-        linear-gradient(0deg, rgba(16, 14, 24, 0.9) 0%, transparent 55%); }
-
-.vst-half-fg { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column;
-    justify-content: flex-end; gap: 4px; padding: 20px; }
-.vst-half-eyebrow { font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
-    color: rgb(var(--accent-rgb)); }
-.vst-half--collection .vst-half-eyebrow { color: #5bd0a0; }
-.vst-half-title { font-size: 17px; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
-.vst-half-desc { font-size: 12px; line-height: 1.5; color: var(--white-a60); max-width: 30ch; margin-bottom: 8px; }
-.vst-half-cta { display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
-    font-size: 12.5px; font-weight: 800; color: #fff; padding: 8px 15px; border-radius: var(--radius-control);
-    background: rgba(var(--accent-rgb), 0.9); box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.36);
-    transition: transform 0.16s ease, filter 0.16s ease; }
-.vst-half--collection .vst-half-cta { background: rgba(45, 170, 130, 0.92); box-shadow: 0 6px 18px rgba(45, 170, 130, 0.34); }
-.vst-half:hover .vst-half-cta { transform: translateY(-1px); filter: brightness(1.08); }
-.vst-half-cta span { transition: transform 0.16s ease; }
-.vst-half:hover .vst-half-cta span { transform: translateX(3px); }
-
-@media (prefers-reduced-motion: reduce) {
-    .vst-half-bg, .vst-half--collection .vst-col-poster, .vst-half-cta, .vst-half-cta span { transition: none; }
-    .vst-half:hover .vst-half-bg { transform: none; }
-}
-@media (max-width: 640px) {
-    .vst-combo-panels { grid-template-columns: 1fr; }
-    .vst-half + .vst-half { border-left: 0; }
-}
-/* Non-admins can't use the studios (launchers are gated) — if only one half remains
-   visible, let it fill the width. */
-body:not(.video-admin) .vst-half--overlay { display: none; }
-body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vwlp-card-info { padding: 9px 4px 0; }
 .vwlp-card-title { display: block; font-size: 13.5px; font-weight: 700; line-height: 1.3;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4576,7 +4348,6 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vlib-prog-fill { height: 100%; border-radius: var(--radius-pill); background: linear-gradient(90deg, rgba(164, 114, 245, 0.65), rgb(164, 114, 245)); }
 .vlib-prog-fill--full { background: linear-gradient(90deg, rgba(var(--success-strong-rgb), 0.65), #2bd17e); }
 
-
 /* first-visit loading skeleton (removed on the first render) */
 .vdpg-skel-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin-bottom: 10px;
     border-radius: var(--radius-lg); background: var(--white-a03); border: 1px solid var(--white-a06); }
@@ -4605,6 +4376,31 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 }
 .em-retry-global:hover { transform: none; background: rgba(var(--warning-strong-rgb), 0.24); }
 .em-retry-global:disabled { opacity: 0.55; cursor: default; }
+
+/* "Process first everywhere": a segmented control in the topbar. the music
+   modal moved this into a menu and dropped the shared rules, so the video
+   modal owns them now. */
+#vem-overlay .em-global {
+    display: flex; align-items: center; gap: 11px; flex: 0 0 auto;
+    padding: 6px 6px 6px 12px; border-radius: var(--radius-lg);
+    background: var(--black-a25); border: 1px solid var(--white-a08);
+}
+#vem-overlay .em-global-label {
+    font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px;
+    color: var(--white-a40); line-height: 1.25; text-align: right;
+}
+#vem-overlay .em-global-label span { color: var(--white-a70); }
+#vem-overlay .em-global-tabs {
+    display: inline-flex; gap: 3px; padding: 3px; background: var(--white-a05);
+    border-radius: var(--radius-md); border: 1px solid var(--white-a08);
+}
+#vem-overlay .em-global-tabs button {
+    padding: 6px 12px; border: none; background: transparent; border-radius: var(--radius-sm);
+    color: var(--white-a60); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+#vem-overlay .em-global-tabs button:hover { color: var(--text-primary); background: var(--white-a06); }
+#vem-overlay .em-global-tabs button.active { background: rgb(var(--accent-rgb)); color: var(--text-primary); }
 
 /* ── Import page (manual / failed-import resolution) — video/video-import.js ──── */
 .vimp-page { max-width: 1080px; margin: 0 auto; padding: 8px 4px 40px; }
@@ -4748,7 +4544,6 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     background: var(--white-a05); border: 1px solid var(--white-a14); width: 90px; }
 .vimp-ep-field--wide input { width: 100%; }
 .vimp-modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px 18px; border-top: 1px solid var(--white-a06); margin-top: 8px; }
-
 
 body.vdh-locked { overflow: hidden; }
 .vdh-overlay { position: fixed; inset: 0; z-index: 4000; display: none; align-items: center; justify-content: center;
@@ -4938,7 +4733,6 @@ body[data-side="video"] #gsearch-aura {
 .vd-ep-dl-txt { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.72); white-space: nowrap; }
 .vd-ep-dl-txt--done { color: #4ade80; }
 
-
 /* ── Manual (interactive) search modal — matches the get-modal / download chrome ── */
 .vms-overlay {
     position: fixed; inset: 0; z-index: 4000; display: flex; align-items: flex-start; justify-content: center;
@@ -4995,7 +4789,6 @@ body[data-side="video"] #gsearch-aura {
 .vdl-res--rejected:has(.vdl-res-grab--override):hover { opacity: 1; }
 .vdl-res-grab--override { color: #fbbf24; border-color: rgba(251,191,36,0.55); }
 .vdl-res-grab--override:hover { color: #fde68a; background: rgba(251,191,36,0.12); }
-
 
 /* ── Library bulk select mode + action bar ─────────────────────────────────
    Select N cards → floating action bar (bulk metadata via /api/video/bulk —
@@ -5278,7 +5071,6 @@ body[data-side="video"] #gsearch-aura {
     background: linear-gradient(90deg, #e0564a, #e0a34a);
 }
 .vrf-runtime-label { font-size: 11.5px; color: var(--white-a50); margin-top: 5px; }
-
 
 /* ── Issues page + report/detail modals (the music Issues standard) ────────── */
 .vi-toolbar { display: flex; gap: 10px; margin-bottom: 16px; }
@@ -6617,8 +6409,6 @@ body[data-side="video"] #gsearch-aura {
     }
 }
 
-
-
 /* ── Downloading now ─────────────────────────────────────────────────────────
    Live transfer cards. A GRID, not full width rows: two downloads in a row that
    spans the whole page is a band of mostly empty space, which is what the first
@@ -6627,35 +6417,6 @@ body[data-side="video"] #gsearch-aura {
    Namespaced vdn-, not vdl-. vdl- is the download modal's namespace
    (video-download-view.js owns ~170 of them) and squatting in it is how two
    unrelated components end up sharing a rule by accident. */
-.vdn {
-    margin: 0 0 26px;
-}
-
-.vdn-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 12px;
-}
-
-.vdn-title {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 700;
-    letter-spacing: -0.2px;
-    color: #fff;
-}
-
-.vdn-all {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--white-a50);
-    text-decoration: none;
-    white-space: nowrap;
-    transition: color var(--dur-fast) ease;
-}
-.vdn-all:hover { color: #fff; }
 
 .vdn-grid {
     display: grid;
@@ -6785,6 +6546,22 @@ body[data-side="video"] #gsearch-aura {
     color: var(--white-a40);
 }
 
+/* on the dashboard it is a rail card: one column, a count chip by the title */
+[data-card="downloads"] .vdn-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+[data-card="downloads"] .vdn-more { align-self: flex-start; padding: 2px 2px 0; }
+[data-card="downloads"] .dash-side-title { white-space: nowrap; }
+.vdn-count {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: var(--radius-pill);
+    background: rgba(var(--info-rgb), 0.16);
+    color: rgb(var(--info-rgb));
+    font-size: 11px;
+    letter-spacing: 0;
+    vertical-align: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .vdn-bar-fill { transition: none; }
 }
@@ -6794,24 +6571,6 @@ body[data-side="video"] #gsearch-aura {
    stopped on is what you recognise — a portrait poster is how you BROWSE, not
    how you resume, which is why every player switches shape for this row.
    Hidden entirely when there is nothing to resume. */
-.vcw {
-    margin: 0 0 26px;
-}
-
-.vcw-head {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    margin-bottom: 12px;
-}
-
-.vcw-title {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 700;
-    letter-spacing: -0.2px;
-    color: #fff;
-}
 
 /* A rail, not a grid: the row is ordered by recency, so the leftmost card is
    the answer and the rest is overflow you scroll to. */
@@ -7243,7 +7002,6 @@ body[data-side="video"] #gsearch-aura {
     line-height: 1;
 }
 .vsr-context button:hover { background: var(--white-a18); color: #fff; }
-
 
 /* ── Connections: the media tab decides which server section is on screen ──────
    The Services tabs used to move only the tile grid; the server sections below

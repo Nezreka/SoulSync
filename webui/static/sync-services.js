@@ -1177,6 +1177,8 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
     }
     modal.style.display = 'flex';
     hideLoadingOverlay();
+    // owned/missing per track straight away, not after Begin Analysis (#1910)
+    if (typeof previewModalOwnership === 'function') void previewModalOwnership(virtualPlaylistId);
 }
 
 
