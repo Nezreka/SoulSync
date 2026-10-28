@@ -307,11 +307,9 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 900,
         'owned_by': 'video',
     },
-    # Sonarr-style: once a day at 1am (server-local), wishlist every episode airing
-    # today for the shows you follow (skipping ones already owned) so the day's episodes
-    # are queued overnight. A fixed wall-clock 'daily_time' (not a rolling 24h interval
-    # that drifts with restarts) — the seeder now arms timed system triggers, and
-    # _fix_airing_automation_schedule migrates the old 24h-interval row.
+    # Sonarr-style: wishlist every aired episode for the shows you follow (skipping
+    # ones already owned). _fix_airing_automation_schedule moves the older 24h-interval
+    # and daily-01:00 rows onto the interval below.
     # Runs before the airing automation so the calendar it reads is current — re-pulls
     # TMDB episode schedules for still-airing watchlist shows (the airing read is LOCAL).
     {
@@ -321,11 +319,18 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'video_refresh_airing_schedules',
         'owned_by': 'video',
     },
+    # Every 4 hours, not a 01:00 slot: a timed slot the server is restarting
+    # through is discarded, and an interval that passed while the app was down
+    # runs soon after boot. Each run looks back a week with per-episode receipts,
+    # so extra runs only cost a read.
     {
         'name': 'Auto-Wishlist Episodes Airing Today',
-        'trigger_type': 'daily_time',
-        'trigger_config': {'time': '01:00'},
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 4, 'unit': 'hours'},
         'action_type': 'video_add_airing_episodes',
+        # short: a dev server that reloads every few minutes must not push an
+        # overdue run out forever, and the run is a cheap read when caught up
+        'initial_delay': 120,
         'owned_by': 'video',
     },
     # Freshness: every 6 hours, re-enrich the stalest matched library items (oldest-refreshed
@@ -883,34 +888,37 @@ class AutomationEngine:
         except Exception:
             logger.exception("RSS Sync cadence migration failed")
 
-    def _fix_airing_automation_schedule(self):
-        """Migrate 'Auto-Wishlist Episodes Airing Today' from the old rolling 24h
-        interval to a fixed daily 1am run.
+    _AIRING_INTERVAL = {'interval': 4, 'unit': 'hours'}
 
-        It originally shipped as a 'schedule'/24h interval because the seeder only
-        armed interval specs — a 'daily_time' spec sat idle and never fired. The 24h
-        interval fires reliably but at a time that drifts with every restart (5 min
-        after startup, then +24h). Now that the seeder arms timed triggers, rewrite
-        the live row to run at a fixed 1am (better for 'today's airings' — queues the
-        day overnight). Matches only the is_system row with the OLD 24h-interval
-        shape — a hand-tuned trigger (e.g. weekly_time) is left alone. Idempotent."""
+    def _fix_airing_automation_schedule(self):
+        """Move 'Auto-Wishlist Episodes Airing Today' onto a 4-hour interval.
+
+        It shipped as a rolling 24h interval, then became a fixed daily 01:00. The
+        engine discards a timed slot the process is down for, so every restart
+        across 01:00 cost a day of airings (Oct 21, 24 and 27 on Boulder's box).
+        An interval that passed while the app was down runs soon after boot
+        instead. Rewrites only the two shapes the seeder itself shipped; a
+        hand-tuned trigger is left alone. Idempotent."""
         try:
             auto = self.db.get_system_automation_by_action('video_add_airing_episodes')
-            if not auto or auto.get('trigger_type') != 'schedule':
+            if not auto:
                 return
             try:
                 old_cfg = json.loads(auto.get('trigger_config') or '{}')
             except (TypeError, ValueError):
                 return
-            if old_cfg not in ({'interval': 24, 'unit': 'hours'},
-                               {'interval': 1, 'unit': 'days'}):
+            shipped = (
+                (auto.get('trigger_type') == 'schedule'
+                 and old_cfg in ({'interval': 24, 'unit': 'hours'}, {'interval': 1, 'unit': 'days'}))
+                or (auto.get('trigger_type') == 'daily_time' and old_cfg == {'time': '01:00'}))
+            if not shipped:
                 return
-            cfg = {'time': '01:00'}
-            nr_dt = next_run_at('daily_time', cfg, now_utc=_utcnow(), default_tz=self._default_tz)
+            # run soon: the slot this replaces may already have been missed today
             self.db.update_automation(
-                auto['id'], trigger_type='daily_time', trigger_config=json.dumps(cfg),
-                next_run=_dt_to_db_str(nr_dt) if nr_dt is not None else None)
-            logger.info("Migrated 'Auto-Wishlist Episodes Airing Today' to a fixed daily 01:00 (id=%s)",
+                auto['id'], trigger_type='schedule',
+                trigger_config=json.dumps(self._AIRING_INTERVAL),
+                next_run=_utc_after(self._overdue_catchup_seconds(auto['id'])))
+            logger.info("Moved 'Auto-Wishlist Episodes Airing Today' to every 4 hours (id=%s)",
                         auto.get('id'))
         except Exception:
             logger.exception("airing automation schedule migration failed")

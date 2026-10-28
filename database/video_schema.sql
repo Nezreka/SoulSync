@@ -1005,3 +1005,17 @@ CREATE TABLE IF NOT EXISTS show_type_hints (
     source TEXT NOT NULL,            -- tmdb | user
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ── airing auto-wishlist receipts ──
+-- one row per episode the airing automation has already offered to a
+-- profile's wishlist. the run looks back a week every time (episodes that
+-- reach TMDB on or after their air date, or a slot the server slept through),
+-- and this is what stops it re-adding an episode the user deleted.
+CREATE TABLE IF NOT EXISTS video_airing_offers (
+    profile_id INTEGER NOT NULL,
+    tmdb_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL,
+    episode_number INTEGER NOT NULL,
+    offered_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (profile_id, tmdb_id, season_number, episode_number)
+);

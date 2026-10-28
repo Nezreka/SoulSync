@@ -834,7 +834,7 @@ The video side surfaces the same **system automation engine** the music side use
 | **Auto-Update Video Database After Scan** | On *Video Library Scan Done* | Reads newly-indexed media from the server into SoulSync |
 | **Auto-Update Video Database (Hourly)** | Every hour | Incremental server read so manual additions appear within the hour |
 | **Refresh Airing TV Schedules** | Daily 23:00 | Re-pulls TMDB episode schedules (air dates, stills) for still-airing watchlisted shows |
-| **Auto-Wishlist Episodes Airing Today** | Daily 01:00 | Wishes every episode airing today for followed shows; prunes ended/canceled shows |
+| **Auto-Wishlist Episodes Airing Today** | Every 4 hours | Wishes every episode that aired in the last week for followed shows, once each; prunes ended/canceled shows |
 | **Refresh Stale Metadata** | Every 6 hours | Re-pulls the stalest matched movies & shows (up to 500/run, skipping anything refreshed in the last 30 days) |
 | **Auto-Update Overlays** | Daily 04:00 | Renders + pushes enabled overlay templates onto server artwork |
 | **Sync Collections** | Daily 04:30 | Resolves + pushes every enabled collection to the server |
@@ -878,7 +878,7 @@ Every action below is a DO block you can drop into your own automations. Config 
 | **Refresh Stale Metadata** | Rolling freshness pass over the stalest matched titles (ratings, overviews, art, air dates); never clobbers your locked data | Items per run (500), Skip movies/shows refreshed within 30 days |
 | **Clean Old YouTube Episodes** | Delete downloaded channel episodes outside each channel's keep window (history kept so they're never re-downloaded) | — |
 | **Empty Recycle Bin** | Permanently delete recycled files older than the keep window in Settings → Library Organization | — |
-| **Wishlist Today's Airings** | Add every episode airing today (followed shows) to the wishlist; optionally prune ended/canceled shows | Prune ended shows (on) |
+| **Wishlist Aired Episodes** | Add every episode that aired in the last week (followed shows) to the wishlist, once each, so a removed one stays removed; optionally prune ended/canceled shows | Prune ended shows (on) |
 | **Scan Watchlist People** | Wishlist every movie a followed person acted in or directed that you don't own | — |
 | **Scan Watchlist Studios** | Wishlist every movie a followed studio produced that you don't own | — |
 | **Scan Watchlist Channels** | Wishlist new long-form uploads from followed YouTube channels | — |

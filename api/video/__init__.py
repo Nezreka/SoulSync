@@ -62,6 +62,13 @@ def create_video_blueprint() -> Blueprint:
         path = request.path or ""
         writing = request.method in ("POST", "PUT", "PATCH", "DELETE")
 
+        # the iCal feed is fetched by calendar apps with no session at all. its
+        # token is the credential, and the route checks that token's profile
+        # (video access, kids rating cap) itself.
+        from core.video.calendar_feed import is_feed_path
+        if is_feed_path(path, request.method):
+            return None
+
         def _p(*prefixes):
             return any(path.startswith(x) for x in prefixes)
 
@@ -145,6 +152,8 @@ def create_video_blueprint() -> Blueprint:
                 # the per-row grab above, so it takes the same permission
                 "/api/video/wishlist/youtube/download-all",
                 "/api/video/wishlist/add",
+                # the calendar's "wishlist the missing ones" is a bulk add
+                "/api/video/calendar/wishlist-missing",
                 "/api/video/watchlist/add", "/api/video/youtube/wishlist/add",
                 "/api/video/watch/grab",
                 # the wishlist and watchlist are shared by the household: a

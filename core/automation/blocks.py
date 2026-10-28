@@ -555,8 +555,8 @@ ACTIONS: list[dict] = [
      "description": "Delete downloaded YouTube channel episodes that fall outside each channel's keep window (set per channel via its cog → Keep: e.g. last 30 episodes / last 3–6 months). Removes the video + its sidecars but keeps the history record so it's never re-downloaded. No-op for channels left on 'keep everything' (the default). Playlists are excluded. Pair with a daily Schedule.", "available": True},
     {"type": "video_purge_recycle_bin", "label": "Empty Recycle Bin", "icon": "trash", "scope": "video",
      "description": "Delete recycled files older than the keep window set in Settings, Library Organization. The bin is where every video delete lands (upgrade replaces, YouTube retention, watched cleanup) so this is what actually reclaims the disk. Age is measured from when the file was recycled, not its original date.", "available": True},
-    {"type": "video_add_airing_episodes", "label": "Wishlist Today's Airings", "icon": "calendar", "scope": "video",
-     "description": "Sonarr-style: add every episode airing today (for shows you follow) to the wishlist, skipping ones you already own. Also tidies the watchlist by dropping shows that have ended/been canceled.", "available": True,
+    {"type": "video_add_airing_episodes", "label": "Wishlist Aired Episodes", "icon": "calendar", "scope": "video",
+     "description": "Sonarr-style: add every episode that aired in the last week (for shows you follow) to the wishlist, once each, skipping ones you already own or stopped monitoring. An episode you remove from the wishlist is not added back. Also tidies the watchlist by dropping shows that have ended/been canceled. Pair with a Schedule every few hours.", "available": True,
      "config_fields": [
          {"key": "prune_ended", "type": "checkbox", "label": "Also remove ended/canceled shows from the watchlist", "default": True}
      ]},
@@ -579,7 +579,7 @@ ACTIONS: list[dict] = [
           "description": "Caps how many items one drain run hands to the download clients; the rest wait for the next run. Does not affect RSS Sync or manual grabs."}
      ]},
     {"type": "video_process_episode_wishlist", "label": "Process Episode Wishlist", "icon": "download", "scope": "video",
-     "description": "Auto-grab your wished EPISODES from Soulseek: searches each, picks the best release per your quality profile, and downloads it. Fed by the 'Wishlist Today's Airings' scan. Needs the TV library folder + slskd set. Pair with an hourly schedule. One run hands at most 'Max downloads per run' items (default 3) to the download clients — the rest wait for the next run.", "available": True,
+     "description": "Auto-grab your wished EPISODES from Soulseek: searches each, picks the best release per your quality profile, and downloads it. Fed by the 'Wishlist Aired Episodes' scan. Needs the TV library folder + slskd set. Pair with an hourly schedule. One run hands at most 'Max downloads per run' items (default 3) to the download clients — the rest wait for the next run.", "available": True,
      "config_fields": [
          {"key": "max_concurrent", "type": "number", "label": "Max simultaneous searches", "default": 3, "min": 1},
          {"key": "max_simultaneous_downloads", "type": "number", "label": "Max downloads per run", "default": 3, "min": 1,

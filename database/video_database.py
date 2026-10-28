@@ -88,7 +88,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 57   # v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 58   # v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -5118,6 +5118,95 @@ class VideoDatabase:
             return {"refreshed_at": str(raw), "stale": True, "age_days": None}
         return {"refreshed_at": str(raw), "age_days": round(float(age), 2),
                 "stale": float(age) > self.SCHEDULE_STALE_DAYS}
+
+    def wishlist_episode_statuses(self, profile_id: int, tmdb_ids) -> dict:
+        """{(tmdb_id, season, episode): status} for this profile's wished episodes
+        of these shows."""
+        ids = sorted({int(t) for t in tmdb_ids or () if t is not None})
+        out: dict = {}
+        if not ids:
+            return out
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                for r in conn.execute(
+                        "SELECT tmdb_id, season_number, episode_number, status FROM video_wishlist "
+                        "WHERE profile_id=? AND kind='episode' AND tmdb_id IN (%s)" % ",".join("?" * len(chunk)),
+                        [int(profile_id)] + chunk):
+                    if r["season_number"] is None or r["episode_number"] is None:
+                        continue
+                    out[(int(r["tmdb_id"]), int(r["season_number"]), int(r["episode_number"]))] = r["status"]
+        finally:
+            conn.close()
+        return out
+
+    def calendar_feed_token(self, profile_id: int, *, rotate: bool = False) -> str:
+        """This profile's iCal feed token, made on first ask. ``rotate`` replaces
+        it, so a leaked feed url stops working."""
+        from core.video.calendar_feed import new_token
+        key = "calendar_feed_token:%d" % int(profile_id)
+        token = None if rotate else self.get_setting(key)
+        if not token:
+            token = new_token()
+            self.set_setting(key, token)
+        return token
+
+    def calendar_feed_profile(self, token: str):
+        """The profile a feed token belongs to, or None."""
+        import hmac
+        from core.video.calendar_feed import valid_token_shape
+        if not valid_token_shape(token):
+            return None
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT key, value FROM video_settings WHERE key LIKE 'calendar_feed_token:%'").fetchall()
+        finally:
+            conn.close()
+        for r in rows:
+            if hmac.compare_digest(str(r["value"] or ""), token):
+                try:
+                    return int(str(r["key"]).split(":", 1)[1])
+                except (IndexError, ValueError):
+                    return None
+        return None
+
+    def airing_offered_keys(self, profile_id: int, keys) -> set:
+        """The (tmdb_id, season, episode) keys in ``keys`` the airing automation
+        already offered to this profile's wishlist."""
+        keys = [(int(t), int(s), int(e)) for (t, s, e) in keys or ()]
+        if not keys:
+            return set()
+        out: set = set()
+        conn = self._get_connection()
+        try:
+            tids = sorted({k[0] for k in keys})
+            for i in range(0, len(tids), 500):
+                chunk = tids[i:i + 500]
+                for r in conn.execute(
+                        "SELECT tmdb_id, season_number, episode_number FROM video_airing_offers "
+                        "WHERE profile_id=? AND tmdb_id IN (%s)" % ",".join("?" * len(chunk)),
+                        [int(profile_id)] + chunk):
+                    out.add((int(r[0]), int(r[1]), int(r[2])))
+        finally:
+            conn.close()
+        return out & set(keys)
+
+    def mark_airing_offered(self, profile_id: int, keys) -> None:
+        """Record that these episodes were offered, and drop receipts old enough
+        that no lookback window can reach them any more."""
+        rows = [(int(profile_id), int(t), int(s), int(e)) for (t, s, e) in keys or ()]
+        conn = self._get_connection()
+        try:
+            if rows:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO video_airing_offers "
+                    "(profile_id, tmdb_id, season_number, episode_number) VALUES (?, ?, ?, ?)", rows)
+            conn.execute("DELETE FROM video_airing_offers WHERE offered_at < datetime('now', '-60 days')")
+            conn.commit()
+        finally:
+            conn.close()
 
     def mark_airing_schedule_refreshed(self) -> None:
         """Stamp a successful schedule refresh. Called by the automation handler."""
