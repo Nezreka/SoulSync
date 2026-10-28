@@ -142,7 +142,14 @@ export function SourceModals({
           // (#1910); the real youtube vertical keeps the sniff.
           if (config.id === 'mirrored') {
             const label = mirroredDetailSourceLabel(mirroredSource || '') || 'Playlist';
-            await window.openDownloadMissingModalForYouTube?.(vpid, name, tracks, null, null, label);
+            await window.openDownloadMissingModalForYouTube?.(
+              vpid,
+              name,
+              tracks,
+              null,
+              null,
+              label,
+            );
           } else {
             await window.openDownloadMissingModalForYouTube?.(vpid, name, tracks);
           }
