@@ -81,10 +81,11 @@ def test_playlist_retry_recovers_interruption_before_metadata_restore():
     assert server.playlists['p']['comment'] == 'Keep this description'
 
 
+@pytest.mark.parametrize('same_release', [True, False])
 @pytest.mark.parametrize('verified,fail,changed,expected', [
     (False, False, False, 'waiting'), (True, True, False, 'attention'),
     (True, False, True, 'attention'), (True, False, False, 'complete')])
-def test_approved_replacement_retires_only_verified_copy_after_playlist_handoff(tmp_path, monkeypatch, verified, fail, changed, expected):
+def test_approved_replacement_retires_only_verified_copy_after_playlist_handoff(tmp_path, monkeypatch, verified, fail, changed, expected, same_release):
     db_path = str(tmp_path / 'state.sqlite')
     db = SimpleNamespace(_get_connection=lambda: sqlite3.connect(db_path))
     old, new = tmp_path / 'old.flac', tmp_path / 'new.flac'
@@ -105,14 +106,17 @@ def test_approved_replacement_retires_only_verified_copy_after_playlist_handoff(
         assignment = {'source_track_id': 'recording', 'file_path': str(new), 'status': 'confirmed' if verified else 'uncertain'}
         conn.execute('INSERT INTO reconcile_album_plans VALUES(?,?)', (case, json.dumps({'source': 'musicbrainz', 'release_id': 'release', 'assignments': [assignment], '_planning': {'files': [{'path': str(new), 'size_bytes': new.stat().st_size, 'mtime_ns': new.stat().st_mtime_ns, 'file_identity': file_identity(new.stat())}]}})))
         conn.execute("UPDATE reconcile_fulfillment SET state='published',published_path=?", (str(new),))
+    server = Server()
+    server.fail = fail
+    monkeypatch.setattr('core.library.playlist_membership._active_server_and_client', lambda: ('navidrome', server))
+    db.get_album_canonical = lambda _: {'source': 'musicbrainz', 'album_id': 'release' if same_release else 'another'}
+    if verified and not same_release:
+        expected = 'attention'
     replacement.approve(db, str(old), details)
     # Even a verified download remains in the waiting queue until handoff completes.
     settle_assignments(db, case, [assignment], 'release', 'musicbrainz')
     with db._get_connection() as conn:
         assert conn.execute('SELECT state FROM reconcile_fulfillment').fetchone()[0] == 'published'
-    server = Server()
-    server.fail = fail
-    monkeypatch.setattr('core.library.playlist_membership._active_server_and_client', lambda: ('navidrome', server))
     worker = RepairWorker.__new__(RepairWorker)
     worker.db, worker.transfer_folder = db, str(tmp_path)
     worker._schedule_album_refresh = lambda *args, **kwargs: True

@@ -590,7 +590,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
         if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_replacements'").fetchone():
             replacements = [{'file': os.path.basename(path), 'state': state, 'error': error}
                 for path, state, error in conn.execute(
-                    "SELECT old_path,state,error FROM reconcile_replacements WHERE case_id=? AND state!='complete'", (case_id,))]
+                    "SELECT old_path,state,error FROM reconcile_replacements WHERE case_id=? AND state NOT IN ('complete','cancelled')", (case_id,))]
         plan = classify_case(items)
         for item in items:
             if requests := _ready_requests(item, items):

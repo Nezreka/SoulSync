@@ -23,18 +23,30 @@ def ensure_schema(conn):
 
 
 def approve(db, path, details):
+    from core.library.playlist_membership import _active_server_and_client
+    server, client = _active_server_and_client()
+    server_key = _server_key(server, client)
+    details = {**details, '_replacement_server': server_key}
     identity = request_identity(details, details['replacement_track'])
-    key = hashlib.sha256(json.dumps([identity, path, details.get('file_identity')], sort_keys=True).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps([identity, path, details.get('file_identity'), server_key], sort_keys=True).encode()).hexdigest()
     with connection(db) as conn:
         ensure_schema(conn)
-        conn.execute('''INSERT OR IGNORE INTO reconcile_replacements
-            (replacement_id,case_id,old_path,details_json) VALUES (?,?,?,?)''',
+        conn.execute('''INSERT INTO reconcile_replacements
+            (replacement_id,case_id,old_path,details_json) VALUES (?,?,?,?)
+            ON CONFLICT(replacement_id) DO UPDATE SET state='waiting',journal='{}',error='',
+                details_json=excluded.details_json,updated_at=CURRENT_TIMESTAMP
+            WHERE reconcile_replacements.state='cancelled' ''',
             (key, identity['case_id'], path, json.dumps(details)))
         conn.execute('''UPDATE reconcile_fulfillment SET state='published'
             WHERE case_id=? AND source=? AND release_id=? AND source_track_id=?
             AND state='fulfilled' AND published_path!='' ''',
             (identity['case_id'], identity['source'], identity['release_id'], identity['source_track_id']))
     return key
+
+
+def _server_key(server, client):
+    return hashlib.sha256(json.dumps([server, getattr(client, 'base_url', None),
+                                     getattr(client, 'username', None)]).encode()).hexdigest()
 
 
 def separate_delivery(path, source_info):
@@ -140,7 +152,7 @@ def advance(worker):
     with connection(worker.db) as conn:
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_replacements'").fetchone():
             return
-        rows = conn.execute("SELECT replacement_id,old_path,details_json,journal FROM reconcile_replacements WHERE state!='complete'").fetchall()
+        rows = conn.execute("SELECT replacement_id,old_path,details_json,journal FROM reconcile_replacements WHERE state NOT IN ('complete','cancelled')").fetchall()
     resolve = lambda path: resolve_library_file_path(path, transfer_folder=worker.transfer_folder)
     for key, old, raw, saved in rows:
         details, journal = json.loads(raw), json.loads(saved)
@@ -160,7 +172,13 @@ def advance(worker):
             old_id = str(details.get('track_id') or '')
             if not old_id or new_id == old_id:
                 raise ValueError('The replacement must be indexed as a separate playable copy')
+            canonical = worker.db.get_album_canonical(details['album_id'])
+            if not canonical or (canonical.get('source'), str(canonical.get('album_id'))) != (
+                    details['source'], str(details['release_id'])):
+                raise ValueError('The selected album release changed; the original copy is retained')
             server, client = _active_server_and_client()
+            if _server_key(server, client) != details.get('_replacement_server'):
+                raise ValueError('The music server or account changed; review the replacement again')
             if server != 'navidrome' or client is None or not client.ensure_connection():
                 raise ValueError('Automatic playlist handoff needs Navidrome; the original file is retained')
             song = (client._make_request('getSong', {'id': new_id}) or {}).get('song') or {}
@@ -190,6 +208,10 @@ def advance(worker):
                 error = worker._reconciliation_file_guard(old, details)
                 if error:
                     raise ValueError(error)
+                with connection(worker.db) as conn:
+                    row = conn.execute('SELECT file_path,album_id FROM tracks WHERE id=?', (old_id,)).fetchone()
+                if not row or row[0] != details.get('old_stored_path', old) or str(row[1]) != str(details['album_id']):
+                    raise ValueError('The original library entry changed during handoff; both copies are retained')
                 safe_move_file(old, dest)
             elif not os.path.isfile(dest):
                 raise ValueError('The original file moved outside this replacement; review its location')

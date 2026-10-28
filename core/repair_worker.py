@@ -2583,6 +2583,8 @@ class RepairWorker:
             conn.execute('DELETE FROM reconcile_review_choices WHERE case_id=?', (case_id,))
             from core.repair_operation_reports import record_case_left_as_is
             record_case_left_as_is(conn, case_id)
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_replacements'").fetchone():
+                conn.execute("UPDATE reconcile_replacements SET state='cancelled' WHERE case_id=? AND state!='complete'", (case_id,))
         return {'success': True, 'message': 'Album left entirely as-is, including its folder. Existing download requests are unchanged.'}
 
     @review_plan_mutation

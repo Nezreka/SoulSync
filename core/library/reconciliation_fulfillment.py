@@ -316,7 +316,7 @@ def settle_assignments(db, case_id, assignments, release_id, source):
             if not any(assignment_fulfills_request(request, assignment) for assignment in assignments):
                 continue
             if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_replacements'").fetchone():
-                active = conn.execute('''SELECT 1 FROM reconcile_replacements WHERE case_id=? AND state!='complete'
+                active = conn.execute('''SELECT 1 FROM reconcile_replacements WHERE case_id=? AND state NOT IN ('complete','cancelled')
                     AND json_extract(details_json,'$.source')=?
                     AND COALESCE(json_extract(details_json,'$.exact_release_id'),json_extract(details_json,'$.release_id'))=?
                     AND CAST(json_extract(details_json,'$.replacement_track.source_track_id') AS TEXT)=?''',
