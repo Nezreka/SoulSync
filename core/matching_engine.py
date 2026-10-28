@@ -15,6 +15,7 @@ from core.media_server.types import TrackInfo
 from core.download_plugins.types import TrackResult, AlbumResult
 # Pure text helpers, no cycle back here (core.text imports only core.text).
 from core.text.source_title import strip_artist_prefix
+from core.imports.context import is_placeholder_album
 from core.text.title_match import is_trailing_version_qualifier
 from core.text.track_prefix import strip_track_prefix
 
@@ -226,6 +227,23 @@ class MusicMatchingEngine:
         
         return self.normalize_string(cleaned)
     
+    def album_field_match(self, wanted_album, candidate_album) -> float:
+        """album bonus for a hit that names its album in a field, not a folder.
+
+        both sides go through clean_album_name, so a subtitle drops on each
+        ('Timeless - The All-Time Greatest Hits' is 'timeless'). same scale as
+        the folder check: 0.10 strong, 0.03 partial, 0 otherwise (#1866)."""
+        wanted = self.clean_album_name(wanted_album or '')
+        got = self.clean_album_name(candidate_album or '')
+        if not wanted or not got:
+            return 0.0
+        sim = SequenceMatcher(None, wanted, got).ratio()
+        if sim >= 0.85:
+            return 0.10
+        if sim >= 0.60:
+            return 0.03
+        return 0.0
+
     def clean_album_name(self, album_name: str) -> str:
         """Clean album name by removing version info, deluxe editions, etc."""
         if not album_name:
@@ -765,7 +783,13 @@ class MusicMatchingEngine:
             album_name = getattr(spotify_track, attr, None)
             if album_name:
                 break
-        
+
+        # 'Unknown Album' is the no-album placeholder stored on album-less
+        # playlist entries — as a search term it poisons the priority query
+        # (no peer has such an album; the search returns nothing).
+        if album_name and is_placeholder_album(album_name):
+            album_name = None
+
         # PRIORITY 0: Try exact Artist + Album + Title
         # For Soulseek this matches the typical folder structure (Artist/Album/Track)
         # and prevents wrong-artist downloads when the artist name appears as an album
@@ -1055,6 +1079,13 @@ class MusicMatchingEngine:
                 elif best_album_sim >= 0.60:
                     album_bonus = 0.03  # Partial match — small bonus
                 # No penalty for low similarity — the file might just not have album folders
+                # streaming hits ('id||Artist - Title') have no album folder,
+                # so the album has to come from the field. without it every
+                # compilation copy of a song tied and the api's order picked
+                # the release, cd-only best-of included (#1866).
+                if '||' in slskd_track.filename:
+                    album_bonus = max(album_bonus, self.album_field_match(
+                        album_name, getattr(slskd_track, 'album', None)))
 
         # 5. Special handling for short titles (high false positive risk)
         # Titles like "Run", "Love", "Girls", "Stay" need stricter artist matching.
@@ -1144,6 +1175,10 @@ class MusicMatchingEngine:
         slskd_track.title_score = title_score
         slskd_track.artist_score = artist_score
         slskd_track.duration_score = duration_score
+        # kept apart because confidence caps at 1.0: two perfect matches of the
+        # same song tie there, and this is what says which one is the album's
+        # own release (#1866).
+        slskd_track.album_match = album_bonus
 
         # Debug logging to track matching decisions
         if final_confidence > 0.3:  # Only log potential matches
@@ -1620,8 +1655,10 @@ class MusicMatchingEngine:
             version_priority = 0.0 if r.version_type == 'original' else getattr(r, 'version_penalty', 0.1)
             # Tertiary: peer quality (upload speed, queue, free slots)
             peer_quality = r.quality_score
+            # then the album's own release over a best-of copy of the same song
+            album_match = getattr(r, 'album_match', 0) or 0
             # Quaternary: file size
-            return (preferred_hit, r.confidence, -version_priority, peer_quality, r.size)
+            return (preferred_hit, r.confidence, -version_priority, album_match, peer_quality, r.size)
 
         sorted_results = sorted(scored_results, key=sort_key, reverse=True)
 

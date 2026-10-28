@@ -73,9 +73,10 @@ def test_result_without_live_track_returns_none():
     assert rescue_stale_plex_track(client, _db_track(), "Artist") is None
 
 
-def test_rescue_is_wired_into_both_fetch_failure_branches():
+def test_rescue_is_wired_into_all_fetch_failure_branches():
     src = (_ROOT / "services" / "sync_service.py").read_text(encoding="utf-8",
                                                              errors="replace")
-    # once for the lacks-ratingKey branch, once for the fetchItem exception
-    assert src.count("rescued = rescue_stale_plex_track(") == 2
+    # once for the lacks-ratingKey branch, once for the fetchItem exception,
+    # and once for the provider-ID match whose stored id went stale (#1885)
+    assert src.count("rescued = rescue_stale_plex_track(") == 3
     assert "[Stale-Key Rescue]" in src

@@ -48,6 +48,7 @@ function seasonBar(season: Record<string, unknown>, opts: { canDownload: boolean
     var ytFilter = { q: '', state: 'all', duration: 'all' };
     function canDownload() { return ${opts.canDownload ? 'true' : 'false'}; }
     window.VideoGrab = {};
+    ${extractFunction('grabScope', SRC)}
   `;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const build = new Function(

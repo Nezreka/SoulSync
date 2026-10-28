@@ -265,7 +265,7 @@ describe('SoulSync Discovery (sync-soulsync-discovery.js)', () => {
 
   it('ssdStaleness: never-generated / stale / ready with the vanilla colors (86-90)', () => {
     expect(ssdStaleness({ kind: 'k', _never_generated: true, is_stale: true })).toEqual({
-      text: 'Tap “Refresh & Mirror” to generate',
+      text: 'Not built yet — Refresh & Mirror builds it',
       color: '#facc15',
     });
     expect(ssdStaleness({ kind: 'k', is_stale: true })).toEqual({
@@ -275,31 +275,66 @@ describe('SoulSync Discovery (sync-soulsync-discovery.js)', () => {
     expect(ssdStaleness({ kind: 'k' })).toEqual({ text: 'Ready', color: '#14b8a6' });
   });
 
-  it('fetchSsdRecords: existing + synthetic never-generated SINGLETONS; kinds failure tolerated (33-57)', async () => {
+  it('fetchSsdRecords: every kind AND variant, in tab order and grouped, built rows merged in', async () => {
     responder = (url) =>
       url.includes('/kinds')
         ? {
             success: true,
             kinds: [
-              { kind: 'hidden_gems', name_template: 'Hidden Gems' },
-              { kind: 'listening_mix' }, // already generated → not synthesized
-              { kind: 'time_machine', requires_variant: true }, // variant kinds excluded
+              { kind: 'hidden_gems', name_template: 'Hidden Gems', description: 'Obscure picks' },
+              { kind: 'listening_mix', description: 'From what you play' },
+              {
+                kind: 'time_machine',
+                name_template: 'Time Machine — {variant}',
+                requires_variant: true,
+                variants: ['1980s', '1990s'],
+              },
+              {
+                kind: 'daily_mix',
+                name_template: 'Daily Mix {variant}',
+                requires_variant: true,
+                variants: ['1', '2'],
+              },
             ],
           }
-        : { success: true, playlists: [{ kind: 'listening_mix', variant: '', track_count: 30 }] };
+        : {
+            success: true,
+            playlists: [
+              { kind: 'listening_mix', variant: '', track_count: 30 },
+              { kind: 'daily_mix', variant: '1', name: 'Daily Mix 1', track_count: 40 },
+              { kind: 'daily_mix', variant: '6', name: 'Daily Mix 6', track_count: 40 },
+            ],
+          };
     stubFetch();
     const { records } = await fetchSsdRecords();
-    expect(records).toEqual([
-      { kind: 'listening_mix', variant: '', track_count: 30 },
-      {
-        kind: 'hidden_gems',
-        variant: '',
-        name: 'Hidden Gems',
-        track_count: 0,
-        is_stale: true,
-        _never_generated: true,
-      },
+    // daily mixes first, then the singles, then the big variant families
+    expect(records.map((r) => `${r.kind}|${r.variant}`)).toEqual([
+      'daily_mix|1',
+      'daily_mix|2',
+      'daily_mix|6', // built yesterday, not listed today: kept in its family
+      'listening_mix|',
+      'hidden_gems|',
+      'time_machine|1980s',
+      'time_machine|1990s',
     ]);
+    expect(records.map((r) => r.group)).toEqual([
+      'Daily Mix',
+      'Daily Mix',
+      'Daily Mix',
+      'Discovery playlists',
+      'Discovery playlists',
+      'Time Machine',
+      'Time Machine',
+    ]);
+    expect(records[0]).toMatchObject({ track_count: 40, name: 'Daily Mix 1' });
+    expect(records[0]._never_generated).toBeUndefined();
+    expect(records[1]).toMatchObject({
+      name: 'Daily Mix 2',
+      track_count: 0,
+      _never_generated: true,
+    });
+    expect(records[4]).toMatchObject({ name: 'Hidden Gems', description: 'Obscure picks' });
+    expect(records[5]).toMatchObject({ name: 'Time Machine — 1980s', _never_generated: true });
 
     // A kinds failure must never sink the tab (49-52).
     failer = (url) => url.includes('/kinds');

@@ -20,7 +20,7 @@ from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _SOURCES = (_ROOT / "core" / "video" / "sources.py").read_text(encoding="utf-8")
-_REPAIR_JS = (_ROOT / "webui" / "static" / "video" / "video-repair.js").read_text(encoding="utf-8")
+_DETAIL_TSX = (_ROOT / "webui" / "src" / "routes" / "tools" / "-ui" / "video-finding-detail.tsx").read_text(encoding="utf-8")
 _HUB_JS = (_ROOT / "webui" / "static" / "stats-automations.js").read_text(encoding="utf-8")
 
 
@@ -192,8 +192,11 @@ def test_job_is_registered_everywhere():
                         if b["type"] == "video_run_repair_job")
     values = [o["value"] for o in repair_block["config_fields"][0]["options"]]
     assert "watched_cleanup" in values              # runnable from automations
-    assert "watched_cleanup: 'Watched Cleanup'" in _REPAIR_JS
-    assert "watched_cleanup: 'Clean Up'" in _REPAIR_JS
-    assert "cleaned: 'Cleaned'" in _REPAIR_JS
-    assert "function watchedDetailHTML" in _REPAIR_JS
+    from core.video.repair.catalog import VIDEO_ACTION_LABELS, VIDEO_FINDING_TYPE_META
+    assert VIDEO_FINDING_TYPE_META["watched_cleanup"]["label"] == "Watched Cleanup"
+    assert VIDEO_FINDING_TYPE_META["watched_cleanup"]["verb"] == "Clean Up"
+    # it recycles a file, so it asks first and is never in fix-all-safe
+    assert VIDEO_FINDING_TYPE_META["watched_cleanup"]["destructive"] is True
+    assert VIDEO_ACTION_LABELS["cleaned"] == "Cleaned"
+    assert "function WatchedDetail(" in _DETAIL_TSX
     assert "v-watched-cleanup" in _HUB_JS           # discoverable via a hub recipe

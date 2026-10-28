@@ -16,8 +16,11 @@ GET  /api/video/manual-match/status?kind=&tmdb_id=
     {library_id} — the current manual link for a TMDB id, if any.
 GET  /api/video/manual-match/status?kind=&library_id=
     {tmdb_id} — the TMDB id manually linked to a library row, if any.
-POST /api/video/manual-match  {kind, tmdb_id, library_id}
-    Record the link. 404 when the library row doesn't exist.
+POST /api/video/manual-match  {kind, tmdb_id, library_id, reidentify?}
+    Record the link. 404 when the library row doesn't exist. With
+    ``reidentify`` the library row itself is re-pointed to the TMDB id and
+    locked (core.video.identity), which is what the picker sends for an
+    unmatched or mismatched copy.
 DELETE /api/video/manual-match  {kind, tmdb_id}
     Remove the link. 404 when there wasn't one.
 """
@@ -74,6 +77,16 @@ def register_routes(bp):
         kind = body.get("kind")
         if kind not in _KINDS:
             return jsonify({"success": False, "error": "kind must be movie|show"}), 400
+        if body.get("reidentify"):
+            # the copy you picked IS this title: re-identify the library row
+            # itself (locked, like Fix match) instead of only recording a side
+            # link. a side link made it read as owned and nothing else, so the
+            # row kept its wrong or missing artwork, details and upgrades.
+            from core.video.identity import identify
+            res = identify(get_video_db(), kind, body.get("library_id"), body.get("tmdb_id"))
+            if not res.get("success"):
+                return jsonify(res), 409
+            return jsonify({**res, "reidentified": True, "library_id": res.get("id")})
         if not get_video_db().set_manual_match(kind, body.get("tmdb_id"),
                                                 body.get("library_id")):
             return jsonify({"success": False,

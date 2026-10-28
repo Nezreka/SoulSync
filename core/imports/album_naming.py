@@ -6,7 +6,7 @@ import re
 import threading
 from typing import Any, Dict
 
-from core.imports.context import extract_artist_name
+from core.imports.context import extract_artist_name, has_real_album_name
 from utils.logging_config import get_logger
 
 
@@ -132,6 +132,16 @@ def resolve_album_group(artist_context: dict, album_info: dict, original_album: 
         with _album_cache_lock:
             artist_name = extract_artist_name(artist_context)
             detected_album = (album_info or {}).get("album_name", "")
+
+            # 'Unknown Album' is the no-album placeholder, not a group:
+            # grouping under it filed every album-less track of an artist
+            # into one shared 'Unknown Album' folder.
+            if not has_real_album_name(detected_album):
+                detected_album = ""
+            if not has_real_album_name(original_album):
+                original_album = None
+            if not detected_album and not original_album:
+                return ""
 
             if detected_album:
                 base_album = get_base_album_name(detected_album)

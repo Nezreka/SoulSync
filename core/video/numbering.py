@@ -173,6 +173,113 @@ def scene_info(item: Dict[str, Any], db: Any = None, client: Any = None,
         return None
 
 
+# how far past a lumped TMDB season to walk TVDB's seasons (Dragon Ball's one
+# TMDB season of 153 is five on TVDB)
+REGROUP_MAX_SEASONS = 40
+
+
+def _shift(day: str, days: int) -> str:
+    try:
+        return (_dt.date.fromisoformat(day) + _dt.timedelta(days=days)).isoformat()
+    except ValueError:
+        return ""
+
+
+def tvdb_regroup(season: int, episodes: Sequence[Dict[str, Any]],
+                 tvdb_seasons: Dict[int, Sequence[Tuple[int, Any]]]):
+    """split one TMDB season's episodes by the season TVDB files them under.
+
+    TMDB lumps some anime into one long season (Jujutsu Kaisen S01E01-59) where
+    TVDB, the servers, the scene and the subtitle sites all split it (24/23/12).
+    an episode TVDB's same season doesn't have is moved to the TVDB episode
+    that aired the same day, in another season. everything else stays put.
+
+    late-night anime slips a day between the two: TVDB dates a 00:26 airing by
+    the broadcast day before, TMDB by the calendar. five of Jujutsu Kaisen's
+    stayed behind as phantom S1E32-35 and S1E46 (Thibs). a leftover moves to a
+    TVDB episode one day either side, but only when that's the only candidate,
+    nobody else claimed it, and no TMDB episode has that TVDB day exactly, so a
+    show airing every day never shuffles onto its neighbours.
+
+    returns ({season: [episode dicts]}, {old episode number: (season, episode)})."""
+    season = int(season)
+    groups: Dict[int, List[Dict[str, Any]]] = {season: []}
+    moved: Dict[int, Numbering] = {}
+    have = {int(e) for e, _ in (tvdb_seasons or {}).get(season) or []}
+    by_day: Dict[str, List[Numbering]] = {}
+    for e in episodes or []:
+        if e.get("episode_number") is not None and _day(e.get("air_date")):
+            by_day.setdefault(_day(e["air_date"]), []).append((season, int(e["episode_number"])))
+    claimed = set()
+    targets: Dict[int, Numbering] = {}
+    leftovers = []
+    for idx, e in enumerate(episodes or []):
+        en = e.get("episode_number")
+        if not (season > 0 and have and en is not None and int(en) not in have):
+            continue
+        alt = scene_numbering((season, int(en)), e.get("air_date"), tvdb_seasons,
+                              by_day.get(_day(e.get("air_date"))))
+        if alt and alt[0] > 0 and alt[0] != season and alt not in claimed:
+            claimed.add(alt)
+            targets[idx] = alt
+        else:
+            leftovers.append(idx)
+
+    if leftovers:
+        others = [(int(s), int(n), _day(d)) for s, eps in (tvdb_seasons or {}).items()
+                  if int(s) > 0 and int(s) != season for n, d in eps or [] if _day(d)]
+        tmdb_days = set(by_day)
+        for idx in leftovers:
+            e = episodes[idx]
+            day = _day(e.get("air_date"))
+            if not day:
+                continue
+            near = {_shift(day, -1), _shift(day, 1)}
+            hits = [(s, n) for s, n, d in others
+                    if d in near and d not in tmdb_days and (s, n) not in claimed]
+            if len(hits) == 1:
+                claimed.add(hits[0])
+                targets[idx] = hits[0]
+
+    for idx, e in enumerate(episodes or []):
+        target = targets.get(idx)
+        if target:
+            moved[int(e["episode_number"])] = target
+            groups.setdefault(target[0], []).append(dict(e, episode_number=target[1]))
+        else:
+            groups[season].append(e)
+    return groups, moved
+
+
+def regroup_season(db: Any, tvdb_id: Any, season: int, episodes: Sequence[Dict[str, Any]],
+                   client: Any = None, now: Optional[_dt.datetime] = None):
+    """tvdb_regroup with TVDB's seasons fetched (week-old cache). TVDB is only
+    asked past the TMDB season when that season runs longer than TVDB's.
+    without a TVDB key or id the season comes back as it was. never raises."""
+    unchanged = ({int(season): list(episodes or [])}, {})
+    if not tvdb_id or int(season) <= 0:
+        return unchanged
+    try:
+        if client is None:
+            client = _default_client(db)
+        s = int(season)
+        have = tvdb_season(db, client, int(tvdb_id), s, now=now)
+        nums = {int(e) for e, _ in have}
+        if not nums or all(int(e["episode_number"]) in nums for e in episodes or []
+                           if e.get("episode_number") is not None):
+            return unchanged
+        seasons = {s: have}
+        for n in range(s + 1, s + 1 + REGROUP_MAX_SEASONS):
+            eps = tvdb_season(db, client, int(tvdb_id), n, now=now)
+            if not eps:
+                break
+            seasons[n] = eps
+        return tvdb_regroup(s, episodes, seasons)
+    except Exception:   # noqa: BLE001 - a numbering assist must never break a sync
+        logger.debug("tvdb regroup failed for %s S%s", tvdb_id, season, exc_info=True)
+        return unchanged
+
+
 def annotate(items: List[Dict[str, Any]], db: Any = None, client: Any = None) -> List[Dict[str, Any]]:
     """set alt_season / alt_episode on every wished episode whose scene
     numbering differs. one TVDB client for the batch; seasons come from the

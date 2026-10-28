@@ -382,7 +382,8 @@ def get_user_playlist_cover(playlist_id):
     try:
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
-        if not up.is_user_playlist(playlist):
+        # a mirror with a generated cover keeps its file here too
+        if not (up.is_user_playlist(playlist) or (playlist or {}).get('custom_cover')):
             return _not_found()
         path = up.cover_path(playlist_id, _cover_base_dir())
         if not os.path.isfile(path):

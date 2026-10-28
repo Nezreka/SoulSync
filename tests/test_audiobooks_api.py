@@ -1487,3 +1487,41 @@ def test_a_series_followed_without_backfill_waits_for_the_scan(client, wishlist_
                        json={"name": "Mein Lotta-Leben", "role": "series"}).get_json()
     assert "wishlisted" not in body
     assert wishlist_db.get_wishlist(1) == []
+
+
+# ---------------------------------------------------------------------------
+# Library matching asks the user's storefront, not the client's US default
+# ---------------------------------------------------------------------------
+
+def _library_row():
+    return {"asin": "local:one", "title": "Folge 6: Die verschwundene Meerjungfrau",
+            "scan_signature": "v1", "match_revision": 0}
+
+
+def _library_calls(path, method="get", body=None):
+    db = MagicMock()
+    db.get_library_entry.return_value = _library_row()
+    catalog = MagicMock()
+    catalog.get_book.return_value = None
+    catalog.search.return_value = []
+    with patch("api.audiobooks.get_audiobook_db", return_value=db), \
+         patch("api.audiobooks.get_audiobook_client", return_value=catalog):
+        getattr(_app_with_config("de").test_client(), method)(path, json=body)
+    return catalog
+
+
+def test_library_match_lookup_by_asin_uses_the_configured_marketplace():
+    catalog = _library_calls("/api/audiobooks/library/local:one/matches?q=B0H373Y5M7")
+    assert catalog.get_book.call_args.kwargs["marketplace"] == "de"
+
+
+def test_library_match_search_uses_the_configured_marketplace():
+    catalog = _library_calls("/api/audiobooks/library/local:one/matches?q=Meerjungfrau")
+    assert catalog.search.call_args.kwargs["marketplace"] == "de"
+
+
+def test_confirming_a_library_match_verifies_in_the_configured_marketplace():
+    catalog = _library_calls("/api/audiobooks/library/local:one/match", method="patch",
+                             body={"action": "confirm", "catalog_asin": "B0H373Y5M7",
+                                   "scan_signature": "v1", "match_revision": 0})
+    assert catalog.get_book.call_args.kwargs["marketplace"] == "de"

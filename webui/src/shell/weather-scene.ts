@@ -218,7 +218,8 @@ export function gustEnvelope(t: number): number {
 /* ------------------------------------------------------------------ */
 
 export interface WeatherSceneEngine {
-  resize(w: number, h: number, dpr: number): void;
+  /** `top`: where the sky starts showing, under the opaque header */
+  resize(w: number, h: number, dpr: number, top?: number): void;
   /** dt and t in seconds */
   frame(dt: number, t: number): void;
   /** particle counts, for tests and the playground */
@@ -245,7 +246,7 @@ function bake(w: number, h: number, paint: (g: Ctx) => void): Sprite {
   return c;
 }
 
-function softDot(rgb: string): Sprite {
+export function softDot(rgb: string): Sprite {
   return bake(32, 32, (g) => {
     const grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
     grad.addColorStop(0, `rgba(${rgb},1)`);
@@ -262,7 +263,7 @@ function softDot(rgb: string): Sprite {
  * stratus band (overcast, fog). where canvas filters aren't supported the
  * puffs are already soft, it's just a little lumpier
  */
-function puffSprite(
+export function puffSprite(
   rgb: string,
   rng: Rng,
   w: number,
@@ -322,7 +323,7 @@ function streakSprite(rgb: string): Sprite {
 }
 
 /** a leaf, pointed both ends, with a midrib. drawn edge-on it flips */
-function leafSprite(fill: string, rib: string): Sprite {
+export function leafSprite(fill: string, rib: string): Sprite {
   return bake(28, 16, (g) => {
     g.beginPath();
     g.moveTo(2, 8);
@@ -445,6 +446,21 @@ const STREAM_RGB = '214,226,244';
 export interface SceneExtras {
   /** new year's fireworks, 0 none .. 1 the midnight show. night only */
   fireworks?: number;
+  /** the fireworks' colours, when not new year's own */
+  fireworkColors?: string[];
+  /** a holiday's sky, painted with the weather (holiday-scene.ts) */
+  layer?: SceneLayer | null;
+}
+
+/** something painted along with the weather: a holiday's sky */
+export interface SceneLayer {
+  resize(w: number, h: number, top: number, dpr: number): void;
+  update(dt: number, t: number): void;
+  /** under the clouds: light, a moon */
+  back(t: number): void;
+  /** over the weather */
+  front(t: number): void;
+  stats(): Record<string, number>;
 }
 
 interface Rocket {
@@ -465,6 +481,10 @@ interface Spark {
   rgb: string;
 }
 
+/** a rocket keeps this much of its speed each second */
+const ROCKET_DRAG = 0.6;
+const ROCKET_K = -Math.log(ROCKET_DRAG);
+
 const FIREWORK_RGB = [
   '255,214,140',
   '255,150,176',
@@ -483,6 +503,8 @@ export function createWeatherScene(
   let w = 260;
   let h = 900;
   let dpr = 1;
+  /** where the sky starts showing, under the opaque header */
+  let skyTop = 0;
 
   const rand = (a: number, b: number) => a + rng() * (b - a);
   const side = windSide(cond.windFromDeg);
@@ -1158,9 +1180,11 @@ export function createWeatherScene(
   /* ---------------- fireworks (new year's) ---------------- */
 
   const fireworks = night ? clamp(extras.fireworks ?? 0, 0, 1) : 0;
+  const layer = extras.layer ?? null;
   const rockets: Rocket[] = [];
   const sparks: Spark[] = [];
   const bursts: Array<{ x: number; y: number; age: number; rgb: string }> = [];
+  const palette = extras.fireworkColors?.length ? extras.fireworkColors : FIREWORK_RGB;
   let nextRocket = fireworks > 0 ? rand(0.4, 1.6) : Infinity;
 
   function updateFireworks(dt: number): void {
@@ -1170,19 +1194,26 @@ export function createWeatherScene(
       // the midnight show fires every second or two; the rest of the night
       // a firework now and then, far off
       nextRocket = lerp(rand(4, 9), rand(0.7, 1.8), fireworks);
+      // burst where it can be seen: under the header, never behind it
+      const burstAt = skyTop + rand(0.08, 0.45) * (h - skyTop);
+      // it slows by ROCKET_DRAG a second, so it can only ever climb v0/k.
+      // launch fast enough to get there with speed to spare, however tall
+      // the sidebar: a fixed speed stalled short and hung in the air
+      const climb = h + 10 - burstAt;
       rockets.push({
         x: rand(0.18, 0.82) * w,
         y: h + 10,
-        vy: -rand(380, 470),
-        burstAt: rand(0.1, 0.42) * h,
-        rgb: FIREWORK_RGB[Math.floor(rng() * FIREWORK_RGB.length)],
+        vy: -climb * ROCKET_K * rand(1.35, 1.6),
+        burstAt,
+        rgb: palette[Math.floor(rng() * palette.length)],
       });
     }
     for (let i = rockets.length - 1; i >= 0; i--) {
       const r = rockets[i];
       r.y += r.vy * dt;
-      r.vy *= Math.pow(0.6, dt); // slows as it climbs
-      if (r.y <= r.burstAt) {
+      r.vy *= Math.pow(ROCKET_DRAG, dt); // slows as it climbs
+      // and if it ever runs out of climb, it bursts at the top of its arc
+      if (r.y <= r.burstAt || r.vy > -40) {
         rockets.splice(i, 1);
         burst(r.x, r.y, r.rgb);
       }
@@ -1211,7 +1242,7 @@ export function createWeatherScene(
     const n = Math.round(rand(56, 80));
     const max = rand(120, 170);
     // now and then a second colour through the bloom
-    const second = rng() < 0.4 ? FIREWORK_RGB[Math.floor(rng() * FIREWORK_RGB.length)] : rgb;
+    const second = rng() < 0.4 ? palette[Math.floor(rng() * palette.length)] : rgb;
     for (let i = 0; i < n && sparks.length < 520; i++) {
       const a = rng() * Math.PI * 2;
       // a range of speeds fills the bloom like a real peony; one speed
@@ -1281,28 +1312,33 @@ export function createWeatherScene(
   /* ---------------- api ---------------- */
 
   return {
-    resize(nw: number, nh: number, ndpr: number): void {
+    resize(nw: number, nh: number, ndpr: number, top = 0): void {
       const rebuild = !built || Math.abs(nw - w) > 2 || Math.abs(nh - h) > 2;
       w = Math.max(1, nw);
       h = Math.max(1, nh);
       dpr = ndpr;
+      skyTop = clamp(top, 0, h * 0.8);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       if (rebuild) {
         build();
         built = true;
       }
       buildLight();
+      layer?.resize(w, h, top, dpr);
     },
     frame(dt: number, t: number): void {
       update(dt, t);
+      layer?.update(dt, t);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, h);
       drawSky(t);
+      layer?.back(t);
       drawClouds();
       drawFog(t);
       drawRain();
       drawSnow();
       drawWind(t);
+      layer?.front(t);
       drawFireworks();
       drawLightning();
     },
@@ -1320,6 +1356,7 @@ export function createWeatherScene(
         satellite: satelliteGlow,
         flash,
         driftX,
+        ...layer?.stats(),
       };
     },
   };

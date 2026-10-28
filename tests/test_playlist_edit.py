@@ -53,6 +53,30 @@ def test_align_ids_coerced_to_str():
     assert out == ["3", "1", "2"]
 
 
+def test_align_shared_server_track_is_written_once():
+    # #1852: two source rows can pair with one server track (pass 0), so the
+    # editor sends its id twice. the playlist holds it once, so it stays once.
+    out = plan_align_rewrite(current_ids=["A", "S", "B"], matched_ids=["S", "A", "S", "B"])
+    assert out == ["S", "A", "B"]
+
+
+def test_align_shared_track_with_extras_adds_nothing():
+    out = plan_align_rewrite(current_ids=["A", "S", "X"], matched_ids=["S", "A", "S"], keep_extras=True)
+    assert out == ["S", "A", "X"]
+
+
+def test_align_keeps_a_song_the_playlist_really_holds_twice():
+    out = plan_align_rewrite(current_ids=["D", "A", "D"], matched_ids=["A", "D", "D"])
+    assert out == ["A", "D", "D"]
+
+
+def test_align_keep_extras_keeps_an_unmatched_second_copy():
+    # the playlist holds D twice, only one is matched: the other is an extra
+    out = plan_align_rewrite(current_ids=["D", "A", "D"], matched_ids=["A", "D"], keep_extras=True)
+    assert out == ["A", "D", "D"]
+    assert plan_align_rewrite(current_ids=["D", "A", "D"], matched_ids=["A", "D"]) == ["A", "D"]
+
+
 # ── plan_playlist_add: link must not duplicate ────────────────────────────
 
 def test_link_to_existing_track_does_not_insert():

@@ -6,7 +6,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--black-a60);
   backdrop-filter: blur(4px);
 }
 
@@ -15,9 +15,9 @@
   max-width: 92vw;
   background: linear-gradient(135deg, rgba(26, 26, 30, 0.98), rgba(18, 18, 22, 0.99));
   border: 1px solid rgba(var(--accent-rgb), 0.25);
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   padding: 22px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 18px 50px var(--black-a55);
 }
 
 .title {
@@ -36,7 +36,7 @@
 .input {
   width: 100%;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--white-a12);
   background: var(--white-a05);
   color: var(--text-1);
@@ -60,7 +60,7 @@
 
 .save {
   padding: 8px 16px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border: 1px solid rgba(var(--accent-rgb), 0.35);
   background: rgba(var(--accent-rgb), 0.12);
   color: var(--text-1);

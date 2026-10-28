@@ -780,6 +780,46 @@ def _other_music_batches_pending(batch_id: str) -> bool:
     return False
 
 
+def _credit_name(value) -> str:
+    """A name out of a dict-or-string artist/album value."""
+    if isinstance(value, dict):
+        value = value.get('name')
+    return str(value).strip() if value else ''
+
+
+def _batch_event_credits(batch: dict, queue: list) -> dict:
+    """artist / title / album for the batch_complete event.
+
+    An album batch carries its artist and album in the batch's own contexts.
+    The wishlist's catch-all batches ("Wishlist (Auto - Albums)", singles and
+    residual tracks) carry neither, so the notification could not say what
+    arrived. Fall back to the tracks that actually finished: one artist is
+    named, several read "A, B +2", and title / album are filled only when
+    exactly one track finished (a list of titles would not fit a notification).
+    CALLED UNDER tasks_lock.
+    """
+    artist = _credit_name(batch.get('artist_context'))
+    album = _credit_name(batch.get('album_context'))
+    title = ''
+
+    done = [download_tasks[tid].get('track_info') or {} for tid in queue
+            if tid in download_tasks and download_tasks[tid].get('status') == 'completed']
+    if len(done) == 1:
+        title = _credit_name(done[0].get('name'))
+        album = album or _credit_name(done[0].get('album'))
+    if not artist and done:
+        names = []
+        for info in done:
+            artists = info.get('artists')
+            first = artists[0] if isinstance(artists, list) and artists else info.get('artist')
+            name = _credit_name(first)
+            if name and name not in names:
+                names.append(name)
+        if names:
+            artist = ', '.join(names[:2]) + (f' +{len(names) - 2}' if len(names) > 2 else '')
+    return {'artist': artist, 'title': title, 'album': album}
+
+
 def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
                          queue: list, finished_count: int, tag: str) -> dict:
     """Flip a finished batch to 'complete' and do the bookkeeping that has to
@@ -819,10 +859,12 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
         _scan_owed = more_pending
         try:
             if deps.automation_engine:
-                _batch_artist = batch.get('artist_context')
+                _credits = _batch_event_credits(batch, queue)
                 deps.automation_engine.emit('batch_complete', {
                     'playlist_name': playlist_name,
-                    'artist': (_batch_artist.get('name') or '') if isinstance(_batch_artist, dict) else '',
+                    'artist': _credits['artist'],
+                    'title': _credits['title'],
+                    'album': _credits['album'],
                     'total_tracks': str(len(queue)),
                     'completed_tracks': str(successful_downloads),
                     'failed_tracks': str(failed_count),
@@ -1055,7 +1097,10 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                     'retry_count': task.get('retry_count', 0),
                     'track_data': wishlist_track_data,
                     'spotify_track': wishlist_track_data,  # Backward-compatible alias for older callers
-                    'failure_reason': 'Download cancelled' if task_status == 'cancelled' else ('No matching track found' if task_status == 'not_found' else 'Download failed'),
+                    # a failed download keeps the task's own reason (tidal said no,
+                    # the transfer stalled, ...). a bare 'Download failed' left the
+                    # wishlist saying "keeps failing" with nothing to go on.
+                    'failure_reason': 'Download cancelled' if task_status == 'cancelled' else ('No matching track found' if task_status == 'not_found' else (task.get('error_message') or 'Download failed')),
                     'candidates': task.get('cached_candidates', []),  # Include search results if available
                 }
 

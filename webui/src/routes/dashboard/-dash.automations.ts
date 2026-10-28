@@ -116,11 +116,18 @@ export function automationCardRows(
   rows: AutomationApiRow[],
   nowMs: number,
   progress: Record<string, AutomationProgressState> = {},
+  /** the video dashboard shows only video_* actions; music, everything else */
+  side: 'music' | 'video' = 'music',
 ): AutomationCardRow[] {
   const out: AutomationCardRow[] = [];
   for (const row of rows || []) {
     const actionType = String(row.action_type || '');
-    if (SYNCBAND_ACTIONS.has(actionType) || isVideoAction(actionType)) continue;
+    if (
+      side === 'video'
+        ? !isVideoAction(actionType)
+        : SYNCBAND_ACTIONS.has(actionType) || isVideoAction(actionType)
+    )
+      continue;
     const enabled = row.enabled !== false && row.enabled !== 0;
     const live = progress[String(row.id)];
     out.push({

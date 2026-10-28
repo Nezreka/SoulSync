@@ -45,6 +45,18 @@ export interface FindingTypeInfo {
   job_ids?: string[];
   /** What the bulk-fix confirmation says, when the generic warning is wrong. */
   confirm?: string;
+  /** Approving starts downloads (a grab, wishlist rows). Video sends it; a
+   *  movie is gigabytes, so "fix all safe" leaves these alone. */
+  acquires?: boolean;
+  /** Served one-liner (video). Music's live in FINDING_TYPE_BLURBS below. */
+  blurb?: string;
+}
+
+/** Safe = approving only writes data: nothing on disk moves and nothing is
+ *  downloaded. What "Fix all safe" promises, so the count and the run must
+ *  agree on it. */
+export function isSafeType(info: FindingTypeInfo | undefined): boolean {
+  return Boolean(info?.fixable && !info.destructive && !info.acquires && !info.review_only);
 }
 
 // ── One line explaining every finding type ───────────────────────────────────
@@ -102,15 +114,15 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   album_release_year_mismatch: 'Album and track release years disagree with the original release.',
 };
 
-export function findingTypeBlurb(findingType: string): string {
-  return FINDING_TYPE_BLURBS[findingType] || '';
+export function findingTypeBlurb(findingType: string, info?: FindingTypeInfo): string {
+  return info?.blurb || FINDING_TYPE_BLURBS[findingType] || '';
 }
 
 // ── Severity ─────────────────────────────────────────────────────────────────
 
 /** Sort order. Anything unrecognised sorts as `info` — the quietest bucket,
  *  so an unknown severity can never jump the queue ahead of real errors. */
-export const SEVERITY_RANK: Record<string, number> = { error: 0, warning: 1, info: 2 };
+export const SEVERITY_RANK: Record<string, number> = { error: 0, critical: 0, warning: 1, info: 2 };
 
 export function severityRank(severity: string | null | undefined): number {
   return SEVERITY_RANK[severity || 'info'] ?? 2;
@@ -123,7 +135,13 @@ export function severityRank(severity: string | null | undefined): number {
  * spread is deliberately wide so the number tracks what is actually wrong
  * rather than what is merely numerous.
  */
-export const SEVERITY_WEIGHTS: Record<string, number> = { error: 1, warning: 0.25, info: 0.02 };
+export const SEVERITY_WEIGHTS: Record<string, number> = {
+  error: 1,
+  // the video side's word for error
+  critical: 1,
+  warning: 0.25,
+  info: 0.02,
+};
 
 export function severityWeight(severity: string | null | undefined): number {
   return SEVERITY_WEIGHTS[severity || 'info'] ?? SEVERITY_WEIGHTS.info;
@@ -296,9 +314,7 @@ export function safeFixablePending(
 ): number {
   let total = 0;
   for (const group of groups) {
-    const info = infoOf(group.finding_type);
-    if (info?.fixable && !info.destructive && !info.review_only)
-      total += Math.max(0, group.pending || 0);
+    if (isSafeType(infoOf(group.finding_type))) total += Math.max(0, group.pending || 0);
   }
   return total;
 }

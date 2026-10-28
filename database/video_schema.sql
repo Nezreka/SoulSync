@@ -784,6 +784,7 @@ CREATE TABLE IF NOT EXISTS video_repair_findings (
     description   TEXT,
     details_json  TEXT DEFAULT '{}',                 -- per-finding-type payload (fix input)
     user_action   TEXT,                              -- what the fix did (badge label)
+    last_error    TEXT,                              -- why the last fix attempt failed (v57)
     resolved_at   TIMESTAMP,
     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -803,7 +804,8 @@ CREATE TABLE IF NOT EXISTS video_repair_job_runs (
     findings_created  INTEGER DEFAULT 0,
     auto_fixed        INTEGER DEFAULT 0,
     errors            INTEGER DEFAULT 0,
-    status            TEXT NOT NULL DEFAULT 'running'   -- running | completed
+    status            TEXT NOT NULL DEFAULT 'running',  -- running | completed | failed | cancelled
+    error_text        TEXT                               -- why a failed run failed (v57)
 );
 CREATE INDEX IF NOT EXISTS idx_vrjr_job ON video_repair_job_runs(job_id);
 
@@ -988,4 +990,32 @@ CREATE TABLE IF NOT EXISTS tvdb_episode_cache (
     episodes TEXT NOT NULL,          -- JSON [[episode_number, "YYYY-MM-DD"], ...]
     fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (tvdb_id, season_number)
+);
+
+-- ── series type for shows not in any library yet ──
+-- a show's series type normally comes from its library row (set by hand, or
+-- the show sits in a library marked anime). a show that is followed, wished
+-- or approved before it is owned has no row, so its type lives here, keyed
+-- by TMDB id: suggested from TMDB when it is first followed (source 'tmdb')
+-- or chosen by an admin (source 'user'). once the show is scanned into a
+-- library the library row decides and this row is no longer read.
+CREATE TABLE IF NOT EXISTS show_type_hints (
+    tmdb_id INTEGER PRIMARY KEY,
+    series_type TEXT NOT NULL,       -- standard | daily | anime
+    source TEXT NOT NULL,            -- tmdb | user
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ── airing auto-wishlist receipts ──
+-- one row per episode the airing automation has already offered to a
+-- profile's wishlist. the run looks back a week every time (episodes that
+-- reach TMDB on or after their air date, or a slot the server slept through),
+-- and this is what stops it re-adding an episode the user deleted.
+CREATE TABLE IF NOT EXISTS video_airing_offers (
+    profile_id INTEGER NOT NULL,
+    tmdb_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL,
+    episode_number INTEGER NOT NULL,
+    offered_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (profile_id, tmdb_id, season_number, episode_number)
 );

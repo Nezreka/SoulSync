@@ -22,7 +22,11 @@ const JS = readFileSync(resolve(process.cwd(), 'static/downloads.js'), 'utf8');
 // in style.css rather than in the video side's stylesheet.
 const CSS = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
 const VIDEO_CSS = readFileSync(resolve(process.cwd(), 'static/video/video-side.css'), 'utf8');
-const DASH = readFileSync(resolve(process.cwd(), 'static/video/video-dashboard.js'), 'utf8');
+// the video dashboard is React now (routes/dashboard/-video)
+const DASH = readFileSync(
+  resolve(process.cwd(), 'src/routes/dashboard/-video/video-dashboard-page.tsx'),
+  'utf8',
+);
 const HTML = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 
 function symbols(health: unknown): HTMLElement {
@@ -125,6 +129,7 @@ describe('the dashboard no longer carries it', () => {
   it('has no health strip left behind', () => {
     // Dead code that looks like a feature is worse than no code.
     expect(DASH).not.toContain('loadHealth');
+    expect(DASH).not.toContain('video/health');
     expect(HTML).not.toContain('data-vdash-health');
     expect(VIDEO_CSS).not.toContain('.vdash-health-chip');
   });

@@ -79,7 +79,7 @@ const _SS_BRAND: Record<string, string> = {
   soundcloud: '#ff5500',
 };
 function _ssBrand(id: string): string {
-  return _SS_BRAND[id] || 'var(--accent-light-rgb-hex, #7c5cff)';
+  return _SS_BRAND[id] || '#7c5cff';
 }
 
 interface SsActiveSources {
@@ -239,8 +239,7 @@ function _ssRailCurrent(tabId: string): SsRailChip | null {
     return { logo: info.logo, emoji: '🖥️', label: info.name, brand: _ssBrand(id), dark: info.dark };
   }
   const id = d.download.mode;
-  if (id === 'hybrid')
-    return { emoji: '🔀', label: 'Hybrid', brand: 'var(--accent-light-rgb-hex,#7c5cff)' };
+  if (id === 'hybrid') return { emoji: '🔀', label: 'Hybrid', brand: '#7c5cff' };
   const info = _ssDownloadInfo(id);
   return { logo: info.logo, emoji: info.emoji, label: info.name, brand: _ssBrand(id) };
 }

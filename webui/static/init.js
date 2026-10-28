@@ -1946,10 +1946,24 @@ function showProfileForgotPin(profile) {
 // the last select answer, so a failed pick can say why
 let _pfLastSelect = null;
 
+// Reconnect the socket so its new handshake carries the CURRENT session
+// cookie: Flask-SocketIO freezes the session at connect time, so after
+// anything that changes this browser's session server-side (profile
+// switch, own-password change, "sign out everywhere" — the server keeps
+// THIS browser signed in under a new epoch) the existing socket would
+// keep acting on, and being revocation-checked against, the stale
+// session (#1837). The connect handler re-joins rooms and re-subscribes.
+function pfReconnectSocket() {
+    if (!socket) return;
+    // the revocation sweep can drop the old socket before this runs, and a
+    // server-side drop never auto-reconnects, so connect either way
+    if (socket.connected) socket.disconnect();
+    socket.connect();
+}
+
 async function selectProfile(profileId) {
     _pfLastSelect = null;
     try {
-        const oldProfileId = currentProfile ? currentProfile.id : null;
         const res = await fetch('/api/profiles/select', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1959,10 +1973,9 @@ async function selectProfile(profileId) {
         _pfLastSelect = data;
         if (data.success) {
             setCurrentProfile(data.profile);
-            // Join profile-scoped WebSocket room for watchlist/wishlist count updates
-            if (socket && socket.connected) {
-                socket.emit('profile:join', { profile_id: profileId, old_profile_id: oldProfileId });
-            }
+            // New handshake for the switched profile's session (#1837);
+            // the connect handler re-joins the profile room.
+            pfReconnectSocket();
             // Invalidate ListenBrainz cache on profile switch (each profile has their own playlists)
             _invalidateListenBrainzCache();
         }
@@ -2148,6 +2161,12 @@ function profileAllowedSides() {
 // being on), not the music page's. /wishlist?media=tv is the video wishlist.
 const SHARED_VIDEO_VIEWS = {
     wishlist: { media: ['movies', 'tv', 'youtube'], videoPage: 'video-wishlist' },
+    // /tools?media=video is the video tools page
+    tools: { media: ['video'], videoPage: 'video-tools' },
+    // /calendar?media=video is the video calendar (music has none)
+    calendar: { media: ['video'], videoPage: 'video-calendar' },
+    // /dashboard?media=video is the video dashboard
+    dashboard: { media: ['video'], videoPage: 'video-dashboard' },
 };
 
 function isPageAccessAllowed(pageId, search) {
@@ -2849,6 +2868,9 @@ async function signOutProfileEverywhere(p) {
         const res = await fetch(`/api/profiles/${p.id}/sign-out-everywhere`, { method: 'POST' });
         const data = await pfReadJson(res);
         if (!res.ok || !data.success) throw new Error(data.error || "Couldn't sign out");
+        // self: the server kept THIS browser signed in under the new epoch —
+        // re-handshake so the socket isn't dropped as revoked (#1837)
+        if (isSelf) pfReconnectSocket();
         showToast(isSelf ? 'Other devices are signed out' : `${p.name} is signed out everywhere`, 'success');
         return true;
     } catch (e) {
@@ -3001,7 +3023,9 @@ async function deleteProfile(p) {
 function openProfilePasswordModal(p) {
     const modal = pfModal({
         title: `${p.name}'s login password`,
-        subtitle: 'Used to sign in when login mode is on. The PIN is separate.',
+        subtitle: window.__soulsyncOidcOnly
+            ? 'Sign-in is OIDC only right now, so this is kept but only works once OIDC-only is turned off.'
+            : 'Used to sign in when login mode is on. The PIN is separate.',
         size: 'small', layerClass: 'pf-layer--small',
     });
     const pw = pfEl('input', { type: 'password', class: 'pf-input', autocomplete: 'new-password', maxlength: '200', 'aria-label': 'New password', placeholder: 'New password' });
@@ -3015,6 +3039,9 @@ function openProfilePasswordModal(p) {
         });
         const data = await pfReadJson(res);
         if (!res.ok || !data.success) throw new Error(data.error || "Couldn't save the password");
+        // own password changed: this browser stays signed in under a new
+        // epoch — re-handshake so the socket isn't dropped as revoked (#1837)
+        if (currentProfile && currentProfile.id === p.id) pfReconnectSocket();
     };
     if (p.has_password) {
         const remove = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--quiet', text: 'Remove password', style: 'margin-right:auto' });
@@ -3393,7 +3420,9 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             pfEl('div', { class: 'pf-group' }, [pinSwitch.row, pinExtra]),
             pfEl('div', { class: 'pf-section-title', text: 'Login password' }),
             pfEl('div', { class: 'pf-field' }, [passwordInput, passwordError,
-                pfEl('p', { class: 'pf-help', text: 'For signing in when login mode is on. Separate from the PIN.' })]),
+                pfEl('p', { class: 'pf-help', text: window.__soulsyncOidcOnly
+                    ? 'Sign-in is OIDC only right now, so this is kept but only works once OIDC-only is turned off.'
+                    : 'For signing in when login mode is on. Separate from the PIN.' })]),
             pfEl('div', { class: 'pf-section-title', text: 'Home' }),
             homeField,
         );
@@ -3849,6 +3878,7 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
         if (isSelf && st.password) {
             try {
                 const data = await send(`/api/profiles/${targetId}/set-password`, 'POST', { password: st.password });
+                pfReconnectSocket();   // own password: new epoch, re-handshake (#1837)
                 saved.push('login password');
                 currentProfile.has_password = !!data.has_password;
             } catch (e) {
@@ -3984,8 +4014,15 @@ async function showInviteLanding(token) {
             pfEl('p', { class: 'pf-help', id: pwId + '-help', text: 'At least 6 characters. You sign in with your name and this.' }),
         ]));
     }
+    // sign-in is oidc only (#1839): no password here, the provider signs
+    // them in and their account there is linked to the new profile
+    if (invite.oidc) {
+        fields.push(pfEl('p', { class: 'pf-help', text: `You'll sign in with your account at the provider. It's linked to this profile, and that's how you sign in from now on.` }));
+    }
     const formError = pfEl('p', { class: 'pf-form-error', role: 'alert', 'aria-live': 'polite' });
-    const join = pfEl('button', { type: 'submit', class: 'pf-btn pf-btn--primary pf-btn--block', text: 'Join' });
+    if (invite.error) formError.textContent = invite.error;
+    const joinText = invite.oidc ? (invite.oidc_label || 'Continue') : 'Join';
+    const join = pfEl('button', { type: 'submit', class: 'pf-btn pf-btn--primary pf-btn--block', text: joinText });
     form.append(...fields, formError, join);
     inner.append(form);
     renderPreview();
@@ -4016,6 +4053,10 @@ async function showInviteLanding(token) {
                 body: JSON.stringify({ name, avatar_color: st.color, pin: pin || undefined, password: password || undefined }),
             });
             const data = await pfReadJson(res);
+            if (res.ok && data.success && data.oidc && data.url) {
+                window.location.assign(data.url);
+                return;
+            }
             if (res.ok && data.success) {
                 if (pin) {
                     try { localStorage.setItem(_pfPinLengthKey(data.profile_id), String(pin.length)); } catch (err) { /* ignore */ }
@@ -4042,7 +4083,7 @@ async function showInviteLanding(token) {
             formError.textContent = 'Connection error, try again';
         }
         join.disabled = false;
-        join.textContent = 'Join';
+        join.textContent = joinText;
     });
 }
 
@@ -4223,7 +4264,7 @@ const _DEEPLINK_VALID_PAGES = new Set([
     'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
     'hydrabase', 'tools', 'review', 'chat', 'podcasts', 'audiobooks', 'requests',
-    'sample-studio'
+    'sample-studio', 'calendar'
 ]);
 
 function _getPageFromPath() {

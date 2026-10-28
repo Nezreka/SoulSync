@@ -54,6 +54,7 @@ import {
   autoSyncCanSchedulePlaylist,
   autoSyncEnrichDiscoveryRows,
   autoSyncExpandPersonalizedRows,
+  autoSyncTrackCountText,
   autoSyncGeneratedCountMap,
   autoSyncGroupSidebarRows,
   autoSyncHoursFromTrigger,
@@ -509,8 +510,14 @@ describe('personalized rows', () => {
     expect(autoSyncEnrichDiscoveryRows(PLAYLISTS, KINDS)).toEqual([
       PLAYLISTS[0],
       PLAYLISTS[1],
-      { ...PLAYLISTS[2], kind: 'time_machine', variant: '1990s', kind_label: 'Time Machine' },
-      { ...PLAYLISTS[3], kind: 'time', variant: 'x', kind_label: 'Time' },
+      {
+        ...PLAYLISTS[2],
+        kind: 'time_machine',
+        variant: '1990s',
+        variant_label: '1990s',
+        kind_label: 'Time Machine',
+      },
+      { ...PLAYLISTS[3], kind: 'time', variant: 'x', variant_label: 'x', kind_label: 'Time' },
       PLAYLISTS[5],
     ]);
     expect(autoSyncEnrichDiscoveryRows(PLAYLISTS, [])).toEqual(PLAYLISTS);
@@ -553,7 +560,9 @@ describe('personalized rows', () => {
         track_count: 12,
         kind: 'time_machine',
         variant: '2000s',
+        variant_label: '2000s',
         kind_label: 'Time Machine',
+        _never_generated: false,
         source_playlist_id: 'ssd_time_machine_2000s',
         _personalized: true,
       },
@@ -564,7 +573,10 @@ describe('personalized rows', () => {
         track_count: 0,
         kind: 'time',
         variant: 'x',
+        variant_label: 'x',
         kind_label: 'Time',
+        // never built: the sidebar says so instead of "0 tracks"
+        _never_generated: true,
         source_playlist_id: 'ssd_time_x',
         _personalized: true,
       },
@@ -573,6 +585,24 @@ describe('personalized rows', () => {
     expect(ours.map((r) => r.source_playlist_id)).toEqual(['ssd_time_machine_2000s', 'ssd_time_x']);
     expect(ours.map((r) => r.id)).toEqual([-1, -2]);
     expect(ours[0].track_count).toBe(12);
+  });
+
+  it('names variants the way the kind labels them, and says when a row was never built', () => {
+    const kinds = [
+      {
+        kind: 'genre_playlist',
+        name_template: 'Genre — {variant}',
+        requires_variant: true,
+        variants: ['electronic_dance'],
+        variant_labels: { electronic_dance: 'Electronic/Dance' },
+      },
+    ];
+    const [row] = autoSyncExpandPersonalizedRows(kinds, [], new Map());
+    expect(row.name).toBe('Genre — Electronic/Dance');
+    expect(row.variant_label).toBe('Electronic/Dance');
+    expect(autoSyncTrackCountText(row)).toBe('Not built yet');
+    expect(autoSyncTrackCountText({ track_count: '40' })).toBe('40 tracks');
+    expect(autoSyncTrackCountText({ track_count: 0 })).toBe('0 tracks');
   });
 
   it('builds personalized actions or mirrored-playlist actions as appropriate', () => {
@@ -1780,5 +1810,38 @@ describe('beatport mirror kinds', () => {
       expect(beatportMirrorIsSnapshot(row(id)), id).toBe(false);
     }
     expect(beatportMirrorIsSnapshot(undefined)).toBe(false);
+  });
+});
+
+describe('discovery mirror targets', () => {
+  it('reads kind and variant off an ssd id, longest kind first', async () => {
+    const { autoSyncSsdTarget } = await import('./-sync.autosync');
+    const m = (sid: string) => ({ source: 'soulsync_discovery', source_playlist_id: sid });
+    expect(autoSyncSsdTarget(m('ssd_daily_mix_3'))).toEqual({ kind: 'daily_mix', variant: '3' });
+    expect(autoSyncSsdTarget(m('ssd_time_machine_1980s'))).toEqual({
+      kind: 'time_machine',
+      variant: '1980s',
+    });
+    expect(autoSyncSsdTarget(m('ssd_genre_playlist_hip_hop_rap'))).toEqual({
+      kind: 'genre_playlist',
+      variant: 'hip_hop_rap',
+    });
+    expect(autoSyncSsdTarget(m('ssd_hidden_gems'))).toEqual({ kind: 'hidden_gems', variant: '' });
+    expect(autoSyncSsdTarget(m('ssd_nope'))).toBeNull();
+    expect(
+      autoSyncSsdTarget({ source: 'spotify', source_playlist_id: 'ssd_daily_mix_1' }),
+    ).toBeNull();
+  });
+
+  it('a mirrored discovery row schedules as its personalized playlist', () => {
+    expect(
+      autoSyncActionForPlaylist(
+        { id: 55, source: 'soulsync_discovery', source_playlist_id: 'ssd_daily_mix_1' },
+        55,
+      ),
+    ).toEqual({
+      action_type: 'personalized_pipeline',
+      action_config: { kinds: [{ kind: 'daily_mix', variant: '1' }], refresh_first: true },
+    });
   });
 });

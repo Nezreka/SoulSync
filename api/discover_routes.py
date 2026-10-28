@@ -407,16 +407,8 @@ def _discover_genre_taste(database, profile_id):
     cached = _discover_taste_cache.get(profile_id)
     if cached and now < cached[0]:
         return cached[1]
-    profile = {}
-    try:
-        from core.discovery.listening_recommendations import build_genre_taste_profile
-        top = database.get_top_artists('all', 300, profile_id=profile_id) or []
-        genres_by_name = database.get_artist_genres_by_name([t.get('name') for t in top if t.get('name')])
-        weighted = [(genres_by_name.get((t.get('name') or '').strip().lower(), []),
-                     t.get('play_count', 1) or 1) for t in top]
-        profile = build_genre_taste_profile(weighted)
-    except Exception as e:
-        logger.debug(f"discover genre taste profile failed: {e}")
+    from core.personalized_playlists import PersonalizedPlaylistsService
+    profile = PersonalizedPlaylistsService(database).genre_taste_profile(profile_id)
     _discover_taste_cache[profile_id] = (now + 300, profile)
     return profile
 
@@ -3594,12 +3586,13 @@ def get_available_decades():
                     COUNT(*) as track_count
                 FROM discovery_pool
                 WHERE release_date IS NOT NULL
+                  AND profile_id = ?
                   AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) >= 1950
                   AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) <= 2029
                 GROUP BY decade
                 HAVING track_count >= 10
                 ORDER BY decade ASC
-            """)
+            """, (get_current_profile_id(),))
 
             rows = cursor.fetchall()
             decades = []

@@ -136,7 +136,7 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
           You are not following any authors yet. Open an author from the audiobooks page and use the
           watchlist button to have their next release picked up automatically.
         </p>
-        <Link to="/audiobooks" className="wl-primary-btn">
+        <Link to="/audiobooks" className="btn btn--primary">
           Browse Audiobooks
         </Link>
       </div>
@@ -161,7 +161,7 @@ export function WatchlistAudiobooksTab({ searchFilter = '' }: WatchlistAudiobook
         </p>
         <button
           type="button"
-          className="wl-primary-btn"
+          className="btn btn--primary"
           onClick={() => void scanNow()}
           disabled={scanning}
         >

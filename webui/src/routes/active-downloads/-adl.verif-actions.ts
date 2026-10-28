@@ -9,6 +9,8 @@
  * They hit different endpoints and their confirm copy differs accordingly.
  */
 
+import { openWishlistInspector } from '@/features/downloads/inspector-modal';
+
 import type { AdlDeletedEntry, AdlDownload, AdlQuarantineEntry } from './-adl.types';
 
 import {
@@ -27,6 +29,7 @@ import {
   verificationDelete,
   verificationEntry,
   verificationPlay,
+  verificationWrongSong,
 } from './-adl.api';
 import { verificationHistoryId } from './-adl.helpers';
 import { ADL_DONE_STATUSES, ADL_REVIEW_STATUSES } from './-adl.types';
@@ -150,6 +153,39 @@ export async function unverifiedDelete(historyId: string, onDone: () => void): P
     } else toast(data.error || 'Delete failed', 'error');
   } catch {
     toast('Delete failed', 'error');
+  }
+}
+
+/**
+ * The file is the wrong song: it goes like a delete (and its source is
+ * skipped from now on), the song that was asked for goes back on the
+ * wishlist, and the interactive search opens on it to pick the right one.
+ * Closing the search leaves the wishlist to keep hunting.
+ */
+export async function unverifiedWrongSong(
+  historyId: string,
+  asked: string,
+  onDone: () => void,
+): Promise<void> {
+  const confirmed = await window.showConfirmDialog?.({
+    title: 'Wrong song',
+    message: `This deletes the file, skips where it came from next time, and opens a search for ${asked} so you can pick the right one.`,
+    confirmText: 'Delete and search',
+    cancelText: 'Cancel',
+    destructive: true,
+  });
+  if (!confirmed) return;
+  try {
+    const data = await verificationWrongSong(historyId);
+    if (!data.success || !data.wishlist_track) {
+      toast(data.error || 'Could not reject the file', 'error');
+      return;
+    }
+    toast('File deleted. Pick the right one, or close and the wishlist keeps looking.', 'success');
+    onDone();
+    openWishlistInspector(data.wishlist_track);
+  } catch (error) {
+    toast((error as Error).message || 'Could not reject the file', 'error');
   }
 }
 

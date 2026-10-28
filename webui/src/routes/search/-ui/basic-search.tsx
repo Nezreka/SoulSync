@@ -7,6 +7,7 @@ import { sourceLabel } from '../-basic.api';
 import { BasicFilters } from './basic-filters';
 import { BasicResults } from './basic-results';
 import { BasicSearchBar } from './basic-search-bar';
+import { BasicWarnings } from './basic-warnings';
 import styles from './basic.module.css';
 import { DownloadChooser } from './download-chooser';
 import { EnrichedModal } from './enriched-modal';
@@ -78,6 +79,8 @@ export function BasicSearch({
         onChange={setFilters}
         onToggleOrder={toggleSortOrder}
       />
+
+      {!state.searching && <BasicWarnings warnings={state.warnings} />}
 
       <BasicResults
         results={visible}

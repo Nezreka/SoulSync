@@ -204,12 +204,37 @@ describe('the request flow', () => {
   let quota: Row | null;
   let requests: Row[];
   let profiles: Row[];
+  let showType: Row | null;
+  // every test evaluates a fresh copy of the module, and each copy's document
+  // listeners and 200ms repaint timers outlive its test. a stale copy's repaint,
+  // landing inside a later slow test, painted from its own cache and flipped
+  // Requested back to Preview. track both and tear them down per test.
+  let listeners: [string, EventListenerOrEventListenerObject][] = [];
+  let timers: ReturnType<typeof setTimeout>[] = [];
+  const realAdd = document.addEventListener.bind(document);
+  const realSetTimeout = globalThis.setTimeout;
 
   beforeEach(() => {
+    vi.spyOn(document, 'addEventListener').mockImplementation(
+      (
+        type: string,
+        fn: EventListenerOrEventListenerObject,
+        opts?: boolean | AddEventListenerOptions,
+      ) => {
+        listeners.push([type, fn]);
+        realAdd(type, fn, opts);
+      },
+    );
+    vi.stubGlobal('setTimeout', (fn: () => void, ms?: number) => {
+      const id = realSetTimeout(fn, ms);
+      timers.push(id);
+      return id;
+    });
     toasts = [];
     posts = [];
     quota = null;
     requests = [];
+    showType = null;
     profiles = [{ id: 0, name: 'Default' }];
     document.body.innerHTML = '';
     vi.stubGlobal('showToast', (m: string, t: string) => toasts.push([m, t]));
@@ -221,6 +246,8 @@ describe('the request flow', () => {
       vi.fn((url: string, init?: RequestInit) => {
         let body: unknown = { success: true };
         if (url.startsWith('/api/video/downloads/quality/profiles')) body = { profiles };
+        else if (url.includes('/series-type'))
+          body = showType ?? { owned: false, anime_folder: false };
         else if (url === '/api/video/requests' && init?.method === 'POST') {
           posts.push(JSON.parse(typeof init.body === 'string' ? init.body : '{}'));
           body = { success: true, id: 1 };
@@ -235,6 +262,10 @@ describe('the request flow', () => {
   });
 
   afterEach(() => {
+    for (const [type, fn] of listeners) document.removeEventListener(type, fn);
+    for (const id of timers) clearTimeout(id);
+    listeners = [];
+    timers = [];
     vi.unstubAllGlobals();
   });
 
@@ -286,6 +317,31 @@ describe('the request flow', () => {
     document.querySelector<HTMLElement>('[data-vreq-choice="first_season"]')!.click();
     document.querySelector<HTMLElement>('[data-vreq-sheet-go]')!.click();
     expect(await res).toEqual({ monitor: 'first_season', quality_profile_id: 0 });
+  });
+
+  it('asks where an unowned show is filed, pre-set to the stored type', async () => {
+    showType = { owned: false, series_type: 'anime', source: 'hint-tmdb', anime_folder: true };
+    const res = sheet().pickRequest({ kind: 'show', title: 'Frieren', typeFor: 209867 });
+    for (let i = 0; i < 10 && !document.querySelector('[data-vreq-type]'); i++) await flush();
+    const sel = document.querySelector<HTMLSelectElement>('[data-vreq-type]');
+    expect(sel).not.toBeNull();
+    expect(sel!.value).toBe('anime');
+    expect(document.querySelector('[data-vreq-type-row]')!.textContent).toContain('suggestion');
+    sel!.value = 'standard';
+    document.querySelector<HTMLElement>('[data-vreq-sheet-go]')!.click();
+    expect(await res).toEqual({ monitor: 'all', quality_profile_id: 0, series_type: 'standard' });
+  });
+
+  it.each([
+    ['without an anime folder', { owned: false, series_type: 'anime', anime_folder: false }],
+    ['for a show in the library', { owned: true, series_type: 'anime', anime_folder: true }],
+  ])('leaves the type out %s', async (_label, t) => {
+    showType = t;
+    const res = sheet().pickRequest({ kind: 'show', title: 'X', typeFor: 1 });
+    for (let i = 0; i < 5; i++) await flush();
+    expect(document.querySelector('[data-vreq-type]')).toBeNull();
+    document.querySelector<HTMLElement>('[data-vreq-sheet-go]')!.click();
+    expect(await res).not.toHaveProperty('series_type');
   });
 
   it('paints Requested over the preview ribbon and hides the card action', async () => {

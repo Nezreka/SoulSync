@@ -32,6 +32,7 @@ then resolves to the same surviving folder.
 from __future__ import annotations
 
 import os
+import re
 from typing import Optional
 
 from utils.logging_config import get_logger
@@ -47,9 +48,20 @@ logger = get_logger("library.case_folding")
 _LISTING_CACHE: "dict[str, tuple[float, dict[str, list[str]]]]" = {}
 _LISTING_CACHE_MAX = 512
 
+_AMP = re.compile(r"\s*&\s*")
+_SPACES = re.compile(r"\s+")
+
+
+def _fold(name: str) -> str:
+    """the key two folder names share when they're the same folder: case, and
+    '&' vs 'and' ("Huey Lewis & The News" next to "Huey Lewis and the News"
+    was the same artist split in two, TheHomeGuy's report)."""
+    folded = _AMP.sub(" and ", str(name).casefold())
+    return _SPACES.sub(" ", folded).strip()
+
 
 def _dir_listing(parent: str, *, force: bool = False) -> "dict[str, list[str]]":
-    """``{casefolded name: [real names]}`` for the directories inside parent."""
+    """``{folded name: [real names]}`` for the directories inside parent."""
     try:
         mtime = os.stat(parent).st_mtime
     except (OSError, ValueError):
@@ -69,7 +81,7 @@ def _dir_listing(parent: str, *, force: bool = False) -> "dict[str, list[str]]":
                         continue
                 except OSError:
                     continue
-                listing.setdefault(entry.name.casefold(), []).append(entry.name)
+                listing.setdefault(_fold(entry.name), []).append(entry.name)
     except (OSError, ValueError):
         return {}
 
@@ -94,7 +106,7 @@ def _existing_sibling(parent: str, name: str) -> Optional[str]:
     instead of alternating between them — a non-deterministic answer here
     would keep re-splitting the album on every pass.
     """
-    key = str(name).casefold()
+    key = _fold(name)
     matches = _dir_listing(parent).get(key)
     if not matches:
         # A miss is the answer that CREATES a folder, so it has to be fresh.

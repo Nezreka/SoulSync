@@ -135,14 +135,14 @@ def test_only_library_of_a_kind_is_picked_and_saved(db):
     libs = {"movies": [{"title": "Movies"}], "tv": [{"title": "Shows"}]}
     sel = vs._auto_pick_single_libraries("jellyfin", libs, {"movies": None, "tv": None}, db=db)
     assert sel == {"movies": "Movies", "tv": "Shows"}
-    assert db.get_library_selection("jellyfin") == {"movies": "Movies", "tv": "Shows"}
+    assert db.get_library_selection("jellyfin") == {"movies": "Movies", "tv": "Shows", "tv_more": [], "anime": []}
 
 
 def test_several_libraries_stay_unpicked(db):
     libs = {"movies": [{"title": "Movies"}, {"title": "4K Movies"}], "tv": []}
     sel = vs._auto_pick_single_libraries("jellyfin", libs, {"movies": None, "tv": None}, db=db)
     assert sel == {"movies": None, "tv": None}
-    assert db.get_library_selection("jellyfin") == {"movies": None, "tv": None}
+    assert db.get_library_selection("jellyfin") == {"movies": None, "tv": None, "tv_more": [], "anime": []}
 
 
 def test_none_picked_on_purpose_is_left_alone(db):
@@ -150,7 +150,7 @@ def test_none_picked_on_purpose_is_left_alone(db):
     db.set_library_selection("jellyfin", "Movies", "")
     libs = {"movies": [{"title": "Movies"}], "tv": [{"title": "Shows"}]}
     sel = vs._auto_pick_single_libraries("jellyfin", libs, db.get_library_selection("jellyfin"), db=db)
-    assert sel == {"movies": "Movies", "tv": ""}
+    assert sel == {"movies": "Movies", "tv": "", "tv_more": [], "anime": []}
     assert db.get_setting("jellyfin.tv_library") == ""
 
 
@@ -169,4 +169,4 @@ def test_a_fresh_install_scan_reads_the_only_libraries(db, monkeypatch):
     st = VideoLibraryScanner(db).scan_sync(vs.scan_video_source, mode="deep")
     assert st["state"] == "done", st
     assert (st["movies"], st["shows"]) == (2, 1)
-    assert db.get_library_selection("jellyfin") == {"movies": "Movies", "tv": "Shows"}
+    assert db.get_library_selection("jellyfin") == {"movies": "Movies", "tv": "Shows", "tv_more": [], "anime": []}

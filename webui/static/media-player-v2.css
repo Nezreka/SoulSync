@@ -226,11 +226,15 @@
     padding-right: 4px;
 }
 
-/* v1 panels keep their look; when tabbed they fill the panel region */
+/* v1 styled lyrics/queue as full-width bottom sections (40px padding,
+   top border). Tabbed into the right column they are plain panels that
+   fill the panel region. */
 #np-modal-overlay #np-queue-panel,
 #np-modal-overlay #np-lyrics-panel {
     max-height: none;
     overflow: visible;
+    padding: 0;
+    border-top: none;
 }
 
 #np-modal-overlay #np-lyrics-panel.collapsed {
@@ -815,15 +819,6 @@
     #np-v2-bg { display: none; }
 }
 
-/* ---- v1 panels when tabbed into the right column --------------------------- */
-/* v1 styled lyrics/queue as full-width bottom sections (40px padding,
-   top border). Inside the tabbed panel region they are plain panels. */
-#np-modal-overlay #np-queue-panel,
-#np-modal-overlay #np-lyrics-panel {
-    padding: 0;
-    border-top: none;
-}
-
 /* A-B loop indicator row under the time display */
 .np-v2-ab-row {
     display: flex;
@@ -1036,6 +1031,7 @@
 #np-v2-sidepanel-body > #np-queue-panel {
     padding: 0; /* side panel body already pads */
 }
+/* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
 #np-modal-overlay .np-queue-header {
     flex: 0 0 auto;
 }

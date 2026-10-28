@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { fetchSinCharts, type SinChart } from '@/features/metasync/charts';
 import { getShellProfileContext } from '@/platform/shell/bridge';
 
 import type { WebLens } from '../-discover.artist-web';
@@ -75,6 +76,7 @@ import { useBlacklist } from '../-discover.use-blacklist';
 import { useBuildPlaylist } from '../-discover.use-build-playlist';
 import { useDownloadBar } from '../-discover.use-download-bar';
 import { useHero } from '../-discover.use-hero';
+import { useHeroVideo } from '../-discover.use-hero-video';
 import { useLastfmRadio } from '../-discover.use-lastfm-radio';
 import { useDiscoverLayout } from '../-discover.use-layout';
 import { useListenBrainz } from '../-discover.use-listenbrainz';
@@ -121,6 +123,7 @@ import { LastfmRadioSection, ListenBrainzSection } from './radio-sections';
 import { RecipeEditor } from './recipe-editor';
 import { RecommendedModal } from './recommended-modal';
 import { RecommendedShelf } from './recommended-shelf';
+import { SinChartsShelf } from './sin-charts-shelf';
 import { YourAlbumsSourcesModal, YourArtistsSourcesModal } from './sources-modals';
 import { StationModal } from './station-modal';
 import { StationsRow } from './stations-row';
@@ -264,6 +267,22 @@ export function DiscoverPage() {
   const albums = useYourAlbums((t) => toast(t.message, t.level));
   const blacklist = useBlacklist((t) => toast(t.message, t.level));
   const lastfm = useLastfmRadio((t) => toast(t.message, t.level));
+
+  // MetaSync's SIN charts: fetched here because their count decides whether
+  // the shelf shows at all (no MetaSync, or nothing charted, hides it)
+  const [sinCharts, setSinCharts] = useState<SinChart[]>([]);
+  const [sinChartsLoaded, setSinChartsLoaded] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void fetchSinCharts().then((charts) => {
+      if (!live) return;
+      setSinCharts(charts);
+      setSinChartsLoaded(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const lb = useListenBrainz((t) => toast(t.message, t.level));
   const bp = useBuildPlaylist((t) => toast(t.message, t.level));
   const map = useArtistMap((t) => toast(t.message, t.level));
@@ -339,6 +358,16 @@ export function DiscoverPage() {
   // ── the living banners: one music video at a time, only the one on screen ──
   const [videosOn, setVideosOn] = useVideoBackdropsEnabled();
   const heroGlow = useDominantColor(hero.artist?.image_url ?? null);
+  // the hero's hidden music video: behind the active slide, only ever
+  // brought forward by the reader's click on the preview button.
+  const heroVideo = useHeroVideo(hero.artist?.artist_name ?? null, videosOn);
+  // the rotation holds while the pointer is on the hero, and holds for as
+  // long as a preview is playing: one pause, two reasons.
+  const [heroHovered, setHeroHovered] = useState(false);
+  const setHeroPaused = hero.setPaused;
+  useEffect(() => {
+    setHeroPaused(heroHovered || heroVideo.preview);
+  }, [heroHovered, heroVideo.preview, setHeroPaused]);
   const stationPreview = useStationPreview();
   // A profile switch discards an open preview: it belongs to the old profile,
   // and a response already in flight for it must never fill this one in.
@@ -957,6 +986,7 @@ export function DiscoverPage() {
       if (id === 'lastfm-radio') return lastfm.configured === true;
       if (id === 'listenbrainz') return true; // renders its own load/error states
       if (id === 'deezer-editorial') return true; // fetches and empties itself
+      if (id === 'sin-charts') return sinCharts.length > 0;
       if (id === 'build-a-playlist') return true; // a control, like adv-wave
       // always: 'Build a mix' lives in its header, so it must be reachable
       // before there is a single mix
@@ -966,7 +996,7 @@ export function DiscoverPage() {
       if (id === 'discover-bylt-sections') return byltRows.length > 0;
       return page.hasContent(id);
     },
-    [lastfm.configured, mixes, byltRows.length, page],
+    [lastfm.configured, mixes, byltRows.length, page, sinCharts.length],
   );
 
   const cacheShelf = (id: DiscoverSectionId) => {
@@ -1200,6 +1230,14 @@ export function DiscoverPage() {
         );
       case 'deezer-editorial':
         return <DeezerEditorialShelf onToast={(m) => toast(m, 'error')} />;
+      case 'sin-charts':
+        return (
+          <SinChartsShelf
+            charts={sinCharts}
+            loaded={sinChartsLoaded}
+            onToast={(m) => toast(m, 'error')}
+          />
+        );
       case 'build-a-playlist':
         return (
           <BuildPlaylistSection
@@ -1532,8 +1570,18 @@ export function DiscoverPage() {
               onViewRecommended={() => setRecModalKind('picks')}
               onOpenBlacklist={blacklist.openModal}
               artists={hero.artists}
-              onPauseChange={hero.setPaused}
+              onPauseChange={setHeroHovered}
               glowRgb={heroGlow}
+              rootRef={heroVideo.ref}
+              videoId={heroVideo.videoId}
+              videoPlaying={heroVideo.playing}
+              preview={heroVideo.preview}
+              closing={heroVideo.closing}
+              videoLive={heroVideo.videoLive}
+              soundOn={heroVideo.soundOn}
+              onTogglePreview={heroVideo.togglePreview}
+              onUnplayable={heroVideo.onUnplayable}
+              onLiveChange={heroVideo.onLiveChange}
             />
           </div>
           {week || gap ? (

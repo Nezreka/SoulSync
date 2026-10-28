@@ -56,6 +56,13 @@ interface StubOptions {
   /** Collects what was POSTed, for tests that care about the payload and not
    *  just that a request happened. */
   bodies?: { url: string; body: Record<string, unknown> }[];
+  /** #1822: the artist follows the watchlist defaults. */
+  followDefaults?: boolean;
+  /** #1822: artists with their own rules, as the defaults form reports. */
+  customCount?: number;
+  /** what you own of the panel's artist and how much you play them. */
+  library?: Record<string, unknown> | null;
+  listening?: Record<string, unknown> | null;
 }
 
 function stubFetch(options: StubOptions = {}) {
@@ -71,6 +78,10 @@ function stubFetch(options: StubOptions = {}) {
     globalAutoDownload = true,
     autoDownloadPref = null,
     bodies,
+    followDefaults = false,
+    customCount = 0,
+    library = null,
+    listening = null,
   } = options;
 
   const calls: string[] = [];
@@ -123,6 +134,7 @@ function stubFetch(options: StubOptions = {}) {
             include_instrumentals: false,
             exclude_terms: '',
             global_auto_download: globalAutoDownload,
+            custom_artist_count: customCount,
           },
         });
       }
@@ -137,6 +149,15 @@ function stubFetch(options: StubOptions = {}) {
       }
       if (url.includes('/api/podcasts/watchlist')) {
         return createResponse({ success: true, count: podcasts.length, podcasts });
+      }
+      if (url.includes('/api/watchlist/reset-to-defaults')) {
+        return createResponse({ success: true, reset: customCount });
+      }
+      if (url.includes('/api/library/albums/9/tracks')) {
+        return createResponse({
+          success: true,
+          tracks: [{ id: 't1', title: 'Minipops 67', file_path: '/m/syro/01.flac' }],
+        });
       }
       if (url.includes('/link-provider')) {
         return createResponse({ success: true });
@@ -159,6 +180,18 @@ function stubFetch(options: StubOptions = {}) {
             auto_download_pref: autoDownloadPref,
             global_auto_download: globalAutoDownload,
             quality_profile_id: null,
+            follow_defaults: followDefaults,
+            defaults: {
+              include_albums: true,
+              include_eps: true,
+              include_singles: true,
+              include_live: false,
+              include_remixes: false,
+              include_acoustic: false,
+              include_compilations: false,
+              include_instrumentals: false,
+              include_other_artists: false,
+            },
           },
           artist: {
             id: 'sp-aphex',
@@ -175,6 +208,8 @@ function stubFetch(options: StubOptions = {}) {
           amazon_artist_id: null,
           musicbrainz_artist_id: null,
           watchlist_name: 'Aphex Twin',
+          library,
+          listening,
           global_metadata_source: 'deezer',
           quality_profiles: [
             { id: 1, name: 'Lossless', is_default: true },
@@ -255,24 +290,23 @@ describe('watchlist route', () => {
     expect(screen.getByRole('button', { name: 'Open Search' })).toBeInTheDocument();
   });
 
-  it('only shows the global override banner when the override is on', async () => {
-    stubFetch({ globalOverride: false });
-    const { unmount } = renderWatchlistRoute();
-
-    await waitFor(() => {
-      expect(screen.getByText('Aphex Twin')).toBeInTheDocument();
+  it('marks an artist with its own rules, not one on the defaults (#1822)', async () => {
+    stubFetch({
+      artists: [
+        artistRow({ follow_defaults: false }),
+        artistRow({
+          id: 2,
+          artist_name: 'Boards',
+          spotify_artist_id: 'sp-boc',
+          follow_defaults: true,
+        }),
+      ],
     });
-    expect(screen.queryByText(/Global override is active/)).not.toBeInTheDocument();
-
-    unmount();
-    vi.unstubAllGlobals();
-
-    stubFetch({ globalOverride: true });
     renderWatchlistRoute();
 
-    await waitFor(() => {
-      expect(screen.getByText(/Global override is active/)).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByText('Boards')).toBeInTheDocument());
+    expect(document.querySelectorAll('.watchlist-pill-custom')).toHaveLength(1);
+    expect(screen.queryByText(/Global override is active/)).not.toBeInTheDocument();
   });
 
   it('shows the last-scan strip only once a scan has completed', async () => {
@@ -460,7 +494,9 @@ describe('watchlist route', () => {
     // The menu must not also trip the artist detail click.
     expect(router.state.location.search).not.toMatchObject({ detailId: 'sp-aphex' });
 
-    fireEvent.click(screen.getByText('Aphex Twin'));
+    // the panel names the artist too, so click the one in the roster
+    const roster = document.querySelector('.watchlist-roster-panel') as HTMLElement;
+    fireEvent.click(within(roster).getByText('Aphex Twin'));
     await waitFor(() => {
       expect(router.state.location.search).toMatchObject({ detailId: 'sp-aphex' });
     });
@@ -696,32 +732,30 @@ describe('watchlist route', () => {
     });
   });
 
-  it('opens global settings from the URL and saves', async () => {
-    const calls = stubFetch({ globalOverride: true });
+  it('opens the watchlist defaults from the URL and saves them', async () => {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    stubFetch({ bodies });
     renderWatchlistRoute(['/watchlist?settings=true']);
 
-    await waitFor(() => {
-      expect(screen.getByRole('dialog', { name: 'Global Watchlist Settings' })).toBeInTheDocument();
-    });
+    const dialog = await screen.findByRole('dialog', { name: 'Watchlist defaults' });
+    // no override switch any more, and nothing greyed out
+    expect(within(dialog).queryByText(/Enable Global Override/)).not.toBeInTheDocument();
 
-    // Populated from the loaded config, not from blank defaults.
-    const overrideToggle = screen.getByRole('checkbox', { name: /Enable Global Override/ });
-    expect(overrideToggle).toBeChecked();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save Global Settings' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save defaults' }));
 
     await waitFor(() => {
-      const posts = calls.filter((url) => url.includes('/api/watchlist/global-config'));
-      expect(posts.length).toBeGreaterThan(1);
+      expect(bodies.some((call) => call.url.includes('/api/watchlist/global-config'))).toBe(true);
     });
+    const saved = bodies.find((call) => call.url.includes('/api/watchlist/global-config'))!.body;
+    expect(saved.global_override_enabled).toBe(false);
   });
 
-  it('refuses to save an override with no release type, and says why', async () => {
-    stubFetch({ globalOverride: true });
+  it('refuses defaults with no release type, and says why', async () => {
+    stubFetch();
     window.showToast = vi.fn();
     renderWatchlistRoute(['/watchlist?settings=true']);
 
-    const dialog = await screen.findByRole('dialog', { name: 'Global Watchlist Settings' });
+    const dialog = await screen.findByRole('dialog', { name: 'Watchlist defaults' });
     const inDialog = within(dialog);
 
     // each box is found through its description text and the label around it.
@@ -732,7 +766,7 @@ describe('watchlist route', () => {
       expect(box.type).toBe('checkbox');
       if (box.checked) fireEvent.click(box);
     }
-    fireEvent.click(inDialog.getByRole('button', { name: 'Save Global Settings' }));
+    fireEvent.click(inDialog.getByRole('button', { name: 'Save defaults' }));
 
     await waitFor(() => {
       expect(window.showToast).toHaveBeenCalledWith(
@@ -742,12 +776,17 @@ describe('watchlist route', () => {
     });
   });
 
-  it('the Global Settings button reports an active override', async () => {
-    stubFetch({ globalOverride: true });
-    renderWatchlistRoute();
+  it('resets custom artists to the defaults, after asking', async () => {
+    const calls = stubFetch({ customCount: 3 });
+    window.showConfirmDialog = vi.fn(async () => true);
+    renderWatchlistRoute(['/watchlist?settings=true']);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Watchlist defaults' });
+    expect(within(dialog).getByText(/3 artists have their own rules/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset all to defaults' }));
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Global Override ON/ })).toBeInTheDocument();
+      expect(calls.some((url) => url.includes('/api/watchlist/reset-to-defaults'))).toBe(true);
     });
   });
 
@@ -761,15 +800,12 @@ describe('watchlist route', () => {
       expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('1,234,567')).toBeInTheDocument();
-    expect(screen.getByText('71/100')).toBeInTheDocument();
-    // Genres cap at three even when the payload carries four.
-    expect(screen.getByText('braindance')).toBeInTheDocument();
-    expect(screen.queryByText('electronic')).not.toBeInTheDocument();
+    // configId opens the one artist panel on its Rules tab
+    expect(screen.getByRole('tab', { name: 'Rules' })).toHaveAttribute('aria-selected', 'true');
 
     // Stored config, not defaults: EPs off, singles on, lookback 90.
-    expect(screen.getByRole('checkbox', { name: /Extended plays/ })).not.toBeChecked();
-    expect(screen.getByRole('checkbox', { name: /Single tracks and/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'EPs' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Singles' })).toBeChecked();
     expect(screen.getByLabelText('Scan lookback')).toHaveValue('90');
   });
 
@@ -800,6 +836,7 @@ describe('watchlist route', () => {
       expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Sources' }));
     // Matched on Spotify + Deezer only.
     expect(screen.getByRole('button', { name: 'Spotify' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Deezer' })).toBeInTheDocument();
@@ -818,8 +855,8 @@ describe('watchlist route', () => {
       expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /Extended plays/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'EPs' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
       expect(calls.filter((url) => url.includes('/config')).length).toBeGreaterThan(1);
@@ -844,7 +881,7 @@ describe('watchlist route', () => {
     fireEvent.click(
       screen.getByRole('checkbox', { name: /Auto-download new releases by default/ }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Save Global Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save defaults' }));
 
     await waitFor(() => {
       expect(bodies.some((call) => call.url.includes('global-config'))).toBe(true);
@@ -881,7 +918,7 @@ describe('watchlist route', () => {
     fireEvent.change(screen.getByLabelText('New releases from this artist'), {
       target: { value: 'never' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
       expect(bodies.some((call) => call.url.includes('/config'))).toBe(true);
@@ -902,8 +939,8 @@ describe('watchlist route', () => {
       expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /Extended plays/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'EPs' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
       expect(bodies.some((call) => call.url.includes('/config'))).toBe(true);
@@ -924,9 +961,9 @@ describe('watchlist route', () => {
       expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('checkbox', { name: /Full-length studio albums/ }));
-    fireEvent.click(screen.getByRole('checkbox', { name: /Single tracks and/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Albums' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Singles' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
       expect(window.showToast).toHaveBeenCalledWith(
@@ -946,6 +983,7 @@ describe('watchlist route', () => {
       expect(screen.getByLabelText('Quality Profile')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Sources' }));
     // Matched rows offer Fix + clear; unmatched offer Match.
     expect(screen.getAllByRole('button', { name: 'Fix' })).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: 'Match' })).toHaveLength(4);
@@ -970,6 +1008,7 @@ describe('watchlist route', () => {
     const calls = stubFetch();
     renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
 
+    fireEvent.click(await screen.findByRole('tab', { name: 'Sources' }));
     await waitFor(() => {
       expect(screen.getByLabelText('Clear Spotify match')).toBeInTheDocument();
     });
@@ -981,18 +1020,46 @@ describe('watchlist route', () => {
     });
   });
 
-  it('warns inside the config modal while the global override is on', async () => {
-    stubFetch({ globalOverride: true });
+  it('a following artist shows the switch on, and a rule change gives it its own rules', async () => {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    stubFetch({ bodies, followDefaults: true });
     renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
 
+    const follow = await screen.findByRole('switch', { name: /Follow watchlist defaults/ });
+    expect(follow).toBeChecked();
+    expect(screen.getByText('Defaults')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Live' }));
+    expect(follow).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
     await waitFor(() => {
-      expect(
-        screen.getByText(/these per-artist settings are currently ignored during scans/),
-      ).toBeInTheDocument();
+      expect(bodies.some((call) => call.url.includes('/config'))).toBe(true);
     });
+    const saved = bodies.find((call) => call.url.includes('/config'))!.body;
+    expect(saved.follow_defaults).toBe(false);
+    expect(saved.include_live).toBe(true);
   });
 
-  it('opens the artist detail panel with releases and watchlist info', async () => {
+  it('switching an artist back to the defaults saves follow_defaults', async () => {
+    const bodies: { url: string; body: Record<string, unknown> }[] = [];
+    stubFetch({ bodies, followDefaults: false });
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    const follow = await screen.findByRole('switch', { name: /Follow watchlist defaults/ });
+    expect(follow).not.toBeChecked();
+    fireEvent.click(follow);
+    // the chips show the defaults it will get (EPs is on in the defaults)
+    expect(screen.getByRole('checkbox', { name: 'EPs' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => {
+      expect(bodies.some((call) => call.url.includes('/config'))).toBe(true);
+    });
+    expect(bodies.find((call) => call.url.includes('/config'))!.body.follow_defaults).toBe(true);
+  });
+
+  it('opens the artist panel on its overview, with every genre and the stats', async () => {
     stubFetch();
     renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
 
@@ -1002,50 +1069,152 @@ describe('watchlist route', () => {
       expect(screen.getByText('1,234,567')).toBeInTheDocument();
     });
 
-    expect(screen.getByRole('button', { name: '← Back to Watchlist' })).toBeInTheDocument();
-    // The detail hero shows ALL genres, unlike the config modal which caps at 3.
+    expect(screen.getByText('71/100')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
+    // the overview shows ALL genres
     expect(screen.getByText('electronic')).toBeInTheDocument();
-
-    // The grid stays mounted underneath, so "Albums" legitimately appears
-    // twice — scope the pill assertions to the panel itself.
-    const panel = document.querySelector('.watchlist-artist-detail-overlay');
-    expect(panel).not.toBeNull();
-    const inPanel = within(panel as HTMLElement);
-    expect(inPanel.getByText('Albums')).toBeInTheDocument();
-    expect(inPanel.getByText('Singles')).toBeInTheDocument();
-    expect(inPanel.queryByText('EPs')).not.toBeInTheDocument();
+    expect(screen.getByText('braindance')).toBeInTheDocument();
   });
 
-  it('Settings swaps the detail panel for the config modal', async () => {
+  it('shows your listening and your library on the overview', async () => {
+    stubFetch({
+      listening: {
+        play_count: 212,
+        plays_30d: 18,
+        last_played: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+        months: [
+          ...Array.from({ length: 11 }, (_, i) => ({
+            month: `2025-${String(i + 1).padStart(2, '0')}`,
+            plays: 0,
+          })),
+          { month: '2025-12', plays: 9 },
+        ],
+        top_tracks: [
+          {
+            title: 'Xtal',
+            album: 'Selected Ambient Works 85-92',
+            play_count: 40,
+            thumb_url: '',
+          },
+          { title: 'Avril 14th', album: 'Avril 14th', play_count: 22, thumb_url: '' },
+        ],
+      },
+      library: {
+        artist_id: 77,
+        album_count: 4,
+        track_count: 52,
+        recent_albums: [
+          {
+            id: 9,
+            title: 'Syro',
+            year: 2014,
+            thumb_url: '',
+            added_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+            track_count: 12,
+          },
+        ],
+      },
+    });
+    const navigateToPage = vi.fn();
+    vi.stubGlobal('navigateToPage', navigateToPage);
+    const playTrackList = vi.fn(async () => {});
+    vi.stubGlobal('playTrackList', playTrackList);
+    renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    const panel = within(await screen.findByRole('dialog'));
+    expect(await panel.findByText('Your listening')).toBeInTheDocument();
+    expect(panel.getByText('212')).toBeInTheDocument();
+    expect(panel.getByText(/last played 3 days ago/)).toBeInTheDocument();
+    expect(panel.getByRole('button', { name: /Xtal/ })).toBeInTheDocument();
+    // a single's album is its title, said once
+    expect(panel.getAllByText('Avril 14th')).toHaveLength(1);
+    expect(panel.getByLabelText('December 2025: 9 plays')).toBeInTheDocument();
+    expect(panel.getByText('4 albums · 52 tracks')).toBeInTheDocument();
+    expect(panel.getByText('added 2 days ago')).toBeInTheDocument();
+
+    // an owned album plays, from the library's files
+    fireEvent.click(panel.getByTitle('Play Syro'));
+    await waitFor(() => expect(playTrackList).toHaveBeenCalledTimes(1));
+    expect(playTrackList).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          title: 'Minipops 67',
+          file_path: '/m/syro/01.flac',
+          is_library: true,
+        }),
+      ],
+      'Syro',
+    );
+    expect(navigateToPage).not.toHaveBeenCalled();
+
+    // Open is what goes to the library artist
+    fireEvent.click(panel.getByRole('button', { name: 'Open' }));
+    expect(navigateToPage).toHaveBeenCalledWith('artist-detail', {
+      artistId: 77,
+      artistName: 'Aphex Twin',
+    });
+  });
+
+  it('hides listening and library when there is nothing to say', async () => {
     stubFetch();
-    const { router } = renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
-
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-
-    await waitFor(() => {
-      expect(router.state.location.search).toMatchObject({ configId: 'sp-aphex' });
-    });
-    // The panel must close, or it would sit on top of the modal.
-    expect(router.state.location.search).not.toMatchObject({ detailId: 'sp-aphex' });
-  });
-
-  it('removes the artist from the detail panel', async () => {
-    const calls = stubFetch();
     renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Remove from Watchlist' })).toBeInTheDocument();
+      expect(screen.getByText('1,234,567')).toBeInTheDocument();
     });
+    expect(screen.queryByText('Your listening')).not.toBeInTheDocument();
+    expect(screen.queryByText('In your library')).not.toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove from Watchlist' }));
+  it('switches to Rules inside the same panel (#1822: one artist view, not three)', async () => {
+    stubFetch();
+    const { router } = renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Rules' }));
+
+    expect(await screen.findByText('What to grab')).toBeInTheDocument();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    const panel = within(screen.getByRole('dialog'));
+    expect(panel.getByRole('checkbox', { name: 'Albums' })).toBeChecked();
+    expect(panel.getByRole('checkbox', { name: 'EPs' })).not.toBeChecked();
+    expect(router.state.location.search).toMatchObject({ detailId: 'sp-aphex' });
+  });
+
+  it('only shows a save bar once something changed', async () => {
+    stubFetch();
+    renderWatchlistRoute(['/watchlist?configId=sp-aphex']);
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'EPs' }));
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'EPs' })).not.toBeChecked();
+  });
+
+  it('removes the artist from the panel, after asking', async () => {
+    const calls = stubFetch();
+    window.showConfirmDialog = vi.fn(async () => true);
+    renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Artist actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from watchlist' }));
 
     await waitFor(() => {
       expect(calls.some((url) => url.includes('/api/watchlist/remove'))).toBe(true);
     });
+    expect(window.showConfirmDialog).toHaveBeenCalled();
+  });
+
+  it('keeps the artist when the remove is declined', async () => {
+    const calls = stubFetch();
+    window.showConfirmDialog = vi.fn(async () => false);
+    renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Artist actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from watchlist' }));
+
+    await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
+    expect(calls.some((url) => url.includes('/api/watchlist/remove'))).toBe(false);
   });
 
   it('disables View Discography for an artist with no provider ids', async () => {
@@ -1064,9 +1233,9 @@ describe('watchlist route', () => {
     renderWatchlistRoute();
 
     await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: /Cancel Scan/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Stop scan/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Scan for New Releases/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Scan now/ }));
     await waitFor(() => {
       expect(calls.some((url) => url.endsWith('/api/watchlist/scan'))).toBe(true);
     });
@@ -1108,7 +1277,7 @@ describe('watchlist route', () => {
     expect(screen.getByText('Dandelion')).toBeInTheDocument();
     expect(screen.getByText('Roygbiv')).toBeInTheDocument();
     // Cancel appears only while scanning.
-    expect(screen.getByRole('button', { name: /Cancel Scan/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Stop scan/ })).toBeInTheDocument();
   });
 
   it('shows the completion summary and the track ledger when a scan finishes', async () => {
@@ -1153,7 +1322,7 @@ describe('watchlist route', () => {
     expect(screen.getByText(/already queued or blocklisted \(1\)/)).toBeInTheDocument();
   });
 
-  it('opens the shared vanilla modals from the action bar', async () => {
+  it('opens the shared vanilla modals from the menu', async () => {
     stubFetch();
     window.openDownloadOriginsModal = vi.fn();
     window.openWatchlistHistoryModal = vi.fn();
@@ -1162,9 +1331,12 @@ describe('watchlist route', () => {
 
     await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: /Download Origins/ }));
-    fireEvent.click(screen.getByRole('button', { name: /History/ }));
-    fireEvent.click(screen.getByRole('button', { name: /Blocklist/ }));
+    // monthly jobs live behind ⋯ (#1822); each pick closes the menu
+    const more = screen.getByRole('button', { name: 'More watchlist actions' });
+    for (const name of ['Download origins', 'Scan history', 'Blocklist']) {
+      fireEvent.click(more);
+      fireEvent.click(screen.getByRole('menuitem', { name }));
+    }
 
     // These modals live in other vanilla files and are shared with other
     // pages, so the React page invokes them rather than reimplementing them.
@@ -1179,7 +1351,8 @@ describe('watchlist route', () => {
 
     await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: /Update Similar Artists/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'More watchlist actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Update similar artists/ }));
 
     await waitFor(() => {
       expect(calls.some((url) => url.includes('/api/watchlist/update-similar-artists'))).toBe(true);
@@ -1187,7 +1360,7 @@ describe('watchlist route', () => {
 
     // Both drive the same worker, so Scan is disabled until it reports done.
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Scan for New Releases/ })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /Updating similar artists/ })).toBeDisabled();
     });
   });
 

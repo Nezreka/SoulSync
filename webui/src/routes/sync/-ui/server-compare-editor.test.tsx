@@ -879,3 +879,62 @@ describe('Remove from Server (whole-playlist delete)', () => {
     expect(onBack).not.toHaveBeenCalled();
   });
 });
+
+describe('ServerCompareEditor — unmatch', () => {
+  const PAIRED = {
+    match_status: 'matched',
+    confidence: 1,
+    source_track: { position: 1, name: 'Sanctuary', artist: 'TAYA.', source_track_id: 'sp1' },
+    server_track: { id: 's9', title: 'Sanctuary', artist: 'Various Artists' },
+  };
+
+  it('offers unmatch only on a matched row with ids on both sides', async () => {
+    renderEditor();
+    await waitFor(() => expect(screen.getAllByText('Alright').length).toBeGreaterThan(0));
+    // TRACKS[0] is matched but its source row carries no source_track_id
+    expect(document.querySelector('.server-track-unmatch-btn')).toBeNull();
+  });
+
+  it('posts both ids, leaves the playlist alone and splits the pair', async () => {
+    payload = { success: true, server_type: 'navidrome', tracks: [PAIRED] };
+    writePayload = { success: true };
+    const toast = vi.fn();
+    vi.stubGlobal('showToast', toast);
+    renderEditor();
+    await waitFor(() => expect(document.querySelector('.server-track-unmatch-btn')).not.toBeNull());
+
+    fireEvent.click(document.querySelector('.server-track-unmatch-btn') as Element);
+
+    await waitFor(() => expect(calls.some((c) => c.url.includes('/unmatch-track'))).toBe(true));
+    expect(calls.find((c) => c.url.includes('/unmatch-track'))?.body).toEqual({
+      playlist_name: 'Road Trip',
+      source_track_id: 'sp1',
+      server_track_id: 's9',
+    });
+    expect(calls.some((c) => c.url.includes('/remove-track'))).toBe(false);
+    await waitFor(() =>
+      expect(
+        document.querySelector('#server-col-server-scroll [data-status="extra"]'),
+      ).not.toBeNull(),
+    );
+    expect(
+      document.querySelector('#server-col-source-scroll [data-status="missing"]'),
+    ).not.toBeNull();
+    expect(toast).toHaveBeenCalledWith(
+      'Match removed. The track stays in the playlist.',
+      'success',
+    );
+  });
+
+  it('a refused unmatch keeps the pair', async () => {
+    payload = { success: true, server_type: 'navidrome', tracks: [PAIRED] };
+    writePayload = { success: false, error: 'nope' };
+    const toast = vi.fn();
+    vi.stubGlobal('showToast', toast);
+    renderEditor();
+    await waitFor(() => expect(document.querySelector('.server-track-unmatch-btn')).not.toBeNull());
+    fireEvent.click(document.querySelector('.server-track-unmatch-btn') as Element);
+    await waitFor(() => expect(toast).toHaveBeenCalledWith('nope', 'error'));
+    expect(document.querySelector('[data-status="extra"]')).toBeNull();
+  });
+});

@@ -462,11 +462,45 @@ def test_anilist_rejects_title_mismatch(db, monkeypatch):
     assert AniListWorker(db).fetch({"kind": "show", "title": "The Office"}) is None
 
 
-def test_anilist_worker_records_score(db):
+def _animated_show(db, title, year):
     with db.connect() as c:
-        c.execute("INSERT INTO shows (title, year) VALUES ('Bebop', 1998)")
-        sid = c.execute("SELECT id FROM shows WHERE title='Bebop'").fetchone()["id"]
+        c.execute("INSERT INTO shows (title, year) VALUES (?, ?)", (title, year))
+        sid = c.execute("SELECT id FROM shows WHERE title=?", (title,)).fetchone()["id"]
+        c.execute("INSERT OR IGNORE INTO genres (name) VALUES ('Animation')")
+        gid = c.execute("SELECT id FROM genres WHERE name='Animation'").fetchone()["id"]
+        c.execute("INSERT INTO show_genres (show_id, genre_id) VALUES (?, ?)", (sid, gid))
         c.commit()
+    return sid
+
+
+def test_anilist_only_visits_animation(db):
+    # a title search scored Arrow, Angel and The Bear off same-named anime;
+    # only an animated show is worth asking about
+    with db.connect() as c:
+        c.execute("INSERT INTO shows (title, year) VALUES ('The Bear', 2022)")
+        c.commit()
+    assert db.backfill_next("anilist") is None
+    sid = _animated_show(db, "Cowboy Bebop", 1998)
+    item = db.backfill_next("anilist")
+    assert item["id"] == sid and item["year"] == 1998
+
+
+def test_anilist_rejects_a_longer_title_and_a_far_year(db, monkeypatch):
+    import core.video.enrichment.backfill as bf
+
+    def media(title, year):
+        return {"data": {"Media": {"averageScore": 40, "startDate": {"year": year},
+                                   "title": {"romaji": title, "english": title}}}}
+    monkeypatch.setattr(bf, "_http_post_json", lambda *a, **k: media("The Bear's Claw", 2022))
+    assert AniListWorker(db).fetch({"kind": "show", "title": "The Bear", "year": 2022}) is None
+    monkeypatch.setattr(bf, "_http_post_json", lambda *a, **k: media("Arrow", 1990))
+    assert AniListWorker(db).fetch({"kind": "show", "title": "Arrow", "year": 2012}) is None
+    monkeypatch.setattr(bf, "_http_post_json", lambda *a, **k: media("Cowboy Bebop", 1998))
+    assert AniListWorker(db).fetch({"kind": "show", "title": "Cowboy Bebop", "year": 1998}) == {"anilist_score": 40}
+
+
+def test_anilist_worker_records_score(db):
+    sid = _animated_show(db, "Bebop", 1998)
     w = AniListWorker(db)
     w.fetch = lambda item: {"anilist_score": 87}
     assert w.process_one() is True

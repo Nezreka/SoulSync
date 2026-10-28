@@ -51,6 +51,7 @@ class _FakeDatabase:
         cursor.executescript("""
             CREATE TABLE discovery_pool (
                 id INTEGER PRIMARY KEY,
+                profile_id INTEGER NOT NULL DEFAULT 1,
                 source TEXT NOT NULL,
                 spotify_track_id TEXT,
                 itunes_track_id TEXT,
@@ -210,10 +211,11 @@ def test_discovery_helper_filters_only_this_profiles_blocks(service):
     from core.profile_context import reset_background_profile, set_background_profile
 
     svc, db = service
-    db.insert_discovery_track(
-        source='spotify', spotify_track_id='sp1', track_name='Theirs',
-        artist_name='Their Block', album_name='X',
-    )
+    for pid in (1, 2):      # the pool is per profile, both hold the track
+        db.insert_discovery_track(
+            source='spotify', spotify_track_id='sp1', track_name='Theirs',
+            artist_name='Their Block', album_name='X', profile_id=pid,
+        )
     db.blacklist('their block', profile_id=2)
 
     def names():
@@ -224,6 +226,29 @@ def test_discovery_helper_filters_only_this_profiles_blocks(service):
     token = set_background_profile(2)
     try:
         assert names() == []
+    finally:
+        reset_background_profile(token)
+
+
+def test_discovery_helper_reads_only_this_profiles_pool(service):
+    """profile 2's hidden gems / shuffle / time machine came out of every
+    profile's pool before"""
+    from core.profile_context import reset_background_profile, set_background_profile
+
+    svc, db = service
+    db.insert_discovery_track(source='spotify', spotify_track_id='a', track_name='Mine',
+                              artist_name='A', album_name='X', profile_id=1)
+    db.insert_discovery_track(source='spotify', spotify_track_id='b', track_name='Theirs',
+                              artist_name='B', album_name='Y', profile_id=2)
+
+    def names():
+        return [t['track_name'] for t in svc._select_discovery_tracks(
+            source='spotify', order_by='track_name', fetch_limit=100)]
+
+    assert names() == ['Mine']
+    token = set_background_profile(2)
+    try:
+        assert names() == ['Theirs']
     finally:
         reset_background_profile(token)
 
@@ -368,6 +393,23 @@ def test_adaptive_limits_high_variety():
     max_album, max_artist = svc._compute_adaptive_diversity_limits(tracks)
     # High variety tier — strict limits
     assert (max_album, max_artist) == (3, 5)
+
+
+def test_adaptive_limits_plenty_of_artists_caps_tight():
+    svc = PersonalizedPlaylistsService(_FakeDatabase())
+    tracks = [{'artist_name': f'a{i}'} for i in range(45)]
+    assert svc._compute_adaptive_diversity_limits(tracks) == (2, 3)
+    assert svc._compute_adaptive_diversity_limits(tracks, relaxed=True) == (2, 3)
+
+
+def test_diversity_output_never_stacks_an_artist_when_it_can_help_it():
+    svc = PersonalizedPlaylistsService(_FakeDatabase())
+    tracks = ([{'artist_name': 'U2', 'album_name': f'u{i}'} for i in range(3)]
+              + [{'artist_name': f'a{i}', 'album_name': f'x{i}'} for i in range(4)])
+    out = svc._apply_diversity_filter(tracks, max_per_album=2, max_per_artist=3, limit=7)
+    names = [t['artist_name'] for t in out]
+    assert sorted(names) == sorted(t['artist_name'] for t in tracks)
+    assert all(a != b for a, b in zip(names, names[1:]))
 
 
 def test_adaptive_limits_low_variety():

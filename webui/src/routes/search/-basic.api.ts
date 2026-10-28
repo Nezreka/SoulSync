@@ -2,7 +2,13 @@ import { HTTPError } from 'ky';
 
 import { apiClient, readJson } from '@/app/api-client';
 
-import type { BasicResult, BasicSource, BasicSourcesResponse } from './-basic.types';
+import type {
+  BasicResult,
+  BasicSearchOutcome,
+  BasicSearchResponse,
+  BasicSource,
+  BasicSourcesResponse,
+} from './-basic.types';
 
 /**
  * The download sources the chip row offers.
@@ -42,16 +48,19 @@ export function isSingleSourceMode(response: BasicSourcesResponse): boolean {
  * `source` is omitted when there is none to send: the server then falls
  * through to the orchestrator's own selection (single-source mode, or the
  * first source in the hybrid chain).
+ *
+ * `warnings` lists prowlarr indexers that failed while others answered, so
+ * the page can say the results are incomplete (#1831).
  */
 export async function performBasicSearch(
   query: string,
   source: string | null,
   signal?: AbortSignal,
-): Promise<BasicResult[]> {
+): Promise<BasicSearchOutcome> {
   const json: { query: string; source?: string } = { query };
   if (source) json.source = source;
 
-  const data = await readJson<{ results?: BasicResult[]; error?: string }>(
+  const data = await readJson<BasicSearchResponse>(
     apiClient.post('search', { json, timeout: false, signal }),
   );
 
@@ -59,7 +68,7 @@ export async function performBasicSearch(
   // problems (a SoundCloud link with the source disabled, say). Surfacing it
   // as a thrown error is what puts the message in the status bar.
   if (data?.error) throw new Error(data.error);
-  return data?.results ?? [];
+  return { results: data?.results ?? [], warnings: data?.warnings ?? [] };
 }
 
 export interface DownloadResponse {

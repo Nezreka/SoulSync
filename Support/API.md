@@ -816,6 +816,59 @@ Library statistics (counts and database info).
 
 ---
 
+### Library — Download Activity
+
+#### `GET /api/v1/library/download-activity`
+
+Per-album completed-download aggregates, used by the MetaSync node to build its download-based signals. One row per library album that has at least one completed download, keyed by the album's MusicBrainz release ID (an opaque text identifier). Only IDs, counts, and timestamps are returned — no titles or file paths. Albums without a MusicBrainz release ID do not appear.
+
+**Parameters:**
+- `since` (optional): ISO-8601 timestamp. Each row's `completed_since` counts only downloads completed at or after this instant.
+- `until` (optional): ISO-8601 timestamp. `completed_since` counts only downloads completed before this instant, so `since` + `until` count one closed window. Without either, `completed_since` equals `completed_downloads`.
+
+```json
+{
+  "data": {
+    "albums": [
+      {
+        "musicbrainz_release_id": "b1392450-e666-3926-a536-22c65f834433",
+        "completed_downloads": 12,
+        "completed_since": 3,
+        "first_downloaded_at": "2026-08-02 14:03:11",
+        "last_downloaded_at": "2026-10-21 09:30:00"
+      }
+    ]
+  }
+}
+```
+
+#### `GET /api/v1/library/listening-activity`
+
+Per-album listening aggregates for one time window, used by the MetaSync node for its opt-in listening signal. One row per library album played in `[since, until)`, keyed by the album's MusicBrainz release ID: how many plays, how many distinct tracks, and on how many distinct (UTC) days. Only IDs and counts are returned — no titles, no individual play times, no profile or media-server details. Albums without a MusicBrainz release ID, and plays that matched no library track, do not appear.
+
+Only the **shared** listening history is read — the plays the admin's own stats show. A profile with its own ListenBrainz, Last.fm, or media-server account keeps its own history, and that history is never included here.
+
+**Parameters:**
+- `since` (required): ISO-8601 timestamp, window start (inclusive).
+- `until` (required): ISO-8601 timestamp, window end (exclusive). At most 31 days after `since`.
+
+```json
+{
+  "data": {
+    "albums": [
+      {
+        "musicbrainz_release_id": "b1392450-e666-3926-a536-22c65f834433",
+        "plays": 14,
+        "distinct_tracks": 9,
+        "distinct_days": 3
+      }
+    ]
+  }
+}
+```
+
+---
+
 ### Search
 
 Search external music sources (Spotify, iTunes, Hydrabase). These endpoints search **external services**, not your local library (use `/library/tracks` or `/library/lookup` for that).
@@ -1102,7 +1155,8 @@ List all watched artists for the current profile.
         "include_live": false,
         "include_remixes": false,
         "include_acoustic": false,
-        "include_compilations": false
+        "include_compilations": false,
+        "follow_defaults": true
       }
     ]
   }
@@ -1130,6 +1184,7 @@ List all watched artists for the current profile.
 | `include_remixes` | bool | Include remixes |
 | `include_acoustic` | bool | Include acoustic versions |
 | `include_compilations` | bool | Include compilations |
+| `follow_defaults` | bool | The artist uses the watchlist defaults. The `include_*` fields then show the defaults, which are the rules a scan applies |
 
 #### `POST /api/v1/watchlist`
 
@@ -1154,7 +1209,9 @@ Update content type filters for a watched artist without having to remove and re
 }
 ```
 
-Accepts any combination of: `include_albums`, `include_eps`, `include_singles`, `include_live`, `include_remixes`, `include_acoustic`, `include_compilations`.
+Accepts any combination of: `include_albums`, `include_eps`, `include_singles`, `include_live`, `include_remixes`, `include_acoustic`, `include_compilations`, `follow_defaults`.
+
+Send `"follow_defaults": true` to put an artist back on the watchlist defaults. Sending release rules for an artist that follows the defaults gives it its own rules, starting from the defaults it was getting, so the fields you leave out keep the values a scan was already using.
 
 **Response:**
 
@@ -2267,6 +2324,14 @@ Titles in the video library. `kind=movies|shows` (default `movies`), plus `searc
 
 #### `GET /api/v1/video/library/genres`
 
+#### `GET /api/v1/video/<kind>/<id>/library`
+
+What you own of one library movie or show (`kind=movie|show`, `id` is the library id). Every file with its resolution, quality, codecs, audio, size, runtime and path, whether SoulSync can reach it, the subtitles beside it and whether its name matches your naming template; the title's match (`tmdb_id`, `imdb_id`, `tvdb_id`, `fixed`); and the quality verdict against its profile. For a show, every season with `owned`, `missing`, `upcoming`, `size_bytes`, `res_mix` and `monitored`, plus the folders the show lives in. `?season=<n>` adds the disk checks (reachability, subtitles, naming) for that season's files; without it a show is a database read.
+
+#### `POST /api/v1/video/<kind>/<id>/identify`
+
+Fix match. Body: `{"tmdb_id": 841}`. Re-points the library title to that TMDB entry, fills the imdb / tvdb ids TMDB gives for it, takes TMDB's title and year when your server named it differently, and locks the ids so a scan can't switch it back. Returns the new `tmdb_id`, `title` and `year`. `409` (with nothing changed) when TMDB doesn't answer for that id.
+
 #### `GET /api/v1/video/search?q=`
 
 TMDB multi-search over movies, shows and people.
@@ -2329,6 +2394,8 @@ Video downloads, active rows first then newest (the latest 100). `status` filter
 #### `GET /api/v1/video/calendar`
 
 Upcoming and recent episodes and releases. `start` and `end` as ISO dates.
+
+For a calendar app, use the iCal feed instead: `GET /api/video/calendar/feed/<token>.ics`. The token is per profile and is the credential, so the feed needs no session or API key. Get the link from the calendar page (⋯ → Subscribe), or `GET /api/video/calendar/feed-url` from a signed-in session; `POST` to the same path makes a new token and retires the old one. The feed takes `days` (1–60, default 14), `scope=watchlist|all`, `movies=0` and `specials=1`, and applies that profile's video access and rating limits.
 
 #### `GET /api/v1/video/requests`
 

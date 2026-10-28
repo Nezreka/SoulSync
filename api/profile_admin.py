@@ -89,7 +89,8 @@ def sign_out_everywhere(profile_id):
     target = db.get_profile(profile_id)
     if not target:
         return jsonify({"success": False, "error": "Profile not found"}), 404
-    epoch = db.bump_profile_session_epoch(profile_id)
+    epoch = db.bump_profile_session_epoch(
+        profile_id, keep_device_id=session.get("device_id") if int(profile_id) == int(pid) else None)
     if epoch is None:
         return jsonify({"success": False, "error": "Could not sign out"}), 500
     from core.security.session_epoch import forget
@@ -211,61 +212,68 @@ def _open_invite(token):
     if locked:
         return None, (jsonify({"success": False, "error": "Too many attempts"}), 429, {"Retry-After": str(retry)})
     inv = get_database().get_profile_invite_by_hash(_hash(token or ""))
-    if (not inv or inv.get("used_at") or inv.get("revoked_at")
-            or str(inv.get("expires_at") or "") <= _now_sql()):
+    if not invite_is_open(inv):
         _invite_limiter.record_failure(ip, "invite", now)
         return None, (jsonify({"success": False, "error": "This invite link isn't valid any more"}), 404)
     return inv, None
 
 
+def invite_is_open(inv) -> bool:
+    return bool(inv and not inv.get("used_at") and not inv.get("revoked_at")
+                and str(inv.get("expires_at") or "") > _now_sql())
+
+
+def reopen_invite(token):
+    """the invite behind a raw token if it can still be used, else None. for
+    the oidc callback, which already counted its lookup on the way out"""
+    inv = get_database().get_profile_invite_by_hash(_hash(token or ""))
+    return inv if invite_is_open(inv) else None
+
+
+def _oidc_only_on() -> bool:
+    from core.security.oidc_only import is_on
+    return is_on(config_manager)
+
+
 @bp.route("/api/invite/<token>", methods=["GET"])
 def read_invite(token):
-    """what the invite page shows before someone accepts: nothing private."""
+    """what the invite page shows before someone accepts: nothing private.
+    while sign-in is oidc only (#1839) the page sends the person to the
+    provider instead of asking for a password, and shows (once) why the
+    last round trip didn't work"""
     inv, err = _open_invite(token)
     if err:
         return err
     preset = inv.get("preset") or {}
-    return jsonify({"success": True, "note": inv.get("note"), "expires_at": inv.get("expires_at"),
-                    "sides": preset.get("allowed_sides") or "music",
-                    "can_download": bool(preset.get("can_download", True)),
-                    "password_required": bool(_require_login_enabled())})
+    oidc = _oidc_only_on()
+    out = {"success": True, "note": inv.get("note"), "expires_at": inv.get("expires_at"),
+           "sides": preset.get("allowed_sides") or "music",
+           "can_download": bool(preset.get("can_download", True)),
+           "password_required": bool(_require_login_enabled()) and not oidc,
+           "oidc": oidc}
+    if oidc:
+        from core.security import oidc_signin
+        settings = oidc_signin.read_settings(config_manager)
+        out["oidc_label"] = settings.button_label if settings else oidc_signin.DEFAULT_BUTTON_LABEL
+        out["error"] = session.pop("oidc_invite_error", None)
+    return jsonify(out)
 
 
-@bp.route("/api/invite/<token>/accept", methods=["POST"])
-def accept_invite(token):
-    """{name, avatar_color?, pin?, password?}: makes the profile with the
-    invite's access and signs this browser in as it. the invite is spent
-    before the profile exists, so two tabs can't both use it."""
-    inv, err = _open_invite(token)
-    if err:
-        return err
-    db = get_database()
-    body = request.get_json(silent=True) or {}
-    name = str(body.get("name") or "").strip()[:40]
-    if not name:
-        return jsonify({"success": False, "error": "Pick a name"}), 400
+def create_from_invite(db, inv, *, name, color, pin_hash, password=None):
+    """spend the invite, then make its profile with the invite's access.
+    (new id, None) or (None, why). the spend comes first, so two tabs (or a
+    tab and an oidc round trip) can't both use it"""
     if db.get_profile_by_name(name):
-        return jsonify({"success": False, "error": "That name is taken"}), 409
-    pin = str(body.get("pin") or "")
-    if pin and not (pin.isdigit() and 4 <= len(pin) <= 20):
-        return jsonify({"success": False, "error": "A PIN is 4 to 20 digits"}), 400
-    password = str(body.get("password") or "")
-    if _require_login_enabled() and len(password) < 6:
-        return jsonify({"success": False, "error": "Choose a password of at least 6 characters"}), 400
+        return None, "That name is taken"
     if not db.claim_profile_invite(inv["id"], 0):
-        return jsonify({"success": False, "error": "This invite link isn't valid any more"}), 404
+        return None, "This invite link isn't valid any more"
     preset = inv.get("preset") or {}
-    pin_hash = None
-    if pin:
-        from werkzeug.security import generate_password_hash
-        pin_hash = generate_password_hash(pin, method="pbkdf2:sha256")
-    color = str(body.get("avatar_color") or "#6366f1")[:20]
     new_id = db.create_profile(name, color, pin_hash, is_admin=False,
                                allowed_pages=preset.get("allowed_pages"),
                                can_download=bool(preset.get("can_download", True)),
                                allowed_sides=preset.get("allowed_sides"))
     if not new_id:
-        return jsonify({"success": False, "error": "Could not create the profile"}), 500
+        return None, "Could not create the profile"
     extra = {k: preset[k] for k in ("hide_explicit", "max_rating", "request_limit", "request_limit_days")
              if k in preset}
     if extra:
@@ -280,18 +288,75 @@ def accept_invite(token):
         conn.close()
     except Exception:  # noqa: BLE001
         logger.debug("invite used_by write failed", exc_info=True)
+    audit("invite_used", new_id, name, actor=(new_id, name, False))
+    return new_id, None
+
+
+def _invite_fields(body):
+    """(name, color, pin_hash, error_response) from the invite page's form"""
+    name = str(body.get("name") or "").strip()[:40]
+    if not name:
+        return None, None, None, (jsonify({"success": False, "error": "Pick a name"}), 400)
+    pin = str(body.get("pin") or "")
+    if pin and not (pin.isdigit() and 4 <= len(pin) <= 20):
+        return None, None, None, (jsonify({"success": False, "error": "A PIN is 4 to 20 digits"}), 400)
+    pin_hash = None
+    if pin:
+        from werkzeug.security import generate_password_hash
+        pin_hash = generate_password_hash(pin, method="pbkdf2:sha256")
+    color = str(body.get("avatar_color") or "#6366f1")[:20]
+    return name, color, pin_hash, None
+
+
+@bp.route("/api/invite/<token>/accept", methods=["POST"])
+def accept_invite(token):
+    """{name, avatar_color?, pin?, password?}: makes the profile with the
+    invite's access and signs this browser in as it. the invite is spent
+    before the profile exists, so two tabs can't both use it.
+
+    while sign-in is oidc only (#1839) nothing is made here: the answer is
+    the provider's address. the profile is made, linked to the account that
+    signs in there and signed in when the browser comes back, and only then
+    is the invite spent, so giving up at the provider leaves it usable"""
+    inv, err = _open_invite(token)
+    if err:
+        return err
+    db = get_database()
+    body = request.get_json(silent=True) or {}
+    name, color, pin_hash, bad = _invite_fields(body)
+    if bad:
+        return bad
+    if db.get_profile_by_name(name):
+        return jsonify({"success": False, "error": "That name is taken"}), 409
+    if _oidc_only_on():
+        from api.login import oidc_start_url
+        url, error = oidc_start_url("invite", pending={
+            "token": token, "name": name, "color": color, "pin_hash": pin_hash})
+        if error:
+            return jsonify({"success": False, "error": error}), 502
+        return jsonify({"success": True, "oidc": True, "url": url})
+    password = str(body.get("password") or "")
+    if _require_login_enabled() and len(password) < 6:
+        return jsonify({"success": False, "error": "Choose a password of at least 6 characters"}), 400
+    new_id, error = create_from_invite(db, inv, name=name, color=color, pin_hash=pin_hash,
+                                       password=password or None)
+    if error == "That name is taken":
+        return jsonify({"success": False, "error": error}), 409
+    if error == "Could not create the profile":
+        return jsonify({"success": False, "error": error}), 500
+    if error:
+        return jsonify({"success": False, "error": error}), 404
     session["profile_id"] = new_id
     session["profile_epoch"] = 0
     from core.security.devices import start_device
     start_device(session, db.add_profile_device, new_id, request.headers.get("User-Agent", ""),
-                 request.remote_addr or "")
+                 request.remote_addr or "", revoke_row=db.revoke_profile_device)
     session["device_owner"] = new_id
     if _require_login_enabled():
         session["login_authenticated"] = True
     # an admin minted this link: it opens the launch lock for the person it
     # was made for, or the invite would lead to a locked door
     session["launch_pin_verified"] = True
-    audit("invite_used", new_id, name, actor=(new_id, name, False))
     return jsonify({"success": True, "profile_id": new_id}), 201
 
 

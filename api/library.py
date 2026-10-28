@@ -2,11 +2,31 @@
 Library endpoints — browse artists, albums, tracks, genres, and stats.
 """
 
+from datetime import datetime, timedelta, timezone
+
 from flask import request, current_app
 from database.music_database import get_database
 from .auth import require_api_key
 from .helpers import api_success, api_error, build_pagination, parse_pagination, parse_fields, parse_profile_id
 from .serializers import serialize_artist, serialize_album, serialize_track
+
+# The longest window /library/listening-activity answers. The MetaSync
+# node asks for one ISO week; a month of slack, never the whole history.
+LISTENING_WINDOW_MAX_DAYS = 31
+
+
+def _parse_instant(value):
+    """An ISO-8601 string as an aware UTC datetime (naive reads as UTC, the
+    database's rule), or None when it is empty or unparseable."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def register_routes(bp):
@@ -445,6 +465,70 @@ def register_routes(bp):
             }[table]
 
             return api_success({entity_type: serializer(result, fields)})
+        except Exception as e:
+            return api_error("LIBRARY_ERROR", str(e), 500)
+
+    @bp.route("/library/download-activity", methods=["GET"])
+    @require_api_key
+    def download_activity():
+        """Per-album completed-download aggregates for the MetaSync node.
+
+        MusicBrainz release ids + counts only (see
+        db.api_download_activity); the node bridges release ids to release
+        groups itself. ``since`` / ``until`` (ISO-8601) bound a per-album
+        ``completed_since`` count.
+        """
+        since = (request.args.get("since") or "").strip()
+        until = (request.args.get("until") or "").strip()
+        # Validated here rather than passed through: an unparseable
+        # string would silently compare as text in SQLite and quietly
+        # return the wrong counts instead of a 400.
+        for name, value in (("since", since), ("until", until)):
+            if value and _parse_instant(value) is None:
+                return api_error(
+                    "BAD_REQUEST",
+                    f"{name} must be an ISO-8601 timestamp (e.g. 2026-10-19T00:00:00).",
+                    400,
+                )
+        try:
+            db = get_database()
+            albums = db.api_download_activity(since=since, until=until)
+            return api_success({"albums": albums})
+        except Exception as e:
+            return api_error("LIBRARY_ERROR", str(e), 500)
+
+    @bp.route("/library/listening-activity", methods=["GET"])
+    @require_api_key
+    def listening_activity():
+        """Per-album listening aggregates for one window, for the MetaSync node.
+
+        MusicBrainz release ids + counts only (see
+        db.api_listening_activity): plays, distinct tracks and distinct
+        days per album in ``[since, until)``, from the shared listening
+        pile only. Both bounds are required and the window is at most
+        LISTENING_WINDOW_MAX_DAYS: this answers "what was played this
+        week", never "everything ever played".
+        """
+        since = (request.args.get("since") or "").strip()
+        until = (request.args.get("until") or "").strip()
+        start, end = _parse_instant(since), _parse_instant(until)
+        if start is None or end is None:
+            return api_error(
+                "BAD_REQUEST",
+                "since and until are both required ISO-8601 timestamps "
+                "(e.g. 2026-10-19T00:00:00).",
+                400,
+            )
+        if not timedelta(0) < end - start <= timedelta(days=LISTENING_WINDOW_MAX_DAYS):
+            return api_error(
+                "BAD_REQUEST",
+                f"until must be after since, at most {LISTENING_WINDOW_MAX_DAYS} days later.",
+                400,
+            )
+        try:
+            db = get_database()
+            albums = db.api_listening_activity(since=since, until=until)
+            return api_success({"albums": albums})
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 

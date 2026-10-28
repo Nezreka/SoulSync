@@ -319,6 +319,46 @@ class WishlistService:
         }
         return formatted_track
 
+    @staticmethod
+    def apply_search_override(track: Dict[str, Any], name: Any = None, artist: Any = None) -> Dict[str, Any]:
+        """the formatted track with the title/artist someone typed into the
+        interactive search instead of what the row says (a playlist that
+        tagged a song as "Various Artists"). blank or unchanged leaves it be.
+
+        the source ids go: they point at the song the row was wrong about,
+        and the import would pull its metadata back over what was typed.
+        wishlist_id stays, so a finished download still clears the row.
+        a new title drops the length (a different song), a new artist drops
+        the album and its track number (that artist's album, or a comp).
+        """
+        name = str(name or "").strip()
+        artist = str(artist or "").strip()
+        new_name = bool(name) and name != (track.get("name") or "")
+        new_artist = bool(artist) and artist != (track.get("artist_name") or "")
+        if not new_name and not new_artist:
+            return track
+        out = dict(track)
+        if new_name:
+            out["name"] = out["track_name"] = name
+            out["duration_ms"] = 0
+        if new_artist:
+            out["artists"] = [{"name": artist}]
+            out["artist_name"] = artist
+            out["album"] = {}
+            out["album_name"] = ""
+            out["track_number"] = 0
+        for key in ("id", "track_id", "spotify_track_id"):
+            out[key] = ""
+        out["provider"] = out["_source"] = None
+        data = {
+            "name": out["name"],
+            "artists": out["artists"],
+            "album": out["album"],
+            "duration_ms": out["duration_ms"],
+        }
+        out["track_data"] = out["spotify_data"] = data
+        return out
+
     def get_wishlist_tracks_for_download(
         self,
         limit: Optional[int] = None,

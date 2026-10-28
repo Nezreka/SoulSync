@@ -108,7 +108,7 @@
   width: 100%;
   padding: 9px 10px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: none;
   color: var(--ob-faint);
   font: inherit;
@@ -297,10 +297,10 @@ button.stepItem:hover {
   text-decoration: none;
   white-space: nowrap;
   transition:
-    transform 0.15s ease,
-    opacity 0.15s ease,
-    background 0.15s ease,
-    border-color 0.15s ease;
+    transform var(--dur-fast) ease,
+    opacity var(--dur-fast) ease,
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
 }
 
 .primary {
@@ -346,7 +346,7 @@ button.stepItem:hover {
 .light {
   height: 42px;
   padding: 0 18px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--ob-text);
   color: #09090b;
   font-size: 13px;
@@ -431,15 +431,15 @@ button.stepItem:hover {
   gap: 8px;
   padding: 18px;
   border: 1px solid var(--ob-line);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--ob-card);
   color: var(--ob-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 0.15s ease,
-    background 0.15s ease;
+    border-color var(--dur-fast) ease,
+    background var(--dur-fast) ease;
 }
 
 .option:hover,
@@ -534,7 +534,7 @@ button.stepItem:hover {
   gap: 18px;
   padding: 22px 24px;
   border: 1px solid var(--ob-line);
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   background: var(--ob-card);
 }
 
@@ -635,7 +635,7 @@ button.stepItem:hover {
 }
 
 .chip.warn::before {
-  background: #f59e0b;
+  background: var(--warning-strong);
 }
 
 .chip.busy::before {
@@ -744,11 +744,6 @@ button.stepItem:hover {
 
 .inputRow > .field {
   flex-grow: 1;
-}
-
-.mono {
-  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
-  font-size: 13px;
 }
 
 .pinInput {
@@ -933,7 +928,7 @@ button.stepItem:hover {
   gap: 12px;
   padding: 14px 16px;
   border: 1px solid var(--ob-line);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--ob-card);
 }
 
@@ -1007,7 +1002,7 @@ button.stepItem:hover {
   gap: 10px;
   padding: 10px 4px;
   border: none;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: transparent;
   color: var(--ob-faint);
   font: inherit;
@@ -1033,7 +1028,7 @@ button.stepItem:hover {
   font-size: 28px;
   font-weight: 600;
   opacity: 0.45;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-fast) ease;
 }
 
 .disc img {
@@ -1078,7 +1073,7 @@ button.stepItem:hover {
   gap: 12px;
   padding: 8px 10px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--ob-text);
   font: inherit;
@@ -1231,7 +1226,7 @@ button.stepItem:hover {
 }
 
 .warnIcon {
-  color: #f59e0b;
+  color: var(--warning-strong);
 }
 
 .fix {

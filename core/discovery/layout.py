@@ -1,6 +1,6 @@
 """Discover page layout: the single source of truth for section ids, zones, order.
 
-The 20 discover sections live in 4 zones, top to bottom: For You, New &
+The 21 discover sections live in 4 zones, top to bottom: For You, New &
 Missing, From Your Library, Explore & Build. The frontend mirrors these ids for
 rendering; the API validates and persists per-profile layouts against them.
 
@@ -25,7 +25,7 @@ ZONE_LABELS = {
     'tools': 'Explore & Build',
 }
 
-# All 20 sections, in default page order (zone by zone, matching the page).
+# All 21 sections, in default page order (zone by zone, matching the page).
 SECTION_IDS = (
     # for-you: the most personal rows lead, then the dial and its targets
     'your-mixes-section',
@@ -34,7 +34,8 @@ SECTION_IDS = (
     'listening-recs-section',
     'recommended-artists-section',
     'discover-bylt-sections',
-    # new-missing: fresh releases and collection gaps
+    # new-missing: the network's charts, fresh releases and collection gaps
+    'sin-charts',
     'recent-releases',
     'cache-genre-releases',
     'seasonal-albums-section',
@@ -62,6 +63,7 @@ DEFAULT_ZONE = {
     'listening-recs-section': 'for-you',
     'recommended-artists-section': 'for-you',
     'discover-bylt-sections': 'for-you',
+    'sin-charts': 'new-missing',
     'recent-releases': 'new-missing',
     'cache-genre-releases': 'new-missing',
     'seasonal-albums-section': 'new-missing',
@@ -84,7 +86,7 @@ class LayoutValidationError(ValueError):
 
 
 def default_layout() -> List[Dict[str, Any]]:
-    """The full 19-entry layout: no saved preferences == exactly the current
+    """The full layout (every SECTION_IDS entry): no saved preferences == exactly the current
     page order, every section enabled."""
     entries: List[Dict[str, Any]] = []
     for zone in ZONES:

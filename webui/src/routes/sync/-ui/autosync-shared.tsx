@@ -28,6 +28,7 @@ import {
   autoSyncIntervalLabel,
   autoSyncParseCustomInterval,
   autoSyncSourceLabel,
+  autoSyncTrackCountText,
   autoSyncPlaylistHealth,
   type AutoSyncHistoryEntry,
   type MirroredRow,
@@ -199,7 +200,7 @@ export function AutoSyncScheduledCard({
           {playlist.name}
         </div>
         <div className="auto-sync-scheduled-meta">
-          {autoSyncSourceLabel(playlist.source)} &middot; {playlist.track_count || 0} tracks
+          {autoSyncSourceLabel(playlist.source)} &middot; {autoSyncTrackCountText(playlist)}
         </div>
         <div className="auto-sync-scheduled-timing">{timing}</div>
         {hasSettings ? (
@@ -310,7 +311,7 @@ function SidebarCard({
         {displayName || playlist.name}
       </div>
       <div className="auto-sync-playlist-meta">
-        {playlist.track_count || 0} tracks &middot; {badge.assigned}
+        {autoSyncTrackCountText(playlist)} &middot; {badge.assigned}
       </div>
     </div>
   );
@@ -369,7 +370,9 @@ function SidebarGroupBody({
               ) : null}
               <span className="auto-sync-kind-group-count">{g.rows.length}</span>
             </div>
-            <div className="auto-sync-kind-group-body">{g.rows.map((p) => card(p, p.variant))}</div>
+            <div className="auto-sync-kind-group-body">
+              {g.rows.map((p) => card(p, p.variant_label || p.variant))}
+            </div>
           </div>
         );
       })}

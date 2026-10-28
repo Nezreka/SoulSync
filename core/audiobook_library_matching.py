@@ -78,12 +78,25 @@ def score_candidate(local, book):
             'automatic_eligible': strong, 'match_version': MATCH_VERSION}
 
 
-def candidates_for(row, client, query=None):
+def configured_marketplace():
+    """The audiobooks.marketplace setting; the library scan runs without a request."""
+    try:
+        from core.settings import config_manager
+        return (config_manager.get('audiobooks.marketplace', 'us') or 'us').strip().lower()
+    except Exception:  # noqa: BLE001 - config unreadable: search the US store
+        return 'us'
+
+
+def candidates_for(row, client, query=None, marketplace=None):
     local = row.get('metadata_json') or row
     query = (query or f"{local.get('title', row.get('title', ''))} {local.get('author', row.get('author', ''))}").strip()
     if not query:
         return []
-    books = client.search(query, limit=20, strict=True)
+    # The user's storefront, not the client's US default: a German or French
+    # book is not in the US catalogue, so every disk book there came back
+    # "No catalogue candidates found".
+    books = client.search(query, limit=20, strict=True,
+                          marketplace=marketplace or configured_marketplace())
     distinct = {}
     for book in books:
         data = compact(book)

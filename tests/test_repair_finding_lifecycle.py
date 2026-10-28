@@ -502,7 +502,7 @@ def test_bulk_progress_tallies_per_type(worker):
                              'errors': [], 'error': None, 'per_type': {}}
     worker._bulk_fix_stop_event = type('E', (), {'is_set': lambda self: False})()
     worker.should_stop = False
-    worker.fix_finding = lambda fid, fix_action=None: {'success': fid == ids[0]}
+    worker.fix_finding = lambda fid, fix_action=None, **kwargs: {'success': fid == ids[0]}
 
     worker._run_bulk_fix(ids)
     per_type = worker._bulk_fix_state['per_type']

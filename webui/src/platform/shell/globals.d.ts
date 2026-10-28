@@ -12,6 +12,8 @@ declare global {
     showToast?: (message: string, type?: string, durationOrContext?: number | string) => void;
     /** core.js: the latest server-side active music download count from the status push. */
     __soulsyncMusicActiveDownloads?: number;
+    /** src/shell/oidc-signin.ts: sign-in is OIDC only right now (#1839), from /api/auth/oidc/available. */
+    __soulsyncOidcOnly?: boolean;
     /** core.js: repaints the music Requests nav badge (admin: waiting, member: news). */
     refreshMusicRequestsBadge?: () => void;
     /** core.js: after a wishlist add, tells a profile that asks first it went out as a
@@ -675,6 +677,17 @@ declare global {
         poster?: string | null;
       }) => void;
     };
+    /** video-poster-modal.js: the poster manager (search, then pick art). */
+    VideoPoster?: { openSearch?: () => void };
+    /** video-overlay-editor.js / video-collection-editor.js: the two studios. */
+    VideoOverlayEditor?: { open?: () => void };
+    VideoCollectionEditor?: { open?: () => void };
+    /** video-worker-orbs.js: re-anchor to the video dashboard's orb stage. */
+    videoWorkerOrbs?: { refresh: () => void; onStatus: (id: string, data: unknown) => void };
+    /** video-enrichment.js: fill the worker buttons now, not at the next push. */
+    videoEnrichmentPrime?: () => void;
+    /** video-side.js: the calendar on a day, optionally with an episode open. */
+    videoOpenCalendar?: (opts?: { date?: string; ep?: number | string }) => void;
     /** video-side.js: flip the shell chrome music <-> video (does NOT navigate). */
     _switchAppSide?: (side: 'music' | 'video', opts?: { force?: boolean }) => void;
     /** unified downloads page: true while any video download is active.

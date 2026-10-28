@@ -119,45 +119,5 @@ def test_ics_episodes_with_real_airtime_become_timed_events(client, db):
     assert "DTSTART:%sT210000" % day in body           # real time → timed event
     assert "DTSTART;VALUE=DATE:%s" % day in body       # placeholder stays whole-day
 
-
-# ---------------------------------------------------------------------------
-# Frontend contracts (video-calendar.js + index.html)
-# ---------------------------------------------------------------------------
-
-from pathlib import Path as _P
-
-_ROOT = _P(__file__).resolve().parent.parent
-_CAL_JS = (_ROOT / "webui" / "static" / "video" / "video-calendar.js").read_text(encoding="utf-8")
-_INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-
-
-def test_js_renders_movie_rail_with_typed_chips():
-    assert "vcal-rail--movies" in _CAL_JS
-    assert "'🎬 In Cinemas'" in _CAL_JS and "'🏠 Home Release'" in _CAL_JS
-    assert "data-cal-movie" in _CAL_JS
-    # owned movie opens the library detail; unowned the tmdb preview
-    assert "'/video-detail/library/movie/' + m.library_id" in _CAL_JS
-    assert "'/video-detail/tmdb/movie/' + m.tmdb_id" in _CAL_JS
-
-
-def test_js_movie_type_filter_persisted_and_click_delegated():
-    assert "data-video-cal-movietype" in _CAL_JS and "vcalMovieTypes" in _CAL_JS
-    assert "data-video-cal-movietype" in _INDEX
-    assert "'[data-cal-ep],[data-cal-movie]'" in _CAL_JS   # grid click delegation covers movies
-
-
-def test_agenda_view_exists_and_rerenders_across_boundary():
-    assert 'data-video-cal-view="agenda"' in _INDEX
-    assert "function renderAgenda" in _CAL_JS
-    assert "vcal-view--agenda" in _CAL_JS
-    assert "if (state.data && (wasAgenda || v === 'agenda')) render();" in _CAL_JS
-
-
-def test_ical_subscribe_button_and_modal():
-    assert "data-video-cal-ical" in _INDEX
-    assert "/api/video/calendar.ics?scope=" in _CAL_JS
-    assert "function openIcsModal" in _CAL_JS
-
-
-def test_empty_state_counts_movies_too():
-    assert "eps.length > 0 || movies.length > 0" in _CAL_JS
+# The page itself is React now (webui/src/routes/calendar); its movie lane,
+# views and iCal dialog are pinned in calendar-page.test.tsx.

@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { takePendingMirroredOpen } from '@/features/metasync/charts';
 import { takeSetupPlaylistLink } from '@/features/onboarding/handoff';
 
 import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
@@ -134,6 +135,14 @@ export function SyncPage() {
     if (openMirroredDetail.current) openMirroredDetail.current(playlistId);
     else void window.openMirroredPlaylistModal?.(playlistId);
   }, []);
+  // A SoulSync chart opened from the dashboard or Discover lands here with its
+  // (already matched) playlist to show (features/metasync/charts.ts). The
+  // mirrored tab registers its opener in a child effect, which runs before
+  // this one, so the detail opens on the first render.
+  useEffect(() => {
+    const playlistId = takePendingMirroredOpen();
+    if (playlistId) showMirroredDetail(playlistId);
+  }, [showMirroredDetail]);
   /** The pending url, but only for the tab it was meant for. */
   const pendingFor = useCallback(
     (tab: string) => (pending && pending.tab === tab ? pending.url : undefined),

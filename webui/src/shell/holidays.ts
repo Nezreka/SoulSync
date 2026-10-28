@@ -16,6 +16,16 @@ export interface HolidayInfo {
   isDay: boolean;
 }
 
+/** what a holiday paints on the sky (holiday-scene.ts) */
+export interface HolidaySky {
+  id: HolidayId;
+  /** 0 the rest of the week .. 1 the big day (or night): more of everything */
+  moment: number;
+}
+
+/** lunar new year's fireworks: reds and golds */
+export const LUNAR_FIREWORKS = ['255,92,72', '255,200,96', '255,232,170', '255,128,90'];
+
 export const HOLIDAY_LABELS: Record<HolidayId, string> = {
   halloween: 'Halloween',
   thanksgiving: 'Thanksgiving',

@@ -38,6 +38,9 @@ DEFAULT_TOLERANCE = 0.92
 # A release that is LONGER than the book is not automatically wrong — box sets,
 # duplicated intros and bonus interviews all overshoot — but far over means the
 # folder holds something else entirely, like a whole series.
+#
+# past this line the verdict carries "overshoot". a short book can still be
+# arriving, a long one never gets shorter, so waiting on it is pointless (#1833)
 MAX_OVERSHOOT = 1.60
 
 # How long a short book is kept staged before giving up. Torrents finish late
@@ -208,7 +211,8 @@ def assess(
     """Is what is on disk the whole book?
 
     Returns ``{complete, measured_minutes, expected_minutes, ratio, files,
-    unreadable, reason, measured_by}``.
+    unreadable, reason, measured_by}``, plus ``overshoot`` when the download is
+    far longer than the book.
 
     Deliberately measures PLAYING TIME, never file count. There is no standard
     for how an audiobook is cut up: the same title ships as one m4b, as 20
@@ -285,6 +289,7 @@ def assess(
                 )
                 return result
             if per_minute > _MAX_BYTES_PER_MINUTE:
+                result["overshoot"] = True
                 result["reason"] = (
                     f"Unreadable audio, and {total_bytes // (1024 * 1024)}MB is far too "
                     f"much for a {expected_for_check}-minute book"
@@ -327,9 +332,10 @@ def assess(
         return result
 
     if ratio > MAX_OVERSHOOT:
+        result["overshoot"] = True
         result["reason"] = (
-            f"{int(measured_minutes)} minutes for a {expected}-minute book "
-            f"— this folder holds more than one title"
+            f"{int(measured_minutes)} minutes for a {expected}-minute book, "
+            f"far too long to be this book (another title, or several)"
         )
         return result
 

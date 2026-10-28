@@ -74,13 +74,31 @@ def norm_title(t: str) -> str:
 
 
 def _src_entry(src: Dict[str, Any], position_fallback: int) -> Dict[str, Any]:
+    # Positions are 1-based everywhere the user sees them: mirrored rows are
+    # stored i+1 (music_database mirror insert) and the editor's server column
+    # is always ordinal (index + 1). ``position_fallback`` is the 0-based
+    # enumerate index, so a source with no stored position (sync-history
+    # entries carry a 0-based 'index' and no 'position' at all) must fall back
+    # to fallback + 1 — falling back to the raw index numbered the first
+    # source track 0 against the server's 1, shifting every paired row by one
+    # and making a 55-track source read as numbered 0..54 (#1852).
+    # Anything that is not a positive int (missing, None, a stray 0, a bool,
+    # a string) is not a usable 1-based position either — the row's own
+    # ordinal is the only honest number for it. This assumes a list's stored
+    # positions are homogeneous (every row has one, or none do): both real
+    # producers are — mirrored rows all carry one, sync-history rows carry
+    # none — so a fallback ordinal never collides with a neighbour's stored
+    # position in practice.
+    position = src.get('position')
+    if not isinstance(position, int) or isinstance(position, bool) or position < 1:
+        position = position_fallback + 1
     return {
         'name': src.get('name', ''),
         'artist': src.get('artist', ''),
         'album': src.get('album', ''),
         'image_url': src.get('image_url', ''),
         'duration_ms': src.get('duration_ms', 0),
-        'position': src.get('position', position_fallback),
+        'position': position,
         # #768 Bug B: echo the source id back so the editor can persist a
         # manual "Find & add" override against it.
         'source_track_id': src.get('source_track_id', '') or '',
@@ -128,13 +146,21 @@ def reconcile_playlist(
     source_tracks: List[Dict[str, Any]],
     server_tracks: List[Dict[str, Any]],
     override_pairs: Optional[Dict[int, int]] = None,
+    rejected_pairs: Optional[set] = None,
 ) -> List[Dict[str, Any]]:
     """Return the combined matched/missing/extra view (list of dicts).
 
     Each combined entry has ``source_track``, ``server_track``,
     ``match_status`` ('matched'|'missing'|'extra'), ``confidence``, and
-    ``override: True`` on override hits."""
+    ``override: True`` on override hits.
+
+    ``rejected_pairs`` is ``{(source_track_id, server_track_id)}`` the user
+    unmatched; passes 1 and 2 never pair those two again."""
     override_pairs = override_pairs or {}
+    rejected_pairs = rejected_pairs or set()
+
+    def _rejected(src_id: str, j: int) -> bool:
+        return bool(src_id) and (src_id, str(server_tracks[j].get('id'))) in rejected_pairs
     combined: List[Dict[str, Any]] = []
     used_server_indices: set[int] = set()
     unmatched_source: List[tuple[int, Dict[str, Any], str]] = []
@@ -178,6 +204,8 @@ def reconcile_playlist(
             if j in used_server_indices:
                 continue
             if svr_norm not in candidates:
+                continue
+            if _rejected(src_entry['source_track_id'], j):
                 continue
             svr_artist = server_tracks[j].get('artist', '')
             if _artists_agree(src_artist, svr_artist) or (
@@ -240,6 +268,8 @@ def reconcile_playlist(
         for j, sm in enumerate(server_matchers):
             if j in used_server_indices:
                 continue
+            if _rejected(src_entry['source_track_id'], j):
+                continue
             sm.set_seq1(src_key)
             if sm.real_quick_ratio() < _FUZZY_THRESHOLD or sm.quick_ratio() < _FUZZY_THRESHOLD:
                 continue
@@ -297,25 +327,45 @@ def compute_order_status(combined: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     Reads each matched entry's ``server_index`` (its position in the server
     playlist) off the combined view — which is already in source order — and checks
-    that sequence is strictly ascending. Relative order is used on purpose: missing
+    that the DISTINCT positions, in first-occurrence order, are strictly ascending.
+    Relative order is used on purpose: missing
     and extra tracks shift absolute positions, so comparing positions directly would
     false-flag any playlist that isn't a perfect 1:1. The model is one-way (source
     order is truth; the server may have drifted), so we only ever report whether the
     server is *behind* the source order — never the reverse.
 
     Returns ``{matched, in_order, out_of_order}``. ``out_of_order`` is True only when
-    there are >= 2 matched tracks AND their server positions aren't ascending — so a
-    playlist with 0 or 1 matches (nothing to compare) is never flagged.
+    there are >= 2 DISTINCT matched server positions AND they aren't ascending — so a
+    playlist with 0 or 1 distinct matched positions (nothing to compare) is never
+    flagged. ``matched`` still counts every matched entry, shared pairings included.
+
+    A server position can repeat: pass 0 deliberately pairs two source rows
+    with ONE server track (two provider ids for the same song, both
+    user-confirmed — see ``resolve_match_overrides``), so a shared track's
+    index appears twice in the sequence. A repeat is not disorder — the
+    shared track sits in exactly one place on the server — so the check
+    runs over each position's first occurrence. Without that, any playlist
+    with a shared pairing (55 source rows matched to 54 server tracks) was
+    flagged out of order no matter how the server was actually ordered
+    (#1852).
+
+    One shape this deliberately does not flag is a straddle: a shared
+    track whose two source slots sit on opposite sides of another track
+    (A B A). No single server placement can satisfy both slots, and
+    flagging it would re-break legitimate duplicate-song playlists over
+    something reordering the server cannot fix — so first-occurrence
+    order is the verdict, and a straddle reads as in order.
     """
     positions = [
         e['server_index'] for e in combined
         if e.get('match_status') == 'matched' and e.get('server_index') is not None
     ]
-    in_order = all(a < b for a, b in zip(positions, positions[1:], strict=False))
+    distinct = list(dict.fromkeys(positions))
+    in_order = all(a < b for a, b in zip(distinct, distinct[1:], strict=False))
     return {
         'matched': len(positions),
         'in_order': in_order,
-        'out_of_order': len(positions) >= 2 and not in_order,
+        'out_of_order': len(distinct) >= 2 and not in_order,
     }
 
 

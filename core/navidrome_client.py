@@ -184,6 +184,9 @@ class NavidromeClient(MediaServerBase):
         self._artist_cache = {}
         self._album_cache = {}
         self._track_cache = {}
+        # play data per (user, album): the songs from the last getAlbum, kept
+        # until the album's own played / playCount moves (see _played_songs)
+        self._album_play_cache: Dict[tuple, tuple] = {}
         self._folder_album_ids: Optional[set] = None  # Album IDs in selected music folder
 
         # Progress callback for UI updates
@@ -903,6 +906,31 @@ class NavidromeClient(MediaServerBase):
             logger.error(f"Error getting recently added albums from Navidrome: {e}")
             return []
 
+    def get_album_census(self) -> Optional[List[Dict[str, Any]]]:
+        """every album in the library (the selected music folder), as Navidrome
+        lists them: raw getAlbumList2 entries with id, songCount and artistId.
+        500 a page, so a 5,000-album library is 10 requests. None when a page
+        fails, so a short answer is never mistaken for a smaller library."""
+        if not self.ensure_connection():
+            return None
+        albums: List[Dict[str, Any]] = []
+        offset = 0
+        page = 500
+        while True:
+            params = {'type': 'alphabeticalByName', 'size': page, 'offset': offset}
+            if self.music_folder_id:
+                params['musicFolderId'] = self.music_folder_id
+            response = self._make_request('getAlbumList2', params)
+            if response is None:
+                return None
+            batch = response.get('albumList2', {}).get('album', [])
+            if not isinstance(batch, list):
+                batch = [batch] if batch else []
+            albums.extend(a for a in batch if isinstance(a, dict) and a.get('id'))
+            if len(batch) < page or offset > 1_000_000:
+                return albums
+            offset += page
+
     def get_tracks_for_album(self, album_id: str) -> List[NavidromeTrack]:
         """Get all tracks for a specific album"""
         return self.get_tracks_for_album_verified(album_id)[0]
@@ -1018,6 +1046,40 @@ class NavidromeClient(MediaServerBase):
             logger.error(f"Error getting library stats: {e}")
             return {}
 
+    _ALBUM_PLAY_CACHE_MAX = 2000
+
+    def _played_songs(self, album: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """an album's songs with their play data, fetched only when the album's
+        own played stamp or play count has moved since the last fetch.
+
+        the listening poll asked getAlbum for up to 50 recent and 100 frequent
+        albums every time, about 150 requests a poll per user whether anything
+        was played or not. TheHomeGuy's Pi-hole rate-limited SoulSync at over
+        1,000 an hour. the album list already carries both values, so a quiet
+        poll is now the two list calls. play data is per user, so is the key.
+        a server that sends neither value gets no caching at all."""
+        album_id = album.get('id')
+        if not album_id:
+            return []
+        mark = (album.get('played'), album.get('playCount'))
+        cache = self._album_play_cache
+        key = (self.username or '', str(album_id))
+        if mark != (None, None):
+            hit = cache.get(key)
+            if hit and hit[0] == mark:
+                return hit[1]
+        resp = self._make_request('getAlbum', {'id': album_id})
+        if not resp:
+            return []
+        songs = resp.get('album', {}).get('song', [])
+        if not isinstance(songs, list):
+            songs = [songs] if songs else []
+        if mark != (None, None):
+            if len(cache) >= self._ALBUM_PLAY_CACHE_MAX:
+                cache.pop(next(iter(cache)))
+            cache[key] = (mark, songs)
+        return songs
+
     def get_play_history(self, limit=500):
         """Fetch recently played tracks via Subsonic API.
 
@@ -1033,7 +1095,9 @@ class NavidromeClient(MediaServerBase):
         try:
             response = self._make_request('getAlbumList2', {
                 'type': 'recent',
-                'size': min(limit, 500),
+                # limit=None (the one-off old-plays tagger) means "as much as
+                # there is"; min(None, 500) raised and the tagger got nothing
+                'size': min(limit or 500, 500),
             })
             if not response:
                 return []
@@ -1044,16 +1108,7 @@ class NavidromeClient(MediaServerBase):
 
             results = []
             for album in album_list[:50]:  # Limit album fetches to avoid API spam
-                album_id = album.get('id')
-                if not album_id:
-                    continue
-                album_resp = self._make_request('getAlbum', {'id': album_id})
-                if not album_resp:
-                    continue
-                songs = album_resp.get('album', {}).get('song', [])
-                if not isinstance(songs, list):
-                    songs = [songs] if songs else []
-                for song in songs:
+                for song in self._played_songs(album):
                     played = song.get('played')
                     if not played:
                         continue
@@ -1097,16 +1152,7 @@ class NavidromeClient(MediaServerBase):
 
             counts = {}
             for album in album_list[:100]:
-                album_id = album.get('id')
-                if not album_id:
-                    continue
-                album_resp = self._make_request('getAlbum', {'id': album_id})
-                if not album_resp:
-                    continue
-                songs = album_resp.get('album', {}).get('song', [])
-                if not isinstance(songs, list):
-                    songs = [songs] if songs else []
-                for song in songs:
+                for song in self._played_songs(album):
                     pc = song.get('playCount', 0)
                     if pc and pc > 0:
                         counts[song.get('id', '')] = pc
@@ -1914,6 +1960,23 @@ class NavidromeClient(MediaServerBase):
         except Exception as e:
             logger.error(f"Failed to trigger Navidrome scan: {e}")
             return False
+
+    def get_scan_state(self):
+        """getScanStatus in full: ``{scanning, last_scan, count, folder_count}``,
+        or None when it can't be read. Navidrome adds ``lastScan`` (and
+        ``folderCount``) to the Subsonic answer, which is what lets a finished
+        scan be told apart from one that hasn't started yet (#1899)."""
+        try:
+            result = self._make_request('getScanStatus')
+        except Exception:   # noqa: BLE001 - unreadable is "unknown", never "done"
+            return None
+        if result is None:
+            return None
+        status = result.get('scanStatus') or {}
+        return {"scanning": bool(status.get('scanning', False)),
+                "last_scan": status.get('lastScan'),
+                "count": status.get('count'),
+                "folder_count": status.get('folderCount')}
 
     def is_library_scanning(self, library_name: str = "Music") -> bool:
         """Check if Navidrome library is currently scanning via Subsonic getScanStatus."""

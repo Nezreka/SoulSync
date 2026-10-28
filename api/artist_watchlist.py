@@ -144,6 +144,9 @@ def get_watchlist_artists():
     try:
         database = get_database()
         database.backfill_watchlist_musicbrainz_ids_from_library(profile_id=get_current_profile_id())
+        from core.watchlist_defaults import default_values, retire_legacy_override
+        retire_legacy_override(database, config_manager)
+        defaults = default_values(config_manager)
         watchlist_artists = database.get_watchlist_artists(profile_id=get_current_profile_id())
 
         # an artist whose source had no picture (deezer's empty-hash urls, or
@@ -165,6 +168,9 @@ def get_watchlist_artists():
                         image_url = normalize_image_url(thumb)
                     except Exception as e:
                         logger.debug("watchlist library thumb fallback failed for %s: %s", artist.artist_name, e)
+            # #1822: the rules a scan applies, so the row shows what it gets
+            rules = defaults if artist.follow_defaults else {
+                key: getattr(artist, key) for key in defaults}
             artists_data.append({
                 "id": artist.id,
                 "spotify_artist_id": artist.spotify_artist_id,
@@ -179,13 +185,14 @@ def get_watchlist_artists():
                 "discogs_artist_id": getattr(artist, 'discogs_artist_id', None),
                 "musicbrainz_artist_id": getattr(artist, 'musicbrainz_artist_id', None),
                 "amazon_artist_id": getattr(artist, 'amazon_artist_id', None),
-                "include_albums": artist.include_albums,
-                "include_eps": artist.include_eps,
-                "include_singles": artist.include_singles,
-                "include_live": artist.include_live,
-                "include_remixes": artist.include_remixes,
-                "include_acoustic": artist.include_acoustic,
-                "include_compilations": artist.include_compilations,
+                "include_albums": rules['include_albums'],
+                "include_eps": rules['include_eps'],
+                "include_singles": rules['include_singles'],
+                "include_live": rules['include_live'],
+                "include_remixes": rules['include_remixes'],
+                "include_acoustic": rules['include_acoustic'],
+                "include_compilations": rules['include_compilations'],
+                "follow_defaults": bool(artist.follow_defaults),
             })
 
         return jsonify({"success": True, "artists": artists_data})
@@ -1467,6 +1474,10 @@ def watchlist_artist_config(artist_id):
         database = get_database()
         active_profile_id = get_current_profile_id()
 
+        from core.watchlist_defaults import default_values, retire_legacy_override
+        retire_legacy_override(database, config_manager)
+        defaults = default_values(config_manager)
+
         if request.method == 'GET':
             database.backfill_watchlist_musicbrainz_ids_from_library(profile_id=get_current_profile_id())
             # Get current config from database
@@ -1479,7 +1490,8 @@ def watchlist_artist_config(artist_id):
                        last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id,
                        lookback_days, discogs_artist_id, preferred_metadata_source,
                        amazon_artist_id, musicbrainz_artist_id, auto_download,
-                       quality_profile_id, auto_download_pref, include_other_artists
+                       quality_profile_id, auto_download_pref, include_other_artists,
+                       follow_defaults
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (
                       spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
@@ -1624,7 +1636,34 @@ def watchlist_artist_config(artist_id):
                 'include_other_artists': (bool(result[23])
                                           if len(result) > 23 and result[23] is not None else False),
                 'global_auto_download': bool(config_manager.get('watchlist.global_auto_download', True)),
+                # #1822: following the watchlist defaults. the include_* above
+                # then show the defaults, the rules a scan actually applies.
+                'follow_defaults': bool(result[24]) if len(result) > 24 and result[24] is not None else False,
+                'defaults': defaults,
             }
+            if config['follow_defaults']:
+                config.update(defaults)
+
+            # what you own of theirs and how much you play them
+            overview = database.get_watchlist_artist_overview(
+                result[7] or artist_info.get('name') or '',
+                {
+                    'spotify': spotify_id,
+                    'itunes': itunes_id,
+                    'deezer': deezer_id,
+                    'discogs': discogs_id,
+                    'musicbrainz': musicbrainz_id,
+                },
+                profile_id=active_profile_id,
+            )
+            if overview['library']:
+                from core.metadata.artwork import normalize_image_url
+                for album in overview['library']['recent_albums']:
+                    album['thumb_url'] = normalize_image_url(album['thumb_url']) or ''
+            if overview['listening']:
+                from core.metadata.artwork import normalize_image_url
+                for track in overview['listening']['top_tracks']:
+                    track['thumb_url'] = normalize_image_url(track['thumb_url']) or ''
 
             from core.metadata.registry import available_sources, get_primary_source
             return jsonify({
@@ -1632,6 +1671,8 @@ def watchlist_artist_config(artist_id):
                 "config": config,
                 "artist": artist_info,
                 "recent_releases": releases,
+                "library": overview['library'],
+                "listening": overview['listening'],
                 "spotify_artist_id": spotify_id,
                 "itunes_artist_id": itunes_id,
                 "deezer_artist_id": deezer_id,
@@ -1683,7 +1724,7 @@ def watchlist_artist_config(artist_id):
                 SELECT include_albums, include_eps, include_singles, include_live,
                        include_remixes, include_acoustic, include_compilations,
                        include_instrumentals, include_other_artists, lookback_days, preferred_metadata_source,
-                       auto_download, quality_profile_id, auto_download_pref
+                       auto_download, quality_profile_id, auto_download_pref, follow_defaults
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (
                       spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
@@ -1699,6 +1740,20 @@ def watchlist_artist_config(artist_id):
                 def __init__(self, field):
                     self.field = field
 
+            # #1822: an artist following the defaults that gets its own rules
+            # starts from the defaults it was getting, not from whatever stale
+            # values sit in its columns. a client that sends release rules
+            # without saying follow_defaults means "these rules", so it stops
+            # following; the panel always says it explicitly.
+            was_following = bool(old_row['follow_defaults'])
+            if 'follow_defaults' in data:
+                follow_defaults = parse_strict_bool(data.get('follow_defaults'))
+                if follow_defaults is None:
+                    conn.close()
+                    return jsonify({"success": False, "error": "follow_defaults must be a boolean"}), 400
+            else:
+                follow_defaults = was_following and not any(key in data for key in defaults)
+
             def _field(name, fallback):
                 """Sent value, or the stored one when the client omitted the field.
 
@@ -1708,6 +1763,8 @@ def watchlist_artist_config(artist_id):
                 answers 400 for the same input (R2-08).
                 """
                 if name not in data:
+                    if was_following and name in defaults:
+                        return defaults[name]
                     return old_row[name] if old_row[name] is not None else fallback
                 parsed = parse_strict_bool(data.get(name))
                 if parsed is None:
@@ -1727,6 +1784,19 @@ def watchlist_artist_config(artist_id):
             except _BadBool as bad:
                 conn.close()
                 return jsonify({"success": False, "error": f"{bad.field} must be a boolean"}), 400
+
+            if follow_defaults:
+                # a follower's own columns aren't used; leave them as stored so a
+                # partial update (just the quality profile) stays partial
+                (include_albums, include_eps, include_singles, include_live, include_remixes,
+                 include_acoustic, include_compilations, include_instrumentals,
+                 include_other_artists) = (
+                    bool(old_row[key]) if old_row[key] is not None else fallback
+                    for key, fallback in (
+                        ('include_albums', True), ('include_eps', True), ('include_singles', True),
+                        ('include_live', False), ('include_remixes', False),
+                        ('include_acoustic', False), ('include_compilations', False),
+                        ('include_instrumentals', False), ('include_other_artists', False)))
 
             if 'lookback_days' in data:
                 lookback_days = data.get('lookback_days')  # None = use global setting
@@ -1792,8 +1862,9 @@ def watchlist_artist_config(artist_id):
             else:
                 quality_profile_id = old_row['quality_profile_id']
 
-            # Validate at least one release type is selected
-            if not (include_albums or include_eps or include_singles):
+            # Validate at least one release type is selected (its own rules only;
+            # a follower uses the defaults, which the defaults form validates)
+            if not follow_defaults and not (include_albums or include_eps or include_singles):
                 conn.close()
                 return jsonify({"success": False, "error": "At least one release type must be selected"}), 400
 
@@ -1806,6 +1877,7 @@ def watchlist_artist_config(artist_id):
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
                     include_instrumentals = ?, include_other_artists = ?, lookback_days = ?, preferred_metadata_source = ?,
                     auto_download = ?, auto_download_pref = ?, quality_profile_id = ?,
+                    follow_defaults = ?,
                     last_scan_timestamp = CASE WHEN ? THEN NULL ELSE last_scan_timestamp END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE profile_id = ? AND (
@@ -1815,7 +1887,7 @@ def watchlist_artist_config(artist_id):
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
                   int(include_instrumentals), int(include_other_artists), lookback_days, preferred_metadata_source, int(auto_download),
-                  auto_download_pref, quality_profile_id, lookback_changed, active_profile_id,
+                  auto_download_pref, quality_profile_id, int(bool(follow_defaults)), lookback_changed, active_profile_id,
                   artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
             conn.commit()
 
@@ -1844,6 +1916,7 @@ def watchlist_artist_config(artist_id):
                     'auto_download': bool(auto_download),
                     'auto_download_pref': auto_download_pref,
                     'quality_profile_id': quality_profile_id,
+                    'follow_defaults': bool(follow_defaults),
                 }
             })
 
@@ -1935,11 +2008,39 @@ def watchlist_artist_link_provider(artist_id):
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+def _custom_artist_count(database, profile_id) -> int:
+    conn = database._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM watchlist_artists WHERE profile_id = ? "
+            "AND COALESCE(follow_defaults, 0) = 0", (int(profile_id),)).fetchone()
+        return int(row[0] or 0)
+    finally:
+        conn.close()
+
+
+@bp.route('/api/watchlist/reset-to-defaults', methods=['POST'])
+def watchlist_reset_to_defaults():
+    """Every artist with its own release rules goes back to the defaults (#1822)."""
+    try:
+        from database.music_database import get_database
+        from core.watchlist_defaults import reset_all_to_defaults
+        count = reset_all_to_defaults(get_database(), get_current_profile_id())
+        return jsonify({"success": True, "reset": count})
+    except Exception as e:
+        logger.error(f"Error resetting watchlist artists to defaults: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/watchlist/global-config', methods=['GET', 'POST'])
 def watchlist_global_config():
     """Get or update global watchlist configuration (overrides per-artist settings)"""
     try:
         if request.method == 'GET':
+            from database.music_database import get_database
+            from core.watchlist_defaults import retire_legacy_override
+            _db = get_database()
+            retire_legacy_override(_db, config_manager)
             config = {
                 'global_override_enabled': config_manager.get('watchlist.global_override_enabled', False),
                 'include_albums': config_manager.get('watchlist.global_include_albums', True),
@@ -1963,6 +2064,8 @@ def watchlist_global_config():
                     'watchlist.edition_preference', _EDITION_PREFERENCE_ALL),
                 'prefer_explicit_edition': config_manager.get(
                     'watchlist.prefer_explicit_edition', True),
+                # #1822: how many artists have their own rules instead
+                'custom_artist_count': _custom_artist_count(_db, get_current_profile_id()),
             }
             return jsonify({"success": True, "config": config})
 
@@ -1983,8 +2086,9 @@ def watchlist_global_config():
             include_other_artists = data.get('include_other_artists', False)
             exclude_terms = data.get('exclude_terms', '')
 
-            # When override is enabled, validate at least one release type
-            if global_override_enabled and not (include_albums or include_eps or include_singles):
+            # the defaults apply to every artist that follows them, so they
+            # always need a release type (#1822)
+            if not (include_albums or include_eps or include_singles):
                 return jsonify({"success": False, "error": "At least one release type must be selected"}), 400
 
             config_manager.set('watchlist.global_override_enabled', global_override_enabled)

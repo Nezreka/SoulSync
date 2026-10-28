@@ -1,10 +1,11 @@
 """Video Library Maintenance API — the music /api/repair surface, video-scoped.
 
-Same route set, same response shapes (see the music table in web_server.py):
-status/toggle/pause/resume, jobs list + per-job toggle/settings/run/stop,
-findings list/counts/fix/resolve/dismiss/bulk-fix/bulk/clear, history, and a
-progress snapshot for page load (the socket event 'video:repair:progress'
-keeps it live afterwards).
+Same route set, same response shapes (see api/repair.py): status/toggle/
+pause/resume, jobs list + per-job toggle/settings/run/stop, findings list/
+counts/groups/finding-types/fix/resolve/dismiss/reopen/bulk/bulk-fix(-start)/
+clear, history, and a progress snapshot for page load (the socket event
+'video:repair:progress' keeps it live afterwards). one client, the React
+Tools page, drives both sides, so a shape that differs here is a bug there.
 """
 
 from __future__ import annotations
@@ -21,6 +22,38 @@ def _worker():
 
     from . import get_video_db
     return get_video_repair_worker(get_video_db())
+
+
+def _int(val, default):
+    try:
+        if val is None or str(val).strip().lower() in ("", "undefined", "null", "nan"):
+            return default
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _with_schedules(jobs: list) -> list:
+    """the schedule lives on each job's system automation (in the app db,
+    where the shared automation engine keeps its rows). hand the tools page the
+    automation id and its interval, so the cadence editor writes there like
+    it does for music. without a row the job keeps its own config values."""
+    try:
+        from core.automation.migrate_repair_jobs import system_job_schedules
+        schedules = system_job_schedules(None, "video_run_repair_job")
+    except Exception:   # noqa: BLE001 - schedules are a nicety, the list isn't
+        logger.debug("could not read video job schedules", exc_info=True)
+        return jobs
+    for job in jobs:
+        sched = schedules.get(job.get("job_id"))
+        if not sched:
+            continue
+        job["automation_id"] = sched.get("automation_id")
+        if sched.get("interval_hours"):
+            job["interval_hours"] = sched["interval_hours"]
+        if sched.get("next_run"):
+            job["next_run"] = sched["next_run"]
+    return jobs
 
 
 def register_routes(bp):
@@ -56,7 +89,7 @@ def register_routes(bp):
 
     @bp.route("/repair/jobs", methods=["GET"])
     def video_repair_jobs():
-        return jsonify({"jobs": _worker().get_all_job_info()})
+        return jsonify({"jobs": _with_schedules(_worker().get_all_job_info())})
 
     @bp.route("/repair/jobs/<job_id>/toggle", methods=["POST"])
     def video_repair_job_toggle(job_id):
@@ -108,13 +141,36 @@ def register_routes(bp):
         q = request.args
         return jsonify(get_video_db().repair_get_findings(
             job_id=q.get("job_id") or None, status=q.get("status") or None,
-            severity=q.get("severity") or None,
-            page=q.get("page", 1), limit=q.get("limit", 50)))
+            severity=q.get("severity") or None, finding_type=q.get("finding_type") or None,
+            sort=q.get("sort") or None, q=q.get("q") or None,
+            page=_int(q.get("page"), 0), limit=_int(q.get("limit"), 50)))
 
     @bp.route("/repair/findings/counts", methods=["GET"])
     def video_repair_findings_counts():
         from . import get_video_db
         return jsonify(get_video_db().repair_counts())
+
+    @bp.route("/repair/findings/groups", methods=["GET"])
+    def video_repair_findings_groups():
+        return jsonify({"groups": _worker().get_finding_groups()})
+
+    @bp.route("/repair/finding-types", methods=["GET"])
+    def video_repair_finding_types():
+        return jsonify({"types": _worker().get_finding_type_catalog()})
+
+    @bp.route("/repair/findings/<int:fid>/reopen", methods=["POST"])
+    def video_repair_finding_reopen(fid):
+        if not _worker().reopen_finding(fid):
+            return jsonify({"success": False,
+                            "error": "Finding not found or already pending"}), 404
+        return jsonify({"success": True})
+
+    @bp.route("/repair/findings/reopen-all", methods=["POST"])
+    def video_repair_findings_reopen_all():
+        body = request.get_json(silent=True) or {}
+        n = _worker().reopen_findings_bulk(job_id=body.get("job_id"),
+                                           finding_type=body.get("finding_type"))
+        return jsonify({"success": True, "reopened": n})
 
     @bp.route("/repair/findings/<int:fid>/fix", methods=["POST"])
     def video_repair_finding_fix(fid):
@@ -140,10 +196,38 @@ def register_routes(bp):
             job_id=body.get("job_id"), severity=body.get("severity"),
             ids=body.get("ids"), fix_action=body.get("fix_action")))
 
+    @bp.route("/repair/findings/bulk-fix-start", methods=["POST"])
+    def video_repair_bulk_fix_start():
+        """fix all, in the background. returns at once; poll /bulk-fix/status."""
+        body = request.get_json(silent=True) or {}
+        res = _worker().start_bulk_fix(
+            job_id=body.get("job_id") or None, severity=body.get("severity") or None,
+            ids=body.get("ids") or None, fix_action=body.get("fix_action") or None,
+            finding_type=body.get("finding_type") or None,
+            safe_only=bool(body.get("safe_only")))
+        # an unscoped fix_action is a caller bug, not "nothing matched"
+        return jsonify(res), (400 if res.get("invalid") else 200)
+
+    @bp.route("/repair/bulk-fix/status", methods=["GET"])
+    def video_repair_bulk_fix_status():
+        return jsonify(_worker().get_bulk_fix_status())
+
+    @bp.route("/repair/bulk-fix/stop", methods=["POST"])
+    def video_repair_bulk_fix_stop():
+        _worker().stop_bulk_fix()
+        return jsonify({"success": True})
+
     @bp.route("/repair/findings/bulk", methods=["POST"])
     def video_repair_bulk():
         body = request.get_json(silent=True) or {}
         ids, action = body.get("ids") or [], body.get("action")
+        finding_type = body.get("finding_type")
+        # the inbox's dismiss-all is scoped by TYPE, not by thousands of ids
+        if not ids and finding_type:
+            if action != "dismiss":
+                return jsonify({"error": "Only dismiss is supported for a type-scoped bulk"}), 400
+            return jsonify({"success": True,
+                            "updated": _worker().dismiss_findings_by_type(finding_type)})
         if action not in ("dismiss", "resolve") or not ids:
             return jsonify({"error": "bad request"}), 400
         return jsonify({"success": True,
@@ -153,8 +237,11 @@ def register_routes(bp):
     def video_repair_clear():
         from . import get_video_db
         body = request.get_json(silent=True) or {}
+        # every filter the list has, or clear deletes rows that weren't on screen
         deleted = get_video_db().repair_clear_findings(
-            job_id=body.get("job_id"), status=body.get("status"))
+            job_id=body.get("job_id") or None, status=body.get("status") or None,
+            severity=body.get("severity") or None,
+            finding_type=body.get("finding_type") or None, q=body.get("q") or None)
         return jsonify({"success": True, "deleted": deleted})
 
     @bp.route("/repair/history", methods=["GET"])
@@ -162,7 +249,7 @@ def register_routes(bp):
         from . import get_video_db
         q = request.args
         return jsonify({"runs": get_video_db().repair_history(
-            job_id=q.get("job_id") or None, limit=int(q.get("limit", 50)))})
+            job_id=q.get("job_id") or None, limit=_int(q.get("limit"), 50))})
 
     @bp.route("/repair/progress", methods=["GET"])
     def video_repair_progress():

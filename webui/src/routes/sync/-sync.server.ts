@@ -212,7 +212,7 @@ export interface CompareTrack {
     image_url?: string;
     duration_ms?: number;
     /**
-     * Both are read ONLY by the Find & Add body (924, 929) — nothing renders
+     * Read by the Find & Add body (924, 929) and by unmatch — nothing renders
      * them. They carry the durable manual match (#787) back to the backend.
      */
     source_track_id?: string;
@@ -257,6 +257,7 @@ export const COMPARE_SOURCE_ICONS: Readonly<Record<string, string>> = {
   beatport: '🎛️',
   deezer: '🟣',
   file: '📄',
+  newpipe: '▶️',
 };
 
 /** The server-column icons (314) — a third, smaller table. */
@@ -286,6 +287,7 @@ export function compareSourceLabel(
   hasMirrored: boolean,
 ): string {
   if (!hasMirrored) return 'Source';
+  if (source === 'newpipe') return 'NewPipe';
   const s = source || 'source';
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
@@ -540,6 +542,56 @@ export function applyRemovedTrack(
     next.splice(trackIndex, 1);
   }
   return next;
+}
+
+/**
+ * Unmatch a wrong pairing: the source row goes back to missing, and the
+ * server track stays in the playlist, so it reappears as an extra at the end,
+ * where the backend files every unclaimed server track.
+ */
+export function applyUnmatchedTrack(
+  tracks: readonly CompareTrack[],
+  trackIndex: number,
+): CompareTrack[] {
+  const track = tracks[trackIndex];
+  if (!track?.source_track || !track.server_track) return tracks.slice();
+  const next = tracks.slice();
+  next[trackIndex] = {
+    ...track,
+    server_track: null,
+    match_status: 'missing',
+    confidence: 0.0,
+    has_manual_match: false,
+  };
+  next.push({ source_track: null, server_track: track.server_track, match_status: 'extra' });
+  return next;
+}
+
+/** only a pairing with ids on both sides can be filed as rejected. */
+export function canUnmatch(track: CompareTrack): boolean {
+  return (
+    track.match_status === 'matched' &&
+    Boolean(track.source_track?.source_track_id) &&
+    Boolean(track.server_track?.id)
+  );
+}
+
+export async function unmatchServerTrack(
+  playlistId: string,
+  playlistName: string,
+  sourceTrackId: string,
+  serverTrackId: string,
+): Promise<ServerMutationResponse> {
+  const response = await fetch(`/api/server/playlist/${playlistId}/unmatch-track`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      playlist_name: playlistName,
+      source_track_id: sourceTrackId,
+      server_track_id: serverTrackId,
+    }),
+  });
+  return (await response.json()) as ServerMutationResponse;
 }
 
 /** 837-838: limit is fixed at 20; the artist hint is omitted when empty. */

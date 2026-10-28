@@ -215,11 +215,11 @@ def test_dashboard_stats_counts_content_and_downloads(db):
 
 
 def test_library_selection_roundtrip(db):
-    assert db.get_library_selection("plex") == {"movies": None, "tv": None}
+    assert db.get_library_selection("plex") == {"movies": None, "tv": None, "tv_more": [], "anime": []}
     db.set_library_selection("plex", "Movies", "TV Shows")
-    assert db.get_library_selection("plex") == {"movies": "Movies", "tv": "TV Shows"}
+    assert db.get_library_selection("plex") == {"movies": "Movies", "tv": "TV Shows", "tv_more": [], "anime": []}
     # Per-server keys don't collide.
-    assert db.get_library_selection("jellyfin") == {"movies": None, "tv": None}
+    assert db.get_library_selection("jellyfin") == {"movies": None, "tv": None, "tv_more": [], "anime": []}
 
 
 def test_settings_kv_roundtrip(db):

@@ -92,6 +92,8 @@ describe('the album inspection tray', () => {
     fireEvent.click(await screen.findByRole('button', { name: /resolve album/i }));
 
     await waitFor(() => expect(fixFinding).toHaveBeenCalledTimes(1));
-    expect(fixFinding).toHaveBeenCalledWith(9);
+    // bulk: the resolve-all loop fixes many findings, so it must not
+    // count as an explicit fix of this one finding.
+    expect(fixFinding).toHaveBeenCalledWith(9, null, { bulk: true });
   });
 });

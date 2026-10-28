@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Callable
@@ -679,6 +680,16 @@ class DatabaseUpdateWorker:
             self.removed_albums = 0
             self.removed_tracks = stale_removed
 
+            # the tools card said "last full refresh: 3 months ago" while this
+            # ran every week and read the whole server (TheHomeGuy), so a
+            # finished deep scan gets its own stamp, shown next to it
+            if not self.should_stop:
+                try:
+                    from datetime import datetime as _dt_now
+                    self.database.set_metadata('last_deep_scan', _dt_now.now().isoformat())
+                except Exception as e:
+                    logger.debug(f"Deep scan: could not stamp completion: {e}")
+
             # Phase 5: Emit finished signal
             logger.info(f"Deep scan completed: {self.processed_artists} artists, "
                         f"{self.processed_albums} albums, {self.processed_tracks} new tracks, "
@@ -1016,8 +1027,8 @@ class DatabaseUpdateWorker:
             # Get recent albums from Navidrome (use the generic method that calls Navidrome-specific logic)
             recent_albums = self._get_recent_albums_for_server()
             if not recent_albums:
-                logger.info("No recent albums found - nothing to process")
-                return []
+                logger.info("No recent albums found - checking the album census")
+                return self._navidrome_census_artists(set())
 
             logger.info(f"Found {len(recent_albums)} recent albums to check")
 
@@ -1102,6 +1113,7 @@ class DatabaseUpdateWorker:
                     consecutive_complete_albums = 0  # Reset on error
                     continue
 
+            artists_to_process.extend(self._navidrome_census_artists(processed_artist_ids))
             logger.info(f"Navidrome incremental complete: {len(artists_to_process)} artists need processing (checked {total_tracks_checked} tracks from {len(recent_albums)} recent albums)")
             return artists_to_process
 
@@ -1109,6 +1121,45 @@ class DatabaseUpdateWorker:
             logger.error(f"Error in Navidrome incremental update: {e}")
             return []
     
+    def _navidrome_census_artists(self, already: set) -> List:
+        """artists of the albums the newest-first pass can't see: ones we don't
+        hold at all, or hold fewer songs of than Navidrome lists (see
+        core/library/navidrome_census.py). never raises; a census that can't be
+        read just leaves this run to the newest-first pass."""
+        census_fn = getattr(self.media_client, 'get_album_census', None)
+        if not callable(census_fn):
+            return []
+        try:
+            census = census_fn()
+            if census is None:
+                logger.info("Navidrome census: album list unreadable this run, skipping")
+                return []
+            from core.library.navidrome_census import albums_to_sync
+            key = 'navidrome_census_tried' + (f':{self.owner_profile_id}' if self.owner_profile_id else '')
+            try:
+                tried = json.loads(self.database.get_metadata(key) or '{}')
+            except (TypeError, ValueError):
+                tried = {}
+            held = self.database.album_track_counts(self.server_type)
+            picked, record = albums_to_sync(census, held, tried)
+            self.database.set_metadata(key, json.dumps(record))
+            artists = []
+            for raw in picked:
+                aid = str(raw.get('artistId') or '')
+                if not aid or aid in already:
+                    continue
+                artist = self.media_client.get_artist_by_id(aid)
+                if artist:
+                    already.add(aid)
+                    artists.append(artist)
+            if picked:
+                logger.info(f"Navidrome census: {len(picked)} album(s) of {len(census)} not fully in the "
+                            f"database, {len(artists)} artist(s) to re-read")
+            return artists
+        except Exception as e:
+            logger.warning(f"Navidrome census failed: {e}")
+            return []
+
     def _get_artists_for_jellyfin_track_incremental_update(self) -> List:
         """FAST Jellyfin incremental update using recent tracks directly (no caching needed)"""
         try:

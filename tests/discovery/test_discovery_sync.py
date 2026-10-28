@@ -1017,28 +1017,51 @@ def test_jellyfin_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
 # User-playlist covers ride the sync
 # ---------------------------------------------------------------------------
 
-def _user_playlist_db(monkeypatch, source='soulsync'):
+def _user_playlist_db(monkeypatch, source='soulsync', custom_cover=False):
     class _DB:
+        def __init__(self):
+            self.asked = []
+
         def get_mirrored_playlist(self, playlist_id, profile_id=None):
-            return {'id': playlist_id, 'source': source}
+            self.asked.append(playlist_id)
+            return {'id': playlist_id, 'source': source, 'custom_cover': custom_cover}
 
-    monkeypatch.setattr('database.music_database.get_database', lambda: _DB())
+    db = _DB()
+    monkeypatch.setattr('database.music_database.get_database', lambda: db)
+    return db
 
 
-def test_sync_is_user_playlist_helper(monkeypatch):
+def test_sync_cover_is_users_helper(monkeypatch):
     _user_playlist_db(monkeypatch, source='soulsync')
-    assert ds._sync_is_user_playlist(9, 1) is True
+    assert ds._sync_cover_is_users(9, 1) is True
 
 
-def test_sync_is_user_playlist_helper_false_for_sources(monkeypatch):
+def test_sync_cover_is_users_false_for_source_posters(monkeypatch):
     _user_playlist_db(monkeypatch, source='spotify')
-    assert ds._sync_is_user_playlist(9, 1) is False
+    assert ds._sync_cover_is_users(9, 1) is False
 
 
-def test_sync_is_user_playlist_helper_survives_bad_ids(monkeypatch):
-    _user_playlist_db(monkeypatch)
-    assert ds._sync_is_user_playlist('pImg', 1) is False  # not an int mirror id
-    assert ds._sync_is_user_playlist(None, 1) is False
+def test_sync_cover_is_users_for_a_generated_mirror_cover(monkeypatch):
+    """a generated cover on a spotify mirror is the user's pick, it pushes
+    like a user playlist's does."""
+    _user_playlist_db(monkeypatch, source='spotify', custom_cover=True)
+    assert ds._sync_cover_is_users(9, 1) is True
+
+
+def test_sync_cover_is_users_reads_auto_mirror_ids(monkeypatch):
+    """the pipeline syncs as auto_mirror_<id>. int() on that always failed, so
+    a user playlist's cover read as a source poster on every pipeline sync."""
+    db = _user_playlist_db(monkeypatch, source='soulsync')
+    assert ds._sync_cover_is_users('auto_mirror_9', 1) is True
+    assert db.asked == [9]
+
+
+def test_sync_cover_is_users_survives_bad_ids(monkeypatch):
+    db = _user_playlist_db(monkeypatch)
+    assert ds._sync_cover_is_users('pImg', 1) is False  # not a mirror id
+    assert ds._sync_cover_is_users(None, 1) is False
+    assert ds._sync_cover_is_users('auto_mirror_x', 1) is False
+    assert db.asked == []
 
 
 def test_user_playlist_cover_pushes_despite_existing_server_playlist(monkeypatch, patched_db):
@@ -1127,6 +1150,45 @@ def test_plex_gets_local_filepath_for_uploaded_cover(monkeypatch, patched_db, tm
 
     assert plex.image_calls == [('Mine', 'http://127.0.0.1:8008/api/user-playlists/7/cover')]
     assert plex.local_paths == [str(cover)]
+
+
+def test_generated_cover_pushes_through_the_pipeline_despite_existing_playlist(
+        monkeypatch, patched_db, tmp_path):
+    """the real shape: pipeline sync id auto_mirror_<id>, a spotify mirror with a
+    generated cover, a server playlist that already exists. #993 keeps source
+    posters off existing playlists; this cover is the user's, so it goes."""
+    _user_playlist_db(monkeypatch, source='spotify', custom_cover=True)
+    monkeypatch.setenv('SOULSYNC_PLAYLIST_COVER_DIR', str(tmp_path))
+    cover = tmp_path / 'user-7.webp'
+    cover.write_bytes(b'fake-webp')
+    plex = _FakePlex()
+    cfg = _FakeConfig(server='plex')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, plex=plex, config=cfg)
+
+    ds.run_sync_task('auto_mirror_7', 'Night Drive', [_track()],
+                     playlist_image_url='/api/user-playlists/7/cover?v=1', deps=deps,
+                     sync_mode='reconcile')
+
+    assert plex.image_calls == [('Night Drive', 'http://127.0.0.1:8008/api/user-playlists/7/cover')]
+    assert plex.local_paths == [str(cover)]
+
+
+def test_source_poster_still_stays_off_an_existing_playlist_via_pipeline(monkeypatch, patched_db):
+    """the other side: no generated cover, source poster, playlist already on
+    the server. #993's guard holds for auto_mirror ids too."""
+    _user_playlist_db(monkeypatch, source='spotify', custom_cover=False)
+    nd = _FakeNavidrome(existing=('Night Drive',))
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('auto_mirror_7', 'Night Drive', [_track()],
+                     playlist_image_url='https://src/poster.jpg', deps=deps, sync_mode='replace')
+
+    assert nd.image_calls == []
 
 
 def test_plex_falls_back_to_url_when_no_local_cover_file(monkeypatch, patched_db, tmp_path):

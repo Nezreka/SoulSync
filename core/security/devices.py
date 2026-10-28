@@ -40,8 +40,18 @@ def device_label(user_agent: str) -> str:
 
 
 def start_device(session, add_row: Callable[[str, int, str, str], bool], owner_id: int,
-                 user_agent: str, ip: str) -> Optional[str]:
-    """a sign-in: new device id in the session and a row for it."""
+                 user_agent: str, ip: str,
+                 revoke_row: Optional[Callable[[int, str], bool]] = None) -> Optional[str]:
+    """a sign-in: new device id in the session and a row for it. the row of
+    the sign-in this browser had before (another profile, say) can never be
+    used again, so ``revoke_row`` takes it off the list."""
+    old_id, old_owner = session.get("device_id"), session.get("device_owner")
+    if revoke_row and old_id and old_owner is not None:
+        try:
+            revoke_row(int(old_owner), old_id)
+        except Exception:  # noqa: BLE001, S110 - the list is a nicety, the sign-in isn't
+            pass
+        forget(old_id)
     device_id = new_device_id()
     if add_row(device_id, int(owner_id), device_label(user_agent), ip or ""):
         session["device_id"] = device_id

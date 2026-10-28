@@ -38,6 +38,33 @@ _STREAMING_USERNAMES = frozenset({
 })
 
 
+# words a lot of artist names start with. "lil yee" vs "lil jon" scored 0.57
+# on the shared "lil " alone, over the 0.5 artist gate, so lil jon's "alive"
+# was downloaded for lil yee's "dead or alive". the fuzzy compare looks past
+# these; an exact or contained name still matches as before.
+_ARTIST_NAME_PREFIXES = frozenset({'lil', 'dj', 'mc', 'the', 'young', 'yung', 'big'})
+
+
+def _artist_core(name):
+    words = name.split()
+    if len(words) > 1 and words[0] in _ARTIST_NAME_PREFIXES:
+        return ' '.join(words[1:])
+    return name
+
+
+def _fuzzy_artist_similarity(wanted, got):
+    """similarity of two artist names that are neither equal nor contained.
+    with the shared prefix gone what's left is short, and short strings
+    match by accident ("yee" vs "wayne" is 0.5), so two prefixed names have
+    to be properly alike to count at all."""
+    from difflib import SequenceMatcher
+    wanted_core, got_core = _artist_core(wanted), _artist_core(got)
+    ratio = SequenceMatcher(None, wanted_core, got_core).ratio()
+    if wanted_core != wanted and got_core != got and ratio < 0.6:
+        return 0.0
+    return ratio
+
+
 def init(matching_engine_obj, download_orchestrator_obj):
     """Bind the matching engine and download orchestrator from web_server."""
     global matching_engine, download_orchestrator
@@ -698,7 +725,7 @@ def _score_streaming_candidates(results, spotify_track, why=None):
                     _best_artist = 1.0
                     break
                 else:
-                    _best_artist = max(_best_artist, SequenceMatcher(None, _ea_norm, _cand_artist).ratio())
+                    _best_artist = max(_best_artist, _fuzzy_artist_similarity(_ea_norm, _cand_artist))
             # Raised from 0.4 → 0.5 to close a fencepost bug: SequenceMatcher
             # returns exactly 0.400 for "maduk" vs "tom walker" (5 chars vs
             # 10 chars with 2 coincidental char matches), which bypassed the
@@ -757,6 +784,12 @@ def _score_streaming_candidates(results, spotify_track, why=None):
 
         r.confidence = confidence
         r.version_type = 'wrong_version' if is_wrong_version else match_type
+        # every best-of copy of a song scores the same here; this says which
+        # one is on the album being downloaded (#1866). torrent/usenet rows
+        # carry the release name, already scored above.
+        _album_match = getattr(matching_engine, 'album_field_match', None)
+        if _album_match and r.username not in ('torrent', 'usenet', 'youtube'):
+            r.album_match = _album_match(expected_album, getattr(r, 'album', None))
         if confidence >= 0.60:
             scored.append(r)
         elif why is not None:
@@ -770,7 +803,8 @@ def _score_streaming_candidates(results, spotify_track, why=None):
 
     if scored:
         # Sort by confidence (best match first)
-        scored.sort(key=lambda x: x.confidence, reverse=True)
+        scored.sort(key=lambda x: (x.confidence, getattr(x, 'album_match', 0) or 0),
+                    reverse=True)
         best = scored[0]
         logger.info(f"[{source_label}] {len(scored)}/{len(results)} candidates passed validation "
               f"(best: {best.confidence:.2f} '{best.artist} - {best.title}')")

@@ -168,10 +168,13 @@ def test_quality_upgrade_scan_includes_owned_episodes(db, worker, monkeypatch):
 
 
 def test_repair_ui_renders_episode_quality_upgrade_details():
-    src = (_ROOT / "webui" / "static" / "video" / "video-repair.js").read_text(
-        encoding="utf-8", errors="replace")
-    assert "episodeQualityPanelHTML" in src
+    # the vanilla named a panel function here it never defined, so episode
+    # rows threw on open while this text check passed. the React panel exists.
+    src = (_ROOT / "webui" / "src" / "routes" / "tools" / "-ui" /
+           "video-finding-detail.tsx").read_text(encoding="utf-8", errors="replace")
+    assert "function EpisodeQualityPanel(" in src
     assert "d.kind === 'episode'" in src
+    assert "<EpisodeQualityPanel d={d} />" in src
 
 
 def test_broken_files_truncated_and_stub(db, worker):

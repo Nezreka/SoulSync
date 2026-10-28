@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "oxfmt --check src && oxlint --type-check src",
+    "check": "oxfmt --check src && oxlint --type-check src && npm run lint:css",
     "dev": "vite",
-    "fix": "oxfmt src && oxlint --type-check src --fix",
+    "fix": "oxfmt src && oxlint --type-check src --fix && npm run lint:css -- --fix",
+    "lint:css": "stylelint \"src/**/*.css\" \"static/**/*.css\"",
     "build": "vite build && vite build -c vite.shell.config.ts",
     "build:shell": "vite build -c vite.shell.config.ts",
     "test": "vitest run",
@@ -44,6 +45,8 @@
     "oxfmt": "^0.47.0",
     "oxlint": "^1.62.0",
     "oxlint-tsgolint": "^0.22.1",
+    "stylelint": "^17.16.0",
+    "stylelint-config-standard": "^40.0.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.10",
     "vitest": "^4.1.5"

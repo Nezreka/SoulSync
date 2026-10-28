@@ -17,6 +17,7 @@ import {
   glyphSvg,
   lineGlyph,
   refreshSidebarWeather,
+  holidaySky,
   sceneConditions,
   sceneExtras,
   setWeatherPreview,
@@ -1183,9 +1184,10 @@ describe('holidays in the sidebar', () => {
 
     setWeatherPreview({ preset: '', date: null, holiday: 'lunar-new-year' });
     expect(document.querySelectorAll('.sidebar-holiday[data-holiday="halloween"]').length).toBe(0);
+    // the lanterns on the divider, their light on the card
     expect(
       document.querySelectorAll('.sidebar-holiday[data-holiday="lunar-new-year"]').length,
-    ).toBe(1);
+    ).toBe(2);
 
     mockWeather({ ...BASE_PAYLOAD, enabled: false });
     await bootSidebarWeather();
@@ -1270,5 +1272,25 @@ describe("christmas day snow and new year's fireworks", () => {
       JSON.stringify({ preset: '', date: null, holiday: 'new-year' }),
     );
     expect(sceneExtras(clear).fireworks).toBe(1);
+  });
+
+  it('the big day is the moment: halloween night, the 31st', () => {
+    at(2026, 10, 31, 20);
+    expect(holidaySky(clear)).toEqual({ id: 'halloween', moment: 1 });
+    at(2026, 10, 27, 20);
+    expect(holidaySky(clear)).toEqual({ id: 'halloween', moment: 0 });
+    at(2026, 11, 3, 20);
+    expect(holidaySky(clear)).toBeNull();
+  });
+
+  it('lunar new year fires reds and golds on the eve and the day, nothing after', () => {
+    at(2027, 2, 6, 21);
+    expect(sceneExtras(clear).fireworks).toBe(0.45);
+    expect(sceneExtras(clear).fireworkColors?.length).toBeGreaterThan(0);
+    at(2027, 2, 8, 21);
+    expect(sceneExtras(clear).fireworks).toBe(0);
+    // new year's keeps its own colours
+    at(2026, 12, 31, 23, 50);
+    expect(sceneExtras(clear).fireworkColors).toBeUndefined();
   });
 });

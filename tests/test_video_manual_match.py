@@ -173,3 +173,48 @@ def test_api_writes_are_admin_only(tmp_path):
     r = c.delete("/api/video/manual-match",
                  json={"kind": "show", "tmdb_id": 1})
     assert r.status_code == 403
+
+
+# ── relinking that works (Oct 2026) ──────────────────────────────────────────
+# Boulder: "the relinking functionality doesnt seem to work that well". The
+# picker searched one LIKE phrase, so TMDB's "Dune: Part One" never found the
+# server's "Dune Part One"; and a link only wrote a side row, so the library
+# copy kept its missing/wrong tmdb id and everything derived from it.
+
+def test_search_matches_word_by_word_and_ranks_the_year(tmp_path):
+    db = _db(tmp_path)
+    conn = db._get_connection()
+    conn.execute("INSERT INTO movies (title, year, server_id) VALUES ('Dune Part One', 2021, 'srv1')")
+    conn.execute("INSERT INTO movies (title, year, server_id) VALUES ('Dune', 1984, 'srv1')")
+    conn.commit(); conn.close()
+    assert [r["title"] for r in db.search_library_titles("movie", "Dune: Part One")] == ["Dune Part One"]
+    rows = db.search_library_titles("movie", "Dune 1984")
+    assert (rows[0]["title"], rows[0]["year"]) == ("Dune", 1984)
+    assert db.search_library_titles("movie", "!!!") == []
+
+
+def test_api_reidentify_repoints_the_library_row_and_locks_it(tmp_path, monkeypatch):
+    import core.video.identity as identity
+    monkeypatch.setattr(identity, "_default_lookup",
+                        lambda kind, tmdb_id: {"title": "Australian Survivor", "year": "2016",
+                                               "tvdb_id": 311029, "imdb_id": "tt5814334"})
+    c = _client(tmp_path)
+    r = c.post("/api/video/manual-match",
+               json={"kind": "show", "tmdb_id": 66126, "library_id": 1, "reidentify": True})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["reidentified"] is True
+    import api.video as videoapi
+    ident = videoapi._video_db.title_identity("show", 1)
+    assert ident["tmdb_id"] == 66126 and ident["tvdb_id"] == 311029
+    assert {"tmdb_id", "imdb_id", "tvdb_id"} <= set(ident["locked_fields"])
+
+
+def test_api_reidentify_changes_nothing_when_tmdb_is_silent(tmp_path, monkeypatch):
+    import core.video.identity as identity
+    monkeypatch.setattr(identity, "_default_lookup", lambda kind, tmdb_id: None)
+    c = _client(tmp_path)
+    r = c.post("/api/video/manual-match",
+               json={"kind": "show", "tmdb_id": 66126, "library_id": 1, "reidentify": True})
+    assert r.status_code == 409
+    import api.video as videoapi
+    assert videoapi._video_db.title_identity("show", 1)["tmdb_id"] is None

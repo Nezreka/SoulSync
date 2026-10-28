@@ -330,14 +330,17 @@ def fetch_lyrics_endpoint():
     Body: ``{title, artist, album?, duration?}``. Returns
     ``{success, synced, plain, source}`` where ``synced`` is an LRC
     string with ``[mm:ss.xx] line`` timestamps (or None) and ``plain``
-    is the untimestamped text (or None). ``source`` is the lookup
-    strategy that hit (``exact`` / ``search`` / ``sidecar``).
+    is the untimestamped text (or None). ``source`` is ``sidecar`` for
+    a local lyrics file or ``lrclib`` for a network hit (else None).
+    A transient LRCLib failure from the lookup returns
+    ``success: False`` with the real reason in ``error`` and
+    ``retryable: True`` for transient kinds (#1879) — it is NOT the
+    same response as a definitive ``no lyrics found``.
 
     Tries the local ``.lrc`` / ``.txt`` sidecar first when a
     ``file_path`` is supplied — already-downloaded tracks should not
-    bounce LRClib on every play. Falls through to LRClib's exact-
-    match endpoint when title+artist+album+duration are all available,
-    then to its generic search endpoint.
+    bounce LRClib on every play. Falls through to the shared
+    LyricsClient's exact-match then search lookup.
     """
     try:
         data = request.get_json() or {}
@@ -379,38 +382,56 @@ def fetch_lyrics_endpoint():
                 logger.debug("lyrics sidecar read skipped: %s", sidecar_err)
 
         # 2. LRClib network lookup via the shared client instance.
+        # Go through the client's tri-state lookup (#1879) instead of
+        # calling the raw api directly: the client paces requests,
+        # retries transient failures honouring Retry-After, and can tell
+        # "LRCLib has no lyrics" (404) apart from "LRCLib rate-limited /
+        # 503 — retry later", which is surfaced as the error here instead
+        # of a misleading 'no lyrics found'.
         from core.lyrics_client import lyrics_client as _lyrics_client
-        api = getattr(_lyrics_client, 'api', None)
-        if api is None:
-            return jsonify({'success': False, 'error': 'lrclib unavailable',
+        if getattr(_lyrics_client, 'api', None) is None:
+            return jsonify({'success': False, 'error': 'LRCLib unavailable',
                             'synced': None, 'plain': None, 'source': None}), 200
 
-        result = None
-        # Exact-match endpoint requires all four fields. LRClib's API
-        # will 404 on any miss; treat as soft failure and fall through
-        # to the search endpoint.
-        if album and duration:
-            try:
-                result = api.get_lyrics(track_name=title, artist_name=artist,
-                                        album_name=album, duration=duration)
-            except Exception as exact_err:
-                logger.debug("lrclib exact lookup failed: %s", exact_err)
+        # Interactive caller: cap each throttle wait at 10s so a player
+        # request can never park an HTTP worker for the length of a
+        # rate-limit cooldown (which can exceed the gunicorn timeout).
+        # The cap is per reservation, not per request — a lookup that
+        # falls through to search waits at most 10s per strategy.
+        fetch = _lyrics_client.lookup_remote_lyrics(
+            track_name=title, artist_name=artist,
+            album_name=album, duration_seconds=duration,
+            max_wait_seconds=10)
 
-        if result is None:
-            try:
-                hits = api.search_lyrics(track_name=title, artist_name=artist)
-                if hits:
-                    result = hits[0]
-            except Exception as search_err:
-                logger.debug("lrclib search lookup failed: %s", search_err)
+        if fetch is None:
+            # A substituted/legacy client returning the old contract's
+            # None (unknown) — answer with the soft unavailable body,
+            # not a 500 from dereferencing it below.
+            return jsonify({'success': False, 'error': 'LRCLib unavailable',
+                            'synced': None, 'plain': None, 'source': None}), 200
 
+        if fetch.status == 'unknown':
+            # retryable only for genuinely transient kinds — a permanent
+            # query error (other 4xx) won't succeed on a retry (#1879).
+            return jsonify({'success': False, 'error': fetch.reason or 'lrclib lookup failed',
+                            'synced': None, 'plain': None, 'source': None,
+                            'retryable': fetch.error_kind in
+                            ('rate_limited', 'server', 'timeout', 'network')})
+
+        result = fetch.data if fetch.status == 'found' else None
         if result is None:
             return jsonify({'success': False, 'error': 'no lyrics found',
                             'synced': None, 'plain': None, 'source': None})
 
         synced = getattr(result, 'synced_lyrics', None) or None
         plain = getattr(result, 'plain_lyrics', None) or None
-        return jsonify({'success': bool(synced or plain), 'synced': synced,
+        if not synced and not plain:
+            # A record with no lyrics content is a definitive negative,
+            # same as a 404 — say so explicitly instead of returning a
+            # success flag with no error and no lyrics.
+            return jsonify({'success': False, 'error': 'no lyrics found',
+                            'synced': None, 'plain': None, 'source': None})
+        return jsonify({'success': True, 'synced': synced,
                         'plain': plain, 'source': 'lrclib'})
     except Exception as e:
         logger.error("lyrics fetch failed: %s", e)

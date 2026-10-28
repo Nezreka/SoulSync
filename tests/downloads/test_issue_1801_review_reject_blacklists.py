@@ -148,3 +148,55 @@ def test_a_failed_blacklist_never_stops_the_delete(db, tmp_path, monkeypatch):
     out = _review_delete(db, tmp_path, monkeypatch, source='YouTube', filename=YT_FILE)
     assert out['success'] is True and out['file_deleted'] is True
     assert out['blacklisted'] is False
+
+
+# --- wrong song: reject it and search again for the one that was asked for -----
+
+
+def _wrong_song(db, tmp_path, monkeypatch, **history):
+    from flask import Flask
+
+    import api.verification as ver
+    f = tmp_path / 'Alive.flac'
+    f.write_bytes(b'x')
+    history_id = db.add_library_history_entry(
+        event_type='download', title='Alive', artist_name='Lil Jon',
+        file_path=str(f), download_source='Tidal', source_filename='1||Lil Jon - Alive',
+        verification_status='unverified', **history)
+    monkeypatch.setattr(ver, 'get_database', lambda: db)
+    monkeypatch.setattr(ver, 'get_current_profile_id', lambda: 1)
+    monkeypatch.setattr(ver, '_resolve_history_audio_path', lambda row: str(f))
+    with Flask(__name__).app_context():
+        resp = ver.wrong_song_verification_item.__wrapped__(history_id)
+    resp, status = resp if isinstance(resp, tuple) else (resp, 200)
+    return f, history_id, resp.get_json(), status
+
+
+def test_wrong_song_rejects_the_file_and_wishlists_what_was_asked_for(db, tmp_path, monkeypatch):
+    """TheHomeGuy: lil jon's "alive" came in for lil yee's "dead or alive".
+    deleting it only blacklisted the file; there was no way to go and find
+    the right one from review."""
+    f, history_id, out, status = _wrong_song(
+        db, tmp_path, monkeypatch, source_track_id='sp-dead-or-alive',
+        source_track_title='Dead or Alive', source_artist='Lil Yee', album_name='Alive')
+
+    assert status == 200 and out['success'] is True
+    assert not f.exists()
+    assert out['blacklisted'] is True
+    assert db.is_blacklisted('tidal', '1||Lil Jon - Alive')
+    assert out['wishlist_track'] == {'id': 'sp-dead-or-alive', 'name': 'Dead or Alive',
+                                     'artist': 'Lil Yee', 'album': 'Alive'}
+    row = db.get_wishlist_track('sp-dead-or-alive', profile_id=1)
+    assert row is not None
+    import json
+    data = row['spotify_data']
+    data = json.loads(data) if isinstance(data, str) else data
+    assert data['name'] == 'Dead or Alive'
+    assert data['artists'][0]['name'] == 'Lil Yee'
+
+
+def test_wrong_song_without_a_record_of_the_ask_touches_nothing(db, tmp_path, monkeypatch):
+    f, history_id, out, status = _wrong_song(db, tmp_path, monkeypatch)
+    assert status == 400 and out['success'] is False
+    assert f.exists()
+    assert not db.is_blacklisted('tidal', '1||Lil Jon - Alive')

@@ -36,6 +36,7 @@ GATED = [
     ('POST', '/api/database/update'),
     ('POST', '/api/database/update/stop'),
     ('POST', '/api/database/backup'),
+    ('POST', '/api/settings/path-preview'),
     ('DELETE', '/api/database/backups/x.db'),
     ('POST', '/api/database/backups/x.db/restore'),
     ('POST', '/api/database/maintenance/vacuum'),

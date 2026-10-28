@@ -240,6 +240,37 @@ describe('LastfmSyncTab — the nameFallback wiring', () => {
 });
 
 describe('SoulsyncDiscoveryTab', () => {
+  it('lists unbuilt variants under section headings, described, not keyed', async () => {
+    responder = (url) => {
+      if (url.includes('/kinds'))
+        return {
+          success: true,
+          kinds: [
+            {
+              kind: 'daily_mix',
+              name_template: 'Daily Mix {variant}',
+              description: 'Built from what you listen to',
+              requires_variant: true,
+              variants: ['1', '2'],
+            },
+            { kind: 'hidden_gems', name_template: 'Hidden Gems', description: 'Obscure picks' },
+          ],
+        };
+      return {
+        success: true,
+        playlists: [{ kind: 'daily_mix', variant: '1', name: 'Daily Mix 1', track_count: 40 }],
+      };
+    };
+    stubFetch();
+    render(<SoulsyncDiscoveryTab />);
+    await waitFor(() => expect(screen.getByText('Daily Mix 2')).toBeInTheDocument());
+    const headings = [...document.querySelectorAll('.ssd-group-title')].map((h) => h.textContent);
+    expect(headings).toEqual(['Daily Mix', 'Discovery playlists']);
+    expect(screen.getAllByText('Built from what you listen to')).toHaveLength(2);
+    expect(screen.queryByText('daily_mix · 1')).toBeNull();
+    expect(screen.getAllByText('Not built yet')).toHaveLength(2); // mix 2 + hidden gems
+  });
+
   it('Refresh & Mirror: generator POST → mirror POST → toast + detail modal + card update', async () => {
     const toast = vi.fn();
     const openMirrored = vi.fn();

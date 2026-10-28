@@ -27,14 +27,18 @@ WANTED = "wanted"
 IGNORED = "ignored"
 UNAIRED = "unaired"
 MISSING = "missing"
+# the show has no TMDB id, so nothing can wish for or search this episode until
+# it is matched. Counting it as missing put a "Wishlist 16" button on the page
+# that could only ever answer "nothing new to add".
+UNMATCHED = "unmatched"
 
 # Read in this order. Reality beats intent: a file on disk is owned whatever the
 # wishlist thinks, and a live transfer outranks the row that asked for it.
-_ORDER = (OWNED, DOWNLOADING, QUEUED, FAILED, WANTED, IGNORED, UNAIRED, MISSING)
+_ORDER = (OWNED, DOWNLOADING, QUEUED, FAILED, WANTED, IGNORED, UNAIRED, MISSING, UNMATCHED)
 
 # The states worth a badge. `unaired` is the ordinary case for most of a
 # calendar week and drawing attention to it would make the view useless.
-_NOTABLE = frozenset({OWNED, DOWNLOADING, QUEUED, FAILED, WANTED, IGNORED, MISSING})
+_NOTABLE = frozenset({OWNED, DOWNLOADING, QUEUED, FAILED, WANTED, IGNORED, MISSING, UNMATCHED})
 
 # What "needs action" means: it aired, you don't have it, and nothing is
 # currently trying to get it. `wanted` is excluded on purpose — the drain has it
@@ -66,7 +70,9 @@ def acquisition_state(ep: Dict[str, Any], *, today: str,
         return OWNED
 
     live = active or {}
-    status = live.get(episode_key(ep)) or live.get(season_key(ep))
+    hit = live.get(episode_key(ep)) or live.get(season_key(ep))
+    # an entry is the download's status, or the live_index record carrying it
+    status = hit.get("status") if isinstance(hit, dict) else hit
     if status:
         # 'importing' is still in flight from the user's point of view - the
         # bytes are here but the episode is not yet theirs.
@@ -82,10 +88,77 @@ def acquisition_state(ep: Dict[str, Any], *, today: str,
     if not ep.get("monitored"):
         return IGNORED
 
+    # Unmatched comes before the air date: an unmatched show's upcoming episode
+    # won't be grabbed on air either, so "Auto" would be a promise nothing keeps.
+    if not ep.get("show_tmdb_id"):
+        return UNMATCHED
+
     air = str(ep.get("air_date") or "")
     if air and air > str(today):
         return UNAIRED
     return MISSING
+
+
+def live_index(rows: Iterable[Dict[str, Any]]) -> Dict[tuple, Dict[str, Any]]:
+    """In-flight download rows keyed the way ``acquisition_state`` reads them,
+    each carrying what a card shows: status, percent and seconds left. The first
+    row for a key wins (rows come oldest first, so that is the one running)."""
+    from core.automation.handlers.video_process_wishlist import active_download_keys
+    out: Dict[tuple, Dict[str, Any]] = {}
+    for row in rows or ():
+        for key in active_download_keys([row]):
+            if key in out:
+                continue
+            try:
+                pct = max(0, min(100, int(round(float(row.get("progress") or 0)))))
+            except (TypeError, ValueError):
+                pct = 0
+            out[key] = {"status": row.get("status"), "progress": pct,
+                        "eta_seconds": row.get("eta_seconds")}
+    return out
+
+
+def live_for(ep: Dict[str, Any], active: Optional[Dict[tuple, Any]]) -> Optional[Dict[str, Any]]:
+    """The in-flight record covering this episode (its own grab or a season pack)."""
+    live = active or {}
+    hit = live.get(episode_key(ep)) or live.get(season_key(ep))
+    return hit if isinstance(hit, dict) else None
+
+
+def movie_state(m: Dict[str, Any], *, active: Optional[Dict[tuple, Any]] = None) -> str:
+    """Where a calendar movie stands. Every movie on the calendar is on the
+    wishlist, so the floor is ``wanted``, never ``missing``."""
+    if m.get("owned"):
+        return OWNED
+    hit = (active or {}).get(("movie", str(m.get("tmdb_id"))))
+    status = hit.get("status") if isinstance(hit, dict) else hit
+    if status:
+        return QUEUED if str(status).lower() == "queued" else DOWNLOADING
+    if str(m.get("status") or "").strip().lower() == "failed":
+        return FAILED
+    return WANTED
+
+
+def collapse_copies(eps):
+    """One row per episode. A Plex library can list one series as several
+    items (Boulder's had "90 Day Fiancé: The Other Way" fifteen times), each
+    a show row with its own copy of every episode, so the calendar drew the
+    same episode once per copy. Copies are the same show (by TMDB id, or by
+    title when unmatched), season, episode and air date. The kept copy is the
+    one that has the file, else one on the wishlist, else the first."""
+    def rank(e):
+        return (0 if e.get("has_file") else 1, 0 if e.get("wishlist_status") else 1)
+
+    order, best = [], {}
+    for e in eps or ():
+        ident = e.get("show_tmdb_id") or "t:" + str(e.get("show_title") or "").strip().lower()
+        key = (ident, e.get("season_number"), e.get("episode_number"), e.get("air_date"))
+        if key not in best:
+            order.append(key)
+            best[key] = e
+        elif rank(e) < rank(best[key]):
+            best[key] = e
+    return [best[k] for k in order]
 
 
 def needs_action(state: str) -> bool:
@@ -113,6 +186,7 @@ def summarize(states: Iterable[str]) -> list:
 
 
 __all__ = ["acquisition_state", "needs_action", "is_notable", "summarize",
+           "live_index", "live_for", "movie_state", "collapse_copies",
            "episode_key", "season_key",
            "OWNED", "DOWNLOADING", "QUEUED", "FAILED", "WANTED", "IGNORED",
-           "UNAIRED", "MISSING"]
+           "UNAIRED", "MISSING", "UNMATCHED"]

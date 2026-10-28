@@ -16,6 +16,9 @@
 
 import { useEffect, useState } from 'react';
 
+import type { ToolsMedia } from '../-tools.media';
+
+import { setToolsMedia, ToolsMediaContext } from '../-tools.media';
 import {
   BlacklistCard,
   ConfigMigrationCard,
@@ -27,8 +30,38 @@ import { MaintenanceHero } from './maintenance-hero';
 import { DbUpdaterCard, DuplicateCleanerCard, ReconcileIdsCard } from './scanning-cards';
 import { BackupManagerCard, MediaScanCard, MetadataUpdaterCard } from './server-cards';
 import { ToolsSection } from './tool-card';
+import {
+  VideoBackupsCard,
+  VideoLibraryScanCard,
+  VideoMassRenameCard,
+  VideoServerScanCard,
+  VideoStudioCards,
+} from './video-tool-cards';
 
-export function ToolsPage() {
+export interface ToolsPageProps {
+  /** 'video' is the video side's tools page (/tools?media=video). */
+  media?: ToolsMedia;
+  /** the video maintenance api, backups, rename and the studios are
+   *  admin-only on the server, so other profiles don't get them on screen. */
+  isAdmin?: boolean;
+}
+
+export function ToolsPage({ media = 'music', isAdmin = true }: ToolsPageProps) {
+  // during render, not in an effect: children's effects run BEFORE a parent's,
+  // so an effect here would let the first fetches go to the other side's api.
+  // see -tools.media.ts.
+  setToolsMedia(media);
+  return (
+    <ToolsMediaContext.Provider value={media}>
+      {/* keyed: switching sides must not carry one side's jobs, filters or
+          open groups into the other */}
+      <ToolsPageBody key={media} media={media} isAdmin={isAdmin} />
+    </ToolsMediaContext.Provider>
+  );
+}
+
+function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean }) {
+  const video = media === 'video';
   const [tab, setTab] = useState<'operations' | 'tools'>('operations');
 
   /* Anything that jumps straight to a tool card - the helper's search, the
@@ -57,7 +90,11 @@ export function ToolsPage() {
   }, []);
 
   return (
-    <div className="page-shell tools-page-container" id="tools-page">
+    <div
+      className={`page-shell tools-page-container${video ? ' tools-page--video' : ''}`}
+      id="tools-page"
+      data-tools-media={media}
+    >
       <div className="tools-page-header">
         <div className="tools-page-header-left">
           <h2 className="tools-page-title">
@@ -79,8 +116,9 @@ export function ToolsPage() {
           <p className="tools-page-subtitle">
             {/* Says what the Issues page ISN'T, so the two stop reading as
                 duplicates of each other (#1210). */}
-            Automated scans, database management, metadata, backups — hand-reported problems live on
-            the Issues page
+            {video
+              ? 'Library maintenance, scans, backups and the studios. Hand-reported problems live on the Issues page'
+              : 'Automated scans, database management, metadata, backups — hand-reported problems live on the Issues page'}
           </p>
         </div>
       </div>
@@ -125,7 +163,17 @@ export function ToolsPage() {
         aria-labelledby="tools-tab-operations"
         hidden={tab !== 'operations'}
       >
-        <MaintenanceHero />
+        {video && !isAdmin ? (
+          <div className="repair-empty-state">
+            <div className="repair-empty-icon">&#128274;</div>
+            <div className="repair-empty-title">Admins only</div>
+            <div className="repair-empty-text">
+              Library maintenance changes the shared library, so it lives with the admin profile.
+            </div>
+          </div>
+        ) : (
+          <MaintenanceHero />
+        )}
       </div>
 
       <div
@@ -138,38 +186,78 @@ export function ToolsPage() {
             glow device, so the page reads as one system rather than a hero
             followed by a strip of unrelated boxes. The blurbs answer "why would
             I open this section", which a taxonomy title does not. */}
-        <ToolsSection
-          title="Database &amp; Scanning"
-          blurb="Reading your media server into SoulSync, and keeping the two in step."
-          glow="56,189,248"
-        >
-          <DbUpdaterCard />
-          <ReconcileIdsCard />
-          <DuplicateCleanerCard />
-          <MediaScanCard />
-        </ToolsSection>
-
-        <ToolsSection
-          title="Metadata &amp; Cache"
-          blurb="Enriching what SoulSync knows, and fixing what it got wrong."
-          glow="168,85,247"
-        >
-          <MetadataUpdaterCard />
-          <DiscoveryPoolCard />
-          <ManualLibraryMatchCard />
-        </ToolsSection>
-
-        <ToolsSection
-          title="Management"
-          blurb="Backups, moving install, and the lists you have told SoulSync to respect."
-          glow="245,158,11"
-        >
-          <BackupManagerCard />
-          <ConfigMigrationCard />
-          <MetadataCacheCard />
-          <BlacklistCard />
-        </ToolsSection>
+        {video ? (
+          <>
+            <ToolsSection
+              title="Database &amp; Scanning"
+              blurb="Reading your media server into SoulSync, and keeping the two in step."
+              glow="56,189,248"
+            >
+              <VideoLibraryScanCard />
+              <VideoServerScanCard />
+            </ToolsSection>
+            {isAdmin ? (
+              <>
+                <ToolsSection
+                  title="Studios"
+                  blurb="The visual editors for posters and collections."
+                  glow="168,85,247"
+                >
+                  <VideoStudioCards />
+                </ToolsSection>
+                <ToolsSection
+                  title="Management"
+                  blurb="Backups of the video database, and file names that follow your templates."
+                  glow="245,158,11"
+                >
+                  <VideoBackupsCard />
+                  <VideoMassRenameCard />
+                </ToolsSection>
+              </>
+            ) : null}
+          </>
+        ) : (
+          <MusicToolSections />
+        )}
       </div>
     </div>
+  );
+}
+
+function MusicToolSections() {
+  return (
+    <>
+      <ToolsSection
+        title="Database &amp; Scanning"
+        blurb="Reading your media server into SoulSync, and keeping the two in step."
+        glow="56,189,248"
+      >
+        <DbUpdaterCard />
+        <ReconcileIdsCard />
+        <DuplicateCleanerCard />
+        <MediaScanCard />
+      </ToolsSection>
+
+      <ToolsSection
+        title="Metadata &amp; Cache"
+        blurb="Enriching what SoulSync knows, and fixing what it got wrong."
+        glow="168,85,247"
+      >
+        <MetadataUpdaterCard />
+        <DiscoveryPoolCard />
+        <ManualLibraryMatchCard />
+      </ToolsSection>
+
+      <ToolsSection
+        title="Management"
+        blurb="Backups, moving install, and the lists you have told SoulSync to respect."
+        glow="245,158,11"
+      >
+        <BackupManagerCard />
+        <ConfigMigrationCard />
+        <MetadataCacheCard />
+        <BlacklistCard />
+      </ToolsSection>
+    </>
   );
 }

@@ -317,7 +317,13 @@ def rescue_stale_plex_track(media_client, db_track, artist_name):
     None. Best-effort — never raises; a miss just leaves the track unmatched
     exactly as before (#1047)."""
     try:
-        title = (getattr(db_track, 'title', '') or '').strip()
+        # db_track is a db row object; a dict-shaped row carries the same
+        # fields as keys (#1885's provider helper tolerates both shapes).
+        def _row_text(name):
+            value = (db_track.get(name, '') if isinstance(db_track, dict)
+                     else getattr(db_track, name, ''))
+            return value.strip() if isinstance(value, str) else ''
+        title = _row_text('title')
         if not title:
             return None
         results = media_client.search_tracks(title, artist_name or '', limit=15) or []
@@ -325,7 +331,7 @@ def rescue_stale_plex_track(media_client, db_track, artist_name):
             return None
 
         import os as _os
-        file_path = (getattr(db_track, 'file_path', '') or '').strip()
+        file_path = _row_text('file_path')
         want_base = _os.path.basename(file_path.replace('\\', '/')) if file_path else ''
         chosen = None
         if want_base:
@@ -1343,6 +1349,22 @@ class PlaylistSyncService:
         """
         return await asyncio.to_thread(self._find_track_blocking, spotify_track, candidate_pool)
 
+    def _match_was_rejected(self, spotify_track, server_source, library_track_id) -> bool:
+        """whether the user unmatched this source track from this library track
+        on the server playlist compare view."""
+        try:
+            from core.sync.match_overrides import is_rejected_match, match_lookup_ids
+            from core.artists.map import get_current_profile_id
+            from database.music_database import MusicDatabase
+            ids = match_lookup_ids(spotify_track)
+            if not ids:
+                return False
+            profile_id = _sync_profile_id.get() or get_current_profile_id()
+            return is_rejected_match(MusicDatabase(), profile_id, server_source, ids, library_track_id)
+        except Exception as e:
+            logger.debug("rejected-match check failed: %s", e)
+            return False
+
     def _find_track_blocking(self, spotify_track: SpotifyTrack, candidate_pool: Optional[Dict[str, list]] = None) -> Tuple[Optional[TrackInfo], float]:
         """Find a track using the same improved database matching as Download Missing Tracks modal"""
         try:
@@ -1421,6 +1443,13 @@ class PlaylistSyncService:
                                     f"{cached['server_track_id']} no longer matches under "
                                     f"current rules; dropping the cached pairing")
                                 drop_stale_cached_match(cache_db, _match_id, active_server)
+                            elif self._match_was_rejected(spotify_track, active_server,
+                                                          cached['server_track_id']):
+                                # the discovered id can carry a cache row the
+                                # unmatch (keyed by the playlist's id) never saw
+                                cache_db.delete_sync_match_cache(
+                                    _match_id, active_server,
+                                    server_track_id=cached['server_track_id'])
                             else:
                                 logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
                                 return actual_track, cached['confidence']
@@ -1468,6 +1497,47 @@ class PlaylistSyncService:
                     logger.debug(f"Durable manual match lookup error: {durable_err}")
             # --- End match fast-path ---
 
+            # exact spotify id (#1885). a library artist filed in another
+            # script never matches by name below, so the track went missing
+            # and the mirror's saved link got cleared. runs after the
+            # user-confirmed paths above and before the fuzzy matcher. not
+            # cached: a 1.0 cache row reads as user-confirmed elsewhere, and
+            # the #1721 stale gate would drop it every run on artist evidence.
+            if self._cancelled:
+                return None, 0.0
+            try:
+                from core.artists.map import get_current_profile_id
+                from core.sync.provider_match import (
+                    honorable_provider_rows, rescue_is_the_provider_row)
+                _provider_profile = _sync_profile_id.get() or get_current_profile_id()
+                # every row gets a turn, the first can be a duplicate whose
+                # key went stale while a sibling is the live one
+                for provider_row in honorable_provider_rows(
+                        cache_db, spotify_track, active_server, _provider_profile):
+                    _provider_id = (provider_row.get("id") if isinstance(provider_row, dict)
+                                    else provider_row.id)
+                    actual_track = _materialize(_provider_id)
+                    if actual_track:
+                        logger.debug(f"Provider-ID match for '{original_title}' → {getattr(actual_track, 'ratingKey', _provider_id)}")
+                        return actual_track, 1.0
+                    # plex re-keys tracks on a metadata refresh, so the stored
+                    # id can 404. re-resolve live like the fuzzy branch (#1047),
+                    # but only trust the hit when it really is this row
+                    if server_type == "plex":
+                        _row_artist = (provider_row.get("artist_name") if isinstance(provider_row, dict)
+                                       else getattr(provider_row, 'artist_name', '')) or ''
+                        rescued = rescue_stale_plex_track(
+                            media_client, provider_row,
+                            _row_artist or (_artist_name(spotify_track.artists[0]) if spotify_track.artists else ''))
+                        if rescue_is_the_provider_row(cache_db, spotify_track, provider_row, rescued,
+                                                      _provider_profile, active_server):
+                            logger.info(f"[Stale-Key Rescue] '{original_title}' re-resolved live "
+                                        f"(stored id {_provider_id} → {rescued.ratingKey})")
+                            return rescued, 1.0
+                    logger.debug(f"Provider-ID match for '{original_title}' pointed at {_provider_id}, which did not materialize")
+            except Exception as provider_err:
+                logger.debug(f"Provider-ID match lookup error: {provider_err}")
+
             # Try each artist (same as modal logic)
             for artist in spotify_track.artists:
                 if self._cancelled:
@@ -1508,6 +1578,11 @@ class PlaylistSyncService:
                         )
                         if _cand_conf > confidence:
                             db_track, confidence = _cand_track, _cand_conf
+
+                    if db_track and confidence >= 0.7 and self._match_was_rejected(
+                            spotify_track, active_server, db_track.id):
+                        logger.info(f"Skipping '{db_track.title}' for '{original_title}': the user unmatched that pairing")
+                        db_track, confidence = None, 0.0
 
                     if db_track and confidence >= 0.7:
                         logger.debug(f"Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")

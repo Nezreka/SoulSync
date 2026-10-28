@@ -40,10 +40,10 @@
   line-height: 1.5;
   padding: 12px 14px;
   transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
+    border-color var(--dur-quick) ease,
+    background var(--dur-quick) ease,
+    box-shadow var(--dur-quick) ease,
+    transform var(--dur-quick) ease;
 }
 
 .textInput::placeholder,
@@ -75,7 +75,7 @@
   min-width: 130px;
   box-sizing: border-box;
   border: 1px solid var(--white-a10);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.035)),
     var(--white-a05);
@@ -87,10 +87,10 @@
   min-height: 36px;
   padding: 8px 32px 8px 12px;
   transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
+    border-color var(--dur-quick) ease,
+    background var(--dur-quick) ease,
+    box-shadow var(--dur-quick) ease,
+    transform var(--dur-quick) ease;
   appearance: none;
   -webkit-appearance: none;
   color-scheme: dark;
@@ -136,10 +136,10 @@
   color: #000;
   cursor: pointer;
   transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
+    border-color var(--dur-quick) ease,
+    background var(--dur-quick) ease,
+    box-shadow var(--dur-quick) ease,
+    transform var(--dur-quick) ease;
   color-scheme: dark;
   &[data-checked] {
     border-color: rgb(var(--accent-light-rgb));
@@ -163,7 +163,7 @@
   width: 100%;
   height: 100%;
   opacity: 0;
-  transition: opacity 0.18s ease;
+  transition: opacity var(--dur-quick) ease;
 }
 
 .checkboxIcon {
@@ -189,10 +189,10 @@
   background: linear-gradient(180deg, var(--white-a08), var(--white-a04)), var(--white-a06);
   cursor: pointer;
   transition:
-    border-color 0.18s ease,
-    background 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
+    border-color var(--dur-quick) ease,
+    background var(--dur-quick) ease,
+    box-shadow var(--dur-quick) ease,
+    transform var(--dur-quick) ease;
   color-scheme: dark;
   &[data-checked] {
     border-color: rgba(var(--accent-light-rgb), 0.55);
@@ -222,9 +222,9 @@
   height: 18px;
   border-radius: var(--radius-circle);
   background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 1px 3px var(--black-a25);
   transform: translateX(0);
-  transition: transform 0.18s ease;
+  transition: transform var(--dur-quick) ease;
 }
 
 .rangeRoot {
@@ -273,8 +273,8 @@
     rgb(var(--accent-light-rgb));
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
   transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease;
+    transform var(--dur-quick) ease,
+    box-shadow var(--dur-quick) ease;
 }
 
 .rangeThumb:hover {
@@ -300,16 +300,16 @@
   width: 100%;
   padding: 14px 16px;
   text-align: left;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   border: 1px solid var(--white-a08);
   background: linear-gradient(180deg, var(--white-a05), var(--white-a03)), var(--white-a03);
   color: #fff;
   cursor: pointer;
   transition:
-    transform 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    background 0.18s ease;
+    transform var(--dur-quick) ease,
+    border-color var(--dur-quick) ease,
+    box-shadow var(--dur-quick) ease,
+    background var(--dur-quick) ease;
   &:hover {
     transform: translateY(-1px);
     border-color: var(--white-a14);
@@ -386,10 +386,10 @@
   min-width: 80px;
   padding: 8px 16px;
   transition:
-    transform 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    background 0.18s ease;
+    transform var(--dur-quick) ease,
+    border-color var(--dur-quick) ease,
+    box-shadow var(--dur-quick) ease,
+    background var(--dur-quick) ease;
   &:hover {
     transform: translateY(-1px);
     border-color: var(--white-a18);
@@ -431,7 +431,7 @@
   justify-content: center;
   gap: 8px;
   border: 1px solid var(--white-a10);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--white-a05);
   color: #fff;
   cursor: pointer;
@@ -442,11 +442,11 @@
   min-height: 36px;
   padding: 8px 12px;
   transition:
-    transform 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    background 0.18s ease,
-    color 0.18s ease;
+    transform var(--dur-quick) ease,
+    border-color var(--dur-quick) ease,
+    box-shadow var(--dur-quick) ease,
+    background var(--dur-quick) ease,
+    color var(--dur-quick) ease;
   &:hover:not(:disabled) {
     transform: translateY(-1px);
     border-color: var(--white-a18);
@@ -507,7 +507,7 @@
   &[data-variant='primary']:disabled {
     opacity: 0.62;
     background: rgba(var(--accent-light-rgb), 0.45);
-    color: rgba(0, 0, 0, 0.55);
+    color: var(--black-a55);
   }
 
   &[data-variant='primary'] [data-slot='badge'] {

@@ -40,6 +40,7 @@ import {
   unverifiedAudit,
   unverifiedCompare,
   unverifiedDelete,
+  unverifiedWrongSong,
   unverifiedPlay,
 } from '../-adl.verif-actions';
 import { musicChipCounts, musicLive, musicQuiet } from '../-dl.header-data';
@@ -282,6 +283,17 @@ export function ActiveDownloadsPage() {
         onAudit: () => void unverifiedAudit(historyId),
         onApprove: () => void unverifiedApprove(historyId, refresh),
         onDelete: () => void unverifiedDelete(historyId, refresh),
+        // only when we know what was asked for: that's what it searches for
+        ...(dl.expected_title
+          ? {
+              onWrongSong: () =>
+                void unverifiedWrongSong(
+                  historyId,
+                  `"${dl.expected_title}"${dl.expected_artist ? ` by ${dl.expected_artist}` : ''}`,
+                  refresh,
+                ),
+            }
+          : {}),
       };
     },
     [refresh],

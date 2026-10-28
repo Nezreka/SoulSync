@@ -153,3 +153,10 @@ def test_replaced_recording_does_not_inherit_old_identifier(db, tmp_path):
     scan(str(tmp_path), db)
     assert not db.is_owned(BOOK['asin'])
     assert db.get_library()[0]['match_status'] == 'unmatched'
+
+def test_background_matching_searches_the_configured_marketplace(db):
+    row=local_row(db); client=MagicMock(); client.search.return_value=[]
+    with patch('core.settings.config_manager') as config:
+        config.get.side_effect=lambda key, default=None: 'de' if key=='audiobooks.marketplace' else default
+        match_one(db,row,client)
+    assert client.search.call_args.kwargs['marketplace']=='de'

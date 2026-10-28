@@ -977,10 +977,11 @@ def create_audiobooks_blueprint() -> Blueprint:
         try:
             client = get_audiobook_client()
             if ASIN_RE.fullmatch(query):
-                book = client.get_book(query.upper())
+                book = client.get_book(query.upper(), marketplace=_marketplace())
                 candidates = [score_candidate(row.get("metadata_json") or row, book)] if book else []
             else:
-                candidates = candidates_for(row, client, query=query or None)
+                candidates = candidates_for(row, client, query=query or None,
+                                            marketplace=_marketplace())
             return jsonify({"success": True, "candidates": candidates,
                             "scan_signature": row.get("scan_signature", ""),
                             "match_revision": row.get("match_revision", 0)})
@@ -1009,7 +1010,7 @@ def create_audiobooks_blueprint() -> Blueprint:
             if not ASIN_RE.fullmatch(selected):
                 return jsonify({"success": False, "error": "A valid Audible ASIN is required"}), 400
             try:
-                result = get_audiobook_client().get_book(selected)
+                result = get_audiobook_client().get_book(selected, marketplace=_marketplace())
             except Exception:
                 result = None
             if result is None:

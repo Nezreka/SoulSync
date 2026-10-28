@@ -29,7 +29,7 @@ export function openOnboarding(options: OpenOptions = {}) {
 }
 
 /**
- * Settings > Advanced > Developer > Setup preview. The markup is static in
+ * Settings > System > Developer > Setup preview. The markup is static in
  * index.html, next to the weather preview; this only wires the button.
  */
 export function wireSetupPreviewControls(root: ParentNode = document): void {

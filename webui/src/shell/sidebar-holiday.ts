@@ -1,16 +1,19 @@
 /**
- * holiday decorations: your art, placed where it belongs instead of pasted
- * on. they live in the page, attached to the sidebar's own furniture, so
- * they scroll with it and sit on it:
+ * holiday decorations: the props. every holiday gets the same four layers,
+ * so none of them is just a sticker:
  *
- * - header: a little scene in its empty bottom-left corner, under the
- *   profile row, left of the weather line
- * - footer: hung from the divider above Support, perched on the top edge of
- *   the Service Status card
+ * - sky: painted on the scene canvas (holiday-scene.ts)
+ * - tint: `data-holiday` on the sidebar retunes the header glow, the active
+ *   nav item and the weather glyph (sidebar-weather.css)
+ * - one hero prop, lit: it throws its light onto the card it sits on
+ * - the moment: the big day itself gets more (`holiday-moment`)
  *
- * motion is css (sway, flicker, flap, a turkey's strut), off under reduced
- * motion. the wind sets how far the lanterns sway; night lights the
- * candles. clicks always pass through.
+ * the props live in the page, attached to the sidebar's own furniture, so
+ * they scroll with it and sit on it: the header's empty bottom-left corner,
+ * the divider above Support, the top edge of the Service Status card.
+ *
+ * motion is css, off under reduced motion. the wind sets how far things
+ * sway; night lights the candles. clicks always pass through.
  */
 
 import type { HolidayId } from './holidays';
@@ -23,6 +26,25 @@ export interface HolidayMood {
   night: boolean;
   /** 0..1, how much the wind shows */
   wind: number;
+  /** the big day itself */
+  moment?: boolean;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function svg(viewBox: string, cls: string, paint: string): SVGSVGElement {
+  const el = document.createElementNS(SVG_NS, 'svg');
+  el.setAttribute('viewBox', viewBox);
+  el.setAttribute('class', cls);
+  el.setAttribute('aria-hidden', 'true');
+  el.innerHTML = paint;
+  return el;
+}
+
+function span(cls: string): HTMLSpanElement {
+  const el = document.createElement('span');
+  el.className = cls;
+  return el;
 }
 
 function img(name: string, cls: string, alt = ''): HTMLImageElement {
@@ -68,14 +90,105 @@ function lantern(name: string, side: 'left' | 'right', kind = ''): HTMLElement {
   return wrap;
 }
 
-function bat(name: string, cls: string): HTMLElement {
-  const flier = document.createElement('span');
-  flier.className = cls;
-  const wings = document.createElement('span');
-  wings.className = 'holiday-bat-wings';
-  wings.appendChild(img(name, 'holiday-art'));
-  flier.appendChild(wings);
-  return flier;
+/**
+ * the hero's light on the card: a warm wash over its top corner and a lit
+ * rim along the edge, flickering with the flame when it's a flame
+ */
+function spill(): HTMLElement {
+  const wrap = span('holiday-spill');
+  wrap.append(span('holiday-spill-wash'), span('holiday-spill-rim'));
+  return wrap;
+}
+
+/** a cobweb in the header's bottom-left corner, threads catching the light */
+function cobweb(): HTMLElement {
+  // spokes fan out of the corner (0,60); each ring sags back toward it
+  const spokes = [0, 16, 33, 50, 68, 90].map((deg) => (deg * Math.PI) / 180);
+  const at = (r: number, a: number) =>
+    `${(Math.cos(a) * r).toFixed(1)} ${(60 - Math.sin(a) * r).toFixed(1)}`;
+  let paint = spokes.map((a) => `<path d="M0 60 L${at(60, a)}"/>`).join('');
+  for (const r of [11, 20, 30, 40, 51]) {
+    let d = `M${at(r, spokes[0])}`;
+    for (let i = 1; i < spokes.length; i++) {
+      const mid = (spokes[i - 1] + spokes[i]) / 2;
+      d += ` Q${at(r * 0.84, mid)} ${at(r, spokes[i])}`;
+    }
+    paint += `<path d="${d}"/>`;
+  }
+  const wrap = span('holiday-cobweb');
+  wrap.appendChild(svg('0 0 60 60', 'holiday-cobweb-art', `<g>${paint}</g>`));
+  return wrap;
+}
+
+/** a spider on its silk, hung from the divider: it lets itself down now and then */
+function spider(): HTMLElement {
+  const wrap = span('holiday-spider');
+  const body = span('holiday-spider-body');
+  body.appendChild(
+    svg(
+      '0 0 20 20',
+      'holiday-spider-art',
+      // eight legs, bent at the knee, then the body: a round abdomen, a small head
+      `<g class="holiday-spider-legs">${[
+        'M8.6 9 L4 6.4 L1.6 9.6',
+        'M8.4 10.2 L3.4 9.4 L1 13',
+        'M8.6 11.2 L4 12.6 L2.6 16.6',
+        'M9 12 L6.2 15.4 L5.8 19',
+        'M11.4 9 L16 6.4 L18.4 9.6',
+        'M11.6 10.2 L16.6 9.4 L19 13',
+        'M11.4 11.2 L16 12.6 L17.4 16.6',
+        'M11 12 L13.8 15.4 L14.2 19',
+      ]
+        .map((d) => `<path d="${d}"/>`)
+        .join('')}</g>` +
+        '<ellipse cx="10" cy="7.6" rx="2" ry="1.8"/><ellipse cx="10" cy="12.2" rx="3.3" ry="3.9"/>',
+    ),
+  );
+  wrap.append(span('holiday-silk'), body);
+  return wrap;
+}
+
+/** snow settled along an edge: soft drifts, thicker in places */
+function snowcap(): HTMLElement {
+  return span('holiday-snowcap');
+}
+
+/**
+ * new year's: a string of warm bulbs draped across the divider in three
+ * swags, twinkling out of step
+ */
+const GARLAND_SWAGS = 3;
+const GARLAND_BULBS = 13;
+
+function garland(): HTMLElement {
+  const wrap = span('holiday-garland');
+  const sag = (f: number) => {
+    const u = (f * GARLAND_SWAGS) % 1;
+    return 1 + 8 * 4 * u * (1 - u);
+  };
+  let d = 'M0 1';
+  for (let i = 0; i < GARLAND_SWAGS; i++) {
+    const x0 = (i * 200) / GARLAND_SWAGS;
+    const x1 = ((i + 1) * 200) / GARLAND_SWAGS;
+    d += ` Q${((x0 + x1) / 2).toFixed(1)} 17 ${x1.toFixed(1)} 1`;
+  }
+  const wire = svg(
+    '0 0 200 14',
+    'holiday-garland-wire',
+    `<path d="${d}" vector-effect="non-scaling-stroke"/>`,
+  );
+  // stretch to the divider's width; the bulbs are placed by percent, so they ride the wire
+  wire.setAttribute('preserveAspectRatio', 'none');
+  wrap.appendChild(wire);
+  for (let i = 0; i < GARLAND_BULBS; i++) {
+    const f = (i + 0.5) / GARLAND_BULBS;
+    const bulb = span(`holiday-bulb holiday-bulb--${['gold', 'warm', 'champagne'][i % 3]}`);
+    bulb.style.left = `${(f * 100).toFixed(2)}%`;
+    bulb.style.top = `${sag(f).toFixed(1)}px`;
+    bulb.style.animationDelay = `${(-i * 0.61).toFixed(2)}s`;
+    wrap.appendChild(bulb);
+  }
+  return wrap;
 }
 
 /**
@@ -138,32 +251,25 @@ function build(
 ): Array<{ anchor: 'header' | 'divider' | 'card'; el: HTMLElement }> {
   switch (holiday) {
     case 'halloween':
+      // the moon, the bats and the fog are on the sky; here: the web in
+      // the corner, the spider on its thread, the jack-o'-lantern lighting
+      // the card
       return [
-        {
-          anchor: 'header',
-          el: deco(
-            'header',
-            holiday,
-            pumpkin('pumpkin-1', 'sm', true),
-            bat('bat-1', 'holiday-bat holiday-bat--cross'),
-          ),
-        },
-        {
-          anchor: 'divider',
-          el: deco('divider', holiday, bat('bat-2', 'holiday-bat holiday-bat--roost')),
-        },
+        { anchor: 'header', el: deco('header', holiday, cobweb()) },
+        { anchor: 'divider', el: deco('divider', holiday, spider()) },
         {
           anchor: 'card',
           el: deco(
             'card',
             holiday,
+            spill(),
             pumpkin('pumpkin-2', 'md', false),
             pumpkin('pumpkin-3', 'lg', true),
           ),
         },
       ];
     case 'thanksgiving':
-      return [{ anchor: 'card', el: deco('card', holiday, turkey()) }];
+      return [{ anchor: 'card', el: deco('card', holiday, spill(), turkey()) }];
     case 'christmas':
       return [
         { anchor: 'header', el: deco('header', holiday, sleigh()) },
@@ -176,17 +282,21 @@ function build(
             lantern('ornament-blue', 'right', 'ornament'),
           ),
         },
-        { anchor: 'card', el: deco('card', holiday, tree()) },
+        { anchor: 'card', el: deco('card', holiday, spill(), snowcap(), tree()) },
       ];
     case 'new-year':
-      // the fireworks are painted on the scene canvas, no art to hang
-      return [];
+      // the fireworks and the confetti are on the sky; the lights are strung here
+      return [
+        { anchor: 'divider', el: deco('divider', holiday, garland()) },
+        { anchor: 'card', el: deco('card', holiday, spill()) },
+      ];
     case 'lunar-new-year':
       return [
         {
           anchor: 'divider',
           el: deco('divider', holiday, lantern('lantern-1', 'left'), lantern('lantern-2', 'right')),
         },
+        { anchor: 'card', el: deco('card', holiday, spill()) },
       ];
   }
 }
@@ -219,6 +329,7 @@ export function mountHoliday(holiday: HolidayId | null, mood: HolidayMood): void
         );
       }
       sidebar.classList.add(ROOT_CLASS);
+      sidebar.dataset.holiday = holiday;
       mounted = holiday;
     }
   }
@@ -230,6 +341,7 @@ export function setHolidayMood(mood: HolidayMood): void {
   const sidebar = document.getElementById('app-sidebar');
   if (!sidebar) return;
   sidebar.classList.toggle('holiday-night', mood.night);
+  sidebar.classList.toggle('holiday-moment', !!mood.moment);
   const wind = Math.max(0, Math.min(1, mood.wind));
   sidebar.style.setProperty('--holiday-sway', `${(2 + wind * 7).toFixed(1)}deg`);
   sidebar.style.setProperty('--holiday-sway-time', `${(4.2 - wind * 1.8).toFixed(2)}s`);
@@ -261,7 +373,13 @@ export function guardHeaderCorner(
 export function unmountHoliday(): void {
   document.querySelectorAll(`.${DECO_CLASS}`).forEach((el) => el.remove());
   const sidebar = document.getElementById('app-sidebar');
-  sidebar?.classList.remove(ROOT_CLASS, 'holiday-night', 'holiday-header-crowded');
+  sidebar?.classList.remove(
+    ROOT_CLASS,
+    'holiday-night',
+    'holiday-moment',
+    'holiday-header-crowded',
+  );
+  if (sidebar) delete sidebar.dataset.holiday;
   sidebar?.style.removeProperty('--holiday-sway');
   sidebar?.style.removeProperty('--holiday-sway-time');
   mounted = null;

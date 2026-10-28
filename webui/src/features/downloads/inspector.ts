@@ -182,6 +182,8 @@ export interface InspectorSearchMeta {
     policy_run_id?: string;
   };
   policy?: InspectorPolicyFacet;
+  /** The length every row was judged against (0 when the track has none). */
+  expected_duration_ms?: number;
 }
 
 /** One candidate's rung on the quality ladder in effect for the search. */
@@ -259,6 +261,7 @@ export async function streamInspection(
           {
             provenance: data.provenance as InspectorSearchMeta['provenance'],
             policy: data.policy as InspectorSearchMeta['policy'],
+            expected_duration_ms: Number(data.expected_duration_ms) || 0,
           },
         );
       } catch {

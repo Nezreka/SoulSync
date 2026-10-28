@@ -1,20 +1,20 @@
-"""Sonarr-style 'wishlist today's airings' automation handler — pure logic with the
-calendar read + wishlist write + catch-up bookmark injected, so it runs without a
+"""Sonarr-style 'wishlist aired episodes' automation handler — pure logic with the
+calendar read + wishlist write + offer receipts injected, so it runs without a
 DB or media server.
 
-Catch-up (Boulder's Sunday gap): each run covers (bookmark+1 .. today), capped at
-CATCHUP_MAX_DAYS, so days a slept-through 01:00 trigger skipped heal on the next
-run. Delivery is at-least-once: the wishlist upsert is idempotent, so re-covered
-windows never duplicate — but a bookmark write failure means the next run
-re-offers the window (a deliberately-deleted episode can boomerang in that case).
+Every run looks back LOOKBACK_DAYS and offers each episode once (a receipt per
+episode). That replaced a once-a-day (bookmark + 1 .. today) window, which lost
+episodes when the 01:00 slot was skipped by a restart and never offered one that
+reached TMDB on or after its own air date.
 """
 
 from __future__ import annotations
 
 from core.automation.handlers.video_auto_wishlist_airing import (
-    CATCHUP_MAX_DAYS,
+    LOOKBACK_DAYS,
     auto_video_add_airing_episodes,
-    compute_catchup_window,
+    lookback_start,
+    seed_boundary,
 )
 
 
@@ -41,7 +41,10 @@ def _run(config=None, deps=None, **overrides):
         today_fn=lambda: "2026-06-21",
         season_meta=lambda *a: None,
         get_bookmark=lambda: None,
-        set_bookmark=lambda d: None,
+        get_offered=lambda keys: set(),
+        mark_offered=lambda keys: None,
+        is_seeded=lambda: True,
+        set_seeded=lambda: None,
         # unowned-follow pass: hermetic by default, the production seams reach
         # the real video DB + TMDB
         unowned_follows=lambda: [],
@@ -119,7 +122,7 @@ def test_falls_back_to_db_values_when_tmdb_unavailable():
     assert ep["still_url"] == "/library/metadata/9/thumb/1"
 
 
-def test_queries_the_calendar_for_today():
+def test_queries_the_calendar_for_the_last_week():
     seen = {}
 
     def fetch(start, end):
@@ -127,7 +130,7 @@ def test_queries_the_calendar_for_today():
         return []
 
     _run(fetch_airing=fetch)
-    assert seen["window"] == ("2026-06-21", "2026-06-21")     # start == end == today
+    assert seen["window"] == ("2026-06-15", "2026-06-21")     # a week ending today
 
 
 def test_nothing_airing_is_a_clean_noop():
@@ -145,110 +148,153 @@ def test_error_is_caught_and_reported():
     assert any(p.get("status") == "error" for p in deps.progress)
 
 
-# ── catch-up window (Boulder's Sunday gap) ───────────────────────────────────
+# ── lookback + receipts ──────────────────────────────────────────────────
 
 
-def test_window_no_bookmark_is_today_only():
-    assert compute_catchup_window("2026-06-21", None) == "2026-06-21"
-    assert compute_catchup_window("2026-06-21", "") == "2026-06-21"
-    assert compute_catchup_window("2026-06-21", "junk") == "2026-06-21"
+class _Receipts:
+    """an in-memory video_airing_offers table, for runs that follow each other."""
+
+    def __init__(self, seeded=True):
+        self.keys = set()
+        self.seeded = seeded
+
+    def seams(self):
+        return dict(get_offered=lambda keys: {k for k in keys if k in self.keys},
+                    mark_offered=lambda keys: self.keys.update(keys),
+                    is_seeded=lambda: self.seeded,
+                    set_seeded=lambda: setattr(self, "seeded", True))
 
 
-def test_window_normal_night_collapses_to_today():
-    # bookmark = yesterday → window starts today: identical to pre-catch-up behavior
-    assert compute_catchup_window("2026-06-21", "2026-06-20") == "2026-06-21"
+def _dated(tid, title, s, e, day):
+    r = _row(tid, title, s, e)
+    r["air_date"] = day
+    return r
 
 
-def test_window_after_gap_covers_missed_days():
-    # gone Thu–Sun (last covered Wed 17th) → window = Thu 18th .. today
-    assert compute_catchup_window("2026-06-21", "2026-06-17") == "2026-06-18"
+def test_lookback_is_a_week_ending_today():
+    assert LOOKBACK_DAYS == 7
+    assert lookback_start("2026-06-21") == "2026-06-15"
+    assert lookback_start("2026-03-02") == "2026-02-24"
 
 
-def test_window_is_capped():
-    # bookmark a month old → clamp to (today - CATCHUP_MAX_DAYS + 1)
-    assert CATCHUP_MAX_DAYS == 7
-    assert compute_catchup_window("2026-06-21", "2026-05-01") == "2026-06-15"
+def test_an_offered_episode_is_never_added_twice():
+    rec = _Receipts()
+    added = []
+    fetch = lambda s, e: [_row(1, "Widows Bay", 1, 1)]
+    add = lambda tid, title, eps, *a: added.append([x["episode_number"] for x in eps]) or len(eps)
+    _run(fetch_airing=fetch, add_episodes=add, **rec.seams())
+    res = _run(fetch_airing=fetch, add_episodes=add, **rec.seams())
+    assert added == [[1]]
+    assert res["episodes_added"] == 0
+    assert (1, 1, 1) in rec.keys
 
 
-def test_window_future_or_same_day_bookmark_clamps_to_today():
-    assert compute_catchup_window("2026-06-21", "2026-06-21") == "2026-06-21"
-    assert compute_catchup_window("2026-06-21", "2026-06-25") == "2026-06-21"
+def test_an_episode_removed_from_the_wishlist_does_not_come_back():
+    # the old window re-offered a whole week whenever its bookmark write failed,
+    # and a deleted episode came back. the receipt outlives the wishlist row.
+    rec = _Receipts()
+    rec.keys.add((1, 1, 1))
+    added = []
+    _run(fetch_airing=lambda s, e: [_row(1, "Widows Bay", 1, 1)],
+         add_episodes=lambda *a: added.append(a) or 1, **rec.seams())
+    assert added == []
 
 
-def test_gap_run_fetches_window_and_advances_bookmark():
-    seen = {}
-    marks = []
-
-    def fetch(start, end):
-        seen["window"] = (start, end)
-        return [_row(1, "Widows Bay", 1, 1)]
-
-    res = _run(fetch_airing=fetch, add_episodes=lambda *a, **k: 1,
-               get_bookmark=lambda: "2026-06-17", set_bookmark=marks.append)
-    assert seen["window"] == ("2026-06-18", "2026-06-21")   # the missed days + today
-    assert marks == ["2026-06-21"]                          # bookmark advanced to today
+def test_an_episode_tmdb_learned_about_late_is_still_offered():
+    """Boulder, Oct 27 2026: 41 aired episodes sat missing. The refresh runs at
+    23:00 and the airing run at 01:00 covered only (bookmark + 1 .. today), so an
+    episode that reached the episodes table on or after its own air date was
+    behind the bookmark before anything could read it. A week of lookback with
+    receipts offers it on the next run."""
+    rec = _Receipts()
+    added = []
+    rows = [_dated(1, "Lupin", 4, 1, "2026-06-19")]   # aired two days ago, never offered
+    res = _run(fetch_airing=lambda s, e: [r for r in rows if s <= r["air_date"] <= e],
+               add_episodes=lambda tid, t, eps, *a: added.extend(eps) or len(eps), **rec.seams())
+    assert [e["episode_number"] for e in added] == [1]
     assert res["episodes_added"] == 1
 
 
-def test_failed_run_does_not_advance_bookmark():
-    marks = []
+def test_a_failed_write_leaves_the_show_for_the_next_run():
+    rec = _Receipts()
 
-    def boom(start, end):
-        raise RuntimeError("calendar down")
+    def add(tid, *a):
+        if tid == 2:
+            raise RuntimeError("db hiccup")
+        return 1
 
-    res = _run(fetch_airing=boom, get_bookmark=lambda: "2026-06-17", set_bookmark=marks.append)
+    res = _run(fetch_airing=lambda s, e: [_row(1, "A", 1, 1), _row(2, "B", 1, 1)],
+               add_episodes=add, **rec.seams())
     assert res["status"] == "error"
-    assert marks == []                       # next run re-covers the same window
+    assert (1, 1, 1) in rec.keys and (2, 1, 1) not in rec.keys
 
 
-def test_bookmark_read_failure_degrades_to_today_only():
-    seen = {}
-    marks = []
+def test_seed_boundary():
+    assert seed_boundary("2026-06-21", "2026-06-20") == "2026-06-20"
+    assert seed_boundary("2026-06-21", "2026-06-17") == "2026-06-17"
+    # no usable bookmark = fresh install, which never backfilled history either
+    assert seed_boundary("2026-06-21", None) == "2026-06-20"
+    assert seed_boundary("2026-06-21", "junk") == "2026-06-20"
+    # a bookmark at or past today still leaves today to be offered
+    assert seed_boundary("2026-06-21", "2026-06-21") == "2026-06-20"
 
-    def fetch(start, end):
-        seen["window"] = (start, end)
-        return []
 
-    def bad_bookmark():
+def test_the_first_run_does_not_re_offer_what_the_bookmark_covered():
+    # the old rules already offered up to the bookmark, and the user may have
+    # deleted some of those since. the first receipt run marks them, adds the rest.
+    rec = _Receipts(seeded=False)
+    added = []
+    rows = [_dated(1, "A", 1, 1, "2026-06-16"), _dated(1, "A", 1, 2, "2026-06-18"),
+            _dated(1, "A", 1, 3, "2026-06-21")]
+    _run(fetch_airing=lambda s, e: rows, get_bookmark=lambda: "2026-06-18",
+         add_episodes=lambda tid, t, eps, *a: added.extend(eps) or len(eps), **rec.seams())
+    assert [e["episode_number"] for e in added] == [3]
+    assert {(1, 1, 1), (1, 1, 2), (1, 1, 3)} <= rec.keys
+    assert rec.seeded
+
+
+def test_the_first_run_on_a_fresh_install_does_not_backfill_history():
+    rec = _Receipts(seeded=False)
+    added = []
+    rows = [_dated(1, "A", 1, 1, "2026-06-16"), _dated(1, "A", 1, 2, "2026-06-21")]
+    _run(fetch_airing=lambda s, e: rows,
+         add_episodes=lambda tid, t, eps, *a: added.extend(eps) or len(eps), **rec.seams())
+    assert [e["episode_number"] for e in added] == [2]
+
+
+def test_seeding_happens_once():
+    rec = _Receipts(seeded=False)
+    _run(get_bookmark=lambda: "2026-06-18", **rec.seams())
+    assert rec.seeded
+    rows = [_dated(1, "A", 1, 1, "2026-06-16")]       # learned about late, after the seed
+    added = []
+    _run(fetch_airing=lambda s, e: rows, get_bookmark=lambda: "2026-06-18",
+         add_episodes=lambda tid, t, eps, *a: added.extend(eps) or len(eps), **rec.seams())
+    assert [e["episode_number"] for e in added] == [1]
+
+
+def test_an_unreadable_bookmark_seeds_like_a_fresh_install():
+    rec = _Receipts(seeded=False)
+
+    def bad():
         raise RuntimeError("db hiccup")
 
-    res = _run(fetch_airing=fetch, get_bookmark=bad_bookmark, set_bookmark=marks.append)
-    assert res["status"] == "completed"
-    assert seen["window"] == ("2026-06-21", "2026-06-21")
-    assert marks == []     # a degraded run must NOT stamp the bookmark — the
-                           # un-covered catch-up days would be lost forever
+    res = _run(get_bookmark=bad, fetch_airing=lambda s, e: [_dated(1, "A", 1, 1, "2026-06-16")],
+               **rec.seams())
+    assert res["status"] == "completed" and res["episodes_added"] == 0
+    assert (1, 1, 1) in rec.keys
 
 
-def test_bookmark_read_failure_next_run_recovers():
-    # the degraded run leaves the old bookmark alone, so the next healthy run
-    # re-covers the whole window instead of losing the missed days
-    seen = {}
-    marks = []
-
-    def fetch(start, end):
-        seen["window"] = (start, end)
-        return []
-
-    def bad_bookmark():
-        raise RuntimeError("db hiccup")
-
-    _run(fetch_airing=fetch, get_bookmark=bad_bookmark, set_bookmark=marks.append)
-    res = _run(fetch_airing=fetch, get_bookmark=lambda: "2026-06-17",
-               set_bookmark=marks.append)
-    assert res["status"] == "completed"
-    assert seen["window"] == ("2026-06-18", "2026-06-21")   # the missed days heal
-    assert marks == ["2026-06-21"]
-
-
-def test_bookmark_write_failure_fails_the_run():
-    # the wishlist writes landed but coverage was not committed — the run must
-    # report the failure so the next run re-covers the window (at-least-once)
-    def bad_write(day):
-        raise RuntimeError("db hiccup")
-
-    res = _run(set_bookmark=bad_write)
-    assert res["status"] == "error"
-    assert "bookmark" in res["error"].lower()
+def test_tmdb_pass_episodes_get_receipts_too():
+    rec = _Receipts()
+    eps = [{"season_number": 2, "episode_number": 4, "air_date": "2026-06-21"}]
+    kw = dict(unowned_follows=lambda: [{"tmdb_id": 7, "title": "Unowned"}],
+              tmdb_airings=lambda tid, s, e: {"poster_url": "p", "episodes": eps},
+              add_episodes=lambda tid, t, e, *a: len(e))
+    first = _run(**kw, **rec.seams())
+    second = _run(**kw, **rec.seams())
+    assert first["episodes_added"] == 1 and second["episodes_added"] == 0
+    assert (7, 2, 4) in rec.keys
 
 
 # ── watchlist hygiene: prune ended/canceled follows ─────────────────────────
@@ -332,14 +378,13 @@ def test_a_followed_show_you_dont_own_still_gets_its_airings():
     assert added == [(42, "Elle", 1, None, "https://image.tmdb.org/p/w500/elle.jpg")]
 
 
-def test_the_tmdb_pass_uses_the_same_catchup_window():
+def test_the_tmdb_pass_uses_the_same_lookback_window():
     seen = []
     _run(fetch_airing=lambda s, e: [],
          today_fn=lambda: "2026-06-21",
-         get_bookmark=lambda: "2026-06-18",
          unowned_follows=lambda: [{"tmdb_id": 42, "title": "Elle"}],
          tmdb_airings=lambda tid, s, e: seen.append((s, e)) or {"episodes": []})
-    assert seen == [("2026-06-19", "2026-06-21")]
+    assert seen == [("2026-06-15", "2026-06-21")]
 
 
 def test_the_calendar_pass_wins_for_a_show_in_both():
@@ -479,3 +524,30 @@ def test_unmonitored_episodes_are_not_wishlisted():
     assert res["status"] == "completed"
     assert res["episodes_added"] == 1
     assert added == [(1, 1)]
+
+
+# ── the real receipt table ──────────────────────────────────────────────────
+
+
+def test_receipts_round_trip_on_a_real_db(tmp_path):
+    from database.video_database import VideoDatabase
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.mark_airing_offered(1, [(10, 1, 1), (10, 1, 2), (11, 3, 4)])
+    db.mark_airing_offered(1, [(10, 1, 1)])                       # idempotent
+    assert db.airing_offered_keys(1, [(10, 1, 1), (10, 1, 3), (11, 3, 4)]) == {(10, 1, 1), (11, 3, 4)}
+    # per profile: another profile's offers are not this one's
+    assert db.airing_offered_keys(2, [(10, 1, 1)]) == set()
+    assert db.airing_offered_keys(1, []) == set()
+
+
+def test_old_receipts_age_out(tmp_path):
+    from database.video_database import VideoDatabase
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.mark_airing_offered(1, [(10, 1, 1), (10, 1, 2)])
+    conn = db._get_connection()
+    conn.execute("UPDATE video_airing_offers SET offered_at=datetime('now', '-90 days') "
+                 "WHERE episode_number=1")
+    conn.commit()
+    conn.close()
+    db.mark_airing_offered(1, [])
+    assert db.airing_offered_keys(1, [(10, 1, 1), (10, 1, 2)]) == {(10, 1, 2)}

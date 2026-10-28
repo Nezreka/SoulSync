@@ -35,6 +35,14 @@
         'cam': 'CAM / TS', 'screener': 'Screener', 'workprint': 'Workprint', '3d': '3D', 'x264': 'x264 / AVC'
     };
     var REJECT_ORDER = ['cam', 'screener', 'workprint', '3d', 'x264'];
+    // audio languages a release tag can name (core/video/quality_profile.AUDIO_LANGUAGES)
+    var LANG_ORDER = ['fr', 'de', 'it', 'es', 'pt', 'ja', 'ko', 'zh', 'ru', 'pl', 'nl',
+                      'sv', 'da', 'no', 'fi', 'hi', 'tr', 'cs', 'hu', 'ar', 'uk', 'en'];
+    var LANG_LABEL = { fr: 'French', de: 'German', it: 'Italian', es: 'Spanish', pt: 'Portuguese',
+                       ja: 'Japanese', ko: 'Korean', zh: 'Chinese', ru: 'Russian', pl: 'Polish',
+                       nl: 'Dutch', sv: 'Swedish', da: 'Danish', no: 'Norwegian', fi: 'Finnish',
+                       hi: 'Hindi', tr: 'Turkish', cs: 'Czech', hu: 'Hungarian', ar: 'Arabic',
+                       uk: 'Ukrainian', en: 'English' };
 
     function esc(s) {
         return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -206,6 +214,66 @@
         }
     }
 
+    // The TV libraries other than the main pick, each with a Scan and an Anime
+    // tick. ``tvMore`` / ``anime`` are the saved lists of titles.
+    var _tvAll = [], _tvMore = [], _anime = [];
+
+    function fillTvMore() {
+        var row = document.querySelector('[data-video-lib-tv-more-row]');
+        var box = document.querySelector('[data-video-lib-tv-more]');
+        if (!row || !box) return;
+        var t = document.querySelector('[data-video-lib-select="tv"]');
+        var main = t ? t.value : '';
+        box.textContent = '';
+        var shown = 0;
+        for (var i = 0; i < _tvAll.length; i++) {
+            var title = _tvAll[i].title;
+            if (!title || title === main) continue;
+            shown++;
+            var item = document.createElement('div');
+            item.className = 'video-library-tv-more-item';
+            var name = document.createElement('span');
+            name.textContent = title;
+            item.appendChild(name);
+            [['scan', 'Scan', _tvMore], ['anime', 'Anime', _anime]].forEach(function (k) {
+                var lab = document.createElement('label');
+                lab.className = 'checkbox-label';
+                var box2 = document.createElement('input');
+                box2.type = 'checkbox';
+                box2.setAttribute('data-video-lib-tv-' + k[0], title);
+                box2.checked = k[2].indexOf(title) !== -1;
+                box2.addEventListener('change', onTvMoreChange);
+                lab.appendChild(box2);
+                lab.appendChild(document.createTextNode(' ' + k[1]));
+                item.appendChild(lab);
+            });
+            box.appendChild(item);
+        }
+        row.hidden = shown === 0;
+    }
+
+    function ticked(kind) {
+        var out = [];
+        var boxes = document.querySelectorAll('[data-video-lib-tv-' + kind + ']');
+        for (var i = 0; i < boxes.length; i++) {
+            if (boxes[i].checked) out.push(boxes[i].getAttribute('data-video-lib-tv-' + kind));
+        }
+        return out;
+    }
+
+    function onTvMoreChange(e) {
+        // a library ticked Anime is one you want scanned: tick Scan with it
+        var b = e && e.target;
+        if (b && b.checked && b.hasAttribute('data-video-lib-tv-anime')) {
+            var title = b.getAttribute('data-video-lib-tv-anime');
+            var scans = document.querySelectorAll('[data-video-lib-tv-scan]');
+            for (var i = 0; i < scans.length; i++) {
+                if (scans[i].getAttribute('data-video-lib-tv-scan') === title) scans[i].checked = true;
+            }
+        }
+        save();
+    }
+
     function load() {
         status('Loading…');
         fetch(URL, { headers: { 'Accept': 'application/json' } })
@@ -215,6 +283,10 @@
                 var sel = d.selected || {};
                 fill(document.querySelector('[data-video-lib-select="movies"]'), d.movies || [], sel.movies);
                 fill(document.querySelector('[data-video-lib-select="tv"]'), d.tv || [], sel.tv);
+                _tvAll = d.tv || [];
+                _tvMore = sel.tv_more || [];
+                _anime = sel.anime || [];
+                fillTvMore();
                 if (!(d.movies || []).length && !(d.tv || []).length) {
                     status('No movie or TV libraries found. Check the server connection and that the user above can see them.');
                 } else if (!sel.movies && !sel.tv) {
@@ -229,11 +301,20 @@
     function save(silent) {
         var m = document.querySelector('[data-video-lib-select="movies"]');
         var t = document.querySelector('[data-video-lib-select="tv"]');
+        var body = { movies: m ? m.value : '', tv: t ? t.value : '' };
+        if (document.querySelector('[data-video-lib-tv-more]')) {
+            // the main TV pick is always scanned; keep an Anime mark on it if it had one
+            var main = body.tv;
+            body.tv_more = ticked('scan');
+            body.anime = ticked('anime').concat(main && _anime.indexOf(main) !== -1 ? [main] : []);
+            _tvMore = body.tv_more;
+            _anime = body.anime;
+        }
         status('Saving…');
         return fetch(URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ movies: m ? m.value : '', tv: t ? t.value : '' })
+            body: JSON.stringify(body)
         })
             .then(function (r) { return r.json(); })
             .then(function () { status('Saved'); if (!silent) toast('Library selection saved', 'success'); })
@@ -1135,6 +1216,19 @@
         _vqSeg('vq-audio', 'data-vq-audio', p.prefer_audio);
         var rep = document.getElementById('vq-prefer-repack'); if (rep) rep.checked = !!p.prefer_repack;
 
+        // Audio language (dubbed / MULTI). MULTI always counts as a match.
+        var lmode = p.audio_language_mode || 'off';
+        _vqSeg('vq-lang-mode', 'data-vq-lang-mode', lmode);
+        var lg = document.getElementById('vq-langs');
+        if (lg) {
+            var langs = Array.isArray(p.audio_languages) ? p.audio_languages : [];
+            lg.hidden = lmode === 'off';
+            lg.innerHTML = LANG_ORDER.map(function (k) {
+                var on = langs.indexOf(k) !== -1;
+                return '<button type="button" class="vq-chip' + (on ? ' on' : '') + '" data-vq-lang="' + k + '">' + (LANG_LABEL[k] || k) + '</button>';
+            }).join('');
+        }
+
         // Size guard — split by runtime so a movie and an episode aren't judged the same.
         var mv = document.getElementById('vq-movie-size'); if (mv) mv.value = p.max_movie_gb || 0;
         var ep = document.getElementById('vq-episode-size'); if (ep) ep.value = p.max_episode_gb || 0;
@@ -1165,6 +1259,14 @@
         var j = i + dir;
         if (i < 0 || j < 0 || j >= arr.length) return;
         var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;   // swap
+        renderQuality(); saveQuality(true);
+    }
+
+    function toggleLang(k) {
+        var p = _videoQuality; if (!p) return;
+        if (!Array.isArray(p.audio_languages)) p.audio_languages = [];
+        var i = p.audio_languages.indexOf(k);
+        if (i === -1) p.audio_languages.push(k); else p.audio_languages.splice(i, 1);
         renderQuality(); saveQuality(true);
     }
 
@@ -1222,6 +1324,10 @@
             if (hd) { _videoQuality.prefer_hdr = hd.getAttribute('data-vq-hdr'); renderQuality(); saveQuality(true); return; }
             var au = e.target.closest('[data-vq-audio]');
             if (au) { _videoQuality.prefer_audio = au.getAttribute('data-vq-audio'); renderQuality(); saveQuality(true); return; }
+            var lm = e.target.closest('[data-vq-lang-mode]');
+            if (lm) { _videoQuality.audio_language_mode = lm.getAttribute('data-vq-lang-mode'); renderQuality(); saveQuality(true); return; }
+            var lc = e.target.closest('[data-vq-lang]');
+            if (lc) { toggleLang(lc.getAttribute('data-vq-lang')); return; }
         });
         card.addEventListener('change', function (e) {
             if (!_videoQuality) return;
@@ -1384,7 +1490,8 @@
     var _ORG_MOVIE_EG = { title: 'The Matrix', titlefirst: 'T', year: '1999', quality: 'Bluray-1080p',
         resolution: '1080p', source: 'Bluray', codec: 'HEVC', edition: '', tmdbid: '603', imdbid: 'tt0133093' };
     var _ORG_EP_EG = { series: 'Breaking Bad', season: '01', seasonraw: '1', episode: '01', episodetitle: 'Pilot',
-        year: '2008', quality: 'WEBDL-1080p', resolution: '1080p', source: 'WEBDL', codec: 'H264', tvdbid: '81189' };
+        year: '2008', quality: 'WEBDL-1080p', resolution: '1080p', source: 'WEBDL', codec: 'H264', tvdbid: '81189',
+        tmdbid: '1396', imdbid: 'tt0903747' };
     var _ORG_YT_EG = { channel: 'Veritasium', title: 'How Electricity Actually Works', year: '2024',
         date: '2024-03-15', month: '03', day: '15', sxe: 's2024e0315', videoid: 'oI_X2cMHNe0' };
 
@@ -1400,7 +1507,9 @@
         keys.forEach(function (k) { out = out.split('${' + k + '}').join(_orgSanitize(vals[k])); });
         keys.forEach(function (k) { out = out.split('$' + k).join(_orgSanitize(vals[k])); });
         return out.split('/').map(function (p) {
+            p = p.replace(/\{\s*(?:[A-Za-z]+-)?\s*\}/g, '');   // '{imdb-}' / '{}' from an empty id
             p = p.replace(/\s+-\s+(?=(\s|$))/g, ' ').replace(/\(\s*\)/g, '').replace(/\[\s*\]/g, '');
+            p = p.replace(/\((\d{4})\)(?:\s*\(\d{4}\))+/g, '($1)');
             p = p.replace(/\s+/g, ' ').trim().replace(/^-+|-+$/g, '').trim().replace(/[ .]+$/, '');
             return p;
         }).filter(function (p) { return p !== ''; }).join('/');
@@ -1880,23 +1989,11 @@
             })
             .catch(function () { /* status is best-effort */ });
     }
-    // Jump to Tools and bring the job's card into view (cards render async).
+    // Jump to Tools on this job: the React tools page opens the job's card
+    // (advanced view) and lights it up from ?job=.
     function openMissingSubsJob() {
         document.dispatchEvent(new CustomEvent('soulsync:video-navigate',
-            { detail: { page: 'video-tools' } }));
-        var tries = 0;
-        var t = setInterval(function () {
-            var card = document.querySelector('.repair-job-card[data-job-id="' + MISSING_SUBS_JOB + '"]');
-            if (card || ++tries > 40) {
-                clearInterval(t);
-                if (!card) return;
-                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                // a brief accent ring so the eye lands on the right card
-                card.style.transition = 'box-shadow .35s ease';
-                card.style.boxShadow = '0 0 0 2px rgba(var(--accent-rgb), .85)';
-                setTimeout(function () { card.style.boxShadow = ''; }, 2200);
-            }
-        }, 100);
+            { detail: { page: 'video-tools', job: MISSING_SUBS_JOB } }));
     }
     function fillOrg() {
         if (!_videoOrg) return;
@@ -2166,7 +2263,7 @@
         // first arg (which is our `silent` flag — it would suppress the toast).
         var selects = document.querySelectorAll('select[data-video-lib-select]');
         for (var i = 0; i < selects.length; i++) {
-            selects[i].addEventListener('change', function () { save(); });
+            selects[i].addEventListener('change', function () { fillTvMore(); save(); });
         }
         // Enrichment keys save on blur/change (turns the workers on).
         ['tmdb-api-key', 'tvdb-api-key', 'omdb-api-key',
@@ -2216,17 +2313,22 @@
                 });
             })(testBtns[k]);
         }
-        // The shared "Save Settings" button belongs to MUSIC (it runs music's
-        // saveSettings, which would fire a music-config write from the video page).
-        // On the video side we intercept it (capture phase, before music's bubble
-        // listener), block music's handler, flush all video settings, and toast —
-        // so the button is real here and can't reach into music. Music side: this
-        // does nothing, so its behaviour is unchanged.
+        // The shared "Save Settings" button. On the video side it flushes the
+        // video settings here (capture phase), then lets the click through to the
+        // button's own handler, which saves the rest of the page exactly as it
+        // does on the music side - and shows the one toast.
+        //
+        // It used to stop the click here. That was right while the video side
+        // could only show video settings; once Sources, Downloads, Library and
+        // Quality became shared it meant every music field on those tabs, and all
+        // of System (Security & Access included), was editable on the video side
+        // and could never be saved there - while this toasted "Settings saved".
+        // saveSettings is safe to run from here: it keeps the stored
+        // active_media_server on the video side, so the video side still can't
+        // change the music server. Music side: this does nothing.
         document.addEventListener('click', function (e) {
             if (document.body.getAttribute('data-side') !== 'video') return;
             if (!e.target.closest('#save-settings')) return;
-            e.preventDefault();
-            e.stopImmediatePropagation();
             // saveSlskd is NOT in this list any more. Its form is retired - the
             // shared Sources tab's Soulseek card is the single editor now - but
             // the fields are still in the DOM holding whatever they loaded with.
@@ -2236,8 +2338,7 @@
             // The music panel saves through the main settings save.
             Promise.all([saveConn(true), save(true), saveKeys(true), savePrefs(true),
                          saveDownloads(true), saveQuality(true), saveYtQuality(true)])
-                .then(function () { toast('Settings saved', 'success'); })
-                .catch(function () { toast('Some settings could not be saved', 'error'); });
+                .catch(function () { toast('Some video settings could not be saved', 'error'); });
         }, true);
         document.addEventListener('soulsync:video-page-shown', onPageShown);
         document.addEventListener('soulsync:library-settings-shown', loadSharedLibrary);

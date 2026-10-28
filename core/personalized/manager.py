@@ -219,8 +219,15 @@ class PersonalizedPlaylistManager:
           Tracks without a primary id pass through unchanged (nothing
           to dedupe on).
 
+        - **Blocks** (always): an artist you blocked or said "not now" to,
+          and a track you set aside, never reach the snapshot. Discover
+          hides them in its responses, but a sync reads the snapshot
+          straight, so a generator that only checked blocked names (or none)
+          put them on the server.
+
         Returns a new list (never mutates input). When no filter
         applies, returns ``tracks`` unchanged."""
+        tracks = self._drop_blocked(tracks, profile_id)
         if config.exclude_recent_days <= 0 or not tracks:
             return tracks
 
@@ -229,6 +236,27 @@ class PersonalizedPlaylistManager:
             return tracks
 
         return [t for t in tracks if not t.primary_id() or t.primary_id() not in recent_set]
+
+    def _drop_blocked(self, tracks: List[Track], profile_id: int) -> List[Track]:
+        if not tracks or not hasattr(self.database, 'get_blocklist'):
+            return tracks
+        try:
+            from core.discovery.blocked import BlockedArtists
+            blocked = BlockedArtists.load(self.database, profile_id)
+        except Exception as exc:  # noqa: BLE001 - no blocks readable, nothing to drop
+            logger.debug("blocks unreadable for profile %s: %s", profile_id, exc)
+            return tracks
+        if blocked.is_empty:
+            return tracks
+
+        def item(t: Track) -> Dict[str, Any]:
+            rich = _safe_json_loads(t.track_data_json) if isinstance(t.track_data_json, str) \
+                else t.track_data_json
+            base = dict(rich) if isinstance(rich, dict) else {}
+            base.update({'artist_name': t.artist_name, 'track_name': t.track_name,
+                         'album_name': t.album_name})
+            return base
+        return [t for t in tracks if not blocked.blocks_work(item(t))]
 
     # ─── track read ──────────────────────────────────────────────────
 

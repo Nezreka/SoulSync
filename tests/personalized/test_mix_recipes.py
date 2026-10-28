@@ -292,13 +292,27 @@ def test_it_renews_on_schedule_and_when_the_recipe_changes(db):
     row = R.get_recipe(db, 1, rid)
     fp = R._fingerprints(db, 1)
     assert not R.is_stale(first, row, fp)
-    later = datetime.fromisoformat(first['generated_at']) + timedelta(hours=21)
+    later = datetime.fromisoformat(first['generated_at']) + timedelta(days=1)
     assert R.is_stale(first, row, fp, now=later)
     manual = dict(row, recipe=dict(row['recipe'], schedule='manual'))
     assert not R.is_stale(dict(first, recipe=manual['recipe']), manual, fp,
                           now=later + timedelta(days=90))
     R.save_recipe(db, 1, Recipe.from_dict(dict(row['recipe'], length=12)), rid)
     assert R.get_or_build(db, 1, rid)['recipe']['length'] == 12
+
+
+def test_a_daily_mix_renews_when_the_day_turns_not_on_age(db):
+    """built at 11pm it used to stay yesterday's mix until 7pm the next day"""
+    rid = _make(db, genres=['metal'], schedule='daily')
+    first = R.get_or_build(db, 1, rid)
+    row = R.get_recipe(db, 1, rid)
+    fp = R._fingerprints(db, 1)
+    late = datetime(2026, 10, 27, 23, 0).astimezone()
+    built_late = dict(first, generated_at=late.isoformat())
+    assert R.is_stale(built_late, row, fp, now=late + timedelta(hours=2))
+    early = datetime(2026, 10, 27, 1, 0).astimezone()
+    built_early = dict(first, generated_at=early.isoformat())
+    assert not R.is_stale(built_early, row, fp, now=early + timedelta(hours=21))
 
 
 def test_a_track_the_wishlist_gave_up_on_is_replaced(db):

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { BasicResult, BasicSource, FilterState } from './-basic.types';
+import type { BasicResult, BasicSearchWarning, BasicSource, FilterState } from './-basic.types';
 
 import { fetchBasicSources, isSingleSourceMode, performBasicSearch } from './-basic.api';
 import { applyFiltersAndSort } from './-basic.helpers';
@@ -14,6 +14,8 @@ export interface BasicSearchState {
   query: string;
   /** Everything the server returned, before filtering. */
   results: BasicResult[];
+  /** prowlarr indexers that failed while others answered, for these results */
+  warnings: BasicSearchWarning[];
   filters: FilterState;
   status: string;
   searching: boolean;
@@ -53,6 +55,7 @@ export interface BasicSearchController {
 const INITIAL: BasicSearchState = {
   query: '',
   results: [],
+  warnings: [],
   filters: DEFAULT_FILTERS,
   status: IDLE_STATUS,
   searching: false,
@@ -78,6 +81,7 @@ const INITIAL: BasicSearchState = {
 interface PersistedBasicSearch {
   query: string;
   results: BasicResult[];
+  warnings: BasicSearchWarning[];
   filters: FilterState;
   filtersVisible: boolean;
   status: string;
@@ -119,6 +123,7 @@ export function useBasicSearchController(): BasicSearchController {
   persisted = {
     query: state.query,
     results: state.results,
+    warnings: state.warnings,
     filters: state.filters,
     filtersVisible: state.filtersVisible,
     status: state.status,
@@ -173,12 +178,13 @@ export function useBasicSearchController(): BasicSearchController {
       ...prev,
       query,
       results: [],
+      warnings: [],
       searching: true,
       status: `Searching for '${query}'...`,
     }));
 
     try {
-      const results = await performBasicSearch(query, source, controller.signal);
+      const { results, warnings } = await performBasicSearch(query, source, controller.signal);
       // Honest about its weight: a new search aborts the previous request
       // first, and that abort cancels the body read, so a superseded request
       // reaches the CATCH rather than here. A mutant deleting this line
@@ -192,6 +198,7 @@ export function useBasicSearchController(): BasicSearchController {
       setState((prev) => ({
         ...prev,
         results,
+        warnings,
         // Every search resets the pills — `resetFilters()` ran before the
         // results were rendered, so a format filter from the last search never
         // silently hides the new one's results.

@@ -141,6 +141,54 @@ describe('the hooks', () => {
     expect(result.current[0]).toBe(true);
   });
 
+  it('tells its listeners when the stage flips off or on with nothing live', async () => {
+    const { act, renderHook } = await import('@testing-library/react');
+    const { useVideoBackdropsEnabled } = await import('./-discover.video-stage');
+    // wiring the stage reads the motion query once and listens for its
+    // changes: hand it a query whose change the test can fire by hand.
+    let motionChange: ((e: { matches: boolean }) => void) | undefined;
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        matches: false,
+        addEventListener: (_type: string, fn: (e: { matches: boolean }) => void) => {
+          if (query.includes('prefers-reduced-motion')) motionChange = fn;
+        },
+        removeEventListener: () => {},
+      })),
+    );
+    let tabHidden = false;
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => tabHidden });
+    try {
+      const stage = new VideoStage();
+      renderHook(() => useVideoBackdropsEnabled(stage));
+      const heard = vi.fn();
+      stage.subscribe(heard);
+      // nothing is live, and nothing will be: the live set is empty on
+      // both sides of every flip below. a bare recompute only speaks
+      // when the live set changes, so these flips would reach nobody —
+      // and a reader of `enabled` (the hero hands out its video id by
+      // it) would keep acting on the stale answer.
+      expect(stage.enabled).toBe(true);
+      expect(stage.getLive().size).toBe(0);
+      act(() => motionChange?.({ matches: true }));
+      expect(stage.enabled).toBe(false);
+      expect(heard).toHaveBeenCalledTimes(1);
+      act(() => motionChange?.({ matches: false }));
+      expect(stage.enabled).toBe(true);
+      expect(heard).toHaveBeenCalledTimes(2);
+      tabHidden = true;
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      expect(stage.enabled).toBe(false);
+      expect(heard).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.unstubAllGlobals();
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    }
+  });
+
   it('useVideoSlot plays a banner on screen once it has a video, and hands over the sound', async () => {
     const { act, renderHook } = await import('@testing-library/react');
     const { useVideoSlot, videoStage } = await import('./-discover.video-stage');

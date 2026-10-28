@@ -70,7 +70,7 @@ The first time you open SoulSync, setup takes over the screen. While the welcome
 > [!TIP]
 > Moving to a new machine? **Restore from a SoulSync backup** on the welcome page loads a config export and skips setup.
 
-To see setup again without touching your install, open **Settings → Advanced → Developer → Setup preview**. It runs the real flow, saves nothing, and keeps a Preview tag in the corner.
+To see setup again without touching your install, open **Settings → System → Developer → Setup preview**. It runs the real flow, saves nothing, and keeps a Preview tag in the corner.
 
 ![Settings page first-time setup](gs-first-setup.jpg)
 

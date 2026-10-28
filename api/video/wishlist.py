@@ -302,6 +302,11 @@ def register_routes(bp):
                     poster_url=show.get("poster_url") or None,
                     library_id=show.get("library_id") or None, server_source=srv,
                     profile_id=_profile())
+                if n > 0:
+                    # a show not in any library yet: store its type (TMDB's
+                    # suggestion) so its episodes are filed in the right folder
+                    from core.video.anime_hint import note_show_wanted
+                    note_show_wanted(get_video_db, show["tmdb_id"])
                 return jsonify({"success": n > 0, "added": n,
                                 "counts": db.wishlist_counts(profile_id=_profile())})
 

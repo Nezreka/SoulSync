@@ -195,6 +195,25 @@ Repair and maintenance moved to the **Tools** page, which has two tabs:
 - **Operations** — the findings inbox. Repair scans surface problems here (missing tags, duplicates, dead files, …) and you fix them individually or in bulk.
 - **Tools** — launcher cards for scans and maintenance: **Media Server Scan**, **Metadata Updater**, **Backup Manager**, **Download Blacklist**, **Metadata Cache**, **Discovery Pool**, and more.
 
+## Working through findings
+
+**Simple mode** opens with one health score (the same one Advanced shows) and sorts every open finding by what fixing it would do:
+
+| Card | What's in it |
+|------|--------------|
+| **Safe to fix** | Fixes that only write tags and data. **Fix all** runs them in the background. |
+| **Needs your call** | Fixes that move, delete or replace files. Each asks first. |
+| **Review only** | Things worth a look that have no automatic fix. |
+
+Each card lists the finding types inside it; click one to open its findings.
+
+**Advanced mode** lands on **Issue Types**: one row per kind of finding, worst first, each with its own fix-all and dismiss-all. **Albums & Releases** is a lens on the findings that belong to an album; it says how many findings it can't show (orphan files have no album) and links to the rest.
+
+- **Dismiss** means "don't raise this again". Every dismiss shows an **Undo** for a few seconds, and dismissed findings can be reopened from the Dismissed view.
+- **Delete matching…** forgets findings outright (the next scan can raise them again). It's not the same as dismiss.
+- A fix that fails keeps its reason on the row, with **Retry Fix**.
+- Keyboard, in any open list: \`j\`/\`k\` move, \`x\` select, \`Enter\` details, \`f\` fix, \`d\` dismiss, \`z\` undo, \`/\` search.
+
 ## Repair jobs
 
 The background repair worker runs automated jobs on configurable schedules, including:
@@ -360,7 +379,7 @@ Every downloaded file is verified by **AcoustID audio fingerprinting** against t
 ### ⚠ Unverified
 Imported files AcoustID could not hard-confirm (shown only when AcoustID is configured). Row badges explain why: **FORCE-IMPORTED** ("Accepted as best candidate after the retry budget was exhausted") or **ACOUSTID UNCONFIRMED** ("ambiguous / cross-script / no fingerprint match"). Expanding a row shows **Why flagged**, download source, quality, file, and download date.
 
-Per-row actions: **▶ Play** (in the media player), **⇆ Compare** (finds the expected track on Soulseek/streaming and plays it for A/B comparison), **🔍 Audit** (full audit trail: lifecycle, embedded tags, lyrics), **✔ Approve** ("mark as human-verified — the AcoustID scanner will skip it"), **🗑 Delete** (wrong file: delete from disk and remove the entry).
+Per-row actions: **▶ Play** (in the media player), **⇆ Compare** (finds the expected track on Soulseek/streaming and plays it for A/B comparison), **🔍 Audit** (full audit trail: lifecycle, embedded tags, lyrics), **✔ Approve** ("mark as human-verified — the AcoustID scanner will skip it"), **Wrong song** (deletes the file, skips that source next time, puts the song you asked for back on the wishlist and opens Interactive Search on it so you can pick the right one; close it and the wishlist keeps looking), **🗑 Delete** (wrong file: delete from disk, remove the entry, and skip that source next time).
 
 Bulk: **✔ Approve all**, **🧹 Clean orphaned** (removes dead log rows whose file no longer exists — never deletes a file), **🗑 Delete all**, plus checkbox multi-select.
 

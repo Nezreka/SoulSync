@@ -466,6 +466,350 @@ describe('import route', () => {
     expect(screen.getByRole('tab', { name: /History/ })).toHaveTextContent('1');
   });
 
+  it('a cold open mid-scan still shows the batch stats (#1874)', async () => {
+    // the page was NOT open when processing began, so there is no
+    // client-side snapshot: the stats can only come from the summary the
+    // server carries in its scanning reply (the last complete build's).
+    // Note the deliberate, documented mismatch this locks in: the header
+    // counts the last build's STAGED rows, while the filter pills count
+    // the history rows in this payload's items — they disagree until the
+    // scan lands and reconciles them.
+    inbox = {
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 3, total: 4 },
+      summary: { items: 2, files: 4, size: 65_011_712, attention: 1, by_status: {} },
+      items: [
+        albumItem({
+          key: 'hash-3',
+          name: 'Old Album',
+          in_staging: false,
+          files: [],
+          status: 'imported',
+          history_id: 2,
+        }),
+      ],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'processing',
+        last_scan_time: null,
+        stats: {},
+      },
+    };
+    renderImportRoute(['/import?filter=all']);
+    expect(await screen.findByText('Old Album')).toBeInTheDocument();
+    const stats = document.getElementById('import-page-staging-stats');
+    expect(stats).not.toBeNull();
+    expect(stats).toHaveTextContent('2 items');
+    expect(stats).toHaveTextContent('4 files');
+    expect(stats).toHaveTextContent('62 MB');
+  });
+
+  it('a re-scan with seq-less summaries prefers the server summary (tie-break) (#1874)', async () => {
+    const { queryClient } = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    // a complete build landed elsewhere after this tab's snapshot; the
+    // scanning reply carries its (fresher) summary, and the strip must
+    // show that, not this tab's older snapshot numbers
+    inbox = {
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 90, total: 99 },
+      summary: { items: 9, files: 99, size: 2_147_483_648, attention: 9, by_status: {} },
+      items: [],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'scanning',
+        last_scan_time: null,
+        stats: {},
+      },
+    };
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    await waitFor(() => {
+      const stats = document.getElementById('import-page-staging-stats');
+      expect(stats).toHaveTextContent('9 items');
+      expect(stats).toHaveTextContent('99 files');
+      expect(stats).toHaveTextContent('2.0 GB');
+    });
+  });
+
+  it('a server summary from a later build (higher seq) wins over the tab snapshot (#1874)', async () => {
+    inbox = inboxPayload([albumItem()], {
+      summary: { items: 7, files: 7, size: 7_340_032, attention: 0, by_status: {}, seq: 5 },
+    });
+    const { queryClient } = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    expect(document.getElementById('import-page-staging-stats')).toHaveTextContent('7 items');
+    inbox = {
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 90, total: 99 },
+      summary: { items: 9, files: 99, size: 2_147_483_648, attention: 9, by_status: {}, seq: 10 },
+      items: [],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'scanning',
+        last_scan_time: null,
+        stats: {},
+      },
+    };
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    await waitFor(() => {
+      const stats = document.getElementById('import-page-staging-stats');
+      expect(stats).toHaveTextContent('9 items');
+      expect(stats).toHaveTextContent('99 files');
+      expect(stats).toHaveTextContent('2.0 GB');
+    });
+  });
+
+  it('equal seqs: the server summary wins the tie (#1874)', async () => {
+    // pins the >= tie-break: the server reuses a seq exactly when the
+    // numbers are identical, so a tie with different numbers can only
+    // come from an edge the server side already resolved — the freshest
+    // server word stands.
+    inbox = inboxPayload([albumItem()], {
+      summary: { items: 7, files: 7, size: 7_340_032, attention: 0, by_status: {}, seq: 5 },
+    });
+    const { queryClient } = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    inbox = {
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 90, total: 99 },
+      summary: { items: 9, files: 99, size: 2_147_483_648, attention: 9, by_status: {}, seq: 5 },
+      items: [],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'scanning',
+        last_scan_time: null,
+        stats: {},
+      },
+    };
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    await waitFor(() => {
+      expect(document.getElementById('import-page-staging-stats')).toHaveTextContent('9 items');
+    });
+  });
+
+  it('a server summary older than the tab snapshot loses to it (#1874)', async () => {
+    // this tab snapshotted build seq 10; the scanning reply carries the
+    // server's remembered summary from build seq 5 (e.g. this tab's build
+    // was skipped by the server's invalidation guard). Build order, not
+    // blind preference, decides: the snapshot's numbers stay.
+    inbox = inboxPayload([albumItem()], {
+      summary: { items: 7, files: 7, size: 7_340_032, attention: 0, by_status: {}, seq: 10 },
+    });
+    const { queryClient } = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    expect(document.getElementById('import-page-staging-stats')).toHaveTextContent('7 items');
+    inbox = {
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 90, total: 99 },
+      summary: { items: 9, files: 99, size: 2_147_483_648, attention: 9, by_status: {}, seq: 5 },
+      items: [],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'scanning',
+        last_scan_time: null,
+        stats: {},
+      },
+    };
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    expect(await screen.findByText(/90 of 99 files/)).toBeInTheDocument();
+    const stats = document.getElementById('import-page-staging-stats');
+    expect(stats).toHaveTextContent('7 items');
+    expect(stats).toHaveTextContent('7 files');
+    expect(stats).toHaveTextContent('7 MB');
+  });
+
+  it('mixed seq presence: a seq-less snapshot loses, a seq-less server summary loses (#1874)', async () => {
+    const scanningWith = (summary: unknown) => ({
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 90, total: 99 },
+      summary,
+      items: [],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'scanning',
+        last_scan_time: null,
+        stats: {},
+      },
+    });
+    // snapshot without a seq (the default fixture), server summary with one
+    const first = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    inbox = scanningWith({
+      items: 9,
+      files: 99,
+      size: 2_147_483_648,
+      attention: 9,
+      by_status: {},
+      seq: 3,
+    }) as typeof inbox;
+    await first.queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    await waitFor(() =>
+      expect(document.getElementById('import-page-staging-stats')).toHaveTextContent('9 items'),
+    );
+    first.unmount();
+
+    // snapshot with a seq, server summary without one
+    inbox = inboxPayload([albumItem()], {
+      summary: { items: 7, files: 7, size: 7_340_032, attention: 0, by_status: {}, seq: 10 },
+    });
+    const second = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    inbox = scanningWith({
+      items: 9,
+      files: 99,
+      size: 2_147_483_648,
+      attention: 9,
+      by_status: {},
+    }) as typeof inbox;
+    await second.queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    expect(await screen.findByText(/90 of 99 files/)).toBeInTheDocument();
+    expect(document.getElementById('import-page-staging-stats')).toHaveTextContent('7 items');
+    second.unmount();
+  });
+
+  it('a clear newer than the snapshot drops its stats; an older clear does not (#1874)', async () => {
+    inbox = inboxPayload([albumItem()], {
+      summary: { items: 7, files: 7, size: 7_340_032, attention: 0, by_status: {}, seq: 5 },
+    });
+    const { queryClient } = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    const scanningCleared = (clearedSeq: number) => ({
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 1, total: 3 },
+      summary_cleared_seq: clearedSeq,
+      items: [],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'scanning',
+        last_scan_time: null,
+        stats: {},
+      },
+    });
+    // a clear from build 3 predates this tab's build-5 snapshot: stats stay
+    inbox = scanningCleared(3) as typeof inbox;
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    expect(await screen.findByText(/1 of 3 files/)).toBeInTheDocument();
+    expect(document.getElementById('import-page-staging-stats')).toHaveTextContent('7 items');
+    // a clear from build 9 supersedes the snapshot: the batch it counted
+    // was emptied by a later build, so its numbers must go
+    inbox = scanningCleared(9) as typeof inbox;
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    await waitFor(() => expect(document.getElementById('import-page-staging-stats')).toBeNull());
+  });
+
+  it('a clear also drops a seq-less (pre-upgrade) snapshot (#1874)', async () => {
+    // a tab opened before summaries carried a seq: its snapshot counts as
+    // seq -1, so any reported clear supersedes it
+    const { queryClient } = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    expect(document.getElementById('import-page-staging-stats')).toHaveTextContent('124 MB');
+    inbox = {
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 1, total: 3 },
+      summary_cleared_seq: 1,
+      items: [],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'scanning',
+        last_scan_time: null,
+        stats: {},
+      },
+    };
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    await waitFor(() => expect(document.getElementById('import-page-staging-stats')).toBeNull());
+  });
+
+  it('a re-scan with no server summary falls back to the tab snapshot (#1874)', async () => {
+    const { queryClient } = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    // the default complete payload's stats: 2 staged items, 3 files, 124 MB
+    expect(document.getElementById('import-page-staging-stats')).toHaveTextContent('124 MB');
+    inbox = {
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 1, total: 3 },
+      items: [],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'scanning',
+        last_scan_time: null,
+        stats: {},
+      },
+    };
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    expect(await screen.findByText(/1 of 3 files/)).toBeInTheDocument();
+    const stats = document.getElementById('import-page-staging-stats');
+    expect(stats).toHaveTextContent('2 items');
+    expect(stats).toHaveTextContent('3 files');
+    expect(stats).toHaveTextContent('124 MB');
+  });
+
+  it('a cold open mid-scan with no summary on record shows no stats (#1874)', async () => {
+    // nothing counted yet anywhere: the strip must not fabricate numbers
+    inbox = {
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 181, total: 252 },
+      items: [
+        albumItem({
+          key: 'hash-3',
+          name: 'Old Album',
+          in_staging: false,
+          files: [],
+          status: 'imported',
+          history_id: 2,
+        }),
+      ],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'processing',
+        last_scan_time: null,
+        stats: {},
+      },
+    };
+    renderImportRoute(['/import?filter=all']);
+    expect(await screen.findByText('Old Album')).toBeInTheDocument();
+    expect(document.getElementById('import-page-staging-stats')).toBeNull();
+  });
+
   it('a re-scan keeps the last complete list under the progress banner (#1671)', async () => {
     const { queryClient } = renderImportRoute();
     expect(await screen.findByText('Album A')).toBeInTheDocument();

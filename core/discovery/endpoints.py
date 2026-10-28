@@ -86,7 +86,10 @@ def convert_results_to_spotify_tracks(
                 'id': result.get('spotify_id', 'unknown'),
                 'name': result.get('spotify_track', 'Unknown Track'),
                 'artists': [result.get('spotify_artist', 'Unknown Artist')] if result.get('spotify_artist') else ['Unknown Artist'],
-                'album': result.get('spotify_album', 'Unknown Album'),
+                # No default album name: inventing 'Unknown Album' here
+                # would put a fake album on the payload that downstream
+                # readers treat as a real name. Missing stays missing.
+                'album': result.get('spotify_album') or '',
                 'duration_ms': dur,
             }
             match_data = result.get('match_data') or result.get('matched_data') or {}
