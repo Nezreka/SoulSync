@@ -35,9 +35,14 @@ from core.video.slskd_download import (
 
 logger = get_logger("video.download_monitor")
 
-_INTERVAL = 3            # seconds between polls
+_INTERVAL = 3            # seconds between polls while downloads are active
+_IDLE_INTERVAL = 30      # seconds between polls when nothing is in flight (#1905):
+                         # every poll opens fresh SQLite connections, so polling an
+                         # empty queue at the active cadence burned CPU all day idle
 _started = False
 _lock = threading.Lock()
+_wake_event = threading.Event()   # set by ensure_started() so a fresh grab
+                                  # interrupts the idle sleep at once (#1905)
 
 
 def _scene_alt(ctx):
@@ -1569,7 +1574,17 @@ def _spawn_requery(dl_id) -> None:
                      name="video-dl-requery-%s" % dl_id).start()
 
 
-def _tick(db) -> None:
+def _tick(db) -> bool:
+    """Poll the non-YouTube active downloads once. Returns True when any row
+    was in flight (the caller keeps the fast poll cadence), False when the
+    queue is empty (the caller backs off to the idle cadence, #1905).
+
+    This is the loop's authority for "any row in flight": its check covers
+    every row get_active_video_downloads() returns, including YouTube and
+    'searching' rows it does not process itself (a YouTube row mid-merge
+    is status 'importing' with import_phase 'merging', so it is covered
+    too). _recover_youtube by contrast reports only its own actions
+    (recovered / started), so _run ORs the two."""
     all_active = db.get_active_video_downloads()
     # Re-adopt any 'searching' row whose requery thread is gone (its state is in-memory,
     # so a restart/crash mid-requery would otherwise strand it forever — _tick skips
@@ -1590,7 +1605,10 @@ def _tick(db) -> None:
               if d.get("status") != "searching" and d.get("source") != "youtube"]
     if not active:
         _misses.clear()
-        return
+        # Rows this tick did not process can still mean work is in flight:
+        # 'searching' rows are owned by their requery thread and YouTube rows
+        # by their workers / the recovery pump — either keeps the fast cadence.
+        return bool(all_active)
     from core.settings import config_manager
     download_dir = str(config_manager.get("soulseek.download_path", "") or "")
     transfers = list_downloads() if any(d.get("source") not in ("torrent", "usenet")
@@ -1706,22 +1724,30 @@ def _tick(db) -> None:
             notify_batch_complete({"completed": completed_now})
         except Exception:
             logger.exception("video monitor: batch-complete notify failed")
+    return True
 
 
-def _recover_youtube(db_provider) -> None:
+def _recover_youtube(db_provider) -> bool:
     """Re-adopt orphaned YouTube downloads (stranded at 'downloading' or 'importing'/
     'merging' when a restart killed their worker thread) + keep the YouTube queue pumped.
     Guarded on its own — a YouTube hiccup must never wedge the slskd/torrent monitor.
     YouTube rows are owned by their yt-dlp worker (not the slskd/client poll below), so
-    this is their ONLY reliable recovery path once the process that owned them is gone."""
+    this is their ONLY reliable recovery path once the process that owned them is gone.
+    Returns True when it recovered or started anything, False when it had
+    nothing to do. False does NOT mean no YouTube work is in flight — rows
+    held by live workers need no recovery and are reported by _tick, whose
+    active-row check is the loop's in-flight authority (#1905)."""
     try:
         from core.video.youtube_download import recover_and_pump
         recovered, started = recover_and_pump(db_provider)
         if recovered or started:
             logger.info("youtube recovery: re-queued %d orphan(s), started %d worker(s)",
                         recovered, started)
+            return True
+        return False
     except Exception:
         logger.exception("youtube recovery pass failed")
+        return True   # a failed pass retries at the fast cadence, as before
 
 
 _RUNTIME_REQUEUE_KEY = "runtime_rule_requeue_v1"
@@ -1784,26 +1810,61 @@ def _run(db_provider) -> None:
     except Exception:
         logger.exception("video runtime-reject requeue failed")
     while True:
+        _wake_event.clear()
+        worked = False
         try:
             db = db_provider()
             if db is not None:
-                _recover_youtube(db_provider)   # re-adopt orphaned youtube rows + pump the queue
-                _tick(db)
+                yt_worked = _recover_youtube(db_provider)   # re-adopt orphaned youtube rows + pump the queue
+                tick_worked = _tick(db)
+                worked = yt_worked or tick_worked
         except Exception:
             logger.exception("video download monitor tick failed")
-        time.sleep(_INTERVAL)
+            worked = True   # a failed pass retries at the fast cadence, as before
+        # #1905: an empty queue needs no 3s poll — each pass opens fresh
+        # SQLite connections, so idle polling was the top idle-CPU cost.
+        # The sleep is interruptible: grab paths end in ensure_started(),
+        # which sets _wake_event (read-only page polls call it with
+        # wake=False), so a row enqueued during an idle window (queued
+        # season-pack grabs and orphaned YouTube rows are MONITOR-only
+        # pickups — nothing else starts them) is picked up at once, not
+        # up to an idle interval later. Producers always commit their row
+        # BEFORE ensure_started(), so a wake erased by the clear() at the
+        # top of this loop is harmless: that pass's snapshot already saw
+        # the row. Two honest exceptions: the native YouTube queue
+        # enqueue relies on its own pump (start_next_queued) rather than
+        # ensure_started(), so a row it cannot start immediately is
+        # noticed within one idle interval; and a wake also cuts the
+        # ACTIVE sleep short, so a burst of grabs runs back-to-back
+        # passes — bounded by the number of grabs, and each pass is the
+        # work those grabs asked for.
+        # A row created by a path that never calls ensure_started() is
+        # still noticed within one idle interval. A provider returning
+        # None is not work either, so it backs off the same way.
+        _wake_event.wait(timeout=_INTERVAL if worked else _IDLE_INTERVAL)
 
 
-def ensure_started(db_provider) -> None:
-    """Start the monitor thread once (idempotent). Called when the first grab happens."""
+def ensure_started(db_provider, *, wake: bool = True) -> None:
+    """Start the monitor thread once (idempotent). Called when the first grab happens.
+
+    ``wake=False`` for read-only callers (the downloads page polls): they may
+    (re)start the thread but must not interrupt its idle sleep — a page left
+    open polling every few seconds would otherwise defeat the #1905 backoff."""
     global _started, _db_provider
     with _lock:
         _db_provider = db_provider
-        if _started:
-            return
-        _started = True
-        threading.Thread(target=_run, args=(db_provider,), daemon=True,
-                         name="video-download-monitor").start()
+        already_started = _started
+        if not _started:
+            _started = True
+            threading.Thread(target=_run, args=(db_provider,), daemon=True,
+                             name="video-download-monitor").start()
+    # Every grab calls this, started or not: wake a monitor that is in its
+    # idle sleep so the new row is picked up immediately (#1905). Read-only
+    # polls pass wake=False and skip this.
+    if wake:
+        _wake_event.set()
+    if already_started:
+        return
     # The subtitle wanted-loop rides along: it retries subtitle_wanted rows on
     # its own cadence (Phase 2, "Replace Bazarr"). Idempotent; no-op when the
     # master toggle is off.

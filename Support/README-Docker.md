@@ -258,7 +258,7 @@ services:
           cpus: '0.5'
           memory: 512M
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8888/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8888/api/setup/status"]
       interval: 30s
       timeout: 10s
       retries: 3

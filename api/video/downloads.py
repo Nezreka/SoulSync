@@ -1517,7 +1517,7 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.download_monitor import ensure_started
         db = get_video_db()
-        ensure_started(get_video_db)   # also (re)start the monitor when the page is open
+        ensure_started(get_video_db, wake=False)   # (re)start the monitor when the page is open, without interrupting its idle sleep (#1905)
         rows = db.list_video_downloads()
         _annotate_upgrade_watches(db, rows, _request_profile())
         _annotate_packs(rows)
@@ -1532,7 +1532,7 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.download_monitor import ensure_started
         db = get_video_db()
-        ensure_started(get_video_db)
+        ensure_started(get_video_db, wake=False)   # read-only poll: (re)start only, never wake (#1905)
         dl_id = request.args.get("id")
         if dl_id:
             try:
