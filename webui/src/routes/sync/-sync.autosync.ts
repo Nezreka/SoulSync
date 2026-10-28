@@ -504,14 +504,60 @@ export function autoSyncExpandPersonalizedRows(
   return rows;
 }
 
+/** Every personalized kind; the ones that take a variant are suffixed `_<variant>` in ssd ids. */
+const SSD_KINDS = [
+  'daily_mix',
+  'listening_mix',
+  'fresh_tape',
+  'archives',
+  'hidden_gems',
+  'discovery_shuffle',
+  'popular_picks',
+  'time_machine',
+  'genre_playlist',
+  'seasonal_mix',
+];
+const SSD_VARIANT_KINDS = new Set(['daily_mix', 'time_machine', 'genre_playlist', 'seasonal_mix']);
+
+/**
+ * The personalized playlist a SoulSync Discovery row stands for, or null.
+ * A synthetic or enriched row carries kind/variant; a mirror made by "Refresh
+ * & Mirror" may only carry its `ssd_<kind>[_<variant>]` id.
+ */
+export function autoSyncSsdTarget(
+  row: MirroredRow | null | undefined,
+): { kind: string; variant: string } | null {
+  if (!row || row.source !== 'soulsync_discovery') return null;
+  if (row.kind) return { kind: row.kind, variant: row.variant || '' };
+  const sid = String(row.source_playlist_id || '');
+  if (!sid.startsWith('ssd_')) return null;
+  const rest = sid.slice(4);
+  for (const kind of [...SSD_KINDS].sort((a, b) => b.length - a.length)) {
+    if (rest === kind) return { kind, variant: '' };
+    if (SSD_VARIANT_KINDS.has(kind) && rest.startsWith(`${kind}_`)) {
+      return { kind, variant: rest.slice(kind.length + 1) };
+    }
+  }
+  return null;
+}
+
+/** The ssd id a personalized kind/variant mirrors under. */
+export function autoSyncSsdId(target: { kind: string; variant: string }): string {
+  return `ssd_${target.kind}${target.variant ? `_${target.variant}` : ''}`;
+}
+
 /** The automation payload scheduling a board row creates (auto-sync.js 355-371). */
 export function autoSyncActionForPlaylist(
   playlist: MirroredRow | null | undefined,
   playlistId: number | string,
 ): { action_type: string; action_config: Record<string, unknown> } {
-  if (playlist && playlist._personalized) {
-    const entry: Record<string, unknown> = { kind: playlist.kind };
-    if (playlist.variant) entry.variant = playlist.variant;
+  // a discovery mirror is scheduled as its personalized playlist, the same
+  // automation the sidebar makes for it. a playlist pipeline on the mirror
+  // ran beside that one and pushed the same playlist twice
+  const target = playlist && (playlist._personalized ? playlist : autoSyncSsdTarget(playlist));
+  if (target && target.kind) {
+    const entry: Record<string, unknown> = { kind: target.kind };
+    if (target.variant) entry.variant = target.variant;
     return {
       action_type: 'personalized_pipeline',
       action_config: { kinds: [entry], refresh_first: true },

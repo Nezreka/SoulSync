@@ -1016,9 +1016,12 @@ export function MirroredTab({
           .filter((r) => autoSyncPipelineCoversPlaylist(r))
           .map((r) => r.id)
           .filter((id): id is number => id !== undefined && !Number.isNaN(Number(id)))
-      : Object.keys(cardSchedules.schedules)
-          .map(Number)
-          .filter((id) => !Number.isNaN(id)),
+      : allRows
+          // per row, not the map's keys: a discovery mirror's schedule is
+          // keyed by its personalized playlist, not by its id
+          .filter((r) => cardSchedules.scheduleFor(r))
+          .map((r) => r.id)
+          .filter((id): id is number => id !== undefined && !Number.isNaN(Number(id))),
   );
 
   /**
@@ -1300,11 +1303,11 @@ export function MirroredTab({
                   // bare "30m ago" leaves you guessing.
                   when={`${userScope ? 'Edited' : 'Mirrored'} ${timeAgo(row.updated_at || row.mirrored_at, Date.now())}`}
                   schedule={cardScheduleLabel(
-                    cardSchedules.schedules[String(row.id)],
+                    cardSchedules.scheduleFor(row),
                     Date.now(),
                     pipelineCovers,
                   )}
-                  scheduled={Boolean(cardSchedules.schedules[String(row.id)]) || pipelineCovers}
+                  scheduled={Boolean(cardSchedules.scheduleFor(row)) || pipelineCovers}
                   health={autoSyncPlaylistHealth(cardSchedules.history, row.id)}
                   status={
                     exportStatus ? (
@@ -1380,15 +1383,15 @@ export function MirroredTab({
       {schedMenu && (
         <ScheduleMenu
           row={schedMenu.row}
-          hours={cardSchedules.schedules[String(schedMenu.row.id)]?.hours ?? null}
-          weekly={Boolean(cardSchedules.schedules[String(schedMenu.row.id)]?.weekly)}
+          hours={cardSchedules.scheduleFor(schedMenu.row)?.hours ?? null}
+          weekly={Boolean(cardSchedules.scheduleFor(schedMenu.row)?.weekly)}
           anchor={{ top: schedMenu.top, left: schedMenu.left }}
           anchorEl={schedMenu.anchor}
           onClose={() => setSchedMenu(null)}
           onPickHours={(hours) => void cardSchedules.set(schedMenu.row, hours)}
           onPickWeekly={(days) => void cardSchedules.setWeekly(schedMenu.row, { days })}
           onCustomWeekly={() => {
-            const current = cardSchedules.schedules[String(schedMenu.row.id)]?.weeklyConfig;
+            const current = cardSchedules.scheduleFor(schedMenu.row)?.weeklyConfig;
             setWeeklyDraft({
               playlistId: Number(schedMenu.row.id),
               days: current?.days ?? ['mon'],
@@ -1409,7 +1412,9 @@ export function MirroredTab({
             rows?.find((r) => r.id === weeklyDraft.playlistId)?.name ??
             ''
           }
-          hasExisting={Boolean(cardSchedules.schedules[String(weeklyDraft.playlistId)]?.weekly)}
+          hasExisting={Boolean(
+            cardSchedules.scheduleFor(rows?.find((r) => r.id === weeklyDraft.playlistId))?.weekly,
+          )}
           onChange={setWeeklyDraft}
           onSave={() => {
             const target = rows?.find((r) => r.id === weeklyDraft.playlistId);

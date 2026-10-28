@@ -1812,3 +1812,36 @@ describe('beatport mirror kinds', () => {
     expect(beatportMirrorIsSnapshot(undefined)).toBe(false);
   });
 });
+
+describe('discovery mirror targets', () => {
+  it('reads kind and variant off an ssd id, longest kind first', async () => {
+    const { autoSyncSsdTarget } = await import('./-sync.autosync');
+    const m = (sid: string) => ({ source: 'soulsync_discovery', source_playlist_id: sid });
+    expect(autoSyncSsdTarget(m('ssd_daily_mix_3'))).toEqual({ kind: 'daily_mix', variant: '3' });
+    expect(autoSyncSsdTarget(m('ssd_time_machine_1980s'))).toEqual({
+      kind: 'time_machine',
+      variant: '1980s',
+    });
+    expect(autoSyncSsdTarget(m('ssd_genre_playlist_hip_hop_rap'))).toEqual({
+      kind: 'genre_playlist',
+      variant: 'hip_hop_rap',
+    });
+    expect(autoSyncSsdTarget(m('ssd_hidden_gems'))).toEqual({ kind: 'hidden_gems', variant: '' });
+    expect(autoSyncSsdTarget(m('ssd_nope'))).toBeNull();
+    expect(
+      autoSyncSsdTarget({ source: 'spotify', source_playlist_id: 'ssd_daily_mix_1' }),
+    ).toBeNull();
+  });
+
+  it('a mirrored discovery row schedules as its personalized playlist', () => {
+    expect(
+      autoSyncActionForPlaylist(
+        { id: 55, source: 'soulsync_discovery', source_playlist_id: 'ssd_daily_mix_1' },
+        55,
+      ),
+    ).toEqual({
+      action_type: 'personalized_pipeline',
+      action_config: { kinds: [{ kind: 'daily_mix', variant: '1' }], refresh_first: true },
+    });
+  });
+});
