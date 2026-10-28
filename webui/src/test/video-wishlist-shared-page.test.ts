@@ -141,7 +141,7 @@ describe('a reload onto the video wishlist stays on the video side', () => {
     // router to an unknown path and the shell bounced the profile home
     // (the tools page is handed off the same way since it went React)
     expect(SIDE).toContain(
-      "var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1 };",
+      "var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1, 'video-dashboard': 1 };",
     );
     expect(boot).toContain('if (bootPage && !HANDED_OFF[initialPage] &&');
     // the re-assert is still gated on bootPage only

@@ -71,7 +71,7 @@ describe('the sidebar hands video tools off to the React page', () => {
 
   it('is handed off, so the boot never re-asserts /video-tools over the React url', () => {
     expect(SIDE).toContain(
-      "var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1 };",
+      "var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1, 'video-dashboard': 1 };",
     );
   });
 
