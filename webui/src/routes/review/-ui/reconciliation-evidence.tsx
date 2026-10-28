@@ -881,6 +881,12 @@ export function ReleaseComparison({
                         disambiguation={label(candidate.disambiguation)}
                       />
                       {isCurrent && <small>Selected for this album plan</small>}
+                      {Boolean(candidate.audio_copy_of_video) && (
+                        <small>
+                          MusicBrainz lists this as a video recording. Use it only if this file is
+                          its audio copy.
+                        </small>
+                      )}
                       {isLibraryEdition(candidate) && <small>Current library edition</small>}
                       {label(candidate.difference_summary) && (
                         <small>{label(candidate.difference_summary)}</small>
@@ -896,7 +902,9 @@ export function ReleaseComparison({
                       disabled={busy}
                       onClick={() => onPin(index)}
                     >
-                      Use this release
+                      {candidate.audio_copy_of_video
+                        ? 'Use for this audio copy'
+                        : 'Use this release'}
                     </Button>
                   )}
                 </div>

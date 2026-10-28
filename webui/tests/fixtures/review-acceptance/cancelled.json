@@ -170,6 +170,7 @@
             "release_disambiguation": "",
             "spotify_track_id": "",
             "title": "Home",
+            "total_discs": 0,
             "track_artist": "Acceptance Artist",
             "track_number": 1,
             "year": ""
@@ -478,6 +479,7 @@
             "release_disambiguation": "",
             "spotify_track_id": "",
             "title": "Home",
+            "total_discs": 0,
             "track_artist": "Acceptance Artist",
             "track_number": 1,
             "year": ""

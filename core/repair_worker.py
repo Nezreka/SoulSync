@@ -1126,6 +1126,11 @@ class RepairWorker:
         while not self._stop_event.is_set():
             try:
                 self._refresh_published_review_albums()
+                if time.monotonic() - getattr(self, '_replacement_checked_at', 0) >= 30:
+                    self._replacement_checked_at = time.monotonic()
+                    from core.library.reconciliation_replacement import advance
+                    with self._review_apply_lock:
+                        advance(self)
                 # Check force-run queue even when disabled (user explicitly requested)
                 forced_job = None
                 with self._force_run_lock:
@@ -2250,7 +2255,7 @@ class RepairWorker:
     @review_plan_mutation
     def pin_review_release(self, case_id: str, *, source: str, release_id: str,
                            expected_source: str, expected_release_id: str,
-                           manual: bool = False, preview: bool = False) -> dict:
+                           manual: bool = False, preview: bool = False, audio_copy: bool = False) -> dict:
         """Pin a displayed candidate even when no release ambiguity was emitted."""
         case = self.get_review_case(case_id, job_id='library_reconciliation')
         plan = (case or {}).get('album_plan') or {}
@@ -2265,6 +2270,7 @@ class RepairWorker:
         candidate = next((row for row in plan.get('candidates') or []
                           if row.get('source') == source and
                           str(row.get('release_id') or '') == release_id), None)
+        video_only = False
         if manual or preview:
             import re
             if source != 'musicbrainz' or not re.fullmatch(
@@ -2279,6 +2285,9 @@ class RepairWorker:
                       for track in medium.get('tracks') or []]
             if not tracks:
                 return {'success': False, 'error': 'That release has no track list'}
+            video_only = all((track.get('recording') or {}).get('video') is True for track in tracks)
+            if video_only and not preview and not audio_copy:
+                return {'success': False, 'error': 'This release contains video recordings. Choose Use for this audio copy to confirm its identity for your audio files.'}
             if preview:
                 from core.repair_jobs.library_reconciliation import (
                     candidate_preview, _score_release_candidates, _read_file_tags, _mark_lossy_companions,
@@ -2301,7 +2310,8 @@ class RepairWorker:
                     cache.close()
                 from core.library.duplicate_rules import lossy_companion_exts
                 _mark_lossy_companions(files, lossy_companion_exts(self._config_manager, self.db))
-                scored = _score_release_candidates(files, [(source, release_id)], {}, {release_id})
+                scored = _score_release_candidates(files, [(source, release_id)], {}, {release_id},
+                    **({'audio_copy_release': (source, release_id)} if video_only else {}))
                 if not scored:
                     return {'success': False, 'error': 'Could not analyze this release track list'}
                 return {'success': True, 'candidate': candidate_preview(
@@ -2316,6 +2326,8 @@ class RepairWorker:
                                            score=score, locked=True):
             return {'success': False, 'error': 'Could not pin that album release'}
         review_choices.remember_release_choice(self.db, album_id, source, release_id)
+        from core.library.reconciliation_audio_copy import save_choice
+        save_choice(self.db, album_id, source, release_id, bool(audio_copy and (video_only or candidate.get('audio_copy_of_video'))))
         queued = self._schedule_review_refresh(
             case_id, case.get('folder') or '', case, scope='discovery')
         return {'success': True, 'message': 'Release pinned; updating this album plan',
@@ -5293,13 +5305,21 @@ class RepairWorker:
             return 'The reviewed file is no longer at this path'
         try:
             stat = os.stat(file_path)
-            if (stat.st_size != details.get('size_bytes') or
-                    stat.st_mtime_ns != details.get('mtime_ns')):
-                return 'The file changed after the scan; rescan before applying'
             from core.library.reconciliation_evidence import file_identity
             identity = details.get('file_identity')
-            if identity and identity != file_identity(stat):
-                return 'The file changed after the scan; rescan before applying'
+            changed = []
+            if stat.st_size != details.get('size_bytes'):
+                changed.append('file size')
+            if stat.st_mtime_ns != details.get('mtime_ns'):
+                changed.append('modified time')
+            if identity:
+                actual_identity = file_identity(stat)
+                changed.extend(label for field, label in
+                    (('device', 'filesystem'), ('inode', 'file identity'), ('ctime_ns', 'metadata change time'))
+                    if identity.get(field) != actual_identity.get(field))
+            if changed:
+                return (f'{os.path.basename(file_path)} changed after the scan '
+                        f'({", ".join(changed)}). Recheck this album before applying.')
             expected = details.get('fingerprint_key')
             # Older persisted plans lack identity/ctime. Validate those once;
             # new scans have enough evidence to avoid decoding unchanged files.
@@ -5913,7 +5933,7 @@ class RepairWorker:
                                           config_manager=self._config_manager)
             if not resolved or not _same_reviewed_file(resolved, file_path):
                 return {'success': False, 'error': 'The track now points to another file'}
-            if action != 'request_missing':
+            if action == 'quarantine':
                 if self._playlist_removal_blocked(details):
                     return {'success': False, 'blocked': True,
                             'error': 'This copy is in a playlist; review that reference first'}
@@ -5978,6 +5998,11 @@ class RepairWorker:
             if action == 'request_missing':
                 return {'success': True, 'action': 'version_requested',
                         'message': f'{replacement_name} requested; the local version was kept'}
+        if action == 'replace':
+            from core.library.reconciliation_replacement import approve
+            approve(self.db, file_path, {**details, 'old_stored_path': stored_path if track_id else file_path})
+            return {'success': True, 'action': 'replacement_requested',
+                    'message': 'Replacement scheduled. The current copy stays playable until the new copy and its playlist references are verified.'}
         moved, note, dest = _quarantine_file_if_present(
             file_path, self.transfer_folder, 'library_reconciliation',
             config_manager=self._config_manager)

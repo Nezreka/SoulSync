@@ -60,6 +60,7 @@ def read_file_tags(file_path: str, *, opened_audio=None) -> Dict[str, Any]:
         'genre': None,
         'track_number': None,
         'disc_number': None,
+        'total_discs': None,
         'bpm': None,
         'has_cover_art': False,
         'format': None,
@@ -100,6 +101,8 @@ def read_file_tags(file_path: str, *, opened_audio=None) -> Dict[str, Any]:
             result['genre'] = _id3_text(audio.tags, 'TCON')
             result['track_number'] = _parse_track_num(_id3_text(audio.tags, 'TRCK'))
             result['disc_number'] = _parse_track_num(_id3_text(audio.tags, 'TPOS'))
+            disc_text = _id3_text(audio.tags, 'TPOS') or ''
+            result['total_discs'] = _parse_track_num(disc_text.split('/', 1)[1]) if '/' in disc_text else None
             bpm_text = _id3_text(audio.tags, 'TBPM')
             if bpm_text:
                 try:
@@ -122,6 +125,7 @@ def read_file_tags(file_path: str, *, opened_audio=None) -> Dict[str, Any]:
             result['genre'] = _vorbis_first(audio, 'genre')
             result['track_number'] = _parse_track_num(_vorbis_first(audio, 'tracknumber'))
             result['disc_number'] = _parse_track_num(_vorbis_first(audio, 'discnumber'))
+            result['total_discs'] = _parse_track_num(_vorbis_first(audio, 'totaldiscs') or _vorbis_first(audio, 'disctotal'))
             bpm_val = _vorbis_first(audio, 'bpm')
             if bpm_val:
                 try:
@@ -149,6 +153,7 @@ def read_file_tags(file_path: str, *, opened_audio=None) -> Dict[str, Any]:
             disk = audio.tags.get('disk', []) if audio.tags else []
             if disk:
                 result['disc_number'] = disk[0][0] if isinstance(disk[0], tuple) else None
+                result['total_discs'] = disk[0][1] if isinstance(disk[0], tuple) else None
             # MP4 stores BPM in the integer `tmpo` atom — the writer sets
             # it (_write_mp4), so the reader must read it back, or every
             # MP4 with a DB BPM previews as changed forever (#1871).
@@ -340,6 +345,7 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         ('genre', 'genres', 'Genre'),
         ('track_number', 'track_number', 'Track #'),
         ('disc_number', 'disc_number', 'Disc #'),
+        ('total_discs', 'total_discs', 'Total discs'),
         ('bpm', 'bpm', 'BPM'),
     ]
 
@@ -580,15 +586,15 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
         if isinstance(audio.tags, ID3):
             written = _write_id3(audio, title, artist, album_artist, album,
                                  year, genre_str, track_num, total_tracks,
-                                 disc_num, bpm, artists_list=artists_list)
+                                 disc_num, bpm, artists_list=artists_list, total_discs=db_data.get('total_discs'))
         elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
             written = _write_vorbis(audio, title, artist, album_artist, album,
                                     year, genre_str, track_num, total_tracks,
-                                    disc_num, bpm, artists_list=artists_list)
+                                    disc_num, bpm, artists_list=artists_list, total_discs=db_data.get('total_discs'))
         elif isinstance(audio, MP4):
             written = _write_mp4(audio, title, artist, album_artist, album,
                                  year, genre_str, track_num, total_tracks,
-                                 disc_num, bpm, artists_list=artists_list)
+                                 disc_num, bpm, artists_list=artists_list, total_discs=db_data.get('total_discs'))
 
         if db_data.get('clear_musicbrainz_ids'):
             _clear_musicbrainz_ids(audio, db_data['clear_musicbrainz_ids'])
@@ -698,7 +704,7 @@ def _date_to_write(existing: Optional[str], year) -> str:
 
 def _write_id3(audio, title, artist, album_artist, album, year, genre,
                track_num, total_tracks, disc_num, bpm,
-               artists_list: Optional[List[str]] = None) -> List[str]:
+               artists_list: Optional[List[str]] = None, total_discs=None) -> List[str]:
     written = []
     if title:
         audio.tags.delall('TIT2')
@@ -744,7 +750,7 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
         written.append('track_number')
     if disc_num is not None:
         audio.tags.delall('TPOS')
-        audio.tags.add(TPOS(encoding=3, text=[str(disc_num)]))
+        audio.tags.add(TPOS(encoding=3, text=[f'{disc_num}/{total_discs}' if total_discs else str(disc_num)]))
         written.append('disc_number')
     stored_bpm = _stored_bpm(bpm)
     if stored_bpm is not None:
@@ -756,7 +762,7 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
 
 def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
                   track_num, total_tracks, disc_num, bpm,
-                  artists_list: Optional[List[str]] = None) -> List[str]:
+                  artists_list: Optional[List[str]] = None, total_discs=None) -> List[str]:
     written = []
     if title:
         audio['title'] = [title]
@@ -798,6 +804,10 @@ def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
     if disc_num is not None:
         audio['discnumber'] = [str(disc_num)]
         written.append('disc_number')
+    if total_discs is not None:
+        audio['totaldiscs'] = [str(total_discs)]
+        audio['disctotal'] = [str(total_discs)]
+        written.append('total_discs')
     stored_bpm = _stored_bpm(bpm)
     if stored_bpm is not None:
         audio['bpm'] = [str(stored_bpm)]
@@ -807,7 +817,7 @@ def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
 
 def _write_mp4(audio, title, artist, album_artist, album, year, genre,
                track_num, total_tracks, disc_num, bpm,
-               artists_list: Optional[List[str]] = None) -> List[str]:
+               artists_list: Optional[List[str]] = None, total_discs=None) -> List[str]:
     written = []
     if title:
         audio['\xa9nam'] = [title]
@@ -841,7 +851,7 @@ def _write_mp4(audio, title, artist, album_artist, album, year, genre,
         audio['trkn'] = [(track_num, total)]
         written.append('track_number')
     if disc_num is not None:
-        audio['disk'] = [(disc_num, 0)]
+        audio['disk'] = [(disc_num, total_discs or 0)]
         written.append('disc_number')
     stored_bpm = _stored_bpm(bpm)
     if stored_bpm is not None:

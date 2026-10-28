@@ -123,7 +123,7 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
     """
     result = {
         'title': '', 'artist': '', 'album_artist': '', 'track_artist': '', 'album': '',
-        'track_number': 0, 'disc_number': 1, 'year': '',
+        'track_number': 0, 'disc_number': 1, 'total_discs': 0, 'year': '',
         'genres': [], 'isrc': '', 'mbid': '', 'duration_ms': 0,
         'spotify_track_id': '',
     }
@@ -166,6 +166,10 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
                 dn = tags.get('discnumber', ['1'])[0]
                 try:
                     result['disc_number'] = int(str(dn).split('/')[0])
+                    total = (tags.get('totaldiscs') or tags.get('disctotal') or [''])[0]
+                    if not total and '/' in str(dn):
+                        total = str(dn).split('/', 1)[1]
+                    result['total_discs'] = int(total or 0)
                 except (ValueError, TypeError):
                     pass
                 # GENRE — Mutagen easy mode returns a list (some files
@@ -199,6 +203,9 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
     except Exception as e:
         logger.debug(f"Could not read tags from {os.path.basename(file_path)}: {e}")
     return result
+
+
+_read_file_tags.required_cache_keys = ('total_discs',)
 
 
 def _parse_folder_name(folder_name: str):

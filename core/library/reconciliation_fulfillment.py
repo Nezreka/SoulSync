@@ -33,6 +33,13 @@ def ensure_schema(conn):
                 WHERE replacement_request=1 AND state='fulfilled' AND published_path=''""")
 
 
+def request_identity(details, slot):
+    return {'case_id': review_case_key(details, None),
+            'source': details.get('source') or '',
+            'release_id': details.get('exact_release_id') or details.get('release_id') or '',
+            'source_track_id': str(slot.get('source_track_id') or '')}
+
+
 def record_request_on_connection(conn, details, slot):
     """Persist exact collection intent in the wishlist transaction."""
     from core.repair_jobs.library_reconciliation import _wanted_slot_key
@@ -96,12 +103,20 @@ def published_wishlist_track(db, stored_id, profiles, path):
     conn = db._get_connection()
     try:
         ensure_schema(conn)
-        rows = conn.execute('SELECT profile_id, spotify_data FROM wishlist_tracks WHERE spotify_track_id=?',
-                            (stored_id,)).fetchall()
-        for profile, raw in rows:
+        has_info = 'source_info' in {r[1] for r in conn.execute('PRAGMA table_info(wishlist_tracks)')}
+        rows = conn.execute('SELECT profile_id, spotify_data,' + ('source_info' if has_info else "'{}'") +
+                            ' FROM wishlist_tracks WHERE spotify_track_id=?', (stored_id,)).fetchall()
+        for profile, raw, info_raw in rows:
             if profiles is not None and profile not in profiles:
                 continue
             payload = json.loads(raw or '{}')
+            identity = (json.loads(info_raw or '{}') or {}).get('review_request') or {}
+            if identity.get('case_id'):
+                conn.execute('''UPDATE reconcile_fulfillment SET state='published', published_path=?,
+                    refresh_needed=1, updated_at=CURRENT_TIMESTAMP WHERE profile_id=? AND case_id=?
+                    AND source=? AND release_id=? AND source_track_id=? AND state='requested' ''',
+                    (str(path), profile, identity['case_id'], identity.get('source'),
+                     identity.get('release_id'), identity.get('source_track_id')))
             track_id = str(payload.get('id') or str(stored_id).split('::')[0])
             release_id = str((payload.get('album') or {}).get('id') or '')
             source = str(payload.get('provider') or '')
@@ -129,7 +144,7 @@ def retain_request_context(conn, payload, source_info, profile_id):
             "SELECT 1 FROM sqlite_master WHERE name='reconcile_fulfillment'").fetchone():
         return payload, source_info
     album = payload.get('album') or {}
-    rows = conn.execute('''SELECT source, replacement_request FROM reconcile_fulfillment
+    rows = conn.execute('''SELECT source, replacement_request, case_id FROM reconcile_fulfillment
         WHERE profile_id=? AND release_id=? AND source_track_id=?
           AND state IN ('requested', 'published')''',
         (int(profile_id or 1), str(album.get('id') or ''), str(payload.get('id') or ''))).fetchall()
@@ -141,6 +156,9 @@ def retain_request_context(conn, payload, source_info, profile_id):
     if source == 'musicbrainz':
         payload['album']['musicbrainz_release_id'] = album['id']
     info = dict(source_info) if isinstance(source_info, dict) else {}
+    if len(rows) == 1:
+        info['review_request'] = {'case_id': rows[0][2], 'source': source,
+                                  'release_id': album['id'], 'source_track_id': str(payload['id'])}
     info.update(source=source, source_track_id=payload['id'], source_album_id=album['id'],
                 is_album=True, reason='library_reconciliation_wrong_audio' if any(r[1] for r in rows)
                 else 'library_reconciliation')
@@ -297,6 +315,14 @@ def settle_assignments(db, case_id, assignments, release_id, source):
             request = dict(zip(('source_track_id', 'state', 'published_path', 'replacement_request'), row))
             if not any(assignment_fulfills_request(request, assignment) for assignment in assignments):
                 continue
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_replacements'").fetchone():
+                active = conn.execute('''SELECT 1 FROM reconcile_replacements WHERE case_id=? AND state!='complete'
+                    AND json_extract(details_json,'$.source')=?
+                    AND COALESCE(json_extract(details_json,'$.exact_release_id'),json_extract(details_json,'$.release_id'))=?
+                    AND CAST(json_extract(details_json,'$.replacement_track.source_track_id') AS TEXT)=?''',
+                    (case_id, source, str(release_id), row[0])).fetchone()
+                if active:
+                    continue
             conn.execute('''UPDATE reconcile_fulfillment SET state='fulfilled', refresh_needed=0,
                 updated_at=CURRENT_TIMESTAMP WHERE case_id=? AND release_id=? AND source_track_id=? AND source=?''',
                 (case_id, str(release_id), row[0], source))
@@ -305,7 +331,7 @@ def settle_assignments(db, case_id, assignments, release_id, source):
         conn.close()
 
 
-def _planned_delivery(conn, case, profile, release, track, path):
+def _planned_delivery(conn, case, profile, release, track, path, *, verified=False):
     """An older import may have retagged a delivery with another pressing ID."""
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_album_plans'").fetchone():
         return False
@@ -320,7 +346,8 @@ def _planned_delivery(conn, case, profile, release, track, path):
     if plan.get('source') != 'musicbrainz' or plan.get('release_id') != release:
         return False
     for assignment in plan.get('assignments') or []:
-        if str(assignment.get('source_track_id') or '') != track or not assignment.get('file_path'):
+        if ((verified and assignment.get('status') not in ('confirmed', 'change', 'settled')) or
+                str(assignment.get('source_track_id') or '') != track or not assignment.get('file_path')):
             continue
         try:
             if os.path.samefile(path, assignment['file_path']):
@@ -332,15 +359,20 @@ def _planned_delivery(conn, case, profile, release, track, path):
 
 def recover_published_requests(conn):
     """Recover a missed publication callback from an exact, verified delivery."""
-    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='wishlist_removals'").fetchone():
-        return
     from mutagen import File, MutagenError
     for case, profile, release, track, requested in conn.execute(
             "SELECT case_id,profile_id,release_id,source_track_id,updated_at FROM reconcile_fulfillment "
             "WHERE source='musicbrainz' AND state='requested' AND published_path='' ").fetchall():
-        deliveries = conn.execute("SELECT final_path, profile_ids FROM wishlist_removals "
+        deliveries = []
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name='wishlist_removals'").fetchone():
+            deliveries = conn.execute("SELECT final_path, profile_ids FROM wishlist_removals "
             "WHERE spotify_track_id=? AND reason='download_complete' AND removed_at >= ? "
             "ORDER BY removed_at DESC", (track, requested)).fetchall()
+        receipts = conn.execute('''SELECT published_path FROM reconcile_fulfillment
+            WHERE case_id=? AND profile_id=? AND state IN ('published','fulfilled')
+              AND published_path!='' AND updated_at>=?''', (case, profile, requested)).fetchall()
+        deliveries.extend((path, json.dumps([profile])) for (path,) in receipts
+                          if _planned_delivery(conn, case, profile, release, track, path, verified=True))
         for path, profiles in deliveries:
             try:
                 if int(profile) not in json.loads(profiles or '[]') or not os.path.isfile(path):

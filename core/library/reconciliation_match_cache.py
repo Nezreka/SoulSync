@@ -103,12 +103,16 @@ def input_key(policy, files, slots, forced_pairs, identity):
     # cannot hide a new semantic input. UI and decision state stay outside.
     local = [{
         'path': f.get('path'), 'size_bytes': f.get('size_bytes'), 'mtime_ns': f.get('mtime_ns'),
-        'duration_ms': f.get('duration_ms'), 'tags': f.get('tags'), 'acoustid': f.get('acoustid'),
+        # Disc totals affect the metadata/folder proposal, never audio assignment.
+        'duration_ms': f.get('duration_ms'),
+        'tags': {k: v for k, v in (f.get('tags') or {}).items() if k != 'total_discs'},
+        'acoustid': f.get('acoustid'),
         'companion_of': f.get('companion_of'),
         'db': {key: (f.get('db') or {}).get(key) for key in
                ('title', 'recording_disambiguation', 'owner_profile_id', 'artist_aliases')},
     } for f in files]
-    remote = [{key: value for key, value in slot.items() if key != 'preview_url'} for slot in slots]
+    remote = [{key: value for key, value in slot.items()
+               if key not in ('preview_url', 'audio_copy_of_video')} for slot in slots]
     return digest(canonical([policy, identity, local, remote, sorted((forced_pairs or {}).items())]))
 
 

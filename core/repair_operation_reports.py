@@ -57,10 +57,10 @@ def latest_case_report(db, case_id):
                 if not parents:
                     break
                 keys.update(parents)
-        row = conn.execute('''SELECT report FROM repair_operation_reports
+        row = conn.execute('''SELECT report,updated_at FROM repair_operation_reports
             WHERE EXISTS (SELECT 1 FROM json_each(report, '$.review_case_ids')
                 WHERE value IN (SELECT value FROM json_each(?)))
             ORDER BY updated_at DESC LIMIT 1''', (json.dumps(sorted(keys)),)).fetchone()
-        return json.loads(row[0]) if row else None
+        return {**json.loads(row[0]), 'updated_at': row[1]} if row else None
     finally:
         conn.close()

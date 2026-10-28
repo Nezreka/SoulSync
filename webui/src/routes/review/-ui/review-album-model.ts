@@ -204,7 +204,13 @@ export function readyFieldGroup(field: string): { key: string; label: string } {
     return { key: 'album', label: 'Album title' };
   }
   if (
-    ['track_number', 'disc_number', 'library_track_number', 'library_disc_number'].includes(field)
+    [
+      'track_number',
+      'disc_number',
+      'total_discs',
+      'library_track_number',
+      'library_disc_number',
+    ].includes(field)
   ) {
     return { key: 'numbering', label: 'Numbering' };
   }

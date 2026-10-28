@@ -44,24 +44,6 @@
   color: var(--text-1);
 }
 
-.badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 2ch;
-  padding: 1px 7px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-pill);
-  font-size: 0.74rem;
-  font-weight: 700;
-  line-height: 1.2;
-  white-space: nowrap;
-  vertical-align: middle;
-  color: var(--white-a45);
-  background: var(--white-a05);
-  border-color: var(--white-a08);
-}
-
 .badge[data-tone='info'] {
   color: var(--info);
   background: rgba(var(--info-rgb), 0.1);
@@ -87,6 +69,21 @@
 }
 
 .badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2ch;
+  padding: 1px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  vertical-align: middle;
+  color: var(--white-a45);
+  background: var(--white-a05);
+  border-color: var(--white-a08);
   gap: 5px;
 }
 .badge svg {

@@ -16374,6 +16374,11 @@ class MusicDatabase:
                                                      reconciliation_request['slot'])
                     conn.commit()
 
+                if reconciliation_request:
+                    from core.library.reconciliation_fulfillment import request_identity
+                    source_info = {**(source_info or {}), 'review_request': request_identity(
+                        reconciliation_request['details'], reconciliation_request['slot'])}
+
                 # Use track ID as unique identifier. Field name stays legacy-compatible.
                 track_id = spotify_track_data.get('id')
                 if not track_id:

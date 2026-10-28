@@ -43,13 +43,43 @@ def rank(album, artist, query):
             3 if matches(artist, query.split()) else 4)
 
 
+def prepare(conn, *, status, job_id):
+    """Cache only searchable names; evidence updates invalidate their own entry.
+
+    Triggers use ordinary SQL so writers need no connection-specific functions.
+    Build outside the write transaction and compare the source again at insertion
+    so a concurrent scan cannot publish stale names after its invalidation.
+    """
+    conn.execute('''CREATE TABLE IF NOT EXISTS repair_review_search_documents (
+        finding_id INTEGER PRIMARY KEY, words TEXT NOT NULL)''')
+    conn.execute('''CREATE TRIGGER IF NOT EXISTS repair_review_search_changed
+        AFTER UPDATE OF title,details_json ON repair_findings
+        WHEN OLD.title IS NOT NEW.title OR OLD.details_json IS NOT NEW.details_json
+        BEGIN DELETE FROM repair_review_search_documents WHERE finding_id=NEW.id; END''')
+    conn.execute('''CREATE TRIGGER IF NOT EXISTS repair_review_search_deleted
+        AFTER DELETE ON repair_findings
+        BEGIN DELETE FROM repair_review_search_documents WHERE finding_id=OLD.id; END''')
+    rows = conn.execute('''SELECT f.id,f.title,f.details_json FROM repair_findings f
+        LEFT JOIN repair_review_search_documents d ON d.finding_id=f.id
+        WHERE f.status=? AND (?='' OR f.job_id=?) AND d.finding_id IS NULL''',
+        (status, job_id, job_id)).fetchall()
+    documents = [(' '.join(sorted(set(names(title, raw).split()))), fid, title, raw)
+                 for fid, title, raw in rows]
+    if documents:
+        conn.executemany('''INSERT OR IGNORE INTO repair_review_search_documents
+            SELECT id,? FROM repair_findings WHERE id=? AND title IS ? AND details_json IS ?''',
+            documents)
+        conn.commit()
+
+
 def matching_cases(conn, *, status, job_id, query):
     tokens = normalize(query).split()
     conn.create_function('review_search_names', 2, names, deterministic=True)
     # Combine names across an album before matching: album and track terms may
     # live on different findings. Filtering must retain its entire action plan.
-    rows = conn.execute('''SELECT review_case_key,
-        group_concat(review_search_names(title, details_json), ' ')
-        FROM repair_findings WHERE status=? AND (?='' OR job_id=?)
-        GROUP BY review_case_key''', (status, job_id, job_id))
-    return [key for key, text in rows if matches(text, tokens)]
+    rows = conn.execute('''SELECT f.review_case_key, group_concat(COALESCE(d.words, review_search_names(f.title,f.details_json)), ' ')
+        FROM repair_findings f LEFT JOIN repair_review_search_documents d ON d.finding_id=f.id
+        WHERE f.status=? AND (?='' OR f.job_id=?) GROUP BY f.review_case_key''',
+        (status, job_id, job_id))
+    return [key for key, text in rows
+            if all(any(word.startswith(token) for word in text.split()) for token in tokens)]

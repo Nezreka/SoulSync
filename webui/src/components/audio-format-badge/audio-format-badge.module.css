@@ -11,7 +11,7 @@
   letter-spacing: 0.03em;
 }
 /* Format is descriptive metadata, independent of review status. */
-.badge:global(.enhanced-format-badge) {
+.badge[class~='enhanced-format-badge'] {
   background: var(--surface-3);
   color: var(--text-2);
 }

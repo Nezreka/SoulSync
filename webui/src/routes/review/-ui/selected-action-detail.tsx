@@ -134,10 +134,7 @@ export function SelectedActionDetail({
         caseId={caseId}
         path={finding.file_path}
         names={Array.isArray(details.playlists) ? details.playlists.map(String) : []}
-        removal={
-          ['quarantine', 'replace'].includes(plannedAction) ||
-          plannedAction.startsWith('existing:quarantine')
-        }
+        removal={plannedAction === 'quarantine' || plannedAction.startsWith('existing:quarantine')}
         lastError={finding.last_error}
         onRecheck={onRecheck}
         findingId={finding.id}
@@ -166,10 +163,10 @@ export function SelectedActionDetail({
           <span>
             {plannedAction === 'replace'
               ? ['wishlisted', 'downloading'].includes(requestState)
-                ? 'The replacement is requested. Applying this plan quarantines the current file.'
+                ? 'The replacement is requested. Applying starts a verified handoff: the current file stays playable until the download and playlist references are ready.'
                 : requestState === 'downloaded'
                   ? 'A download has arrived. Review its audio match before applying the saved file action.'
-                  : `Request ${textValue(replacement.name || details.expected_title)} from Plan first. Applying then quarantines the current file.`
+                  : `Request ${textValue(replacement.name || details.expected_title)} from Plan first. Applying then schedules a replacement while keeping this copy playable.`
               : 'Saved in this album plan. Files change when you apply it.'}
           </span>
           <div className={styles.inlineActions}>
@@ -605,11 +602,10 @@ function ReplacementChoice({
           )}
           <p className={styles.remediationSummary}>
             {source === 'new'
-              ? 'Request a new copy and move'
+              ? 'Request a new copy. Keep the current file playable until the replacement and playlist handoff are verified, then move it to recoverable quarantine.'
               : source === 'existing'
-                ? 'Use the selected file and move'
-                : 'Move'}{' '}
-            the current file to recoverable quarantine when you apply the plan.
+                ? 'Use the selected file and move the current file to recoverable quarantine when you apply the plan.'
+                : 'Move the current file to recoverable quarantine when you apply the plan.'}
           </p>
         </DialogBody>
         <DialogFooter>

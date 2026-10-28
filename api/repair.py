@@ -249,7 +249,8 @@ def repair_review_queue_pin_release(case_id):
             release_id=str(data.get('release_id') or ''),
             expected_source=str(data.get('expected_source') or ''),
             expected_release_id=str(data.get('expected_release_id') or ''),
-            manual=bool(data.get('manual')), preview=bool(data.get('preview')))
+            manual=bool(data.get('manual')), preview=bool(data.get('preview')),
+            **({'audio_copy': True} if data.get('audio_copy') is True else {}))
         return jsonify(result), 200 if result.get('success') else (409 if result.get('stale') else 400)
     except Exception as exc:
         logger.error('Error pinning review release: %s', exc, exc_info=True)

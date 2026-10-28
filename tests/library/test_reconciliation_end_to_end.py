@@ -2407,10 +2407,11 @@ def test_wrong_audio_can_request_exact_replacement_before_quarantine(tmp_path, m
     assert path.exists()
     result = worker.fix_finding(extra['id'], review_approved=True)
     assert result['success'], result
-    assert not path.exists()
-    assert (root / '.deleted' / path.name).exists()
+    assert path.exists()
+    assert not (root / '.deleted' / path.name).exists()
     with db._get_connection() as conn:
-        assert conn.execute('SELECT id FROM tracks WHERE id = 1').fetchone() is None
+        assert conn.execute('SELECT id FROM tracks WHERE id = 1').fetchone() is not None
+        assert conn.execute('SELECT state FROM reconcile_replacements').fetchone()[0] == 'waiting'
         row = conn.execute(
             'SELECT spotify_track_id, source_info FROM wishlist_tracks').fetchone()
     assert row['spotify_track_id'] == 'wanted-id'

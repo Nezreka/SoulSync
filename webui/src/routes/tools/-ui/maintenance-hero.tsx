@@ -471,11 +471,13 @@ export function MaintenanceHero() {
         </div>
       </div>
 
-      <ReviewQueueEntry
-        job={jobs?.find((job) => job.job_id === 'library_reconciliation')}
-        progress={progress.library_reconciliation}
-        onScanStarted={loadJobs}
-      />
+      {media === 'music' && (
+        <ReviewQueueEntry
+          job={jobs?.find((job) => job.job_id === 'library_reconciliation')}
+          progress={progress.library_reconciliation}
+          onScanStarted={loadJobs}
+        />
+      )}
 
       {/* ── SIMPLE MODE: Primary Curated Studio & Spotlight ──────────────── */}
       {mode === 'simple' ? (

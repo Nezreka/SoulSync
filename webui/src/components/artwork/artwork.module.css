@@ -1,9 +1,3 @@
-.artwork {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
 .fallback {
   display: grid;
   place-items: center;
@@ -34,6 +28,10 @@
   opacity: 0;
 }
 .artwork {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   transition: opacity var(--motion-fast, 150ms);
 }
 @media (prefers-reduced-motion: reduce) {

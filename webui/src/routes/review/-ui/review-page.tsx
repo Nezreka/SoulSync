@@ -262,7 +262,9 @@ export function ReviewPage() {
     scanHistoryLive.current = true;
     void fetchLastReconciliationRun()
       .then((run) => {
-        if (scanHistoryLive.current) setLastRun(run);
+        if (scanHistoryLive.current) {
+          setLastRun(run);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -277,10 +279,17 @@ export function ReviewPage() {
     onState: (status) => {
       setScanStatus(status);
       const scanning = status.current_job?.job_id === 'library_reconciliation';
+      if (scanning)
+        setGlobalNotice((value) =>
+          value.startsWith('Library reconciliation queued.') ? '' : value,
+        );
       if (wasScanning.current && !scanning) {
         void fetchLastReconciliationRun()
           .then((run) => {
-            if (scanHistoryLive.current) setLastRun(run);
+            if (scanHistoryLive.current) {
+              setLastRun(run);
+              if (run?.status === 'completed') setGlobalNotice('Library reconciliation complete.');
+            }
           })
           .catch(() => undefined);
       }
@@ -300,32 +309,49 @@ export function ReviewPage() {
   }, [searchInput, query]);
 
   const queueRequestVersion = useRef(0);
+  const queueAbort = useRef<AbortController | null>(null);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueError, setQueueError] = useState('');
+  useEffect(() => {
+    if (globalNotice !== 'Library reconciliation complete.') return;
+    const timer = window.setTimeout(() => setGlobalNotice(''), 6000);
+    return () => window.clearTimeout(timer);
+  }, [globalNotice]);
   const queueScope = JSON.stringify([page, query, category, risk]);
   const currentQueueScope = useRef(queueScope);
   currentQueueScope.current = queueScope;
   const refreshQueue = useCallback(async () => {
+    queueAbort.current?.abort();
+    const controller = new AbortController();
+    queueAbort.current = controller;
+    setQueueLoading(true);
+    setQueueError('');
     const version = ++queueRequestVersion.current;
     const current = () =>
       version === queueRequestVersion.current && queueScope === currentQueueScope.current;
-    void fetchReviewQueueModeTotals(query, category)
+    void fetchReviewQueueModeTotals(query, category, controller.signal)
       .then((totals) => {
         if (current()) setQueueTotals(totals);
       })
       .catch(() => undefined);
     try {
-      const result = await fetchReviewQueue(page, query, category, risk);
+      const result = await fetchReviewQueue(page, query, category, risk, 30, controller.signal);
       if (!current()) return null;
       setQueue(result);
       if (result.page !== page) setPage(result.page);
       return result;
     } catch (cause) {
-      if (!current()) return null;
-      throw cause;
+      if (!current() || controller.signal.aborted) return null;
+      setQueueError((cause as Error).message);
+      return null;
+    } finally {
+      if (current()) setQueueLoading(false);
     }
   }, [page, query, category, risk, queueScope]);
 
   useEffect(() => {
     let live = true;
+    setQueue(null);
     void refreshQueue()
       .then((result) => {
         if (live && result && !selectedCaseRef.current && result.items[0])
@@ -337,6 +363,7 @@ export function ReviewPage() {
     return () => {
       live = false;
       ++queueRequestVersion.current;
+      queueAbort.current?.abort();
     };
   }, [refreshQueue, setError]);
 
@@ -864,7 +891,7 @@ export function ReviewPage() {
             status.phase === 'requests'
               ? 'Adding requested tracks to the wishlist…'
               : status.phase === 'file_actions'
-                ? 'Saving replacement requests and moving selected files to quarantine…'
+                ? 'Saving replacement handoffs and applying selected file actions…'
                 : status.phase === 'waiting_for_scan'
                   ? 'Waiting for reconciliation to finish before applying…'
                   : status.phase === 'queueing_organization'
@@ -1347,7 +1374,7 @@ export function ReviewPage() {
         reviewCase.case_id,
         { source: String(candidate.source), release_id: String(candidate.release_id) },
         current,
-        { manual: candidate === manualRelease },
+        { manual: candidate === manualRelease, audio_copy: Boolean(candidate.audio_copy_of_video) },
       );
       if (!result.success) throw new Error(result.error || 'Could not select this release');
       if (selectedCaseRef.current !== requestedCase) return;
@@ -1680,7 +1707,7 @@ export function ReviewPage() {
         </Notice>
       )}
       {globalNotice && (
-        <Notice tone="info" role="status">
+        <Notice tone="info" role="status" className={styles.queueNotice}>
           <span>{globalNotice}</span>
           <Button
             type="button"
@@ -1808,8 +1835,16 @@ export function ReviewPage() {
                 Clear filters
               </Button>
             )}
-            <div className={styles.caseList} ref={caseListRef} aria-busy={!queue}>
-              {!queue && <p role="status">Loading albums…</p>}
+            <div className={styles.caseList} ref={caseListRef} aria-busy={queueLoading}>
+              {queueLoading && (
+                <p role="status">{query ? 'Searching albums…' : 'Loading albums…'}</p>
+              )}
+              {queueError && (
+                <Notice tone="warning" role="alert">
+                  <p>Could not load albums. {queueError}</p>
+                  <Button onClick={() => void refreshQueue()}>Retry search</Button>
+                </Notice>
+              )}
               {queue?.items.map((item) => (
                 <Button
                   key={item.case_id}
@@ -2001,25 +2036,35 @@ export function ReviewPage() {
               </div>
 
               {reviewCase.last_operation?.error && (
-                <Notice tone="danger" role="alert">
-                  <strong>
-                    {reviewCase.last_operation.fixed || 0} actions applied ·{' '}
+                <details className={styles.operationHistory}>
+                  <summary>
+                    Previous attempt
+                    {reviewCase.last_operation.updated_at
+                      ? ` · ${new Date(reviewCase.last_operation.updated_at * 1000).toLocaleString()}`
+                      : ''}
+                    {' · '}
+                    {reviewCase.last_operation.fixed || 0} actions applied
                     {reviewCase.last_operation.organize_failed
-                      ? 'Folder organization incomplete'
-                      : 'Operation needs attention'}
-                  </strong>
+                      ? ' · folder step incomplete'
+                      : ' · needs attention'}
+                  </summary>
                   <p>{reviewCase.last_operation.error}</p>
                   <p>Completed metadata changes are retained.</p>
                   {reviewCase.organization_retry_signature && (
                     <Button disabled={mutationBusy} onClick={() => void retryOrganization()}>
-                      Review and retry folder organization
+                      Review current folder changes
                     </Button>
                   )}
-                </Notice>
+                </details>
               )}
               {error && errorCase === reviewCase.case_id && !reviewCase.last_operation?.error && (
-                <Notice tone="danger" role="alert">
-                  {error}
+                <Notice tone="danger" role="alert" className={styles.queueNotice}>
+                  <span>{error}</span>
+                  {error.includes('after the scan') && (
+                    <Button disabled={mutationBusy} onClick={() => void reanalyzeAlbum()}>
+                      Recheck this album
+                    </Button>
+                  )}
                 </Notice>
               )}
               {!folderFinding && (
@@ -2588,6 +2633,16 @@ export function ReviewPage() {
                     plan.ready === 0 && (
                       <div className={styles.empty}>No album-level action is pending.</div>
                     )}
+
+                  {reviewCase.replacement_operations?.map((operation) => (
+                    <Notice key={operation.file} tone={operation.error ? 'warning' : 'info'}>
+                      <strong>Replacing {operation.file}</strong>
+                      <p>
+                        {operation.error ||
+                          'The current copy stays playable until the new copy is verified and its playlist references are transferred.'}
+                      </p>
+                    </Notice>
+                  ))}
 
                   {albumView === 'plan' && pendingDecisions.length > 0 && (
                     <section

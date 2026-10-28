@@ -653,14 +653,16 @@ def _review_pairs(files, plan):
 
 def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str]],
                               release_cache: dict,
-                              exact_musicbrainz_releases: set[str] | None = None) -> list[tuple]:
+                              exact_musicbrainz_releases: set[str] | None = None, *,
+                              audio_copy_release=None) -> list[tuple]:
     scored = []
     aliases = {fold_title(name): [row['artist_name'], *row['artist_aliases']]
                for file in files for row in [file.get('db') or {}]
                if row.get('artist_name') and row.get('artist_aliases')
                for name in [row['artist_name'], *row['artist_aliases']]}
     for source, release_id in candidates:
-        key = (source, release_id)
+        audio_copy = audio_copy_release == (source, release_id)
+        key = (source, release_id, 'audio_copy') if audio_copy else (source, release_id)
         if key not in release_cache:
             is_exact_release = (source == 'musicbrainz' and
                                 release_id in (exact_musicbrainz_releases or set()))
@@ -668,10 +670,10 @@ def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str
                    if is_exact_release else
                    get_album_tracks_for_source(source, release_id))
             items = _track_items(raw)
-            excluded = sum(item.get('video') is True for item in items)
+            excluded = 0 if audio_copy else sum(item.get('video') is True for item in items)
             release_cache[key] = [{**_normalize_slot(item, source),
-                                   'excluded_video_tracks': excluded}
-                                  for item in items if item.get('video') is not True]
+                                   'excluded_video_tracks': excluded, **({'audio_copy_of_video': True} if audio_copy else {})}
+                                  for item in items if audio_copy or item.get('video') is not True]
         slots = [{**slot, 'artist_aliases': aliases.get(fold_title(slot.get('artist') or ''), [])}
                  for slot in release_cache[key]] if aliases else release_cache[key]
         if not slots:
@@ -1368,6 +1370,7 @@ def candidate_preview(files: list[dict], row: tuple, release_meta: dict) -> dict
         'format': ', '.join(dict.fromkeys(formats)) or release_meta.get('format') or '',
         **_release_display_metadata(candidate.source, candidate.release_id, release_meta),
         'matched': candidate.matched, 'total_slots': len(release_slots),
+        **({'audio_copy_of_video': True} if any(slot.get('audio_copy_of_video') for slot in release_slots) else {}),
         'excluded_video_tracks': max((slot.get('excluded_video_tracks', 0)
                                       for slot in release_slots), default=0),
         'missing': len(candidate_plan['missing_slots']),
@@ -2184,6 +2187,8 @@ class LibraryReconciliationJob(RepairJob):
         if not plan_only:
             review_choices.backfill_applied_releases(context.db)
         reviewed_releases = review_choices.load_release_choices(context.db)
+        from core.library.reconciliation_audio_copy import load_choices as audio_copy_choices
+        audio_copies = audio_copy_choices(context.db)
         numbering_history = review_choices.flattened_numbering_history(context.db)
         playlist_membership = {}
         if context.playlist_membership and not plan_only:
@@ -2410,7 +2415,8 @@ class LibraryReconciliationJob(RepairJob):
                         exact_musicbrainz_releases.add(reviewed_release[1])
                     linked_candidates = list(candidates)
                     scored = _score_release_candidates(
-                        files, candidates, release_cache, exact_musicbrainz_releases)
+                        files, candidates, release_cache, exact_musicbrainz_releases,
+                        audio_copy_release=audio_copies.get(str(album_id)))
                     best_initial = (max(scored, key=rank_candidate) if scored else None)
                     if not plan_only and (not best_initial or best_initial[6]['extra_files']
                             or best_initial[6]['missing_slots']):
@@ -3018,6 +3024,11 @@ class LibraryReconciliationJob(RepairJob):
                                 'total_tracks': disc_totals[slot['disc_number']]
                                 if not slot.get('excluded_video_tracks') else 0}
                         tag_plan = plan_track(tags, target, meta)
+                        expected_discs = max(int(member.get('disc_number') or 1) for member in slots)
+                        if tags.get('total_discs') and tags['total_discs'] != expected_discs:
+                            tag_plan['changes']['total_discs'] = {'old': tags['total_discs'], 'new': expected_discs}
+                            tag_plan['db_data']['total_discs'] = expected_discs
+                            tag_plan['db_data']['disc_number'] = slot['disc_number']
                         # Minor title spelling/version annotations are often valid;
                         # only act on a substantive title difference or hard slot
                         # fields. Album/artist edits require an explicit source.

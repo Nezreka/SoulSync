@@ -18,21 +18,21 @@
   width: 18px;
   height: 12px;
   flex: none;
-  border-radius: 1px;
+  border-radius: 0;
 }
 .tooltipPosition {
-  z-index: var(--z-tooltip, 100000);
+  z-index: var(--z-tooltip);
 }
 .tooltip {
   max-width: min(300px, calc(100vw - 24px));
   padding: 8px 10px;
   border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--surface-overlay, #18181d);
-  color: var(--text-1, #eee);
+  border-radius: var(--radius-sm);
+  background: var(--surface-overlay);
+  color: var(--text-1);
   font-size: 12px;
   line-height: 1.5;
-  box-shadow: 0 4px 16px #0005;
+  box-shadow: 0 4px 16px var(--black-a35);
 }
 .help {
   display: inline-flex;
@@ -44,7 +44,7 @@
   margin-inline-start: 6px;
   padding: 0;
   border: 1px solid currentColor;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: transparent;
   color: var(--text-2);
   font-size: 12px;

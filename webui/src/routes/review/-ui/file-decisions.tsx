@@ -6,7 +6,13 @@ import { HelpHint } from '@/components/release-metadata/release-metadata';
 import { DisclosureFooter } from './disclosure-footer';
 import styles from './review-page.module.css';
 
-export type FileDecision = { title: string; keep: string[]; quarantine: string[]; request: string };
+export type FileDecision = {
+  title: string;
+  keep: string[];
+  quarantine: string[];
+  request: string;
+  deferred_replacement?: boolean;
+};
 export type TrackRequest = {
   title: string;
   release?: string;
@@ -115,6 +121,9 @@ export function FileDecisions({
                   ))}
                 </td>
                 <td>
+                  {decision!.deferred_replacement && (
+                    <small>After the replacement and playlist handoff are verified</small>
+                  )}
                   {decision!.quarantine.map((path) => (
                     <span className={styles.quarantineFormat} key={path}>
                       {format(path)}

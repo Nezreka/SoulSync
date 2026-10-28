@@ -32,6 +32,18 @@ def ensure_schema(conn):
         case_id TEXT PRIMARY KEY, signature TEXT NOT NULL,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
 
+    # Replacement now retains the original through a verified playlist handoff.
+    # Release only the obsolete removal blocker, and only for unchanged saved evidence.
+    if 'last_error' in {r[1] for r in conn.execute('PRAGMA table_info(repair_findings)')}:
+        obsolete = conn.execute("""SELECT f.id FROM repair_findings f JOIN reconcile_review_choices c
+            ON c.finding_id=f.id AND c.evidence_json=f.details_json
+            WHERE f.status='pending' AND c.choice='fix' AND c.fix_action='replace'
+              AND f.last_error IN ('This copy is in a playlist; review that reference first',
+                                   'The current file is in a playlist; review that reference first')""").fetchall()
+        if obsolete:
+            conn.executemany('UPDATE repair_findings SET last_error=NULL WHERE id=?', obsolete)
+            conn.commit()
+
 
 def load_choices(conn, finding_id=None, *, case_id=None):
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_review_choices'").fetchone():
@@ -71,7 +83,7 @@ def project(details, saved, *, case_id=None, raw_json=None):
         result['numbering_choice'] = numbering
     if numbering == 'dismiss':
         result.get('db_data', {}).pop('track_count', None)
-        for key in ('track_number', 'disc_number'):
+        for key in ('track_number', 'disc_number', 'total_discs'):
             for section in ('db_data', 'db_track_updates'):
                 result.get(section, {}).pop(key, None)
             for change in (key, 'library_' + key):
@@ -128,7 +140,7 @@ def retains_numbering(previous, current):
     if any(previous.get(key) != current.get(key) for key in
            ('source', 'release_id', 'fingerprint_key', 'expected_title')):
         return False
-    fields = {'track_number', 'disc_number', 'library_track_number', 'library_disc_number'}
+    fields = {'track_number', 'disc_number', 'total_discs', 'library_track_number', 'library_disc_number'}
     before = {k: v for k, v in (previous.get('changes') or {}).items() if k in fields}
     after = {k: v for k, v in (current.get('changes') or {}).items() if k in fields}
     return bool(before) and before == after
@@ -144,7 +156,7 @@ def flattened_numbering_history(db):
                 AND finding_type='reconciliation_metadata' AND status='resolved'
                 AND user_action='reconciliation_metadata' ORDER BY id DESC'''):
             details = json.loads(raw or '{}')
-            positions = {'track_number', 'disc_number', 'library_track_number', 'library_disc_number'}
+            positions = {'track_number', 'disc_number', 'total_discs', 'library_track_number', 'library_disc_number'}
             if not positions.intersection(details.get('changes') or {}):
                 continue
             identities = [('track', str(track_id))] if track_id else []

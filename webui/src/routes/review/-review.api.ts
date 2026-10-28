@@ -199,12 +199,14 @@ export interface ReviewFinding extends RepairFinding {
 }
 
 export interface ReviewCase {
+  replacement_operations?: Array<{ file: string; state: string; error: string }>;
   case_id: string;
   plan_signature?: string;
   saved_for_later?: boolean;
   organization_retry_signature?: string;
   last_operation?: {
     operation_id: string;
+    updated_at?: number;
     fixed?: number;
     failed?: number;
     organize_failed?: number;
@@ -265,6 +267,7 @@ export async function fetchReviewQueue(
   category = '',
   risk = '',
   limit = 30,
+  signal?: AbortSignal,
 ): Promise<ReviewQueuePage> {
   const params = new URLSearchParams({
     page: String(page),
@@ -275,17 +278,18 @@ export async function fetchReviewQueue(
   if (category) params.set('category', category);
   if (risk) params.set('risk', risk);
   return readJson<ReviewQueuePage>(
-    await fetch(`/api/repair/review-queue?${params}`, { cache: 'no-store' }),
+    await fetch(`/api/repair/review-queue?${params}`, { cache: 'no-store', signal }),
   );
 }
 
 export async function fetchReviewQueueModeTotals(
   q = '',
   category = '',
+  signal?: AbortSignal,
 ): Promise<ReviewQueueModeTotals> {
   const params = new URLSearchParams({ q, category, job_id: 'library_reconciliation' });
   return readJson<ReviewQueueModeTotals>(
-    await fetch(`/api/repair/review-queue/summary?${params}`, { cache: 'no-store' }),
+    await fetch(`/api/repair/review-queue/summary?${params}`, { cache: 'no-store', signal }),
   );
 }
 
@@ -343,7 +347,7 @@ export async function pinReviewRelease(
   caseId: string,
   candidate: { source: string; release_id: string },
   current: { source?: string; release_id?: string },
-  options: { manual?: boolean; preview?: boolean } = {},
+  options: { manual?: boolean; preview?: boolean; audio_copy?: boolean } = {},
 ): Promise<{
   success: boolean;
   message?: string;

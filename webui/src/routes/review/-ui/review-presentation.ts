@@ -116,6 +116,7 @@ export function changeFieldLabel(field: string, locations?: string[]): string {
       library_title: 'Track title',
       track_number: 'Track number',
       disc_number: 'Disc number',
+      total_discs: 'Total discs',
       library_track_number: 'Track number',
       library_disc_number: 'Disc number',
       library_recording_disambiguation: 'Recording description',

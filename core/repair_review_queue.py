@@ -402,6 +402,9 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
     limit = min(100, max(1, int(limit)))
     conn = db._get_connection()
     choices.ensure_schema(conn)
+    if q.strip():
+        from core.repair_review_search import prepare
+        prepare(conn, status=status, job_id=job_id)
     try:
         modes = effective_case_modes(conn, status=status, job_id=job_id, compact=True)
         where, params = queue_filter(conn=conn, case_modes=modes, status=status, job_id=job_id, q=q,
@@ -496,6 +499,9 @@ def matching_case_ids(db, case_ids, **filters) -> set[str]:
     if not case_ids:
         return set()
     conn = db._get_connection()
+    if (filters.get('q') or '').strip():
+        from core.repair_review_search import prepare
+        prepare(conn, status=filters.get('status', 'pending'), job_id=filters.get('job_id', ''))
     where, params = queue_filter(conn=conn, **filters)
     choices.ensure_schema(conn)
     try:
@@ -516,13 +522,17 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
     """
     conn = db._get_connection()
     choices.ensure_schema(conn)
+    if q.strip():
+        from core.repair_review_search import prepare, matching_cases
+        prepare(conn, status=status, job_id=job_id)
     try:
         conn.execute('BEGIN')
+        search_ids = matching_cases(conn, status=status, job_id=job_id, query=q) if q.strip() else None
         modes = effective_case_modes(conn, status=status, job_id=job_id, compact=True)
         projections = []
         params = []
         for mode in ('', 'manual', 'ready', 'destructive', 'waiting'):
-            where, values = queue_filter(conn=conn, case_modes=modes, status=status, job_id=job_id, q=q,
+            where, values = queue_filter(conn=conn, case_modes=modes, search_case_ids=search_ids, status=status, job_id=job_id, q=q,
                                          category=category, risk=mode)
             projections.append(
                 f'COUNT(DISTINCT CASE WHEN {where} THEN review_case_key END)')
@@ -576,6 +586,11 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                 'created_at': row[12], 'updated_at': row[13], 'last_error': row[14],
                 'evidence_token': evidence_token(row),
             })
+        replacements = []
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_replacements'").fetchone():
+            replacements = [{'file': os.path.basename(path), 'state': state, 'error': error}
+                for path, state, error in conn.execute(
+                    "SELECT old_path,state,error FROM reconcile_replacements WHERE case_id=? AND state!='complete'", (case_id,))]
         plan = classify_case(items)
         for item in items:
             if requests := _ready_requests(item, items):
@@ -777,6 +792,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
             'count': len(items),
             'status': first['status'],
             'album_id': album_id,
+            **({'replacement_operations': replacements} if replacements else {}),
             'album_thumb_url': album_art,
             'plan': plan,
             'album_plan': album_plan,
@@ -822,7 +838,7 @@ def _ready_action_description(item: dict, file_path: str | None, title: str | No
         chosen = next((row for row in details.get('replacement_files') or [] if str(row.get('track_id')) == track_id), {})
         return f"Use {os.path.basename(chosen.get('file_path') or '')} for {details.get('expected_title') or filename}; {'keep' if mode == 'keep' else 'quarantine'} the current file"
     if action == 'replace':
-        return f'Move {filename} to recoverable quarantine; the replacement request is submitted separately'
+        return f'Replace {filename} after the download is verified and playlist references are transferred; keep the current copy playable until then'
     if action == 'request_missing':
         return f'Request {(details.get("replacement_track") or {}).get("title") or details.get("expected_title") or filename or "the missing release track"}'
     return f'Move {filename} to recoverable quarantine and remove its library entry'
@@ -847,10 +863,10 @@ def _ready_file_decision(item, file_path):
                 keep.append(chosen['file_path'])
             (keep if mode == 'keep' else quarantine).append(file_path)
         else:
-            (keep if action == 'request_missing' else quarantine).append(file_path)
+            (keep if action in ('request_missing', 'replace') else quarantine).append(file_path)
     requested = details.get('replacement_track') or {}
     return {'title': (details.get('current_tags') or {}).get('title') or details.get('expected_title') or os.path.basename(file_path or ''),
-            'keep': keep, 'quarantine': quarantine,
+            'keep': keep, 'quarantine': quarantine, **({'deferred_replacement': True} if action == 'replace' else {}),
             'request': (requested.get('name') or requested.get('title') or details.get('expected_title') or '')
                        if action in ('replace', 'request_missing') else ''}
 
@@ -880,7 +896,7 @@ def _ready_action_changes(details):
             continue
         seen.add(key)
         kind = ('album' if field == 'library_album_title' else 'filenames' if field == 'filename'
-                else 'numbering' if field in ('track_number', 'disc_number')
+                else 'numbering' if field in ('track_number', 'disc_number', 'total_discs')
                 else 'fills' if value.get('old') in (None, '', [], {}) else 'corrections')
         changes.append({'field': field, 'old': value.get('old_label', value.get('old')),
                         'new': value.get('new_label', value.get('new')), 'kind': kind})

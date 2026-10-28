@@ -770,7 +770,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByRole('radio', { name: /Find another copy/ })).toBeChecked();
     expect(
       screen.getByText(
-        'Request a new copy and move the current file to recoverable quarantine when you apply the plan.',
+        'Request a new copy. Keep the current file playable until the replacement and playlist handoff are verified, then move it to recoverable quarantine.',
       ),
     ).toBeTruthy();
   });
@@ -1606,4 +1606,33 @@ it('describes a saved removal blocker without asking for another choice', async 
       'Your choices are saved. Resolve the apply issues below before retrying this album plan.',
     ),
   ).toBeVisible();
+});
+
+it('replaces the old queue with a retryable search error when the server is busy', async () => {
+  let fail = true;
+  fetchMock.mockImplementation((url: string) => {
+    if (url.startsWith('/api/repair/review-queue?')) {
+      const query = new URL(url, 'http://localhost').searchParams.get('q');
+      if (query && fail) return Promise.resolve(reply({ error: 'Reconciliation is busy' }, 503));
+      return Promise.resolve(
+        reply({
+          items: query
+            ? []
+            : [{ case_id: 'old', album: 'Old visible album', pending: 1, finding_types: [] }],
+          total: query ? 0 : 1,
+          page: 0,
+          limit: 30,
+        }),
+      );
+    }
+    return Promise.resolve(auxiliary(url));
+  });
+  render(<ReviewPage />);
+  await screen.findByText('Old visible album');
+  fireEvent.change(screen.getByPlaceholderText('Search findings'), { target: { value: 'Tron' } });
+  await screen.findByRole('button', { name: 'Retry search' });
+  expect(screen.queryByText('Old visible album')).toBeNull();
+  fail = false;
+  fireEvent.click(screen.getByRole('button', { name: 'Retry search' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Retry search' })).toBeNull());
 });

@@ -360,7 +360,7 @@ def read_album_track_from_file(
     planned_metadata = planned_metadata or {}
     fields = {'title': 'title', 'album_title': 'album', 'artist_name': 'albumartist',
               'track_artist': 'artist', 'track_number': 'tracknumber',
-              'disc_number': 'discnumber', 'track_count': 'totaltracks',
+              'disc_number': 'discnumber', 'total_discs': 'totaldiscs', 'track_count': 'totaltracks',
               'year': 'date', 'musicbrainz_release_id': 'musicbrainz_release_id'}
     for field, tag in fields.items():
         if field in planned_metadata:

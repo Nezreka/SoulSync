@@ -1558,6 +1558,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 "[Import] batch-album distrust pre-check traceback", exc_info=True)
 
         final_path, _final_is_replace = build_final_path_for_track(context, artist_context, album_info, file_ext)
+        from core.library.reconciliation_replacement import separate_delivery
+        final_path = separate_delivery(final_path, _enhance_source_info)
         if _group_upgraded_from and not _final_is_replace:
             # M5: this track upgraded the group — relocate tracks already
             # filed under the standard folder so the album isn't split

@@ -111,6 +111,7 @@
             "album": "Another album",
             "track_number": 2,
             "disc_number": 1,
+            "total_discs": 0,
             "year": "",
             "genres": [],
             "isrc": "",
@@ -394,6 +395,7 @@
             "release_disambiguation": "",
             "spotify_track_id": "",
             "title": "Home",
+            "total_discs": 0,
             "track_artist": "Acceptance Artist",
             "track_number": 1,
             "year": ""
@@ -683,6 +685,7 @@
             "release_disambiguation": "",
             "spotify_track_id": "",
             "title": "Home",
+            "total_discs": 0,
             "track_artist": "Acceptance Artist",
             "track_number": 1,
             "year": ""
@@ -834,6 +837,7 @@
             "album": "Another album",
             "track_number": 2,
             "disc_number": 1,
+            "total_discs": 0,
             "year": "",
             "genres": [],
             "isrc": "",

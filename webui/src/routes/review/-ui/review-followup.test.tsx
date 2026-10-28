@@ -317,3 +317,25 @@ it('marks a large length mismatch red even when the fingerprint identifies the s
   expect(screen.getByText('Length differs by 196.1 seconds')).toBeVisible();
   expect(screen.getByText(/incorrect catalogue length/)).toBeVisible();
 });
+
+it('requires an explicit audio-copy choice for a video-only MusicBrainz release', () => {
+  const onPin = vi.fn();
+  render(
+    <ReleaseComparison
+      candidates={[
+        {
+          source: 'musicbrainz',
+          release_id: 'video',
+          release_title: 'Present Tense',
+          audio_copy_of_video: true,
+        },
+      ]}
+      selected={0}
+      onSelect={vi.fn()}
+      onPin={onPin}
+    />,
+  );
+  expect(screen.getByText(/MusicBrainz lists this as a video recording/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Use for this audio copy' }));
+  expect(onPin).toHaveBeenCalledWith(0);
+});

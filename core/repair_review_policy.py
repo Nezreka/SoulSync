@@ -14,7 +14,7 @@ _DESTRUCTIVE_TYPES = frozenset({
 })
 _GLOBAL_BLOCKER_TYPES = frozenset({'reconciliation_release'})
 _POSITION_CHANGE_KEYS = frozenset({
-    'track_number', 'disc_number', 'library_track_number', 'library_disc_number',
+    'track_number', 'disc_number', 'total_discs', 'library_track_number', 'library_disc_number',
 })
 _TRACK_ARTIST_CHANGE_KEYS = frozenset({
     'track_artist', 'library_track_artist',
@@ -82,7 +82,7 @@ def needs_numbering_review(details: dict) -> bool:
         return False
     # A fully assigned continuous sequence already has its final track numbers.
     # Clearing redundant disc markers is metadata normalization, not renumbering.
-    normalized_disc = (positions <= {'disc_number', 'library_disc_number'}
+    normalized_disc = (positions <= {'disc_number', 'library_disc_number', 'total_discs'}
         and details.get('confidence') == 'clear'
         and details.get('release_disc_count') == 1
         and (details.get('local_file_count') or 0) - (details.get('companion_count') or 0) == details.get('release_track_count')
@@ -238,7 +238,7 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
     return 'ready', 'Metadata supports this repair; audio identity is not independently confirmed'
 
 
-def queue_filter(*, conn, case_modes=None, status: str, job_id: str = "", q: str = "", category: str = "", risk: str = "") -> tuple[str, list[Any]]:
+def queue_filter(*, conn, case_modes=None, search_case_ids=None, status: str, job_id: str = "", q: str = "", category: str = "", risk: str = "") -> tuple[str, list[Any]]:
     params: list[Any] = [status]
     job_filter = ''
     if job_id:
@@ -249,7 +249,8 @@ def queue_filter(*, conn, case_modes=None, status: str, job_id: str = "", q: str
         import json
         from core.repair_review_search import matching_cases
         search = 'AND review_case_key IN (SELECT value FROM json_each(?))'
-        params.append(json.dumps(matching_cases(conn, status=status, job_id=job_id, query=q)))
+        params.append(json.dumps(search_case_ids if search_case_ids is not None else
+                                 matching_cases(conn, status=status, job_id=job_id, query=q)))
     if category:
         import json
         modes = case_modes if case_modes is not None else effective_case_modes(conn, status=status, job_id=job_id, compact=True)
