@@ -17780,17 +17780,31 @@ def _persist_find_and_add_match(source_track_id, server_source, server_track_id,
     # Durable manual library match — survives a rescan (the override above does not).
     try:
         from core.library import manual_library_match as _mlm
+        # The durable match names the catalogue track. Library v2 keeps the
+        # server's id apart from the catalogue's, so a server id stored as a
+        # catalogue id named some other track, or none. A track the catalogue
+        # does not know yet keeps the server's id and says so.
+        library_track_id, id_kind = str(server_track_id), 'server'
         file_path = ''
         try:
-            _rows = db.api_get_tracks_by_ids([server_track_id])
-            if _rows:
-                file_path = _rows[0].get('file_path', '') or ''
+            from core.library2.media_server_sync import resolve_track
+            _conn = db._get_connection()
+            try:
+                _native = resolve_track(_conn.cursor(), server_source, server_track_id)
+            finally:
+                _conn.close()
+            if _native is not None:
+                library_track_id, id_kind = str(_native), 'lib2'
+                _rows = db.api_get_tracks_by_ids([_native])
+                if _rows:
+                    file_path = _rows[0].get('file_path', '') or ''
         except Exception as _fp_err:
-            logger.debug(f"[ServerPlaylist] file_path lookup for manual match failed: {_fp_err}")
+            logger.debug(f"[ServerPlaylist] catalogue lookup for manual match failed: {_fp_err}")
         _mlm.save_match(
-            db, get_current_profile_id(), (source or 'spotify'), str(source_track_id), str(server_track_id),
+            db, get_current_profile_id(), (source or 'spotify'), str(source_track_id), library_track_id,
             source_title=source_title, source_artist=source_artist,
             server_source=server_source, library_file_path=file_path,
+            library_track_id_kind=id_kind,
         )
         logger.info(f"[ServerPlaylist] Recorded durable manual library match: {source_track_id} → {server_track_id}")
     except Exception as e:

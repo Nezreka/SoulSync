@@ -717,12 +717,27 @@ def reject_match(db: Any, profile_id: int, server_source: str,
         logger.debug("unmatch: cache delete failed: %s", e)
     try:
         m = db.find_manual_library_match_by_source_track_id(profile_id, src, server_source)
-        if m and str(m.get('library_track_id')) == svr:
+        if m and _manual_match_names_server_track(db, m, server_source, svr):
             from core.library import manual_library_match as _mlm
             _mlm.delete_match(db, m['id'], profile_id)
     except Exception as e:
         logger.debug("unmatch: manual match delete failed: %s", e)
     return bool(db.add_server_match_rejection(profile_id, server_source, src, svr))
+
+
+def _manual_match_names_server_track(db: Any, match: Dict[str, Any], server_source: str,
+                                     server_track_id: str) -> bool:
+    """Whether a durable manual match points at this server track.
+
+    The match stores a catalogue id and the compare view speaks the server's,
+    so the stored id is translated first. A match with no translation is
+    compared as stored: one saved with the server's own id."""
+    stored = match.get('library_track_id')
+    translated = manual_match_server_id(
+        db, stored, server_source, match.get('library_track_id_kind'))
+    if translated is not None:
+        return translated == server_track_id
+    return str(stored) == server_track_id
 
 
 def is_rejected_match(db: Any, profile_id: int, server_source: str,
