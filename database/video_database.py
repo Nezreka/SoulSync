@@ -88,7 +88,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 58   # v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 59   # v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -950,6 +950,28 @@ class VideoDatabase:
                 "AND s.server_id IS NOT NULL) "
                 "AND EXISTS (SELECT 1 FROM episodes l WHERE l.show_id=e.show_id "
                 "AND l.season_number>e.season_number AND l.server_id IS NOT NULL))")
+
+        if prev_version < 59:
+            # v59: the v56 regroup moved an episode only to a TVDB episode on
+            # the same day, and late-night anime slips a day between TMDB and
+            # TVDB, so Jujutsu Kaisen kept phantom S1E32-35 and S1E46 (Thibs).
+            # the regroup takes a day either side now; re-queue the shows still
+            # carrying a missing row numbered past TVDB's season that sits
+            # within a day of an episode in a later TVDB season. 31 shows on
+            # Boulder's db, not the 495 the v56 query matches today.
+            conn.execute(
+                "UPDATE shows SET episodes_synced=0 WHERE id IN ("
+                "SELECT DISTINCT s.id FROM shows s "
+                "JOIN tvdb_episode_cache t ON t.tvdb_id = s.tvdb_id "
+                "JOIN episodes e ON e.show_id = s.id AND e.season_number = t.season_number "
+                "WHERE s.episodes_synced=1 AND s.tmdb_id IS NOT NULL AND e.season_number > 0 "
+                "AND e.server_id IS NULL AND COALESCE(e.has_file, 0)=0 AND e.air_date IS NOT NULL "
+                "AND e.episode_number > (SELECT MAX(CAST(json_extract(j.value, '$[0]') AS INTEGER)) "
+                "  FROM json_each(t.episodes) j) "
+                "AND EXISTS (SELECT 1 FROM tvdb_episode_cache t2, json_each(t2.episodes) k "
+                "  WHERE t2.tvdb_id = s.tvdb_id AND t2.season_number > e.season_number "
+                "  AND ABS(julianday(json_extract(k.value, '$[1]')) "
+                "          - julianday(substr(e.air_date, 1, 10))) <= 1))")
 
     # ── enrichment plumbing (per-source match status, like music) ─────────────
     def enrichment_next(self, service: str, retry_days: int = 30, priority=None) -> dict | None:

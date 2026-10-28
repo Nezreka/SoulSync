@@ -210,3 +210,89 @@ def test_tvdb_worker_leaves_the_episode_sync_queue_alone(db):
     worker = VideoEnrichmentWorker(db, "tvdb", FakeTVDB(TVDB_JJK))
     assert worker._sync_episodes_once() is False
     assert db.episode_sync_next()["id"] == show_id
+
+
+# ── a day apart (Thibs, Oct 26: "the problem persists for jujutsu kaisen") ──
+
+import datetime as _dt2
+
+from core.video.numbering import tvdb_regroup as _regroup
+
+# TVDB's real Jujutsu Kaisen seasons 1-2 (the cache on Boulder's db)
+_JJK_S1 = [(n, (_dt2.date(2020, 10, 3) + _dt2.timedelta(weeks=n - 1)).isoformat()) for n in range(1, 25)]
+_JJK_S2 = [(1, "2023-07-06"), (2, "2023-07-13"), (3, "2023-07-20"), (4, "2023-07-27"),
+           (5, "2023-08-03"), (6, "2023-08-31"), (7, "2023-09-07"), (8, "2023-09-14"),
+           (9, "2023-09-21"), (10, "2023-09-28"), (11, "2023-10-05"), (12, "2023-10-12"),
+           (13, "2023-10-19"), (14, "2023-10-26"), (15, "2023-11-02"), (16, "2023-11-09"),
+           (17, "2023-11-16"), (18, "2023-11-23"), (19, "2023-11-30"), (20, "2023-12-07"),
+           (21, "2023-12-14"), (22, "2023-12-21"), (23, "2023-12-28")]
+# TMDB dates those five a day later: the broadcast day vs the calendar day
+_TMDB_LATE = {8: "2023-09-15", 9: "2023-09-22", 10: "2023-09-29", 11: "2023-10-06", 22: "2023-12-22"}
+
+
+def _jjk_tmdb_s1():
+    eps = [{"episode_number": n, "air_date": d} for n, d in _JJK_S1]
+    for n, d in _JJK_S2:
+        eps.append({"episode_number": 24 + n, "air_date": _TMDB_LATE.get(n, d)})
+    return eps
+
+
+def test_episodes_a_day_off_still_land_in_their_tvdb_season():
+    """S1E32-35 and S1E46 stayed behind as phantom season 1 rows on Boulder's
+    library and Thibs', because TMDB dates them a day after TVDB does."""
+    groups, moved = _regroup(1, _jjk_tmdb_s1(), {1: _JJK_S1, 2: _JJK_S2})
+    assert sorted(e["episode_number"] for e in groups[1]) == list(range(1, 25))
+    assert sorted(e["episode_number"] for e in groups[2]) == list(range(1, 24))
+    assert moved[32] == (2, 8) and moved[35] == (2, 11) and moved[46] == (2, 22)
+
+
+def test_a_tvdb_day_that_a_tmdb_episode_has_exactly_is_never_borrowed():
+    """a show airing on consecutive days: the TVDB episode one day off is some
+    other TMDB episode's exact day, so taking it would be a guess."""
+    tmdb = [{"episode_number": 1, "air_date": "2024-01-01"},
+            {"episode_number": 2, "air_date": "2024-01-04"},   # TVDB has S1E2 on Jan 2
+            {"episode_number": 3, "air_date": "2024-01-05"}]   # no TVDB S1E3
+    tvdb = {1: [(1, "2024-01-01"), (2, "2024-01-02")],
+            2: [(1, "2024-01-04")]}                             # a day off E3, E2's exact day
+    _groups, moved = _regroup(1, tmdb, tvdb)
+    assert 3 not in moved
+
+
+def test_two_candidates_a_day_apart_is_a_guess_and_is_left_alone():
+    tmdb = [{"episode_number": n, "air_date": f"2021-01-{n:02d}"} for n in range(1, 3)]
+    tmdb.append({"episode_number": 3, "air_date": "2021-02-10"})
+    tvdb = {1: [(1, "2021-01-01"), (2, "2021-01-02")],
+            2: [(1, "2021-02-09"), (2, "2021-02-11")]}
+    _groups, moved = _regroup(1, tmdb, tvdb)
+    assert 3 not in moved
+
+
+def test_v59_requeues_only_shows_with_a_day_apart_leftover(tmp_path):
+    """Jujutsu Kaisen's phantom S1E32 (2023-09-15) sits a day after TVDB's
+    S2E8 (2023-09-14). a show merely missing the end of an older season, the
+    case the broad v56 query also caught (495 shows on Boulder's db), stays put."""
+    import json as _json
+    db = VideoDatabase(database_path=str(tmp_path / "v58.db"))
+    jjk = db.upsert_show_tree("plex", {"server_id": "jjk", "title": "JJK", "seasons": [
+        {"season_number": 1, "episodes": [{"server_id": "j1", "season_number": 1, "episode_number": 1}]},
+        {"season_number": 2, "episodes": [{"server_id": "j2", "season_number": 2, "episode_number": 1}]}]})
+    plain = db.upsert_show_tree("plex", {"server_id": "p", "title": "Plain", "seasons": [
+        {"season_number": 1, "episodes": [{"server_id": "p1", "season_number": 1, "episode_number": 1}]},
+        {"season_number": 2, "episodes": [{"server_id": "p2", "season_number": 2, "episode_number": 1}]}]})
+    db.backfill_episodes(jjk, 1, [{"episode_number": 32, "air_date": "2023-09-15", "title": "Shibuya"}])
+    db.backfill_episodes(plain, 1, [{"episode_number": 30, "air_date": "2020-05-01", "title": "Late"}])
+    conn = db._get_connection()
+    try:
+        conn.execute("UPDATE shows SET tmdb_id=id, tvdb_id=id + 1000, episodes_synced=1")
+        for sid in (jjk, plain):
+            conn.execute("INSERT INTO tvdb_episode_cache (tvdb_id, season_number, episodes) VALUES (?, 1, ?)",
+                         (sid + 1000, _json.dumps([[n, "2020-10-03"] for n in range(1, 25)])))
+            conn.execute("INSERT INTO tvdb_episode_cache (tvdb_id, season_number, episodes) VALUES (?, 2, ?)",
+                         (sid + 1000, _json.dumps([[8, "2023-09-14"]])))
+        conn.commit()
+        VideoDatabase._run_data_migrations(conn, 58)
+        conn.commit()
+        flags = dict(conn.execute("SELECT id, episodes_synced FROM shows").fetchall())
+    finally:
+        conn.close()
+    assert flags[jjk] == 0 and flags[plain] == 1
