@@ -25,6 +25,12 @@ def _blocklist_profile() -> int:
         return 1
 
 
+# taste signals per (database, profile): they move with your listening, not by
+# the minute, and discover builds a fresh service per request
+_TASTE_TTL = 1800
+_taste_signal_cache: Dict[Tuple[Any, int], Tuple[float, Any]] = {}
+
+
 def rank_library_genres(rows) -> List[Tuple[str, int]]:
     """(genres_value, weight) rows -> [(genre, total_weight)], biggest first.
 
@@ -135,6 +141,111 @@ class PersonalizedPlaylistsService:
     def __init__(self, database, spotify_client=None):
         self.database = database
         self.spotify_client = spotify_client
+        # every playlist this service draws is a fresh draw; tests seed it
+        self.rng = random.Random()
+        self._taste_cache: Dict[int, Tuple[Dict[str, float], Dict[str, float]]] = {}
+
+    def _taste_signals(self) -> Tuple[Dict[str, float], Dict[str, float]]:
+        """(genre profile, artist affinity) for the current profile, read once
+        per service. fail-soft: no signals means every track weighs the same,
+        which is the old random draw."""
+        pid = _blocklist_profile()
+        if pid in self._taste_cache:
+            return self._taste_cache[pid]
+        import time as _time
+        shared_key = (getattr(self.database, 'database_path', None) or id(self.database), pid)
+        hit = _taste_signal_cache.get(shared_key)
+        if hit and hit[0] > _time.time():
+            self._taste_cache[pid] = hit[1]
+            return hit[1]
+        from core.discovery.listening_recommendations import build_recency_weighted_seeds
+        from core.personalized.daily_mixes import _seed_edges
+        from core.personalized.taste_draw import artist_affinity
+        genres = self.genre_taste_profile(pid)
+        artists: Dict[str, float] = {}
+        try:
+            top = self.database.get_top_artists('all', 200, profile_id=pid) or []
+            recent = self.database.get_top_artists('30d', 200, profile_id=pid) or []
+            seeds = build_recency_weighted_seeds(
+                top, {a['name']: a.get('play_count', 0) for a in recent})
+            similars, _owned = _seed_edges(
+                self.database, [str(s['name']).strip().lower() for s in seeds], pid)
+            artists = artist_affinity(seeds, similars)
+        except Exception as e:  # noqa: BLE001 - the genre signal still works
+            logger.debug(f"artist affinity read failed: {e}")
+        self._taste_cache[pid] = (genres, artists)
+        _taste_signal_cache[shared_key] = (_time.time() + _TASTE_TTL, (genres, artists))
+        return genres, artists
+
+    NEAR_ARTISTS = 800        # how many of your nearest artists seed the candidates
+
+    def _candidates(self, *, source: str, fetch_limit: int, extra_where: str = "",
+                    extra_params: tuple = (), extra_columns: tuple = ()) -> List[Dict]:
+        """the pool slice a playlist draws from: about two thirds from the
+        artists nearest what you play, a third from anywhere so a stranger can
+        still turn up. a plain random slice of a 145k pool was three quarters
+        strangers, and no weighting can make a playlist out of that.
+
+        one pass over the pool for ids and a near flag, then only the chosen
+        rows are loaded: every filter here reads whole pool rows (track json
+        and all), so each extra pass is a full scan (~17s through wsl)."""
+        from core.personalized.taste_draw import nearest
+        columns = tuple(dict.fromkeys(('artist_genres',) + tuple(extra_columns)))
+        _genres, artists = self._taste_signals()
+        near_names = nearest(artists, self.NEAR_ARTISTS)
+        profile = _blocklist_profile()
+        near_sql = (f"LOWER(artist_name) IN ({','.join('?' * len(near_names))})"
+                    if near_names else "0")
+        try:
+            with self.database._get_connection() as conn:
+                ids = conn.execute(
+                    f"""SELECT id, {near_sql} FROM discovery_pool
+                        {self._POOL_WHERE}
+                          {self._OWNED_CLAUSE}
+                          {extra_where}""",
+                    tuple(near_names) + (source, profile, profile) + tuple(extra_params),
+                ).fetchall()
+        except Exception as e:
+            logger.error(f"Error drawing pool candidates (source={source}): {e}")
+            return []
+        near = [r[0] for r in ids if r[1]]
+        far = [r[0] for r in ids if not r[1]]
+        take_near = min(len(near), fetch_limit * 2 // 3 if far else fetch_limit)
+        chosen = self.rng.sample(near, take_near)
+        chosen += self.rng.sample(far, min(len(far), fetch_limit - take_near))
+        return self._rows_by_ids(chosen, source, columns)
+
+    def _rows_by_ids(self, ids: List[Any], source: str, extra_columns: tuple = ()) -> List[Dict]:
+        """pool rows by primary key, in the order asked"""
+        if not ids:
+            return []
+        columns = self._STANDARD_DISCOVERY_COLUMNS + ('id',) + tuple(extra_columns)
+        by_id: Dict[Any, Dict] = {}
+        with self.database._get_connection() as conn:
+            for i in range(0, len(ids), 900):
+                chunk = ids[i:i + 900]
+                for row in conn.execute(
+                        f"SELECT {', '.join(columns)} FROM discovery_pool "
+                        f"WHERE id IN ({','.join('?' * len(chunk))})", chunk).fetchall():
+                    by_id[row['id']] = self._build_track_dict(row, source)
+        return [by_id[i] for i in ids if i in by_id]
+
+    def _taste_ordered(self, tracks: List[Dict], boost=None,
+                       genre_profile: Optional[Dict[str, float]] = None,
+                       power: float = 2.0) -> List[Dict]:
+        """the candidates as a taste-weighted draw, junk and duplicate versions
+        out. boost(track) multiplies a kind's own lean in (popularity for
+        popular picks). squared by default: in a pool that's mostly strangers
+        a linear tilt still reads as random. shuffle passes 1, gentler."""
+        from core.personalized.taste_draw import draw, taste_weight
+        genres, artists = self._taste_signals()
+        if genre_profile is not None:
+            genres = genre_profile
+
+        def weight(t):
+            w = taste_weight(t, genres, artists) ** power
+            return w * boost(t) if boost else w
+        return draw(tracks, weight, self.rng)
 
     def _get_active_source(self) -> str:
         """Determine which music source is active — delegates to centralized metadata_service."""
@@ -181,6 +292,36 @@ class PersonalizedPlaylistsService:
         'source',
     )
 
+    # Note column-name asymmetry: discovery_pool.deezer_track_id but
+    # tracks.deezer_id. Don't refactor without checking.
+    #
+    # Split into three single-column NOT EXISTS checks (one per ID space)
+    # instead of one OR'd clause: SQLite cannot use an index for the OR'd
+    # correlated subquery and falls back to a full scan of `tracks` for every
+    # discovery_pool row, which pins the CPU for minutes on large pools (issue
+    # #1350). Each subquery is guarded by an IS NULL test on the pool side — a
+    # NULL ID can never match the original clause either (equality against
+    # NULL is never true), so this changes nothing semantically and skips the
+    # index probe entirely for rows without that ID.
+    _OWNED_CLAUSE = """
+                  AND (discovery_pool.spotify_track_id IS NULL OR NOT EXISTS (
+                      SELECT 1 FROM tracks t
+                      WHERE t.spotify_track_id = discovery_pool.spotify_track_id))
+                  AND (discovery_pool.itunes_track_id IS NULL OR NOT EXISTS (
+                      SELECT 1 FROM tracks t
+                      WHERE t.itunes_track_id = discovery_pool.itunes_track_id))
+                  AND (discovery_pool.deezer_track_id IS NULL OR NOT EXISTS (
+                      SELECT 1 FROM tracks t
+                      WHERE t.deezer_id = discovery_pool.deezer_track_id))"""
+
+    # the gate every pool read shares: this source, this profile's pool, a
+    # usable id, no artist this profile blocked. params: (source, profile, profile)
+    _POOL_WHERE = """
+                WHERE source = ?
+                  AND discovery_pool.profile_id = ?
+                  AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL OR deezer_track_id IS NOT NULL)
+                  AND LOWER(artist_name) NOT IN (SELECT LOWER(name) FROM blocklist WHERE entity_type='artist' AND profile_id = ?)"""
+
     def _select_discovery_tracks(
         self,
         *,
@@ -202,6 +343,7 @@ class PersonalizedPlaylistsService:
 
         The WHERE clause always includes:
             source = ?
+            AND profile_id = (this profile, the pool is per profile)
             AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL OR deezer_track_id IS NOT NULL)
             AND LOWER(artist_name) NOT IN
                 (this profile's blocked artists, by name)
@@ -246,46 +388,22 @@ class PersonalizedPlaylistsService:
             columns = self._STANDARD_DISCOVERY_COLUMNS + tuple(extra_columns)
             select_cols = ",\n                        ".join(columns)
 
-            owned_clause = ""
-            if exclude_owned:
-                # Note column-name asymmetry: discovery_pool.deezer_track_id
-                # but tracks.deezer_id. Don't refactor without checking.
-                #
-                # Split into three single-column NOT EXISTS checks (one per
-                # ID space) instead of one OR'd clause: SQLite cannot use an
-                # index for the OR'd correlated subquery and falls back to a
-                # full scan of `tracks` for every discovery_pool row, which
-                # pins the CPU for minutes on large pools (issue #1350).
-                # Each subquery is guarded by an IS NULL test on the pool
-                # side — a NULL ID can never match the original clause
-                # either (equality against NULL is never true), so this
-                # changes nothing semantically and skips the index probe
-                # entirely for rows without that ID.
-                owned_clause = """
-                  AND (discovery_pool.spotify_track_id IS NULL OR NOT EXISTS (
-                      SELECT 1 FROM tracks t
-                      WHERE t.spotify_track_id = discovery_pool.spotify_track_id))
-                  AND (discovery_pool.itunes_track_id IS NULL OR NOT EXISTS (
-                      SELECT 1 FROM tracks t
-                      WHERE t.itunes_track_id = discovery_pool.itunes_track_id))
-                  AND (discovery_pool.deezer_track_id IS NULL OR NOT EXISTS (
-                      SELECT 1 FROM tracks t
-                      WHERE t.deezer_id = discovery_pool.deezer_track_id))"""
+            owned_clause = self._OWNED_CLAUSE if exclude_owned else ""
 
+            # the pool is per profile: profile 2's hidden gems came out of
+            # everyone's pool before
+            profile = _blocklist_profile()
             query = f"""
                 SELECT
                         {select_cols}
                 FROM discovery_pool
-                WHERE source = ?
-                  AND (spotify_track_id IS NOT NULL OR itunes_track_id IS NOT NULL OR deezer_track_id IS NOT NULL)
-                  AND LOWER(artist_name) NOT IN (SELECT LOWER(name) FROM blocklist WHERE entity_type='artist' AND profile_id = ?)
+                {self._POOL_WHERE}
                   {owned_clause}
                   {extra_where}
                 ORDER BY {order_by}
                 LIMIT ?
             """
-
-            params = (source, _blocklist_profile()) + tuple(extra_params) + (fetch_limit,)
+            params = (source, profile, profile) + tuple(extra_params) + (fetch_limit,)
 
             with self.database._get_connection() as conn:
                 cursor = conn.cursor()
@@ -334,7 +452,8 @@ class PersonalizedPlaylistsService:
                 if len(diverse_tracks) >= limit:
                     break
 
-        return diverse_tracks
+        from core.personalized.taste_draw import spread
+        return spread(diverse_tracks)
 
     def _compute_adaptive_diversity_limits(
         self,
@@ -361,6 +480,12 @@ class PersonalizedPlaylistsService:
             Tuple of (max_per_album, max_per_artist).
         """
         unique_artists = len(set(t['artist_name'] for t in tracks))
+
+        # plenty of artists: a tilted draw piles onto your nearest ones up to
+        # the cap, so the cap is what keeps it a playlist (five bob dylan
+        # songs in the first fourteen of a decade)
+        if unique_artists >= 40:
+            return 2, 3
 
         if relaxed:
             # Genre playlist tiers
@@ -452,14 +577,13 @@ class PersonalizedPlaylistsService:
         active_source = source or self._get_active_source()
 
         # Over-fetch 10x for diversity filtering headroom.
-        all_tracks = self._select_discovery_tracks(
+        all_tracks = self._candidates(
             source=active_source,
             extra_where=(
                 "AND release_date IS NOT NULL "
                 "AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) BETWEEN ? AND ?"
             ),
             extra_params=(start_year, end_year),
-            order_by="RANDOM()",
             fetch_limit=limit * 10,
             extra_columns=('release_date',),
         )
@@ -468,7 +592,8 @@ class PersonalizedPlaylistsService:
             logger.warning(f"No tracks found for {decade}s")
             return []
 
-        random.shuffle(all_tracks)
+        # the decade as you'd hear it, not a random tenth of it
+        all_tracks = self._taste_ordered(all_tracks)
 
         max_per_album, max_per_artist = self._compute_adaptive_diversity_limits(all_tracks)
         unique_artists = len(set(t['artist_name'] for t in all_tracks))
@@ -487,6 +612,30 @@ class PersonalizedPlaylistsService:
         logger.info(f"Found {len(diverse_tracks)} tracks from {decade}s in discovery pool (adaptive diversity)")
         return diverse_tracks
 
+    def available_decades(self, min_tracks: int = 10, source: str = None) -> List[int]:
+        """decades (1950..2020) this profile's pool has at least min_tracks
+        tracks for, oldest first. a decade with nothing built an empty
+        time machine. fail-soft -> []."""
+        try:
+            with self.database._get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT (CAST(SUBSTR(release_date, 1, 4) AS INTEGER) / 10) * 10 AS decade,
+                           COUNT(*) AS n
+                    FROM discovery_pool
+                    WHERE profile_id = ? AND source = ? AND release_date IS NOT NULL
+                      AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) BETWEEN 1950 AND 2029
+                    GROUP BY decade
+                    HAVING n >= ?
+                    ORDER BY decade
+                    """,
+                    (_blocklist_profile(), source or self._get_active_source(), min_tracks),
+                ).fetchall()
+            return [int(r[0]) for r in rows]
+        except Exception as e:  # noqa: BLE001 - the picker falls back
+            logger.debug(f"available decades failed: {e}")
+            return []
+
     def get_available_genres(self, source: str = None) -> List[Dict]:
         """
         Get list of consolidated parent genres with track counts from discovery pool.
@@ -504,8 +653,8 @@ class PersonalizedPlaylistsService:
                 cursor.execute("""
                     SELECT artist_genres
                     FROM discovery_pool
-                    WHERE artist_genres IS NOT NULL AND source = ?
-                """, (active_source,))
+                    WHERE artist_genres IS NOT NULL AND source = ? AND profile_id = ?
+                """, (active_source, _blocklist_profile()))
                 rows = cursor.fetchall()
 
                 if not rows:
@@ -579,18 +728,18 @@ class PersonalizedPlaylistsService:
 
         # Over-fetch 10x for diversity filter headroom — the SQL filter
         # has already narrowed to genre matches, so this is bounded.
-        all_tracks = self._select_discovery_tracks(
+        all_tracks = self._candidates(
             source=active_source,
             extra_where=f"AND artist_genres IS NOT NULL AND ({like_clauses})",
             extra_params=like_params,
-            order_by="RANDOM()",
             fetch_limit=limit * 10,
-            extra_columns=('artist_genres',),
         )
 
         if not all_tracks:
             logger.warning(f"No tracks found for genre: {genre}")
             return []
+
+        all_tracks = self._taste_ordered(all_tracks)
 
         max_per_album, max_per_artist = self._compute_adaptive_diversity_limits(all_tracks, relaxed=True)
         unique_artists = len(set(t['artist_name'] for t in all_tracks))
@@ -626,20 +775,22 @@ class PersonalizedPlaylistsService:
         if popular_min is not None:
             extra_where = "AND popularity >= ?"
             extra_params: tuple = (popular_min,)
-            order_by = "popularity DESC, RANDOM()"
         else:
             extra_where = ""
             extra_params = ()
-            order_by = "RANDOM()"
 
-        # Over-fetch 3x so the diversity filter has room to spread albums/artists.
-        all_tracks = self._select_discovery_tracks(
+        # a wide random slice of the popular band, then a draw leaning on
+        # popularity AND your taste. "popularity DESC" picked from thousands
+        # of tracks tied at the top, so the list was mozart and a zelda
+        # soundtrack for someone who plays synthwave
+        all_tracks = self._candidates(
             source=active_source,
             extra_where=extra_where,
             extra_params=extra_params,
-            order_by=order_by,
-            fetch_limit=limit * 3,
+            fetch_limit=limit * 12,
         )
+        all_tracks = self._taste_ordered(
+            all_tracks, boost=lambda t: (max(int(t.get('popularity') or 0), 1) / 100.0) ** 2)
 
         diverse_tracks = self._apply_diversity_filter(
             all_tracks,
@@ -651,6 +802,23 @@ class PersonalizedPlaylistsService:
         logger.info(f"Popular Picks ({active_source}): selected {len(diverse_tracks)} tracks with diversity")
         return diverse_tracks
 
+    def genre_taste_profile(self, profile_id: Optional[int] = None) -> Dict[str, float]:
+        """{genre_lower: 0..1} from the genres of your top-played artists,
+        weighted by plays. what hidden gems ranks by, on discover and in the
+        synced playlist alike. fail-soft -> {} (no boost, never a penalty)."""
+        try:
+            from core.discovery.listening_recommendations import build_genre_taste_profile
+            pid = profile_id if profile_id is not None else _blocklist_profile()
+            top = self.database.get_top_artists('all', 300, profile_id=pid) or []
+            genres_by_name = self.database.get_artist_genres_by_name(
+                [t.get('name') for t in top if t.get('name')]) or {}
+            weighted = [(genres_by_name.get((t.get('name') or '').strip().lower(), []),
+                         t.get('play_count', 1) or 1) for t in top]
+            return build_genre_taste_profile(weighted)
+        except Exception as e:  # noqa: BLE001 - ranking is a nicety
+            logger.debug(f"genre taste profile failed: {e}")
+            return {}
+
     def get_hidden_gems(self, limit: int = 50, taste_profile: Optional[Dict[str, float]] = None) -> List[Dict]:
         """Get low-popularity (underground/indie) tracks from discovery pool with diversity.
 
@@ -659,11 +827,10 @@ class PersonalizedPlaylistsService:
         source-aware — iTunes/Hydrabase fall back to RANDOM + diversity
         only.
 
-        With a ``taste_profile`` ({genre: 0..1}), candidates are re-ranked by
-        genre affinity BEFORE the diversity cut — "best obscure", not "random
-        obscure". The base fetch stays RANDOM(), so equal-affinity tracks
-        still rotate between visits (the stable sort keeps their random
-        order within each affinity band).
+        Candidates are a taste-weighted draw (artist closeness to your
+        library + genre affinity) BEFORE the diversity cut: "best obscure",
+        not "random obscure", and still a fresh set every refresh. A passed
+        ``taste_profile`` ({genre: 0..1}) stands in for the profile's own.
         """
         active_source = self._get_active_source()
         _, hidden_max = self._get_popularity_thresholds(active_source)
@@ -675,31 +842,13 @@ class PersonalizedPlaylistsService:
             extra_where = ""
             extra_params = ()
 
-        # Over-fetch 3x for diversity filter headroom.
-        all_tracks = self._select_discovery_tracks(
+        all_tracks = self._candidates(
             source=active_source,
             extra_where=extra_where,
             extra_params=extra_params,
-            order_by="RANDOM()",
-            fetch_limit=limit * 3,
-            extra_columns=('artist_genres',),
+            fetch_limit=limit * 12,
         )
-
-        if taste_profile:
-            def _affinity(track: Dict) -> float:
-                # _build_track_dict surfaces the extra column as
-                # _artist_genres_raw (raw JSON string), not artist_genres
-                genres = track.get('_artist_genres_raw')
-                if isinstance(genres, str):
-                    try:
-                        genres = json.loads(genres)
-                    except ValueError:
-                        genres = []
-                if not isinstance(genres, list):
-                    genres = []
-                return max((float(taste_profile.get(str(g).lower(), 0.0))
-                            for g in genres), default=0.0)
-            all_tracks.sort(key=_affinity, reverse=True)
+        all_tracks = self._taste_ordered(all_tracks, genre_profile=taste_profile or None)
 
         diverse_tracks = self._apply_diversity_filter(
             all_tracks,
@@ -721,12 +870,9 @@ class PersonalizedPlaylistsService:
         """
         active_source = self._get_active_source()
 
-        # Over-fetch 3x for diversity filter headroom.
-        all_tracks = self._select_discovery_tracks(
-            source=active_source,
-            order_by="RANDOM()",
-            fetch_limit=limit * 3,
-        )
+        # still a shuffle, only a gentle tilt toward your corner of the pool
+        all_tracks = self._candidates(source=active_source, fetch_limit=limit * 8)
+        all_tracks = self._taste_ordered(all_tracks, power=1.0)
 
         diverse_tracks = self._apply_diversity_filter(
             all_tracks,

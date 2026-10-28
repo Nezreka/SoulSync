@@ -132,3 +132,23 @@ def test_the_hero_cache_read_honours_the_refresh_flag():
 
     src = inspect.getsource(hero.get_discover_hero)
     assert "if _cached and _time.time() < _cached[0] and not refreshing():" in src
+
+
+def test_the_sweep_turns_the_daily_mixes_over_for_every_profile(ws):
+    """daily mixes rebuilt only when someone opened discover, so a day nobody
+    visited kept yesterday's mix (and synced it). the sweep asks every 25
+    minutes, which builds the new day's mixes shortly after midnight."""
+    daily = '/api/discover/personalized/daily-mixes'
+    assert daily in ws._DISCOVER_WARM_PATHS
+    stats = ws._discover_warm_sweep(paths=[daily])
+    assert stats['failed'] == []
+    db = ws.get_database()
+    from datetime import date
+    for p in db.get_all_profiles():
+        if p.get('disabled'):
+            continue
+        stored = db.get_curated_playlist('daily_mixes_v2', p['id'])
+        # an empty library builds no mixes, so only a stored payload is
+        # checked: it's today's
+        if isinstance(stored, dict) and stored.get('mixes'):
+            assert stored['day'] == date.today().isoformat()

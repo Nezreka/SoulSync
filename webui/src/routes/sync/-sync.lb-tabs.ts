@@ -228,6 +228,11 @@ export interface SsdRecord {
   track_count?: number;
   is_stale?: boolean;
   _never_generated?: boolean;
+  /** The tab's section ('Daily Mix', 'Discovery playlists', 'Time Machine', ...). */
+  group?: string;
+  /** What the kind is, in a sentence, from the registry. */
+  description?: string;
+  variant_label?: string;
 }
 
 /** ssd_<kind>[_<variant>] — UPSERT-stable (124-129). */
@@ -235,33 +240,104 @@ export function soulsyncSyntheticId(kind: string, variant?: string): string {
   return `ssd_${kind}${variant ? `_${variant}` : ''}`;
 }
 
+interface SsdKind {
+  kind: string;
+  requires_variant?: boolean;
+  name_template?: string;
+  description?: string;
+  variants?: (string | number)[];
+  variant_labels?: Record<string, string>;
+}
+
+/** How the tab orders the kinds: the daily ones first, the big variant families last. */
+export const SSD_KIND_ORDER = [
+  'daily_mix',
+  'listening_mix',
+  'fresh_tape',
+  'archives',
+  'hidden_gems',
+  'discovery_shuffle',
+  'popular_picks',
+  'time_machine',
+  'genre_playlist',
+  'seasonal_mix',
+];
+
+/** 'Time Machine — {variant}' -> 'Time Machine'. */
+function ssdFamilyLabel(k: SsdKind): string {
+  return (
+    String(k.name_template || k.kind)
+      .split('{variant}')[0]
+      .replace(/[\s—–:>·.-]+$/, '')
+      .trim() || k.kind
+  );
+}
+
 /**
- * Existing generated rows + synthetic never-generated SINGLETON kinds (33-57).
- * Kinds are best-effort — a kinds failure must never sink the tab.
+ * Every discovery playlist SoulSync can make, in tab order, grouped: the rows
+ * already built merged with one never-built record per kind AND variant. It
+ * used to synthesize singletons only, so a decade, genre, season or daily mix
+ * that had never been built wasn't in the tab at all. Kinds are best-effort:
+ * without them the tab falls back to the built rows.
  */
 export async function fetchSsdRecords(): Promise<{ records: SsdRecord[]; error?: string }> {
   const data = await (await fetch('/api/personalized/playlists')).json();
   if (!data.success) return { records: [], error: String(data.error || 'Failed to load') };
   const existing = (data.playlists || []) as SsdRecord[];
-  const seen = new Set(existing.map((p) => `${p.kind}|${p.variant || ''}`));
-  let kinds: { kind: string; requires_variant?: boolean; name_template?: string }[] = [];
+  let kinds: SsdKind[] = [];
   try {
     const kindsData = await (await fetch('/api/personalized/kinds')).json();
     if (kindsData.success && Array.isArray(kindsData.kinds)) kinds = kindsData.kinds;
   } catch {
     // kinds endpoint optional — fall back to existing rows only
   }
-  const synthetic: SsdRecord[] = kinds
-    .filter((k) => !k.requires_variant && !seen.has(`${k.kind}|`))
-    .map((k) => ({
-      kind: k.kind,
-      variant: '',
-      name: k.name_template || k.kind,
-      track_count: 0,
-      is_stale: true,
-      _never_generated: true,
-    }));
-  return { records: [...existing, ...synthetic] };
+  kinds = kinds.filter((k) => k && k.kind);
+  if (!kinds.length) return { records: existing };
+
+  const built = new Map(existing.map((p) => [`${p.kind}|${p.variant || ''}`, p]));
+  const rank = (kind: string) => {
+    const i = SSD_KIND_ORDER.indexOf(kind);
+    return i < 0 ? SSD_KIND_ORDER.length : i;
+  };
+  const ordered = [...kinds].sort((a, b) => rank(a.kind) - rank(b.kind));
+  const records: SsdRecord[] = [];
+  const placed = new Set<string>();
+  for (const k of ordered) {
+    const group = k.requires_variant ? ssdFamilyLabel(k) : 'Discovery playlists';
+    const variants = k.requires_variant ? (k.variants || []).map(String) : [''];
+    // a built variant the resolver no longer lists (yesterday's sixth daily
+    // mix) stays in its family
+    for (const p of existing) {
+      if (p.kind === k.kind && p.variant && !variants.includes(p.variant)) variants.push(p.variant);
+    }
+    for (const variant of variants) {
+      const key = `${k.kind}|${variant}`;
+      placed.add(key);
+      const label = (k.variant_labels && k.variant_labels[variant]) || variant;
+      const extra = { group, description: k.description || '', variant_label: label };
+      const row = built.get(key);
+      records.push(
+        row
+          ? { ...row, ...extra }
+          : {
+              kind: k.kind,
+              variant,
+              name: k.requires_variant
+                ? String(k.name_template || `${k.kind} {variant}`).replace('{variant}', label)
+                : k.name_template || k.kind,
+              track_count: 0,
+              is_stale: true,
+              _never_generated: true,
+              ...extra,
+            },
+      );
+    }
+  }
+  // built rows of a kind the server no longer registers
+  for (const p of existing) {
+    if (!placed.has(`${p.kind}|${p.variant || ''}`)) records.push(p);
+  }
+  return { records };
 }
 
 /** Staleness line + color (86-90). */
@@ -269,7 +345,7 @@ export function ssdStaleness(record: SsdRecord): { text: string; color: string }
   const stale = Boolean(record.is_stale);
   return {
     text: record._never_generated
-      ? 'Tap “Refresh & Mirror” to generate'
+      ? 'Not built yet — Refresh & Mirror builds it'
       : stale
         ? 'Stale — refresh to regenerate'
         : 'Ready',

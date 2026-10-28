@@ -58,7 +58,11 @@ export interface MirroredRow {
   kind?: string;
   variant?: string;
   kind_label?: string;
+  /** The variant as a person reads it ('Electronic/Dance', not 'electronic_dance'). */
+  variant_label?: string;
   _personalized?: boolean;
+  /** A personalized playlist that has never been built: its 0 is "nothing yet", not empty. */
+  _never_generated?: boolean;
   /** The board's organize-by-playlist preference (1921). */
   organize_by_playlist?: boolean;
   /**
@@ -73,8 +77,25 @@ export interface MirroredRow {
 export interface PersonalizedKind {
   kind?: string;
   name_template?: string;
+  description?: string;
   requires_variant?: boolean;
   variants?: (string | number)[];
+  /** variant key -> readable label, from /api/personalized/kinds. */
+  variant_labels?: Record<string, string>;
+}
+
+/** A variant as a person reads it, the key when the kind sends no label. */
+export function autoSyncVariantLabel(
+  k: PersonalizedKind | null | undefined,
+  variant: string,
+): string {
+  return (k && k.variant_labels && k.variant_labels[variant]) || variant;
+}
+
+/** The count line: a never-built playlist isn't an empty one. */
+export function autoSyncTrackCountText(playlist: MirroredRow): string {
+  if (playlist._never_generated) return 'Not built yet';
+  return `${parseInt(String(playlist.track_count), 10) || 0} tracks`;
 }
 
 export interface AutomationRow {
@@ -399,10 +420,12 @@ export function autoSyncEnrichDiscoveryRows(
     }
     const vk = variantKinds.find((v) => sid.startsWith(v.prefix));
     if (vk) {
+      const variant = sid.slice(vk.prefix.length);
       out.push({
         ...p,
         kind: vk.k.kind,
-        variant: sid.slice(vk.prefix.length),
+        variant,
+        variant_label: autoSyncVariantLabel(vk.k, variant),
         kind_label: autoSyncKindLabel(vk.k),
       });
       continue;
@@ -455,11 +478,13 @@ export function autoSyncExpandPersonalizedRows(
       const variant = k.requires_variant ? String(raw) : '';
       const ssdId = `ssd_${k.kind}${variant ? `_${variant}` : ''}`;
       if (existingSsd.has(ssdId)) continue;
+      const label = autoSyncVariantLabel(k, variant);
       const name = k.requires_variant
-        ? String(k.name_template || `${k.kind} ${variant}`).replace('{variant}', variant)
+        ? String(k.name_template || `${k.kind} ${variant}`).replace('{variant}', label)
         : String(k.name_template || k.kind);
       const kindLabel = k.requires_variant ? autoSyncKindLabel(k) : '';
-      const generated = generatedCounts ? generatedCounts.get(`${k.kind} ${variant}`) || 0 : 0;
+      const key = `${k.kind} ${variant}`;
+      const generated = generatedCounts ? generatedCounts.get(key) || 0 : 0;
       rows.push({
         id: nextId--,
         source: 'soulsync_discovery',
@@ -467,7 +492,10 @@ export function autoSyncExpandPersonalizedRows(
         track_count: generated,
         kind: k.kind,
         variant,
+        variant_label: label,
         kind_label: kindLabel,
+        // no generated row at all: "0 tracks" read as an empty playlist
+        _never_generated: generatedCounts ? !generatedCounts.has(key) : false,
         source_playlist_id: ssdId,
         _personalized: true,
       });

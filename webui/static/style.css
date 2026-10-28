@@ -18424,6 +18424,19 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .spotify-public-card,
 .listenbrainz-playlist-card,
 .lastfm-playlist-card,
+.ssd-group-title {
+    margin: 18px 8px 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+}
+
+.ssd-group-title:first-child {
+    margin-top: 4px;
+}
+
 .soulsync-discovery-playlist-card {
     background: rgba(18, 18, 22, 0.9);
     backdrop-filter: blur(12px);

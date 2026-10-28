@@ -128,4 +128,63 @@ class TestGenrePlaylist:
 
     def test_display_name(self):
         spec = get_registry().get('genre_playlist')
-        assert spec.display_name('electronic_dance') == 'Genre — electronic_dance'
+        # the parent genre as discover names it, never the url key
+        assert spec.display_name('electronic_dance') == 'Genre — Electronic/Dance'
+        assert spec.display_name('hip_hop_rap') == 'Genre — Hip Hop/Rap'
+        assert spec.display_name('deep_house') == 'Genre — Deep House'   # free-form keyword
+
+
+def test_seasonal_names_read_like_discover():
+    spec = get_registry().get('seasonal_mix')
+    assert spec.display_name('halloween') == 'Seasonal — Halloween Hits'
+    assert spec.display_name('nope') == 'Seasonal — Nope'
+
+
+def test_kinds_carry_variant_labels():
+    from types import SimpleNamespace
+    from core.personalized import api
+    manager = SimpleNamespace(deps=SimpleNamespace(service=SimpleNamespace(
+        GENRE_MAPPING={'Electronic/Dance': []})))
+    kinds = {k['kind']: k for k in api.list_kinds(manager=manager)['kinds']}
+    assert kinds['seasonal_mix']['variant_labels']['halloween'] == 'Halloween Hits'
+    assert kinds['genre_playlist']['variant_labels']['electronic_dance'] == 'Electronic/Dance'
+
+
+def test_time_machine_lists_only_decades_with_music():
+    svc = _StubService()
+    svc.available_decades = lambda: [1980, 2010]
+    assert get_registry().get('time_machine').variant_resolver(
+        SimpleNamespace(service=svc)) == ['1980s', '2010s']
+
+
+def test_genre_lists_only_families_the_pool_has_biggest_first():
+    svc = _StubService()
+    svc.get_available_genres = lambda: [{'name': 'Rock', 'track_count': 90},
+                                        {'name': 'Electronic/Dance', 'track_count': 40},
+                                        {'name': 'Other', 'track_count': 9}]
+    assert get_registry().get('genre_playlist').variant_resolver(
+        SimpleNamespace(service=svc)) == ['rock', 'electronic_dance']
+
+
+def test_available_decades_reads_only_this_profiles_pool(tmp_path):
+    from core.personalized_playlists import PersonalizedPlaylistsService
+    from core.profile_context import reset_background_profile, set_background_profile
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase(str(tmp_path / 'd.db'))
+    conn = db._get_connection()
+    for i in range(12):
+        for pid, year in ((1, '1985-01-01'), (2, '1995-01-01')):
+            conn.execute(
+                "INSERT INTO discovery_pool (spotify_track_id, track_name, artist_name, album_name, "
+                "source, release_date, profile_id, track_data_json) VALUES (?,?,?,?,?,?,?,'{}')",
+                (f'{pid}-{i}', f't{i}', 'A', 'X', 'spotify', year, pid))
+    conn.commit()
+    conn.close()
+    svc = PersonalizedPlaylistsService(db)
+    assert svc.available_decades(source='spotify') == [1980]
+    token = set_background_profile(2)
+    try:
+        assert svc.available_decades(source='spotify') == [1990]
+    finally:
+        reset_background_profile(token)

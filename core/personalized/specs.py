@@ -46,6 +46,10 @@ GeneratorFn = Callable[[Any, str, PlaylistConfig], List[Track]]
 # variants (e.g. a new decade, a new season). Singletons return [''].
 VariantResolver = Callable[[Any], List[str]]
 
+# Variant label: the stored variant key ('electronic_dance', 'halloween') as a
+# person reads it ('Electronic/Dance', 'Halloween Hits').
+VariantLabel = Callable[[str], str]
+
 
 @dataclass
 class PlaylistKindSpec:
@@ -63,12 +67,22 @@ class PlaylistKindSpec:
     requires_variant: bool = False
     # Tags for UI grouping ('curated' / 'discovery' / 'time' / 'genre').
     tags: List[str] = field(default_factory=list)
+    variant_label: Optional[VariantLabel] = None
+
+    def label(self, variant: str) -> str:
+        """The variant as a person reads it. falls back to the key."""
+        if self.variant_label is not None and variant:
+            try:
+                return self.variant_label(variant) or variant
+            except Exception:  # noqa: BLE001 - a label is never worth an error
+                return variant
+        return variant
 
     def display_name(self, variant: str) -> str:
         """Render the human-readable playlist name for a given variant."""
         if not variant:
             return self.name_template.replace('{variant}', '').strip(' —-')
-        return self.name_template.format(variant=variant)
+        return self.name_template.format(variant=self.label(variant))
 
 
 class PlaylistKindRegistry:

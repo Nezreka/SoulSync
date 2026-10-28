@@ -22402,6 +22402,9 @@ _DISCOVER_WARM_PATHS = [
     '/api/discover/decades/available',
     '/api/discover/moods',
     '/api/discover/for-you',
+    # not a shelf cache: asking is what turns the day over, so the new day's
+    # mixes are built shortly after midnight instead of on the first visit
+    '/api/discover/personalized/daily-mixes',
 ]
 
 

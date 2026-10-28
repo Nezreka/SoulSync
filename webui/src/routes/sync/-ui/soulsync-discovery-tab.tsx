@@ -167,19 +167,31 @@ export function SoulsyncDiscoveryTab({ onOpenMirrored }: SoulsyncDiscoveryTabPro
               : 'No SoulSync Discovery playlists yet. Open the Discover page and generate a few personalized playlists first.'}
           </div>
         ) : (
-          records.map((record) => {
+          records.map((record, index) => {
             const syntheticId = soulsyncSyntheticId(record.kind, record.variant || undefined);
             const staleness = ssdStaleness(record);
             const busy = busyIds.has(syntheticId);
-            return (
+            // a heading wherever the section changes: 41 cards in one run
+            // read as a pile
+            const heading =
+              record.group && record.group !== records[index - 1]?.group ? (
+                <div className="ssd-group-title" key={`group-${record.group}`}>
+                  {record.group}
+                </div>
+              ) : null;
+            return [
+              heading,
               <SourceCard
                 key={syntheticId}
                 id={`soulsync-discovery-sync-card-${syntheticId}`}
                 cardClassName="soulsync-discovery-playlist-card"
                 icon="✨"
                 name={record.name || `${record.kind} ${record.variant || ''}`.trim()}
-                countText={`${record.track_count || 0} tracks`}
-                owner={record.variant ? `${record.kind} · ${record.variant}` : record.kind}
+                countText={
+                  record._never_generated ? 'Not built yet' : `${record.track_count || 0} tracks`
+                }
+                // what it is, not its storage key ('daily_mix · 1')
+                owner={record.description || record.kind}
                 phase="fresh"
                 statusText={staleness.text}
                 statusColor={staleness.color}
@@ -189,8 +201,8 @@ export function SoulsyncDiscoveryTab({ onOpenMirrored }: SoulsyncDiscoveryTabPro
                 onClick={() => {
                   if (!busy) void refreshAndMirror(record);
                 }}
-              />
-            );
+              />,
+            ];
           })
         )}
       </div>

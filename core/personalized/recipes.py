@@ -46,6 +46,8 @@ logger = get_logger("personalized.recipes")
 
 SOURCES = ('library', 'discovery', 'trending')
 DEFAULT_MIX = {'library': 0.6, 'discovery': 0.3, 'trending': 0.1}
+# daily renews when the local day turns over, not on age: built at 11pm it was
+# still yesterday's mix at 6pm the next day
 SCHEDULES = {'daily': timedelta(hours=20), 'weekly': timedelta(days=6, hours=20), 'manual': None}
 MIN_LENGTH, MAX_LENGTH = 10, 100
 RESERVE_SHARE = 0.25          # reserve size, as a share of the length
@@ -522,6 +524,11 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _local_day(moment: datetime):
+    """the calendar day it is (or was) where the server is"""
+    return moment.astimezone().date()
+
+
 def _fingerprints(database, profile_id: int) -> Tuple[str, str]:
     from core.discovery.blocked import BlockedArtists
     from core.discovery.feedback import Taste
@@ -569,7 +576,7 @@ def generate(database, profile_id: int, recipe_id: int, recipe: Recipe,
     from core.discovery.explain import explanation
     from core.discovery.feedback import Taste
 
-    rng = random.Random(seed or f"{_now().date().isoformat()}:{profile_id}:{recipe_id}")
+    rng = random.Random(seed or f"{_local_day(_now()).isoformat()}:{profile_id}:{recipe_id}")
     blocked = BlockedArtists.load(database, profile_id)
     taste = Taste.load(database, profile_id)
     circle, owned = _circle(database, recipe, profile_id)
@@ -658,9 +665,12 @@ def is_stale(payload: Any, recipe_row: Dict[str, Any], fingerprints: Tuple[str, 
     if every is None:
         return False           # manual: only a refresh renews it
     try:
-        age = (now or _now()) - datetime.fromisoformat(payload.get('generated_at', ''))
-    except ValueError:
+        built = datetime.fromisoformat(payload.get('generated_at', ''))
+        age = (now or _now()) - built
+    except (TypeError, ValueError):
         return True
+    if every == SCHEDULES['daily']:
+        return _local_day(now or _now()) != _local_day(built)
     return age >= every
 
 

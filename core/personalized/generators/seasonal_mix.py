@@ -112,6 +112,12 @@ def generate(deps: Any, variant: str, config: PlaylistConfig) -> List[Track]:
     return tracks[:config.limit]
 
 
+def variant_label(variant: str) -> str:
+    """'halloween' -> 'Halloween Hits', the name discover shows."""
+    from core.seasonal_discovery import SEASONAL_CONFIG
+    return (SEASONAL_CONFIG.get(variant) or {}).get('name') or (variant or '').title()
+
+
 def variant_resolver(deps: Any) -> List[str]:
     """Return every season key from SEASONAL_CONFIG."""
     try:
@@ -130,6 +136,7 @@ SPEC = PlaylistKindSpec(
     variant_resolver=variant_resolver,
     requires_variant=True,
     tags=['curated', 'seasonal'],
+    variant_label=variant_label,
 )
 
 
