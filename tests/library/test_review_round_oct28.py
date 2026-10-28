@@ -147,3 +147,25 @@ def test_new_disc_evidence_retains_choices_only_when_the_proposed_effects_match(
     assert same_annotated_evidence(original, enriched)
     corrected = {**enriched, 'changes': {**original['changes'], 'total_discs': {'old': 2, 'new': 1}}}
     assert not same_annotated_evidence(original, corrected)
+
+
+def test_scan_refreshes_legacy_tag_cache_without_repeating_audio_lookup(tmp_path, monkeypatch):
+    from core.library.reconciliation_evidence import ReconciliationEvidence
+    from core.repair_jobs import library_reconciliation as job
+    from core.library import release_identity
+    db = SimpleNamespace(_get_connection=lambda: sqlite3.connect(str(tmp_path / 'evidence.db')))
+    path = tmp_path / 'Song.flac'
+    path.write_bytes(b'audio')
+    cache = ReconciliationEvidence(db, None)
+    old = {'title': 'Song', 'musicbrainz_release_id': 'release', 'artists_list': ['Artist']}
+    cache.read_tags(str(path), lambda _: old)
+    reads = []
+    monkeypatch.setattr(job, '_read_file_tags', lambda p: reads.append(p) or {**old, 'total_discs': 2})
+    monkeypatch.setattr(release_identity, 'read_release_evidence', lambda _: {})
+    try:
+        assert cache.read_tags(str(path), job._read_reconciliation_tags)['total_discs'] == 2
+        assert cache.read_tags(str(path), job._read_reconciliation_tags)['total_discs'] == 2
+        assert reads == [str(path)]
+        assert cache.metrics['lookups'] == cache.metrics['fingerprints'] == 0
+    finally:
+        cache.close()

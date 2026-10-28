@@ -59,7 +59,9 @@ def _read_reconciliation_tags(path):
     return tags
 
 
-_read_reconciliation_tags.required_cache_keys = ('musicbrainz_release_id', 'artists_list')
+_read_reconciliation_tags.required_cache_keys = (
+    *_read_file_tags.required_cache_keys, 'musicbrainz_release_id', 'artists_list',
+)
 
 
 def _release_identity_target(files, album, source, release_id):
