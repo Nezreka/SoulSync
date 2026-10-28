@@ -31,6 +31,7 @@ like the charts endpoints):
 from flask import Blueprint, current_app, jsonify, request
 
 from core import metasync_depot as depot
+from core.profile_context import admin_only
 from database.music_database import get_database
 from utils.logging_config import get_logger
 
@@ -91,6 +92,7 @@ def get_metasync_depot():
 
 
 @bp.route("/api/metasync/depot/reconcile", methods=["POST"])
+@admin_only
 def post_metasync_depot_reconcile():
     try:
         config_manager = current_app.soulsync["config_manager"]

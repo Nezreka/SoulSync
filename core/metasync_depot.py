@@ -1527,7 +1527,14 @@ def fetch_node_record(config_get: Callable[..., Any],
             f"MetaSync record fetch failed with HTTP {resp.status_code}")
     _note_node_success(node_url)
     payload = resp.json()
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    # the node wraps the projection: {"ok": true, "record": {...}}
+    # (node app.py local_meta_record). a bare record is accepted too.
+    if "record" in payload:
+        record = payload.get("record")
+        return record if isinstance(record, dict) else None
+    return payload
 
 
 def collect_subjects(db: Any, config_get: Callable[..., Any],

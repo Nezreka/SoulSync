@@ -1173,6 +1173,36 @@ def test_fetch_node_record_quotes_the_subject(db, monkeypatch):
     assert urls[0].endswith("/local/meta/record/soul_a%2Fb%3Fc%23d")
 
 
+def test_fetch_node_record_unwraps_the_nodes_envelope(db, monkeypatch):
+    """the node answers /local/meta/record as {"ok": true, "record":
+    {...}}. handing the envelope to store_record rejected every
+    subject, so a real reconcile refreshed and dropped nothing."""
+    record = {"subject": "soul_x", "kind": "track", "found": True, "fields": {}}
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"ok": True, "record": record}
+
+    monkeypatch.setattr(depot.requests, "get", lambda url, **kw: _Resp())
+    cfg = lambda k, d=None: {  # noqa: E731
+        "metasync.node_url": "http://node3:8790",
+        "metasync.local_api_key": "mn_key"}.get(k, d)
+    assert depot.fetch_node_record(cfg, "soul_x") == record
+    assert depot.store_record(db, depot.fetch_node_record(cfg, "soul_x")) is True
+
+
+def test_depot_reconcile_route_is_admin_only():
+    import inspect
+
+    from api import metasync_depot as route
+
+    src = inspect.getsource(route)
+    head = src.split("def post_metasync_depot_reconcile")[0].rsplit("@bp.route", 1)[1]
+    assert "@admin_only" in head
+
+
 # ── minor: the seam's SoulIDs are the worker's SoulIDs ────────────
 
 def test_tagging_soul_ids_match_the_workers(db):
