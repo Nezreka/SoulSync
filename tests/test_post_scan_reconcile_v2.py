@@ -88,7 +88,8 @@ class TestNewlyMapped:
             "every run, which is the backfill job, not a post-scan tail")
 
     def test_a_track_with_no_imported_file_is_neither(self, db):
-        """The scan cannot create ownership, so there is nothing to reconcile."""
+        """A listed song with no file on disk is not adopted, so there is
+        nothing to reconcile."""
         assert db.insert_or_update_media_track(
             _server_track("ghost"), "al-1", "ar-1", server_source="plex") is False
 

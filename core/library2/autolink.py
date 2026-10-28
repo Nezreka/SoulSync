@@ -826,11 +826,12 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                 if artist_id is None:
                     return None
                 # A derived identity is an observation, never an acquisition
-                # intent: rows minted from tags/filename start unmonitored so
-                # a guessed "Unknown Artist" title can't enter the wanted
-                # projection and send the pipeline hunting for it. Matching an
-                # existing row leaves that row's own monitoring untouched.
-                derived_monitored = 0 if fallback else None
+                # intent: rows minted from tags/filename -- or from a file a
+                # media-server scan found -- start unmonitored so a guessed
+                # "Unknown Artist" title can't enter the wanted projection and
+                # send the pipeline hunting for it. Matching an existing row
+                # leaves that row's own monitoring untouched.
+                derived_monitored = 0 if fallback or context.get("_scan_discovered") else None
                 album_id = _find_or_create_album(
                     conn, artist_id, album_name,
                     album_type=album_type, spotify_album_id=spotify_album_id,

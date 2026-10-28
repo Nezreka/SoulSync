@@ -10070,11 +10070,13 @@ class MusicDatabase:
 
         ``album_id``/``artist_id`` are the SERVER's ids; both are resolved to
         catalogue rows. Size/bitrate update only the already-imported matching
-        path; the scan cannot create or move file ownership.
+        path; the scan cannot create or move file ownership. A song nothing
+        recognizes goes through ``adopt_scanned_file`` once and is then mapped.
         """
         from core.library2.media_mappings import resolve_mapping
         from core.library2.media_server_sync import (
-            recognize_track_artists, resolve_album, resolve_artist, upsert_track,
+            adopt_scanned_file, recognize_track_artists, resolve_album, resolve_artist,
+            upsert_track,
         )
         max_retries = 3
         retry_count = 0
@@ -10175,6 +10177,9 @@ class MusicDatabase:
                             (recording_id, title, duration, duration),
                         ).fetchall()
                     if len(candidates) != 1:
+                        if adopt_scanned_file(cursor, file_path, server_path, server_source):
+                            return self.insert_or_update_media_track(
+                                track_obj, album_id, artist_id, server_source)
                         logger.warning(
                             "Track %s skipped: unresolved server album/artist and no unique imported identity", title)
                         return False
@@ -10247,6 +10252,9 @@ class MusicDatabase:
                     bitrate=bitrate,
                 )
                 if catalogue_track_id is None:
+                    if adopt_scanned_file(cursor, file_path, server_path, server_source):
+                        return self.insert_or_update_media_track(
+                            track_obj, album_id, artist_id, server_source)
                     logger.info("Media track %s skipped: no active imported file row", title)
                     return False
                 recognize_track_artists(cursor, catalogue_track_id, track_obj, server_source)

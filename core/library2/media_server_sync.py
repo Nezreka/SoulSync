@@ -1,9 +1,10 @@
-"""Map media-server identities onto an existing Library-v2 catalogue.
+"""Map media-server identities onto the Library-v2 catalogue.
 
-After the upgrade, a server scan is not an ownership/import path. Catalogue and
-file rows come from the import/download pipeline; a server only stamps its own
-IDs and technical observations onto those existing rows. ``allow_create`` is
-reserved for that pipeline's shared helpers.
+A server scan stamps its own IDs and technical observations onto the rows the
+catalogue already has. A file it lists that the catalogue lacks (a ripped CD,
+Lidarr, a copy into the music folder) is not written here either:
+``adopt_scanned_file`` hands it to the import writer, like a finished
+download. ``allow_create`` is reserved for that pipeline's shared helpers.
 
 Three rules run through every upsert here:
 
@@ -15,7 +16,7 @@ new stamp on the row we already had.
 
 **The server is only an identity/technical observer.** It may stamp its own id
 and refresh track/disc number, duration, size and bitrate.  It does not create
-catalogue or file ownership and does not replace provider/import metadata.
+catalogue or file ownership itself and does not replace provider/import metadata.
 
 **A file is a row** (ADR-03). The server's path/size/bitrate land on
 ``lib2_track_files``, not on the track.
@@ -24,6 +25,7 @@ catalogue or file ownership and does not replace provider/import metadata.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Dict, Optional
 
 from utils.logging_config import get_logger
@@ -391,6 +393,45 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
     return track_id
 
 
+def adopt_scanned_file(cursor, path: Optional[str], server_path: Optional[str],
+                       server_source: str) -> bool:
+    """Bring a listed file the catalogue lacks in through the import writer.
+
+    Only a file this process can open under one of the library folders counts:
+    ownership stays a property of the file, so a listed file that is gone
+    (Navidrome's missing files, a delayed removal) or lies elsewhere stays out.
+    The identity comes from the file's tags, album artist first, and the rows
+    it creates start unmonitored -- a file found on disk never turns into a
+    download or an upgrade. ``server_path`` covers rows stored in the server's
+    form of the path (#1573).
+    """
+    if not path or cursor.execute(
+            "SELECT 1 FROM lib2_track_files WHERE path IN (?, ?)"
+            " AND COALESCE(file_state,'active')<>'deleted' LIMIT 1",
+            (path, server_path or path)).fetchone():
+        return False
+    from core.library2.library_roots import load_roots, owner_for_path
+    if not owner_for_path(load_roots(cursor), path)[0] or not os.path.isfile(path):
+        return False
+    from core.library2 import tag_cache
+    from core.library2.autolink import link_download_into_library_v2
+    tags = tag_cache.read_tag_snapshot(path)
+    artist = tags.get("album_artist") or tags.get("artist")
+    track_info = {"name": tags.get("title"), "artist": artist, "album": tags.get("album"),
+                  "track_number": tags.get("track_number"),
+                  "disc_number": tags.get("disc_number")} if artist and tags.get("title") else {}
+    # "username" is the file row's source; without track_info the writer
+    # derives the identity from the file itself.
+    if link_download_into_library_v2({"_final_processed_path": path, "track_info": track_info,
+                                      "username": server_source, "_scan_discovered": True}) is None:
+        return False
+    from core.library2.unmapped_trigger import schedule_unmapped_artist_reconcile
+    from core.settings import config_manager
+    schedule_unmapped_artist_reconcile(config_manager)
+    logger.info("%s scan adopted %s into the catalogue", server_source, path)
+    return True
+
+
 def _upsert_file(cursor, track_id: int, path: str, size, bitrate,
                  server_source=None, source=None) -> None:
     """Refresh a file row, then apply ADR-03's shared primary election.
@@ -440,6 +481,6 @@ def _upsert_file(cursor, track_id: int, path: str, size, bitrate,
 
 
 __all__ = [
-    "resolve_album", "resolve_artist", "resolve_track", "upsert_album", "upsert_artist",
-    "upsert_track", "_genres_json",
+    "adopt_scanned_file", "resolve_album", "resolve_artist", "resolve_track", "upsert_album",
+    "upsert_artist", "upsert_track", "_genres_json",
 ]
