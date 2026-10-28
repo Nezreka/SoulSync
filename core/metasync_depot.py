@@ -169,9 +169,9 @@ PROMOTABLE_FIELDS = {
 
 # Every field name a projection may store rows under: the promotable
 # vocabulary plus the structural fields the depot reads but never
-# promotes (the album_track tracklists leg (c) anchors on, and the
-# duration it holds without promoting). Anything else in a record is
-# not stored — an unknown field name is either a newer node's
+# promotes (the album_track tracklists, read for settled variants,
+# and the duration it holds without promoting). Anything else in a
+# record is not stored — an unknown field name is either a newer node's
 # vocabulary this build cannot judge, or junk; either way the depot
 # has no floor for it.
 _STRUCTURAL_FIELDS = {"album_track", "duration_ms"}
@@ -811,21 +811,21 @@ def confirmation_key_check(response: Any, local_keys: Any, *,
 def _settled_variant_anchor(db: Any, album_subject: Optional[str],
                             track_subject: str, disc: Any,
                             position: Any) -> bool:
-    """A verified anchor for floor leg (c), track side — stated at
-    exactly the strength it has: the track sits at the file's
-    disc+position in a SETTLED album_track variant whose own slot
-    for it is strong-verified, AND (leg (c)'s outer condition, in
-    promotion_verdict) exactly one candidate survives for the
-    field. §8 names the anchor as "the candidate is the ID the
-    verified release's tracklist carries at that position"; the
-    node's projection carries NO per-slot provider IDs, so this
-    checks the slot, not the ID the slot carries — slot plus
-    exactly-one-candidate is the approximation, and the two
-    together are what passes. Because the slot identifies the
-    TRACK rather than any value on it, promotion_verdict consults
-    this anchor for provider-ID fields only. Slot parts are read
-    defensively: a non-numeric disc/position off the wire is no
-    anchor, never an exception."""
+    """Is the track at the file's disc+position in a SETTLED
+    album_track variant whose own slot for it is strong-verified?
+
+    This proves WHICH track sits at the slot — and nothing about
+    whether the provider ID attached to that track is right.
+    promotion_verdict therefore does NOT consult it (concerns
+    §4.1): with the node's projection carrying no per-slot
+    provider IDs, slot plus an exactly-one-candidate rule let a
+    lone answering node's wrong ID promote on niche items. The
+    check stays for the day the projection carries the per-slot
+    provider ID recorded at verification time: then leg (c) can
+    require the candidate to BE the ID the verified tracklist
+    carries at that slot, which is what §8 actually names.
+    Slot parts are read defensively: a non-numeric disc/position
+    off the wire is no anchor, never an exception."""
     file_disc = _as_int(disc)
     file_pos = _as_int(position)
     if not album_subject or file_disc is None or file_pos is None:
@@ -846,15 +846,15 @@ def _settled_variant_anchor(db: Any, album_subject: Optional[str],
     return False
 
 
-# Fields the leg (c) tracklist slot anchor may speak for: PROVIDER
-# IDs only. The anchor proves WHICH track sits at the file's slot —
-# it identifies the entity, and an ID is an identity claim. It says
-# nothing about the VALUES hanging off that track: an ISRC, a year,
-# a genre list or a label at a settled slot still needs leg (a)'s
-# verification or leg (b)'s confirmation. (Membership IS the
-# vocabulary: every promotable field not listed here — isrc, year,
-# genres, label — is a value field for this purpose.)
-_SLOT_ANCHOR_FIELDS = {
+# The provider-ID fields: any field whose value IS a provider
+# identifier (the provider IDs proper plus the MusicBrainz ID
+# fields). Leg (c)'s tracklist slot anchor is OFF for exactly
+# these (concerns §4.1): the settled slot proves which track sits
+# there, not that the ID a node attached to it is right, and on a
+# niche item a single answering node is automatically the single
+# survivor. These fields promote via leg (a), leg (b), or leg
+# (c)'s disambiguation settlement — never via the slot.
+_PROVIDER_ID_FIELDS = {
     "spotify_id", "deezer_id", "tidal_id", "itunes_id", "discogs_id",
     "artist_mbid", "release_group_mbid", "recording_mbid",
 }
@@ -884,15 +884,19 @@ def promotion_verdict(db: Any, subject: str, field: str, value: Any, *,
     (c) the value is the SINGLE surviving candidate for its field,
         picked by a verified anchor: the node's disambiguation
         settlement for the entity (settled via a fetched link or a
-        shared strong MBID, promotion-flagged, fresh), or — for a
-        track PROVIDER-ID field — its place in a settled,
-        strong-verified release tracklist at the file's
-        disc+position (the slot anchor identifies the track; it
-        never vouches for value fields like isrc or year). A
-        settlement reached by counting unverified links is
-        display-only in the projection (promotion=False) and never
-        satisfies this leg; a lone claim with zero support and no
-        anchor is not a survivor.
+        shared strong MBID, promotion-flagged, fresh). The
+        tracklist slot anchor is NOT such an anchor for provider-ID
+        fields: a settled, strong-verified slot proves which track
+        sits there, not that the ID attached to it is right, and
+        on a niche item one answering node is automatically the
+        single survivor (concerns §4.1) — so this leg never
+        promotes a provider ID on slot evidence. It comes back
+        when the projection carries the per-slot provider ID
+        recorded at verification time and the candidate can be
+        checked against it. A settlement reached by counting
+        unverified links is display-only in the projection
+        (promotion=False) and never satisfies this leg; a lone
+        claim with zero support and no anchor is not a survivor.
 
     Name + duration agreement alone never promotes — there is no
     leg for it, on purpose.
@@ -939,11 +943,13 @@ def promotion_verdict(db: Any, subject: str, field: str, value: Any, *,
                 if settled_at and now - settled_at <= timedelta(
                         days=SETTLEMENT_FRESH_DAYS):
                     return (True, "c")
-        kind = subject_kind(db, subject)
-        if kind == "track" and field in _SLOT_ANCHOR_FIELDS \
-                and _settled_variant_anchor(
-                    db, album_subject, subject, disc, position):
-            return (True, "c")
+        # No slot-anchor path (concerns §4.1): the settled slot
+        # proves which track sits at the file's disc+position, not
+        # that a provider ID attached to it is right, so it never
+        # promotes a provider-ID field — and it never spoke for
+        # non-ID fields. _settled_variant_anchor stays for the
+        # cross-repo fix that records the per-slot provider ID at
+        # verification time and checks the candidate against it.
     return (False, None)
 
 
