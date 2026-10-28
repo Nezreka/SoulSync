@@ -596,6 +596,9 @@ def mark_done(database: Any, owner_token: str, *, watermark: Optional[str] = Non
         )
         updated = cursor.rowcount > 0
         conn.commit()
+        if updated:
+            from core.library2.source_snapshot import retire_legacy_tables
+            retire_legacy_tables(conn)
         return updated
 
 
@@ -773,6 +776,11 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
                 state.get("status") == "waiting_for_source"
                 and legacy_user_state_waiting(database)):
             reason = "already_done" if state.get("status") == "done" else "empty_source"
+            if reason == "already_done":
+                # an install upgraded before the legacy tables were renamed
+                from core.library2.source_snapshot import retire_legacy_tables
+                with closing(database._get_connection()) as conn:
+                    retire_legacy_tables(conn)
             return {"skipped": reason}
 
     resume = resume_point_for(state, current_watermark)

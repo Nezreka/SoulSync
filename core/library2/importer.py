@@ -1488,6 +1488,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         resume = None
     with closing(database._get_connection()) as conn:
         ensure_library_v2_schema(conn)
+        # a rebuild after the upgrade reads the renamed legacy tables
+        from core.library2.source_snapshot import expose_retired_tables
+        expose_retired_tables(conn)
         from core.library2.user_references import ensure_reference_id_kinds
         ensure_reference_id_kinds(conn)
         cursor = conn.cursor()
@@ -2550,6 +2553,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
     if first_upgrade:  # after the artist twins are folded: the album's artist is final
         try:
             with closing(database._get_connection()) as backlog_conn:
+                expose_retired_tables(backlog_conn)
                 stats["reorganize_backlog"] = _carry_reorganize_backlog(
                     backlog_conn.cursor(), album_map, live_owners)
                 backlog_conn.commit()

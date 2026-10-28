@@ -115,11 +115,13 @@ def migration_required(database: Any) -> bool:
         # mutation observers and commits; it is a writer, unsuitable inside
         # another connection's publish/rollback transaction.
         from contextlib import closing
-        from core.library2.source_snapshot import SOURCE_TABLES
+        from core.library2.source_snapshot import SOURCE_TABLES, source_table
         with closing(database._get_connection()) as conn:
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            return any(conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is not None
-                       for table in SOURCE_TABLES if table in tables)
+            # renamed after a finished upgrade, still the source of a rebuild
+            sources = [source_table(tables, table) for table in SOURCE_TABLES]
+            return any(conn.execute(f"SELECT 1 FROM {source} LIMIT 1").fetchone() is not None
+                       for source in sources if source)
     except Exception as exc:  # half-known upgrade state must never admit writers
         logger.warning("Could not verify Library v2 upgrade state: %s", exc)
         return True
