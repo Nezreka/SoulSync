@@ -1485,9 +1485,12 @@
     transition: all var(--dur-quick) ease !important;
 }
 
+/* the preview switch stays lit while its preview plays, like the promo's
+   sound on, so it shares the hover look */
 .tool-help-button.discover-page-help-button:hover,
 .discover-blacklist-btn:hover,
-.discover-hero-preview-btn:hover {
+.discover-hero-preview-btn:hover,
+.discover-hero-preview-btn.on {
     background: var(--white-a20) !important;
     color: #ffffff !important;
     border-color: var(--white-a30) !important;
@@ -1499,13 +1502,6 @@
     top: 20px;
     right: 96px;
     z-index: 10;
-}
-
-/* while the preview plays, its switch stays lit, like the promo's sound on */
-.discover-hero-preview-btn.on {
-    background: var(--white-a20) !important;
-    color: #ffffff !important;
-    border-color: var(--white-a30) !important;
 }
 
 /* ── 10. Premier Artist Map & Artist Web Hubs (Explore & Build) ──────────── */

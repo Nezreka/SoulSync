@@ -108,7 +108,9 @@ describe('useHeroVideo', () => {
       expect(result.current.closing).toBe(true);
       expect(result.current.preview).toBe(true);
       expect(result.current.soundOn).toBe(false);
-      act(() => vi.advanceTimersByTime(1400));
+      act(() => {
+        vi.advanceTimersByTime(1400);
+      });
       expect(result.current.closing).toBe(false);
       expect(result.current.preview).toBe(false);
       expect(result.current.playing).toBe(false);
@@ -137,10 +139,14 @@ describe('useHeroVideo', () => {
       // would hard-cut the video the fade is supposed to carry out
       expect(result.current.preview).toBe(true);
       expect(result.current.playing).toBe(true);
-      act(() => vi.advanceTimersByTime(1399));
+      act(() => {
+        vi.advanceTimersByTime(1399);
+      });
       expect(result.current.preview).toBe(true);
       expect(result.current.closing).toBe(true);
-      act(() => vi.advanceTimersByTime(1));
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
       expect(result.current.preview).toBe(false);
       expect(result.current.closing).toBe(false);
       expect(result.current.playing).toBe(false);
@@ -162,7 +168,9 @@ describe('useHeroVideo', () => {
     try {
       act(() => result.current.togglePreview());
       expect(result.current.closing).toBe(true);
-      act(() => vi.advanceTimersByTime(1400));
+      act(() => {
+        vi.advanceTimersByTime(1400);
+      });
       expect(result.current.preview).toBe(false);
       expect(result.current.closing).toBe(false);
     } finally {
@@ -184,14 +192,18 @@ describe('useHeroVideo', () => {
       act(() => result.current.togglePreview());
       expect(result.current.closing).toBe(true);
       expect(result.current.soundOn).toBe(false);
-      act(() => vi.advanceTimersByTime(700));
+      act(() => {
+        vi.advanceTimersByTime(700);
+      });
       act(() => result.current.togglePreview());
       expect(result.current.closing).toBe(false);
       expect(result.current.preview).toBe(true);
       expect(result.current.soundOn).toBe(true);
       expect(result.current.playing).toBe(true);
       // the cancelled finalize must not land later and close it anyway
-      act(() => vi.advanceTimersByTime(5000));
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
       expect(result.current.preview).toBe(true);
       expect(result.current.closing).toBe(false);
     } finally {
@@ -223,7 +235,9 @@ describe('useHeroVideo', () => {
       try {
         act(() => result.current.togglePreview());
         expect(result.current.closing).toBe(true);
-        act(() => vi.advanceTimersByTime(700));
+        act(() => {
+          vi.advanceTimersByTime(700);
+        });
         // changed their mind mid-fade: the preview goes on
         act(() => result.current.togglePreview());
         expect(result.current.closing).toBe(false);
@@ -269,7 +283,9 @@ describe('useHeroVideo', () => {
       expect(result.current.videoLive).toBe(false);
       expect(result.current.soundOn).toBe(false);
       // nothing is left pending: time passing changes nothing
-      act(() => vi.advanceTimersByTime(5000));
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
       expect(result.current.preview).toBe(false);
       expect(result.current.closing).toBe(false);
     } finally {
@@ -313,9 +329,13 @@ describe('useHeroVideo', () => {
         // 0.6) takes the one seat here and the video hard-cuts.
         expect(result.current.playing).toBe(true);
         expect(videoStage.isLive('promo-rival')).toBe(false);
-        act(() => vi.advanceTimersByTime(1399));
+        act(() => {
+          vi.advanceTimersByTime(1399);
+        });
         expect(result.current.playing).toBe(true);
-        act(() => vi.advanceTimersByTime(1));
+        act(() => {
+          vi.advanceTimersByTime(1);
+        });
         expect(result.current.preview).toBe(false);
         expect(result.current.closing).toBe(false);
         expect(result.current.playing).toBe(false);
