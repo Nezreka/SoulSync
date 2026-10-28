@@ -19,16 +19,22 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import type { SyncModals } from './-sync.use-modals';
 import type { PipelineController } from './-sync.use-pipeline';
-import type { SyncVerticals } from './-sync.verticals';
+import type { SourceVertical } from './-sync.use-vertical';
 
 import { mirroredPipelineStateWriter } from './-sync.mirrored';
+import { SYNC_SOURCES } from './-sync.sources';
 import { useSyncModals } from './-sync.use-modals';
 import { useMirroredPipeline } from './-sync.use-pipeline';
 import { useStandalone } from './-sync.use-standalone';
-import { useSyncVerticals } from './-sync.verticals';
+import { useSourceVertical } from './-sync.use-vertical';
 
 export interface SyncPage {
-  verticals: SyncVerticals;
+  /**
+   * The mirrored playlists' identify/sync state. The one vertical left: every
+   * source tab imports into a mirror now, so a playlist is only ever
+   * identified, synced or downloaded from there.
+   */
+  mirrored: SourceVertical;
   modals: SyncModals;
   /** The page's ONE controller — see -sync.use-pipeline and S3b-i. */
   pipeline: PipelineController;
@@ -57,12 +63,9 @@ export function useSyncPage(): SyncPage {
     mirroredReloads.current.set(key, reload);
   }, []);
 
-  const verticals = useSyncVerticals();
+  const mirrored = useSourceVertical(SYNC_SOURCES.mirrored);
 
-  const onPipelineState = useMemo(
-    () => mirroredPipelineStateWriter(verticals.mirrored),
-    [verticals.mirrored],
-  );
+  const onPipelineState = useMemo(() => mirroredPipelineStateWriter(mirrored), [mirrored]);
   const reloadMirrored = useCallback(() => {
     for (const reload of mirroredReloads.current.values()) reload();
   }, []);
@@ -85,7 +88,7 @@ export function useSyncPage(): SyncPage {
   }, [reloadMirrored]);
 
   return {
-    verticals,
+    mirrored,
     modals,
     pipeline,
     standalone,

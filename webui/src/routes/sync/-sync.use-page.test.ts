@@ -17,9 +17,9 @@ afterEach(() => {
 });
 
 describe('what it assembles', () => {
-  it('builds ten verticals and ONE pipeline controller', () => {
+  it('builds the mirrored vertical and ONE pipeline controller', () => {
     const { result } = renderHook(() => useSyncPage());
-    expect(Object.keys(result.current.verticals)).toHaveLength(10);
+    expect(result.current.mirrored.states).toEqual({});
     expect(typeof result.current.pipeline.run).toBe('function');
     expect(typeof result.current.pipeline.resume).toBe('function');
   });
@@ -32,6 +32,20 @@ describe('what it assembles', () => {
     rerender();
     rerender();
     expect(result.current.pipeline).toBe(before);
+  });
+
+  it('keeps the mirrored vertical stable until its state changes', () => {
+    // three tabs take it as a prop; a new object every render would re-run
+    // every effect keyed on it
+    const { result, rerender } = renderHook(() => useSyncPage());
+    const before = result.current.mirrored;
+    rerender();
+    expect(result.current.mirrored).toBe(before);
+    act(() => {
+      result.current.mirrored.seed('mirrored_1');
+    });
+    expect(result.current.mirrored).not.toBe(before);
+    expect(Object.keys(result.current.mirrored.states)).toEqual(['mirrored_1']);
   });
 
   it('routes reloadMirrored to whatever the mirrored tab registered', () => {

@@ -32,8 +32,8 @@ import {
 } from './-sync.urls';
 
 /**
- * The vertical ids these URLs route to — the SAME strings SYNC_VERTICAL_IDS
- * registers, so a detection result indexes the registry directly. Note Deezer's
+ * The source ids these URLs route to — the SAME strings SYNC_SOURCES is keyed
+ * by, so a detection result indexes the table directly. Note Deezer's
  * is plain `deezer`: the Deezer LINK tab owns that vertical, while the
  * Deezer-ARL account tab is engine-driven and has none.
  */

@@ -271,7 +271,7 @@ export function SyncPage() {
     'import-file': <ImportFileTab onImported={onImported} />,
     mirrored: (
       <MirroredTab
-        vertical={page.verticals.mirrored}
+        vertical={page.mirrored}
         onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
         sourceName={sourceName}
         pipeline={page.pipeline}
@@ -283,7 +283,7 @@ export function SyncPage() {
     'my-playlists': (
       <MirroredTab
         scope="user"
-        vertical={page.verticals.mirrored}
+        vertical={page.mirrored}
         onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
         sourceName={sourceName}
         pipeline={page.pipeline}
@@ -293,7 +293,7 @@ export function SyncPage() {
     'request-lists': (
       <MirroredTab
         scope="requests"
-        vertical={page.verticals.mirrored}
+        vertical={page.mirrored}
         onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
         sourceName={sourceName}
         pipeline={page.pipeline}
@@ -322,7 +322,7 @@ export function SyncPage() {
       />
 
       <SyncModals
-        verticals={page.verticals}
+        vertical={page.mirrored}
         modals={page.modals}
         standalone={page.standalone}
         mirroredSource={sourceName}
