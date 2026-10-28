@@ -215,6 +215,13 @@ A full web player built into the sidebar.
 
 A complete video side with its own database, pages and pipeline. Switch sides from the header; each profile can be given music, video, or both.
 
+**Dashboard**
+- The music dashboard's layout on video: a greeting with your library's size, a scan strip, and the video enrichment workers on their own orb stage.
+- **Next up**: the calendar's billboard for what airs next, each episode with its state.
+- **Continue watching**, **Downloading now** (only while something is), and **Recently added** with Movies / Shows tabs.
+- **This week** in the rail: how many of the episodes that aired this week you have, a meter by state, when auto-wishlist last ran, and one button to wishlist what's missing.
+- **Up next** video automations, watchlist and wishlist counts, and issue / findings tiles that only appear when something needs you.
+
 **Library**
 - Movies, shows and YouTube channels from **Plex** or **Jellyfin**, with incremental, full and deep scans, per-title sync, and a path resolver for mismatched Docker / NAS mounts.
 - **15 enrichment workers**: TMDB, TVDB, OMDb (IMDb, Rotten Tomatoes, Metacritic), fanart.tv, OpenSubtitles, Trakt, TVmaze, AniList, Wikidata, SponsorBlock, DeArrow, Return YouTube Dislike, streaming (where-to-watch), Mediastinger (credits scenes) and awards — plus a background YouTube upload-date enricher.

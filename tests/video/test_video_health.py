@@ -18,7 +18,8 @@ from core.video.health import collect
 from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-_DASH_JS = (_ROOT / "webui" / "static" / "video" / "video-dashboard.js").read_text(encoding="utf-8")
+# the video dashboard is React now
+_DASH_JS = (_ROOT / "webui" / "src" / "routes" / "dashboard" / "-video" / "video-dashboard-page.tsx").read_text(encoding="utf-8")
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
 
 

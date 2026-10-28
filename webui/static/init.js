@@ -2164,6 +2164,8 @@ const SHARED_VIDEO_VIEWS = {
     tools: { media: ['video'], videoPage: 'video-tools' },
     // /calendar?media=video is the video calendar (music has none)
     calendar: { media: ['video'], videoPage: 'video-calendar' },
+    // /dashboard?media=video is the video dashboard
+    dashboard: { media: ['video'], videoPage: 'video-dashboard' },
 };
 
 function isPageAccessAllowed(pageId, search) {

@@ -677,6 +677,17 @@ declare global {
         poster?: string | null;
       }) => void;
     };
+    /** video-poster-modal.js: the poster manager (search, then pick art). */
+    VideoPoster?: { openSearch?: () => void };
+    /** video-overlay-editor.js / video-collection-editor.js: the two studios. */
+    VideoOverlayEditor?: { open?: () => void };
+    VideoCollectionEditor?: { open?: () => void };
+    /** video-worker-orbs.js: re-anchor to the video dashboard's orb stage. */
+    videoWorkerOrbs?: { refresh: () => void; onStatus: (id: string, data: unknown) => void };
+    /** video-enrichment.js: fill the worker buttons now, not at the next push. */
+    videoEnrichmentPrime?: () => void;
+    /** video-side.js: the calendar on a day, optionally with an episode open. */
+    videoOpenCalendar?: (opts?: { date?: string; ep?: number | string }) => void;
     /** video-side.js: flip the shell chrome music <-> video (does NOT navigate). */
     _switchAppSide?: (side: 'music' | 'video', opts?: { force?: boolean }) => void;
     /** unified downloads page: true while any video download is active.

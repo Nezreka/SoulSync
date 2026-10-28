@@ -125,16 +125,20 @@
     }
 
     function init() {
-        SERVICES.forEach(function (svc) {
-            var b = btn(svc);
-            if (b) b.addEventListener('click', function () { toggle(svc); });
-        });
-        var manage = document.querySelector('[data-video-manage-workers]');
-        if (manage) {
-            manage.addEventListener('click', function () {
+        // delegated: the buttons live in the React video dashboard, which
+        // mounts them after this runs and remounts them on every visit
+        document.addEventListener('click', function (e) {
+            var t = e.target && e.target.closest ? e.target : null;
+            if (!t) return;
+            var b = t.closest('[data-video-enrich]');
+            if (b) { toggle(b.getAttribute('data-video-enrich')); return; }
+            if (t.closest('[data-video-manage-workers]')) {
                 document.dispatchEvent(new CustomEvent('soulsync:video-open-workers'));
-            });
-        }
+            }
+        });
+        // the page calls this on mount so fresh buttons show their state now,
+        // not at the next socket push
+        window.videoEnrichmentPrime = primeOnce;
         primeOnce();   // instant initial state
         bindSocket();  // then the socket pushes updates for all four (incl. youtube)
         // Re-prime when the user returns to the tab (socket kept pushing, but a

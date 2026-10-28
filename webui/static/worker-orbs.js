@@ -95,8 +95,10 @@
         // canvas, the nucleus at its centre, the hover that opens the worker
         // grid, all of it measured against the stage, so orbs never drift over
         // the greeting. the whole header is the fallback (the old layout).
-        dashboardHeader = document.querySelector('#dashboard-page .orb-stage')
-            || document.querySelector('#dashboard-page .dashboard-header');
+        // a page that borrows the dashboard's id and look for its own orb
+        // layer marks its stage data-foreign-orbs, and this never anchors it.
+        dashboardHeader = document.querySelector('#dashboard-page .orb-stage:not([data-foreign-orbs])')
+            || document.querySelector('#dashboard-page .dashboard-header:not([data-foreign-orbs])');
         headerActions = dashboardHeader && dashboardHeader.querySelector('.header-actions');
         if (!dashboardHeader || !headerActions) return;
 
