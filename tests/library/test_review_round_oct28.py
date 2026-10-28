@@ -138,3 +138,12 @@ def test_folder_preview_uses_planned_total_and_preserves_audio_disc_two():
         planned_metadata={'total_discs': 2, 'disc_number': 2})
     assert error is None
     assert album['total_discs'] == 2 and track['disc_number'] == 2
+
+
+def test_new_disc_evidence_retains_choices_only_when_the_proposed_effects_match():
+    from core.library.reconciliation_choices import same_annotated_evidence
+    original = {'current_tags': {'title': 'Song'}, 'changes': {'title': {'old': 'Song', 'new': 'Song!'}}}
+    enriched = {**original, 'current_tags': {'title': 'Song', 'total_discs': 2}}
+    assert same_annotated_evidence(original, enriched)
+    corrected = {**enriched, 'changes': {**original['changes'], 'total_discs': {'old': 2, 'new': 1}}}
+    assert not same_annotated_evidence(original, corrected)

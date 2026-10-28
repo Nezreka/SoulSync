@@ -248,7 +248,8 @@ def same_annotated_evidence(previous, current):
         # actual old/new values still have to match exactly.
         if 'current_tags' in result:
             result['current_tags'] = {k: v for k, v in result['current_tags'].items()
-                                      if k != 'artists_list' or v}
+                                      if (k != 'artists_list' or v) and
+                                      (k != 'total_discs' or 'total_discs' in (previous.get('current_tags') or {}))}
         if 'assignment_options' in result:
             result['assignment_options'] = [
                 {key: value for key, value in option.items() if key != 'artist'}
