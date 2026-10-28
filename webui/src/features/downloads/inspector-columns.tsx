@@ -16,6 +16,7 @@ import {
   overrideConfirm,
   scoreClass,
 } from './inspector';
+import { canListen, listenToCandidate } from './inspector-listen';
 
 /**
  * One source's column in the candidate inspector: the accepted hits (pick one
@@ -130,6 +131,7 @@ export function SourceColumn({
                     <div className="rdl-src-item-name" title={nameTip(c)}>
                       {c.display_name}
                     </div>
+                    <ListenButton row={c} expected={expected} />
                     {isRec ? <span className="rdl-src-recommended">Best</span> : null}
                   </div>
                   <CandidateDetails row={c} source={column.source} />
@@ -183,6 +185,29 @@ export function SourceColumn({
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * Play the hit before picking it. It sits inside the row's label, so the
+ * click mustn't also pick the row.
+ */
+function ListenButton({ row, expected }: { row: InspectorCandidate; expected: InspectorExpected }) {
+  if (!canListen(row)) return null;
+  return (
+    <button
+      type="button"
+      className="rdl-src-listen"
+      title="Listen before you pick"
+      aria-label={`Listen to ${row.display_name || 'this result'}`}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void listenToCandidate(row, expected);
+      }}
+    >
+      ▶
+    </button>
   );
 }
 
@@ -259,6 +284,7 @@ function RejectedRow({
           <div className="rdl-src-item-name" title={nameTip(row)}>
             {row.display_name}
           </div>
+          <ListenButton row={row} expected={expected} />
           <span className={`rdl-rej-pill stage-${stage}`}>
             {decisionPill(row, expected.duration_ms)}
           </span>
