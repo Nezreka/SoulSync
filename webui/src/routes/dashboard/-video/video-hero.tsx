@@ -195,6 +195,8 @@ const OrbButtons = memo(function OrbButtons() {
           </div>
         </div>
       ))}
+      {/* 13 orbs never fill the last row, so the hub button gets its own */}
+      <span className="orb-stage-break" aria-hidden="true"></span>
       <button
         className="em-manage-btn"
         type="button"

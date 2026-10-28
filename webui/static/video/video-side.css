@@ -377,8 +377,14 @@ body[data-side="video"] .dashboard-header-sweep {
     transform: translateX(-50%) translateY(0);
 }
 
-/* The Manage Workers button reuses music's .em-manage-btn* classes verbatim
-   (see index.html), so it needs no styling of its own here — identical by reuse. */
+/* The Manage Workers button reuses music's .em-manage-btn* classes verbatim,
+   so it needs no styling of its own here. */
+
+/* the dashboard orb grid. music's orbs carry a 12px margin the video ones
+   don't, so the column gap makes up the difference: same pitch, five a row,
+   and the hub button breaks onto its own centred row. */
+#dashboard-page [data-video-orb-stage] .header-actions { gap: 12px 30px; }
+#dashboard-page [data-video-orb-stage] .orb-stage-break { flex-basis: 100%; height: 0; }
 
 /* Service logo in the settings API-config frame headers (TMDB/TVDB). */
 .video-svc-logo { width: 18px; height: 18px; object-fit: contain; margin-right: 2px; }
@@ -4371,6 +4377,31 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .em-retry-global:hover { transform: none; background: rgba(var(--warning-strong-rgb), 0.24); }
 .em-retry-global:disabled { opacity: 0.55; cursor: default; }
 
+/* "Process first everywhere": a segmented control in the topbar. the music
+   modal moved this into a menu and dropped the shared rules, so the video
+   modal owns them now. */
+#vem-overlay .em-global {
+    display: flex; align-items: center; gap: 11px; flex: 0 0 auto;
+    padding: 6px 6px 6px 12px; border-radius: var(--radius-lg);
+    background: var(--black-a25); border: 1px solid var(--white-a08);
+}
+#vem-overlay .em-global-label {
+    font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px;
+    color: var(--white-a40); line-height: 1.25; text-align: right;
+}
+#vem-overlay .em-global-label span { color: var(--white-a70); }
+#vem-overlay .em-global-tabs {
+    display: inline-flex; gap: 3px; padding: 3px; background: var(--white-a05);
+    border-radius: var(--radius-md); border: 1px solid var(--white-a08);
+}
+#vem-overlay .em-global-tabs button {
+    padding: 6px 12px; border: none; background: transparent; border-radius: var(--radius-sm);
+    color: var(--white-a60); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+#vem-overlay .em-global-tabs button:hover { color: var(--text-primary); background: var(--white-a06); }
+#vem-overlay .em-global-tabs button.active { background: rgb(var(--accent-rgb)); color: var(--text-primary); }
+
 /* ── Import page (manual / failed-import resolution) — video/video-import.js ──── */
 .vimp-page { max-width: 1080px; margin: 0 auto; padding: 8px 4px 40px; }
 .vimp-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
@@ -6513,6 +6544,21 @@ body[data-side="video"] #gsearch-aura {
     padding: 0 4px;
     font-size: 11.5px;
     color: var(--white-a40);
+}
+
+/* on the dashboard it is a rail card: one column, a count chip by the title */
+[data-card="downloads"] .vdn-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+[data-card="downloads"] .vdn-more { align-self: flex-start; padding: 2px 2px 0; }
+.vdn-count {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: var(--radius-pill);
+    background: rgba(var(--info-rgb), 0.16);
+    color: rgb(var(--info-rgb));
+    font-size: 11px;
+    letter-spacing: 0;
+    vertical-align: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

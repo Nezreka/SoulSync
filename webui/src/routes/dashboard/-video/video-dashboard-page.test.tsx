@@ -279,8 +279,10 @@ describe('bands that vanish when empty', () => {
       if (!b) throw new Error('not yet');
       return b as HTMLElement;
     });
-    expect(band.querySelectorAll('.vdn-card')).toHaveLength(6);
-    expect(within(band).getByText('and 2 more')).toBeTruthy();
+    expect(band.querySelectorAll('.vdn-card')).toHaveLength(4);
+    expect(within(band).getByText('and 4 more')).toBeTruthy();
+    // it lives in the rail, between this week and up next
+    expect(band.closest('.dash-side')).not.toBeNull();
     expect(within(band).queryByText('Done')).toBeNull();
   });
 

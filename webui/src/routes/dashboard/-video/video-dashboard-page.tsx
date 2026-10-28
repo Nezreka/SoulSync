@@ -86,12 +86,12 @@ export function VideoDashboardPage({
             </div>
           ) : null}
           <ContinueBand />
-          <DownloadsBand />
           <RecentBand items={recent} />
           {isAdmin ? <StudiosBand recent={recent} /> : null}
         </div>
         <aside className="dash-side" aria-label="Your system">
           <WeekCard data={week.data} today={today} start={start} canDownload={canDownload} />
+          <DownloadsBand />
           <AutomationsCard compact side="video" />
           <CountTiles
             watchlist={stats.data?.watchlist ?? null}

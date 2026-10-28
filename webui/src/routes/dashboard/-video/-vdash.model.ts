@@ -233,7 +233,8 @@ export function continueHref(it: ContinueItem): string {
 
 export const DL_POLL_ACTIVE_MS = 3000;
 export const DL_POLL_IDLE_MS = 15000;
-export const DL_MAX_ROWS = 6;
+// a rail card, so a short list; the downloads page has the rest
+export const DL_MAX_ROWS = 4;
 
 const IN_FLIGHT = new Set(['downloading', 'queued', 'searching', 'importing']);
 

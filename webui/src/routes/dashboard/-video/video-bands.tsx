@@ -48,22 +48,17 @@ export function goVideo(page: string) {
 
 function Masthead({
   title,
-  count,
   subtitle,
   action,
 }: {
   title: string;
-  count?: string;
   subtitle?: string;
   action?: ReactNode;
 }) {
   return (
     <div className="dash-rail-head">
       <div className="dash-rail-titleblock">
-        <h2 className="dash-rail-title">
-          {title}
-          {count ? <span className="dash-rail-count">{count}</span> : null}
-        </h2>
+        <h2 className="dash-rail-title">{title}</h2>
         {subtitle ? <span className="dash-rail-subtitle">{subtitle}</span> : null}
       </div>
       {action}
@@ -171,20 +166,15 @@ export function DownloadsBand() {
   const shown = rows.slice(0, DL_MAX_ROWS);
   const extra = rows.length - shown.length;
   return (
-    <article className="dash-card dash-card--rail" data-card="downloads">
-      <Masthead
-        title="Downloading now"
-        count={String(rows.length)}
-        action={
-          <button
-            type="button"
-            className="dash-side-link"
-            onClick={() => goVideo('video-downloads')}
-          >
-            All downloads
-          </button>
-        }
-      />
+    <article className="dash-card dash-side-card" data-card="downloads">
+      <header className="dash-side-head">
+        <h3 className="dash-side-title">
+          Downloading now <span className="vdn-count">{rows.length}</span>
+        </h3>
+        <button type="button" className="dash-side-link" onClick={() => goVideo('video-downloads')}>
+          Downloads
+        </button>
+      </header>
       <div className="vdn-grid">
         {shown.map((d) => (
           <DownloadCard key={String(d.id)} d={d} />
@@ -309,10 +299,16 @@ function CoverageRings({ data }: { data: Coverage | undefined }) {
   );
 }
 
+function StudioWash({ src }: { src: string }) {
+  return <img className={styles.studioWash} src={src} alt="" aria-hidden="true" loading="lazy" />;
+}
+
 export function StudiosBand({ recent }: { recent: RecentItem[] | undefined }) {
   const { data } = useQuery(coverageQuery());
   const posters = (recent ?? []).slice(0, 3);
   const lead = (recent ?? []).find((i) => i.kind === 'movie') ?? posters[0];
+  // the fan's middle poster is the one on top
+  const fanLead = posters[1] ?? posters[0];
   return (
     <article className="dash-card dash-card--rail" data-card="studios">
       <Masthead
@@ -327,19 +323,22 @@ export function StudiosBand({ recent }: { recent: RecentItem[] | undefined }) {
           data-studio="overlay"
           onClick={() => window.VideoOverlayEditor?.open?.()}
         >
+          {lead ? <StudioWash src={posterOf(lead, 300)} /> : null}
           <span className={styles.studioArt} aria-hidden="true">
-            {lead ? (
-              <img
-                className={styles.studioPoster}
-                src={posterOf(lead, 300)}
-                alt=""
-                loading="lazy"
-              />
-            ) : null}
-            <span className={styles.studioBadges}>
-              <span>4K</span>
-              <span>IMDb 8.4</span>
-              <span>HDR</span>
+            <span className={styles.studioCanvas}>
+              {lead ? (
+                <img
+                  className={styles.studioPoster}
+                  src={posterOf(lead, 300)}
+                  alt=""
+                  loading="lazy"
+                />
+              ) : null}
+              <span className={styles.studioBadges}>
+                <span>4K</span>
+                <span>IMDb 8.4</span>
+                <span>HDR</span>
+              </span>
             </span>
           </span>
           <span className={styles.studioText}>
@@ -347,6 +346,9 @@ export function StudiosBand({ recent }: { recent: RecentItem[] | undefined }) {
             <span className={styles.studioName}>Overlay Studio</span>
             <span className={styles.studioBlurb}>
               Rating, resolution and logo badges on your posters, designed on a live canvas.
+            </span>
+            <span className={styles.studioCta}>
+              Open studio <span aria-hidden="true">&rarr;</span>
             </span>
           </span>
         </button>
@@ -356,6 +358,7 @@ export function StudiosBand({ recent }: { recent: RecentItem[] | undefined }) {
           data-studio="collection"
           onClick={() => window.VideoCollectionEditor?.open?.()}
         >
+          {fanLead ? <StudioWash src={posterOf(fanLead, 300)} /> : null}
           <span className={styles.studioArt} aria-hidden="true">
             <span className={styles.studioStack}>
               {posters.map((p) => (
@@ -368,6 +371,9 @@ export function StudiosBand({ recent }: { recent: RecentItem[] | undefined }) {
             <span className={styles.studioName}>Collection Studio</span>
             <span className={styles.studioBlurb}>
               Franchises, universes, decades and charts, synced to your server.
+            </span>
+            <span className={styles.studioCta}>
+              Open studio <span aria-hidden="true">&rarr;</span>
             </span>
           </span>
         </button>
