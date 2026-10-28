@@ -2,6 +2,7 @@
 
 import json
 import time
+import uuid
 
 
 def _table(conn):
@@ -31,6 +32,16 @@ def load_report(db, operation_id):
         return json.loads(row[0]) if row else None
     finally:
         conn.close()
+
+
+def record_case_left_as_is(conn, case_id):
+    """Close recovery prompts without rewriting an earlier failure report."""
+    _table(conn)
+    report = {'operation_id': uuid.uuid4().hex, 'review_case_ids': [case_id],
+              'review_scope': 'album', 'phase': 'left_as_is', 'running': False,
+              'fixed': 0, 'failed': 0, 'error': None}
+    conn.execute('INSERT INTO repair_operation_reports VALUES (?, ?, ?)',
+                 (report['operation_id'], time.time(), json.dumps(report)))
 
 
 def latest_case_report(db, case_id):

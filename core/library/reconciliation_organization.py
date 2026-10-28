@@ -82,3 +82,30 @@ def organization_context(db, album_id, details):
                 raise ValueError('The reviewed filename must be a filename, not a path')
             filenames[str(item['track_id'])] = name
     return {'album_title': title, 'filenames': filenames}
+
+
+def retry_organization_context(db, album_id, report):
+    """Keep the approved title, but rebuild filenames from the current files."""
+    context = organization_context(db, album_id, [])
+    title = (report.get('organization_titles') or {}).get(str(album_id))
+    if title is None:
+        # Older reports predate the durable title snapshot. Only an applied
+        # metadata action can supply it; rejected or obsolete findings cannot.
+        conn = db._get_connection()
+        try:
+            rows = conn.execute('''SELECT details_json FROM repair_findings
+                WHERE review_case_key IN (SELECT value FROM json_each(?))
+                AND status='resolved' AND user_action='reconciliation_metadata'
+                ORDER BY resolved_at DESC, id DESC''',
+                (json.dumps(report.get('review_case_ids') or []),)).fetchall()
+            for (raw,) in rows:
+                details = json.loads(raw or '{}')
+                if str(details.get('album_id')) == str(album_id) and not details.get('plan_keep'):
+                    title = details.get('db_album_title')
+                    if title:
+                        break
+        finally:
+            conn.close()
+    if title:
+        context['album_title'] = title
+    return context

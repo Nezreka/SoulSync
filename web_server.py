@@ -10622,6 +10622,11 @@ def reorganize_album_preview(album_id):
             from core.library.reconciliation_organization import organization_context
             review_inputs = {'planned_tag_updates': updates, 'excluded_paths': excluded,
                              'review_context': organization_context(db, album_id, action_details)}
+            if retry:
+                from core.library.reconciliation_organization import retry_organization_context
+                from core.repair_operation_reports import latest_case_report
+                review_inputs = {'review_context': retry_organization_context(
+                    db, album_id, latest_case_report(db, case['case_id']) or {})}
         result = preview_album_reorganize(
             album_id=album_id,
             db=db,

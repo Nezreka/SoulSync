@@ -1872,9 +1872,9 @@ class RepairWorker:
                 case['last_operation'] = {key: report.get(key) for key in (
                     'operation_id', 'fixed', 'failed', 'organize_failed', 'error')}
                 if report.get('organize_failed'):
-                    from core.library.reconciliation_organization import approve_organization, organization_context
+                    from core.library.reconciliation_organization import approve_organization, retry_organization_context
                     try:
-                        approval = approve_organization(self.db, case['album_id'], organization_context(self.db, case['album_id'], []))
+                        approval = approve_organization(self.db, case['album_id'], retry_organization_context(self.db, case['album_id'], report))
                         case['organization_retry_signature'] = approval['review_signature']
                     except ValueError:
                         pass
@@ -2463,6 +2463,8 @@ class RepairWorker:
                 return {'success': False, 'stale': True, 'error': 'The album plan changed'}
             conn.execute("UPDATE repair_findings SET status='dismissed',user_action='leave_album_as_is',resolved_at=CURRENT_TIMESTAMP,last_error=NULL WHERE review_case_key=? AND status='pending'", (case_id,))
             conn.execute('DELETE FROM reconcile_review_choices WHERE case_id=?', (case_id,))
+            from core.repair_operation_reports import record_case_left_as_is
+            record_case_left_as_is(conn, case_id)
         return {'success': True, 'message': 'Album left entirely as-is, including its folder. Existing download requests are unchanged.'}
 
     @review_plan_mutation
@@ -8339,6 +8341,12 @@ class RepairWorker:
                 self.db, album_id, [json.loads(raw) for raw in (reviewed_details or {}).values()
                                    if str(json.loads(raw).get('album_id')) == str(album_id)])
                 for album_id in organize_album_ids or []}
+            if organization_retry:
+                from core.library.reconciliation_organization import retry_organization_context
+                from core.repair_operation_reports import latest_case_report
+                report = latest_case_report(self.db, review_case_id) or {}
+                self._review_organization_contexts = {str(album_id): retry_organization_context(
+                    self.db, album_id, report) for album_id in organize_album_ids or []}
             from core.library.reconciliation_organization import _scope
             retry_scopes = ({str(album_id): _scope(self.db, album_id) for album_id in organize_album_ids or []}
                             if organization_retry else {})
@@ -8365,6 +8373,7 @@ class RepairWorker:
                 'organize_queued': 0,
                 'organize_failed': 0,
                 'organization_retry_scopes': retry_scopes,
+                'organization_titles': {key: value['album_title'] for key, value in self._review_organization_contexts.items()},
                 'blocked': 0,
                 'not_attempted': 0,
                 'errors': [],

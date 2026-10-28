@@ -4,7 +4,7 @@ import os
 
 from core.library.file_identity import same_file, planned_metadata
 from core.library.reconciliation_organization import organization_context
-from core.library.reconciliation_plan import audio_contradicts_local_title, versions_compatible, _same_base_recording_title
+from core.library.reconciliation_plan import audio_contradicts_local_title, versions_compatible, _same_base_recording_title, reconcile_folder
 from core.library_reorganize import _rename_track_in_place, _display_relative_to_root, _plan_from_tags
 from core.library import playlist_membership
 from core.repair_review_queue import list_cases
@@ -55,11 +55,12 @@ def test_kept_metadata_does_not_influence_folder_name(tmp_path, monkeypatch):
 
 def test_unplugged_punctuation_and_recording_context_are_equivalent():
     file = {'path': '08 - Song - MTV Unplugged.mp3', 'tags': {'title': 'Song - MTV Unplugged', 'artist': ARTIST, 'duration_ms': 271080},
-            'acoustid': {'recordings': [{'mbid': 'recording', 'title': 'Song', 'artist': ARTIST, 'score': .98}]}}
+            'acoustid': {'status': 'ok', 'recordings': [{'mbid': 'recording', 'title': 'Song', 'artist': ARTIST, 'score': .98}]}}
     slot = {'title': 'Song (MTV Unplugged)', 'artist': ARTIST, 'duration_ms': 271200, 'recording_mbid': 'recording', 'recording_disambiguation': 'live'}
     assert _same_base_recording_title('Song', file['tags']['title'])
     assert not audio_contradicts_local_title(file)
     assert versions_compatible(file, slot)
+    assert reconcile_folder([file], [slot])['pairs'][0]['confidence'] == 'clear'
     assert not versions_compatible(file, {**slot, 'title': 'Song (live at another venue)'})
     assert not _same_base_recording_title('Song', 'Song - Part Two')
 
@@ -118,6 +119,59 @@ def test_failed_organization_report_survives_relocation_and_allows_only_folder_r
     # A changed file invalidates the previously reviewed folder retry.
     album.paths[0].write_bytes(album.paths[0].read_bytes() + b'changed')
     assert not album.worker.retry_review_organization(case['case_id'], completed['organization_retry_signature'])['started']
+
+
+def test_folder_retry_preserves_approved_title_and_current_filenames(tmp_path, monkeypatch):
+    from core.library.reconciliation_organization import retry_organization_context
+    album = build_album(tmp_path, monkeypatch, 'supported')
+    case = scan_case(album)
+    finding = case['items'][0]
+    details = {**finding['details'], 'db_album_title': 'Approved album',
+               'changes': {'filename': {'new': 'obsolete-filename.flac'}}}
+    report = {'review_case_ids': [case['case_id']]}
+    with album.db._get_connection() as conn:
+        conn.execute("UPDATE repair_findings SET details_json=?,status='resolved',user_action='reconciliation_metadata' WHERE id=?",
+                     (json.dumps(details), finding['id']))
+    legacy = retry_organization_context(album.db, '10', report)
+    assert legacy['album_title'] == 'Approved album'
+    assert 'obsolete-filename.flac' not in legacy['filenames'].values()
+    durable = retry_organization_context(album.db, '10', {**report, 'organization_titles': {'10': 'Saved operation title'}})
+    assert durable['album_title'] == 'Saved operation title'
+    with album.db._get_connection() as conn:
+        conn.execute("UPDATE repair_findings SET user_action='plan_keep' WHERE id=?", (finding['id'],))
+    assert retry_organization_context(album.db, '10', report)['album_title'] != 'Approved album'
+
+
+def test_leave_album_also_closes_old_folder_retry_without_erasing_failure(tmp_path, monkeypatch):
+    from core.repair_operation_reports import save_report, load_report
+    album = build_album(tmp_path, monkeypatch, 'supported')
+    case = scan_case(album)
+    for item in case['items']:
+        assert album.worker._apply_reviewed_finding(item['id'])['success']
+    save_report(album.db, {'operation_id': 'failed-folder', 'review_case_ids': [case['case_id']],
+                          'running': False, 'fixed': 2, 'organize_failed': 1, 'error': 'collision'})
+    case = album.worker.get_review_case(case['case_id'])
+    assert case['organization_retry_signature']
+    assert album.worker.leave_review_album(case['case_id'], case['plan_signature'])['success']
+    after = album.worker.get_review_case(case['case_id'])
+    assert not after.get('organization_retry_signature')
+    assert not after.get('last_operation')
+    assert load_report(album.db, 'failed-folder')['error'] == 'collision'
+
+
+def test_queue_summary_preserves_current_album_title(tmp_path, monkeypatch):
+    album = build_album(tmp_path, monkeypatch, 'supported')
+    case = scan_case(album)
+    summary = next(item for item in list_cases(album.db)['items'] if item['case_id'] == case['case_id'])
+    assert summary['current_album_title'] == case['current_album_title']
+    with album.db._get_connection() as conn:
+        for finding in case['items']:
+            details = {**finding['details'], 'library_album_title': 'Current collection',
+                       'album_title': 'Proposed edition'}
+            conn.execute('UPDATE repair_findings SET details_json=? WHERE id=?',
+                         (json.dumps(details), finding['id']))
+    found = list_cases(album.db, q='current collection')['items']
+    assert len(found) == 1 and found[0]['current_album_title'] == 'Current collection'
 
 
 def test_mixed_release_ids_are_ready_when_one_edition_clearly_fits_every_file(tmp_path, monkeypatch):

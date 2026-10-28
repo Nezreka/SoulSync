@@ -470,7 +470,10 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                     'last_error': last_error,
                 })
             for item in items:
-                item['plan'] = classify_case(grouped.get(item['case_id'], []))
+                findings = grouped.get(item['case_id'], [])
+                item['plan'] = classify_case(findings)
+                item['current_album_title'] = next((finding['details']['library_album_title']
+                    for finding in findings if finding['details'].get('library_album_title')), '')
             album_ids = {
                 str(finding['details']['album_id'])
                 for findings in grouped.values() for finding in findings

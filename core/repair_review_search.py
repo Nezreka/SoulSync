@@ -22,7 +22,7 @@ def names(title, raw):
     except (ValueError, TypeError):
         detail = {}
     values = [title]
-    fields = ('album_title', 'db_album_title', 'album_name', 'album', 'artist_name',
+    fields = ('album_title', 'library_album_title', 'current_album_title', 'db_album_title', 'album_name', 'album', 'artist_name',
               'artist', 'expected_artist', 'expected_title', 'title', 'current_title', 'local_title', 'slot_title', 'name')
     def collect(item):
         if isinstance(item, dict):

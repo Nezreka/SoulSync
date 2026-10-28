@@ -400,7 +400,7 @@ export function ReviewPage() {
         setActiveRowKey(null);
         setManualRelease(null);
         setPreviewCandidate(0);
-        setOpenGroups(['attention', 'changes']);
+        setOpenGroups(['attention', 'changes', 'files']);
       })
       .catch((cause: unknown) => {
         if (live) setError((cause as Error).message);
@@ -608,7 +608,7 @@ export function ReviewPage() {
           ? ['missing']
           : filter === 'settled'
             ? ['settled']
-            : ['attention', 'changes']),
+            : ['attention', 'changes', 'files']),
       ]),
     ]);
     if (focus)
@@ -635,8 +635,10 @@ export function ReviewPage() {
     setActiveId((current) => (current === findingId ? null : findingId));
     const target = assignmentsByFinding.get(findingId);
     setActiveRowKey(rowKey || (target ? assignmentKey(target) : null));
-    if (target?.status === 'change')
-      setOpenGroups((current) => (current.includes('changes') ? current : [...current, 'changes']));
+    if (target?.status === 'change') {
+      const group = fileAction(target) ? 'files' : 'changes';
+      setOpenGroups((current) => (current.includes(group) ? current : [...current, group]));
+    }
   };
 
   const selectCase = (next: string) => {
@@ -652,7 +654,7 @@ export function ReviewPage() {
     setAlbumView('plan');
     setTrackFilter('');
     setTrackView('issues');
-    setOpenGroups(['attention', 'changes']);
+    setOpenGroups(['attention', 'changes', 'files']);
     setPreviewCandidate(0);
     setCaseId(next);
   };
@@ -681,7 +683,7 @@ export function ReviewPage() {
       setActiveRowKey(
         assignmentsByFinding.get(first) ? assignmentKey(assignmentsByFinding.get(first)!) : null,
       );
-      setOpenGroups(['attention', 'changes', 'missing', 'settled']);
+      setOpenGroups(['attention', 'changes', 'files', 'missing', 'settled']);
     }
     window.setTimeout(
       () => document.getElementById('selected-review-action')?.scrollIntoView({ block: 'nearest' }),
@@ -1817,12 +1819,12 @@ export function ReviewPage() {
                   onClick={() => selectCase(item.case_id)}
                 >
                   <ReviewArtwork
-                    title={item.album || 'Unassigned files'}
+                    title={item.current_album_title || item.album || 'Unassigned files'}
                     url={item.album_thumb_url}
                     size="list"
                   />
                   <span className={styles.caseCopy}>
-                    <strong>{item.album || 'Unassigned files'}</strong>
+                    <strong>{item.current_album_title || item.album || 'Unassigned files'}</strong>
                     <span>{item.artist || item.case_id.split(':')[0]}</span>
                     <small>
                       {caseStatusSummary(item)}
@@ -2874,6 +2876,12 @@ export function ReviewPage() {
                             <span>Selected release track</span>
                             <span>Status</span>
                           </div>
+                          {filterCount(trackFilter) === 0 && (
+                            <div className={styles.queueEmpty} role="status">
+                              <p>No tracks match this filter.</p>
+                              <Button onClick={() => showTrackList('')}>Show all tracks</Button>
+                            </div>
+                          )}
                           {trackView === 'release'
                             ? releaseOrderedAssignments
                                 .filter(matchingFilter)

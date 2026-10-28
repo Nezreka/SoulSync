@@ -158,6 +158,7 @@ export interface AlbumReconciliationPlan {
 export interface ReviewCaseSummary {
   case_id: string;
   album: string | null;
+  current_album_title?: string;
   artist: string | null;
   album_thumb_url?: string | null;
   pending: number;
