@@ -213,6 +213,36 @@ describe('fetchMirroredMatches (158-171)', () => {
     expect((await fetchMirroredMatches('Road Trip')).map((p) => p.id)).toEqual([1, 2]);
   });
 
+  it('finds a renamed or suffixed mirror by the name sync wrote it under (#1907)', async () => {
+    const rows = [
+      { id: 1, name: 'Spotify Mix', display_name: 'alternative', sync_name: 'alternative' },
+      { id: 2, name: 'Blumple', display_name: 'Blumple', sync_name: 'Blumple' },
+      { id: 3, name: 'Blumple', display_name: 'Blumple', sync_name: 'Blumple (Deezer)' },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(rows))),
+    );
+    // upstream name differs, the alias is what landed on the server
+    expect((await fetchMirroredMatches('Alternative')).map((p) => p.id)).toEqual([1]);
+    // two mirrors share an upstream name, the sync name tells them apart
+    expect((await fetchMirroredMatches('Blumple')).map((p) => p.id)).toEqual([2]);
+    expect((await fetchMirroredMatches('Blumple (Deezer)')).map((p) => p.id)).toEqual([3]);
+  });
+
+  it('prefers the server playlist the mirror is linked to over any name', async () => {
+    const rows = [
+      { id: 1, name: 'Road Trip', sync_name: 'Road Trip' },
+      { id: 2, name: 'Old Name', sync_name: 'Old Name', server_playlist_id: 'srv-9' },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(rows))),
+    );
+    expect((await fetchMirroredMatches('Road Trip', 'srv-9')).map((p) => p.id)).toEqual([2]);
+    expect((await fetchMirroredMatches('Road Trip', 'srv-1')).map((p) => p.id)).toEqual([1]);
+  });
+
   it('SWALLOWS a failure and answers empty — the server-only path (168-170)', async () => {
     vi.stubGlobal(
       'fetch',

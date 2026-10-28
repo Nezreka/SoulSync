@@ -440,7 +440,7 @@ export function ServerPlaylistList({ onOpenCompare }: ServerPlaylistListProps) {
   /** openServerPlaylistEditor's three-way branch (172-183). */
   const openPlaylist = useCallback(
     async (playlist: ServerPlaylist) => {
-      const matches = await fetchMirroredMatches(playlist.name);
+      const matches = await fetchMirroredMatches(playlist.name, playlist.id);
       if (matches.length === 1) openCompare(playlist, matches[0]);
       else if (matches.length === 0) openCompare(playlist, null);
       else setDisambig({ playlist, candidates: matches });
