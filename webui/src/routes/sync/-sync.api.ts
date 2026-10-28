@@ -167,9 +167,20 @@ export async function fetchActiveProcesses(): Promise<{
 }
 
 /** GET /api/spotify/playlists (loadSpotifyPlaylists, sync-spotify.js 1598). */
+/**
+ * An account list's rows. A list the server couldn't load ({error}, e.g. a 401
+ * when the account isn't connected) throws, so the tab says why instead of
+ * "No playlists found".
+ */
+function accountListRows(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
+  const body = data as { playlists?: unknown[]; error?: unknown } | null;
+  if (typeof body?.error === 'string' && body.error) throw new Error(body.error);
+  return body?.playlists ?? [];
+}
+
 export async function fetchSpotifyPlaylists(): Promise<unknown[]> {
-  const data = await readJson<unknown>(await fetch('/api/spotify/playlists'));
-  return Array.isArray(data) ? data : ((data as { playlists?: unknown[] })?.playlists ?? []);
+  return accountListRows(await readJson<unknown>(await fetch('/api/spotify/playlists')));
 }
 
 /** GET /api/deezer/arl-status (initializeSyncPage deezer tab, 3698). */
@@ -179,8 +190,7 @@ export async function fetchDeezerArlStatus(): Promise<{ authenticated?: boolean 
 
 /** GET /api/deezer/arl-playlists (loadDeezerArlPlaylists, sync-services.js 2437). */
 export async function fetchDeezerArlPlaylists(): Promise<unknown[]> {
-  const data = await readJson<unknown>(await fetch('/api/deezer/arl-playlists'));
-  return Array.isArray(data) ? data : ((data as { playlists?: unknown[] })?.playlists ?? []);
+  return accountListRows(await readJson<unknown>(await fetch('/api/deezer/arl-playlists')));
 }
 
 /** A playlist's tracks, as both account tabs' details modals read them. */

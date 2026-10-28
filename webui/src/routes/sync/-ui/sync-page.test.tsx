@@ -12,32 +12,40 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { LbCardData } from '../-sync.lb-tabs';
-import type { SourceVertical } from '../-sync.use-vertical';
 import type { AutoSyncModalProps } from './autosync-modal';
 import type { SyncModalsProps } from './sync-modals';
 
 let modalProps: AutoSyncModalProps | null = null;
-/** Which vertical each panel was handed — the wiring a mutant can swap. */
-const verticalsSeen: Record<string, SourceVertical> = {};
+/** Which link each link tab was handed — the wiring a mutant can swap. */
+const pendingSeen: Record<string, string | undefined> = {};
 let syncModalsProps: SyncModalsProps | null = null;
 
 /**
  * The four URL tabs and the two LB tabs are stubbed so the panel WIRING is
  * observable. Rendering the real ones would fetch and prove nothing about
- * which vertical or which card field the page passed.
+ * which link or which card field the page passed. The Deezer stub also
+ * reaches the page's import landing, the way a real import does.
  */
-vi.mock('./url-import-tab', () => ({
-  DeezerLinkTab: ({ vertical }: { vertical: SourceVertical }) => {
-    verticalsSeen.deezerLink = vertical;
-    return <div />;
-  },
-  YouTubeTab: ({ vertical }: { vertical: SourceVertical }) => {
-    verticalsSeen.youtube = vertical;
-    return <div />;
-  },
-  SpotifyPublicTab: () => <div />,
-  ITunesLinkTab: () => <div />,
-}));
+vi.mock('./url-import-tab', async () => {
+  const { useImporter } = await import('./use-importer');
+  return {
+    DeezerLinkTab: ({ pendingUrl }: { pendingUrl?: string }) => {
+      pendingSeen.deezerLink = pendingUrl;
+      const { landing } = useImporter();
+      return (
+        <button type="button" onClick={() => landing.land(5, 'Dz Mix', false)}>
+          land-it
+        </button>
+      );
+    },
+    YouTubeTab: ({ pendingUrl }: { pendingUrl?: string }) => {
+      pendingSeen.youtube = pendingUrl;
+      return <div />;
+    },
+    SpotifyPublicTab: () => <div />,
+    ITunesLinkTab: () => <div />,
+  };
+});
 
 vi.mock('./lb-sync-tab', async (importOriginal) => ({
   // the real open hook: it's the fetch + seed the page has to go through
@@ -204,18 +212,29 @@ describe('the panel map', () => {
     expect(screen.getByText('Server Playlists')).toBeTruthy();
   });
 
-  it('gives each source tab its OWN vertical', () => {
-    // A swapped vertical is invisible in review and in every panel's own
-    // tests: the Deezer link tab would render, fetch and look fine while
-    // driving YouTube's state. Identity is the only thing that catches it.
+  it('hands each routed link to the tab that owns its service', () => {
+    // A swapped pendingFor key is invisible in every panel's own tests: the
+    // Deezer tab would sit empty while YouTube tried to parse a Deezer link.
     render(<SyncPage />);
     // These tabs are no longer chips in the strip — they are reached by
     // routing a link through Add playlist, which is the real path now.
     routeViaAddPlaylist('https://www.deezer.com/playlist/1');
+    expect(pendingSeen.deezerLink).toBe('https://www.deezer.com/playlist/1');
     routeViaAddPlaylist('https://www.youtube.com/playlist?list=P1');
-    expect(verticalsSeen.deezerLink).toBeTruthy();
-    expect(verticalsSeen.youtube).toBeTruthy();
-    expect(verticalsSeen.deezerLink).not.toBe(verticalsSeen.youtube);
+    expect(pendingSeen.youtube).toBe('https://www.youtube.com/playlist?list=P1');
+  });
+
+  it('an import lands on the Mirrored tab and says it is identifying', () => {
+    const toast = vi.fn();
+    window.showToast = toast as typeof window.showToast;
+    render(<SyncPage />);
+    routeViaAddPlaylist('https://www.deezer.com/playlist/1');
+    fireEvent.click(screen.getByText('land-it'));
+    expect(toast).toHaveBeenCalledWith(
+      "Imported Dz Mix. It's identifying in the background",
+      'success',
+    );
+    expect(document.querySelector('#mirrored-tab-content')?.className ?? '').toMatch(/active/);
   });
 
   it('opens a ListenBrainz card on its MBID, not its title, with its tracks seeded', async () => {
