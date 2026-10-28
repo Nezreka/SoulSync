@@ -142,16 +142,19 @@
 }
 
 /* the lead poster again, blurred into an ambient backdrop behind the art */
+/* masked to a soft blob: a blurred rectangle still shows its edges, and a
+   wide card would show the poster itself */
 .studioWash {
   position: absolute;
-  top: -20%;
-  right: -10%;
+  top: -30%;
+  right: -8%;
   z-index: 0;
-  width: 60%;
-  height: 140%;
+  width: 380px;
+  height: 160%;
   object-fit: cover;
-  opacity: 0.22;
-  filter: blur(36px) saturate(1.3);
+  opacity: 0.2;
+  filter: blur(48px) saturate(1.4);
+  mask-image: radial-gradient(closest-side, var(--black-a90), transparent);
   transform: scale(1);
   transition:
     opacity var(--studio-dur) var(--studio-ease),
@@ -160,7 +163,7 @@
 }
 
 .studio:hover .studioWash {
-  opacity: 0.38;
+  opacity: 0.34;
   transform: scale(1.12);
 }
 
@@ -169,10 +172,9 @@
   z-index: 3;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   gap: 6px;
-  max-width: 58%;
-  padding: 22px 24px;
+  max-width: min(58%, 420px);
+  padding: 24px 26px;
 }
 
 .studioKicker {
@@ -191,6 +193,8 @@
 }
 
 .studioBlurb {
+  max-width: 40ch;
+  margin-bottom: 12px;
   color: var(--white-a60);
   font-size: 12.5px;
   line-height: 1.5;
@@ -201,7 +205,7 @@
   align-items: center;
   align-self: flex-start;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: auto;
   padding: 7px 14px;
   border: 1px solid rgba(var(--studio-rgb), 0.35);
   border-radius: var(--radius-pill);
@@ -352,6 +356,32 @@
 
 .studio:hover .studioStack img:nth-child(3) {
   transform: rotate(14deg) translate(14px, 12px);
+}
+
+/* a wide card (studios full width under the rail) has room for bigger art,
+   and the art moves in from the edge so the middle isn't empty */
+@container (min-width: 760px) {
+  .studioArt {
+    right: 6%;
+  }
+
+  .studioCanvas {
+    top: 18px;
+    width: 134px;
+  }
+
+  .studioBadges span {
+    font-size: 11px;
+  }
+
+  .studioStack {
+    top: 18px;
+  }
+
+  .studioStack img {
+    width: 108px;
+    margin-left: -44px;
+  }
 }
 
 /* a narrow card (two studios beside the rail) tucks the art in so the
