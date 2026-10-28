@@ -189,18 +189,33 @@ def test_a_finished_run_never_reports_already_running(tmp_path):
 
 
 def test_large_review_batch_waits_for_its_followup_scan(tmp_path):
+    import threading
     db = MusicDatabase(str(tmp_path / 'm.db'))
     for index in range(4):
         _add_genre_finding(db, f'AR{index}', index)
     worker = _worker(db, tmp_path)
-    worker.run_job_now = lambda job: job == 'library_reconciliation'
+    started_refresh, completed_refresh = threading.Event(), threading.Event()
+    worker._album_refresh_events = {}
+    refreshed = []
+    def schedule(case_id, folder, **kwargs):
+        refreshed.append(case_id)
+        worker._album_refresh_events[case_id] = completed_refresh
+        worker._album_refreshes[case_id] = {'state': 'running'}
+        started_refresh.set()
+        return True
+    worker._schedule_album_refresh = schedule
     cases = [(f'album:1:{index}', f'/music/{index}') for index in range(4)]
     started = worker.start_bulk_fix(review_case_folders=cases)
     assert started['operation_id']
+    try:
+        assert started_refresh.wait(2)
+        assert worker.get_bulk_fix_status()['running']
+        assert worker.get_bulk_fix_status()['phase'] == 'reanalyzing'
+    finally:
+        completed_refresh.set()
     status = _wait_done(worker)
     assert status['reconciliation_queued'] and status['fixed'] == 4
-    assert status['review_case_ids'] == [key for key, _ in cases]
-    assert all(worker._album_refreshes[key]['state'] == 'running' for key, _ in cases)
+    assert status['review_case_ids'] == refreshed == [key for key, _ in cases]
 
 
 def test_completed_operation_survives_restart_and_new_operation(tmp_path):
@@ -300,7 +315,7 @@ def test_changed_ready_proposal_blocks_entire_album_after_scan_wait(tmp_path):
         worker._reconciliation_scan_lock.release()
     result = _wait_done(worker)
     assert calls == []
-    assert result['failed'] == 2 and result['fixed'] == 0
+    assert result['failed'] == 1 and result['not_attempted'] == 1 and result['fixed'] == 0
 
 
 def test_confirmed_batch_snapshot_survives_startup_race(tmp_path):
@@ -329,7 +344,7 @@ def test_confirmed_batch_snapshot_survives_startup_race(tmp_path):
     assert worker.start_review_safe(expected_signature=preview['signature'])['started']
     result = _wait_done(worker)
     assert calls == []
-    assert result['failed'] == 2 and result['fixed'] == 0
+    assert result['failed'] == 1 and result['not_attempted'] == 1 and result['fixed'] == 0
 
 
 def test_failed_album_stops_its_remaining_actions_but_other_albums_continue(tmp_path):
@@ -349,7 +364,7 @@ def test_failed_album_stops_its_remaining_actions_but_other_albums_continue(tmp_
     assert worker.start_review_safe()['started']
     result=_wait_done(worker)
     assert len(calls)==2
-    assert result['fixed']==1 and result['failed']==2
+    assert result['fixed']==1 and result['failed']==1 and result['not_attempted']==1
     assert any('earlier action' in row['error'] for row in result['errors'])
 
 

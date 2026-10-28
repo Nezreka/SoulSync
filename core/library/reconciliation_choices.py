@@ -26,6 +26,8 @@ def ensure_schema(conn):
         conn.execute("ALTER TABLE reconcile_review_choices ADD COLUMN fix_action TEXT NOT NULL DEFAULT ''")
     if 'numbering_choice' not in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}:
         conn.execute("ALTER TABLE reconcile_review_choices ADD COLUMN numbering_choice TEXT NOT NULL DEFAULT ''")
+    if 'playlist_override' not in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}:
+        conn.execute("ALTER TABLE reconcile_review_choices ADD COLUMN playlist_override TEXT NOT NULL DEFAULT ''")
     conn.execute("""CREATE TABLE IF NOT EXISTS reconcile_saved_plans (
         case_id TEXT PRIMARY KEY, signature TEXT NOT NULL,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
@@ -37,7 +39,8 @@ def load_choices(conn, finding_id=None, *, case_id=None):
     columns = {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}
     action_column = 'fix_action' if 'fix_action' in columns else "''"
     numbering_column = 'numbering_choice' if 'numbering_choice' in columns else "''"
-    sql = f'SELECT finding_id, case_id, evidence_json, category, choice, {action_column}, {numbering_column} FROM reconcile_review_choices'
+    override_column = 'playlist_override' if 'playlist_override' in columns else "''"
+    sql = f'SELECT finding_id, case_id, evidence_json, category, choice, {action_column}, {numbering_column}, {override_column} FROM reconcile_review_choices'
     if finding_id is not None:
         sql, params = sql + ' WHERE finding_id=?', (finding_id,)
     elif case_id is not None:
@@ -61,6 +64,8 @@ def project(details, saved, *, case_id=None, raw_json=None):
     result = deepcopy(details)
     category, choice = saved[2:4]
     result['planned_choice'] = {'category': category, 'action': choice, 'fix_action': saved[4] if len(saved) > 4 else ''}
+    if len(saved) > 6 and saved[6] and choice == 'fix':
+        result['playlist_override'] = json.loads(saved[6])
     numbering = choice if category == 'numbering' else saved[5] if len(saved) > 5 else ''
     if numbering:
         result['numbering_choice'] = numbering

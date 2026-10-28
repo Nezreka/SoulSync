@@ -74,7 +74,7 @@ export function SelectedActionDetail({
   const replacement = record(finding.details?.replacement_track);
   const canAssign = Boolean(finding.file_path) && !numberingPreview && !waitingForDownload;
   const proposedSlot =
-    canAssign && !wrongAudio && !versionConflict && !duplicateChoice
+    canAssign && !wrongAudio && !duplicateChoice
       ? assignmentOptions.find(
           (slot) =>
             replacement.source_track_id &&
@@ -140,6 +140,9 @@ export function SelectedActionDetail({
         }
         lastError={finding.last_error}
         onRecheck={onRecheck}
+        findingId={finding.id}
+        evidenceToken={finding.evidence_token}
+        overrideSaved={Array.isArray(details.playlist_override)}
       />
       {planned.category === 'numbering' && !hasPlan && (
         <div className={styles.confirmedStatus}>
@@ -295,7 +298,7 @@ export function SelectedActionDetail({
                         disabled={busy}
                         onClick={() => onAct('fix', `assign:${textValue(proposedSlot.key)}`)}
                       >
-                        Accept match
+                        {versionConflict ? 'This is the correct track' : 'Accept match'}
                       </Button>
                     )
                   )}

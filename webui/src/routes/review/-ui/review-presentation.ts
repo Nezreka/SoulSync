@@ -111,7 +111,7 @@ export function changeFieldLabel(field: string, locations?: string[]): string {
       library_track_artist: 'Track artists',
       album: 'Album title',
       library_album_title: 'Album title',
-      library_album_assignment: 'Album grouping',
+      library_album_assignment: 'Library album membership',
       title: 'Track title',
       library_title: 'Track title',
       track_number: 'Track number',

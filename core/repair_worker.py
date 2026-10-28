@@ -1866,7 +1866,28 @@ class RepairWorker:
             bulk = getattr(self, '_bulk_fix_state', {})
             if bulk.get('running') and case_id in bulk.get('review_case_ids', []):
                 case['refresh'] = {'state': 'running'}
+            from core.repair_operation_reports import latest_case_report
+            report = latest_case_report(self.db, case_id)
+            if report and not report.get('running') and (report.get('error') or report.get('organize_failed')):
+                case['last_operation'] = {key: report.get(key) for key in (
+                    'operation_id', 'fixed', 'failed', 'organize_failed', 'error')}
+                if report.get('organize_failed'):
+                    from core.library.reconciliation_organization import approve_organization, organization_context
+                    try:
+                        approval = approve_organization(self.db, case['album_id'], organization_context(self.db, case['album_id'], []))
+                        case['organization_retry_signature'] = approval['review_signature']
+                    except ValueError:
+                        pass
         return case
+
+    @review_plan_mutation
+    def retry_review_organization(self, case_id, signature):
+        case = self.get_review_case(case_id)
+        if not case or not signature or signature != case.get('organization_retry_signature'):
+            return {'started': False, 'stale': True, 'error': 'Review the updated folder preview before retrying'}
+        return self.start_bulk_fix(finding_ids=[], review_approved=True,
+            organize_album_ids=[str(case['album_id'])], review_case_folders=[(case_id, case.get('folder') or '')],
+            review_scope='album', review_case_id=case_id, review_expected_details={}, organization_retry=True)
 
     def review_playlist_references(self, case_id, file_path, *, refresh=False):
         case = self.get_review_case(case_id, job_id='library_reconciliation')
@@ -1895,6 +1916,41 @@ class RepairWorker:
             return self._schedule_album_refresh(case_id, folder, scope=scope, refresh_catalogue=True)
         return (self._schedule_album_refresh(case_id, folder) if scope == 'album' else
                 self._schedule_album_refresh(case_id, folder, scope=scope))
+
+    @review_plan_mutation
+    def acknowledge_review_playlists(self, case_id, finding_id, *, evidence_token, playlist_ids):
+        """Acknowledge only the current references for one saved removal."""
+        case = self.get_review_case(case_id)
+        item = next((row for row in (case or {}).get('items', []) if row['id'] == finding_id), None)
+        details = (item or {}).get('details') or {}
+        action = (details.get('planned_choice') or {}).get('fix_action') or ''
+        if (not item or item['evidence_token'] != evidence_token or
+                not (action in ('quarantine', 'replace') or action.startswith('existing:quarantine:'))):
+            return {'success': False, 'error': 'Review and save this file removal before overriding playlist references'}
+        references = self.review_playlist_references(case_id, item['file_path'], refresh=True)['playlists']
+        ids = sorted(str(row['id']) for row in references)
+        if not ids or ids != sorted(str(value) for value in playlist_ids):
+            return {'success': False, 'error': 'The playlist references changed. Review the current list before overriding.'}
+        with self.db._get_connection() as conn:
+            review_choices.ensure_schema(conn)
+            saved = review_choices.load_choices(conn, finding_id).get(finding_id)
+            raw = conn.execute('SELECT details_json FROM repair_findings WHERE id=?', (finding_id,)).fetchone()
+            if not saved or not raw or saved[1] != raw[0] or saved[4] != action:
+                return {'success': False, 'error': 'The saved action changed; review it again'}
+            conn.execute('UPDATE reconcile_review_choices SET playlist_override=? WHERE finding_id=?',
+                         (json.dumps(ids), finding_id))
+            conn.execute('UPDATE repair_findings SET last_error=NULL WHERE id=?', (finding_id,))
+        return {'success': True, 'message': 'Playlist override saved for this file removal. Apply the album plan to remove it.'}
+
+    def _playlist_removal_blocked(self, details):
+        override = details.get('playlist_override')
+        track_id = str(details.get('track_id') or '')
+        if override:
+            from core.library.playlist_membership import server_playlist_references
+            references = server_playlist_references(refresh=True).get(track_id, [])
+            return not {str(row['id']) for row in references}.issubset(set(override))
+        membership = _server_playlist_membership()
+        return bool(membership.get(track_id) or membership.get(details.get('track_id')))
 
     def refresh_moved_review_album(self, album_id) -> None:
         """Organization updates paths first; then rediscover exact saved members."""
@@ -2325,6 +2381,7 @@ class RepairWorker:
                     case_id=excluded.case_id, evidence_json=excluded.evidence_json,
                     category=excluded.category, choice=excluded.choice, fix_action=excluded.fix_action,
                     numbering_choice=excluded.numbering_choice,
+                    playlist_override='',
                     updated_at=CURRENT_TIMESTAMP""",
                     (item['id'], case_id, row[10], category,
                      'dismiss' if item['id'] in linked_ids else action,
@@ -2388,6 +2445,25 @@ class RepairWorker:
                 if (details.get('replacement_for_finding') and details['replacement_for_finding'] not in active
                         and details.get('fulfillment_state') not in ('wishlisted', 'downloading', 'downloaded')):
                     conn.execute("UPDATE repair_findings SET status='resolved',user_action='obsolete' WHERE id=?", (fid,))
+
+    @review_plan_mutation
+    def leave_review_album(self, case_id, signature):
+        """Accept the current album and folder without executing any proposal."""
+        case = self.get_review_case(case_id, job_id='library_reconciliation')
+        if not case or not signature or case.get('plan_signature') != signature:
+            return {'success': False, 'stale': True, 'error': 'The album plan changed; review it before leaving it as-is'}
+        with self.db._get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            rows = conn.execute('''SELECT id,job_id,finding_type,severity,status,
+                entity_type,entity_id,file_path,title,description,details_json,
+                user_action,created_at,updated_at,last_error FROM repair_findings
+                WHERE review_case_key=? AND status='pending' ''', (case_id,)).fetchall()
+            if {row[0]: repair_review_queue.evidence_token(row) for row in rows} != {
+                    item['id']: item['evidence_token'] for item in case['items']}:
+                return {'success': False, 'stale': True, 'error': 'The album plan changed'}
+            conn.execute("UPDATE repair_findings SET status='dismissed',user_action='leave_album_as_is',resolved_at=CURRENT_TIMESTAMP,last_error=NULL WHERE review_case_key=? AND status='pending'", (case_id,))
+            conn.execute('DELETE FROM reconcile_review_choices WHERE case_id=?', (case_id,))
+        return {'success': True, 'message': 'Album left entirely as-is, including its folder. Existing download requests are unchanged.'}
 
     @review_plan_mutation
     def stop_collecting_review_album(self, case_id, signature):
@@ -5651,7 +5727,7 @@ class RepairWorker:
         if not row or str(row[0]) != str(details.get('album_id')) or not _same_reviewed_file(
                 _resolve_file_path(row[1], self.transfer_folder, config_manager=self._config_manager) or '', path):
             return {'success': False, 'error': 'The replacement file moved or changed albums; reanalyze first'}
-        if parts[1] == 'quarantine' and _server_playlist_membership().get(str(details.get('track_id'))):
+        if parts[1] == 'quarantine' and self._playlist_removal_blocked(details):
             return {'success': False, 'blocked': True, 'error': 'The current file is in a playlist; review that reference first'}
         from core.repair_jobs.library_reconciliation import _wanted_slot_key
         assigned = self._fix_reconciliation_assignment('track', parts[2], path, {
@@ -5696,8 +5772,7 @@ class RepairWorker:
             if not resolved or not _same_reviewed_file(resolved, file_path):
                 return {'success': False, 'error': 'The track now points to another file'}
             if action != 'request_missing':
-                playlists = _server_playlist_membership()
-                if playlists.get(str(track_id)) or playlists.get(track_id):
+                if self._playlist_removal_blocked(details):
                     return {'success': False, 'blocked': True,
                             'error': 'This copy is in a playlist; review that reference first'}
         replacement_name = ''
@@ -8195,7 +8270,7 @@ class RepairWorker:
                        organize_album_ids: List[str] = None,
                        review_case_folders: List[Tuple[str, str]] = None,
                        review_scope: str = 'global', review_case_id: str = '',
-                       review_expected_details: dict = None) -> dict:
+                       review_expected_details: dict = None, organization_retry: bool = False) -> dict:
         """Start a background bulk-fix run. Only one runs at a time.
 
         ``fix_action`` may only reach ONE finding type per run. The string is
@@ -8217,14 +8292,14 @@ class RepairWorker:
                 return {'started': False, 'already_running': True,
                         'error': 'A bulk fix is already running'}
             try:
-                ids = self._pending_fixable_ids(
+                ids = [] if organization_retry else self._pending_fixable_ids(
                     job_id=job_id, severity=severity, finding_ids=finding_ids,
                     finding_type=finding_type, safe_only=safe_only,
                     allow_review_ids=allow_review_ids)
             except Exception as e:
                 logger.error("Error starting bulk fix: %s", e, exc_info=True)
                 return {'started': False, 'error': str(e)}
-            if not ids:
+            if not ids and not (organization_retry and review_approved and organize_album_ids):
                 return {'started': False, 'error': 'No pending fixable findings match'}
 
             if fix_action:
@@ -8264,6 +8339,9 @@ class RepairWorker:
                 self.db, album_id, [json.loads(raw) for raw in (reviewed_details or {}).values()
                                    if str(json.loads(raw).get('album_id')) == str(album_id)])
                 for album_id in organize_album_ids or []}
+            from core.library.reconciliation_organization import _scope
+            retry_scopes = ({str(album_id): _scope(self.db, album_id) for album_id in organize_album_ids or []}
+                            if organization_retry else {})
             self._bulk_fix_state = {
                 'running': True,
                 'operation_id': uuid.uuid4().hex,
@@ -8286,6 +8364,7 @@ class RepairWorker:
                 'reconciliation_queued': False,
                 'organize_queued': 0,
                 'organize_failed': 0,
+                'organization_retry_scopes': retry_scopes,
                 'blocked': 0,
                 'not_attempted': 0,
                 'errors': [],
@@ -8484,6 +8563,12 @@ class RepairWorker:
                 queue = get_queue()
                 organization_ids = []
                 for album_id in dict.fromkeys(organize_album_ids):
+                    expected = state.get('organization_retry_scopes', {}).get(str(album_id))
+                    if expected is not None:
+                        from core.library.reconciliation_organization import _scope
+                        if _scope(self.db, album_id) != expected:
+                            state['organize_failed'] += 1
+                            raise ValueError('The album files changed after the folder preview; review it again before retrying')
                     meta = self.db.get_album_display_meta(album_id)
                     if not meta:
                         state['error'] = (
@@ -8525,7 +8610,7 @@ class RepairWorker:
             if acquired:
                 scan_lock.release()
                 acquired = False
-            if state['fixed'] and review_case_folders and not self.should_stop:
+            if (state['fixed'] or state['organize_queued']) and review_case_folders and not self.should_stop:
                 state['phase'] = 'reanalyzing'
                 self._save_bulk_fix_report(state)
                 refresh_started = time.perf_counter()

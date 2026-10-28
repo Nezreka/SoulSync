@@ -54,7 +54,13 @@ _PERFORMANCE_DATES = tuple(re.compile(pattern, re.I) for pattern in (
 
 def _comparison_title(value: str) -> str:
     # Some storefronts append an import label after a recording qualifier.
-    return re.sub(r'(?i)(\b(?:version|mix|edit))\s+import$', r'\1', value)
+    value = re.sub(r'(?i)(\b(?:version|mix|edit))\s+import$', r'\1', value)
+    # Catalogue punctuation is not version evidence. Only recognize actual
+    # recording qualifiers: a dash in the song's name must remain intact.
+    parts = re.split(r'\s+[-–—]\s+', value, maxsplit=1)
+    if len(parts) == 2 and recording_version_markers(f'({parts[1]})'):
+        return f'{parts[0]} ({parts[1]})'
+    return value
 
 
 @lru_cache(maxsize=32768)
@@ -355,8 +361,9 @@ def versions_compatible(file: dict, slot: dict, *, local_markers=None, remote_ma
     delta = _duration_delta_ms(file, slot)
     return bool(
         remote - local == {'live'} and not local - remote
-        and local.intersection({'session', 'sessions'})
-        and _identity_text(tags.get('title')) == _identity_text(slot.get('title'))
+        and local.intersection({'session', 'sessions', 'unplugged'})
+        and _identity_text(_comparison_title(str(tags.get('title') or ''))) ==
+            _identity_text(_comparison_title(str(slot.get('title') or '')))
         and delta is not None and delta <= 1000
         and _artist_credit_supports(str(tags.get('artist') or ''), str(slot.get('artist') or ''))
         and _recording_id(slot)
@@ -459,7 +466,13 @@ def _same_base_recording_title(left: object, right: object) -> bool:
     title and release slot still have to agree on their version markers; this
     helper only prevents the bare AcoustID label from vetoing that agreement.
     """
-    a, b = fold_title(str(left or '')), fold_title(str(right or ''))
+    titles = [_comparison_title(str(value or '')) for value in (left, right)]
+    for index, title in enumerate(titles):
+        if (any(re.search(r'\b(?:studio|original|album)\s+version\b', segment, re.I)
+                for segment in _recording_qualifier_segments(title))
+                and _version_markers(titles[1 - index]) - _version_markers(title)):
+            return False
+    a, b = (fold_title(value) for value in titles)
     return bool(a and b and a == b and not _named_version_conflicts(
         str(left or ''), str(right or '')))
 

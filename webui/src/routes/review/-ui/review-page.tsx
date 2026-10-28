@@ -3,6 +3,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { ActionMenu } from '@/components/action-menu/action-menu';
 import { useConfirmDialog } from '@/components/dialog/use-confirm-dialog';
 import { Button, Select, TextInput } from '@/components/form/form';
+import { MetadataComparison } from '@/components/metadata-comparison/metadata-comparison';
 import { PageHeader } from '@/components/page-header';
 import { Notice } from '@/components/primitives';
 import { ProviderReleaseId } from '@/components/provider-reference/provider-reference';
@@ -112,7 +113,12 @@ function caseStatusSummary(item: ReviewCaseSummary): string {
   const ordered = [...(item.plan.decisions || [])].sort(
     (left, right) => (decisionOrder[left.category] ?? 99) - (decisionOrder[right.category] ?? 99),
   );
-  const primary = ordered.find((decision) => decision.risk !== 'ready') || ordered[0];
+  const primary =
+    ordered.find(
+      (decision) => decision.risk !== 'ready' && decision.category !== 'pending_fulfillment',
+    ) ||
+    ordered.find((decision) => decision.category !== 'pending_fulfillment') ||
+    ordered[0];
   const status =
     primary?.category === 'apply_blockers'
       ? 'Needs attention'
@@ -201,7 +207,7 @@ export function ReviewPage() {
   const [albumView, setAlbumView] = useState<AlbumView>('plan');
   const [trackFilter, setTrackFilter] = useState('');
   const [trackView, setTrackView] = useState<TrackView>('issues');
-  const [openGroups, setOpenGroups] = useState<string[]>(['attention', 'changes']);
+  const [openGroups, setOpenGroups] = useState<string[]>(['attention', 'changes', 'files']);
   const [previewCandidate, setPreviewCandidate] = useState(0);
   const [releaseIdInput, setReleaseIdInput] = useState('');
   const releaseLookupVersion = useRef(0);
@@ -371,7 +377,8 @@ export function ReviewPage() {
         if (
           result.status === 'completed' &&
           result.refresh?.state !== 'running' &&
-          result.refresh?.state !== 'error'
+          result.refresh?.state !== 'error' &&
+          !result.last_operation?.error
         ) {
           void refreshRef.current();
           return;
@@ -542,9 +549,18 @@ export function ReviewPage() {
   const filterCount = (filter: string) =>
     filterRows.filter((row) => matchesTrackFilter(row, filter)).length;
   const visibleAttention = attentionAssignments.filter(matchingFilter);
-  const visibleChanges = changeAssignments.filter(matchingFilter);
+  const fileAction = (row: AlbumAssignment) =>
+    ['quarantine', 'replace', 'request_missing'].includes(row.planned_choice?.fix_action || '') ||
+    (row.planned_choice?.fix_action || '').startsWith('existing:');
+  const visibleFiles = changeAssignments.filter(matchingFilter).filter(fileAction);
+  const visibleChanges = changeAssignments.filter(matchingFilter).filter((row) => !fileAction(row));
   const visibleMissing = missingAssignments.filter(matchingFilter);
-  const visibleSettled = settledAssignments.filter(matchingFilter);
+  const visibleSettled = settledAssignments
+    .filter(matchingFilter)
+    .filter((row) => row.status !== 'not_owned');
+  const visibleUncollected = settledAssignments
+    .filter(matchingFilter)
+    .filter((row) => row.status === 'not_owned');
   const intentFinding = reviewCase?.items.find(
     (item) => item.finding_type === 'reconciliation_intent',
   );
@@ -721,7 +737,11 @@ export function ReviewPage() {
         setErrorValue((current) => (current === previous ? '' : current));
         refreshError.current = null;
       }
-      if (updated.status === 'completed' && updated.refresh?.state !== 'error') {
+      if (
+        updated.status === 'completed' &&
+        updated.refresh?.state !== 'error' &&
+        !updated.last_operation?.error
+      ) {
         const previousIds = queue?.case_ids || queue?.items.map((item) => item.case_id) || [];
         const currentIds = updatedQueue.case_ids || updatedQueue.items.map((item) => item.case_id);
         const previousIndex = Math.max(0, previousIds.indexOf(requestedId));
@@ -941,10 +961,12 @@ export function ReviewPage() {
             file_exists?: boolean;
             collision?: boolean;
             matched?: boolean;
+            unchanged?: boolean;
             current_path?: string;
             new_path?: string;
           }) =>
             track.file_exists &&
+            !track.unchanged &&
             !track.collision &&
             track.matched !== false &&
             track.new_path &&
@@ -989,6 +1011,112 @@ export function ReviewPage() {
       if (selectedCaseRef.current === requestedId) setError((cause as Error).message);
     } finally {
       setReanalyzingCase((current) => (current === requestedId ? null : current));
+    }
+  };
+
+  const retryOrganization = async () => {
+    if (!reviewCase?.organization_retry_signature) return;
+    setBusy(true);
+    try {
+      const response = await fetch(
+        `/api/library/album/${encodeURIComponent(String(reviewCase.album_id))}/reorganize/preview`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: 'tags',
+            review_case_id: reviewCase.case_id,
+            organization_retry_signature: reviewCase.organization_retry_signature,
+          }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok || !result.success)
+        throw new Error(result.error || 'Could not preview the remaining folder changes');
+      const tracks = (result.tracks || []) as Array<{
+        title: string;
+        current_path: string;
+        new_path: string;
+        unchanged?: boolean;
+        matched?: boolean;
+        collision?: boolean;
+      }>;
+      if (tracks.some((track) => track.collision || track.matched === false))
+        throw new Error(
+          'Some files still need attention before folder organization can be retried.',
+        );
+      const moves = tracks.filter((track) => !track.unchanged);
+      const accepted = await confirm({
+        title: 'Retry folder organization',
+        confirmText: moves.length ? 'Organize remaining files' : 'Confirm files already organized',
+        message: (
+          <>
+            <p>
+              Completed metadata changes will be kept.{' '}
+              {moves.length
+                ? 'Only the following file moves remain.'
+                : 'All files are already in their planned locations.'}
+            </p>
+            {moves.length > 0 && (
+              <MetadataComparison
+                rows={moves.map((track) => ({
+                  field: track.title,
+                  current: track.current_path,
+                  planned: track.new_path,
+                }))}
+              />
+            )}
+          </>
+        ),
+      });
+      if (!accepted) return;
+      const start = await fetch(
+        `/api/repair/review-queue/${encodeURIComponent(reviewCase.case_id)}/retry-organization`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signature: reviewCase.organization_retry_signature }),
+        },
+      );
+      const operation = await start.json();
+      if (!start.ok || !operation.started)
+        throw new Error(operation.error || 'Could not retry folder organization');
+      rememberOperation(operation.operation_id, reviewCase.case_id);
+      setApplyBusy(true);
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const leaveAlbum = async () => {
+    if (!reviewCase) return;
+    const accepted = await confirm({
+      title: 'Leave this album entirely as-is?',
+      message:
+        'Keep the current tags, filenames, library album membership, and folders. This closes the current review without applying its planned changes. Existing download requests stay on the wishlist.',
+      confirmText: 'Leave album entirely as-is',
+    });
+    if (!accepted) return;
+    setBusy(true);
+    try {
+      const response = await fetch(
+        `/api/repair/review-queue/${encodeURIComponent(reviewCase.case_id)}/leave-as-is`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signature: reviewCase.plan_signature }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not save this choice');
+      setNotice(result.message);
+      await refresh();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1573,36 +1701,34 @@ export function ReviewPage() {
           <span>This continues on the server. You can leave this page and return.</span>
         </Notice>
       )}
-      {(scanStatus?.current_job?.job_id === 'library_reconciliation' ||
-        (lastRun && lastRun.status !== 'completed')) && (
-        <div
-          className={styles.scanStatus}
-          role="status"
-          data-running={scanStatus?.current_job?.job_id === 'library_reconciliation' || undefined}
-        >
-          {scanStatus?.current_job?.job_id === 'library_reconciliation' && (
-            <>
-              <span className={styles.loadingSpinner} aria-hidden="true" />
-              <progress
-                aria-label="Library reconciliation progress"
-                max={100}
-                value={
-                  scanStatus.current_job.progress?.total
-                    ? scanStatus.current_job.progress?.percent || 0
-                    : undefined
-                }
-              />
-            </>
-          )}
-          {scanStatus?.current_job?.job_id === 'library_reconciliation'
-            ? !scanStatus.current_job.progress?.total
-              ? 'Discovering album folders…'
-              : `Reconciliation running: ${scanStatus.current_job.progress?.scanned ?? 0} of ${scanStatus.current_job.progress?.total ?? '?'} folders (${scanStatus.current_job.progress?.percent ?? 0}%).`
-            : lastRun?.status === 'completed'
-              ? `Last reconciliation completed: ${lastRun.items_scanned} files checked.`
-              : `Last reconciliation ${lastRun?.status}: ${lastRun?.error_text || 'No reason recorded'}. ${lastRun?.items_scanned ?? 0} files checked; a rerun reuses cached fingerprints.`}
+      {scanStatus?.current_job?.job_id === 'library_reconciliation' && (
+        <div className={styles.scanStatus} role="status" data-running>
+          <span className={styles.loadingSpinner} aria-hidden="true" />
+          <progress
+            aria-label="Library reconciliation progress"
+            max={100}
+            value={
+              scanStatus.current_job.progress?.total
+                ? scanStatus.current_job.progress.percent || 0
+                : undefined
+            }
+          />
+          {scanStatus.current_job.progress?.total
+            ? `Reconciliation running: ${scanStatus.current_job.progress.scanned} of ${scanStatus.current_job.progress.total} folders.`
+            : 'Discovering album folders…'}
         </div>
       )}
+      {lastRun &&
+        lastRun.status !== 'completed' &&
+        scanStatus?.current_job?.job_id !== 'library_reconciliation' && (
+          <details className={styles.scanStatus}>
+            <summary>Previous library scan: {lastRun.status}</summary>
+            <p>
+              {lastRun.error_text || 'No reason recorded'}. {lastRun.items_scanned} files checked; a
+              rerun reuses cached fingerprints.
+            </p>
+          </details>
+        )}
 
       <div className={styles.workspace}>
         <aside className={styles.sidebar} aria-label="Reconciliation albums">
@@ -1669,6 +1795,7 @@ export function ReviewPage() {
             {(searchInput || query || category) && (
               <Button
                 type="button"
+                className={styles.clearFilters}
                 onClick={() => {
                   setSearchInput('');
                   setQuery('');
@@ -1853,6 +1980,12 @@ export function ReviewPage() {
                     )}
                     items={[
                       {
+                        key: 'leave',
+                        label: 'Leave album entirely as-is…',
+                        disabled: mutationBusy || !reviewCase.items.length,
+                        onSelect: () => void leaveAlbum(),
+                      },
+                      {
                         key: 'catalogue',
                         label: 'Refresh catalog evidence',
                         title:
@@ -1865,7 +1998,24 @@ export function ReviewPage() {
                 </div>
               </div>
 
-              {error && errorCase === reviewCase.case_id && (
+              {reviewCase.last_operation?.error && (
+                <Notice tone="danger" role="alert">
+                  <strong>
+                    {reviewCase.last_operation.fixed || 0} actions applied ·{' '}
+                    {reviewCase.last_operation.organize_failed
+                      ? 'Folder organization incomplete'
+                      : 'Operation needs attention'}
+                  </strong>
+                  <p>{reviewCase.last_operation.error}</p>
+                  <p>Completed metadata changes are retained.</p>
+                  {reviewCase.organization_retry_signature && (
+                    <Button disabled={mutationBusy} onClick={() => void retryOrganization()}>
+                      Review and retry folder organization
+                    </Button>
+                  )}
+                </Notice>
+              )}
+              {error && errorCase === reviewCase.case_id && !reviewCase.last_operation?.error && (
                 <Notice tone="danger" role="alert">
                   {error}
                 </Notice>
@@ -1907,7 +2057,11 @@ export function ReviewPage() {
                     onClick={() => setAlbumView('plan')}
                   >
                     Plan
-                    <span>{reviewDecisions.length || plan.ready}</span>
+                    <span>
+                      {reviewDecisions.length
+                        ? `${reviewDecisions.length} decision${reviewDecisions.length === 1 ? '' : 's'}`
+                        : `${plan.ready} action${plan.ready === 1 ? '' : 's'}`}
+                    </span>
                   </Button>
                   <Button
                     type="button"
@@ -2126,6 +2280,7 @@ export function ReviewPage() {
                     !albumReady &&
                     !folderFinding &&
                     !unidentified &&
+                    (reviewDecisions.length > 0 || pendingDecisions.length === 0) &&
                     (reviewCase.album_plan || decisions.length > 0) && (
                       <section className={styles.decisionBoard} aria-label="Album decisions">
                         <div className={styles.sectionHeading}>
@@ -2731,6 +2886,12 @@ export function ReviewPage() {
                                   label: `${visibleAttention.length} track${visibleAttention.length === 1 ? '' : 's'} needing review`,
                                 },
                                 {
+                                  key: 'files',
+                                  tone: 'danger',
+                                  rows: visibleFiles,
+                                  label: `${visibleFiles.length} saved file action${visibleFiles.length === 1 ? '' : 's'}`,
+                                },
+                                {
                                   key: 'changes',
                                   tone: 'info',
                                   rows: visibleChanges,
@@ -2741,6 +2902,12 @@ export function ReviewPage() {
                                   tone: 'danger',
                                   rows: visibleMissing,
                                   label: `${visibleMissing.length} absent release track${visibleMissing.length === 1 ? '' : 's'}`,
+                                },
+                                {
+                                  key: 'uncollected',
+                                  tone: 'neutral',
+                                  rows: visibleUncollected,
+                                  label: `${visibleUncollected.length} tracks outside your collection`,
                                 },
                                 {
                                   key: 'settled',

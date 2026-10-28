@@ -97,14 +97,24 @@ export function ReviewAudio({
   };
   return (
     <section className={styles.reviewAudio} aria-label="Compare audio">
+      <header className={styles.audioHeading}>
+        <div>
+          <strong>Listen and compare</strong>
+          <small>
+            {localTitle}
+            {artist ? ` · ${artist}` : ''}
+          </small>
+        </div>
+        {localFormat && <AudioFormatBadge format={localFormat} />}
+      </header>
       {(playable(localPath) || playable(comparisonPath)) && (
         <div className={styles.reviewAudioChoices}>
           {playable(localPath) && (
             <>
-              {localFormat && <AudioFormatBadge format={localFormat} />}
               <Button
                 type="button"
                 disabled={Boolean(pendingPath)}
+                data-active={playingPath === localPath || undefined}
                 onClick={() => void choose(localPath, localTitle, localDurationMs)}
               >
                 <PlayIcon size={14} /> {pendingPath === localPath ? 'Starting…' : 'Play local file'}
@@ -150,21 +160,21 @@ export function ReviewAudio({
           target="_blank"
           rel="noreferrer"
         >
-          Search Spotify ↗
+          <img src="/static/img/brands/spotify.png" alt="" /> Search Spotify ↗
         </a>
         <a
           href={`https://music.apple.com/search?term=${encodeURIComponent(searchQuery)}`}
           target="_blank"
           rel="noreferrer"
         >
-          Search Apple Music ↗
+          <img src="/static/img/brands/itunes.png" alt="" /> Search Apple Music ↗
         </a>
         <a
           href={`https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`}
           target="_blank"
           rel="noreferrer"
         >
-          Search YouTube ↗
+          <img src="/static/img/brands/youtube.svg" alt="" /> Search YouTube ↗
         </a>
       </div>
       {playingPath && [localPath, comparisonPath].includes(playingPath) && (

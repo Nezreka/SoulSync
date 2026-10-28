@@ -138,10 +138,12 @@ export function ApplyPlanPreview({
             file_exists?: boolean;
             collision?: boolean;
             matched?: boolean;
+            unchanged?: boolean;
             current_path?: string;
             new_path?: string;
           }) =>
             track.file_exists &&
+            !track.unchanged &&
             !track.collision &&
             track.matched !== false &&
             track.current_path &&
@@ -310,26 +312,15 @@ export function ApplyPlanPreview({
                 {folderPreviews[album.case_id]?.moves &&
                   (folderPreviews[album.case_id].moves!.length ? (
                     <>
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Current folder</th>
-                            <th>Planned folder</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {folderPreviews[album.case_id].moves!.map((move) => (
-                            <tr key={`${move.current}→${move.planned}`}>
-                              <td>
-                                <code>{move.current}</code>
-                              </td>
-                              <td>
-                                <code>{move.planned}</code>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                      <MetadataComparison
+                        currentLabel="Current folder"
+                        plannedLabel="Planned folder"
+                        rows={folderPreviews[album.case_id].moves!.map((move) => ({
+                          field: 'Folder',
+                          current: move.current,
+                          planned: move.planned,
+                        }))}
+                      />
                       <label>
                         <input
                           type="checkbox"
@@ -378,26 +369,16 @@ export function ApplyPlanPreview({
                     ? 'Move files into these folders after applying the planned changes.'
                     : 'Folder locations stay the same. Planned filename changes are shown above.'}
                 </p>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Current folder</th>
-                      <th>Planned folder</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {moves.map((move) => (
-                      <tr key={`${move.current}→${move.planned}`}>
-                        <td>
-                          <code>{move.current || 'Current album folder'}</code>
-                        </td>
-                        <td>
-                          <code>{move.planned}</code>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <MetadataComparison
+                  currentLabel="Current folder"
+                  plannedLabel="Planned folder"
+                  rows={moves.map((move) => ({
+                    field: 'Folder',
+                    current: move.current || 'Current album folder',
+                    planned: move.planned,
+                    changed: move.current !== move.planned,
+                  }))}
+                />
               </details>
             )}
           </AlbumSection>

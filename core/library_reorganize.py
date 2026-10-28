@@ -1060,7 +1060,8 @@ def _plan_from_tags(
             })
             continue
 
-        updates = (planned_tag_updates or {}).get(resolved) or (planned_tag_updates or {}).get(db_path)
+        from core.library.file_identity import planned_metadata
+        updates = planned_metadata(planned_tag_updates, track, resolved)
         album_meta, track_meta, err = read_album_track_from_file(
             resolved, **({'planned_metadata': updates} if updates else {}))
         if err is not None or track_meta is None or album_meta is None:
@@ -1798,7 +1799,8 @@ def preview_album_reorganize(
                 new_full = os.path.join(os.path.dirname(new_full), reviewed_name)
             item['new_path_abs'] = new_full or ''
             item['new_path'] = _display_relative_to_root(new_full, transfer_dir)
-            if resolved and new_full and os.path.normpath(resolved) == os.path.normpath(new_full):
+            from core.library.file_identity import same_file
+            if same_file(resolved, new_full):
                 item['unchanged'] = True
         except Exception as e:
             item['reason'] = f"Couldn't compute destination path: {e}"
@@ -1886,6 +1888,15 @@ def _display_relative_to_root(path, root):
         return ''
     if p.startswith(r + os.sep) or (os.altsep and p.startswith(r + os.altsep)):
         return p[len(r):].lstrip(os.sep).lstrip('/')
+    # Bind mounts have different spellings even after realpath. A verified
+    # ancestor identity lets both preview columns use the same library root.
+    from core.library.file_identity import same_file
+    parent, parts = p, []
+    while parent and parent != os.path.dirname(parent):
+        if same_file(parent, r):
+            return os.path.join(*reversed(parts)) if parts else ''
+        parent, name = os.path.split(parent)
+        parts.append(name)
     return path
 
 
@@ -2575,8 +2586,10 @@ def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Option
     try:
         if current_abs and not os.path.exists(current_abs):
             return False, 'source file no longer on disk'
-        same = os.path.normpath(current_abs) == os.path.normpath(new_abs)
-        if os.path.exists(new_abs) and not same:
+        from core.library.file_identity import same_file
+        if same_file(current_abs, new_abs):
+            return True, None
+        if os.path.exists(new_abs):
             return False, 'destination already exists'
         os.makedirs(os.path.dirname(new_abs), exist_ok=True)
         # Carry sibling-format audio to the same destination with the renamed stem —

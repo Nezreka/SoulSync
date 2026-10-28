@@ -201,6 +201,14 @@ export interface ReviewCase {
   case_id: string;
   plan_signature?: string;
   saved_for_later?: boolean;
+  organization_retry_signature?: string;
+  last_operation?: {
+    operation_id: string;
+    fixed?: number;
+    failed?: number;
+    organize_failed?: number;
+    error?: string;
+  };
   can_stop_collecting?: boolean;
   album: string | null;
   current_album_title?: string;

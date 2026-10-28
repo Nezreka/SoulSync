@@ -31,3 +31,25 @@ def load_report(db, operation_id):
         return json.loads(row[0]) if row else None
     finally:
         conn.close()
+
+
+def latest_case_report(db, case_id):
+    conn = db._get_connection()
+    try:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='repair_operation_reports'").fetchone():
+            return None
+        keys = {case_id}
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_case_redirects'").fetchone():
+            redirects = conn.execute('SELECT old_case_id,new_case_id FROM reconcile_case_redirects').fetchall()
+            while True:
+                parents = {old for old, new in redirects if new in keys} - keys
+                if not parents:
+                    break
+                keys.update(parents)
+        row = conn.execute('''SELECT report FROM repair_operation_reports
+            WHERE EXISTS (SELECT 1 FROM json_each(report, '$.review_case_ids')
+                WHERE value IN (SELECT value FROM json_each(?)))
+            ORDER BY updated_at DESC LIMIT 1''', (json.dumps(sorted(keys)),)).fetchone()
+        return json.loads(row[0]) if row else None
+    finally:
+        conn.close()

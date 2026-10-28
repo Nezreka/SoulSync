@@ -158,6 +158,23 @@ def repair_review_playlist_references(case_id):
         return jsonify({'error': 'Could not check playlist references. Check the music server connection and try again.'}), 422
 
 
+@bp.route('/api/repair/review-queue/<path:case_id>/findings/<int:finding_id>/playlist-override', methods=['POST'])
+def repair_review_playlist_override(case_id, finding_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker not initialized'}), 503
+    body = request.get_json(silent=True) or {}
+    if body.get('acknowledge_broken_references') is not True or not isinstance(body.get('playlist_ids'), list):
+        return jsonify({'error': 'Acknowledge the affected playlist references first'}), 400
+    try:
+        result = worker.acknowledge_review_playlists(case_id, finding_id,
+            evidence_token=body.get('evidence_token') or '', playlist_ids=body['playlist_ids'])
+        return jsonify(result), 200 if result.get('success') else 409
+    except Exception as exc:
+        logger.info('Could not acknowledge playlist references: %s', exc)
+        return jsonify({'error': 'Could not verify current playlist references. Try again.'}), 422
+
+
 @bp.route('/api/repair/review-queue/<path:case_id>/file-metadata', methods=['GET'])
 def repair_review_file_metadata(case_id):
     """Inspect a current file belonging to this review case, never a free path."""
@@ -372,6 +389,25 @@ def repair_review_queue_request_missing(case_id):
     except Exception as exc:
         logger.error('Error requesting album missing tracks: %s', exc, exc_info=True)
         return jsonify({'started': False, 'error': 'Could not request missing tracks'}), 500
+
+@bp.route('/api/repair/review-queue/<path:case_id>/retry-organization', methods=['POST'])
+def repair_review_retry_organization(case_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker not initialized'}), 503
+    result = worker.retry_review_organization(case_id, (request.get_json(silent=True) or {}).get('signature'))
+    return jsonify(result), 200 if result.get('started') else 409
+
+
+@bp.route('/api/repair/review-queue/<path:case_id>/leave-as-is', methods=['POST'])
+def repair_review_leave_album(case_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker not initialized'}), 503
+    data = request.get_json(silent=True) or {}
+    result = worker.leave_review_album(case_id, data.get('signature'))
+    return jsonify(result), 200 if result.get('success') else 409
+
 
 @bp.route('/api/repair/review-queue/<path:case_id>/stop-collecting', methods=['POST'])
 def repair_review_stop_collecting(case_id):

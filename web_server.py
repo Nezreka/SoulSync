@@ -10597,10 +10597,12 @@ def reorganize_album_preview(album_id):
         if data.get('review_case_id'):
             from core.repair_review_queue import ready_batch_preview
             case = repair_worker.get_review_case(data['review_case_id']) if repair_worker else None
+            retry = bool(case and data.get('organization_retry_signature') and
+                         data['organization_retry_signature'] == case.get('organization_retry_signature'))
             if (not case or str(case.get('album_id')) != str(album_id)
-                    or case.get('plan_signature') != data.get('plan_signature')
-                    or not (case.get('plan') or {}).get('can_organize')
-                    or not (case.get('plan') or {}).get('can_apply_ready')
+                    or (not retry and (case.get('plan_signature') != data.get('plan_signature')
+                        or not (case.get('plan') or {}).get('can_organize')
+                        or not (case.get('plan') or {}).get('can_apply_ready')))
                     or (case.get('refresh') or {}).get('state') == 'running'):
                 return jsonify({'success': False, 'error': 'The album plan changed; refresh the preview'}), 409
             reviewed = ready_batch_preview(db, case_id=case['case_id'], include_snapshot=True)
@@ -10609,8 +10611,12 @@ def reorganize_album_preview(album_id):
                 for action in album['actions']:
                     details = json.loads(reviewed['reviewed_details'][action['id']])
                     action_details.append(details)
+                    if details.get('plan_keep'):
+                        continue
                     if details.get('db_data') and action.get('file_path'):
                         updates[action['file_path']] = details['db_data']
+                        if details.get('track_id') is not None:
+                            updates[f"track:{details['track_id']}"] = details['db_data']
                     excluded.update((action.get('file_decision') or {}).get('quarantine') or [])
             metadata_source = 'tags'
             from core.library.reconciliation_organization import organization_context

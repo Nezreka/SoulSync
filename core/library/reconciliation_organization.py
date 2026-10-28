@@ -72,6 +72,8 @@ def organization_context(db, album_id, details):
         conn.close()
     title = album[0] if album else ''
     for item in details:
+        if item.get('plan_keep'):
+            continue
         title = item.get('db_album_title') or title
         change = (item.get('changes') or {}).get('filename') or {}
         if change.get('new') and item.get('track_id') is not None:

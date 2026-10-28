@@ -639,7 +639,8 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByRole('button', { name: /Compare editions/ })).toBeTruthy();
     expect(screen.getAllByText('One disc · match release positions').length).toBeGreaterThan(0);
     expect(screen.getByText('1 outside collection')).toBeTruthy();
-    expect(screen.getByText(/3 settled release slots/)).toBeTruthy();
+    expect(screen.getByText(/1 tracks outside your collection/)).toBeTruthy();
+    expect(screen.getByText(/2 settled release slots/)).toBeTruthy();
     expect(screen.getByText(/1 proposed track change/)).toBeTruthy();
     const selectedRow = screen.getByRole('button', { name: /Hourglass/ });
     fireEvent.click(selectedRow);
@@ -656,7 +657,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.queryByText(/3 settled release slots/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
     expect((screen.getByLabelText('Show tracks') as HTMLSelectElement).value).toBe('');
-    expect(screen.getByText(/3 settled release slots/)).toBeTruthy();
+    expect(screen.getByText(/2 settled release slots/)).toBeTruthy();
   });
 
   it('offers an exact replacement and recoverable quarantine for verified wrong audio', async () => {
@@ -800,7 +801,7 @@ describe('library reconciliation review queue', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
     render(<ReviewPage />);
-    await screen.findByText(/Last reconciliation stopped/);
+    await screen.findByText(/Previous library scan: stopped/);
     expect(screen.getByText(/2539 files checked/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Reanalyze library' }));
     await waitFor(() => expect(screen.getByText(/Library reconciliation queued/)).toBeTruthy());

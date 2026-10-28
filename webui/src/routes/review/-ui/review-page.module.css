@@ -3846,3 +3846,126 @@
     flex-direction: column;
   }
 }
+
+/* Expanded decisions share the same inset as their heading. */
+.page .requestStep {
+  padding: 0 14px 16px;
+  min-width: 0;
+}
+.page .completenessChoice {
+  padding: 0 14px 16px;
+}
+.page .completenessChoice .decisionActions {
+  padding: 12px 0 0;
+}
+.page .unidentifiedAlbum > .decisionActions {
+  padding: 0;
+  margin: 16px 0 24px;
+}
+.page .sidebar > button {
+  margin-block: 12px 16px;
+}
+.page .playlistReferences {
+  margin-block: 16px;
+}
+.page .playlistReferences[data-tone='info'] {
+  padding: 12px 14px;
+  background: transparent;
+}
+.page .playlistReferences h4 {
+  margin: 0;
+}
+.page .playlistReferences ul {
+  margin-block: 8px;
+}
+.page .playlistReferences p {
+  margin-block: 8px;
+}
+.missingDisclosure {
+  margin-block: 12px;
+}
+.missingDisclosure summary {
+  cursor: pointer;
+  padding: 10px 0;
+  color: var(--text-1);
+}
+.missingScroll {
+  max-height: 340px;
+  overflow: auto;
+  padding: 8px 4px;
+  margin-block: 8px;
+}
+.missingDisc {
+  margin-block: 12px;
+}
+.missingDisc > h5 {
+  margin: 0 0 10px;
+}
+.page .reviewAudio {
+  padding: 16px;
+  gap: 14px;
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.06), var(--surface-2));
+}
+.audioHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.audioHeading > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.audioHeading small {
+  color: var(--text-2);
+}
+.page .listeningLinks {
+  gap: 8px 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  align-items: center;
+}
+.page .listeningLinks a {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.page .listeningLinks a:hover {
+  color: var(--accent);
+  background: transparent;
+}
+.page .reviewAudioChoices {
+  align-items: center;
+  gap: 10px;
+}
+
+.page .clearFilters {
+  margin-block: 12px 16px;
+}
+.playlistActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.page .playlistReferences[data-tone='info'] ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  list-style: none;
+  padding: 0;
+}
+
+.page .listeningLinks a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.listeningLinks img {
+  width: 15px;
+  height: 15px;
+  object-fit: contain;
+}

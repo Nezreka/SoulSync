@@ -2655,8 +2655,13 @@ class LibraryReconciliationJob(RepairJob):
                             lambda row: _release_metadata(
                                 row, release_meta_cache, exact_musicbrainz_releases))
                     )
+                    album_identity_conflict = bool(
+                        not explicit_release and not (album and album.get('canonical_locked'))
+                        and len(files) <= 2 and len(slots) > len(files)
+                        and _single_file_album_context_conflict(album, _release_metadata(
+                            scored[0], release_meta_cache, exact_musicbrainz_releases)))
                     if (locked_conflict or tied or edition_conflict or symmetric_mismatch or
-                            position_conflict or digital_edition_choice or
+                            position_conflict or digital_edition_choice or album_identity_conflict or
                             (matched == 0 and not pinned)):
                         blockers = [row for row in tied_rows if tied and
                                     not _candidate_shapes_equivalent(scored[0], row)]
@@ -2671,7 +2676,7 @@ class LibraryReconciliationJob(RepairJob):
                         issue_type = ('reconciliation_release' if album_id is not None and
                                       (tied or locked_conflict or edition_conflict or
                                        symmetric_mismatch or position_conflict or
-                                       digital_edition_choice)
+                                       digital_edition_choice or album_identity_conflict)
                                       else 'reconciliation_unresolved')
                         if locked_conflict:
                             description = ('The locked release does not fit as well as another candidate.'
@@ -2691,6 +2696,9 @@ class LibraryReconciliationJob(RepairJob):
                         elif digital_edition_choice:
                             description = ('A digital edition covers every file, but one track has '
                                            'different evidence. Compare the editions before choosing.')
+                        elif album_identity_conflict:
+                            description = ('This recording appears on a differently named collection. '
+                                           'Choose the intended release before changing the album or requesting its other tracks.')
                         else:
                             description = 'No release track could be assigned confidently.'
                         choice_common = {
@@ -2781,6 +2789,15 @@ class LibraryReconciliationJob(RepairJob):
                                         if source == 'musicbrainz' else None) or release_id
                     identity_target = _release_identity_target(files, album, source, exact_release_id)
                     consistency = album_consistency(files)
+                    # Differing embedded release IDs are repairable when one
+                    # selected edition clearly accounts for the entire folder.
+                    # Keep the conflicts as evidence without asking the same
+                    # album identity question on every track.
+                    consistency_review = set(consistency)
+                    if (source == 'musicbrainz' and not plan['extra_files'] and
+                            not plan['missing_slots'] and len(plan['pairs']) == len(files)
+                            and all(pair['confidence'] in ('clear', 'manual') for pair in plan['pairs'])):
+                        consistency_review.discard('musicbrainz_release_id')
                     consistent_album_title = (next(
                         (str((member.get('tags') or {}).get('album') or '').strip()
                          for member in files if str(
@@ -3138,7 +3155,7 @@ class LibraryReconciliationJob(RepairJob):
                                        if filename_conflict else
                                        id_conflict.get('reason') or
                                        'Choose consistent embedded album metadata for this album'
-                                       if id_conflict or set(consistency).intersection(changed) else ''),
+                                       if id_conflict or consistency_review.intersection(changed) else ''),
                                    'recording_id_conflict': id_conflict,
                                    'recording_identity': recording,
                                    'replacement_track': {'name': slot['title'], 'artist': slot.get('artist'),

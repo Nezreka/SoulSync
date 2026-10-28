@@ -545,8 +545,14 @@ function AudioEvidence({ details, explain = false }: { details: Data; explain?: 
       )}
       {(wrong || unsupported) && (
         <p>
-          No AcoustID candidate names this release track: <strong>{expected}</strong>. Listen before
-          changing this file.
+          {expected ? (
+            <>
+              No AcoustID candidate names this release track: <strong>{expected}</strong>.
+            </>
+          ) : (
+            'The fingerprint identity does not support the local title, and no release track is assigned.'
+          )}{' '}
+          Listen before changing this file.
         </p>
       )}
       {reasons.map((reason) => (
@@ -1407,10 +1413,7 @@ export function ReconciliationEvidence({
 }) {
   const details = object(finding.details);
   const changes = object(details.changes);
-  const shownChanges = displayChanges(changes).filter(
-    (change) =>
-      !(change.field === 'album' && change.locations.every((location) => location === 'library')),
-  );
+  const shownChanges = displayChanges(changes);
   const identifierAdditions = shownChanges.filter(
     (change) =>
       isIdentifierField(change.field) && changeOperation(change.old, change.next) === 'add',
@@ -1424,7 +1427,7 @@ export function ReconciliationEvidence({
               changeOperation(change.old, change.next)
             ]
           : ''
-      }${proposedFieldLabel(change.field, shownChanges.filter((row) => row.field === change.field).length > 1 ? change.locations : undefined)}`,
+      }${proposedFieldLabel(change.field, change.field === 'album' || shownChanges.filter((row) => row.field === change.field).length > 1 ? change.locations : undefined)}`,
       current: change.old,
       planned: change.next,
     }));
@@ -1436,6 +1439,12 @@ export function ReconciliationEvidence({
   return (
     <div className={styles.reconciliationEvidence}>
       <EvidenceSummary details={details} />
+      {Boolean(changes.library_album_assignment) && (
+        <p className={styles.actionNote}>
+          Associate this track with the reviewed album in your library. Folder moves are reviewed
+          separately.
+        </p>
+      )}
       {Boolean(details.metadata_review_reason) && (
         <section className={styles.problemCard} data-tone="warning">
           <h4>
@@ -1515,7 +1524,7 @@ export function ReconciliationEvidence({
           <TrackGroups pairs={primaryPairs} />
         </section>
       )}
-      {Object.keys(changes).length > 0 && (
+      {shownChanges.length > 0 && (
         <section className={styles.changesCard}>
           <h4>
             <EvidenceIcon name="check" /> Proposed changes
