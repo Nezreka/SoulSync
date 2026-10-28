@@ -802,7 +802,7 @@ def select_profile():
         if session.get('device_owner') != profile_id or not session.get('device_id'):
             from core.security.devices import start_device
             start_device(session, database.add_profile_device, profile_id, request.headers.get('User-Agent', ''),
-                         request.remote_addr or '')
+                         request.remote_addr or '', revoke_row=database.revoke_profile_device)
             session['device_owner'] = profile_id
         # If the admin PIN was just validated, also mark launch PIN as
         # verified so the subsequent page reload doesn't ask again. only a pin
@@ -1055,7 +1055,9 @@ def set_profile_password_endpoint(profile_id):
         if ok:
             # a new password signs out every other browser on that profile;
             # the one that changed it (if it's the profile's own) stays in
-            epoch = database.bump_profile_session_epoch(profile_id)
+            epoch = database.bump_profile_session_epoch(
+                profile_id,
+                keep_device_id=session.get('device_id') if int(profile_id) == int(current_pid) else None)
             from core.security.session_epoch import forget
             forget(profile_id)
             if int(profile_id) == int(current_pid) and epoch is not None:

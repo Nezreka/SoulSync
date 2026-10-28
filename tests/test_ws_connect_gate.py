@@ -408,7 +408,8 @@ def test_actor_reconnect_with_new_epoch_survives_sweep(monkeypatch):
         web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-actor-1837'))
     assert stale.is_connected() is True
     db = web_server.get_database()
-    new_epoch = db.bump_profile_session_epoch(pid)
+    # the endpoint keeps the acting browser's device row, as here
+    new_epoch = db.bump_profile_session_epoch(pid, keep_device_id='dev-actor-1837')
     assert new_epoch is not None
     from core.security.session_epoch import forget
     forget(pid)

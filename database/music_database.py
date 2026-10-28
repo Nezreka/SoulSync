@@ -1358,6 +1358,7 @@ class MusicDatabase:
             self._add_profile_oidc_identity(cursor)
             self._add_profile_controls(cursor)
             self._add_device_oidc_session(cursor)
+            self._revoke_stale_device_rows(cursor)
             self._add_own_library_columns(cursor)
             self._repair_own_jellyfin_artist_ids(cursor)
             self._add_service_credential_sets(cursor)
@@ -9970,15 +9971,22 @@ class MusicDatabase:
             logger.error(f"Error updating profile {profile_id}: {e}")
             return False
 
-    def bump_profile_session_epoch(self, profile_id: int) -> Optional[int]:
+    def bump_profile_session_epoch(self, profile_id: int,
+                                   keep_device_id: Optional[str] = None) -> Optional[int]:
         """sign this profile out everywhere: every session carries the epoch it
-        was signed in under, and one that no longer matches has no profile."""
+        was signed in under, and one that no longer matches has no profile.
+        its device rows go with them, so the device list stops showing
+        browsers that were just signed out. ``keep_device_id`` is the one
+        browser that stays signed in (yourself, moving on to the new epoch)."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 self._add_profile_controls(cursor)
                 cursor.execute("UPDATE profiles SET session_epoch = COALESCE(session_epoch, 0) + 1 WHERE id = ?",
                                (int(profile_id),))
+                cursor.execute("UPDATE profile_devices SET revoked_at = CURRENT_TIMESTAMP "
+                               "WHERE owner_id = ? AND revoked_at IS NULL AND id != ?",
+                               (int(profile_id), keep_device_id or ''))
                 conn.commit()
                 cursor.execute("SELECT session_epoch FROM profiles WHERE id = ?", (int(profile_id),))
                 row = cursor.fetchone()
@@ -10083,10 +10091,41 @@ class MusicDatabase:
                                "WHERE oidc_identity IS NOT NULL")
                 if cursor.rowcount:
                     logger.info("OIDC session lifetime: signed out %s oidc-linked profile(s) once", cursor.rowcount)
+                # the browsers that just lost their session leave the device list too
+                cursor.execute("UPDATE profile_devices SET revoked_at = CURRENT_TIMESTAMP "
+                               "WHERE revoked_at IS NULL AND owner_id IN "
+                               "(SELECT id FROM profiles WHERE oidc_identity IS NOT NULL)")
             cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('oidc_session_lifetime_v1', '1')")
             self._record_migration(cursor, 'oidc_session_lifetime_v1')
         except Exception as e:
             logger.error(f"Error in device oidc session migration: {e}")
+
+    # a device row not used in this long is taken off the list by the one-time
+    # cleanup below. a live browser touches its row every few minutes in use
+    _STALE_DEVICE_DAYS = 7
+
+    def _revoke_stale_device_rows(self, cursor):
+        """once: signing out everywhere (and a new password, a reset, turning a
+        profile off) used to leave every signed-out browser on the device
+        list. those rows can't be told apart from live ones any more, so the
+        ones not used for a week are taken off. a browser that was only idle
+        signs in again."""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'device_rows_stale_v1' LIMIT 1")
+            if cursor.fetchone():
+                return
+            cursor.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'profile_devices'")
+            if cursor.fetchone():
+                cursor.execute("UPDATE profile_devices SET revoked_at = CURRENT_TIMESTAMP "
+                               "WHERE revoked_at IS NULL AND last_seen < datetime('now', ?)",
+                               (f"-{self._STALE_DEVICE_DAYS} days",))
+                if cursor.rowcount:
+                    logger.info("Device list: took off %s device(s) not used in %s days",
+                                cursor.rowcount, self._STALE_DEVICE_DAYS)
+            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('device_rows_stale_v1', '1')")
+            self._record_migration(cursor, 'device_rows_stale_v1')
+        except Exception as e:
+            logger.error(f"Error in stale device row cleanup: {e}")
 
     def set_profile_device_oidc(self, device_id: str, *, identity: Optional[str] = None,
                                 expires_at: float, refresh_token: Optional[str] = None,
