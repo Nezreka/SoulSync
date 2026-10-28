@@ -605,3 +605,57 @@ def test_the_oidc_route_passes_the_sign_up_settings(client, monkeypatch):
     p = db.get_profile(db.get_profile_by_oidc_identity(acct.identity)['id'])
     assert p['allowed_sides'] == 'video' and p['home_page'] == 'video-discover'
     assert p['request_limit'] == 3 and p['request_limit_days'] == 30
+
+
+# -- the callback uri behind a proxy (RileyRabbit) --
+
+def test_callback_uri_rules():
+    cb = '/api/auth/oidc/callback'
+    # a pinned override always wins
+    assert oidc_signin.callback_uri(' https://pinned.test/x ', 'http://a/', 'http', cb) == 'https://pinned.test/x'
+    # a proxy that terminates https and says so upgrades the scheme
+    assert oidc_signin.callback_uri('', 'http://media.test/', 'https', cb) == 'https://media.test' + cb
+    assert oidc_signin.callback_uri('', 'http://media.test/', 'https, http', cb) == 'https://media.test' + cb
+    # a subpath install keeps its subpath
+    assert oidc_signin.callback_uri('', 'http://media.test/soulsync/', 'https', cb) == 'https://media.test/soulsync' + cb
+    # nothing in front: unchanged
+    assert oidc_signin.callback_uri('', 'http://192.168.1.5:8008/', '', cb) == 'http://192.168.1.5:8008' + cb
+    # it only ever upgrades
+    assert oidc_signin.callback_uri('', 'https://media.test/', 'http', cb) == 'https://media.test' + cb
+
+
+def test_the_provider_gets_https_behind_a_proxy_that_hides_it(client, monkeypatch):
+    """RileyRabbit: behind an https proxy, with "Behind a reverse proxy" off,
+    the provider was sent http://.../callback while the settings page told
+    the admin to register https://, and the provider refused the mismatch."""
+    _config(monkeypatch)
+    _stub_provider(monkeypatch)
+    r = client.get('/api/auth/oidc/start', base_url='http://media.test',
+                   headers={'X-Forwarded-Proto': 'https'})
+    q = parse_qs(urlparse(r.headers['Location']).query)
+    assert q['redirect_uri'] == ['https://media.test/api/auth/oidc/callback']
+    # and the settings page is shown that same uri
+    body = client.get('/api/auth/oidc/available', base_url='http://media.test',
+                      headers={'X-Forwarded-Proto': 'https'}).get_json()
+    assert body['callback_url'] == 'https://media.test/api/auth/oidc/callback'
+
+
+def test_the_token_exchange_sends_the_same_uri_the_browser_was_sent_with(client, monkeypatch):
+    _config(monkeypatch)
+    _stub_provider(monkeypatch)
+    sent = []
+    real = oidc_signin.exchange_code
+    monkeypatch.setattr(oidc_signin, 'exchange_code',
+                        lambda s, d, code, flow: sent.append(flow.redirect_uri) or real(s, d, code, flow))
+    r = client.get('/api/auth/oidc/start', base_url='http://media.test',
+                   headers={'X-Forwarded-Proto': 'https'})
+    state = parse_qs(urlparse(r.headers['Location']).query)['state'][0]
+    client.get(f'/api/auth/oidc/callback?code=code-1&state={state}', base_url='http://media.test')
+    assert sent == ['https://media.test/api/auth/oidc/callback']
+
+
+def test_the_callback_url_is_shown_even_with_oidc_off_and_a_pinned_override(client, monkeypatch):
+    _config(monkeypatch, **{'security.oidc_signin': False,
+                            'security.oidc_redirect_uri': 'https://auth.example/api/auth/oidc/callback'})
+    body = client.get('/api/auth/oidc/available').get_json()
+    assert body['callback_url'] == 'https://auth.example/api/auth/oidc/callback'

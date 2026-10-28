@@ -138,6 +138,10 @@ Any profile (or an admin for them) can set a **recovery question and answer** as
 
 The owner can clear their PIN by proving they run the install: enter any configured service credential (for example the Spotify client secret or the Plex token). That only works for the main admin profile — a member's forgotten PIN is the admin's to reset from Manage Profiles.
 
+## OIDC callback URL
+
+Settings > Security > Sign in with OIDC shows the callback URL to register at your provider. It's the one SoulSync will actually send, so register it exactly. Behind a reverse proxy that serves https, SoulSync uses https when the proxy sends \`X-Forwarded-Proto\` (Nginx Proxy Manager, Traefik and Caddy do; plain nginx needs \`proxy_set_header X-Forwarded-Proto $scheme;\`). If the page warns that SoulSync sees plain http, turn on **Behind a reverse proxy** and restart, or set the **Callback URL override** to your https address.
+
 ## OIDC only
 
 Settings > Security > Sign in with OIDC has an **OIDC only** switch. With it on, the provider is the only way in: password sign-in, the recovery question, Sign in with Plex and switching profiles with a password all stop working, and anyone signed in some other way is signed out. API keys keep working.

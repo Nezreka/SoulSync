@@ -234,9 +234,9 @@ def _app_root():
 def oidc_redirect_uri(settings):
     """the callback address the provider must have registered. the admin can
     pin it, for proxies that don't pass the public host through"""
-    if settings.redirect_uri:
-        return settings.redirect_uri
-    return request.url_root.rstrip('/') + OIDC_CALLBACK_PATH
+    from core.security.oidc_signin import callback_uri
+    return callback_uri(getattr(settings, 'redirect_uri', '') or '', request.url_root,
+                        request.headers.get('X-Forwarded-Proto', ''), OIDC_CALLBACK_PATH)
 
 
 def _oidc_done(error=None, mode='signin'):
@@ -324,6 +324,13 @@ def _invite_back(token, error):
     return redirect(_app_root() + 'invite/' + token)
 
 
+class _PinnedOnly:
+    """oidc is off but the admin is filling the form in: the override still counts"""
+
+    def __init__(self, cfg):
+        self.redirect_uri = ((cfg.get('security.oidc_redirect_uri', '') if cfg else '') or '').strip()
+
+
 @bp.route('/api/auth/oidc/available', methods=['GET'])
 def oidc_signin_available():
     """whether the login screen offers sign in with oidc, the button's label,
@@ -335,6 +342,9 @@ def oidc_signin_available():
                     'label': settings.button_label if settings else oidc_signin.DEFAULT_BUTTON_LABEL,
                     # the login screen shows nothing else while it's on (#1839)
                     'oidc_only': is_on(config_manager),
+                    # what this server will send the provider, so the settings
+                    # page shows the uri to register instead of guessing it
+                    'callback_url': oidc_redirect_uri(settings or _PinnedOnly(config_manager)),
                     'error': session.pop('oidc_error', None)})
 
 

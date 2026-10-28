@@ -107,6 +107,26 @@ def read_settings(config_manager) -> Optional[OidcSettings]:
     )
 
 
+def callback_uri(pinned: str, url_root: str, forwarded_proto: str, path: str) -> str:
+    """the redirect_uri sent to the provider.
+
+    a pinned override wins. otherwise it's the address the request came in on,
+    which behind a proxy that terminates https is the proxy's plain http hop,
+    so the provider got http:// while the settings page (built from the
+    browser) told the admin to register https:// (RileyRabbit). an
+    X-Forwarded-Proto of https upgrades the scheme, even without the full
+    trust-reverse-proxy mode: it only ever upgrades, the host never comes from
+    a header, and the provider only redirects to uris it has registered, so a
+    forged header can only break the forger's own sign-in."""
+    if (pinned or "").strip():
+        return pinned.strip()
+    base = (url_root or "").rstrip("/")
+    proto = (forwarded_proto or "").split(",")[0].strip().lower()
+    if proto == "https" and base.startswith("http://"):
+        base = "https://" + base[len("http://"):]
+    return base + path
+
+
 def safe_icon_url(url: str) -> str:
     """the admin's logo url, or "" unless it is plain https. it's drawn as an
     image in my account, so no other scheme gets through"""

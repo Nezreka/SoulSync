@@ -3958,7 +3958,21 @@ async function loadSettingsData() {
             if (oidcDl) oidcDl.checked = settings.security?.oidc_signin_default_can_download || false;
             // the address to register at the provider, as this browser sees it
             const oidcCb = document.getElementById('security-oidc-callback-url');
-            if (oidcCb) oidcCb.textContent = window.location.origin + window.SoulSyncURL.resolve('/api/auth/oidc/callback');
+            if (oidcCb) {
+                // the browser's own address first, then what the server will
+                // really send the provider. behind a proxy that hides https
+                // they differ, and only the server's one matters (RileyRabbit).
+                oidcCb.textContent = window.location.origin + window.SoulSyncURL.resolve('/api/auth/oidc/callback');
+                const oidcWarn = document.getElementById('security-oidc-callback-warn');
+                fetch('/api/auth/oidc/available').then(r => r.ok ? r.json() : null).then(d => {
+                    if (!d || !d.callback_url) return;
+                    oidcCb.textContent = d.callback_url;
+                    if (!oidcWarn) return;
+                    const sent = d.callback_url.split(':')[0];
+                    const page = window.location.protocol.replace(':', '');
+                    oidcWarn.hidden = sent === page;
+                }).catch(() => { /* keep the browser's guess */ });
+            }
             const signupSides = document.getElementById('security-signup-sides');
             if (signupSides) {
                 const sides = settings.security?.signup_sides;

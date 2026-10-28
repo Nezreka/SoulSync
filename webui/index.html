@@ -9404,6 +9404,12 @@
                                                         the admin, save these settings, then connect your own account
                                                         at the bottom.
                                                     </div>
+                                                    <div class="setting-warning" id="security-oidc-callback-warn" role="status" hidden>
+                                                        SoulSync sees this connection as plain http, so that's the
+                                                        callback it sends your provider. Turn on Behind a reverse proxy
+                                                        below and restart, have your proxy send X-Forwarded-Proto, or
+                                                        set the Callback URL override to your https address.
+                                                    </div>
                                                     <!-- the provider's settings: one nested block inside the toggle's row -->
                                                     <div class="security-nested security-nested-block" id="security-oidc-provider">
                                                         <div class="form-group">
