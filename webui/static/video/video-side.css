@@ -6549,6 +6549,7 @@ body[data-side="video"] #gsearch-aura {
 /* on the dashboard it is a rail card: one column, a count chip by the title */
 [data-card="downloads"] .vdn-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
 [data-card="downloads"] .vdn-more { align-self: flex-start; padding: 2px 2px 0; }
+[data-card="downloads"] .dash-side-title { white-space: nowrap; }
 .vdn-count {
     display: inline-block;
     margin-left: 6px;
