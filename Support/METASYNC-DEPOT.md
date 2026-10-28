@@ -34,11 +34,15 @@ agreement alone never satisfies:
   about each value in a list).
 - **(c) Single survivor, verified anchor.** One candidate remains
   after disambiguation, and a verified anchor picked it: a fetched
-  provider link, a shared strong-verified MusicBrainz ID, or — for
-  a provider ID — the track sitting at the file's own disc and
-  position in a verified release tracklist. The tracklist slot
-  proves *which track* this is, so it anchors IDs only; an ISRC, a
-  year, a genre or a label at the same slot still needs (a) or (b).
+  provider link or a shared strong-verified MusicBrainz ID. The
+  tracklist slot is *not* an anchor for provider IDs: a track
+  sitting at the file's own disc and position in a verified
+  tracklist proves *which track* this is, not that the ID a node
+  attached to it is right — and on a niche item one answering node
+  is automatically the single survivor. Provider IDs promote via
+  (a), (b) or the settlement above. The slot anchor returns when
+  the per-slot provider ID recorded at verification time can be
+  checked against the candidate.
 
 A value other nodes merely *agree* on ("3+ nodes" in the depot) is
 shown and stored as a candidate, but **never promoted on agreement

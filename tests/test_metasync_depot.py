@@ -276,6 +276,12 @@ def test_leg_c_stale_settlement_promotes_nothing(db):
 
 
 def test_leg_c_track_in_verified_tracklist(db):
+    """Concerns §4.1: a settled, strong-verified tracklist slot
+    proves WHICH track this is — it says nothing about whether the
+    provider ID attached to it is right, and a lone answering node
+    is automatically the single survivor. The slot anchor no
+    longer promotes a provider ID, at the right slot or any
+    other; the ID needs leg (a), (b), or a settlement."""
     album = "soul_album_c"
     track = "soul_track_c"
     variant = {"variants": {
@@ -291,12 +297,26 @@ def test_leg_c_track_in_verified_tracklist(db):
     ok, leg = depot.promotion_verdict(
         db, track, "spotify_id", "sp9", now=NOW,
         album_subject=album, disc=1, position=2)
-    assert (ok, leg) == (True, "c")
-    # the wrong slot is no anchor
+    assert (ok, leg) == (False, None)
     ok, _ = depot.promotion_verdict(
         db, track, "spotify_id", "sp9", now=NOW,
         album_subject=album, disc=1, position=3)
     assert ok is False
+
+
+def test_leg_c_settlement_still_promotes_a_non_id_field(db):
+    """§4.1 turned off only the slot anchor: leg (c)'s actual
+    single-survivor disambiguation — a promotion-flagged, fresh
+    settlement — still promotes a non-ID field it settled."""
+    subject = "soul_album_year_c"
+    block = {"settled": "year:1991", "via": "fetched_link",
+             "promotion": True, "survivors": ["year:1991"],
+             "settled_at": (NOW - timedelta(days=1)).timestamp()}
+    depot.store_record(db, _record(subject, "album", {
+        "year": _field([_value(1991, support="1-2")])},
+        disambiguation=block), now=NOW)
+    assert depot.promotion_verdict(db, subject, "year", 1991,
+                                   now=NOW) == (True, "c")
 
 
 def test_lone_claim_with_no_anchor_is_not_a_survivor(db):
@@ -696,8 +716,9 @@ def test_confirmation_key_check_never_raises_on_malformed_position():
 
 
 def test_leg_c_anchor_tolerates_non_numeric_slot(db):
-    """A variant slot whose disc/position arrived as junk text is
-    no anchor — and reading it must not raise into tagging."""
+    """A variant slot whose disc/position arrived as junk text
+    must not raise into tagging — and with the slot anchor off
+    (§4.1) the verdict refuses regardless."""
     album = "soul_album_junk"
     track = "soul_track_junk"
     variant = {"variants": {
@@ -1417,13 +1438,15 @@ def test_genre_marks_from_two_paths_coexist(db):
     assert depot.network_fields_for_export(db, "album", row) == ["genres"]
 
 
-# ── SF-3: leg (c)'s slot anchor speaks for provider IDs only ─────
+# ── §4.1: leg (c)'s slot anchor is off for provider IDs ─────────
 
-def test_leg_c_slot_anchor_covers_provider_ids_only(db):
+def test_leg_c_slot_anchor_off_for_provider_ids(db):
     """The settled slot proves WHICH track this is, not which
-    values are right: a provider ID at the slot still promotes via
-    (c), an ISRC at the very same slot does not — it needs (a)
-    or (b)."""
+    values are right. It used to promote a provider ID at the
+    slot; concerns §4.1 turns that off — every provider-ID field
+    (the MBIDs included) now refuses at the very same slot, and
+    the value fields refuse too, exactly as they always did: all
+    of them need (a), (b), or a settlement."""
     album = "soul_album_slot"
     track = "soul_track_slot"
     variant = {"variants": {
@@ -1436,12 +1459,18 @@ def test_leg_c_slot_anchor_covers_provider_ids_only(db):
                                    {"album_track": variant}), now=NOW)
     depot.store_record(db, _record(track, "track", {
         "spotify_id": _field([_value("sp9", support="1-2")]),
+        "deezer_id": _field([_value("dz9", support="1-2")]),
+        "recording_mbid": _field([_value("mb9", support="1-2")]),
         "isrc": _field([_value("USRC1", support="1-2")]),
         "year": _field([_value(1991, support="1-2")]),
     }), now=NOW)
     ctx = {"album_subject": album, "disc": 1, "position": 2}
     assert depot.promotion_verdict(db, track, "spotify_id", "sp9",
-                                   now=NOW, **ctx) == (True, "c")
+                                   now=NOW, **ctx) == (False, None)
+    assert depot.promotion_verdict(db, track, "deezer_id", "dz9",
+                                   now=NOW, **ctx) == (False, None)
+    assert depot.promotion_verdict(db, track, "recording_mbid", "mb9",
+                                   now=NOW, **ctx) == (False, None)
     assert depot.promotion_verdict(db, track, "isrc", "USRC1",
                                    now=NOW, **ctx) == (False, None)
     assert depot.promotion_verdict(db, track, "year", 1991,
