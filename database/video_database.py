@@ -680,6 +680,102 @@ class VideoDatabase:
             raise
         finally:
             conn.close()
+        self._drop_legacy_id_uniques()
+
+    # Inline UNIQUEs older databases carry on an external id. A server can list
+    # one series as several items (Boulder's had "90 Day Fiancé: The Other Way"
+    # fifteen times), and a title can sit in two libraries, so the id is shared
+    # by design; the current schema has no such constraint. With it, matching a
+    # second copy failed outright ("Failed to update the match").
+    _LEGACY_ID_UNIQUES = {"shows": ("tvdb_id", "tmdb_id", "imdb_id"),
+                          "movies": ("tmdb_id", "imdb_id")}
+
+    def _drop_legacy_id_uniques(self) -> None:
+        """Rebuild ``shows``/``movies`` without a legacy inline UNIQUE on an id.
+
+        SQLite can't drop an inline constraint, so this is its documented
+        rebuild: new table, copy, drop, rename, indexes and views back. Child
+        tables (episodes, seasons, media_files…) reference these with ON DELETE
+        CASCADE, so the drop is only safe with foreign keys off, which SQLite
+        ignores inside a transaction. Hence its own autocommit connection, a
+        read-back that foreign keys really are off before anything is dropped,
+        and row counts of every child table compared before commit. Any
+        mismatch rolls the whole thing back. Idempotent: a table without the
+        constraint is left alone."""
+        import re
+        try:
+            conn = sqlite3.connect(str(self.database_path), timeout=60.0, isolation_level=None)
+        except sqlite3.Error:
+            logger.exception("legacy id unique check: could not open the database")
+            return
+        try:
+            conn.execute("PRAGMA busy_timeout = 60000")
+            todo = {}
+            for tbl, cols in self._LEGACY_ID_UNIQUES.items():
+                row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+                                   (tbl,)).fetchone()
+                if not row or not row[0]:
+                    continue
+                new_sql = row[0]
+                for col in cols:
+                    new_sql = re.sub(r"(\b%s\s+INTEGER|\b%s\s+TEXT)\s+UNIQUE\b" % (col, col),
+                                     r"\1", new_sql, flags=re.IGNORECASE)
+                if new_sql != row[0]:
+                    todo[tbl] = new_sql
+            if not todo:
+                return
+            conn.execute("PRAGMA foreign_keys = OFF")
+            if conn.execute("PRAGMA foreign_keys").fetchone()[0] != 0:
+                logger.error("legacy id unique rebuild skipped: foreign keys would not turn off")
+                return
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                children = [r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND ("
+                    + " OR ".join("sql LIKE ?" for _ in todo) + ")",
+                    ["%REFERENCES " + t + "%" for t in todo])]
+                counts = lambda names: {n: conn.execute('SELECT COUNT(*) FROM "%s"' % n).fetchone()[0]
+                                        for n in names}
+                before = counts(list(todo) + children)
+                views = conn.execute("SELECT name, sql FROM sqlite_master WHERE type='view' "
+                                     "AND sql IS NOT NULL").fetchall()
+                for name, _sql in views:
+                    conn.execute('DROP VIEW IF EXISTS "%s"' % name)
+                for tbl, new_sql in todo.items():
+                    indexes = [r[0] for r in conn.execute(
+                        "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=? "
+                        "AND sql IS NOT NULL", (tbl,))]
+                    tmp = tbl + "__rebuild"
+                    conn.execute('DROP TABLE IF EXISTS "%s"' % tmp)
+                    create = re.sub(r"^\s*CREATE\s+TABLE\s+(\"?)%s\1" % tbl,
+                                    'CREATE TABLE "%s"' % tmp, new_sql, count=1, flags=re.IGNORECASE)
+                    if create == new_sql:
+                        raise RuntimeError("could not rename the CREATE for %s" % tbl)
+                    conn.execute(create)
+                    conn.execute('INSERT INTO "%s" SELECT * FROM "%s"' % (tmp, tbl))
+                    conn.execute('DROP TABLE "%s"' % tbl)
+                    conn.execute('ALTER TABLE "%s" RENAME TO "%s"' % (tmp, tbl))
+                    for idx_sql in indexes:
+                        conn.execute(idx_sql)
+                for _name, view_sql in views:
+                    conn.execute(view_sql)
+                after = counts(list(todo) + children)
+                if after != before:
+                    raise RuntimeError("row counts moved: %r -> %r" % (before, after))
+                conn.execute("COMMIT")
+                logger.info("dropped the legacy id UNIQUE on %s (rows kept: %s)",
+                            ", ".join(sorted(todo)), before)
+            except Exception:
+                conn.execute("ROLLBACK")
+                logger.exception("legacy id unique rebuild failed; nothing changed")
+        except sqlite3.Error:
+            logger.exception("legacy id unique check failed")
+        finally:
+            try:
+                conn.execute("PRAGMA foreign_keys = ON")
+            except sqlite3.Error:
+                pass
+            conn.close()
 
     # Partial indexes that reference migration-added columns. They MUST run after
     # _ensure_columns (the schema executescript runs first, before the ALTERs, so
@@ -4901,7 +4997,11 @@ class VideoDatabase:
                 "s.title AS show_title, s.network, s.airs_time, s.year AS show_year, s.status AS show_status, "
                 "(s.poster_url IS NOT NULL AND s.poster_url<>'') AS show_has_poster, "
                 "(s.backdrop_url IS NOT NULL AND s.backdrop_url<>'') AS show_has_backdrop "
-                "FROM episodes e JOIN shows s ON s.id = e.show_id "
+                # CROSS JOIN pins episodes as the outer loop, so the window is
+                # read off idx_episodes_air. left to itself the planner (no
+                # sqlite_stat1) walked every show's every episode: 6.1s for one
+                # week over 220k episodes, 0.09s this way, same rows.
+                "FROM episodes e CROSS JOIN shows s ON s.id = e.show_id "
                 "LEFT JOIN video_wishlist w ON w.profile_id=? AND w.kind='episode' AND w.tmdb_id = s.tmdb_id "
                 "  AND w.season_number = e.season_number AND w.episode_number = e.episode_number "
                 "WHERE " + srv_where + " "
@@ -5171,6 +5271,26 @@ class VideoDatabase:
                 except (IndexError, ValueError):
                     return None
         return None
+
+    def external_id_holder(self, kind: str, service: str, external_id, exclude_id=None):
+        """The library row (id, title, year, owned episode/file count) already
+        carrying this external id, or None. For saying who has it when a legacy
+        unique refuses a second copy."""
+        tbl = {"movie": "movies", "show": "shows"}.get(kind)
+        col = {"tmdb": "tmdb_id", "tvdb": "tvdb_id", "imdb": "imdb_id"}.get(service)
+        if not tbl or not col:
+            return None
+        conn = self._get_connection()
+        try:
+            owned = ("(SELECT COUNT(*) FROM episodes e WHERE e.show_id=t.id AND e.has_file=1)"
+                     if tbl == "shows" else
+                     "(SELECT COUNT(*) FROM media_files f WHERE f.movie_id=t.id)")
+            r = conn.execute(
+                "SELECT t.id, t.title, t.year, %s AS owned FROM %s t WHERE t.%s=? AND t.id IS NOT ? "
+                "LIMIT 1" % (owned, tbl, col), (external_id, exclude_id)).fetchone()
+            return dict(r) if r else None
+        finally:
+            conn.close()
 
     def airing_offered_keys(self, profile_id: int, keys) -> set:
         """The (tmdb_id, season, episode) keys in ``keys`` the airing automation

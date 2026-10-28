@@ -775,23 +775,59 @@ registerDocsSection({
     pages: [
         {
             id: 'vcal-grid',
-            title: 'Week Grid & Air Times',
-            lede: 'Upcoming episodes on a week grid with air times, agenda, and click-through details.',
+            title: 'Week, Agenda & Month',
+            lede: 'Every episode and movie release, each one showing where it stands.',
             body: `
-The **Calendar** lays out upcoming episodes on a week grid — the same shape as the Sonarr/Radarr calendars. Each day shows what's airing with air times; clicking a day opens an agenda, and clicking an episode opens its details.
+The **Calendar** shows what airs this week for the shows you follow, plus release dates for the movies on your wishlist. Up top, **Next up** shows the next three episodes as one billboard; hover one to open it out.
 
-You can scope the calendar to your **watchlist** or everything (\`watchlist\` / \`all\`), and switch between compact and agenda views. Everything is scoped per media server, so you only see what's relevant to your setup.
+Three views, with ‹ › and **Today** to move around (or the ← → and T keys):
 
-> [!TIP]
-> The calendar is driven by your monitored shows — follow a show on the [video watchlist](#vwatch-follow) and its airings appear automatically.
+- **Week**: seven columns, grouped by time of day. A whole season dropped on one day is a single card (*S2 · E1–19 · 19 eps*).
+- **Agenda**: one list with episode stills and a line saying why each is in its state. On the current week it starts at today; earlier days fold away.
+- **Month**: a six-week grid, one line per show per day. Click a day to open it in the agenda.
+
+**Watchlist** shows the shows you follow plus every airing show you haven't muted; **All library** shows every airing show you own. Followed shows that aren't in your library yet appear too, marked *Not in your library*. Specials (season 0) are hidden unless you turn on **Show specials** in the ⋯ menu.
+`
+        },
+        {
+            id: 'vcal-states',
+            title: 'Episode States',
+            lede: 'Every card says whether you have it, are getting it, or nothing is.',
+            body: `
+| State | Means |
+|---|---|
+| **In library** | The file is on your server |
+| **Downloading** | Being fetched now; the card shows its percent |
+| **Queued** | Waiting for a download slot |
+| **Wanted** | On your wishlist and being searched |
+| **Failed** | Searched, and nothing passed your quality profile. Open it to **Retry now** |
+| **Missing** | Aired, and nothing is looking for it |
+| **Auto** / Upcoming | Hasn't aired. *Auto* means the airing automation will grab it after it airs |
+| **Not monitored** | You told SoulSync to stop looking for it |
+
+The chips above the calendar count each state and filter to it. When aired episodes are **Missing**, a bar offers to wishlist all of them at once. Click any episode for details: an admin can **Ignore** one (stop monitoring it), and anyone with download rights can wishlist or retry it.
+
+The line at the right says when air dates were last refreshed from TMDB and when the auto-wishlist last ran, so a quiet calendar and a stalled automation never look the same. The page refreshes itself every 15 seconds while something is downloading, every few minutes otherwise, and whenever you come back to it.
+`
+        },
+        {
+            id: 'vcal-auto',
+            title: 'Auto-Wishlist for Airings',
+            lede: 'How aired episodes reach your wishlist without you.',
+            body: `
+**Auto-Wishlist Episodes Airing Today** runs every 4 hours. Each run looks back a week and adds every aired, monitored episode you don't own for the shows you follow, **once each**. An episode you remove from the wishlist isn't added back.
+
+Looking back a week means a run the server missed (asleep, restarting) costs a few hours, not a day, and an episode TMDB lists late, like a streaming season posted on release day, still gets picked up. **Refresh Airing TV Schedules** re-pulls air dates from TMDB every night, so the calendar and the automation both see new and moved episodes.
+
+Unaired episodes aren't added ahead of time: they show as **Auto** until they air. RSS sync then grabs them as soon as a release is posted.
 `
         },
         {
             id: 'vcal-movie',
             title: 'Movie Lane',
-            lede: 'Upcoming film releases — theatrical, digital, and physical windows — in one lane.',
+            lede: 'Release dates for the movies on your wishlist.',
             body: `
-Alongside the TV grid, a dedicated **movie lane** tracks upcoming releases for your **wishlisted movies**: the **cinema** (theatrical premiere) date and the **available** (home-release) date, filterable by type. Movies and shows live in one view, so you can see the whole week of what's coming at a glance.
+Movies on your wishlist appear on the day they reach **cinemas** and the day they're **available** at home (digital or physical). A film that skips cinemas gets one entry. Each movie shows its state like an episode does: wanted, downloading, failed or in your library.
 `
         },
         {
@@ -799,16 +835,11 @@ Alongside the TV grid, a dedicated **movie lane** tracks upcoming releases for y
             title: 'iCal Feed',
             lede: 'Subscribe to upcoming airings and releases from any calendar app.',
             body: `
-Take the calendar with you: SoulSync serves an **iCal feed** you can subscribe to from Apple Calendar, Google Calendar, or anything else that speaks iCal.
+Open the ⋯ menu and choose **Subscribe in a calendar app**. Copy the link into Google Calendar, Apple Calendar or Outlook ("add calendar from URL").
 
-\`\`\`text
-/api/video/calendar.ics?scope=watchlist
-\`\`\`
+The link has your own token in it, so a calendar app can read it without signing in, and it shows your calendar: your follows, your profile's rating limits. Treat it like a password. **Reset link** makes a new one and the old one stops working.
 
-The feed respects the same scope parameter as the page (\`watchlist\` or \`all\`), so your phone calendar only shows what you care about.
-
-> [!NOTE]
-> The iCal feed uses your session context — subscribe from a browser where you're logged in, or check with your admin about feed authentication for your setup.
+The feed covers the next 14 days; add \`days=60\` to the link for up to 60. Episodes with a known air time are timed events, everything else is all-day.
 `
         },
     ]
@@ -1255,7 +1286,10 @@ Base path: \`/api/video\`. Read-only content endpoints, open to any video-enable
 | GET | \`/studio/{id}\`, \`/studio/{id}/movies\`, \`/studio/presets\` | Studio detail, paged filmography, preset studios |
 | GET | \`/discover/hero\`, \`/discover/foryou\`, \`/discover/taste\`, \`/discover/morelike\`, \`/discover/gaps\`, \`/discover/genres\`, \`/discover/list\`, \`/discover/trailer\` | Discover feed surfaces |
 | GET/POST | \`/discover/ignore\`, \`/discover/languages\`, \`/discover/providers-pref\` | Global discover preferences |
-| GET | \`/calendar\`, \`/calendar.ics\` | Upcoming airings/releases (JSON + iCal feed) |
+| GET | \`/calendar\`, \`/calendar/followed\` | The window with each episode's state; followed shows not in the library |
+| POST | \`/calendar/wishlist-missing\` | Wishlist every missing episode in a window |
+| GET/POST | \`/calendar/feed-url\` | This profile's iCal link (POST makes a new one) |
+| GET | \`/calendar/feed/<token>.ics\` | The iCal feed calendar apps subscribe to |
 | GET | \`/poster/{kind}/{id}\`, \`/backdrop/...\`, \`/img\` | Poster/backdrop/art proxy |
 `
         },

@@ -71,7 +71,8 @@ def _episodes(db, start, end, *, scope, specials, profile_id, cap):
         eps = [e for e in eps if int(e.get("season_number") or 0) != 0]
     if cap is not None:
         eps = filter_library_items(db, eps, cap, "show", id_key="show_id")
-    return eps
+    from core.video.calendar_state import collapse_copies
+    return collapse_copies(eps)
 
 
 def _annotate(db, eps, movies, today):
@@ -93,6 +94,62 @@ def _annotate(db, eps, movies, today):
         m["acq"] = cs.movie_state(m, active=live)
         rec = live.get(("movie", str(m.get("tmdb_id"))))
         m["progress"] = rec.get("progress") if isinstance(rec, dict) else None
+
+
+def _followed_rows(db, pid, start, end, today, *, specials):
+    """The window's episodes for followed shows that aren't in the library,
+    from TMDB, each with its state. Shared by the lane the page draws and the
+    bulk add, so the two can't disagree about what's missing."""
+    from core.video.sources import resolve_video_server
+    from core.video import calendar_state as cs
+    from .kids import filter_tmdb_items, video_cap
+    follows = [r for r in (db.followed_shows(profile_id=pid,
+                                             server_source=resolve_video_server()) or [])
+               if r.get("library_id") is None and r.get("tmdb_id")]
+    cap = video_cap()
+    if cap is not None:
+        follows = filter_tmdb_items(db, [{**f, "kind": "show"} for f in follows], cap)
+    if not follows:
+        return []
+
+    from core.video.enrichment.engine import get_video_enrichment_engine
+    from core.video.monitor_policy import episodes_airing_between
+    engine = get_video_enrichment_engine()
+
+    def one(f):
+        try:
+            return f, episodes_airing_between(engine, f["tmdb_id"], start.isoformat(), end.isoformat())
+        except Exception:   # noqa: BLE001 - one show can't sink the lane
+            return f, {}
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(one, follows[:60]))
+
+    wished = db.wishlist_episode_statuses(pid, [f["tmdb_id"] for f in follows])
+    try:
+        live = cs.live_index(db.get_active_video_downloads() or [])
+    except Exception:   # noqa: BLE001
+        live = {}
+    out = []
+    for f, res in results:
+        for ep in (res or {}).get("episodes") or []:
+            sn, en = ep.get("season_number"), ep.get("episode_number")
+            if sn is None or en is None or (not specials and int(sn) == 0):
+                continue
+            row = {"id": "tmdb-%s-%s-%s" % (f["tmdb_id"], sn, en),
+                   "show_id": None, "show_tmdb_id": f["tmdb_id"],
+                   "show_title": f.get("title"), "season_number": sn,
+                   "episode_number": en, "title": ep.get("title"),
+                   "overview": ep.get("overview"), "air_date": ep.get("air_date"),
+                   "still_url": ep.get("still_url"),
+                   "poster_url": (res or {}).get("poster_url"),
+                   "has_file": 0, "monitored": 1, "not_in_library": True,
+                   "wishlist_status": wished.get((int(f["tmdb_id"]), int(sn), int(en)))}
+            row["acq"] = cs.acquisition_state(row, today=today.isoformat(), active=live)
+            row["needs_action"] = cs.needs_action(row["acq"])
+            out.append(row)
+    out.sort(key=lambda r: (str(r.get("air_date") or ""), str(r.get("show_title") or "")))
+    return out
 
 
 def register_routes(bp):
@@ -170,59 +227,8 @@ def register_routes(bp):
         from . import get_video_db
         try:
             today, start, end, _days = _window()
-            db = get_video_db()
-            from core.video.sources import resolve_video_server
-            from core.video import calendar_state as cs
-            pid = _profile()
-            follows = [r for r in (db.followed_shows(profile_id=pid,
-                                                     server_source=resolve_video_server()) or [])
-                       if r.get("library_id") is None and r.get("tmdb_id")]
-            from .kids import filter_tmdb_items, video_cap
-            cap = video_cap()
-            if cap is not None:
-                follows = filter_tmdb_items(db, [{**f, "kind": "show"} for f in follows], cap)
-            if not follows:
-                return jsonify({"episodes": []})
-
-            from core.video.enrichment.engine import get_video_enrichment_engine
-            from core.video.monitor_policy import episodes_airing_between
-            engine = get_video_enrichment_engine()
-
-            def one(f):
-                try:
-                    return f, episodes_airing_between(engine, f["tmdb_id"],
-                                                      start.isoformat(), end.isoformat())
-                except Exception:   # noqa: BLE001 - one show can't sink the lane
-                    return f, {}
-
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                results = list(pool.map(one, follows[:60]))
-
-            wished = db.wishlist_episode_statuses(pid, [f["tmdb_id"] for f in follows])
-            specials = _flag("specials")
-            out = []
-            try:
-                live = cs.live_index(db.get_active_video_downloads() or [])
-            except Exception:   # noqa: BLE001
-                live = {}
-            for f, res in results:
-                for ep in (res or {}).get("episodes") or []:
-                    sn, en = ep.get("season_number"), ep.get("episode_number")
-                    if sn is None or en is None or (not specials and int(sn) == 0):
-                        continue
-                    row = {"id": "tmdb-%s-%s-%s" % (f["tmdb_id"], sn, en),
-                           "show_id": None, "show_tmdb_id": f["tmdb_id"],
-                           "show_title": f.get("title"), "season_number": sn,
-                           "episode_number": en, "title": ep.get("title"),
-                           "overview": ep.get("overview"), "air_date": ep.get("air_date"),
-                           "still_url": ep.get("still_url"),
-                           "poster_url": (res or {}).get("poster_url"),
-                           "has_file": 0, "monitored": 1, "not_in_library": True,
-                           "wishlist_status": wished.get((int(f["tmdb_id"]), int(sn), int(en)))}
-                    row["acq"] = cs.acquisition_state(row, today=today.isoformat(), active=live)
-                    row["needs_action"] = cs.needs_action(row["acq"])
-                    out.append(row)
-            out.sort(key=lambda r: (str(r.get("air_date") or ""), str(r.get("show_title") or "")))
+            out = _followed_rows(get_video_db(), _profile(), start, end, today,
+                                 specials=_flag("specials"))
             return jsonify({"episodes": out})
         except Exception:
             logger.exception("video calendar followed lane failed")
@@ -257,6 +263,14 @@ def register_routes(bp):
             _annotate(db, eps, [], today)
             from core.video import calendar_state as cs
             from core.video.sources import resolve_video_server
+            # followed shows you don't own are missing the same way; the page
+            # counts them, so the button adds them
+            if body.get("followed", True):
+                try:
+                    eps = eps + _followed_rows(db, pid, start, end, today,
+                                               specials=bool(body.get("specials")))
+                except Exception:   # noqa: BLE001 - the library ones still land
+                    logger.exception("calendar wishlist-missing: followed lane failed")
             groups: dict = {}
             for e in eps:
                 if e.get("acq") != cs.MISSING or not e.get("show_tmdb_id"):
@@ -270,7 +284,10 @@ def register_routes(bp):
             server = resolve_video_server()
             for tid, g in groups.items():
                 e = g["e"]
-                poster = ("/api/video/poster/show/%s" % e["show_id"]) if e.get("show_has_poster") else None
+                # a show you don't own has no poster proxy; TMDB's poster keeps the
+                # wishlist row from reading as unmatched
+                poster = (e.get("poster_url") if e.get("not_in_library") else
+                          ("/api/video/poster/show/%s" % e["show_id"]) if e.get("show_has_poster") else None)
                 added += int(db.add_episodes_to_wishlist(
                     tid, e.get("show_title"), g["eps"], poster_url=poster,
                     library_id=e.get("show_id"), server_source=server, profile_id=pid) or 0)

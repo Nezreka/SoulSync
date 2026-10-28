@@ -494,8 +494,14 @@
     // the slot is unknown.
     function _whenLabel(ep) { return _fmtMins(_airMins(ep.airs_time)) || 'Today'; }
     // Full episode objects for whatever's currently rendered, keyed by ep.id — so a
-    // click can hand the SAME object the calendar page uses to VideoCalendar.openEpisode().
+    // click can open that episode on the calendar page.
     var _upcomingEps = {};
+    // the same per-show hue the calendar uses (-calendar.model.ts showHue)
+    function _showHue(title) {
+        var h = 0, s = title || '';
+        for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+        return h % 360;
+    }
     function loadUpcoming() {
         var host = document.querySelector('[data-video-upcoming]');
         if (!host) return;
@@ -518,16 +524,15 @@
                     }).slice(0, 10);
                 if (!eps.length) { host.innerHTML = '<p class="video-empty-note">Nothing airing in the next couple of days — check the calendar for what\'s coming up.</p>'; return; }
                 _upcomingEps = {};
-                var hueOf = (window.VideoCalendar && window.VideoCalendar.showHue) || function () { return 230; };
                 host.innerHTML = eps.map(function (ep) {
                     _upcomingEps[ep.id] = ep;
                     var bg = ep.show_has_backdrop ? '/api/video/backdrop/show/' + ep.show_id + '?w=640' : '';
                     var se = '<span class="vup-se">S' + ep.season_number + ' · E' + ep.episode_number + '</span>';
                     var owned = ep.has_file ? '<span class="vup-owned">✓ Owned</span>' : '';
                     // href is the show page (modified-click / new-tab fallback); a plain
-                    // click opens the episode modal via the delegated handler below.
+                    // click opens the episode on the calendar via the handler below.
                     // --vcal-h is the same per-show hue the calendar billboard uses.
-                    return '<a class="vup-row" style="--vcal-h:' + hueOf(ep.show_title || '') + '"' +
+                    return '<a class="vup-row" style="--vcal-h:' + _showHue(ep.show_title || '') + '"' +
                         ' href="/video-detail/library/show/' + ep.show_id + '"' +
                         ' data-video-cal-ep="' + ep.id + '" title="' + _esc(ep.show_title) + '">' +
                         (bg ? '<div class="vup-bg" style="background-image:url(\'' + bg + '\')"></div>' : '') +
@@ -697,17 +702,17 @@
         }));
     });
 
-    // Upcoming cards → the calendar's episode modal (which itself has an "open full
-    // show" button). Plain left-click opens the modal; modified clicks fall through
-    // to the card's href (the show page) so new-tab still works.
+    // Upcoming cards → that episode on the calendar page, its modal open (the
+    // modal has an "open show page" button). Modified clicks fall through to the
+    // card's href (the show page) so new-tab still works.
     document.addEventListener('click', function (e) {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         var card = e.target.closest && e.target.closest('[data-video-upcoming] [data-video-cal-ep]');
         if (!card) return;
         var ep = _upcomingEps[card.getAttribute('data-video-cal-ep')];
-        if (!ep || !window.VideoCalendar || !window.VideoCalendar.openEpisode) return;  // fall through to href
+        if (!ep || typeof window.videoOpenCalendar !== 'function') return;  // fall through to href
         e.preventDefault();
-        window.VideoCalendar.openEpisode(ep);
+        window.videoOpenCalendar({ date: ep.air_date, ep: ep.id });
     });
 
     document.addEventListener('soulsync:video-page-shown', onPageShown);

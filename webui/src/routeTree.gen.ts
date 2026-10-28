@@ -25,6 +25,7 @@ import { Route as IssuesRouteRouteImport } from './routes/issues/route'
 import { Route as ImportRouteRouteImport } from './routes/import/route'
 import { Route as DiscoverRouteRouteImport } from './routes/discover/route'
 import { Route as DashboardRouteRouteImport } from './routes/dashboard/route'
+import { Route as CalendarRouteRouteImport } from './routes/calendar/route'
 import { Route as AutomationsRouteRouteImport } from './routes/automations/route'
 import { Route as AudiobooksRouteRouteImport } from './routes/audiobooks/route'
 import { Route as ActiveDownloadsRouteRouteImport } from './routes/active-downloads/route'
@@ -123,6 +124,11 @@ const DiscoverRouteRoute = DiscoverRouteRouteImport.update({
 const DashboardRouteRoute = DashboardRouteRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CalendarRouteRoute = CalendarRouteRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AutomationsRouteRoute = AutomationsRouteRouteImport.update({
@@ -226,6 +232,7 @@ export interface FileRoutesByFullPath {
   '/active-downloads': typeof ActiveDownloadsRouteRoute
   '/audiobooks': typeof AudiobooksRouteRouteWithChildren
   '/automations': typeof AutomationsRouteRoute
+  '/calendar': typeof CalendarRouteRoute
   '/dashboard': typeof DashboardRouteRoute
   '/discover': typeof DiscoverRouteRoute
   '/import': typeof ImportRouteRouteWithChildren
@@ -262,6 +269,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/active-downloads': typeof ActiveDownloadsRouteRoute
   '/automations': typeof AutomationsRouteRoute
+  '/calendar': typeof CalendarRouteRoute
   '/dashboard': typeof DashboardRouteRoute
   '/discover': typeof DiscoverRouteRoute
   '/issues': typeof IssuesRouteRoute
@@ -298,6 +306,7 @@ export interface FileRoutesById {
   '/active-downloads': typeof ActiveDownloadsRouteRoute
   '/audiobooks': typeof AudiobooksRouteRouteWithChildren
   '/automations': typeof AutomationsRouteRoute
+  '/calendar': typeof CalendarRouteRoute
   '/dashboard': typeof DashboardRouteRoute
   '/discover': typeof DiscoverRouteRoute
   '/import': typeof ImportRouteRouteWithChildren
@@ -337,6 +346,7 @@ export interface FileRouteTypes {
     | '/active-downloads'
     | '/audiobooks'
     | '/automations'
+    | '/calendar'
     | '/dashboard'
     | '/discover'
     | '/import'
@@ -373,6 +383,7 @@ export interface FileRouteTypes {
     | '/'
     | '/active-downloads'
     | '/automations'
+    | '/calendar'
     | '/dashboard'
     | '/discover'
     | '/issues'
@@ -408,6 +419,7 @@ export interface FileRouteTypes {
     | '/active-downloads'
     | '/audiobooks'
     | '/automations'
+    | '/calendar'
     | '/dashboard'
     | '/discover'
     | '/import'
@@ -446,6 +458,7 @@ export interface RootRouteChildren {
   ActiveDownloadsRouteRoute: typeof ActiveDownloadsRouteRoute
   AudiobooksRouteRoute: typeof AudiobooksRouteRouteWithChildren
   AutomationsRouteRoute: typeof AutomationsRouteRoute
+  CalendarRouteRoute: typeof CalendarRouteRoute
   DashboardRouteRoute: typeof DashboardRouteRoute
   DiscoverRouteRoute: typeof DiscoverRouteRoute
   ImportRouteRoute: typeof ImportRouteRouteWithChildren
@@ -578,6 +591,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/calendar': {
+      id: '/calendar'
+      path: '/calendar'
+      fullPath: '/calendar'
+      preLoaderRoute: typeof CalendarRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/automations': {
@@ -777,6 +797,7 @@ const rootRouteChildren: RootRouteChildren = {
   ActiveDownloadsRouteRoute: ActiveDownloadsRouteRoute,
   AudiobooksRouteRoute: AudiobooksRouteRouteWithChildren,
   AutomationsRouteRoute: AutomationsRouteRoute,
+  CalendarRouteRoute: CalendarRouteRoute,
   DashboardRouteRoute: DashboardRouteRoute,
   DiscoverRouteRoute: DiscoverRouteRoute,
   ImportRouteRoute: ImportRouteRouteWithChildren,

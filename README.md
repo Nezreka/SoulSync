@@ -238,8 +238,9 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Charts, streaming services, moods and world cinema.
   - A full browse filter.
 - **TV Calendar**:
-  - Week grid with acquisition state on every episode, and cinema / home release dates for movies.
-  - An **iCal feed** for your phone.
+  - Week, agenda and month views. Every episode says where it stands (in library, downloading, wanted, failed, missing, auto-grabs on air), with cinema / home release dates for movies.
+  - Aired episodes are wishlisted on their own every few hours, each once, and the page says when that last ran.
+  - A per-profile **iCal feed** for your phone, readable without signing in.
 
 **Getting things**
 - **Watchlist → wishlist → download**:

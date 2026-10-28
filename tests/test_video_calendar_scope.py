@@ -66,46 +66,5 @@ def test_watchlist_scope_includes_airing_default_and_respects_mute(db):
     allp = db.calendar_upcoming("2026-06-01", "2026-06-30", server_source="plex", watchlist_only=False)
     assert _tmdbs(allp) == {33}
 
-
-# ── frontend wiring (toggle defaults to watchlist, persists, refetches) ─────
-from pathlib import Path
-
-_ROOT = Path(__file__).resolve().parent.parent
-_JS = (_ROOT / "webui" / "static" / "video" / "video-calendar.js").read_text(encoding="utf-8")
-_INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-
-
-def test_calendar_has_scope_toggle_defaulting_to_watchlist():
-    assert 'data-video-cal-scope="watchlist"' in _INDEX
-    assert 'data-video-cal-scope="all"' in _INDEX
-    # the watchlist button is the one pre-selected (--on)
-    i = _INDEX.index('data-video-cal-scope="watchlist"')
-    assert 'vcal-filter-btn--on' in _INDEX[i - 80:i]
-
-
-def test_calendar_js_defaults_watchlist_and_sends_scope():
-    assert "scope: 'watchlist'" in _JS                  # default state
-    assert "'&scope=' + (state.scope" in _JS            # sent to the API
-    assert "function setScope(" in _JS                  # toggle refetches
-    assert "localStorage.setItem('vcalScope'" in _JS    # remembers the choice
-
-
-def test_episode_modal_offers_single_episode_wishlist_action():
-    """Aired-and-missing episodes can be wished straight from the calendar modal —
-    same eligibility rule and same write-parity payload as the bulk catch-up
-    button (show identity + poster proxy + library_id), so the wishlist row
-    renders with full art. Unaired episodes never get the button (the drain
-    would hunt a release that can't exist yet)."""
-    from pathlib import Path
-    js = (Path(__file__).resolve().parent.parent
-          / "webui" / "static" / "video" / "video-calendar.js").read_text(encoding="utf-8")
-    assert "data-vcm-wish" in js
-    # gate: missing + has a show tmdb id (unaired/upcoming ones are flagged separately)
-    assert "!ep.has_file && !!ep.show_tmdb_id" in js
-    assert "ep.air_date > state.data.today" in js
-    # pre-check against what's already queued, then the parity payload
-    assert js.count("/api/video/wishlist/check") == 2      # bulk button + modal
-    assert "library_id: ep.show_id" in js
-    assert "'/api/video/poster/show/' + ep.show_id" in js
-    # the bulk catch-up count refreshes after a single add
-    assert "refreshAddMissing();   // the bulk catch-up count just changed" in js
+# The scope toggle and the episode modal's wishlist action are React now
+# (webui/src/routes/calendar), pinned in calendar-page.test.tsx.

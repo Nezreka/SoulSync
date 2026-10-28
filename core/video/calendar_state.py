@@ -27,14 +27,18 @@ WANTED = "wanted"
 IGNORED = "ignored"
 UNAIRED = "unaired"
 MISSING = "missing"
+# the show has no TMDB id, so nothing can wish for or search this episode until
+# it is matched. Counting it as missing put a "Wishlist 16" button on the page
+# that could only ever answer "nothing new to add".
+UNMATCHED = "unmatched"
 
 # Read in this order. Reality beats intent: a file on disk is owned whatever the
 # wishlist thinks, and a live transfer outranks the row that asked for it.
-_ORDER = (OWNED, DOWNLOADING, QUEUED, FAILED, WANTED, IGNORED, UNAIRED, MISSING)
+_ORDER = (OWNED, DOWNLOADING, QUEUED, FAILED, WANTED, IGNORED, UNAIRED, MISSING, UNMATCHED)
 
 # The states worth a badge. `unaired` is the ordinary case for most of a
 # calendar week and drawing attention to it would make the view useless.
-_NOTABLE = frozenset({OWNED, DOWNLOADING, QUEUED, FAILED, WANTED, IGNORED, MISSING})
+_NOTABLE = frozenset({OWNED, DOWNLOADING, QUEUED, FAILED, WANTED, IGNORED, MISSING, UNMATCHED})
 
 # What "needs action" means: it aired, you don't have it, and nothing is
 # currently trying to get it. `wanted` is excluded on purpose — the drain has it
@@ -84,6 +88,11 @@ def acquisition_state(ep: Dict[str, Any], *, today: str,
     if not ep.get("monitored"):
         return IGNORED
 
+    # Unmatched comes before the air date: an unmatched show's upcoming episode
+    # won't be grabbed on air either, so "Auto" would be a promise nothing keeps.
+    if not ep.get("show_tmdb_id"):
+        return UNMATCHED
+
     air = str(ep.get("air_date") or "")
     if air and air > str(today):
         return UNAIRED
@@ -130,6 +139,28 @@ def movie_state(m: Dict[str, Any], *, active: Optional[Dict[tuple, Any]] = None)
     return WANTED
 
 
+def collapse_copies(eps):
+    """One row per episode. A Plex library can list one series as several
+    items (Boulder's had "90 Day Fiancé: The Other Way" fifteen times), each
+    a show row with its own copy of every episode, so the calendar drew the
+    same episode once per copy. Copies are the same show (by TMDB id, or by
+    title when unmatched), season, episode and air date. The kept copy is the
+    one that has the file, else one on the wishlist, else the first."""
+    def rank(e):
+        return (0 if e.get("has_file") else 1, 0 if e.get("wishlist_status") else 1)
+
+    order, best = [], {}
+    for e in eps or ():
+        ident = e.get("show_tmdb_id") or "t:" + str(e.get("show_title") or "").strip().lower()
+        key = (ident, e.get("season_number"), e.get("episode_number"), e.get("air_date"))
+        if key not in best:
+            order.append(key)
+            best[key] = e
+        elif rank(e) < rank(best[key]):
+            best[key] = e
+    return [best[k] for k in order]
+
+
 def needs_action(state: str) -> bool:
     """Whether this state is one a person still has to do something about."""
     return state in _NEEDS_ACTION
@@ -155,7 +186,7 @@ def summarize(states: Iterable[str]) -> list:
 
 
 __all__ = ["acquisition_state", "needs_action", "is_notable", "summarize",
-           "live_index", "live_for", "movie_state",
+           "live_index", "live_for", "movie_state", "collapse_copies",
            "episode_key", "season_key",
            "OWNED", "DOWNLOADING", "QUEUED", "FAILED", "WANTED", "IGNORED",
-           "UNAIRED", "MISSING"]
+           "UNAIRED", "MISSING", "UNMATCHED"]

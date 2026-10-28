@@ -305,3 +305,88 @@ def test_the_video_gate_lets_a_sessionless_feed_through(tmp_path, monkeypatch):
         assert c.get("/api/video/calendar/feed-url").status_code == 403
     finally:
         videoapi._video_db = None
+
+
+def test_the_window_is_read_off_the_air_date_index(tmp_path):
+    """Boulder's 220k-episode library: with no planner stats SQLite walked every
+    show's every episode for one week (6.1s, and the page's 10s fetch timed out
+    on a busy box). The window must drive the query through idx_episodes_air."""
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    seen = []
+    real = db._get_connection
+
+    class Spy:
+        def __init__(self, conn):
+            self._c = conn
+
+        def execute(self, sql, *args):
+            if "FROM episodes e" in sql:
+                seen.append((sql, args[0] if args else ()))
+            return self._c.execute(sql, *args)
+
+        def __getattr__(self, name):
+            return getattr(self._c, name)
+
+    db._get_connection = lambda: Spy(real())
+    db.calendar_upcoming("2026-10-25", "2026-10-31", server_source="plex",
+                         watchlist_only=True, profile_id=1)
+    assert seen
+    sql, args = seen[-1]
+    conn = real()
+    plan = " | ".join(r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + sql, args))
+    conn.close()
+    assert "idx_episodes_air" in plan, plan
+
+
+# ── unmatched shows (Boulder, Oct 28: "Wishlist 16" answered "Nothing new to add") ──
+
+
+def test_an_unmatched_shows_episode_is_unmatched_not_missing(env):
+    """All library showed 16 missing and a Wishlist 16 button; every one was on
+    a show row with no TMDB id, which the wishlist can't key, so the button
+    could only ever add nothing. Those rows read Unmatched and stay out of the
+    missing count and the bulk add."""
+    c, db = env
+    db.upsert_show_tree("plex", {
+        "server_id": "u1", "title": "Copy", "tmdb_id": None,
+        "seasons": [{"season_number": 8, "episodes": [{"episode_number": 4, "title": "E4", "air_date": D(-1)}]}]})
+    body = _cal(c)
+    assert [e["acq"] for e in body["episodes"]] == ["unmatched"]
+    assert body["needs_action"] == 0
+    r = c.post("/api/video/calendar/wishlist-missing",
+               json={"start": D(-7), "end": D(0), "scope": "all"}).get_json()
+    assert r["added"] == 0 and r["shows"] == 0
+
+
+def test_an_unmatched_upcoming_episode_does_not_promise_auto(env):
+    c, db = env
+    db.upsert_show_tree("plex", {
+        "server_id": "u1", "title": "Copy", "tmdb_id": None,
+        "seasons": [{"season_number": 1, "episodes": [{"episode_number": 1, "title": "E1", "air_date": D(2)}]}]})
+    assert [e["acq"] for e in _cal(c)["episodes"]] == ["unmatched"]
+
+
+def test_twelve_unmatched_copies_of_one_episode_are_one_card(env):
+    c, db = env
+    for n in range(12):
+        db.upsert_show_tree("plex", {
+            "server_id": "u%d" % n, "title": "90 Day Fiancé: The Other Way", "tmdb_id": None,
+            "seasons": [{"season_number": 8, "episodes": [
+                {"episode_number": 4, "title": "Episode 4", "air_date": D(-2)}]}]})
+    _show(db, tmdb_id=555, title="Matched", server_id="m1",
+          episodes=[{"episode_number": 1, "title": "E1", "air_date": D(-2)}])
+    eps = _cal(c)["episodes"]
+    assert sorted(e["show_title"] for e in eps) == ["90 Day Fiancé: The Other Way", "Matched"]
+
+
+def test_copies_of_one_matched_show_are_one_card_and_the_owned_copy_wins(env):
+    """Once the split copies share a TMDB id, each still holds its own copy of
+    the episode. One card, and the copy with the file decides the state."""
+    c, db = env
+    db.upsert_show_tree("plex", {"server_id": "a", "title": "Split", "tmdb_id": 90046, "seasons": [
+        {"season_number": 8, "episodes": [{"episode_number": 4, "title": "E4", "air_date": D(-1)}]}]})
+    db.upsert_show_tree("plex", {"server_id": "b", "title": "Split", "tmdb_id": 90046, "seasons": [
+        {"season_number": 8, "episodes": [{"episode_number": 4, "title": "E4", "air_date": D(-1),
+                                           "file": {"relative_path": "e.mkv", "size_bytes": 1}}]}]})
+    eps = _cal(c)["episodes"]
+    assert [(e["season_number"], e["episode_number"], e["acq"]) for e in eps] == [(8, 4, "owned")]

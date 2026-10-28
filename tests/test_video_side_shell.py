@@ -41,7 +41,9 @@ _ALLOWED_WINDOW = {
     "window.VideoGet", "window.VideoWatchlist", "window.VideoYoutube", "window.VideoDownload",
     "window.VideoGrab", "window.VideoManage", "window.VideoPoster", "window.VideoIssues",
     "window.VideoRequestSheet", "window.VideoRequests",
-    "window.VideoCalendar", "window.VideoOverlayEditor", "window.VideoCollectionEditor",
+    "window.VideoOverlayEditor", "window.VideoCollectionEditor",
+    # video-side.js: the hand-off to the React calendar (the dashboard's upcoming row)
+    "window.videoOpenCalendar",
     "window.VideoSubtitles",
     # the detail page's Your library tab (a React island) and the bridge it
     # calls back through - both video-side
@@ -618,3 +620,25 @@ def test_discover_filter_bar_has_collapse_toggle():
     assert "data-vdsc-filter-toggle" in _INDEX
     assert "_toggleFilterCollapsed" in disc_js and "vdsc-filters-collapsed" in disc_js
     assert "vdsc-filterbar--collapsed" in disc_js and ".vdsc-filterbar--collapsed" in css
+
+
+# --- the calendar is the React /calendar?media=video page --------------------
+
+def test_calendar_is_handed_off_to_react():
+    """The vanilla calendar (video-calendar.js + its subpage) is gone; the video
+    nav hands /video-calendar to the React route like the wishlist and tools."""
+    side = (_ROOT / "webui" / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
+    init = (_ROOT / "webui" / "static" / "init.js").read_text(encoding="utf-8")
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert not (_ROOT / "webui" / "static" / "video" / "video-calendar.js").exists()
+    assert "video-calendar.js" not in _INDEX
+    assert 'data-video-subpage="video-calendar"' not in _INDEX
+    # the nav entry stays, and navigate() hands it off
+    assert 'data-video-page="video-calendar"' in _INDEX
+    assert "if (pageId === 'video-calendar') { gotoUnifiedCalendar(mode); return; }" in side
+    assert "'video-calendar': 1" in side                       # never re-asserted over the react url
+    assert "if (path === '/calendar') return 'video-calendar';" in side
+    # the video calendar's permission, not a music page's
+    assert "calendar: { media: ['video'], videoPage: 'video-calendar' }" in init
+    # the react host shows on the video side for it
+    assert 'body[data-side="video"][data-video-page="video-calendar"] #webui-react-root' in css

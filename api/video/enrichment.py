@@ -11,6 +11,8 @@ Manage-Workers modal can drive video workers by pointing at /api/video/...
 
 from __future__ import annotations
 
+import sqlite3
+
 from flask import jsonify, request
 
 from utils.logging_config import get_logger
@@ -369,6 +371,20 @@ def register_routes(bp):
             if not ok:
                 return jsonify({"success": False, "error": "Unknown item or service"}), 400
             return jsonify({"success": True})
+        except sqlite3.IntegrityError:
+            # an older database allows one row per id; the boot rebuild lifts
+            # that, so this only fires if it couldn't run. say who has it.
+            holder = get_video_db().external_id_holder(kind, service, external_id, exclude_id=item_id)
+            label = {"tvdb": "TVDB", "tmdb": "TMDB", "imdb": "IMDb"}.get(service, service)
+            if holder:
+                msg = ("%s %s is already on \u201c%s\u201d%s in your library (row %s, %s). If that's "
+                       "the same show listed twice by your server, merge them there."
+                       % (label, external_id, holder.get("title"),
+                          " (%s)" % holder["year"] if holder.get("year") else "", holder.get("id"),
+                          "%s owned" % holder.get("owned") if holder.get("owned") else "nothing owned"))
+            else:
+                msg = "%s %s is already used by another title in your library" % (label, external_id)
+            return jsonify({"success": False, "error": msg, "conflict": holder}), 409
         except Exception:
             logger.exception("video match apply failed for %s %s (%s)", kind, item_id, service)
             return jsonify({"success": False, "error": "Failed to update the match"}), 500

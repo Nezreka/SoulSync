@@ -2162,6 +2162,8 @@ const SHARED_VIDEO_VIEWS = {
     wishlist: { media: ['movies', 'tv', 'youtube'], videoPage: 'video-wishlist' },
     // /tools?media=video is the video tools page
     tools: { media: ['video'], videoPage: 'video-tools' },
+    // /calendar?media=video is the video calendar (music has none)
+    calendar: { media: ['video'], videoPage: 'video-calendar' },
 };
 
 function isPageAccessAllowed(pageId, search) {
@@ -4259,7 +4261,7 @@ const _DEEPLINK_VALID_PAGES = new Set([
     'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
     'hydrabase', 'tools', 'chat', 'podcasts', 'audiobooks', 'requests',
-    'sample-studio'
+    'sample-studio', 'calendar'
 ]);
 
 function _getPageFromPath() {

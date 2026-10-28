@@ -366,7 +366,7 @@
     var VIDEO_WISHLIST_TABS = { movies: 1, tv: 1, youtube: 1 };
     // video pages that are really a React route on a video tab: navigate()
     // hands them off, so their /video-<page> url never stays in the bar.
-    var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1 };
+    var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1 };
     function lastVideoWishlistTab() {
         try {
             var t = sessionStorage.getItem('soulsync.videoWishlistTab');
@@ -384,6 +384,8 @@
         // /tools?media=video is the video tools page (the music tools page on
         // its video media)
         if (path === '/tools') return media === 'video' ? 'video-tools' : null;
+        // the calendar only exists on the video side
+        if (path === '/calendar') return 'video-calendar';
         if (path !== '/wishlist') return null;
         if (!VIDEO_WISHLIST_TABS[media]) return null;
         try { sessionStorage.setItem('soulsync.videoWishlistTab', media); } catch (e2) { /* ignore */ }
@@ -430,6 +432,33 @@
         catch (e2) { window.location.href = href; }
     }
 
+    // the video calendar is the React /calendar page: the same hand-off as tools.
+    // opts.date lands on that week, opts.ep opens that episode on arrival.
+    function gotoUnifiedCalendar(mode, opts) {
+        _backStack = [];
+        setActiveNav('video-calendar');
+        document.body.setAttribute('data-video-page', 'video-calendar');
+        var replace = mode === 'replace' || mode === 'restore';
+        // a reload or Back already on /calendar: the React route has the url,
+        // with its view/date/ep. re-navigating would drop them.
+        var here = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname).replace(/\/+$/, '');
+        if (mode === 'restore' && here === '/calendar') return;
+        var query = { media: 'video' };
+        if (opts && opts.date) query.date = opts.date;
+        if (opts && opts.ep != null) query.ep = String(opts.ep);
+        try {
+            var wsr = window.SoulSyncWebRouter;
+            if (wsr && typeof wsr.navigateToPage === 'function') {
+                wsr.navigateToPage('calendar', { query: query, replace: replace });
+                return;
+            }
+        } catch (e) { /* fall through to a real redirect */ }
+        var href = '/calendar?' + new URLSearchParams(query).toString();
+        try { window.location.assign(href); }
+        catch (e2) { window.location.href = href; }
+    }
+    window.videoOpenCalendar = function (opts) { gotoUnifiedCalendar('push', opts); };
+
     function navigate(pageId, mode, job) {
         // Music-only profile: there is no video page to fall back to — punt the
         // whole navigation back to the music side instead.
@@ -442,6 +471,7 @@
         if (pageId === 'video-downloads') { gotoUnifiedDownloads(mode); return; }
         if (pageId === 'video-wishlist') { gotoUnifiedWishlist(mode); return; }
         if (pageId === 'video-tools') { gotoUnifiedTools(mode, job); return; }
+        if (pageId === 'video-calendar') { gotoUnifiedCalendar(mode); return; }
         setActiveNav(pageId);
         showPage(pageId);
         if (DETAIL_PAGES[pageId] || mode === 'restore') return;

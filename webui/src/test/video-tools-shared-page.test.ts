@@ -70,7 +70,9 @@ describe('the sidebar hands video tools off to the React page', () => {
   });
 
   it('is handed off, so the boot never re-asserts /video-tools over the React url', () => {
-    expect(SIDE).toContain("var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1 };");
+    expect(SIDE).toContain(
+      "var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1 };",
+    );
   });
 
   it('the css reveals the React host and hides the video host for it', () => {

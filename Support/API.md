@@ -2395,6 +2395,8 @@ Video downloads, active rows first then newest (the latest 100). `status` filter
 
 Upcoming and recent episodes and releases. `start` and `end` as ISO dates.
 
+For a calendar app, use the iCal feed instead: `GET /api/video/calendar/feed/<token>.ics`. The token is per profile and is the credential, so the feed needs no session or API key. Get the link from the calendar page (⋯ → Subscribe), or `GET /api/video/calendar/feed-url` from a signed-in session; `POST` to the same path makes a new token and retires the old one. The feed takes `days` (1–60, default 14), `scope=watchlist|all`, `movies=0` and `specials=1`, and applies that profile's video access and rating limits.
+
 #### `GET /api/v1/video/requests`
 
 #### `POST /api/v1/video/requests`
