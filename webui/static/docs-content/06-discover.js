@@ -44,7 +44,7 @@ Each playlist can be played in the media player, downloaded, or synced to your m
 
 The pool playlists (Popular Picks, Hidden Gems, Discovery Shuffle, Genre and Time Machine) draw mostly from artists near what you actually play, with some room left for strangers, and each refresh is a fresh draw. One version of each song, no audiobook chapters or compilation credits, no live recordings unless little else fits, and no artist twice in a row. Artists you blocked or set aside never reach a synced playlist.
 
-On the Sync page, **Add playlist → Discovery playlists → SoulSync Discovery** lists every one of these, grouped, including the ones not built yet; Refresh & Mirror builds one and adds it to your playlists.
+On the Sync page, **Add playlist → Discovery playlists → SoulSync Discovery** lists every one of these, grouped, including the ones not built yet. **Import** builds one (when it isn't built yet), adds it to your playlists and opens it under **Mirrored**; **Import all** does every one not in yet.
 
 ## Daily Mixes
 

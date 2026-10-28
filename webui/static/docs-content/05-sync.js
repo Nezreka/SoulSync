@@ -123,6 +123,8 @@ If ListenBrainz is configured in Settings, **+ Add playlist** opens a ListenBrai
 - **Collaborative** — playlists shared with you by other users
 - **Created For You** — auto-generated playlists based on your listening history
 
+Each playlist has an **Import** button (or **Open** once it's in), and **Import all** brings in everything not in yet. Importing opens it under **Mirrored**, where it identifies itself in the background. A weekly series (Weekly Jams, Weekly Exploration) is one playlist in SoulSync: importing any week files it under the series, and refreshing it picks up the newest week. **Last.fm Radio** works the same way.
+
 ListenBrainz tracks are matched against Spotify/iTunes using a **4-strategy search**: direct match, swapped artist/title, album-based lookup, and extended fuzzy search. Discovered tracks sync to your library like any other playlist.
 `
         },
@@ -150,7 +152,11 @@ Browse 12+ electronic music genres (House, Techno, Drum & Bass, Trance, and more
 
 ## Charts
 
-Top 100 and Hype charts with full track listings. Each track can be manually matched against Spotify for metadata, then synced and downloaded.
+Top 100 and Hype charts with full track listings.
+
+## Importing a list
+
+Opening a chart, top 10 or release list imports it into SoulSync and lands you on it under **Mirrored**, where it identifies itself like any other playlist. Opening one that's already in just opens it. A live list (Top 100, Hype 100, a genre's top 10) stays live: refreshing the playlist pulls today's list. To keep today's version as it is, use **⋯ → Save snapshot** in the playlist's window; that saves a copy that never changes.
 
 ![Beatport genre browser](sync-beatport.jpg)
 

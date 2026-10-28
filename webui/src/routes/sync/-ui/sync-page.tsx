@@ -40,7 +40,7 @@ import { AutoSyncModal } from './autosync-modal';
 import { BeatportTab } from './beatport-tab';
 import { ImportFileTab } from './import-file-tab';
 import { LastfmSyncTab } from './lastfm-sync-tab';
-import { ListenBrainzSyncTab, useLbCardOpen } from './lb-sync-tab';
+import { ListenBrainzSyncTab } from './lb-sync-tab';
 import { MirroredTab } from './mirrored-tab';
 import { ServerCompareEditor } from './server-compare-editor';
 import { ServerPlaylistList } from './server-playlist-list';
@@ -197,17 +197,6 @@ export function SyncPage() {
   const { boardActions, weeklyActions } = useAutoSyncActions(autoSync);
 
   const openSourceModal = page.modals.openModal;
-  const openLbModal = useCallback(
-    // The vertical applies its own `listenbrainz_` prefix downstream, so the
-    // page passes the BARE mbid. Last.fm radios live in the same table and
-    // share the LB vertical (sync-lastfm.js) — one source id, two tabs.
-    (mbid: string) => openSourceModal('listenbrainz', mbid),
-    [openSourceModal],
-  );
-  // fetch the tracks and seed the state before opening. the modal renders
-  // nothing for a state that doesn't exist, so opening straight away made
-  // Discover do nothing on any playlist that was never discovered.
-  const openLbCard = useLbCardOpen(page.verticals.listenbrainz, openLbModal);
 
   /**
    * Where an import from a source tab lands: the Mirrored tab, with the new
@@ -268,12 +257,7 @@ export function SyncPage() {
     ),
     tidal: <TidalTab />,
     qobuz: <QobuzTab />,
-    beatport: (
-      <BeatportTab
-        vertical={page.verticals.beatport}
-        onOpen={(sourceId) => openSourceModal('beatport', sourceId)}
-      />
-    ),
+    beatport: <BeatportTab />,
     deezer: <DeezerArlTab />,
     // The link variant is the same SERVICE: one config, one vertical, one
     // modal id space. Only the way a playlist arrives differs.
@@ -282,11 +266,9 @@ export function SyncPage() {
     ),
     youtube: <YouTubeTab pendingUrl={pendingFor('youtube')} onPendingConsumed={clearPending} />,
     ytmusic: <YTMusicTab />,
-    'listenbrainz-sync': (
-      <ListenBrainzSyncTab vertical={page.verticals.listenbrainz} onOpen={openLbCard} />
-    ),
-    'lastfm-sync': <LastfmSyncTab vertical={page.verticals.listenbrainz} onOpen={openLbCard} />,
-    'soulsync-discovery-sync': <SoulsyncDiscoveryTab onOpenMirrored={showMirroredDetail} />,
+    'listenbrainz-sync': <ListenBrainzSyncTab />,
+    'lastfm-sync': <LastfmSyncTab />,
+    'soulsync-discovery-sync': <SoulsyncDiscoveryTab />,
     'import-file': <ImportFileTab onImported={onImported} />,
     mirrored: (
       <MirroredTab

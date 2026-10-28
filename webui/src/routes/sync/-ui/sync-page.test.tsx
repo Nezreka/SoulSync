@@ -11,14 +11,12 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { LbCardData } from '../-sync.lb-tabs';
 import type { AutoSyncModalProps } from './autosync-modal';
 import type { SyncModalsProps } from './sync-modals';
 
 let modalProps: AutoSyncModalProps | null = null;
 /** Which link each link tab was handed — the wiring a mutant can swap. */
 const pendingSeen: Record<string, string | undefined> = {};
-let syncModalsProps: SyncModalsProps | null = null;
 
 /**
  * The four URL tabs and the two LB tabs are stubbed so the panel WIRING is
@@ -47,25 +45,13 @@ vi.mock('./url-import-tab', async () => {
   };
 });
 
-vi.mock('./lb-sync-tab', async (importOriginal) => ({
-  // the real open hook: it's the fetch + seed the page has to go through
-  useLbCardOpen: (await importOriginal<typeof import('./lb-sync-tab')>()).useLbCardOpen,
-  ListenBrainzSyncTab: ({ onOpen }: { onOpen: (card: LbCardData) => void }) => (
-    <button
-      type="button"
-      onClick={() => onOpen({ mbid: 'mb-1', title: 'Not The Id' } as LbCardData)}
-    >
-      lb-card
-    </button>
-  ),
-  LbCardList: () => <div />,
+vi.mock('./lb-sync-tab', () => ({
+  ListenBrainzSyncTab: () => <div>lb-tab</div>,
+  LbImportList: () => <div />,
 }));
 
 vi.mock('./sync-modals', () => ({
-  SyncModals: (props: SyncModalsProps) => {
-    syncModalsProps = props;
-    return <div />;
-  },
+  SyncModals: (_props: SyncModalsProps) => <div />,
 }));
 
 vi.mock('./autosync-modal', () => ({
@@ -237,31 +223,11 @@ describe('the panel map', () => {
     expect(document.querySelector('#mirrored-tab-content')?.className ?? '').toMatch(/active/);
   });
 
-  it('opens a ListenBrainz card on its MBID, not its title, with its tracks seeded', async () => {
-    // The card carries both, and only the mbid is the source id the vertical
-    // prefixes downstream. The stub deliberately gives them different values.
-    // the modal renders nothing for a state that doesn't exist, so opening
-    // before the tracks are fetched and seeded made Discover do nothing.
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((url: string) =>
-        url.startsWith('/api/discover/listenbrainz/playlist/mb-1')
-          ? Promise.resolve({
-              ok: true,
-              json: () => Promise.resolve({ tracks: [{ track_name: 'Song', artist_name: 'A' }] }),
-            })
-          : new Promise(() => {}),
-      ),
-    );
+  it('the ListenBrainz panel opens from Add playlist', () => {
     render(<SyncPage />);
     fireEvent.click(screen.getByText('+ Add playlist'));
     fireEvent.click(screen.getByRole('button', { name: /ListenBrainz/ }));
-    await act(async () => {
-      fireEvent.click(screen.getByText('lb-card'));
-    });
-    expect(syncModalsProps?.modals.openIdFor('listenbrainz')).toBe('mb-1');
-    const seeded = syncModalsProps?.verticals.listenbrainz.states['mb-1'];
-    expect((seeded?.playlist as { tracks?: unknown[] } | undefined)?.tracks).toHaveLength(1);
+    expect(screen.getByText('lb-tab')).toBeInTheDocument();
   });
 
   it('mounts the Beatport pane', () => {

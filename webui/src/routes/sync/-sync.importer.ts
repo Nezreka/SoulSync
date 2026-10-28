@@ -46,13 +46,23 @@ export interface ImportSpec {
   /** Kept on the mirror as its description; the link it came from, usually. */
   description?: string;
   /** The tracks, fetched only when they're needed (an import, not a browse). */
-  loadTracks: () => Promise<{ tracks: unknown[]; sourceSkipped?: SourceSkipped | null }>;
+  loadTracks?: () => Promise<{ tracks: unknown[]; sourceSkipped?: SourceSkipped | null }>;
   /** The source's track shape into the mirror's (each tab already has one). */
-  toMirrorTracks: (tracks: unknown[]) => MirrorSourceTrack[] | Record<string, unknown>[];
+  toMirrorTracks?: (tracks: unknown[]) => MirrorSourceTrack[] | Record<string, unknown>[];
+  /**
+   * A source that saves its own mirror server-side (Beatport, which keys it by
+   * the list's canonical ref) does it here and answers the mirror's id; the
+   * tracks above are then not used.
+   */
+  save?: () => Promise<number>;
 }
 
 /** Save the playlist as a mirror. Resolves to the mirror's id. */
 export async function importPlaylist(spec: ImportSpec): Promise<number> {
+  if (spec.save) return spec.save();
+  if (!spec.loadTracks || !spec.toMirrorTracks) {
+    throw new Error(`Couldn't import ${spec.name}`);
+  }
   const { tracks, sourceSkipped } = await spec.loadTracks();
   if (!tracks.length) throw new Error(`${spec.name} has no tracks to import`);
   const res = await postMirrorPlaylist(
