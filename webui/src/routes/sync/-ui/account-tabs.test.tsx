@@ -129,14 +129,6 @@ describe('SpotifyTab', () => {
     expect(mirrorBody()).toBeUndefined();
   });
 
-  it('hands the loaded row ids up, for the page', async () => {
-    stubFetch();
-    responder = (url) => (url === '/api/spotify/playlists' ? SPOTIFY_ROWS : {});
-    const registerRows = vi.fn();
-    renderTab(<SpotifyTab registerRows={registerRows} />);
-    await waitFor(() => expect(registerRows).toHaveBeenCalledWith(['sp1', 'sp2']));
-  });
-
   it('an empty account shows the empty copy', async () => {
     stubFetch();
     responder = (url) => (url === '/api/spotify/playlists' ? [] : {});

@@ -14,7 +14,7 @@
  * way reads as already in.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import type { AccountPlaylistRow } from '../-sync.accounts';
 import type { AccountPlaylistTracks } from '../-sync.api';
@@ -77,7 +77,6 @@ function AccountRowsTab({
   noun,
   fetchRows,
   fetchTracks,
-  onRows,
 }: {
   source: 'spotify' | 'deezer';
   title: string;
@@ -87,15 +86,12 @@ function AccountRowsTab({
   noun: string;
   fetchRows: () => Promise<unknown>;
   fetchTracks: (id: string) => Promise<AccountPlaylistTracks>;
-  onRows?: (rows: AccountPlaylistRow[]) => void;
 }) {
   const [rows, setRows] = useState<AccountPlaylistRow[] | null>(null);
   const [placeholder, setPlaceholder] = useState('🔄 Loading playlists...');
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState('');
   const importer = useImporter();
-  const onRowsRef = useRef(onRows);
-  onRowsRef.current = onRows;
 
   const load = useCallback(async () => {
     setPlaceholder('🔄 Loading playlists...');
@@ -104,7 +100,6 @@ function AccountRowsTab({
     try {
       const list = (await fetchRows()) as AccountPlaylistRow[];
       setRows(list);
-      onRowsRef.current?.(list);
       if (list.length === 0) setPlaceholder(`No ${noun} playlists found.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown error';
@@ -175,20 +170,7 @@ function AccountRowsTab({
   );
 }
 
-export interface AccountTabProps {
-  /**
-   * Hands the rendered row ids up. Kept for the page's contract: the
-   * select-several sequential sync it fed is gone from these cards, so with
-   * nothing selected it never starts.
-   */
-  registerRows?: (playlistIds: string[]) => void;
-}
-
-export function SpotifyTab({ registerRows }: AccountTabProps = {}) {
-  const onRows = useCallback(
-    (rows: AccountPlaylistRow[]) => registerRows?.(rows.map((row) => String(row.id))),
-    [registerRows],
-  );
+export function SpotifyTab() {
   return (
     <AccountRowsTab
       source="spotify"
@@ -199,7 +181,6 @@ export function SpotifyTab({ registerRows }: AccountTabProps = {}) {
       noun="Spotify"
       fetchRows={fetchSpotifyPlaylists}
       fetchTracks={fetchSpotifyPlaylistTracks}
-      onRows={onRows}
     />
   );
 }

@@ -47,7 +47,6 @@ import { ServerPlaylistList } from './server-playlist-list';
 import { SoulsyncDiscoveryTab } from './soulsync-discovery-tab';
 import { SyncModals } from './sync-modals';
 import { SyncShell } from './sync-shell';
-import { SyncSidebar } from './sync-sidebar';
 import { DeezerLinkTab, ITunesLinkTab, SpotifyPublicTab, YouTubeTab } from './url-import-tab';
 import { type ImportLanding, ImportLandingProvider } from './use-importer';
 
@@ -245,7 +244,7 @@ export function SyncPage() {
     ),
     // the source tabs find playlists and import them (use-importer); the
     // imported playlist is managed under Mirrored
-    spotify: <SpotifyTab registerRows={page.registerSpotifyRows} />,
+    spotify: <SpotifyTab />,
     'spotify-public': (
       <SpotifyPublicTab
         pendingUrl={pendingFor('spotify-public')}
@@ -319,15 +318,6 @@ export function SyncPage() {
         onAddPlaylist={(next) => setAddAnchor((prev) => (prev ? null : next))}
         onAutoSync={() => setAutoSyncOpen(true)}
         onActivity={() => setActivityOpen(true)}
-        sidebar={
-          <SyncSidebar
-            state={page.actions}
-            onStartSync={page.onStartSync}
-            visible={page.sidebarVisible}
-          />
-        }
-        sidebarVisible={page.sidebarVisible}
-        onTabChange={page.onTabChange}
         registerOpenTab={registerOpenTab}
       />
 

@@ -5,7 +5,7 @@
  *
  * THE VANILLA'S TAB HANDLER DOES FOUR THINGS; only one survives as code here.
  * It moved the `active` class on the buttons and panels (that is this
- * component), re-hid the sidebar (S2 owns that), ran a one-shot lazy load per
+ * component), re-hid the old sync sidebar (gone), ran a one-shot lazy load per
  * tab, and computed an `isMobile` const it never read.
  *
  * The lazy loads dissolve. Each was `if (tabId === 'x' && !xLoaded) { xLoaded
@@ -43,21 +43,10 @@ export interface SyncShellProps {
   panels: Partial<Record<SyncTabId, ReactNode>>;
   onAutoSync: () => void;
   onActivity: () => void;
-  /** The right-hand sidebar (S2). Rendered as the second grid column. */
-  sidebar?: ReactNode;
-  /**
-   * Whether that sidebar is currently shown. Drives the grid only — the
-   * sidebar owns its own display. The vanilla wrote both inline together
-   * (`showSyncSidebar`/`hideSyncSidebar`, downloads.js 4041-4057); splitting
-   * them keeps each element's visibility in the component that renders it,
-   * and the two classes are transcriptions of those inline styles.
-   */
-  sidebarVisible?: boolean;
   /**
    * Fired on every tab switch, including a click on the tab already active —
    * the vanilla's handler runs its whole body regardless (sync-services.js
-   * 3732), and its unconditional sidebar re-hide is what the page keys off.
-   * Filtering out same-tab clicks here would change that.
+   * 3732). Filtering out same-tab clicks here would change that.
    */
   /**
    * Opens the Add-playlist sheet. The PRIMARY action on this page: it is the
@@ -78,8 +67,7 @@ export interface SyncShellProps {
    *
    * Optional: the shell stands alone in its own tests, and nothing breaks if a
    * host does not want it. Opening a tab this way marks it opened and fires
-   * `onTabChange`, exactly as a click does — the vanilla got there BY clicking
-   * the button, so the sidebar re-hide must happen too.
+   * `onTabChange`, exactly as a click does.
    */
   registerOpenTab?: (open: (tab: SyncTabId) => void) => void;
 }
@@ -119,8 +107,6 @@ export function SyncShell({
   onAddPlaylist,
   onAutoSync,
   onActivity,
-  sidebar,
-  sidebarVisible,
   onTabChange,
   registerOpenTab,
 }: SyncShellProps) {
@@ -240,9 +226,7 @@ export function SyncShell({
         </div>
       </div>
 
-      <div
-        className={`sync-content-area${sidebarVisible ? ' sync-content-area--with-sidebar' : ''}`}
-      >
+      <div className="sync-content-area">
         <div className="sync-main-panel">
           <div className="sync-tabs" role="tablist">
             {syncStripTabs(
@@ -296,7 +280,6 @@ export function SyncShell({
             </div>
           ))}
         </div>
-        {sidebar}
       </div>
     </div>
   );
