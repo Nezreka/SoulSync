@@ -187,10 +187,10 @@ def update_artist_settings(
             if field in columns:
                 values[field] = int(updates[field])
 
-    # #1822: a follower given rules of its own stops following, starting from
-    # the defaults it was getting rather than the stale columns
+    # #1822: a follower that stops following -- told so, or given rules of its
+    # own -- starts from the defaults it was getting, not the stale columns
     rules, following = _release_rules(watchlist, columns)
-    if following and "follow_defaults" not in updates and set(values) & set(rules):
+    if following and not values.get("follow_defaults", not set(values) & set(rules)):
         values = {**{k: int(v) for k, v in rules.items() if k in columns},
                   **values, "follow_defaults": 0}
     if not values.get("follow_defaults", following) and not any(

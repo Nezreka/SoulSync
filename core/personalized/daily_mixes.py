@@ -616,9 +616,9 @@ def _owned_tracks_for(database, artist_names: Sequence[str],
         artist_rows = _artists_named(conn, list(artist_names))
         ids = [r[0] for r in artist_rows]
         rows = []
-        for chunk in _chunks(ids, 450):
-            marks = ','.join('?' * len(chunk))
-            # the album's artist or credited on the track, as for_you reads it
+        for chunk in _chunks(ids, 900):
+            # the album's artist, as upstream reads tracks.artist_id: every row
+            # is filed under the artist it is labelled with
             rows += conn.execute(
                 f"""
                 SELECT t.id, t.title, t.duration, t.play_count,
@@ -627,11 +627,9 @@ def _owned_tracks_for(database, artist_names: Sequence[str],
                 FROM lib2_tracks t
                 JOIN lib2_albums al ON al.id = t.album_id
                 JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                WHERE (al.primary_artist_id IN ({marks})
-                       OR t.id IN (SELECT ta.track_id FROM lib2_track_artists ta
-                                    WHERE ta.artist_id IN ({marks})))
+                WHERE al.primary_artist_id IN ({','.join('?' * len(chunk))})
                   AND {owned_sql('track', 't')}
-                """, [*chunk, *chunk]).fetchall()
+                """, list(chunk)).fetchall()
         plays: Dict[str, int] = {}
         if owner is not None and rows:
             # listening_history links a play to the catalogue by lib2_track_id;

@@ -373,61 +373,6 @@ def _album_fill_target_artist_allows_track(album_artist: str, track_artists: Lis
     return any(_album_fill_artist_names_match(album_artist, artist) for artist in source_artists)
 
 
-def _album_fill_track_is_other_artist(album_artist: str, track_artists: List[str]) -> bool:
-    """Return whether a source track is credited to someone other than the
-    album artist.
-
-    This is the strict per-track test the WISHLIST fallback uses, unlike
-    ``_album_fill_target_artist_allows_track`` above: no Various
-    Artists / soundtrack blanket (every credited track on such an album
-    is someone else's track), and no album-level tracklist exemption (a
-    guest credit somewhere on the album does not make every other
-    artist's track the album artist's).
-
-    Fail-closed edges, all verified review shapes:
-
-    - No usable album artist (empty, or the providers' "Unknown Artist"
-      placeholder): no track can be shown to be theirs, so every
-      credited track counts as other. Two placeholders matching each
-      other is not evidence of identity.
-    - No credited track artists on a normal album: NOT other-artist —
-      thin metadata must not drop what may be the album artist's own
-      track, and the wishlist payload falls back to the album artist
-      for such tracks anyway. On a compilation/soundtrack album the
-      same empty credit proves nothing either way, so it counts as
-      other there rather than being wishlisted under the blanket label.
-    """
-    album_artist = (album_artist or '').strip()
-    album_norm = album_artist.lower()
-    compilation_album = album_norm in {'various artists', 'various', 'soundtrack'}
-
-    if not album_artist or album_norm == 'unknown artist':
-        # Checked before the empty-credit case on purpose: a track with
-        # no credit on an album with no usable artist would be
-        # wishlisted under the placeholder name itself.
-        return True
-
-    source_artists = [str(a).strip() for a in (track_artists or []) if str(a or '').strip()]
-    if not source_artists:
-        return compilation_album
-
-    if compilation_album and any(a.lower() in {'various artists', 'various', 'soundtrack'}
-                                 for a in source_artists):
-        # A track credited to the blanket label itself, on an album
-        # credited to the same blanket, is the album's own track.
-        return False
-
-    # "X feat. Y" / "X (feat. Y)" is still X's track. the credit splitter
-    # breaks band names that carry an "&" ("Above & Beyond feat. Zoe"
-    # splits into Above, Beyond, Zoe), so also compare the feat-stripped
-    # credit against the album artist exactly.
-    album_clean = _album_fill_normalized_name(album_artist)
-    return not any(
-        _album_fill_artist_names_match(album_artist, artist)
-        or (album_clean and _album_fill_normalized_name(artist) == album_clean)
-        for artist in source_artists)
-
-
 def _split_acoustid_credit(credit: str) -> List[str]:
     """Split an AcoustID artist credit into individual contributor names.
 

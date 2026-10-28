@@ -216,14 +216,12 @@ class TestProviderEnrichment:
 
 
 class TestSoulId:
-    """The SoulID worker spends an API round-trip per artist to derive the
-    cross-install content key, and records WHICH derivation it used. Only
-    'canonical' is reproducible elsewhere; the album fallback depends on what
-    this library happened to own that day, so the path cannot be recomputed
-    after the fact — it has to travel with the id or it is gone when the legacy
-    tables go."""
+    """kinded_v2 (upstream 9b21ba217): the SoulID worker owns the live id and
+    mints it from the row's names. A legacy row's id is the pre-v2 scheme, so
+    it crosses as the parked id peers bridge old -> new by -- written live, a
+    rebuild after the one-time cutover would bring the old scheme back."""
 
-    def test_the_id_and_its_derivation_path_both_cross(
+    def test_the_legacy_id_crosses_parked_and_the_worker_mints_the_live_one(
             self, migrated_legacy_db, imported):
         _set(migrated_legacy_db,
              "UPDATE artists SET soul_id='soul_abc', soul_id_path='canonical' "
@@ -231,10 +229,22 @@ class TestSoulId:
 
         conn = imported()
         row = conn.execute(
-            "SELECT soul_id, soul_id_path FROM lib2_artists WHERE legacy_artist_id=1"
+            "SELECT soul_id, soul_id_path, soul_id_legacy FROM lib2_artists "
+            "WHERE legacy_artist_id=1"
         ).fetchone()
-        assert row["soul_id"] == "soul_abc"
-        assert row["soul_id_path"] == "canonical"
+        assert (row["soul_id"], row["soul_id_path"], row["soul_id_legacy"]) == (None, None, "soul_abc")
+
+    def test_a_rebuild_never_overwrites_a_minted_id(self, migrated_legacy_db, imported):
+        _set(migrated_legacy_db, "UPDATE artists SET soul_id='soul_old' WHERE id=1")
+        conn = imported()
+        conn.execute("UPDATE lib2_artists SET soul_id='soul_v2' WHERE legacy_artist_id=1")
+        conn.commit()
+
+        conn = imported()
+        row = conn.execute(
+            "SELECT soul_id, soul_id_legacy FROM lib2_artists WHERE legacy_artist_id=1"
+        ).fetchone()
+        assert (row["soul_id"], row["soul_id_legacy"]) == ("soul_v2", "soul_old")
 
 
 def test_a_track_whose_album_row_is_gone_keeps_its_file(legacy_db):

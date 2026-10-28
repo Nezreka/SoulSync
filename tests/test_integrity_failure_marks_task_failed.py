@@ -322,6 +322,35 @@ def test_kept_existing_staging_file_retries_without_it(_isolate_state, tmp_path)
     assert 'staging_t7' not in runtime_state.matched_downloads_context
 
 
+def test_kept_existing_staging_file_retries_when_keeping_counts_as_success(_isolate_state, tmp_path):
+    """lib2 port: here keeping the library copy is a successful import
+    (_confirm_existing_file_bookkeeping sets _pipeline_import_succeeded), so the
+    retry must not sit behind the failure branch."""
+    completion_calls = []
+    runtime = _build_runtime(completion_calls)
+    _seed_task('t10', 'b10')
+    runtime_state.download_tasks['t10'].update({'staging_match': True, 'status': 'post_processing'})
+    copy = tmp_path / 'copy.mp3'
+    copy.write_bytes(b'staged copy')
+    context = {'task_id': 't10', 'batch_id': 'b10', 'context_key': 'staging_t10'}
+    requeued = []
+
+    def kept_as_success(*a, **kw):
+        context.update(_kept_existing_library_file=True, _pipeline_import_succeeded=True,
+                       _final_processed_path=str(tmp_path / 'library.mp3'))
+
+    with patch.object(import_pipeline, 'post_process_matched_download', kept_as_success), \
+         patch.object(import_pipeline, '_requeue_quarantined_task_for_retry',
+                      lambda task_id, batch_id, trigger: requeued.append((task_id, trigger)) or True):
+        import_pipeline.post_process_matched_download_with_verification(
+            'staging_t10', context, str(copy), 't10', 'b10', runtime,
+        )
+
+    assert requeued == [('t10', 'staging')]
+    assert not copy.exists()
+    assert completion_calls == []
+
+
 def test_kept_existing_staging_file_with_no_retry_left_fails_and_cleans_up(_isolate_state, tmp_path):
     completion_calls = []
     runtime = _build_runtime(completion_calls)

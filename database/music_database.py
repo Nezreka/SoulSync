@@ -10840,7 +10840,7 @@ class MusicDatabase:
             spotify_id_str = str(spotify_track_id or '').strip()
             if not spotify_id_str:
                 return []
-            from core.library2.sql_util import owned_sql
+            from core.library2.sql_util import owned_sql, owner_clause
             from core.library2.track_files import primary_order
             # the server's id as get_track_by_server_id answers it: the mapping,
             # else the row's own server pair (the SoulSync library has no mapping)
@@ -10859,6 +10859,7 @@ class MusicDatabase:
                        t.spotify_id AS spotify_track_id,
                        (SELECT f.path FROM lib2_track_files f WHERE f.track_id=t.id
                           AND COALESCE(f.file_state,'active')='active'
+                          {owner_clause(column='f.owner_profile_id')}
                         ORDER BY {primary_order('f')} LIMIT 1) AS file_path,
                        COALESCE(t.track_artist, a.name) AS artist_name, al.title AS album_title
                 FROM lib2_tracks t
@@ -12182,12 +12183,18 @@ class MusicDatabase:
         if not variations:
             return None
         marks = ','.join('?' * len(variations))
+        # the caller's library only, as _routed_download_match reads the ledger:
+        # a housemate's download is not this profile's copy
+        from core.library2.sql_util import ambient_scope, owner_clause
+        ownership = owner_clause(ambient_scope(), column='f.owner_profile_id')
         with self._get_connection() as conn:
             rows = conn.cursor().execute(
-                "SELECT id, file_path, track_title, track_artist, track_album "
-                "FROM track_downloads WHERE status = 'completed' AND file_path IS NOT NULL "
-                f"AND track_artist IS NOT NULL AND LOWER(TRIM(track_title)) IN ({marks}) "
-                "ORDER BY id DESC", tuple(variations)).fetchall()
+                "SELECT DISTINCT d.id, d.file_path, d.track_title, d.track_artist, d.track_album "
+                "FROM track_downloads d LEFT JOIN lib2_track_files f ON f.path = d.file_path "
+                "WHERE d.status = 'completed' AND d.file_path IS NOT NULL "
+                f"AND d.track_artist IS NOT NULL AND LOWER(TRIM(d.track_title)) IN ({marks}) "
+                "AND (f.id IS NULL OR COALESCE(f.file_state, 'active') <> 'deleted')"
+                f"{ownership} ORDER BY d.id DESC", tuple(variations)).fetchall()
         best, best_confidence = None, 0.0
         for row in rows:
             candidate = DatabaseTrack(
@@ -24331,15 +24338,18 @@ class MusicDatabase:
                            MIN(td.created_at) AS first_downloaded_at,
                            MAX(td.created_at) AS last_downloaded_at
                     FROM track_downloads td
-                    JOIN lib2_track_files f ON f.path = td.file_path
-                         AND COALESCE(f.file_state, 'active') = 'active'
-                    JOIN lib2_tracks t ON t.id = f.track_id
-                    JOIN lib2_albums al ON al.id = t.album_id
+                    -- one album per download: the path is not unique (twin
+                    -- rows), and a second file row must not count it twice
+                    JOIN lib2_albums al ON al.id = (
+                        SELECT t.album_id FROM lib2_track_files f
+                        JOIN lib2_tracks t ON t.id = f.track_id
+                        WHERE f.path = td.file_path
+                          AND COALESCE(f.file_state, 'active') = 'active'{scope_sql}
+                        ORDER BY f.id LIMIT 1)
                     WHERE td.status = 'completed'
                       AND td.file_path IS NOT NULL
                       AND al.musicbrainz_id IS NOT NULL
                       AND al.musicbrainz_id != ''
-                      {scope_sql}
                     GROUP BY al.musicbrainz_id
                     ORDER BY al.musicbrainz_id""",
                 [since_norm, since_norm, until_norm, until_norm],

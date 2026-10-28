@@ -41,6 +41,7 @@ class AlbumCompletenessJob(RepairJob):
     supports_file_scope = True
 
     def scan(self, context):
+        from core.library2.artist_aliases import resolve_alias_group
         from core.library2.completeness import load_album_catalogue
         from core.library2.editions import default_edition_id
         from core.library2.maintenance_subjects import active_file_subjects
@@ -86,12 +87,16 @@ class AlbumCompletenessJob(RepairJob):
                     edition_id = default_edition_id(conn, album_id)
                     # upstream b12666102/bfe5cd21c: a track credited only to other
                     # artists (a compilation, a soundtrack) is filled only when this
-                    # album was asked for; a guest on the artist's own track is fine
+                    # album was asked for; a guest on the artist's own track is fine,
+                    # and so is a credit to one of the album artist's aliases
+                    primary = conn.execute('SELECT primary_artist_id FROM lib2_albums WHERE id=?',
+                                           (album_id,)).fetchone()[0]
+                    own = resolve_alias_group(conn, primary) if primary is not None else []
                     tracks = conn.execute(
                         'SELECT t.id,t.title,'
                         'EXISTS(SELECT 1 FROM lib2_track_artists ta WHERE ta.track_id=t.id) AND NOT EXISTS('
-                        'SELECT 1 FROM lib2_track_artists ta JOIN lib2_albums al ON al.id=t.album_id '
-                        'WHERE ta.track_id=t.id AND ta.artist_id=al.primary_artist_id) AS other_artist,'
+                        'SELECT 1 FROM lib2_track_artists ta WHERE ta.track_id=t.id '
+                        f"AND ta.artist_id IN ({','.join('?' * len(own)) or 'NULL'})) AS other_artist,"
                         'EXISTS(SELECT 1 FROM lib2_track_files f '
                         'WHERE f.track_id=t.id AND f.owner_profile_id IS ? '
                         "AND COALESCE(f.file_state,'active') NOT IN ('missing_confirmed','deleted') "
@@ -100,7 +105,7 @@ class AlbumCompletenessJob(RepairJob):
                         'FROM lib2_tracks t WHERE t.album_id=? AND (? IS NULL OR EXISTS('
                         'SELECT 1 FROM lib2_release_tracks rt WHERE rt.track_id=t.id '
                         'AND rt.release_edition_id=?))',
-                        (owner, album_id, edition_id, edition_id),
+                        (*own, owner, album_id, edition_id, edition_id),
                     ).fetchall()
                     owned = sum(bool(t['owned']) for t in tracks)
                     if (not tracks or len(tracks) < int(settings['min_tracks_for_check'])

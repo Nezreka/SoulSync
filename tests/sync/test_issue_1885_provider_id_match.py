@@ -983,3 +983,18 @@ def test_wrong_stamped_id_never_pins_another_bands_song(real_db):
     _seed(real_db, artist="Metallica", title="Intro", spotify_id="sp-intro", duration=120_000)
     track = _track(name="Intro", artists=["The xx"], id="sp-intro", duration_ms=120_000)
     assert _run_media_real(real_db, track) == (None, 0.0)
+
+
+def test_the_file_path_is_the_callers_librarys_copy(real_db, monkeypatch):
+    """lib2 port: with own libraries a track can have a file in two of them;
+    the row's file is the one in the library asking."""
+    _seed_library_track(real_db)
+    with real_db._get_connection() as conn:
+        conn.execute("UPDATE lib2_track_files SET owner_profile_id = 7")
+        conn.execute("INSERT INTO lib2_track_files (track_id, path, is_primary, owner_profile_id) "
+                      "SELECT track_id, '/other/p.flac', 1, 3 FROM lib2_track_files")
+        conn.commit()
+    monkeypatch.setattr("core.library2.sql_util.ambient_scope", lambda: 7)
+    monkeypatch.setattr("core.library2.sql_util._resolve_scope", lambda scope: 7)
+    row = real_db.get_track_by_spotify_id("sp1885", server_source="soulsync")
+    assert row is not None and row.file_path == "/m/p.flac"

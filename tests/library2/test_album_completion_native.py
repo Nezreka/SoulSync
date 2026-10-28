@@ -149,3 +149,20 @@ def test_a_bulk_run_leaves_other_artists_tracks_to_an_explicit_fill(catalogue):
 
     run(db, scope={'target_album_id': f'lib2:{aid}'})
     assert [r[0] for r in rules(db)] == sorted([missing, guest, feat])
+
+
+def test_a_credit_to_the_album_artists_alias_is_the_artists_own(catalogue):
+    """lib2 port of the same rule: an alias of the album artist (one alias
+    group, as the artist page reads it) is not another artist."""
+    db, aid, _, missing, _ = catalogue
+    with db._get_connection() as conn:
+        artist_id = conn.execute('SELECT primary_artist_id FROM lib2_albums WHERE id=?', (aid,)).fetchone()[0]
+        alias = conn.execute("INSERT INTO lib2_artists(name, name_key, canonical_artist_id) "
+                             "VALUES('Alias', 'alias', ?)", (artist_id,)).lastrowid
+        aliased = lib2_seed.track(conn, 'Artist', 'Album', 'Alias Song', owned=False,
+                                  track_number=5, disc_number=1, monitored=0)
+        conn.execute('INSERT INTO lib2_track_artists(track_id,artist_id) VALUES(?,?)', (aliased, alias))
+        conn.commit()
+
+    run(db)
+    assert [r[0] for r in rules(db)] == sorted([missing, aliased])

@@ -154,3 +154,9 @@ def test_a_follower_gets_the_defaults_until_it_gets_rules_of_its_own(imported_co
     updated = update_artist_settings(imported_conn, artist_id, {"include_eps": False})
     assert updated["follow_defaults"] is False
     assert (updated["include_eps"], updated["include_singles"], updated["include_live"]) == (False, True, True)
+
+    # un-following keeps the rules it had, it does not fall back to old columns
+    imported_conn.execute("UPDATE watchlist_artists SET follow_defaults = 1")
+    updated = update_artist_settings(imported_conn, artist_id, {"follow_defaults": False})
+    assert updated["follow_defaults"] is False
+    assert (updated["include_eps"], updated["include_singles"], updated["include_live"]) == (True, True, True)

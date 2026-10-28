@@ -178,3 +178,15 @@ def test_until_closes_the_window(db, client):
 def test_malformed_until_is_a_400(db, client):
     _seed(db)
     assert _get(client, until="next-friday").status_code == 400
+
+
+def test_a_path_two_file_rows_share_counts_once(db, client):
+    """lib2 port: the file path is not unique (twin catalogue rows), and one
+    download must not count twice."""
+    _seed(db)
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_track_files (track_id, path) "
+                 "SELECT track_id, path FROM lib2_track_files WHERE path = '/music/a2.flac'")
+    conn.commit()
+    row = _get(client).get_json()["data"]["albums"][0]
+    assert row["completed_downloads"] == 2
