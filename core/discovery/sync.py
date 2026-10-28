@@ -380,6 +380,9 @@ def _record_library_membership(tracks_json, match_details) -> None:
                 # until the next sync, and a number that cannot say how old it
                 # is invites more trust than it has earned.
                 'library_checked_at': checked_at,
+                # the sync's verdict, so the mirror's library check
+                # (core/playlists/library_check) leaves it alone
+                'library_checked_via': 'sync',
             })
             written += 1
         if written:

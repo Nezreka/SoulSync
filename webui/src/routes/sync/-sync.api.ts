@@ -486,6 +486,22 @@ export async function clearMirroredDiscovery(
   );
 }
 
+/**
+ * POST .../check-library (#1910): check the tracks nothing has checked against
+ * the library yet. a slice per call; `remaining` says how many are left.
+ */
+export async function checkMirroredLibrary(playlistId: number | string): Promise<{
+  success?: boolean;
+  checked?: number;
+  found?: number;
+  remaining?: number;
+  error?: string;
+}> {
+  return readJson(
+    await fetch(`/api/mirrored-playlists/${playlistId}/check-library`, { method: 'POST' }),
+  );
+}
+
 /** One mirrored playlist with its tracks (openMirroredPlaylistModal, 1069). */
 export interface MirroredPlaylistDetail {
   error?: string;
@@ -519,6 +535,9 @@ export interface MirroredPlaylistDetail {
   }[];
   /** how many tracks sit in each status (#1721) */
   status_counts?: Partial<Record<MirroredTrackStatus, number>>;
+  /** tracks the detail's library check should look at: unchecked, plus its
+      own misses old enough to ask again (#1910) */
+  library_check_due?: number;
   is_request_list?: boolean;
   auto_remove_fulfilled?: boolean;
   upstream_playlist_id?: string | null;

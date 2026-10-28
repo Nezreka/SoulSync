@@ -47,6 +47,7 @@ import {
 } from '../../../features/playlists/user-playlists';
 import { CoverArtSheet } from './cover-art-sheet';
 import { LikedArt } from './playlist-art';
+import { useLibraryCheck } from './use-library-check';
 import { usePopoverDismiss } from './use-popover-dismiss';
 
 export interface MirroredDetailModalProps {
@@ -430,7 +431,18 @@ export function MirroredDetailModal({
   const [makingMine, setMakingMine] = useState(false);
   // click a part of the status line to see just those tracks
   const [statusFilter, setStatusFilter] = useState<MirroredTrackStatus | null>(null);
-  const segments = trackStatusSegments(data.status_counts);
+  // tracks nothing has checked against the library yet get checked now, so
+  // the line says what's owned instead of "not checked yet" (#1910)
+  const checkingLibrary = useLibraryCheck(
+    playlistId,
+    data.library_check_due ?? data.status_counts?.unchecked ?? 0,
+    onRefresh,
+  );
+  const segments = trackStatusSegments(data.status_counts).map((seg) =>
+    seg.status === 'unchecked' && checkingLibrary
+      ? { ...seg, label: 'being checked…' }
+      : seg,
+  );
   const shownTracks = sortTracks(tracks, sort).filter(
     (t) => !statusFilter || t.status === statusFilter,
   );

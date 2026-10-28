@@ -191,6 +191,22 @@ Every parsed playlist from any source is automatically **mirrored**. The Mirrore
 
 ![Mirrored playlist cards](sync-mirror.jpg)
 
+## Where each track stands
+
+Open a playlist and the line under its title says where its tracks are: **in library**, **wishlisted**, **need a match** or **not downloaded**. Click a part of it to see just those tracks.
+
+- Tracks nothing has checked against your library yet show **not checked yet**. Opening the playlist checks them right then (they read **being checked…** meanwhile), so you don't have to sync first
+- A track marked **not downloaded** by that check is looked at again on a later open, so a song you downloaded since shows up as **in library** without a sync
+- **Sync & download** is the one button for the whole job: refresh from the source, identify, push to your server and download what's missing
+
+## Identification
+
+**Identify** (or **View identification**) matches each track to a song on your metadata source. In that window, **Identified** means the song was matched there. It doesn't mean you own it; that's checked when you download or sync.
+
+- **Push to server** sends the identified songs you already have to the playlist on your media server. Nothing downloads
+- **Download Missing Tracks** opens the download window. It shows straight away which songs you have and which are missing, and **Add to Wishlist** only queues the missing ones (turn on **Force Download All** to queue everything). The server playlist picks up the new songs on the next push or sync
+- **Clear & re-identify** in a card's **⋯** menu throws the identification away and opens the window to run it again
+
 ## Cover art
 
 Pick **Generate cover art** from a playlist card's **⋯** menu, or the **⋯** inside an open playlist. SoulSync reads the playlist's genres, mood and era from your library (and the playlist's name) and asks [Pollinations](https://pollinations.ai) for an image.

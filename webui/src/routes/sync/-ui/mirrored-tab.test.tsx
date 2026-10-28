@@ -151,10 +151,10 @@ describe('MirroredTab — load and card', () => {
     const ring = document.querySelector('.pl-ring')!;
     expect(ring.getAttribute('data-pct')).toBe('36%');
     expect(ring.className).toContain('pl-ring--short');
-    // Clear identification is offered now that there IS an identification to clear.
+    // Clear & re-identify is offered now that there IS an identification to clear.
     fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
     expect([...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent)).toContain(
-      'Clear identification',
+      'Clear & re-identify',
     );
   });
 
@@ -255,23 +255,26 @@ describe('MirroredTab — the three actions', () => {
     window.showToast = toast as typeof window.showToast;
     await loaded({ ...ROW, discovered_count: 4 });
 
-    runCardAction('Clear identification');
+    runCardAction('Clear & re-identify');
     await waitFor(() => expect(toast).toHaveBeenCalled());
     expect(confirm).toHaveBeenCalledWith({
-      title: 'Clear Identification Data',
+      title: 'Clear and re-identify',
       message:
-        'Clear identification data for "Road Trip"? You can re-identify afterwards to get updated cover art.',
+        'Clear the identification for "Road Trip" and start over? The identification window opens so you can run it again.',
     });
     expect(calls.some((c) => c.url === '/api/mirrored-playlists/3/clear-discovery')).toBe(true);
     expect(toast).toHaveBeenCalledWith(
       'Cleared identification for Road Trip (12 tracks)',
       'success',
     );
-    // 1187: the entry is DELETED, not left at 'cancelled' — otherwise the
-    // next card click reads it as non-fresh and opens an empty modal.
-    expect(screen.getByTestId('phase')).toHaveTextContent('unseeded');
     // and the list is reloaded (1190)
     expect(calls.filter((c) => c.url === '/api/mirrored-playlists').length).toBeGreaterThan(1);
+    // #1910: then the identification window opens on a FRESH run. 1187 still
+    // holds: the old entry was deleted, not left at 'cancelled', or this
+    // would reopen the old results instead of preparing a new one.
+    await waitFor(() => expect(screen.getByTestId('open-id')).toHaveTextContent('mirrored_3'));
+    expect(screen.getByTestId('phase')).toHaveTextContent('fresh');
+    expect(calls.some((c) => c.url === '/api/mirrored-playlists/3/prepare-discovery')).toBe(true);
   });
 
   it('clear: a !success response toasts the backend error and reloads nothing', async () => {
@@ -288,7 +291,7 @@ describe('MirroredTab — the three actions', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     const before = calls.filter((c) => c.url === '/api/mirrored-playlists').length;
-    runCardAction('Clear identification');
+    runCardAction('Clear & re-identify');
     await waitFor(() => expect(toast).toHaveBeenCalledWith('busy', 'error'));
     expect(calls.filter((c) => c.url === '/api/mirrored-playlists').length).toBe(before);
   });
@@ -317,12 +320,15 @@ describe('MirroredTab — the three actions', () => {
     fireEvent.click(screen.getByText('Identify'));
     await waitFor(() => expect(screen.getByTestId('seeded')).toHaveTextContent('Road Trip'));
 
-    runCardAction('Clear identification');
+    runCardAction('Clear & re-identify');
     await waitFor(() => expect(toast).toHaveBeenCalled());
     // The vanilla deletes the entry; leaving it at 'cancelled' would make the
-    // next card click take the non-fresh branch and open an empty modal.
-    expect(screen.getByTestId('phase')).toHaveTextContent('unseeded');
-    expect(screen.getByTestId('seeded')).toHaveTextContent('no-playlist');
+    // follow-up identification take the non-fresh branch and reopen the old
+    // run. It prepares a new one instead (#1910).
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('fresh'));
+    expect(
+      calls.filter((c) => c.url === '/api/mirrored-playlists/3/prepare-discovery').length,
+    ).toBe(2);
   });
 
   it('clear: declining the confirm does nothing at all', async () => {
@@ -330,7 +336,7 @@ describe('MirroredTab — the three actions', () => {
     window.showToast = vi.fn() as typeof window.showToast;
     await loaded({ ...ROW, discovered_count: 4 });
     const before = calls.length;
-    runCardAction('Clear identification');
+    runCardAction('Clear & re-identify');
     await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
     expect(calls.length).toBe(before);
   });
@@ -474,7 +480,7 @@ describe('MirroredTab — the three actions', () => {
     window.showConfirmDialog = vi.fn(async () => false) as typeof window.showConfirmDialog;
     window.showToast = vi.fn() as typeof window.showToast;
     await loaded({ ...ROW, discovered_count: 4 });
-    runCardAction('Clear identification');
+    runCardAction('Clear & re-identify');
     await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
     expect(screen.getByTestId('open-id')).toHaveTextContent('none');
   });
