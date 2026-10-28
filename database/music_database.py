@@ -12050,6 +12050,20 @@ class MusicDatabase:
             logger.error(f"Error checking if track {track_id} exists: {e}")
             return False
     
+    def album_track_counts(self, server_source: str) -> Dict[str, int]:
+        """{album id: tracks we hold} for one server, in one query."""
+        try:
+            conn = self._get_connection()
+            try:
+                return {str(r[0]): int(r[1]) for r in conn.execute(
+                    "SELECT album_id, COUNT(*) FROM tracks WHERE server_source = ? "
+                    "AND album_id IS NOT NULL GROUP BY album_id", (server_source,))}
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"Error counting album tracks for {server_source}: {e}")
+            return {}
+
     def track_exists_by_server(self, track_id, server_source: str) -> bool:
         """Check if a track exists in the database by ID and server source"""
         try:
@@ -20676,7 +20690,8 @@ class MusicDatabase:
                 'database_size_mb': round(db_size_mb, 2),
                 'database_path': str(self.database_path),
                 'last_update': last_update,
-                'last_full_refresh': last_full_refresh
+                'last_full_refresh': last_full_refresh,
+                'last_deep_scan': self.get_metadata('last_deep_scan'),
             }
             
         except Exception as e:
@@ -20734,6 +20749,7 @@ class MusicDatabase:
                 'database_path': str(self.database_path),
                 'last_update': last_update,
                 'last_full_refresh': last_full_refresh,
+                'last_deep_scan': self.get_metadata('last_deep_scan'),
                 'server_source': server_source
             }
             

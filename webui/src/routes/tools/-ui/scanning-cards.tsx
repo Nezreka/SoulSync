@@ -188,6 +188,12 @@ export function DbUpdaterCard() {
               ? new Date(stats.last_full_refresh).toLocaleString()
               : 'Never'}
           </span>
+          {stats?.last_deep_scan && (
+            <>
+              {' · '}Last deep scan:{' '}
+              <span id="db-last-deep-scan">{new Date(stats.last_deep_scan).toLocaleString()}</span>
+            </>
+          )}
         </>
       }
       stats={[
