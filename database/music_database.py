@@ -19372,8 +19372,8 @@ class MusicDatabase:
                     # `artist_id` may be a *source* ID (e.g. a MusicBrainz MBID
                     # from a search result) rather than the catalogue's own PK.
                     # The /api/artist-detail route resolves this upstream via
-                    # find_library_artist_for_source, but the enhanced-view and
-                    # quality-analysis endpoints call this method directly with
+                    # find_library_artist_for_source, but the enhanced-view
+                    # endpoint calls this method directly with
                     # whatever ID the page holds — for a library artist opened
                     # from a non-library search result that's the source ID, so
                     # the page 404'd.

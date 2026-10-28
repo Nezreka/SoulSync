@@ -10,6 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   createContext,
+  Fragment,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -62,6 +63,7 @@ import {
   LIBRARY_V2_ALBUM_TYPES,
   LIBRARY_V2_QUERY_KEY,
   libraryScopesQueryOptions,
+  libraryV2EnhanceQueryOptions,
   invalidateLibraryV2,
   isLibraryV2ImportAlreadyCompleted,
   libraryV2AlbumMatchStatusQueryOptions,
@@ -98,6 +100,7 @@ import {
   setLibraryV2PrimaryTrackFile,
   setLibraryV2QualityProfile,
   startLibraryV2AlbumReplayGain,
+  startLibraryV2Enhance,
   startLibraryV2Import,
   startLibraryV2ScopedSearch,
   startLibraryV2ArtistServerSync,
@@ -162,6 +165,7 @@ import {
   type DiscographyFilterState,
   type DiscographyOwnership,
 } from './discography-filters';
+import { EnhanceQualityModal } from './enhance-quality-modal';
 import { ExportArtistsModal } from './export-modal';
 import { FilePathCellBody } from './file-path-cell';
 import { HistoryEventList } from './history-event-list';
@@ -862,6 +866,48 @@ export function ActionButton({
       <SvgIcon name={busy ? 'refresh' : icon} />
       <span>{label}</span>
     </button>
+  );
+}
+
+/** Enhance Quality (#1062 review, point 2): how many of this artist's files
+ *  the quality profile would still upgrade, monitored or not. Hidden at zero;
+ *  the picks go to `onEnhance`, which monitors and searches them. */
+function EnhanceQualityButton({
+  artistId,
+  artistName,
+  busy,
+  onEnhance,
+}: {
+  artistId: number;
+  artistName: string;
+  busy: boolean;
+  onEnhance: (trackIds: number[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const tracks = useQuery(libraryV2EnhanceQueryOptions('artists', artistId)).data?.tracks ?? [];
+  if (tracks.length === 0) return null;
+  return (
+    <>
+      <ActionButton
+        icon="quality"
+        label={`Enhance Quality (${tracks.length})`}
+        requiresWish
+        title="Files below their quality profile — pick which to upgrade"
+        busy={busy}
+        onClick={() => setOpen(true)}
+      />
+      {open ? (
+        <EnhanceQualityModal
+          title={artistName}
+          tracks={tracks}
+          onClose={() => setOpen(false)}
+          onEnhance={(trackIds) => {
+            setOpen(false);
+            onEnhance(trackIds);
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -7003,25 +7049,52 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           {!immersive ? (
             <div className={styles.pageToolbar}>
               <div className={styles.toolbarGroup}>
-                <ArtistRefreshButton artistId={artistId} />
-                <ActionButton
-                  icon="automatic"
-                  label="Automatic Search"
-                  requiresWish
-                  title="Search missing/upgradable tracks for this artist"
-                  // dd28-16: a double click double-POSTed; the server answered
-                  // 409 (job already running) and the client rendered that as
-                  // "Search failed" over a search that was in fact running.
-                  busy={searchBusy}
-                  onClick={() => handleAction('Automatic Search')}
-                />
-                <ActionButton
-                  icon="interactive"
-                  label="Interactive Search"
-                  requiresWish
-                  title="Manually select from search results across all configured sources"
-                  onClick={() => handleAction('Interactive Search')}
-                />
+                {/* The primary bar as named actions, so a setting can later
+                    pick which of them show. Tools and the rest stay. */}
+                {(
+                  [
+                    ['refresh', <ArtistRefreshButton artistId={artistId} />],
+                    [
+                      'automatic_search',
+                      <ActionButton
+                        icon="automatic"
+                        label="Automatic Search"
+                        requiresWish
+                        title="Search missing/upgradable tracks for this artist"
+                        // dd28-16: a double click double-POSTed; the server answered
+                        // 409 (job already running) and the client rendered that as
+                        // "Search failed" over a search that was in fact running.
+                        busy={searchBusy}
+                        onClick={() => handleAction('Automatic Search')}
+                      />,
+                    ],
+                    [
+                      'interactive_search',
+                      <ActionButton
+                        icon="interactive"
+                        label="Interactive Search"
+                        requiresWish
+                        title="Manually select from search results across all configured sources"
+                        onClick={() => handleAction('Interactive Search')}
+                      />,
+                    ],
+                    [
+                      'enhance_quality',
+                      <EnhanceQualityButton
+                        artistId={artistId}
+                        artistName={artist.name}
+                        busy={searchBusy}
+                        onEnhance={(trackIds) =>
+                          runScoped('artists', artistId, () =>
+                            startLibraryV2Enhance('artists', artistId, trackIds),
+                          )
+                        }
+                      />,
+                    ],
+                  ] as const
+                ).map(([id, action]) => (
+                  <Fragment key={id}>{action}</Fragment>
+                ))}
               </div>
               <div className={styles.toolbarGroup}>
                 <ActionButton
@@ -7416,15 +7489,17 @@ async function awaitBulkJob(
 /** Deep-dive C1: run the scoped Automatic Search endpoint for exactly one
  *  artist/album/track and report a banner-ready outcome. Replaces the old
  *  client-side best-pick heuristic (A4) — the server does the searching,
- *  candidate-walking and grabbing through the normal wishlist pipeline. */
+ *  candidate-walking and grabbing through the normal wishlist pipeline.
+ *  `start` swaps in another way to start that same job (Enhance Quality). */
 async function runScopedSearch(
   queryClient: ReturnType<typeof useQueryClient>,
   entity: 'artists' | 'albums' | 'tracks',
   id: number,
   isCurrent?: () => boolean,
+  start: () => Promise<string> = () => startLibraryV2ScopedSearch(entity, id),
 ): Promise<{ tone: 'ok' | 'err'; text: string }> {
   try {
-    const jobId = await startLibraryV2ScopedSearch(entity, id);
+    const jobId = await start();
     const state = await awaitBulkJobState(queryClient, jobId, isCurrent);
     if (state.error) return { tone: 'err', text: `Search failed: ${state.error}` };
     const dispatchError = state.result?.dispatch_error;
@@ -7492,10 +7567,14 @@ function useScopedSearchBanner() {
     }
   }
 
-  function runScoped(entity: 'artists' | 'albums' | 'tracks', id: number) {
+  function runScoped(
+    entity: 'artists' | 'albums' | 'tracks',
+    id: number,
+    start?: () => Promise<string>,
+  ) {
     void run(async ({ sequence, isCurrent }) => {
       publish(sequence, { tone: 'busy', text: 'Searching…' });
-      const result = await runScopedSearch(queryClient, entity, id, isCurrent);
+      const result = await runScopedSearch(queryClient, entity, id, isCurrent, start);
       publish(sequence, result);
     });
   }

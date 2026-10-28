@@ -84,6 +84,8 @@ _OWN_LIBRARY_WISH_ENDPOINTS = frozenset({
     "lib2_set_monitored",
     "lib2_bulk_monitor",
     "lib2_scoped_search",
+    # Enhance Quality: monitor the picked upgrades, then the scoped search
+    "lib2_enhance_quality",
     "lib2_discovery_artist",
     "lib2_discovery_album",
     "lib2_discovery_track",
@@ -4676,9 +4678,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 (selected_albums is not None and (not isinstance(selected_albums, list) or
                  not selected_albums or any(type(a) is not int or a <= 0 for a in selected_albums)))):
             return _fail('Select valid artist/album releases')
+        return _start_scoped_search(entity, eid, missing_only=missing_only,
+                                    selected_albums=selected_albums)
+
+    def _start_scoped_search(entity, eid, *, missing_only=False, selected_albums=None,
+                             only_track_ids=None):
+        """The scoped search job; ``only_track_ids`` narrows the scope's wanted
+        tracks to exactly these (Enhance Quality's picks)."""
         db = get_database()
         with closing(db._get_connection()) as conn:
-            if not conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (eid,)).fetchone():
+            if not conn.execute(f"SELECT 1 FROM {_MONITOR_TABLES[entity]} WHERE id=?",
+                                (eid,)).fetchone():
                 return _fail("Not found", 404)
 
         active_profile = _intent_profile()
@@ -4709,7 +4719,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 else:
                     recompute_wanted_for_entity(conn, entity, eid, profile_id=active_profile)
                     conn.commit()
-                    track_ids = entity_track_ids(conn, entity, eid)
+                    track_ids = [t for t in entity_track_ids(conn, entity, eid)
+                                 if only_track_ids is None or t in only_track_ids]
                 _job_registry.update(job_id, total=len(track_ids))
 
                 from core.library2.wishlist_mirror import (
@@ -4785,6 +4796,46 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
         threading.Thread(target=carrying_scope(_run), name="lib2-scoped-search", daemon=True).start()
         return jsonify({"success": True, "started": True, "job_id": job_id})
+
+    @_route("/api/library/v2/<entity>/<int:eid>/enhance", methods=["GET", "POST"])
+    def lib2_enhance_quality(entity, eid):
+        """Enhance Quality (#1062 review, point 2): the files of this artist/
+        album its quality profile would still upgrade, monitored or not.
+
+        POSTed ``track_ids`` are monitored for upgrade, as a monitor click
+        would, and searched right away by the scoped Automatic Search -- the
+        one upgrade path, nothing beside it.
+        """
+        if entity not in ("artists", "albums"):
+            return _fail("Unknown entity")
+        from core.library2.enhance import enhance_candidates
+        profile = _intent_profile()
+        db = get_database()
+        with closing(db._get_connection()) as conn:
+            candidates = enhance_candidates(conn, entity, eid, profile_id=profile)
+            if request.method == "GET":
+                return jsonify({"success": True, "tracks": candidates})
+            requested = (request.get_json(silent=True) or {}).get("track_ids")
+            if not isinstance(requested, list) or any(type(t) is not int for t in requested):
+                return _fail("track_ids must be a list of track ids")
+            picked = sorted({c["track_id"] for c in candidates} & set(requested))
+            if not picked:
+                return _fail("None of these tracks has an upgrade to look for")
+            from core.library2.mirror_outbox import drain, enqueue_projected_tracks
+            from core.library2.monitor_rules import PROVENANCE_USER, record_rules
+            from core.library2.wanted import recompute_wanted
+            if _shared_intent():
+                conn.execute("UPDATE lib2_tracks SET monitored=1"
+                             " WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(picked),))
+            record_rules(conn, "track", picked, True, PROVENANCE_USER, profile_id=profile)
+            recompute_wanted(conn, profile_id=profile, track_ids=picked)
+            # a pick is the user asking for exactly these: it lifts a Wishlist
+            # ignore entry, as a monitor click does
+            outbox = enqueue_projected_tracks(conn, picked, profile_id=profile, user_initiated=True)
+            conn.commit()
+        if outbox:
+            drain(db)
+        return _start_scoped_search(entity, eid, only_track_ids=set(picked))
 
     # -- §73/I6: live queue status for track/album rows -------------------------
 

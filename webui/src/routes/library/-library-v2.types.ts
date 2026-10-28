@@ -99,6 +99,21 @@ export interface LibraryV2Pagination {
   has_next: boolean;
 }
 
+/** Enhance Quality: one file its quality profile would still upgrade,
+ *  monitored or not. `target` is what an upgrade has to reach. */
+export interface LibraryV2EnhanceTrack {
+  track_id: number;
+  title: string;
+  album_id: number;
+  album_title: string;
+  disc_number: number | null;
+  track_number: number | null;
+  current: string | null;
+  profile: string;
+  target: string | null;
+  monitored: boolean;
+}
+
 /** §64 I2: one row of a global Wanted View. `file`/`meets_profile` are only
  *  present for `kind=cutoff_unmet` rows. */
 export interface LibraryV2WantedRow {

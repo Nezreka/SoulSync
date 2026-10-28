@@ -361,16 +361,25 @@ def mirror_projected_tracks_wishlist(
     return int(row[0]) if row else 0
 
 
-def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
-    """Wanted tracks with files whose profile permits upgrades. The per-track
-    upgrade re-check happens in
+def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
+                                track_ids: Optional[List[int]] = None) -> List[int]:
+    """Wanted tracks with files whose profile permits upgrades -- or, given
+    ``track_ids``, exactly those whatever their monitoring (Enhance Quality).
+    The per-track upgrade re-check happens in
     ``mirror_tracks_wishlist`` (only genuine candidates queue)."""
+    import json
     from core.library2.wanted import PROJECTION_VERSION
     from core.library2.track_files import primary_order
     from core.library2.sql_util import owner_clause, separated
     from core.library_scope import library_scope_for_profile
     # the files of the library this profile's wishes fill (#1199)
     library = separated(library_scope_for_profile(profile_id))
+    scope, scope_params = (
+        ("JOIN lib2_wanted_tracks wt ON wt.track_id=t.id AND wt.profile_id=? AND wt.wanted=1"
+         " WHERE wt.projection_version=?", (int(profile_id), PROJECTION_VERSION))
+        if track_ids is None else
+        ("WHERE t.id IN (SELECT value FROM json_each(?))",
+         (json.dumps([int(t) for t in track_ids]),)))
     rows = conn.execute(
         f"""SELECT t.id,
                   (SELECT tf.path FROM lib2_track_files tf
@@ -380,15 +389,13 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1) -> List[int]:
                       {owner_clause(library, column="tf.owner_profile_id")}
                     ORDER BY {primary_order('tf')} LIMIT 1) AS path
              FROM lib2_tracks t
-           JOIN lib2_wanted_tracks wt ON wt.track_id=t.id
-                AND wt.profile_id=? AND wt.wanted=1
-          WHERE wt.projection_version=?
+           {scope}
             AND EXISTS (SELECT 1 FROM lib2_track_files f
                          WHERE f.track_id=t.id AND f.path IS NOT NULL AND f.path<>''
                            AND COALESCE(f.file_state,'active')
                                NOT IN ('missing_confirmed','deleted')
                            {owner_clause(library, column="f.owner_profile_id")})""",
-        (int(profile_id), PROJECTION_VERSION),
+        scope_params,
     ).fetchall()
     from core.library2.manual_skips import active_skip_paths
     from core.library2.quality_eval import effective_track_profile, is_upgrade_policy

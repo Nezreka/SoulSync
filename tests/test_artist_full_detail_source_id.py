@@ -6,8 +6,8 @@ Bug (reported by Boulder, 2026-05-28): opening a library artist from a
 page holding the source ID — the MBID — not the catalogue's own id. The
 standard /api/artist-detail route resolves that via
 ``find_library_artist_for_source``, but the **enhanced-view** endpoint
-(``/api/library/artist/<id>/enhanced``) and the quality-analysis endpoint call
-``get_artist_full_detail`` directly with whatever ID the page holds. With only
+(``/api/library/artist/<id>/enhanced``) calls ``get_artist_full_detail``
+directly with whatever ID the page holds. With only
 a ``WHERE id = ?`` lookup, that 404'd ("Artist with ID <mbid> not found") and
 the enhanced view failed to load.
 
@@ -130,8 +130,8 @@ def test_alias_rows_contribute_their_releases(db):
 
 
 def test_tracks_carry_the_file_the_quality_scan_needs(db):
-    """The quality-analysis endpoint reads `file_path` and `bitrate` off each
-    track. In the catalogue those belong to the file row (ADR-03), and a
+    """Artist Radio reads `file_path` off each track, the enhanced view also
+    `bitrate`. In the catalogue those belong to the file row (ADR-03), and a
     deleted file must not present itself as a track the user still has."""
     conn = db._get_connection()
     artist_id = _seed_kendrick(db)

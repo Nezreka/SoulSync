@@ -13,6 +13,7 @@ import type {
   LibraryV2ArtistSettings,
   LibraryV2AlbumListItem,
   LibraryV2ArtistSummary,
+  LibraryV2EnhanceTrack,
   LibraryV2FileTags,
   LibraryV2ImportState,
   LibraryV2JobState,
@@ -1471,6 +1472,37 @@ export async function startLibraryV2ScopedSearch(
   // its job id so another tab/remount attaches to it instead of showing an
   // error while the real search continues.
   if (!payload.job_id) throw new Error(payload.error || 'Search did not return a job id');
+  return payload.job_id;
+}
+
+/** Enhance Quality: the files of an artist/album its profile would still
+ *  upgrade, monitored or not. */
+export function libraryV2EnhanceQueryOptions(entity: 'artists' | 'albums', id: number) {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'enhance', entity, id],
+    queryFn: () =>
+      lib2Json<Ok & { tracks: LibraryV2EnhanceTrack[] }>(
+        apiClient.get(`library/v2/${entity}/${id}/enhance`),
+        'Failed to load quality upgrades',
+      ),
+  });
+}
+
+/** Monitor the picked tracks for upgrade and start their scoped search; the
+ *  job id polls like `startLibraryV2ScopedSearch`'s (a 409 hands back the
+ *  running search). */
+export async function startLibraryV2Enhance(
+  entity: 'artists' | 'albums',
+  id: number,
+  trackIds: number[],
+): Promise<string> {
+  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+    apiClient.post(`library/v2/${entity}/${id}/enhance`, {
+      json: { track_ids: trackIds },
+      throwHttpErrors: false,
+    }),
+  );
+  if (!payload.job_id) throw new Error(payload.error || 'Enhance did not return a job id');
   return payload.job_id;
 }
 

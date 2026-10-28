@@ -340,7 +340,7 @@ _MIGRATION_BLOCKED_ENDPOINTS = frozenset({
     'delete_verification_item', 'deezer_download_test_download',
     'clean_orphan_verification_items', 'recover_quarantine_item',
     'delete_download_origins', 'write_artist_image_to_disk',
-    'set_album_art', 'set_artist_art', 'enhance_artist_quality',
+    'set_album_art', 'set_artist_art',
     'reorganize_album_files', 'reorganize_all_artist_albums',
     'library_enrich_entity', 'library_manual_match', 'library_clear_match',
     'download_selected_candidate', 'manual_search_for_task',
@@ -9752,154 +9752,6 @@ def reidentify_apply():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/library/artist/<artist_id>/quality-analysis')
-def get_artist_quality_analysis(artist_id):
-    """Analyze track quality for an artist — returns tier classification for each track."""
-    try:
-        database = get_database()
-        result = database.get_artist_full_detail(artist_id)
-        if not result.get('success'):
-            return jsonify(result), 404
-
-        artist = result.get('artist', {})
-        albums = result.get('albums', [])
-
-        # Get the app-wide default quality profile (v3 shape — `ranked_targets`,
-        # not the legacy v2 `qualities` dict) to determine min acceptable tier.
-        quality_profile = database.get_quality_profile()
-        ranked_targets = quality_profile.get('ranked_targets') or []
-        min_acceptable_tier = 999
-        # Mirrors QUALITY_TIERS' extension groupings so a ranked-target's
-        # `format` (as edited in the Settings ranked-targets picker — see
-        # RT_LOSSLESS_FORMATS/RT_LOSSY_FORMATS in settings.js) lands on the
-        # same tier this scan buckets library files into.
-        format_tier_map = {
-            'flac': 'lossless', 'alac': 'lossless', 'wav': 'lossless', 'dsf': 'lossless',
-            'opus': 'high_lossy', 'ogg': 'high_lossy',
-            'aac': 'standard_lossy',
-            'mp3': 'low_lossy', 'wma': 'low_lossy',
-        }
-        for target in ranked_targets:
-            tname = format_tier_map.get((target or {}).get('format'))
-            if tname and tname in QUALITY_TIERS:
-                min_acceptable_tier = min(min_acceptable_tier, QUALITY_TIERS[tname]['tier'])
-
-        tracks = []
-        summary = {'total': 0, 'lossless': 0, 'high_lossy': 0, 'standard_lossy': 0, 'low_lossy': 0, 'unknown': 0}
-
-        for album in albums:
-            album_title = album.get('title', 'Unknown Album')
-            album_id = album.get('id')
-            for track in album.get('tracks', []):
-                file_path = track.get('file_path')
-                if not file_path:
-                    continue
-
-                tier_name, tier_num = _get_quality_tier_from_extension(file_path)
-                ext = os.path.splitext(file_path)[1].lstrip('.').upper()
-
-                # Use filename as fallback when title is empty
-                title = track.get('title', '') or ''
-                if not title.strip():
-                    title = os.path.splitext(os.path.basename(file_path))[0]
-
-                tracks.append({
-                    'track_id': track.get('id'),
-                    'title': title,
-                    'album_title': album_title,
-                    'album_id': album_id,
-                    'file_path': file_path,
-                    'format': ext or 'Unknown',
-                    'tier_name': tier_name,
-                    'tier_num': tier_num,
-                    'bitrate': track.get('bitrate'),
-                    'spotify_track_id': track.get('spotify_track_id'),
-                    'track_number': track.get('track_number'),
-                    'disc_number': track.get('disc_number'),
-                })
-                summary['total'] += 1
-                if tier_name in summary:
-                    summary[tier_name] += 1
-                else:
-                    summary['unknown'] += 1
-
-        return jsonify({
-            'success': True,
-            'artist_name': artist.get('name', 'Unknown Artist'),
-            'artist_id': artist_id,
-            'tracks': tracks,
-            'quality_summary': summary,
-            'min_acceptable_tier': min_acceptable_tier
-        })
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-# Artist quality enhancement logic lives in core/artists/quality.py.
-from core.artists import quality as _artists_quality
-
-
-def _build_artist_quality_deps():
-    """Build the ArtistQualityDeps bundle from web_server.py globals on each call."""
-    from core.wishlist_service import get_wishlist_service as _get_ws
-
-    def _resolve_search_sources():
-        """Mirror the Track Redownload modal's source list. Every
-        configured metadata source contributes to the parallel multi-source
-        search — Spotify (only when authenticated), iTunes, Deezer, plus
-        Discogs / Hydrabase when configured."""
-        sources = []
-        if spotify_client and spotify_client.is_authenticated():
-            sources.append(('spotify', spotify_client))
-        try:
-            sources.append(('itunes', _get_itunes_client()))
-        except Exception as e:
-            logger.debug("itunes client init failed: %s", e)
-        try:
-            sources.append(('deezer', _get_deezer_client()))
-        except Exception as e:
-            logger.debug("deezer client init failed: %s", e)
-        # Discogs needs an explicit token; only include when configured.
-        try:
-            _discogs_token = config_manager.get('discogs.token', '')
-            if _discogs_token:
-                sources.append(('discogs', _get_discogs_client(_discogs_token)))
-        except Exception as e:
-            logger.debug("discogs client init failed: %s", e)
-        # Hydrabase only when connected (dev-mode + active client).
-        try:
-            if hydrabase_client and hydrabase_client.is_connected():
-                sources.append(('hydrabase', hydrabase_client))
-        except Exception as e:
-            logger.debug("hydrabase client check failed: %s", e)
-        return sources
-
-    return _artists_quality.ArtistQualityDeps(
-        matching_engine=matching_engine,
-        get_database=get_database,
-        get_wishlist_service=_get_ws,
-        get_current_profile_id=get_current_profile_id,
-        get_quality_tier_from_extension=_get_quality_tier_from_extension,
-        get_metadata_search_sources=_resolve_search_sources,
-    )
-
-
-@app.route('/api/library/artist/<artist_id>/enhance', methods=['POST'])
-def enhance_artist_quality(artist_id):
-    """Add selected tracks to wishlist for quality enhancement re-download."""
-    try:
-        data = request.get_json() or {}
-        track_ids = data.get('track_ids', [])
-        payload, status = _artists_quality.enhance_artist_quality(
-            artist_id, track_ids, _build_artist_quality_deps()
-        )
-        return jsonify(payload), status
-    except Exception as e:
-        logger.error(f"[Enhance] {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
 @app.route('/api/library/artist/<artist_id>', methods=['PUT'])
 def update_library_artist(artist_id):
     """Update artist metadata fields."""
@@ -15164,39 +15016,6 @@ def musicbrainz_recording_lookup_api(mbid):
 # ===============================
 # == QUALITY SCANNER           ==
 # ===============================
-
-# Quality tier mappings
-QUALITY_TIERS = {
-    'lossless': {
-        'extensions': ['.flac', '.ape', '.wav', '.alac', '.dsf', '.dff', '.aiff', '.aif'],
-        'tier': 1
-    },
-    'high_lossy': {
-        'extensions': ['.opus', '.ogg'],
-        'tier': 2
-    },
-    'standard_lossy': {
-        'extensions': ['.m4a', '.aac'],
-        'tier': 3
-    },
-    'low_lossy': {
-        'extensions': ['.mp3', '.wma'],
-        'tier': 4
-    }
-}
-
-def _get_quality_tier_from_extension(file_path):
-    """Determine quality tier from file extension"""
-    if not file_path:
-        return ('unknown', 999)
-
-    ext = os.path.splitext(file_path)[1].lower()
-
-    for tier_name, tier_data in QUALITY_TIERS.items():
-        if ext in tier_data['extensions']:
-            return (tier_name, tier_data['tier'])
-
-    return ('unknown', 999)
 
 # (Quality scanning is part of the wanted projection — see monitoring_list_reconcile.)
 
