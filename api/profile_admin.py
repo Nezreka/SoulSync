@@ -89,7 +89,8 @@ def sign_out_everywhere(profile_id):
     target = db.get_profile(profile_id)
     if not target:
         return jsonify({"success": False, "error": "Profile not found"}), 404
-    epoch = db.bump_profile_session_epoch(profile_id)
+    epoch = db.bump_profile_session_epoch(
+        profile_id, keep_device_id=session.get("device_id") if int(profile_id) == int(pid) else None)
     if epoch is None:
         return jsonify({"success": False, "error": "Could not sign out"}), 500
     from core.security.session_epoch import forget
@@ -349,7 +350,7 @@ def accept_invite(token):
     session["profile_epoch"] = 0
     from core.security.devices import start_device
     start_device(session, db.add_profile_device, new_id, request.headers.get("User-Agent", ""),
-                 request.remote_addr or "")
+                 request.remote_addr or "", revoke_row=db.revoke_profile_device)
     session["device_owner"] = new_id
     if _require_login_enabled():
         session["login_authenticated"] = True
