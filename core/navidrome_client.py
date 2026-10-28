@@ -1915,6 +1915,23 @@ class NavidromeClient(MediaServerBase):
             logger.error(f"Failed to trigger Navidrome scan: {e}")
             return False
 
+    def get_scan_state(self):
+        """getScanStatus in full: ``{scanning, last_scan, count, folder_count}``,
+        or None when it can't be read. Navidrome adds ``lastScan`` (and
+        ``folderCount``) to the Subsonic answer, which is what lets a finished
+        scan be told apart from one that hasn't started yet (#1899)."""
+        try:
+            result = self._make_request('getScanStatus')
+        except Exception:   # noqa: BLE001 - unreadable is "unknown", never "done"
+            return None
+        if result is None:
+            return None
+        status = result.get('scanStatus') or {}
+        return {"scanning": bool(status.get('scanning', False)),
+                "last_scan": status.get('lastScan'),
+                "count": status.get('count'),
+                "folder_count": status.get('folderCount')}
+
     def is_library_scanning(self, library_name: str = "Music") -> bool:
         """Check if Navidrome library is currently scanning via Subsonic getScanStatus."""
         try:
