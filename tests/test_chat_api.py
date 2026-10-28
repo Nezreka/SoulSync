@@ -685,6 +685,21 @@ def test_chat_connection_reports_disconnected_per_endpoint(endpoint):
     assert state["code"] == "slskd_disconnected"
 
 
+def test_chat_connection_falls_back_to_application_state():
+    # slskd 0.26.2 made /server admin-only; a non-admin key reads the same
+    # block from /application
+    client = _RecordingClient({("GET", "application"): {
+        "server": {"isConnected": True, "isLoggedIn": True}}})
+    assert _run(client.get_chat_connection_state()) == {"connected": True}
+
+
+def test_chat_connection_application_state_reports_disconnected():
+    client = _RecordingClient({("GET", "application"): {
+        "server": {"isConnected": True, "isLoggedIn": False}}})
+    state = _run(client.get_chat_connection_state())
+    assert state["code"] == "slskd_disconnected"
+
+
 @pytest.mark.parametrize("path,payload", [
     ("/api/chat/room/message", {"message": "draft"}),
     ("/api/chat/conversations/peer", {"message": "draft"}),

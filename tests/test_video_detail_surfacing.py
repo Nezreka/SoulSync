@@ -92,15 +92,18 @@ class TestUiPins:
     def test_detail_js_wires_the_toggle_and_facts(self):
         js = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(
             encoding="utf-8", errors="replace")
-        assert "data-vd-act=\"watched-toggle\"" in js
+        # the toggle lives in the hero's More menu (Oct 2026), built by moreItem
+        assert "moreItem('watched-toggle'" in js
         assert "which === 'watched-toggle') toggleWatchedState(act)" in js
         assert "'/watched'" in js                       # hits the existing API
         assert 'function renderAwards(d)' in js
         assert js.count('renderAwards(d)') >= 3         # def + main + youtube-path clear
         assert 'vd-ep-new-chip' in js
         assert 'After-credits scene' in js
-        assert "detailCell('Digital release', d.digital_release_date)" in js
-        assert "f.quality || mediaRes(f.resolution)" in js
+        assert "rows.push(['Digital release', fmtDate(d.digital_release_date)])" in js   # About, since Oct 26
+        # the file facts moved to the Your library tab (Oct 2026)
+        assert "f.quality !== f.resolution_label" in (
+            _ROOT / "webui" / "src" / "features" / "video-library" / "library-tab.tsx").read_text(encoding="utf-8")
 
     def test_detail_actions_keep_primary_and_tool_hierarchy(self):
         js = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(
@@ -110,7 +113,8 @@ class TestUiPins:
         assert 'vd-play-btn vd-action-main' in js
         assert 'library-artist-watchlist-btn vd-action-main" type="button" data-vd-act="get"' in js
         assert 'discog-download-btn discog-btn-compact vd-action-main" type="button" data-vd-act="missing"' in js
-        assert 'vd-manage-btn" type="button" data-vd-act="poster"' in js
+        # management actions build into the More menu, never the main row
+        assert "libMore += moreItem('poster'" in js
         assert '.vd-actions {\n    display: flex;' in css
         assert '@media (max-width: 620px)' in css
 

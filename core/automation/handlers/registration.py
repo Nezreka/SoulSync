@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from core.automation.deps import AutomationDeps
 from core.automation.handlers.process_wishlist import auto_process_wishlist
+from core.automation.handlers.metasync_charts import auto_refresh_metasync_charts
 from core.automation.handlers.scan_watchlist import auto_scan_watchlist
 from core.automation.handlers.audiobook_process_wishlist import auto_process_audiobook_wishlist
 from core.automation.handlers.audiobook_scan_watchlist import auto_scan_audiobook_watchlist
@@ -46,6 +47,7 @@ from core.automation.handlers.download_cleanup import (
     auto_full_cleanup,
 )
 from core.automation.handlers.run_script import auto_run_script
+from core.automation.handlers.deezer_signin import auto_check_deezer_signin
 from core.automation.handlers.search_and_download import auto_search_and_download
 from core.automation.handlers.complete_incomplete_albums import auto_complete_incomplete_albums
 from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes_all_profiles, is_airing_already_running
@@ -106,6 +108,11 @@ def register_all(deps: AutomationDeps) -> None:
         'process_wishlist',
         lambda config: auto_process_wishlist(config, deps),
         guard_fn=deps.is_wishlist_actually_processing,
+    )
+    # MetaSync's SIN charts: fetched, stored and matched, never downloaded
+    engine.register_action_handler(
+        'metasync_refresh_charts',
+        lambda config: auto_refresh_metasync_charts(config, deps),
     )
     engine.register_action_handler(
         'scan_watchlist',
@@ -253,6 +260,10 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'backup_database',
         lambda config: auto_backup_database(config, deps),
+    )
+    engine.register_action_handler(
+        'check_deezer_signin',
+        lambda config: auto_check_deezer_signin(config, deps),
     )
     engine.register_action_handler(
         'refresh_beatport_cache',

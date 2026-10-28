@@ -31,12 +31,16 @@ from core.personalized.types import PlaylistRecord, Track
 
 
 def _record_to_dict(record: PlaylistRecord) -> Dict[str, Any]:
+    # the name as the kind renders it now: rows keep the name they were
+    # created with, which for genres and seasons was the raw key
+    # ('Genre — electronic_dance')
+    spec = get_registry().get(record.kind)
     return {
         'id': record.id,
         'profile_id': record.profile_id,
         'kind': record.kind,
         'variant': record.variant,
-        'name': record.name,
+        'name': spec.display_name(record.variant) if spec else record.name,
         'config': record.config.to_json_dict(),
         'track_count': record.track_count,
         'last_generated_at': record.last_generated_at,
@@ -84,12 +88,15 @@ def list_kinds(
             'tags': list(spec.tags),
             'default_config': spec.default_config.to_json_dict(),
             'variants': [],
+            # variant key -> what a person reads ('electronic_dance' -> 'Electronic/Dance')
+            'variant_labels': {},
         }
         if manager is not None and spec.variant_resolver is not None:
             try:
                 entry['variants'] = list(spec.variant_resolver(manager.deps) or [])
             except Exception:
                 entry['variants'] = []
+            entry['variant_labels'] = {str(v): spec.label(str(v)) for v in entry['variants']}
         out.append(entry)
     return {'success': True, 'kinds': out}
 

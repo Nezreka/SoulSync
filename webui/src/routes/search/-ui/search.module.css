@@ -72,7 +72,7 @@
 .libraryTarget {
   margin: 6px 0 0;
   font-size: 12.5px;
-  color: var(--sp-muted);
+  color: var(--text-muted);
 }
 
 .libraryTarget strong {

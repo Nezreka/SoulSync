@@ -12,6 +12,7 @@ import {
   groupDbStorageTables,
   hasStatsData,
   isNewSincePrevious,
+  parsePlayedAt,
   statDelta,
   visibleStatsEnrichmentServices,
 } from './-stats.helpers';
@@ -53,6 +54,11 @@ describe('stats helpers', () => {
     expect(formatRelativePlayedAt('2026-05-14T08:00:00.000Z', now)).toBe('4h ago');
     // the history's own utc stamp, whatever zone the browser is in
     expect(formatRelativePlayedAt('2026-05-14 11:15:00', now)).toBe('45m ago');
+  });
+
+  it('reads a bare history stamp as utc (#1840)', () => {
+    expect(parsePlayedAt('2026-10-22 07:04:33').toISOString()).toBe('2026-10-22T07:04:33.000Z');
+    expect(parsePlayedAt('2026-10-22T07:04:33Z').toISOString()).toBe('2026-10-22T07:04:33.000Z');
   });
 
   it('groups db storage rows into Other after the top eight', () => {

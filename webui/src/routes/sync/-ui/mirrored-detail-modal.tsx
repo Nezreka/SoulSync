@@ -33,6 +33,7 @@ import {
 import { skippedNoteText } from '../-sync.modal-core';
 import { AddSongsPanel } from '../../../features/playlists/add-songs-panel';
 import { AddToPlaylistButton } from '../../../features/playlists/add-to-playlist';
+import { restoreOriginalCover } from '../../../features/playlists/cover-art';
 import { playPlaylist, type PlaylistPlayMode } from '../../../features/playlists/play-playlist';
 import {
   isLikedPlaylist,
@@ -44,6 +45,7 @@ import {
   setPlaylistDescription,
   uploadPlaylistCover,
 } from '../../../features/playlists/user-playlists';
+import { CoverArtSheet } from './cover-art-sheet';
 import { LikedArt } from './playlist-art';
 import { usePopoverDismiss } from './use-popover-dismiss';
 
@@ -462,6 +464,22 @@ export function MirroredDetailModal({
   const [descDraft, setDescDraft] = useState('');
   const [descBusy, setDescBusy] = useState(false);
   const [dupBusy, setDupBusy] = useState(false);
+  const [coverArtOpen, setCoverArtOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const restoreCover = async () => {
+    setRestoring(true);
+    try {
+      await restoreOriginalCover(playlistId);
+      onRefresh();
+    } catch (err) {
+      window.showToast?.(
+        err instanceof Error ? err.message : 'Could not restore the cover',
+        'error',
+      );
+    } finally {
+      setRestoring(false);
+    }
+  };
   useEffect(() => {
     setCoverOpen(false);
     setCoverError(null);
@@ -957,6 +975,22 @@ export function MirroredDetailModal({
                         : []),
                       ...(!own ? [{ label: 'Edit source link', onSelect: onEditSource }] : []),
                       {
+                        label: 'Generate cover art',
+                        hint: 'a new cover from its genres and mood',
+                        separated: true,
+                        onSelect: () => setCoverArtOpen(true),
+                      },
+                      ...(!own && data.custom_cover
+                        ? [
+                            {
+                              label: restoring ? 'Restoring…' : 'Restore original cover',
+                              hint: `back to ${srcLabel === 'unknown' ? "the source's" : `${srcLabel}'s`} cover`,
+                              busy: restoring,
+                              onSelect: () => void restoreCover(),
+                            },
+                          ]
+                        : []),
+                      {
                         label: own ? 'Delete playlist' : 'Delete mirror',
                         danger: true,
                         separated: true,
@@ -977,6 +1011,14 @@ export function MirroredDetailModal({
             &times;
           </button>
         </div>
+        {coverArtOpen ? (
+          <CoverArtSheet
+            playlistId={playlistId}
+            playlistName={data.display_name || data.name || 'this playlist'}
+            onClose={() => setCoverArtOpen(false)}
+            onApplied={onRefresh}
+          />
+        ) : null}
         {addOpen && editable ? (
           <AddSongsPanel
             playlistId={playlistId}

@@ -77,6 +77,8 @@ const NEW_IDS = [
   // Deezer's editors publish curated playlists and the public api serves them
   // with no key. A shelf the vanilla never had, so its section anchor is new.
   'deezer-editorial',
+  // the SoulSync network's weekly charts (MetaSync): a shelf the vanilla never had
+  'sin-charts',
   'build-a-playlist',
   // the generated playlist's name box (#1421): the vanilla never let you name it
   'build-playlist-name',

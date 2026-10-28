@@ -1,6 +1,6 @@
 /**
- * The dashboard content band: ONE full-width card holding both album rails
- * behind a tab switcher — Recently Added | Fresh Releases.
+ * The dashboard content band: ONE full-width card holding the rails behind a
+ * tab switcher — Recently Added | Fresh Releases | SoulSync Charts.
  *
  * One container instead of two (Boulder: "maybe recently added and fresh
  * releases can be one section? … i like it pretty and elegant"). The tabs
@@ -14,13 +14,17 @@
  *
  * Clicks are unchanged: Recently Added plays the newest landed track; Fresh
  * Releases plays when fully owned and opens the standard download-missing
- * modal when not (openFreshRelease). One fetch per feed, on mount.
+ * modal when not (openFreshRelease). SoulSync Charts (MetaSync's network
+ * charts, only once matched) open as your own playlist in Sync, where
+ * nothing downloads until you press Sync & download (openSinChart).
  */
 
 import type { ReactNode } from 'react';
 
 import { useCallback, useState } from 'react';
 
+import { fetchSinCharts, openSinChart, type SinChart } from '@/features/metasync/charts';
+import { SinChartCard } from '@/features/metasync/sin-chart-card';
 import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
 
@@ -138,46 +142,63 @@ function RailCard({
 // it gains plays, and this rail costs two queries.
 const CONTENT_REFRESH_MS = 120_000;
 
-type BandTab = 'recent' | 'fresh';
+type BandTab = 'recent' | 'fresh' | 'charts';
 
 export function ContentBand() {
   const [albums, setAlbums] = useState<RecentlyAddedAlbum[]>([]);
   const [releases, setReleases] = useState<FreshRelease[]>([]);
+  const [charts, setCharts] = useState<SinChart[]>([]);
+  const [openingChart, setOpeningChart] = useState<string | null>(null);
   const [tab, setTab] = useState<BandTab>('recent');
 
   // Was a one-shot mount load, so a finished download did not show up here
   // until the page was reloaded. Both rails refresh on a timer now and catch
   // up whenever the tab comes back to the front.
   const load = useCallback(async () => {
-    const [added, fresh] = await Promise.all([
+    const [added, fresh, ready] = await Promise.all([
       fetchRecentlyAdded().catch(() => null),
       fetchFreshReleases().catch(() => null),
+      fetchSinCharts().catch(() => null),
     ]);
     // null means that rail's fetch failed; keep what is on screen rather than
     // blanking a populated rail because of one bad poll.
     if (added) setAlbums(added);
     if (fresh) setReleases(fresh);
+    if (ready) setCharts(ready);
   }, []);
 
   useLiveRefresh(load, { intervalMs: CONTENT_REFRESH_MS });
 
   const hasRecent = albums.length > 0;
   const hasFresh = releases.length > 0;
-  if (!hasRecent && !hasFresh) return null;
+  const hasCharts = charts.length > 0;
+  if (!hasRecent && !hasFresh && !hasCharts) return null;
 
   // A tab you can't switch to is clutter; a selected tab whose feed is empty
-  // (recent empty, fresh not) silently shows the one with rows.
-  const active: BandTab =
-    tab === 'recent' && !hasRecent ? 'fresh' : tab === 'fresh' && !hasFresh ? 'recent' : tab;
+  // silently shows the first one with rows.
+  const has: Record<BandTab, boolean> = { recent: hasRecent, fresh: hasFresh, charts: hasCharts };
+  const active: BandTab = has[tab]
+    ? tab
+    : ((['recent', 'fresh', 'charts'] as BandTab[]).find((t) => has[t]) ?? 'recent');
   const fromDiscover = hasFresh && releases[0].fromDiscover;
   const now = Date.now();
   // The section header names the active feed with its count; the switcher
   // is a segmented control. Same tabs, same roles, composed instead of
   // floating beside a small subtitle.
-  const feedTitle = active === 'recent' ? 'Recently Added' : 'Fresh Releases';
-  const feedCount = active === 'recent' ? albums.length : releases.length;
+  const feedTitle =
+    active === 'recent'
+      ? 'Recently Added'
+      : active === 'fresh'
+        ? 'Fresh Releases'
+        : 'SoulSync Charts';
+  const feedCount =
+    active === 'recent' ? albums.length : active === 'fresh' ? releases.length : charts.length;
   const feedCountLabel =
-    active === 'recent' ? `${feedCount} new` : `${feedCount} release${feedCount === 1 ? '' : 's'}`;
+    active === 'recent'
+      ? `${feedCount} new`
+      : active === 'fresh'
+        ? `${feedCount} release${feedCount === 1 ? '' : 's'}`
+        : `${feedCount} chart${feedCount === 1 ? '' : 's'}`;
 
   return (
     <article className="dash-card dash-card--rail">
@@ -190,9 +211,11 @@ export function ContentBand() {
           <span className="dash-rail-subtitle">
             {active === 'recent'
               ? 'the latest albums to land in your library'
-              : fromDiscover
-                ? 'new music picked for you — follow artists to tune this'
-                : 'new music from artists you watch'}
+              : active === 'charts'
+                ? 'what the SoulSync network is collecting this week — open one to sync or download'
+                : fromDiscover
+                  ? 'new music picked for you — follow artists to tune this'
+                  : 'new music from artists you watch'}
           </span>
         </div>
         <div className="dash-band-tabs" role="tablist" aria-label="Choose feed">
@@ -215,6 +238,16 @@ export function ContentBand() {
             onClick={() => setTab('fresh')}
           >
             Fresh Releases
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={active === 'charts'}
+            className={`dash-band-tab${active === 'charts' ? ' active' : ''}`}
+            style={hasCharts ? undefined : { display: 'none' }}
+            onClick={() => setTab('charts')}
+          >
+            SoulSync Charts
           </button>
         </div>
       </div>
@@ -249,6 +282,21 @@ export function ContentBand() {
                   album.albumName,
                   album.artistName,
                 );
+              }}
+            />
+          ))}
+        </div>
+      ) : active === 'charts' ? (
+        <div className="dash-rail">
+          {charts.map((chart) => (
+            <SinChartCard
+              key={chart.key}
+              chart={chart}
+              className="dash-rail-card"
+              busy={openingChart === chart.key}
+              onOpen={(c) => {
+                setOpeningChart(c.key);
+                void openSinChart(c).finally(() => setOpeningChart(null));
               }}
             />
           ))}

@@ -158,15 +158,16 @@ def test_inverse_reroot_maps_back_to_server_view():
 
 
 def test_ui_and_api_wiring():
-    index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-    repair_js = (_ROOT / "webui" / "static" / "video" / "video-repair.js").read_text(encoding="utf-8")
+    cards = (_ROOT / "webui" / "src" / "routes" / "tools" / "-ui" / "video-tool-cards.tsx").read_text(encoding="utf-8")
+    api_ts = (_ROOT / "webui" / "src" / "routes" / "tools" / "-video-tools.api.ts").read_text(encoding="utf-8")
+    page = (_ROOT / "webui" / "src" / "routes" / "tools" / "-ui" / "tools-page.tsx").read_text(encoding="utf-8")
     dl_api = (_ROOT / "api" / "video" / "downloads.py").read_text(encoding="utf-8")
-    assert "data-video-rename-card" in index
-    assert "wireRename()" in repair_js and "showConfirmDialog" in repair_js
+    assert "<VideoMassRenameCard />" in page
+    assert "export function VideoMassRenameCard" in cards and "showConfirmDialog" in cards
     assert '"/organization/rename/preview"' in dl_api and '"/organization/rename/apply"' in dl_api
     # background preview: the UI polls the status endpoint for a live count
     assert '"/organization/rename/preview/status"' in dl_api
-    assert "rename/preview/status" in repair_js and "Scanning your library" in repair_js
+    assert "rename/preview/status" in api_ts and "Scanning your library" in cards
 
 
 # ── background preview (slow-library fix) ─────────────────────────────────────
@@ -297,3 +298,15 @@ def test_rename_rows_year_null_when_neither_exists(env):
     _seed_episode_file(db, movies, year=None, first_air_date=None)
     rows = db.rename_owned_episode_files()
     assert rows and rows[0]["show_year"] is None
+
+
+def test_preview_keeps_the_quality_the_file_name_carries(env):
+    """A media-server scan records no quality; the preview used to propose a
+    name with '$quality' rendered empty."""
+    from core.video import organization
+    db, movies = env
+    organization.save(db, {**organization.load(db),
+                           "movie_template": "$title ($year)/$title ($year) [$quality]"})
+    _seed_movie_file(db, movies, name="heat.1995.1080p.bluray.x264-GRP.mkv")
+    e = mr.preview()["entries"][0]
+    assert e["proposed"] == str(movies / "Heat (1995)" / "Heat (1995) [Bluray-1080p].mkv")

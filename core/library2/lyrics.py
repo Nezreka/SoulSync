@@ -86,8 +86,11 @@ def fetch_track_lyrics(
     if not resolved:
         return {"fetched": False, "error": "File not found on disk"}
 
+    # upstream #1879: a rate limit or timeout is not "no lyrics"
+    detailed = getattr(client, "create_lrc_file_detailed", None)
     try:
-        ok = client.create_lrc_file(
+        ok, reason = (detailed if callable(detailed) else
+                      lambda *a, **kw: (client.create_lrc_file(*a, **kw), None))(
             resolved,
             context["title"],
             context["artist"],
@@ -98,7 +101,7 @@ def fetch_track_lyrics(
         logger.error("Lyrics fetch failed for track %s: %s", track_id, e)
         return {"fetched": False, "error": str(e)}
     if not ok:
-        return {"fetched": False, "error": "No lyrics available for this track"}
+        return {"fetched": False, "error": reason or "No lyrics available for this track"}
 
     try:
         from core.library2.tag_cache import read_and_persist_tag_cache

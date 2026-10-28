@@ -17,6 +17,7 @@ SoulSync needs credentials for the services it queries for metadata and enrichme
 - **Tidal** — Client ID, Client Secret, and Redirect URI. Log in with the Authenticate button — it opens Tidal's authorization page in the browser, and the callback is just a success page: close the window and you're connected.
 - **Last.fm** — API key, API secret, and your username. Powers scrobbling, similar artists, and listening-history import.
 - **Genius** — Client access token for lyrics.
+- **Pollinations** — Optional API key for playlist cover art. Works without one (one image every 45 seconds, with their mark).
 - **Qobuz** — Email and password, or a pasted auth token when login hits a CAPTCHA. Powers metadata enrichment and Qobuz downloads.
 - **HiFi** — no credentials at all. Free lossless downloads from community-run hifi-api instances, which you add and health-check on the Sources tab.
 - **Deezer** — App ID, App Secret, and Redirect URI (OAuth), or an ARL token for playlist access and downloads. Powers favorites, playlists, and Deezer downloads.
@@ -113,8 +114,10 @@ These live on other tabs, not Downloads:
 
 ## Organization
 
-- **Path templates** — customize how artists, albums, and tracks are named and nested (e.g. \`$albumartist/$album/$track - $title\`). Variables use \`$name\` syntax: \`$albumartist\`, \`$artist\`, \`$album\`, \`$track\`, \`$title\`, \`$year\`, \`$discnum\`, and more
+- **Path templates** — customize how artists, albums, and tracks are named and nested (e.g. \`$albumartist/$album/$track - $title\`). Variables use \`$name\` syntax: \`$albumartist\`, \`$artist\`, \`$album\`, \`$track\`, \`$title\`, \`$year\`, \`$discnum\`, \`$explicit\` (\`[E]\` on explicit tracks), \`$contentrating\` (\`[E]\` or \`[C]\`), \`$albumartistinfo\` / \`$albumartistcomposite\` / \`$albumartistclash\` (MusicBrainz's note, country or genre, to keep same-named artists apart), and more
+- **Live preview** — under each template is the path it makes for an example release, updated as you type and before you save. Switch the example between **Standard**, **Explicit**, **Multi-disc** and **Shared artist name** to see the content rating badges, the disc folder and the artist notes come out. It runs through the same code a real download does, so what it shows is what you get
 - **Multi-disc labels** — the **Multi-Disc Folder Label** setting controls the subfolder added automatically on multi-disc albums; put a disc variable in your template instead to take over
+- **Lookalike characters** — Windows doesn't allow \`: ? / \\ " * | < >\` in names, so by default they become \`_\` (\`AC_DC\`). Turn on **Keep symbols in names with lookalike characters** and they become lookalikes that work on every system instead (\`AC∕DC\`, \`What's Going On？\`), and a trailing dot is kept (\`DAMN․\`). New downloads use it right away; run Reorganize to rename what's already in your library
 - **Detect multi-artist compilations** — file soundtracks and compilations under Various Artists instead of whichever contributor happened to be first
 
 ## Performance

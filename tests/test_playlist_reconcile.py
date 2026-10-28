@@ -286,6 +286,134 @@ def test_fewer_than_two_matches_never_out_of_order():
     assert compute_order_status(one)["out_of_order"] is False
 
 
+# ── #1852: source numbering starts at 0 while the server starts at 1 ─────
+# The compare view's source column prints source_track.position and the
+# server column prints index + 1. Sync-history source entries carry a
+# 0-based 'index' and no 'position' at all, so the reconcile fallback IS
+# their number — it used to be the raw enumerate index (0-based), so the
+# first paired rows read 0 vs 1 and a 55-track source numbered 0..54.
+
+def test_positionless_source_rows_are_numbered_from_one():
+    source = [_src("one", "A", "s0"), _src("two", "A", "s1"), _src("three", "A", "s2")]
+    server = [_svr("one", "A", "nv0"), _svr("two", "A", "nv1"), _svr("three", "A", "nv2")]
+    combined = reconcile_playlist(source, server)
+    assert [c["source_track"]["position"] for c in combined] == [1, 2, 3]
+
+
+def test_positionless_missing_source_row_is_numbered_from_one():
+    source = [_src("one", "A", "s0"), _src("absent", "A", "s1")]
+    server = [_svr("one", "A", "nv0")]
+    combined = reconcile_playlist(source, server)
+    missing = [c for c in combined if c["match_status"] == "missing"]
+    assert missing and missing[0]["source_track"]["position"] == 2
+
+
+def test_stored_one_based_position_is_kept_verbatim():
+    # Mirrored rows store position i+1; that value must pass through, not
+    # be shifted again.
+    source = [_src("one", "A", "s0", position=7)]
+    server = [_svr("one", "A", "nv0")]
+    combined = reconcile_playlist(source, server)
+    assert combined[0]["source_track"]["position"] == 7
+
+
+def test_none_position_falls_back_to_one_based():
+    source = [_src("one", "A", "s0", position=None), _src("two", "A", "s1", position=None)]
+    server = [_svr("one", "A", "nv0"), _svr("two", "A", "nv1")]
+    combined = reconcile_playlist(source, server)
+    assert [c["source_track"]["position"] for c in combined] == [1, 2]
+
+
+def test_sync_history_shaped_source_rows_are_numbered_from_one():
+    # The exact shape the compare endpoint feeds in for a playlist with no
+    # mirrored match: sync-history track_results entries carry a 0-based
+    # 'index', a 'status', and NO 'position' key at all (#1852's screenshot).
+    source = [
+        {"index": 0, "name": "You're Welcome", "artist": "Dwayne Johnson",
+         "source_track_id": "s0", "status": "found", "duration_ms": 166000},
+        {"index": 1, "name": "Zoo", "artist": "Shakira",
+         "source_track_id": "s1", "status": "found", "duration_ms": 210000},
+    ]
+    server = [_svr("You're Welcome", "Dwayne Johnson", "nv0"), _svr("Zoo", "Shakira", "nv1")]
+    combined = reconcile_playlist(source, server)
+    assert [c["source_track"]["position"] for c in combined] == [1, 2]
+
+
+def test_unusable_position_values_fall_back_to_the_ordinal():
+    # A stored 0, a negative, a bool, a string, or a float is not a 1-based
+    # position — the row must show its own ordinal instead of the stored junk.
+    source = [_src("one", "A", "s0", position=0), _src("two", "A", "s1", position=True),
+              _src("three", "A", "s2", position="3"), _src("four", "A", "s3", position=-3),
+              _src("five", "A", "s4", position=5.0)]
+    server = [_svr(t, "A", f"nv{i}") for i, t in enumerate(["one", "two", "three", "four", "five"])]
+    combined = reconcile_playlist(source, server)
+    assert [c["source_track"]["position"] for c in combined] == [1, 2, 3, 4, 5]
+
+
+# ── #1852: a shared server track always flagged "out of order" ───────────
+# Pass 0 deliberately pairs two source rows with one server track (two
+# provider ids, both user-confirmed). That is how a compare can show 55
+# matched against 54 server tracks — but the shared track's server_index
+# then repeats in the source-order sequence, and the old strictly-ascending
+# check read every repeat as disorder.
+
+def test_shared_server_track_is_not_out_of_order():
+    source = [_src("Song A", "X", "a1"), _src("Song A (other edition)", "X", "a2"),
+              _src("Song B", "Y", "b1")]
+    server = [_svr("Song A", "X", "nvA"), _svr("Song B", "Y", "nvB")]
+    combined = reconcile_playlist(source, server, override_pairs={0: 0, 1: 0})
+    assert [c["match_status"] for c in combined] == ["matched", "matched", "matched"]
+    status = compute_order_status(combined)
+    assert status["matched"] == 3
+    assert status["out_of_order"] is False
+
+
+def test_nonadjacent_shared_server_track_is_not_out_of_order():
+    # Source A B A: the distinct server tracks (A then B) are in source
+    # relative order; the second A's repeat of A's position is not drift.
+    source = [_src("Song A", "X", "a1"), _src("Song B", "Y", "b1"), _src("Song A", "X", "a2")]
+    server = [_svr("Song A", "X", "nvA"), _svr("Song B", "Y", "nvB")]
+    combined = reconcile_playlist(source, server, override_pairs={0: 0, 2: 0})
+    status = compute_order_status(combined)
+    assert status["out_of_order"] is False
+
+
+def test_all_matched_rows_sharing_one_server_track_is_not_out_of_order():
+    # The distinct==1 case: every matched row points at the SAME server
+    # track, so there is no pair of distinct positions to compare at all.
+    source = [_src("Song A", "X", "a1"), _src("Song A (alt take)", "X", "a2"),
+              _src("Song A (live)", "X", "a3")]
+    server = [_svr("Song A", "X", "nvA")]
+    combined = reconcile_playlist(source, server, override_pairs={0: 0, 1: 0, 2: 0})
+    status = compute_order_status(combined)
+    assert status == {"matched": 3, "in_order": True, "out_of_order": False}
+
+
+def test_shared_server_track_still_flags_real_disorder():
+    # Sharing must not mask a genuine reversal of the DISTINCT tracks.
+    source = [_src("Song B", "Y", "b1"), _src("Song A", "X", "a1"),
+              _src("Song A (other edition)", "X", "a2")]
+    server = [_svr("Song A", "X", "nvA"), _svr("Song B", "Y", "nvB")]
+    combined = reconcile_playlist(source, server, override_pairs={1: 0, 2: 0})
+    status = compute_order_status(combined)
+    assert status["out_of_order"] is True
+
+
+def test_interleaved_share_and_disorder_still_flags():
+    # Positions in source order [0, 2, 1, 2]: the 2 repeats (shared), but
+    # the distinct sequence [0, 2, 1] is itself not ascending — real drift
+    # interleaved with a share must still flag.
+    combined = [
+        {"match_status": "matched", "server_index": 0},
+        {"match_status": "matched", "server_index": 2},
+        {"match_status": "matched", "server_index": 1},
+        {"match_status": "matched", "server_index": 2},
+    ]
+    status = compute_order_status(combined)
+    assert status["matched"] == 4
+    assert status["out_of_order"] is True
+
+
 # ── #1005: the fuzzy pass got fast — the scores must not have changed ────────
 
 def test_fast_fuzzy_pass_scores_identically_to_the_naive_matcher():

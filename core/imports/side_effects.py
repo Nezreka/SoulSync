@@ -11,6 +11,7 @@ from core.settings import config_manager
 from core.imports.context import (
     extract_artist_name,
     get_import_clean_album,
+    has_real_album_name,
     get_import_clean_artist,
     get_import_clean_title,
     get_import_context_album,
@@ -125,6 +126,10 @@ def _retention_provenance_json(context: Dict[str, Any]) -> tuple[str | None, str
 # Tiny SQL allowlist for the fill-empty helpers — prevents accidental
 # SQL injection through the f-string column-name interpolation. Only
 # columns the soulsync library write path ever updates are listed.
+# soul_id is deliberately absent: it is a computed key owned by the
+# SoulID worker (kinded_v2, derived from the row's own names). Filling it
+# from an import payload would pin the row to whatever scheme the source
+# used and the worker would never correct it (it only fills empty ids).
 _SOULSYNC_FILLABLE_COLUMNS = {
     # The catalogue columns a re-import may FILL when they are still empty.
     # Never an overwrite — a later provider pass owns whatever it wrote.
@@ -243,12 +248,18 @@ def emit_track_downloaded(context: Dict[str, Any], automation_engine=None) -> No
             first = artists[0]
             artist_name = first.get("name", str(first)) if isinstance(first, dict) else str(first)
 
+        # track_info's album is often the whole album record ({'name', 'id',
+        # 'images', ...}); a {album} tag wants its name, not the record
+        album = ti.get("album", "")
+        if isinstance(album, dict):
+            album = album.get("name") or album.get("title") or ""
+
         automation_engine.emit(
             "track_downloaded",
             {
                 "artist": artist_name,
                 "title": ti.get("name", ti.get("title", "")),
-                "album": ti.get("album", ""),
+                "album": album,
                 "quality": context.get("_audio_quality", "Unknown"),
             },
         )
@@ -473,6 +484,9 @@ def record_download_provenance(context: Dict[str, Any],
         qobuz_track_id = _embedded("QOBUZ_TRACK_ID")
         musicbrainz_recording_id, recording_disambiguation = _recording_identity(context)
         audiodb_id = _embedded("AUDIODB_TRACK_ID")
+        # Provenance only: the tag a file carries is recorded as history,
+        # never copied back into tracks.soul_id (worker-owned — the
+        # provenance backfill map deliberately has no soul_id entry).
         soul_id = _embedded("SOUL_ID")
         isrc = context.get("_isrc")
         acquired_quality_json, retention_json = _retention_provenance_json(context)
@@ -660,8 +674,16 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         else:
             if album_info and isinstance(album_info, dict):
                 album_name = album_info.get("album_name", "")
-            if not album_name:
-                album_name = album_ctx.get("name", "") or original_search.get("album", "")
+            if not has_real_album_name(album_name):
+                # Never record the 'Unknown Album' placeholder as the
+                # library album — the album-mismatch tool reads this row.
+                # Skip placeholder candidates and fall through to the
+                # track title, like album-less singles.
+                album_name = ""
+                for _album_candidate in (album_ctx.get("name", ""), original_search.get("album", "")):
+                    if has_real_album_name(_album_candidate):
+                        album_name = _album_candidate
+                        break
         if not album_name:
             album_name = track_info.get("name", "Unknown")
 

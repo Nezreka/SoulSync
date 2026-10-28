@@ -723,12 +723,12 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
         # Context-level album metadata is canonical.  In particular, the
         # AutoImportWorker puts only ``album_id`` on each track and keeps the
         # real title/type/total under ``spotify_album``.
-        album_name = (
-            _get(canonical_album, "name", "title")
-            or _get(ti, "album")
-            or fallback.get("album")
-            or title
-        )
+        # upstream 71c04f6da: the 'Unknown Album' placeholder never becomes a
+        # library album; it falls through like an album-less single
+        from core.imports.context import has_real_album_name
+        album_name = next((name for name in (
+            _get(canonical_album, "name", "title"), _get(ti, "album"), fallback.get("album"),
+        ) if has_real_album_name(name)), title)
 
         embedded = context.get("_embedded_id_tags") or {}
         embedded_spotify_id = str(embedded.get("SPOTIFY_TRACK_ID") or "") or None

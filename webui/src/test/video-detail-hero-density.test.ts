@@ -67,7 +67,7 @@ describe('the management actions collapse into one button', () => {
     // A "More" button guarding one item is pure overhead - two clicks for what
     // was one, and the label tells you nothing about what is inside.
     const body = extractFunction('renderActions', SRC);
-    expect(body).toContain('(moreCount(more) === 1) ? more :');
+    expect(body).toContain('(moreCount(getMore + libMore) === 1 && !links) ? getMore + libMore :');
   });
 
   it('routes every management action into the menu, not the main row', () => {

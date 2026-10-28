@@ -133,3 +133,24 @@ def test_does_not_read_another_profiles_watchlist_row(imported_conn):
     with pytest.raises(ArtistSettingsError, match="admin watchlist") as exc:
         get_artist_settings(imported_conn, _artist_id(imported_conn), profile_id=1)
     assert exc.value.status == 409
+
+
+def test_a_follower_gets_the_defaults_until_it_gets_rules_of_its_own(imported_conn, monkeypatch):
+    """#1822 (upstream 13def8fcb): an artist following the watchlist defaults
+    scans with them; a rule of its own starts from the defaults it was getting."""
+    import core.settings
+
+    defaults = {"watchlist.global_include_singles": True, "watchlist.global_include_live": True}
+    monkeypatch.setattr(core.settings, "config_manager",
+                        type("Cfg", (), {"get": lambda self, key, default=None: defaults.get(key, default)})())
+    _seed_watchlist(imported_conn)  # its own columns say no singles
+    imported_conn.execute("ALTER TABLE watchlist_artists ADD COLUMN follow_defaults INTEGER DEFAULT 1")
+    artist_id = _artist_id(imported_conn)
+
+    settings = get_artist_settings(imported_conn, artist_id)
+    assert settings["follow_defaults"] is True
+    assert (settings["include_singles"], settings["include_live"]) == (True, True)
+
+    updated = update_artist_settings(imported_conn, artist_id, {"include_eps": False})
+    assert updated["follow_defaults"] is False
+    assert (updated["include_eps"], updated["include_singles"], updated["include_live"]) == (False, True, True)

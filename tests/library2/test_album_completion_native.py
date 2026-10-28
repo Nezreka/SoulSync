@@ -128,3 +128,24 @@ def test_provider_failure_leaves_that_album_unmonitored(catalogue, monkeypatch):
     monkeypatch.setattr('core.library2.completeness.load_album_catalogue', unavailable)
     assert run(db).errors == 1
     assert rules(db) == []
+
+
+def test_a_bulk_run_leaves_other_artists_tracks_to_an_explicit_fill(catalogue):
+    """upstream b12666102/bfe5cd21c/320ec94ef: one artist's compilation or
+    soundtrack must not pull every other artist on it into the library. A
+    guest on the album artist's own track still counts as the artist's."""
+    db, aid, _, missing, _ = catalogue
+    with db._get_connection() as conn:
+        guest = lib2_seed.track(conn, 'Artist', 'Album', 'Their Song', owned=False,
+                                credit='Someone Else', track_number=3, disc_number=1, monitored=0)
+        feat = lib2_seed.track(conn, 'Artist', 'Album', 'Our Song', owned=False,
+                               credit='Someone Else', track_number=4, disc_number=1, monitored=0)
+        artist_id = conn.execute('SELECT primary_artist_id FROM lib2_albums WHERE id=?', (aid,)).fetchone()[0]
+        conn.execute('INSERT INTO lib2_track_artists(track_id,artist_id) VALUES(?,?)', (feat, artist_id))
+        conn.commit()
+
+    run(db)
+    assert [r[0] for r in rules(db)] == sorted([missing, feat])
+
+    run(db, scope={'target_album_id': f'lib2:{aid}'})
+    assert [r[0] for r in rules(db)] == sorted([missing, guest, feat])

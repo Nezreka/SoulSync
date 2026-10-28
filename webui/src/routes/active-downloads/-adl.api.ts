@@ -308,6 +308,18 @@ export function verificationDelete(historyId: string): Promise<AdlResult> {
   );
 }
 
+export interface WrongSongResult extends AdlResult {
+  /** the song that was asked for, back on the wishlist to search for again. */
+  wishlist_track?: { id: string; name: string; artist?: string; album?: string };
+}
+
+/** reject the file like a delete, and put the asked-for song back on the wishlist. */
+export function verificationWrongSong(historyId: string): Promise<WrongSongResult> {
+  return readJson<WrongSongResult>(
+    apiClient.post(`verification/${encodeURIComponent(historyId)}/wrong-song`),
+  );
+}
+
 export interface CleanOrphansResult extends AdlResult {
   removed?: number;
   checked?: number;

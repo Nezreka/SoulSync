@@ -22,6 +22,7 @@ from core.imports.context import (
     get_import_source_ids,
     get_import_track_info,
     get_source_tag_names,
+    has_real_album_name,
     is_real_provider_album_id,
     normalize_import_context,
 )
@@ -1272,15 +1273,31 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
     if pp["hifi_bpm"] and pp["hifi_bpm"] > 0 and _tag_enabled(cfg, "hifi.tags.bpm"):
         bpm_candidates.append(("HiFi", pp["hifi_bpm"]))
     if bpm_candidates:
-        bpm_source, bpm_val = bpm_candidates[0]
-        bpm_int = int(bpm_val)
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TBPM(encoding=3, text=[str(bpm_int)]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["BPM"] = [str(bpm_int)]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["tmpo"] = [bpm_int]
-        logger.info("BPM (%s): %s", bpm_source, bpm_int)
+        # Store through tag_writer's _stored_bpm — the one stored form
+        # every BPM writer uses and build_tag_diff compares against, so
+        # an enrichment-written BPM does not preview as changed
+        # afterwards (#1871). It also guards non-finite/non-numeric
+        # candidates (returns None) instead of raising here; a candidate
+        # with no stored form falls through to the next source rather
+        # than skipping BPM entirely. Local import, matching this
+        # module's style, avoids any import-order coupling with
+        # core.tag_writer.
+        from core.tag_writer import _stored_bpm
+        bpm_int = None
+        bpm_source = None
+        for cand_source, bpm_val in bpm_candidates:
+            stored = _stored_bpm(bpm_val)
+            if stored is not None:
+                bpm_source, bpm_int = cand_source, stored
+                break
+        if bpm_int is not None:
+            if isinstance(audio_file.tags, symbols.ID3):
+                audio_file.tags.add(symbols.TBPM(encoding=3, text=[str(bpm_int)]))
+            elif is_vorbis_like(audio_file, symbols):
+                audio_file["BPM"] = [str(bpm_int)]
+            elif isinstance(audio_file, symbols.MP4):
+                audio_file["tmpo"] = [bpm_int]
+            logger.info("BPM (%s): %s", bpm_source, bpm_int)
 
     if beatport.get("key") and _tag_enabled(cfg, "beatport.tags.key"):
         from core.beatport.enrich import standard_key
@@ -2238,33 +2255,80 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     # artists, a feature doesn't make it a collab album
     metadata["_album_artists_list"] = _album_artist_names(album_artists_for_collab)
 
-    if album_info.get("is_album"):
+    # 'Unknown Album' in any slot is the no-album placeholder, not a name —
+    # tracks from paste-link playlists / discovery-pool rows / TXT imports
+    # carry it in place of an album, and stamping it wiped the downloaded
+    # file's own (correct) album tag. Placeholder candidates fall through
+    # the same rungs an album-less track takes, including the file's own
+    # album tag (snapshotted by the enrichment writer onto the context as
+    # ``_file_album_tag`` before it clears the file's tags), which still
+    # outranks the title fallback.
+    _album_info_name = album_info.get("album_name")
+    if not has_real_album_name(_album_info_name):
+        _album_info_name = ""
+    _album_ctx_name = album_ctx.get("name") if album_ctx else ""
+    if not has_real_album_name(_album_ctx_name):
+        _album_ctx_name = ""
+    _own_album_name = own_album.get("name")
+    if not has_real_album_name(_own_album_name):
+        _own_album_name = ""
+    _file_album_tag = context.get("_file_album_tag")
+    from core.imports.track_number import (
+        embedded_album_belongs_to_track,
+        embedded_album_name_is_real,
+    )
+    if not embedded_album_name_is_real(_file_album_tag):
+        _file_album_tag = ""
+    elif batch_album_distrusted:
+        # #1567: in a distrusted batch the file came from the stranger's
+        # bundle — its album tag is the stranger's evidence, never the
+        # track's. The track's own provider album (the rung above) or
+        # its title are the only honest stamps.
+        _file_album_tag = ""
+    elif not embedded_album_belongs_to_track(
+        context.get("_file_album_artist_tag"), artist_dict.get("name"),
+    ):
+        # The file's album only counts as this track's album when the
+        # file's album artist agrees — a various-artists compilation (or
+        # another artist's album) must not be stamped onto the track.
+        _file_album_tag = ""
+
+    if album_info.get("is_album") and _album_info_name:
+        # 0 = unknown (3827b0227): never invent a track 1
         metadata["track_number"] = album_info.get("track_number", 0)
         if batch_album_distrusted:
             # #1567: album_info['album_name'] is built from the same poisoned
             # batch album in bundle flows — stamp the track's own provider
             # album instead (or the title when the track carries no album of
             # its own), and never the batch's total_tracks.
-            metadata["album"] = own_album.get("name") or metadata["title"]
+            metadata["album"] = _own_album_name or metadata["title"]
             metadata["total_tracks"] = own_album.get("total_tracks")
         else:
-            metadata["album"] = album_info.get("album_name", "Unknown Album")
+            metadata["album"] = _album_info_name
             metadata["total_tracks"] = album_ctx.get("total_tracks") if album_ctx else None
         logger.info("[METADATA] Album track - track_number: %s, album: %s", metadata["track_number"], metadata["album"])
     else:
-        if album_ctx and album_ctx.get("name") and not batch_album_distrusted:
+        if _album_ctx_name and not batch_album_distrusted:
             logger.info("[SAFEGUARD] Using album context name instead of track title for album metadata")
-            metadata["album"] = album_ctx["name"]
+            metadata["album"] = _album_ctx_name
             metadata["track_number"] = album_info.get("track_number", 0) if album_info else 0
             metadata["total_tracks"] = album_ctx.get("total_tracks")
-        elif batch_album_distrusted and own_album.get("name"):
+        elif batch_album_distrusted and _own_album_name:
             # #1567: the batch album context is poisoned — fall back to the
             # track's own provider album rather than stamping a stranger's
             # album on the track.
             logger.info("[SAFEGUARD] Batch album context distrusted — using the track's own provider album (#1567)")
-            metadata["album"] = own_album["name"]
+            metadata["album"] = _own_album_name
             metadata["track_number"] = album_info.get("track_number", 0) if album_info else 0
             metadata["total_tracks"] = own_album.get("total_tracks")
+        elif _file_album_tag:
+            # No source named an album, but the downloaded file itself is
+            # tagged with one — that tag is the track's own evidence and
+            # beats modelling the track as a single named after its title.
+            logger.info("[SAFEGUARD] No album in context — using the file's own album tag: %s", _file_album_tag)
+            metadata["album"] = _file_album_tag
+            metadata["track_number"] = album_info.get("track_number", 0) if album_info else 0
+            metadata["total_tracks"] = album_info.get("total_tracks") if album_info else None
         else:
             metadata["album"] = metadata["title"]
             metadata["track_number"] = 1

@@ -68,6 +68,87 @@ def test_the_clock_is_the_listeners_local_time(db, server_tz):
                                         filter_type='hour', hour=21, limit=10)
     assert hour['total'] == 1
 
+
+# #1840: plays from 7pm to midnight pacific are stored on the next utc day.
+# every day/month bucket must read them on the listener's own calendar.
+
+def _evening_in_vancouver(db, server_tz):
+    server_tz('America/Vancouver')
+    for minute in range(0, 300, 60):   # oct 21 19:05..23:05 pdt
+        _play_at(db, datetime(2026, 10, 22, 2, 5) + timedelta(minutes=minute))
+    _play_at(db, datetime(2026, 10, 22, 7, 4))   # oct 22 00:04 pdt
+
+
+def test_the_timeline_buckets_by_local_day_1840(db, server_tz):
+    _evening_in_vancouver(db, server_tz)
+
+    assert db.get_listening_timeline('all') == [
+        {'date': '2026-10-21', 'plays': 5}, {'date': '2026-10-22', 'plays': 1}]
+
+
+def test_the_timeline_buckets_by_local_month(db, server_tz):
+    server_tz('America/Vancouver')
+    _play_at(db, datetime(2026, 11, 1, 3, 0))   # oct 31 20:00 pdt
+
+    assert db.get_listening_timeline('all', granularity='month') == [
+        {'date': '2026-10', 'plays': 1}]
+
+
+def test_a_day_drill_down_matches_its_bar_1840(db, server_tz):
+    from core.stats import queries
+    _evening_in_vancouver(db, server_tz)
+
+    def day(d):
+        return queries.get_listening_events(db, lambda u: u, time_range='all',
+                                            filter_type='date', date=d, limit=50)['total']
+    assert day('2026-10-21') == 5
+    assert day('2026-10-22') == 1
+    month = queries.get_listening_events(db, lambda u: u, time_range='all',
+                                         filter_type='date', date='2026-10', limit=50)
+    assert month['total'] == 6
+
+
+def test_the_month_drill_down_uses_local_month_edges(db, server_tz):
+    from core.stats import queries
+    server_tz('America/Vancouver')
+    _play_at(db, datetime(2026, 11, 1, 3, 0))   # oct 31 20:00 pdt
+
+    def month(m):
+        return queries.get_listening_events(db, lambda u: u, time_range='all',
+                                            filter_type='date', date=m, limit=50)['total']
+    assert month('2026-10') == 1
+    assert month('2026-11') == 0
+
+
+def test_rhythm_days_are_local_days_1840(db, server_tz):
+    _evening_in_vancouver(db, server_tz)
+
+    rhythm = db.get_listening_rhythm('all')
+    assert rhythm['busiest_day'] == {'date': '2026-10-21', 'plays': 5}
+    assert rhythm['active_days'] == 2
+
+
+def test_the_digest_streak_counts_local_days_1840(db, server_tz):
+    from core.stats.queries import _listening_streak
+    server_tz('America/Vancouver')
+    _play_at(db, datetime(2026, 10, 22, 4, 0))   # oct 21 21:00 pdt
+
+    conn = db._get_connection()
+    try:
+        assert _listening_streak(conn.cursor(), '1=1', date(2026, 10, 21)) == 1
+    finally:
+        conn.close()
+
+
+def test_the_year_reads_local_days_1840(db, server_tz):
+    _evening_in_vancouver(db, server_tz)
+
+    year = db.get_year_in_listening(now=datetime(2026, 10, 21, 23, 0))
+    # the 00:04 play is tomorrow, past the window
+    assert year['totals']['plays'] == 5
+    assert year['totals']['active_days'] == 1
+    assert year['peak_day'] == {'date': '2026-10-21', 'plays': 5}
+
 def test_a_play_lands_in_its_own_weekday_and_hour(db):
     # 2026-08-12 is a Wednesday -> strftime %w == 3.
     _play_at(db, datetime(2026, 8, 12, 21, 30))

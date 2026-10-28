@@ -208,11 +208,12 @@ def register_routes(bp):
 
     @bp.route("/detail/<kind>/<int:item_id>/watched", methods=["POST"])
     def video_set_watched(kind, item_id):
-        """Played/unplayed toggle — local watch state + server markPlayed."""
+        """Played/unplayed toggle — local watch state + server markPlayed. An
+        episode or season id marks just that one."""
         from core.video import metadata as med
 
         from . import get_video_db
-        if kind not in ("movie", "show"):
+        if kind not in ("movie", "show", "episode", "season"):
             return jsonify({"error": "bad kind"}), 400
         watched = bool((request.get_json(silent=True) or {}).get("watched"))
         res = med.set_watched(get_video_db(), kind, item_id, watched)

@@ -13,6 +13,10 @@ from core.text.title_match import is_trailing_version_qualifier, recording_versi
 
 logger = get_logger("musicbrainz_service")
 
+# "argument not given", for update_album_mbid's optional release group
+# (None is a real value there: "matched, but no group known").
+_UNSET = object()
+
 # The cached form of "MusicBrainz answered, and the answer is no aliases".
 # ``resolved`` is what separates it from the row the old failure path wrote,
 # which had the same empty alias list but no answer behind it — see
@@ -655,7 +659,9 @@ class MusicBrainzService:
         Match a release (album) by name to MusicBrainz
 
         Returns:
-            Dict with 'mbid', 'title', 'confidence' or None if no good match
+            Dict with 'mbid', 'release_group_mbid', 'title', 'confidence'
+            or None if no good match. ``release_group_mbid`` is None when
+            the search result (or an old cache row) did not carry it.
         """
         # Check cache first
         cached = self._check_cache('release', album_name, artist_name)
@@ -663,6 +669,10 @@ class MusicBrainzService:
             logger.debug(f"Cache hit for release '{album_name}'")
             return {
                 'mbid': cached['musicbrainz_id'],
+                'release_group_mbid': (
+                    self.release_group_of(cached.get('metadata'))
+                    if cached['musicbrainz_id'] else None
+                ),
                 'title': album_name,
                 'confidence': cached['confidence'],
                 'cached': True
@@ -720,6 +730,7 @@ class MusicBrainzService:
                 
                 return {
                     'mbid': mbid,
+                    'release_group_mbid': self.release_group_of(best_match),
                     'title': mb_title,
                     'confidence': best_confidence,
                     'cached': False
@@ -1969,9 +1980,83 @@ class MusicBrainzService:
         """Update artist with MusicBrainz ID"""
         self._record_mbid('artist', artist_id, mbid, status)
 
-    def update_album_mbid(self, album_id: int, mbid: Optional[str], status: str):
-        """Update album with MusicBrainz release ID"""
+    def update_album_mbid(self, album_id: int, mbid: Optional[str], status: str,
+                          release_group_mbid: Any = _UNSET):
+        """Update album with MusicBrainz release ID.
+
+        ``release_group_mbid`` is written only when given: a match passes the
+        group it found (or None), while re-marking an existing id as matched
+        leaves the stored group alone. Written after the release id, so the
+        trg_lib2_albums_release_group_reset trigger has already cleared an old
+        edition's group when the release changed.
+        """
         self._record_mbid('album', album_id, mbid, status)
+        if release_group_mbid is _UNSET or not mbid:
+            return
+        if release_group_mbid:
+            self.update_album_release_group(album_id, release_group_mbid)
+        # no group from the match (an old cache row): leave the attempt
+        # unstamped so the worker's backfill looks it up next
+
+    @staticmethod
+    def release_group_of(release: Any) -> Optional[str]:
+        """The release-group MBID inside a MusicBrainz release object (a
+        search hit or a lookup with inc=release-groups), or None."""
+        if not isinstance(release, dict):
+            return None
+        group = release.get('release-group')
+        mbid = group.get('id') if isinstance(group, dict) else None
+        return str(mbid).strip().lower() if mbid else None
+
+    def lookup_release_group(self, release_mbid: str) -> Optional[str]:
+        """One MusicBrainz lookup: the release group a release belongs to.
+        None when MusicBrainz has no answer (unknown release or an outage —
+        the caller retries later either way)."""
+        data = self.mb_client.get_release(release_mbid, includes=['release-groups'])
+        return self.release_group_of(data)
+
+    def update_album_release_group(self, album_id: int, release_group_mbid: Optional[str]):
+        """Store an album's release group (None = looked up, no answer) and
+        stamp the attempt so the backfill paces its retries."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            # a lookup that found nothing keeps a group mb_reconcile browsed
+            conn.execute("""
+                UPDATE lib2_albums
+                SET musicbrainz_release_group_id = COALESCE(?, musicbrainz_release_group_id),
+                    musicbrainz_release_group_attempted = ?
+                WHERE id = ?
+            """, (release_group_mbid, datetime.now(), album_id))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error updating release group for album {album_id}: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                conn.close()
+
+    def update_wishlist_release_group(self, wishlist_id: int, release_group_mbid: Optional[str], status: str):
+        """Store a wishlist row's matched release group and match status."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            conn.execute("""
+                UPDATE wishlist_tracks
+                SET musicbrainz_release_group_id = ?,
+                    musicbrainz_match_status = ?,
+                    musicbrainz_last_attempted = ?
+                WHERE id = ?
+            """, (release_group_mbid, status, datetime.now(), wishlist_id))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error updating release group for wishlist row {wishlist_id}: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                conn.close()
 
     def update_track_mbid(self, track_id: int, mbid: Optional[str], status: str,
                           recording_disambiguation: Optional[str] = None):

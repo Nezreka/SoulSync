@@ -187,8 +187,30 @@ class TestFreshTape:
 
         db = _DB()
         out = _ft_mod.generate(_curated_deps(db), '', PlaylistConfig())
-        assert db.calls == ['release_radar_spotify', 'release_radar']
+        # full-row snapshots are asked for first, then the id lists
+        assert db.calls == ['release_radar_spotify_full', 'release_radar_full',
+                            'release_radar_spotify', 'release_radar']
         assert len(out) == 1
+
+    def test_prefers_the_full_row_snapshot_discover_shows(self):
+        """the pool rotates: hydrating ids shrank the synced fresh tape to
+        whatever the pool still held, while discover showed the whole list"""
+        full = [{'spotify_track_id': f'sp-{i}', 'track_name': f'Full {i}',
+                 'artist_name': 'A', 'album_name': 'X', 'source': 'spotify'}
+                for i in range(4)]
+
+        class _DB:
+            def get_curated_playlist(self, key, profile_id=1):
+                if key == 'release_radar_spotify_full':
+                    return full
+                return ['sp-0', 'sp-1', 'sp-2', 'sp-3']
+
+            def get_discovery_pool_tracks(self, **kw):
+                return [_StubPoolTrack('sp-0', name='Pool 0')]   # the pool rotated
+
+        out = _ft_mod.generate(_curated_deps(_DB()), '', PlaylistConfig(limit=3))
+        assert [t.track_name for t in out] == ['Full 0', 'Full 1', 'Full 2']
+        assert out[0].spotify_track_id == 'sp-0'
 
     def test_respects_limit(self):
         db = _CuratedDB(
@@ -215,10 +237,11 @@ class TestArchives:
             pool_tracks=[_StubPoolTrack('sp-1', name='Discover')],
         )
         _arch_mod.generate(_curated_deps(db), '', PlaylistConfig())
-        # Source-specific request fires first; fallback only fires
-        # when source-specific returns empty. Stub returns IDs on
-        # every call, so only the first key gets queried.
-        assert db.requested_keys[0] == 'discovery_weekly_spotify'
+        # the full-row snapshot is asked for first. the stub hands back
+        # ids (not rows) for it, so the id path runs, source-specific first
+        assert db.requested_keys[0] == 'discovery_weekly_spotify_full'
+        id_keys = [k for k in db.requested_keys if not k.endswith('_full')]
+        assert id_keys[0] == 'discovery_weekly_spotify'
 
 
 # ─── seasonal_mix ───────────────────────────────────────────────────

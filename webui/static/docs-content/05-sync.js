@@ -165,13 +165,14 @@ Top 100 and Hype charts with full track listings. Each track can be manually mat
         {
             id: 'sync-import-file',
             title: 'Import from File',
-            lede: 'Turn a CSV, M3U, or plain text track list into a mirrored playlist.',
+            lede: 'Turn a CSV, M3U, plain text track list, or NewPipe backup into mirrored playlists.',
             body: `
-Import track lists from **CSV, TSV, M3U/M3U8, or plain text files**. Drag and drop a file or click to browse. SoulSync parses the file, lets you preview and map columns, then creates a mirrored playlist for discovery and download.
+Import track lists from **CSV, TSV, M3U/M3U8, or plain text files**, or your playlists from a **NewPipe backup**. Drag and drop a file or click to browse. SoulSync parses the file, lets you preview and map columns, then creates a mirrored playlist for discovery and download.
 
 - **CSV/TSV** — auto-detects columns; map Artist, Title, and Album from dropdowns
 - **M3U/M3U8** — read automatically: artist, title, and duration come from \`#EXTINF\` lines (or the file name for simple playlists). Round-trips with SoulSync's own M3U export
 - **Text files** — one track per line; choose Artist–Title or Title–Artist order and separator (dash, tab, pipe, etc.)
+- **NewPipe backup** — the ZIP from NewPipe's *Settings → Backup and restore → Export* (or the \`newpipe.db\` inside it). Every local playlist is listed; tick the ones you want and each becomes its own mirrored playlist. Importing a newer backup later **updates** those mirrors instead of adding copies. Bookmarked YouTube playlists are only a link in the backup, so add those from the YouTube tab
 - Preview parsed tracks before importing
 - Name your playlist and it becomes a mirrored playlist for sync
 `
@@ -189,6 +190,16 @@ Every parsed playlist from any source is automatically **mirrored**. The Mirrore
 - Each profile has its own mirrored playlists
 
 ![Mirrored playlist cards](sync-mirror.jpg)
+
+## Cover art
+
+Pick **Generate cover art** from a playlist card's **⋯** menu, or the **⋯** inside an open playlist. SoulSync reads the playlist's genres, mood and era from your library (and the playlist's name) and asks [Pollinations](https://pollinations.ai) for an image.
+
+- It opens as a preview. **Try another** paints it again in a different style; **Use this cover** keeps it
+- The playlist's name and where it's from ("Tidal playlist") go across the top. **Show name on cover** in the preview takes them off or puts them back without making a new image
+- A generated cover stays when the playlist refreshes from its source, and syncs to Plex, Jellyfin or Navidrome
+- **Restore original cover** in the same menu puts the source's own cover back
+- Free with no setup: one image every 45 seconds, with a small Pollinations mark in the corner. A key from enter.pollinations.ai in **Settings → Pollinations** removes both
 
 ## Auto-sync schedules
 
@@ -220,7 +231,7 @@ Export any mirrored playlist as an **M3U file** for use in external media player
 
 M3U files reference the actual file paths in your library, so they work with any M3U-compatible player.
 
-- **Auto-Save** — enable **Auto-save M3U file when downloading playlists** in Settings → Library → Playlists ("M3U export & server playlist sync") and M3U files regenerate automatically when downloading playlists
+- **Auto-Save** — enable **Auto-save M3U file when downloading playlists** in Settings → Discovery → Playlists ("M3U export & server playlist sync") and M3U files regenerate automatically when downloading playlists
 - **Manual Export** — the export button in the download-missing modal creates an M3U file on demand, even when auto-save is disabled
 
 > [!NOTE]

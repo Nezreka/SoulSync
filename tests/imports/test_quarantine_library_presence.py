@@ -362,6 +362,9 @@ def test_recording_identifier_lookups_do_not_scan_the_catalogue(env, monkeypatch
     steps = 0
     def counted_connection():
         conn = connect()
+        # a fresh connection parses the whole schema on its first statement;
+        # that is not the catalogue scan this counts
+        conn.execute('SELECT 1 FROM sqlite_master LIMIT 1').fetchall()
         def progress():
             nonlocal steps
             steps += 1

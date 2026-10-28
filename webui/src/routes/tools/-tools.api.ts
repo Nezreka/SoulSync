@@ -39,6 +39,8 @@ import type {
   RepairStatus,
 } from './-tools.types';
 
+import { repairUrl } from './-tools.media';
+
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 
 function postJson(url: string, body?: unknown): Promise<Response> {
@@ -55,7 +57,7 @@ function postJson(url: string, body?: unknown): Promise<Response> {
  */
 export async function fetchRepairStatus(): Promise<RepairStatus | null> {
   try {
-    const response = await fetch('/api/repair/status');
+    const response = await fetch(repairUrl('/status'));
     if (!response.ok) return null;
     return (await response.json()) as RepairStatus;
   } catch {
@@ -66,7 +68,7 @@ export async function fetchRepairStatus(): Promise<RepairStatus | null> {
 /** `openRepairModal`'s progress hydrate. `{}` means nothing is running. */
 export async function fetchRepairProgress(): Promise<Record<string, RepairJobProgress>> {
   try {
-    const response = await fetch('/api/repair/progress');
+    const response = await fetch(repairUrl('/progress'));
     if (!response.ok) return {};
     return ((await response.json()) as Record<string, RepairJobProgress>) || {};
   } catch {
@@ -76,14 +78,14 @@ export async function fetchRepairProgress(): Promise<Record<string, RepairJobPro
 
 /** `toggleRepairMaster`. Throws on failure so the caller can toast. */
 export async function toggleRepairMaster(): Promise<{ enabled: boolean }> {
-  const response = await fetch('/api/repair/toggle', { method: 'POST' });
+  const response = await fetch(repairUrl('/toggle'), { method: 'POST' });
   if (!response.ok) throw new Error('Failed to toggle');
   return (await response.json()) as { enabled: boolean };
 }
 
 /** `loadRepairJobs`. */
 export async function fetchRepairJobs(): Promise<RepairJob[]> {
-  const response = await fetch('/api/repair/jobs');
+  const response = await fetch(repairUrl('/jobs'));
   if (!response.ok) throw new Error('Failed to fetch jobs');
   const data = (await response.json()) as { jobs?: RepairJob[] };
   return data.jobs || [];
@@ -94,7 +96,7 @@ export async function fetchRepairJobs(): Promise<RepairJob[]> {
  * visuals optimistically and only catches a thrown network error.
  */
 export async function setRepairJobEnabled(jobId: string, enabled: boolean): Promise<void> {
-  await postJson(`/api/repair/jobs/${jobId}/toggle`, { enabled });
+  await postJson(repairUrl(`/jobs/${jobId}/toggle`), { enabled });
 }
 
 /**
@@ -106,7 +108,7 @@ export async function saveRepairJobSettings(
   intervalHours: number | null,
   settings: Record<string, unknown>,
 ): Promise<void> {
-  await fetch(`/api/repair/jobs/${jobId}/settings`, {
+  await fetch(repairUrl(`/jobs/${jobId}/settings`), {
     method: 'PUT',
     headers: JSON_HEADERS,
     body: JSON.stringify({ interval_hours: intervalHours, settings }),
@@ -115,7 +117,7 @@ export async function saveRepairJobSettings(
 
 /** `runRepairJobNow`. Unchecked; the caller reloads the list after 1s. */
 export async function runRepairJob(jobId: string): Promise<void> {
-  await postJson(`/api/repair/jobs/${jobId}/run`);
+  await postJson(repairUrl(`/jobs/${jobId}/run`));
 }
 
 /**
@@ -124,7 +126,7 @@ export async function runRepairJob(jobId: string): Promise<void> {
  * reload, and an `error` field is thrown so the button can be restored.
  */
 export async function stopRepairJob(jobId: string): Promise<{ stopped: boolean }> {
-  const response = await postJson(`/api/repair/jobs/${jobId}/stop`);
+  const response = await postJson(repairUrl(`/jobs/${jobId}/stop`));
   const data = (await response.json()) as { stopped?: boolean; error?: string };
   if (data.error) throw new Error(data.error);
   return { stopped: Boolean(data.stopped) };
@@ -137,7 +139,7 @@ export async function stopRepairJob(jobId: string): Promise<{ stopped: boolean }
  * checks all through the history tab.
  */
 export async function fetchRepairHistory(limit = 50): Promise<RepairJobRun[]> {
-  const response = await fetch(`/api/repair/history?limit=${limit}`);
+  const response = await fetch(repairUrl(`/history?limit=${limit}`));
   if (!response.ok) throw new Error('Failed to fetch history');
   const data = (await response.json()) as { runs?: RepairJobRun[] };
   return data.runs || [];
@@ -174,7 +176,7 @@ export async function fetchRepairFindings(query: FindingsQuery): Promise<RepairF
   params.set('page', String(query.page ?? 0));
   params.set('limit', String(query.limit ?? 30));
 
-  const response = await fetch(`/api/repair/findings?${params}`);
+  const response = await fetch(repairUrl(`/findings?${params}`));
   if (!response.ok) {
     // Carry the server's own message. The endpoint returns {error: "..."} on a
     // 500, and discarding it left users staring at a bare "Error loading
@@ -236,7 +238,7 @@ export async function fetchFindingAlbums(query: FindingAlbumQuery): Promise<Find
     if (query.findingType) params.set('finding_type', query.findingType);
     if (query.q) params.set('q', query.q);
     if (query.limit) params.set('limit', String(query.limit));
-    const response = await fetch(`/api/repair/findings/albums?${params}`);
+    const response = await fetch(repairUrl(`/findings/albums?${params}`));
     if (!response.ok) return [];
     const data = (await response.json()) as { groups?: FindingAlbumGroup[] };
     return data.groups || [];
@@ -247,7 +249,7 @@ export async function fetchFindingAlbums(query: FindingAlbumQuery): Promise<Find
 
 /** `loadRepairFindingsDashboard`. */
 export async function fetchFindingCounts(): Promise<RepairFindingCounts> {
-  const response = await fetch('/api/repair/findings/counts');
+  const response = await fetch(repairUrl('/findings/counts'));
   if (!response.ok) throw new Error('Failed to fetch counts');
   return (await response.json()) as RepairFindingCounts;
 }
@@ -261,7 +263,7 @@ export async function fetchFindingCounts(): Promise<RepairFindingCounts> {
  */
 export async function fetchFindingGroups(): Promise<FindingGroup[]> {
   try {
-    const response = await fetch('/api/repair/findings/groups');
+    const response = await fetch(repairUrl('/findings/groups'));
     if (!response.ok) return [];
     const data = (await response.json()) as { groups?: FindingGroup[] };
     return data.groups || [];
@@ -279,7 +281,7 @@ export async function fetchFindingGroups(): Promise<FindingGroup[]> {
  */
 export async function fetchFindingTypes(): Promise<FindingTypeInfo[]> {
   try {
-    const response = await fetch('/api/repair/finding-types');
+    const response = await fetch(repairUrl('/finding-types'));
     if (!response.ok) return [];
     const data = (await response.json()) as { types?: FindingTypeInfo[] };
     return data.types || [];
@@ -292,7 +294,7 @@ export async function fetchFindingTypes(): Promise<FindingTypeInfo[]> {
  *  safe to offer freely if it can be taken back. */
 export async function reopenFinding(id: number): Promise<boolean> {
   try {
-    const response = await postJson(`/api/repair/findings/${id}/reopen`);
+    const response = await postJson(repairUrl(`/findings/${id}/reopen`));
     const data = (await response.json()) as { success?: boolean };
     return Boolean(data.success);
   } catch {
@@ -304,7 +306,7 @@ export async function reopenFinding(id: number): Promise<boolean> {
  *  type. The bulk undo for dismiss. Returns the count reopened, or
  *  throws with the backend error message. */
 export async function reopenFindingsBulk(jobId?: string, findingType?: string): Promise<number> {
-  const response = await postJson('/api/repair/findings/reopen-all', {
+  const response = await postJson(repairUrl('/findings/reopen-all'), {
     job_id: jobId,
     finding_type: findingType,
   });
@@ -321,7 +323,7 @@ export async function reopenFindingsBulk(jobId?: string, findingType?: string): 
 export async function dismissFindingType(
   findingType: string,
 ): Promise<{ success?: boolean; updated?: number; error?: string }> {
-  const response = await postJson('/api/repair/findings/bulk', {
+  const response = await postJson(repairUrl('/findings/bulk'), {
     finding_type: findingType,
     action: 'dismiss',
   });
@@ -332,6 +334,12 @@ export interface FixResult {
   success?: boolean;
   message?: string;
   error?: string;
+  /** the fix was held back by design, not failed — e.g. an incomplete
+   *  album whose only missing tracks are other artists', fixed in bulk. */
+  skipped_by_design?: boolean;
+  /** tracks the album gate held back on this fix, including on a fix
+   *  that otherwise succeeded. */
+  other_artist_skipped?: number;
   /** an orphan delete stopped because a library track shares its filename. */
   needs_confirm?: boolean;
   library_paths?: string[];
@@ -341,34 +349,44 @@ export interface FixResult {
  * `fixRepairFinding` / `selectDuplicateToKeep` / `applyCoverArtTarget` — all
  * three POST the same endpoint; only the `fix_action` differs (an action name, a
  * track id to keep, or 'album'/'artist' for which image to apply).
+ *
+ * `bulk` must be set by any caller fixing MORE than the one finding the
+ * user is looking at (the "Fix Selected" loop posts once per id but is a
+ * bulk run). It decides whether the album completeness fixer may
+ * wishlist other artists' tracks: only a fix of one specific finding
+ * counts as asking for that album.
  */
-export async function fixFinding(id: number, fixAction?: string | null): Promise<FixResult> {
-  const response = await postJson(
-    `/api/repair/findings/${id}/fix`,
-    fixAction ? { fix_action: fixAction } : {},
-  );
+export async function fixFinding(
+  id: number,
+  fixAction?: string | null,
+  options?: { bulk?: boolean },
+): Promise<FixResult> {
+  const body: { fix_action?: string; bulk?: boolean } = {};
+  if (fixAction) body.fix_action = fixAction;
+  if (options?.bulk) body.bulk = true;
+  const response = await postJson(repairUrl(`/findings/${id}/fix`), body);
   return (await response.json()) as FixResult;
 }
 
 /** `resolveRepairFinding`. Response ignored by the vanilla. */
 export async function resolveFinding(id: number): Promise<void> {
-  await postJson(`/api/repair/findings/${id}/resolve`);
+  await postJson(repairUrl(`/findings/${id}/resolve`));
 }
 
 /** `dismissRepairFinding`. Response ignored by the vanilla. */
 export async function dismissFinding(id: number): Promise<void> {
-  await postJson(`/api/repair/findings/${id}/dismiss`);
+  await postJson(repairUrl(`/findings/${id}/dismiss`));
 }
 
 /** Used by `bulkFixFindings`' inline dismiss paths, which DO check `resp.ok`. */
 export async function dismissFindingChecked(id: number): Promise<boolean> {
-  const response = await postJson(`/api/repair/findings/${id}/dismiss`);
+  const response = await postJson(repairUrl(`/findings/${id}/dismiss`));
   return response.ok;
 }
 
 /** `bulkRepairAction`. Response ignored; the toast fires regardless. */
 export async function bulkFindingAction(ids: number[], action: string): Promise<void> {
-  await postJson('/api/repair/findings/bulk', { ids, action });
+  await postJson(repairUrl('/findings/bulk'), { ids, action });
 }
 
 export interface ClearFindingsResult {
@@ -396,7 +414,7 @@ export async function clearFindings(
   if (filters.severity) body.severity = filters.severity;
   if (filters.findingType) body.finding_type = filters.findingType;
   if (filters.q?.trim()) body.q = filters.q.trim();
-  const response = await postJson('/api/repair/findings/clear', body);
+  const response = await postJson(repairUrl('/findings/clear'), body);
   return (await response.json()) as ClearFindingsResult;
 }
 
@@ -430,7 +448,7 @@ export async function startBulkFix(options: {
   if (options.fixAction) body.fix_action = options.fixAction;
   if (options.findingType) body.finding_type = options.findingType;
   if (options.safeOnly) body.safe_only = true;
-  const response = await postJson('/api/repair/findings/bulk-fix-start', body);
+  const response = await postJson(repairUrl('/findings/bulk-fix-start'), body);
   return (await response.json()) as BulkFixStartResult;
 }
 
@@ -441,7 +459,7 @@ export async function startBulkFix(options: {
  */
 export async function fetchBulkFixStatus(): Promise<BulkFixStatus | null> {
   try {
-    const response = await fetch('/api/repair/bulk-fix/status');
+    const response = await fetch(repairUrl('/bulk-fix/status'));
     return (await response.json()) as BulkFixStatus;
   } catch {
     return null;
@@ -450,7 +468,7 @@ export async function fetchBulkFixStatus(): Promise<BulkFixStatus | null> {
 
 /** `stopBulkFixRun`. Fire and forget — the vanilla explicitly swallows failures. */
 export function stopBulkFix(): void {
-  void fetch('/api/repair/bulk-fix/stop', { method: 'POST' }).catch(() => {});
+  void fetch(repairUrl('/bulk-fix/stop'), { method: 'POST' }).catch(() => {});
 }
 
 // ── Cache health ─────────────────────────────────────────────────────────────

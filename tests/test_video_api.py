@@ -674,7 +674,7 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
             "billboard_autoplay": False, "watch_region": "GB"}
         assert db.get_setting("tmdb_api_key") == "abc" and db.get_setting("omdb_api_key") == "om"
         assert client.get("/api/video/prefs").get_json() == {
-            "billboard_autoplay": False, "watch_region": "GB"}
+            "billboard_autoplay": False, "watch_region": "GB", "subtitle_langs": ["en"]}
     finally:
         videoapi._video_db = None
 
@@ -2084,5 +2084,29 @@ def test_adopting_a_soulseek_season_makes_one_row_per_episode(tmp_path, monkeypa
         rows = client.get("/api/video/downloads/active").get_json()["downloads"]
         episodes = sorted(_json.loads(d["search_ctx"])["episode"] for d in rows)
         assert episodes == [1, 2]
+    finally:
+        videoapi._video_db = None
+
+
+def test_acquisition_state_does_not_count_specials_or_unaired_as_missing(tmp_path):
+    """Breaking Bad read '22 missing' with every aired episode on disk: the 22
+    were specials. Unowned specials and episodes that haven't aired are not
+    gaps; a special you do own still counts as owned."""
+    client, videoapi = _make_client(tmp_path)
+    try:
+        db = videoapi._video_db
+        sid = db.upsert_show_tree("plex", {
+            "server_id": "s1", "title": "Show", "tmdb_id": 1396, "seasons": [
+                {"season_number": 0, "server_id": "se0", "episodes": [
+                    {"episode_number": 1, "title": "Sp1", "server_id": "sp1"},
+                    {"episode_number": 2, "title": "Sp2", "server_id": "sp2",
+                     "file": {"relative_path": "sp2.mkv", "size_bytes": 10}}]},
+                {"season_number": 1, "server_id": "se1", "episodes": [
+                    {"episode_number": 1, "title": "E1", "server_id": "ep1",
+                     "file": {"relative_path": "e1.mkv", "size_bytes": 10}},
+                    {"episode_number": 2, "title": "E2", "server_id": "ep2", "air_date": "2999-01-01"}]}]})
+        body = client.get("/api/video/detail/show/%d/acquisition" % sid).get_json()
+        assert body["total"] == 2 and body["counts"]["owned"] == 2
+        assert body["specials_missing"] == 1 and body["upcoming"] == 1
     finally:
         videoapi._video_db = None

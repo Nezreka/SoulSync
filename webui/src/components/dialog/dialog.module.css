@@ -82,10 +82,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 999px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.035));
-  color: rgba(255, 255, 255, 0.86);
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-card);
+  background: var(--white-a05);
+  color: var(--text-1);
+  font-size: 16px;
   cursor: pointer;
   transition:
     border-color 0.12s ease,

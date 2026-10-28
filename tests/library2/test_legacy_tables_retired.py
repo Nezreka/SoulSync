@@ -15,7 +15,7 @@ import pytest
 from core.library2 import bootstrap as lib2_bootstrap
 from core.library2.importer import import_legacy_library
 from core.library2.migration_gate import migration_required
-from core.library2.source_snapshot import retire_legacy_tables
+from core.library2.source_snapshot import expose_retired_tables, retire_legacy_tables
 
 
 def _tables(db):
@@ -73,6 +73,32 @@ def test_a_rebuild_still_reads_the_renamed_catalogue(legacy_db):
     assert _count(legacy_db, "lib2_tracks") == imported
     # the views lived on the importer's connection only
     assert "tracks" not in _tables(legacy_db)
+
+
+def test_the_importer_views_do_not_outlive_its_pooled_connection(legacy_db):
+    # The connection pool (upstream 89aaf08ba) hands a closed connection to
+    # the next caller; a TEMP view left on it would bring ``tracks`` back.
+    from database import connection_pool
+
+    _upgraded(legacy_db)
+
+    def opener(check_same_thread):
+        return sqlite3.connect(legacy_db.path, check_same_thread=check_same_thread)
+
+    conn = connection_pool.acquire(legacy_db.path, opener)
+    raw = conn._slot.raw
+    expose_retired_tables(conn)
+    assert conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0] == _count(legacy_db, "legacy_tracks")
+    conn.close()
+
+    reused = connection_pool.acquire(legacy_db.path, opener)
+    try:
+        assert reused._slot.raw is raw
+        with pytest.raises(sqlite3.OperationalError, match="no such table: tracks"):
+            reused.execute("SELECT 1 FROM tracks")
+    finally:
+        reused.close()
+        connection_pool.discard(legacy_db.path)
 
 
 def test_nothing_is_renamed_before_the_upgrade_is_done(legacy_db):

@@ -114,17 +114,21 @@ export function formatTotalDuration(totalMs: number | null | undefined): string 
   return `${Math.floor(totalMs / 3_600_000)}h`;
 }
 
+// the history stores utc as "YYYY-MM-DD HH:MM:SS". a bare stamp like that
+// reads as local time in Date(), hours off for anyone not on utc
+export function parsePlayedAt(dateStr: string): Date {
+  const stamp = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(dateStr)
+    ? `${dateStr.replace(' ', 'T')}Z`
+    : dateStr;
+  return new Date(stamp);
+}
+
 export function formatRelativePlayedAt(
   dateStr: string | null | undefined,
   now = Date.now(),
 ): string {
   if (!dateStr) return '';
-  // the history stores utc as "YYYY-MM-DD HH:MM:SS". a bare stamp like that
-  // reads as local time in Date(), hours off for anyone not on utc
-  const stamp = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(dateStr)
-    ? `${dateStr.replace(' ', 'T')}Z`
-    : dateStr;
-  const diff = now - new Date(stamp).getTime();
+  const diff = now - parsePlayedAt(dateStr).getTime();
   const minutes = Math.floor(diff / 60_000);
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);

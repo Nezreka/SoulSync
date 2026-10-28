@@ -1031,6 +1031,7 @@
 #np-v2-sidepanel-body > #np-queue-panel {
     padding: 0; /* side panel body already pads */
 }
+/* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
 #np-modal-overlay .np-queue-header {
     flex: 0 0 auto;
 }

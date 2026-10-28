@@ -37,7 +37,7 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlencode, urlparse
 
 import requests
@@ -105,6 +105,26 @@ def read_settings(config_manager) -> Optional[OidcSettings]:
         redirect_uri=(config_manager.get("security.oidc_redirect_uri", "") or "").strip(),
         icon_url=safe_icon_url(config_manager.get("security.oidc_icon_url", "") or ""),
     )
+
+
+def callback_uri(pinned: str, url_root: str, forwarded_proto: str, path: str) -> str:
+    """the redirect_uri sent to the provider.
+
+    a pinned override wins. otherwise it's the address the request came in on,
+    which behind a proxy that terminates https is the proxy's plain http hop,
+    so the provider got http:// while the settings page (built from the
+    browser) told the admin to register https:// (RileyRabbit). an
+    X-Forwarded-Proto of https upgrades the scheme, even without the full
+    trust-reverse-proxy mode: it only ever upgrades, the host never comes from
+    a header, and the provider only redirects to uris it has registered, so a
+    forged header can only break the forger's own sign-in."""
+    if (pinned or "").strip():
+        return pinned.strip()
+    base = (url_root or "").rstrip("/")
+    proto = (forwarded_proto or "").split(",")[0].strip().lower()
+    if proto == "https" and base.startswith("http://"):
+        base = "https://" + base[len("http://"):]
+    return base + path
 
 
 def safe_icon_url(url: str) -> str:
@@ -187,7 +207,7 @@ class Flow:
     nonce: str
     verifier: str
     redirect_uri: str
-    mode: str = "signin"          # or "connect"
+    mode: str = "signin"          # or "connect", or "invite" (#1839)
     profile_id: Optional[int] = None
     started_at: float = 0.0
 
@@ -299,6 +319,16 @@ def id_token_claims(id_token: str, settings: OidcSettings, doc: Dict[str, Any], 
                     now: Optional[float] = None) -> Dict[str, Any]:
     """the id token's claims after the checks that don't need its signature
     (see the module doc for why the signature isn't one of them)"""
+    claims = _checked_claims(id_token, settings, doc, now=now)
+    if not nonce or not secrets.compare_digest(str(claims.get("nonce") or ""), nonce):
+        raise OidcError("Sign-in expired. Try again.")
+    return claims
+
+
+def _checked_claims(id_token: str, settings: OidcSettings, doc: Dict[str, Any], *,
+                    now: Optional[float] = None) -> Dict[str, Any]:
+    """issuer, audience, expiry and subject. everything id_token_claims
+    checks but the nonce, which a refreshed id token doesn't carry"""
     now = time.time() if now is None else now
     try:
         parts = str(id_token).split(".")
@@ -324,8 +354,6 @@ def id_token_claims(id_token: str, settings: OidcSettings, doc: Dict[str, Any], 
         raise OidcError("The sign-in token has no expiry") from e
     if now > exp + CLOCK_SKEW:
         raise OidcError("The sign-in token has expired. Try again.")
-    if not nonce or not secrets.compare_digest(str(claims.get("nonce") or ""), nonce):
-        raise OidcError("Sign-in expired. Try again.")
     if not claims.get("sub"):
         raise OidcError("The sign-in token doesn't say who you are")
     return claims
@@ -347,6 +375,100 @@ def userinfo(doc: Dict[str, Any], access_token: str) -> Dict[str, Any]:
     except (requests.RequestException, ValueError, OidcError) as e:
         logger.warning("OIDC userinfo failed: %s", e)
         return {}
+
+
+# -- keeping a session to the provider's lifetime (#1838) --
+
+# a provider that hands out very short lifetimes would otherwise be asked
+# again on nearly every request
+MIN_SESSION = 30
+
+
+def token_expiry(tokens: Dict[str, Any], claims: Optional[Dict[str, Any]], *,
+                 now: Optional[float] = None) -> Optional[float]:
+    """when a session signed in (or renewed) with these tokens has to be
+    renewed: the access token's lifetime, else the id token's expiry. None
+    when the provider said neither"""
+    now = time.time() if now is None else now
+    try:
+        lifetime = float(tokens.get("expires_in"))
+        if lifetime > 0:
+            return now + max(lifetime, MIN_SESSION)
+    except (TypeError, ValueError):
+        pass
+    try:
+        exp = float((claims or {})["exp"])
+        return max(exp, now + MIN_SESSION)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+@dataclass
+class Renewal:
+    expires_at: float
+    refresh_token: Optional[str] = None   # None: the provider didn't rotate it
+
+
+def _identity_sub(identity: str, doc: Dict[str, Any]) -> str:
+    """the subject a stored identity is for, or "" when it is for another issuer"""
+    issuer, _, sub = str(identity or "").rpartition("|")
+    return sub if issuer and issuer == _issuer_key(doc.get("issuer", "")) else ""
+
+
+def refresh(settings: OidcSettings, doc: Dict[str, Any], refresh_token: str, identity: str, *,
+            now: Optional[float] = None) -> Renewal:
+    """renew a session server to server. the renewal has to be for the same
+    account at the same provider, and the account still has to be in the
+    required group. raises OidcError when it can't be renewed, whether the
+    provider refused or couldn't be reached: either way the session ends"""
+    now = time.time() if now is None else now
+    sub = _identity_sub(identity, doc)
+    if not sub or not refresh_token:
+        raise OidcError("The session can't be renewed")
+    data = {"grant_type": "refresh_token", "refresh_token": refresh_token}
+    auth = None
+    if _token_auth_method(doc) == "client_secret_basic":
+        auth = (settings.client_id, settings.client_secret)
+    else:
+        data["client_id"] = settings.client_id
+        data["client_secret"] = settings.client_secret
+    require_secure(doc["token_endpoint"], "token endpoint")
+    try:
+        resp = requests.post(doc["token_endpoint"], data=data, auth=auth, timeout=TIMEOUT,
+                             headers={"Accept": "application/json"})
+    except requests.RequestException as e:
+        logger.warning("OIDC session renewal failed: %s", e)
+        raise OidcError("Couldn't reach the sign-in provider") from e
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {}
+    if resp.status_code != 200 or not isinstance(body, dict) or not body.get("access_token"):
+        logger.info("OIDC session renewal refused: HTTP %s %s", resp.status_code,
+                    body.get("error", "") if isinstance(body, dict) else "")
+        raise OidcError("The sign-in provider refused to renew the session")
+
+    claims: Optional[Dict[str, Any]] = None
+    if body.get("id_token"):
+        claims = _checked_claims(body["id_token"], settings, doc, now=now)
+        if str(claims.get("sub")) != sub:
+            raise OidcError("The renewed session is for another account")
+    if settings.required_group:
+        merged: Dict[str, Any] = dict(claims or {})
+        if settings.groups_claim not in merged:
+            extra = userinfo(doc, body["access_token"])
+            # userinfo counts only for the same subject, as at sign-in
+            if str(extra.get("sub") or "") != sub:
+                raise OidcError("Couldn't check the account's groups")
+            merged.update(extra)
+        if settings.required_group not in _groups_from(merged.get(settings.groups_claim)):
+            raise OidcError("The account is no longer in the required group")
+    expires_at = token_expiry(body, claims, now=now)
+    if expires_at is None:
+        raise OidcError("The sign-in provider didn't say how long the session lasts")
+    rotated = body.get("refresh_token")
+    return Renewal(expires_at=expires_at,
+                   refresh_token=rotated if isinstance(rotated, str) and rotated else None)
 
 
 # -- who signed in --
@@ -451,6 +573,28 @@ def connect_profile(db, profile_id: int, account: OidcAccount) -> SignInResult:
             return SignInResult(error="Couldn't save the connection")
         logger.info("OIDC connect: profile %s connected", profile_id)
         return SignInResult(profile_id=profile_id)
+
+
+def sign_up_by_invite(db, account: OidcAccount, settings: OidcSettings,
+                      create: Callable[[], Tuple[Optional[int], Optional[str]]]) -> SignInResult:
+    """an invite accepted while sign-in is oidc only (#1839): the account
+    that just signed in at the provider gets a new profile, made by
+    `create` (which spends the invite), linked to it. the required group
+    still applies, and an account that already has a profile is turned away
+    before the invite is spent. runs under the sign-in lock, so a sign-in of
+    the same account can't make a second profile in between"""
+    if not allowed_in(account, settings):
+        return SignInResult(error="Your account isn't allowed to use SoulSync. Ask your admin.")
+    with _sign_in_lock:
+        if db.get_profile_by_oidc_identity(account.identity):
+            return SignInResult(error="That account already has a SoulSync profile. Sign in instead.")
+        profile_id, error = create()
+        if error or profile_id is None:
+            return SignInResult(error=error or "Couldn't create your profile")
+        if not db.set_profile_oidc_identity(profile_id, account.identity):
+            return SignInResult(error="Couldn't save the connection")
+        logger.info("OIDC invite: created profile %s for '%s'", profile_id, account.username)
+        return SignInResult(profile_id=profile_id, created=True)
 
 
 def _create_profile(db, username: str, *, can_download: bool,

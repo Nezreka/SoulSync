@@ -44,8 +44,11 @@ def test_handler_derives_today_from_trigger_tz():
         _Deps(), fetch_airing=fetch_airing,
         # stub the rest to avoid DB access
         add_episodes=lambda *a: 0,
-        get_bookmark=lambda: (None, False),
-        set_bookmark=lambda *a: True,
+        get_bookmark=lambda: None,
+        get_offered=lambda keys: set(),
+        mark_offered=lambda keys: None,
+        is_seeded=lambda: True,
+        set_seeded=lambda: None,
         unowned_follows=lambda: [],
         tmdb_airings=lambda *a: [],
         prune_follows=lambda: [],
@@ -53,6 +56,6 @@ def test_handler_derives_today_from_trigger_tz():
     # the window should be derived from Auckland's today, not the server's
     expected_today = datetime.now(ZoneInfo("Pacific/Auckland")).date().isoformat()
     assert seen, "fetch_airing should have been called"
-    # start <= expected_today <= end (catch-up window covers today)
+    # start <= expected_today <= end (the lookback window ends today)
     start, end = seen[0]
     assert start <= expected_today <= end, f"window {start}..{end} should cover {expected_today}"

@@ -181,6 +181,36 @@ def _staging_title_variants(title: Any, normalize: Callable[[str], str]) -> list
     return variants
 
 
+# A staged file whose track number is the wanted track's own number gets this
+# much extra score. Only ever a tie-break: the title and artist scores decide
+# which files are candidates at all, and a better title match (0.05 and up) is
+# never overruled by a number.
+_TRACK_NUMBER_TIEBREAK = 0.02
+
+
+def _wanted_track_position(task_id, track) -> tuple[int, int]:
+    """(track number, disc number) the task is asking for, 0 where unknown."""
+    number = _coerce_positive_int(getattr(track, 'track_number', 0), 0)
+    disc = _coerce_positive_int(getattr(track, 'disc_number', 0), 0)
+    if not number or not disc:
+        with tasks_lock:
+            info = (download_tasks.get(task_id) or {}).get('track_info') or {}
+        if isinstance(info, dict):
+            number = number or _coerce_positive_int(info.get('track_number'), 0) \
+                or _coerce_positive_int(info.get('trackNumber'), 0)
+            disc = disc or _coerce_positive_int(info.get('disc_number'), 0) \
+                or _coerce_positive_int(info.get('discNumber'), 0)
+    return number, disc
+
+
+def _staged_track_position(staged) -> tuple[int, int]:
+    """(track number, disc number) a staged file carries: tags first, then a
+    number visibly at the front of the file name."""
+    number = _coerce_positive_int(staged.get('track_number'), 0) \
+        or _extract_explicit_track_number(staged.get('full_path', ''))
+    return number, _coerce_positive_int(staged.get('disc_number'), 0)
+
+
 @dataclass
 class StagingDeps:
     """Bundle of cross-cutting deps the staging-match helper needs."""
@@ -248,14 +278,27 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             for value in title_variants
         ]
 
+    # files this task already claimed and the import turned down. offering
+    # one again just repeats the refusal, and the real search never runs
+    with tasks_lock:
+        tried = set(download_tasks.get(task_id, {}).get('staging_tried_paths') or ())
+
     best_match = None
     best_score = 0.0
+    best_rank = 0.0
+    wanted_number, wanted_disc = _wanted_track_position(task_id, track)
     # Track per-candidate scoring so the rejection log can show the
     # near-miss that DID exist (useful when title-sim is 0.79 — one
     # point below the threshold).
     candidate_scores: list = []
 
     for sf in staging_files:
+        if sf.get('full_path') in tried:
+            logger.debug(
+                "[Staging] Skip candidate %s — this task already tried it",
+                os.path.basename(sf.get('full_path', '?')),
+            )
+            continue
         sf_title_variants = _staging_title_variants(sf['title'], normalize)
         sf_norm_artist = normalize(sf['artist'])
 
@@ -357,9 +400,46 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
 
         candidate_scores.append((sf, title_sim, artist_sim, combined))
 
-        if combined > best_score:
+        # Several files can score the same: the parts of one audiobook are
+        # all titled alike ('Chapter', 'Teil 03'), so the title cannot tell them
+        # apart and the first file in the folder won every task. That pairs
+        # tracks with the wrong file, trips the length check on the real pair
+        # and sends two tasks after one file. The track number breaks the tie.
+        rank = combined
+        if combined >= 0.75 and wanted_number:
+            file_number, file_disc = _staged_track_position(sf)
+            disc_agrees = not (wanted_disc and file_disc) or wanted_disc == file_disc
+            if file_number == wanted_number and disc_agrees:
+                rank += _TRACK_NUMBER_TIEBREAK
+
+        if rank > best_rank:
+            best_rank = rank
             best_score = combined
             best_match = sf
+
+    # A private album-bundle staging folder holds exactly this album's files, so
+    # the track number is not a hint there, it is the identity: take the file
+    # that carries the wanted number whenever it is an acceptable title match at
+    # all, however the title similarities of its look-alikes happen to rank.
+    # (Parts of one audiobook are titled alike, and the similarity then varies
+    # with the length of the part marker, which has nothing to do with the track.)
+    if wanted_number and deps.get_batch_field is not None and batch_id:
+        try:
+            private_bundle = bool(deps.get_batch_field(batch_id, 'album_bundle_private_staging'))
+        except Exception as _exc:  # noqa: BLE001
+            logger.debug("get_batch_field failed: %s", _exc)
+            private_bundle = False
+        if private_bundle:
+            numbered = []
+            for sf, _title_sim, _artist_sim, _combined in candidate_scores:
+                if _combined < 0.75:
+                    continue
+                file_number, file_disc = _staged_track_position(sf)
+                disc_agrees = not (wanted_disc and file_disc) or wanted_disc == file_disc
+                if file_number == wanted_number and disc_agrees:
+                    numbered.append((_combined, sf))
+            if numbered:
+                best_score, best_match = max(numbered, key=lambda pair: pair[0])
 
     # Require high confidence to avoid false positives
     if not best_match or best_score < 0.75:
@@ -440,6 +520,9 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
                 download_tasks[task_id]['filename'] = dest_path
                 download_tasks[task_id]['username'] = _provenance_username
                 download_tasks[task_id]['staging_match'] = True
+                tried_paths = set(download_tasks[task_id].get('staging_tried_paths') or ())
+                tried_paths.add(best_match['full_path'])
+                download_tasks[task_id]['staging_tried_paths'] = tried_paths
 
         if _private_album_bundle_staging:
             try:

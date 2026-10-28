@@ -41,6 +41,8 @@ import {
   importTracksFromCsv,
   importTracksFromText,
 } from '../-sync.import';
+import { isNewPipeFile } from '../-sync.newpipe';
+import { NewPipeImport } from './newpipe-import';
 
 type TextOrder = 'artist-title' | 'title-artist';
 
@@ -87,13 +89,22 @@ export function ImportFileTab({ onImported }: { onImported: () => void }) {
   const [textSeparator, setTextSeparator] = useState(' - ');
   const [playlistName, setPlaylistName] = useState('');
   const [dragOver, setDragOver] = useState(false);
+  /** a NewPipe backup takes its own branch: it is binary, and holds many playlists. */
+  const [newpipeFile, setNewpipeFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   /** _importFileRead (42-58) — extension gate, then FileReader.readAsText. */
   const readFile = useCallback((file: File) => {
+    if (isNewPipeFile(file.name)) {
+      setNewpipeFile(file);
+      return;
+    }
     const ext = (file.name.split('.').pop() ?? '').toLowerCase();
     if (!IMPORT_FILE_EXTENSIONS.includes(ext)) {
-      window.showToast?.('Unsupported file type. Use CSV, TSV, TXT, M3U, or M3U8.', 'error');
+      window.showToast?.(
+        'Unsupported file type. Use CSV, TSV, TXT, M3U, M3U8, or a NewPipe backup (ZIP/DB).',
+        'error',
+      );
       return;
     }
     // Total over IMPORT_FILE_EXTENSIONS, which the gate above already
@@ -216,7 +227,14 @@ export function ImportFileTab({ onImported }: { onImported: () => void }) {
         <h3>Import Playlist from File</h3>
       </div>
 
-      {parsed === null ? (
+      {newpipeFile ? (
+        <NewPipeImport
+          key={`${newpipeFile.name}-${newpipeFile.lastModified}`}
+          file={newpipeFile}
+          onClear={() => setNewpipeFile(null)}
+          onImported={onImported}
+        />
+      ) : parsed === null ? (
         <div id="import-file-upload-zone" className="import-file-zone">
           <div
             className={dragOver ? 'import-file-zone-inner drag-over' : 'import-file-zone-inner'}
@@ -237,12 +255,14 @@ export function ImportFileTab({ onImported }: { onImported: () => void }) {
             <div className="import-file-zone-icon">📄</div>
             <div className="import-file-zone-title">Drop your file here</div>
             <div className="import-file-zone-subtitle">or click to browse</div>
-            <div className="import-file-zone-formats">Supported: CSV, TSV, TXT, M3U, M3U8</div>
+            <div className="import-file-zone-formats">
+              Supported: CSV, TSV, TXT, M3U, M3U8, NewPipe backup
+            </div>
             <input
               type="file"
               id="import-file-input"
               ref={fileInputRef}
-              accept=".csv,.tsv,.txt,.m3u,.m3u8"
+              accept=".csv,.tsv,.txt,.m3u,.m3u8,.zip,.db"
               style={{ display: 'none' }}
               onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -272,6 +292,14 @@ export function ImportFileTab({ onImported }: { onImported: () => void }) {
               <span className="import-file-hint-text">
                 Standard playlist files. Artist, title and duration are read automatically from
                 #EXTINF lines (or the file name for simple playlists).
+              </span>
+            </div>
+            <div className="import-file-hint">
+              <span className="import-file-hint-label">NewPipe</span>
+              <span className="import-file-hint-text">
+                The backup ZIP from NewPipe (Settings → Backup and restore → Export), or the
+                newpipe.db inside it. Pick which playlists to import; importing a newer backup
+                updates them.
               </span>
             </div>
           </div>

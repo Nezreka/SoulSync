@@ -1088,7 +1088,10 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                     'retry_count': task.get('retry_count', 0),
                     'track_data': wishlist_track_data,
                     'spotify_track': wishlist_track_data,  # Backward-compatible alias for older callers
-                    'failure_reason': 'Download cancelled' if task_status == 'cancelled' else ('No matching track found' if task_status == 'not_found' else 'Download failed'),
+                    # a failed download keeps the task's own reason (tidal said no,
+                    # the transfer stalled, ...). a bare 'Download failed' left the
+                    # wishlist saying "keeps failing" with nothing to go on.
+                    'failure_reason': 'Download cancelled' if task_status == 'cancelled' else ('No matching track found' if task_status == 'not_found' else (task.get('error_message') or 'Download failed')),
                     'candidates': task.get('cached_candidates', []),  # Include search results if available
                 }
 

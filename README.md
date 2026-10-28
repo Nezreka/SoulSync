@@ -45,7 +45,7 @@
 - **Video**
   - [Movies, TV & YouTube](#video-movies-tv--youtube)
 - **Platform**
-  - [Automations](#automations) · [Profiles & access](#profiles--access) · [Chat & arcade](#chat--arcade) · [API & webhooks](#api--webhooks) · [Mobile, PWA & theming](#mobile-pwa--theming) · [Companion browser extension](#companion-browser-extension)
+  - [Automations](#automations) · [Profiles & access](#profiles--access) · [Chat & arcade](#chat--arcade) · [API & webhooks](#api--webhooks) · [Mobile, PWA & theming](#mobile-pwa--theming) · [Companion browser extension](#companion-browser-extension) · [MetaSync & SoulSync Charts](#metasync--soulsync-charts)
 - [Installation](#installation) · [Setup guide](#setup-guide) · [Architecture](#architecture) · [Contributing](#contributing) · [License](#license)
 
 ---
@@ -66,9 +66,10 @@ Most self-hosted media setups are a relay race: one app wants things, another se
 | **Download sources** | Soulseek (slskd), Tidal, Qobuz, Deezer, HiFi, YouTube, SoundCloud, Lidarr, Torrent and Usenet (via Prowlarr). One source or a drag-ordered hybrid chain. |
 | **Metadata** | Spotify (with or without an account), Apple Music / iTunes, Deezer, Discogs, MusicBrainz, plus 14 background enrichment workers |
 | **Media servers** | Plex, Jellyfin, Navidrome, or **SoulSync Standalone** (no server needed) |
-| **Playlist sources** | Spotify, Tidal, Qobuz, Deezer, YouTube, YouTube Music, Apple Music links, ListenBrainz, Last.fm, Beatport, SoulSync's own mixes, and CSV / TSV / TXT / M3U files |
+| **Playlist sources** | Spotify, Tidal, Qobuz, Deezer, YouTube, YouTube Music, Apple Music links, ListenBrainz, Last.fm, Beatport, SoulSync's own mixes, CSV / TSV / TXT / M3U files, and NewPipe backups |
 | **Video** | Movies, TV and YouTube channels with TMDB / TVDB, Prowlarr, qBittorrent / Transmission / Deluge / SABnzbd / NZBGet, Plex and Jellyfin |
 | **Automation** | Visual WHEN → DO → THEN builder, 60+ triggers and actions, Discord / Telegram / Pushbullet / webhook notifications |
+| **Network (optional)** | **MetaSync** companion: share anonymous weekly taste signals with other SoulSync installs through SIN and get **SoulSync Charts** back as ready-to-sync playlists |
 | **Runs on** | Docker (amd64 + arm64), Unraid, or plain Python 3.11 |
 
 ---
@@ -83,7 +84,7 @@ The home screen is split in two: your music on the left, the machine on the righ
 
 - **Hero** with a greeting, your library size, one-click **Quick Scan** and a menu for deep scans, match verification, repair and database backups.
 - **Worker orbs**: every enrichment worker lives on its own animated stage. They drift while resting, pulse when busy, turn red on errors, and fly home into a grid of controls when you hover.
-- **Library Radio** and **Your Mixes**, **Recently Added / Fresh Releases**, and **Recently Played** (tap a song to play it again; repeats fold into one card).
+- **Library Radio** and **Your Mixes**, **Recently Added / Fresh Releases / SoulSync Charts** (when [MetaSync](#metasync--soulsync-charts) is connected), and **Recently Played** (tap a song to play it again; repeats fold into one card).
 - **Playlist sync health**: one honest number for how much of your playlists you own, the playlists missing the most, sorting by missing / last synced / next run / name, and running syncs pinned to the top.
 - **Up next**: the next automations to fire, with run and pause on hover.
 - An **alerts band** that stays invisible until a connection actually breaks.
@@ -92,15 +93,16 @@ The home screen is split in two: your music on the left, the machine on the righ
 
 Bring a playlist in from anywhere, keep a mirror of it, and keep your media server's copy in step on a schedule.
 
-- **Add playlist**: paste any link and SoulSync works out the service, or pick from a connected account, or drop a CSV / TSV / TXT / M3U file and map its columns.
+- **Add playlist**: paste any link and SoulSync works out the service, or pick from a connected account, or drop a CSV / TSV / TXT / M3U file and map its columns, or a NewPipe backup to bring its playlists over.
 - **Mirrored library**: every playlist as a card whose artwork carries its state (a coverage ring, a pulse while syncing, desaturated when something's wrong). Filter by *Needs attention / Working / Discovered / Scheduled*, search, sort, bulk delete.
 - **Discovery**: matches each source track to real metadata with live progress. Fix any match by hand (including by MusicBrainz ID), retry the failures, or let **Wing It** make best-effort guesses that you can review later in the **Wing It Pool**.
 - **Sync modes**: *Replace*, *Reconcile* (edit in place, keep the server playlist's image and description) or *Append*.
 - **Schedules**: per playlist, from hourly to weekly, or on a drag-and-drop **Auto-Sync board** with a live pipeline monitor and run history. A scheduled pipeline does refresh → discover → sync → download missing, unattended.
-- **Server playlists**: a side-by-side **compare editor** for Plex / Jellyfin / Navidrome (matched, missing, extra), swap versions, find & add, reorder to match the source, export M3U.
+- **Server playlists**: a side-by-side **compare editor** for Plex / Jellyfin / Navidrome (matched, missing, extra), swap versions, find & add, unmatch a wrong pairing while keeping the track, reorder to match the source, export M3U.
 - **Export** any playlist to Spotify, Deezer, ListenBrainz or a JSPF file.
 - **Beatport**: Top 100, Hype 100, top 10 lists and releases, and a full genre browser.
 - **Organize by playlist**: optionally download a playlist into its own folder.
+- **Cover art**: *Generate cover art* in any playlist's ⋯ menu (on the card or inside the playlist) paints a cover from its genres, mood and era with [Pollinations](https://pollinations.ai). Preview it with the playlist's name across the top (or without), try another style, keep the one you like; it survives refreshes and syncs to your server. Free with no key (one image every 45s, small Pollinations mark), or add a key in Settings to lift both.
 
 ## Search & downloads
 
@@ -138,8 +140,7 @@ One search box with three modes.
 - **Quarantine & review**: anything that fails is held with its reason and uploader. Approve it, recover it to staging, or delete it. Removed files go to a **recycle bin** with configurable retention.
 - **Tagging**: Picard-style **MusicBrainz release preflight** pins one release per album so every track agrees. Tags are written with mutagen (ID3v2.4, FLAC, Vorbis, MP4), enriched in the order you choose.
 - **Extras**: preferred-source cover art with a minimum size, synced lyrics from LRClib, **ReplayGain 2.0** (track + album), optional lossy copies (MP3 / Opus / AAC), and **atomic album publishing** so half-downloaded albums never appear in your server.
-- **File organization**: templates for albums, singles, compilations, playlists, music videos, podcasts and audiobooks (`$albumartist/$album/$track - $title` and friends), including beets-compatible `$atypes` release labels so `[2017][EP][Live] Audiotree Live` and a plain `[2019] Tokyo` come out of the same template.
-- **File organization**: templates for albums, singles, playlists, music videos, podcasts and audiobooks (`$albumartist/$albumartist - $album/$track - $title` and friends).
+- **File organization**: templates for albums, singles, compilations, playlists, music videos, podcasts and audiobooks (`$albumartist/$album/$track - $title` and friends), including beets-compatible `$atypes` release labels so `[2017][EP][Live] Audiotree Live` and a plain `[2019] Tokyo` come out of the same template, and `$explicit` / `$contentrating` badges (`[E]`, `[C]`) so explicit and clean versions never share a filename, and `$albumartistclash` / `$albumartistinfo` / `$albumartistcomposite` (MusicBrainz disambiguation, else country and genre) so two artists called Nirvana get their own folders. An opt-in lookalike mode keeps `AC∕DC` and `What's Going On？` instead of underscoring them. Every template shows the path it makes right under it as you type, for a plain, explicit or multi-disc release, or an artist that shares its name.
 
 ## Discover
 
@@ -151,6 +152,7 @@ A personal front page shaped by your library, your listening and your watchlist.
 - **Recommended artists**, **Because you listen to…**, **New releases for you**, **New in your genres**, **Albums you're missing**, **More from your labels**, **Deep cuts**.
 - **Stations**: endless artist radio, or a stable 40-track snapshot you can download or sync.
 - **Deezer Curated** editorial playlists (no key needed), **ListenBrainz** recommendations, and **Last.fm Radio**.
+- **SoulSync Charts**: what the SoulSync network is wishlisting, keeping and playing this week, as playlists that open ready to sync (needs [MetaSync](#metasync--soulsync-charts), and the shelf hides itself without it).
 - **Build a playlist** from 1 to 5 seed artists.
 - **Artist Map & Artist Web**: full-screen graphs of your taste. Genres, communities, influence, and the shortest path between any two artists.
 - **Playlist Explorer**: turn any playlist into a tree of its artists and albums, then wishlist the gaps.
@@ -182,6 +184,7 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 ## Tools & library maintenance
 
 - **Library health score** with a findings inbox that turns thousands of findings into a few decisions, and **Fix all safe** for metadata-only repairs.
+- Findings sorted by what a fix would do (safe, needs your call, review only), **undo** on every dismiss, and keyboard triage (\`j\`/\`k\`/\`f\`/\`d\`).
 - **31 maintenance jobs**, each with its own schedule: duplicate and single/album dedup, dead and orphan files, AcoustID scanning, fake-lossless and corrupt-file detection, cover art, lyrics and ReplayGain fillers, metadata gaps, album completeness, discography backfill, quality upgrades, lossy conversion, reorganize and re-tag, MBID mismatches, album tag consistency, unknown-artist and comma-artist fixes, genre cleanup and enrichment, and more.
 - **Database updater** (incremental, full refresh or deep scan), manual library matching, **backups with restore**, a metadata cache browser, and **config export/import** (optionally with credentials).
 
@@ -218,9 +221,11 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 - **Bulk edit & field locks**: edits are written to SoulSync and pushed to your server, and locked fields are never overwritten by enrichment.
 
 **Detail pages**
-- Trailer-backed heroes with Play / Resume on your server.
+- Trailer-backed heroes with one primary action (Play / Resume on your server, else Get) and everything else in one More menu.
 - Every rating, cast and crew, where to watch, collections and acquisition history.
 - Four season views, and season tools: grab, search, wishlist, monitor.
+- A **Your library** tab on every movie and show: each copy you own with its quality, codecs, size, folder and subtitles, whether its name matches your template, and file actions (rename to template, delete to the recycle bin). Shows get every season with counts, size, a resolution mix and a monitored switch, plus the folders a show is split across.
+- **Fix match** that sticks: re-point a title to the right TMDB entry and scans can't switch it back.
 - Person, studio, channel and playlist pages.
 
 **Finding things**
@@ -233,8 +238,9 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Charts, streaming services, moods and world cinema.
   - A full browse filter.
 - **TV Calendar**:
-  - Week grid with acquisition state on every episode, and cinema / home release dates for movies.
-  - An **iCal feed** for your phone.
+  - Week, agenda and month views. Every episode says where it stands (in library, downloading, wanted, failed, missing, auto-grabs on air), with cinema / home release dates for movies.
+  - Aired episodes are wishlisted on their own every few hours, each once, and the page says when that last ran.
+  - A per-profile **iCal feed** for your phone, readable without signing in.
 
 **Getting things**
 - **Watchlist → wishlist → download**:
@@ -248,7 +254,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Seeding goals, **season packs**, and stall detection.
 - **Quality profiles**:
   - A 16-tier ladder with upgrade-until-cutoff and Sonarr-style **custom formats**.
-  - Codec, HDR and audio preferences, size limits and minimum seeders.
+  - Codec, HDR and audio preferences, **audio language** (prefer or require a dubbed / MULTI release), size limits and minimum seeders.
   - A separate YouTube profile.
 - **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames, NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
 - **Downloads page**: Downloads / Review / Clients views with live batches, a review queue and download-client management — the same setup as the music side.
@@ -261,7 +267,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Smart-filter and list collections from TMDB, IMDb, Trakt and MDBList.
   - Presets, seasonal windows, generated artwork, and wishlisting missing members.
 - **Poster Manager** for TMDB posters, including textless ones.
-- **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more. Plus backups and mass rename.
+- **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more, on the same Tools page as music (health score, findings inbox, fix-all in the background). Plus backups and mass rename.
 - **Server Activity**: a Tautulli-style live view of streams, history and stats.
 - **Watch Together** in chat: vote on a title and watch together.
 
@@ -296,6 +302,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 - Non-admins get a **My Account** panel for their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
 - **Security**:
   - An admin PIN with brute-force limits, or full **username/password login** with recovery questions.
+  - Sign in with Plex or with your own OIDC provider, or **OIDC only**, which turns every other sign-in off. If the provider is ever down, `SOULSYNC_OIDC_ONLY_OVERRIDE=off` and a restart let the admin back in with their password. Setup and troubleshooting: [docs/guides/OIDC.md](docs/guides/OIDC.md).
   - Or trust a forward-auth header from Authelia, Authentik or oauth2-proxy.
   - Reverse-proxy and sub-path aware.
 - **Own library per profile** (Plex / Jellyfin): a profile can have its own folder and server library.
@@ -322,7 +329,7 @@ Soulseek rooms and private messages through slskd, in a Discord-style layout.
 - **Inbound request webhook**: `POST /api/v1/request` with a query and SoulSync searches, matches and downloads it. Good for Discord bots and shortcuts.
 - **MCP server** at `/mcp`, so Claude and other AI apps can search, check your library and download through SoulSync with an API key. A read-only key can look but not change anything.
 - **Lidarr compatible API** at `/lidarr`, so request apps that only speak Lidarr (Singarr, MusicSeerr 1.x) can send their album requests to SoulSync instead.
-- Both are off until you turn them on in **Settings > Advanced > SoulSync API**. See [Support/API.md](Support/API.md#mcp-for-ai-clients).
+- Both are off until you turn them on in **Settings > System > SoulSync API**. See [Support/API.md](Support/API.md#mcp-for-ai-clients).
 
 ## Mobile, PWA & theming
 
@@ -340,6 +347,67 @@ Soulseek rooms and private messages through slskd, in a Discord-style layout.
 <p align="center">
   <img src="https://raw.githubusercontent.com/Nezreka/soulsync-extension/main/docs/images/badges-spotify-artists.png" alt="SoulSync Companion badges on Spotify" width="720">
 </p>
+
+## MetaSync & SoulSync Charts
+
+**[MetaSync](https://github.com/Nezreka/MetaSync)** is an optional companion program that runs next to SoulSync. Its first network is **SIN, the SoulSync Intelligence Network**: SoulSync installs that share small, anonymous taste signals once a week and get shared charts back. SoulSync works exactly the same without it, and nothing is shared until you install MetaSync, join a pool **and** turn off Dry run.
+
+**How it flows**
+1. **Weekly read, on your machine.** Early each Monday your MetaSync node reads last week's activity from SoulSync's local API: what you watchlisted, wishlisted, added and downloaded, plus what you listened to if you turned that on.
+2. **One report a week, the only thing that leaves.** The node turns the week into yes/no signals keyed only by MusicBrainz IDs, such as "this install wishlisted album X". No titles, file paths, play counts or library listings.
+3. **Counted on arrival.** The pool adds +1 to each album's count for the week and keeps nothing else from the report.
+4. **Only crowds count.** An album appears in a chart only once **15 or more different installs** reported it that week. Below that it's never shown to anyone, and those counts are deleted after 3 weeks.
+5. **Charts are built once, for everyone.** Each charted album contributes its 2 most popular songs by ListenBrainz's public statistics.
+6. **SoulSync shows them.** The *Refresh MetaSync Charts* system automation asks your node for the charts once a day, matches every song in the background, and shows a chart only when every song in it is matched.
+
+**What gets shared.** Eight one-bit signals per album or artist per week, covering the last full week. "Played it 40 times" and "played it 3 times" look the same.
+
+| Signal | Means | Default |
+|---|---|---|
+| `watchlist_add` | You started watching this artist this week | On |
+| `wishlist_add` | You wishlisted this album this week | On |
+| `hunt_demand` | Wishlisted 7+ days ago and still not downloaded | On |
+| `recent_add` | The album landed in your library this week | On |
+| `import_keep` | The album reached 14 days in your library (sent once per album, ever) | On |
+| `download_grab` | You re-grabbed, upgraded or gap-filled an album you already had | On |
+| `download_churn` | Downloaded 14+ days ago, then removed, confirmed by two weekly checks | **Off** (*Share drop signals*) |
+| `listen_album` | You played 3+ different songs from the album this week, your 50 most played at most | **Off** (*Share listening signals*) |
+
+With listening signals off, MetaSync doesn't read your listening history at all. With them on, SoulSync only hands over the shared listening history, so a profile with its own listening account is never included. If one kind of event happens more than 500 times in a week (a bulk import, a drive remount), that kind isn't reported that week, so a report can never become a copy of your library. The node's **Payload preview** page shows the exact report before anything is sent.
+
+**Privacy, as built**
+- **Counted, not stored.** The pool keeps per-week totals per album, never your report and never which installs sent what.
+- **No week-to-week tracking.** Each report carries a token that changes every week, only to stop a double send.
+- **Keys stay yours.** The portal stores only key hashes, your node signs every request, and your pool key only works from the one node you approved. Revoking the key or unbinding the node cuts access on the very next request.
+- **Members can't publish.** Nodes can only send their own signals and read charts. Only the official composer builds them.
+- **Honest limits.** The pool sees a request arrive from an IP like any website (it doesn't store it), it briefly holds one week's report while counting it, and counts above 15 are public by design. The full data map is [DATA.md](https://github.com/Nezreka/MetaSync/blob/main/DATA.md) in the MetaSync repository.
+
+**The charts**
+
+| Chart | What puts an album on it |
+|---|---|
+| **Trending in SoulSync** | Wishlisted or grabbed this week compared with the 3 weeks before, so a riser beats a steady seller |
+| **Most Wanted** | Wishlisted, or still hunted after a week |
+| **Just Landed** | Newly added to libraries this week |
+| **Loved & Kept** | Kept past 14 days, minus albums people deleted |
+| **Rising** | Demand at least doubled since last week |
+| **Breakout Artists** | Artists whose watchlist adds at least doubled (20+ installs) |
+| **On Repeat** | Played by 15+ installs that share listening signals |
+| **Top Tracks · from ListenBrainz** | ListenBrainz's public weekly song chart, at most 2 songs per artist |
+
+Charts are 25 albums and 50 songs, best songs first, and also come in **genre and decade editions** ("Trending: Hip Hop", "Trending: 2020s") once 8 charted albums share a tag. While the network is young, Trending and Just Landed fill empty slots from ListenBrainz's public charts, and the name says so ("Trending · SoulSync + ListenBrainz").
+
+They show as a **SoulSync Charts** tab on the dashboard and a **SoulSync Charts** shelf on Discover. **Charts are offers, never orders**: opening one gives your profile its own playlist on the Sync page with the matches already in it, and nothing reaches your media server, wishlist or downloads until you press **Sync & download** (or turn on Auto-Sync for it). When the chart updates, your copy updates in place and keeps its matches, and if a chart leaves the network your copy stays yours.
+
+**Setting it up**
+1. **Get a pool key** at [metasync.ssync.net](https://metasync.ssync.net). It's shown once, and the portal only stores a hash of it.
+2. **Run the node** with Docker (see the MetaSync repo's compose example) or `python3 run.py`, open `http://localhost:8790` and set an admin password.
+3. **Connect it**: **Settings → Connections → MetaSync → Connect**. SoulSync finds the node and shows a pairing code, approve it on the MetaSync dashboard and the two swap keys. Connecting joins nothing, it only lets the two programs on your machine talk.
+4. **Join the pool**: paste your pool key into the same section. SoulSync hands it to the node and never contacts the pool itself.
+5. **Approve the node** on the portal the first time it shows *waiting for approval*, checking the fingerprint matches the node's dashboard.
+6. **Check the report, then send it**: the node starts in **Dry run** and only shows the report on its Payload preview page. Turn Dry run off when you're happy, and it reports once a week on its own.
+
+To leave, **Disconnect** in the same section revokes the key SoulSync gave the node, and revoking your pool key or unbinding the node on the portal leaves the network completely. Help & Docs has a full **MetaSync** section with a flow chart and troubleshooting for every message the charts automation can show.
 
 ---
 
@@ -471,6 +539,10 @@ Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and
 | Video | `/media/movies`, `/media/tv`, `/media/youtube` | Optional, for the video side |
 
 Useful environment variables: `PUID`, `PGID`, `UMASK`, `TZ`, `SOULSYNC_URL_BASE` (serve under a sub-path, see [docs/REVERSE_PROXY_SUBPATH.md](docs/REVERSE_PROXY_SUBPATH.md)), and `SOULSYNC_LOG_LEVEL`.
+
+### 5. Sign in with OIDC (optional)
+
+To let people sign in with Pocket ID, Authentik, Authelia, Keycloak or another OpenID Connect provider, follow [docs/guides/OIDC.md](docs/guides/OIDC.md).
 
 ---
 

@@ -655,7 +655,7 @@ class TVmazeWorker(VideoBackfillWorker):
 # ── AniList (no key, GraphQL) — anime average score ───────────────────────────
 _ANILIST_QUERY = (
     "query($search:String){Media(search:$search,type:ANIME){"
-    "averageScore title{romaji english}}}"
+    "averageScore startDate{year} title{romaji english}}}"
 )
 
 
@@ -690,12 +690,16 @@ class AniListWorker(VideoBackfillWorker):
         media = (j.get("data") or {}).get("Media") if isinstance(j, dict) else None
         if not isinstance(media, dict):
             return None
-        # Conservative guard: only accept when AniList's title actually matches ours
-        # (anime search is fuzzy and would otherwise score random non-anime shows).
+        # Conservative guard: the title must match exactly (a substring let "The
+        # Bear" take a longer anime's score) and, when both sides know it, the
+        # year must agree within one.
         names = media.get("title") or {}
         want = _norm_title(title)
         got = {_norm_title(names.get("romaji")), _norm_title(names.get("english"))}
-        if not any(g and (g == want or g in want or want in g) for g in got):
+        if not want or want not in got:
+            return None
+        year, start = item.get("year"), (media.get("startDate") or {}).get("year")
+        if isinstance(year, int) and isinstance(start, int) and abs(year - start) > 1:
             return None
         score = media.get("averageScore")
         if isinstance(score, int) and 0 < score <= 100:

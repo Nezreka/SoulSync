@@ -5,6 +5,7 @@ import { mountCandidateInspectorHost } from '@/features/downloads/inspector-moda
 import { mountOnboardingHost } from '@/features/onboarding/host';
 import { mountAddToPlaylistHost } from '@/features/playlists/add-to-playlist';
 import { mountLibraryDiscographySourceSelector } from '@/features/settings/library-discography-source';
+import { mountVideoLibraryTabHost } from '@/features/video-library/host';
 import { bindWindowWebRouter, SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
 import { ROUTER_ROOT_ID } from '@/platform/shell/route-controllers';
 import { openDownloadTaskSearch } from '@/routes/library/-ui/interactive-search-host';
@@ -73,4 +74,5 @@ mountCandidateInspectorHost();
 // A failed download's Interactive Search is the library's when it is for a library track.
 window.openDownloadTaskInspector = (taskId, track) => void openDownloadTaskSearch(taskId, track);
 mountAddToPlaylistHost();
+mountVideoLibraryTabHost();
 void bootstrapApp();

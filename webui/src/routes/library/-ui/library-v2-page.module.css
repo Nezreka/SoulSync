@@ -3093,17 +3093,6 @@ button.statusWarn:disabled {
   color: rgba(255, 255, 255, 0.4);
 }
 
-/* --- write-tags-to-file action (§18.2) --- */
-.formDivider {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 12.5px;
-}
-
 /* --- lyrics tab (§18.1) --- */
 .lyricsText {
   white-space: pre-wrap;
@@ -3760,12 +3749,6 @@ button.statusWarn:disabled {
   background: rgba(16, 185, 129, 0.14);
   color: rgb(52, 211, 153);
   border-color: rgba(16, 185, 129, 0.3);
-}
-
-.grab_err {
-  background: rgba(239, 68, 68, 0.14);
-  color: rgb(248, 113, 113);
-  border-color: rgba(239, 68, 68, 0.3);
 }
 
 .grabBannerClose {
@@ -6392,7 +6375,6 @@ textarea.searchInput {
 }
 .editFull,
 .metadataEditGrid > .modalActions,
-.metadataEditGrid > .formDivider,
 .metadataEditGrid > .searchError {
   grid-column: 1 / -1;
 }

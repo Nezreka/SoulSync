@@ -71,6 +71,7 @@ import {
   hasStatsData,
   heatIntensity,
   isNewSincePrevious,
+  parsePlayedAt,
   STATS_DB_STORAGE_COLORS,
   STATS_GENRE_COLORS,
   statDelta,
@@ -1758,7 +1759,7 @@ async function playStatsTrack(
 
 function formatDetailPlayedAt(value: string | null | undefined): string {
   if (!value) return '';
-  const parsed = new Date(value.includes('T') ? value : value.replace(' ', 'T'));
+  const parsed = parsePlayedAt(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString([], {
     month: 'short',

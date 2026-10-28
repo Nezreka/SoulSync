@@ -191,6 +191,27 @@ describe('AdlUnverifiedRow', () => {
     expect(acts.onDelete).toHaveBeenCalled();
   });
 
+  it('offers wrong song in the sheet and the menu when there is one', () => {
+    const acts = { ...handlers(), onWrongSong: vi.fn() };
+    const { container } = render(
+      <AdlUnverifiedRow dl={dl()} open onToggle={vi.fn()} handlers={acts} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Wrong song' }));
+    expect(acts.onWrongSong).toHaveBeenCalledTimes(1);
+    openMenu(container);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Wrong song…' }));
+    expect(acts.onWrongSong).toHaveBeenCalledTimes(2);
+  });
+
+  it('has no wrong song without one (nothing to search for)', () => {
+    const { container } = render(
+      <AdlUnverifiedRow dl={dl()} open onToggle={vi.fn()} handlers={handlers()} />,
+    );
+    expect(screen.queryByRole('button', { name: 'Wrong song' })).toBeNull();
+    openMenu(container);
+    expect(screen.queryByRole('menuitem', { name: 'Wrong song…' })).toBeNull();
+  });
+
   it('renders no actions without a history id to act on', () => {
     const { container } = render(
       <AdlUnverifiedRow dl={dl()} open={false} onToggle={vi.fn()} handlers={null} />,

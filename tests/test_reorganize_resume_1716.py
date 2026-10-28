@@ -92,6 +92,14 @@ def test_checkpoint_album_gone_starts_over(monkeypatch):
     assert _reorganize(monkeypatch, config, [11, 12]) == [11, 12]
 
 
+def test_a_gone_checkpoint_album_resumes_at_the_next_one(monkeypatch):
+    """upstream #1857: the album a stop saved was merged away meanwhile. The
+    pass carries on after it instead of re-planning the albums before it."""
+    config = _Config()
+    assert _reorganize(monkeypatch, config, [10, 11, 12, 13], stop_after=2) == [10, 11]
+    assert _reorganize(monkeypatch, config, [10, 12, 13]) == [12, 13]
+
+
 def test_a_scoped_reorganize_run_never_touches_the_checkpoint(monkeypatch):
     config = _Config()
     _reorganize(monkeypatch, config, [10, 11, 12], stop_after=1)

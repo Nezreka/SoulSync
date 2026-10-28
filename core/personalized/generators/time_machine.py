@@ -45,9 +45,13 @@ def generate(deps: Any, variant: str, config: PlaylistConfig) -> List[Track]:
 
 
 def variant_resolver(deps: Any) -> List[str]:
-    """Return the standard decade set. Future enhancement: filter to
-    decades that actually have data in the discovery pool."""
-    return list(_DEFAULT_DECADES)
+    """The decades this profile's pool has music for: listing all seven put
+    empty decades in the picker. The standard set when nothing can be read."""
+    try:
+        decades = get_service(deps).available_decades()
+    except Exception:  # noqa: BLE001 - the picker must still render
+        decades = []
+    return [f'{d}s' for d in decades] or list(_DEFAULT_DECADES)
 
 
 SPEC = PlaylistKindSpec(

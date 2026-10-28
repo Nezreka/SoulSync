@@ -162,7 +162,7 @@ def test_endpoint_and_ui_wiring_pins():
     api = (_ROOT / "api" / "video" / "detail.py").read_text(encoding="utf-8", errors="replace")
     js = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(encoding="utf-8", errors="replace")
     assert '"/detail/movie/<int:movie_id>/sync"' in api
-    assert 'data-vd-act="sync-movie"' in js
+    assert "moreItem('sync-movie'" in js
     assert "function syncMovieNow" in js
     assert "/detail/movie/" in js and "/sync'" in js
 

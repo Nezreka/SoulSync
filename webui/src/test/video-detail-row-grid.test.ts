@@ -7,11 +7,13 @@ import { extractFunction } from './vanilla-extract';
 /**
  * The episode row grid has to have a column for every child it can produce.
  *
- * An OWNED episode emits six: index, thumbnail, info, the "Owned" badge, the
- * action buttons, and the chevron. The grid declared five, so the chevron fell
- * onto a second implicit row at the far left of the card. It only happened on
- * owned rows, which is why it read as an expand affordance instead of a broken
- * layout - until a fully-owned season made every row do it at once.
+ * An episode emits six: index, thumbnail, info, the badge cell, the action
+ * group, and the chevron. The grid once declared five, so the chevron fell onto
+ * a second implicit row at the far left of the card.
+ *
+ * Oct 2026: owned rows stopped wearing an "Owned" pill (only a gap gets one),
+ * but they still emit the badge CELL, empty. Without it an owned row's actions
+ * sit one column left of a missing row's and the action column jumps.
  */
 
 const JS = readFileSync(resolve(process.cwd(), 'static/video/video-detail.js'), 'utf8');
@@ -41,11 +43,12 @@ function childCount(ep: Record<string, unknown>): number {
     function runtimeLabel(m) { return m ? m + 'm' : ''; }
     var selectedSeason = 1;
     var data = { source: 'library', kind: 'show' };
+    var currentSource = 'library';
     window.VideoGrab = {};
   `;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const build = new Function(
-    `${preamble}\n${extractFunction('episodeReportAttrs', JS)}\n${extractFunction('episodeRow', JS)}\nreturn episodeRow;`,
+    `${preamble}\n${extractFunction('episodeReportAttrs', JS)}\n${extractFunction('epAired', JS)}\n${extractFunction('epBadge', JS)}\n${extractFunction('epWatchedItem', JS)}\n${extractFunction('epPop', JS)}\n${extractFunction('episodeRow', JS)}\nreturn episodeRow;`,
   )() as (e: unknown) => string;
   const host = document.createElement('div');
   host.innerHTML = build(ep);
@@ -60,9 +63,11 @@ describe('the episode row grid fits every child it emits', () => {
     expect(columns('.vd-ep').length).toBeGreaterThanOrEqual(owned);
   });
 
-  it('still fits a missing episode, which emits one fewer', () => {
+  it('gives a missing episode the same columns, so the actions line up', () => {
     const missing = childCount({ episode_number: 2, title: 'E2', owned: false, overview: 'x' });
-    expect(missing).toBe(5);
+    const owned = childCount({ episode_number: 1, title: 'E1', owned: true, overview: 'x' });
+    expect(missing).toBe(6);
+    expect(missing).toBe(owned);
     expect(columns('.vd-ep').length).toBeGreaterThanOrEqual(missing);
   });
 
@@ -86,5 +91,22 @@ describe('the episode row grid fits every child it emits', () => {
     expect(CSS.slice(CSS.indexOf('\n.vd-ep {'), CSS.indexOf('\n.vd-ep {') + 300)).toContain(
       'justify-content: start',
     );
+  });
+});
+
+describe('an episode row with its menu open', () => {
+  // Measured in chromium (Oct 2026): every row is its own layer, so a menu
+  // opened in row 3 was painted under row 4's buttons. Raising the open row
+  // is what fixed it; a z-index on the menu alone did nothing.
+  it('sits above the rows after it', () => {
+    const at = CSS.indexOf('\n.vd-ep.vd-ep--menu {');
+    expect(at, 'the open-row rule is gone').toBeGreaterThan(-1);
+    const rule = CSS.slice(at, CSS.indexOf('}', at));
+    expect(rule).toContain('position: relative');
+    expect(rule).toMatch(/z-index:\s*\d+/);
+  });
+
+  it('keeps its actions on screen while the pointer is in the menu', () => {
+    expect(CSS).toContain(':not(.vd-ep--open):not(.vd-ep--menu) .vd-ep-get');
   });
 });

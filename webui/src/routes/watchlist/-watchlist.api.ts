@@ -285,6 +285,15 @@ export async function saveWatchlistGlobalConfig(
   return withEditionDefaults(payload.config ?? config);
 }
 
+/** #1822: every artist with its own rules follows the defaults again. */
+export async function resetWatchlistToDefaults(): Promise<number> {
+  const payload = await readJson<{ success: boolean; reset?: number; error?: string }>(
+    apiClient.post('watchlist/reset-to-defaults'),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Failed to reset artists');
+  return payload.reset ?? 0;
+}
+
 export async function fetchWatchlistArtistConfig(
   artistId: string,
 ): Promise<WatchlistArtistConfigResponse> {
@@ -319,6 +328,8 @@ export interface WatchlistArtistConfigUpdate {
   quality_profile_id: number | null;
   lookback_days: number | null;
   preferred_metadata_source: string | null;
+  /** #1822: always sent by the panel, so a save says which rules it means. */
+  follow_defaults: boolean;
 }
 
 export async function saveWatchlistArtistConfig(

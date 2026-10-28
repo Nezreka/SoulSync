@@ -9,10 +9,16 @@
  * a connect from my account comes back with ?oidc=connect; my account opens
  * again so its outcome is seen.
  *
+ * every navigation goes through appURL: under SOULSYNC_URL_BASE the page's
+ * fetches get the sub-path from url-base.js, but location.assign can't be
+ * patched, so a bare /api/... would leave the app for the host's root.
+ *
  * the admin never gets my account, so their own connection lives in settings
  * > security instead, as the last row of the oidc block: status, the
  * provider's icon and disconnect when connected, else the connect button.
  */
+
+import { appURL } from '@/platform/url-base';
 
 import { OIDC_CONNECT_URL, openMyAccountsModal } from './my-accounts';
 
@@ -43,6 +49,21 @@ export function resumeOidcConnect(
   return true;
 }
 
+/** sign-in is oidc only (#1839): the login screen keeps just the provider's
+ * button. the server refuses the rest anyway; this only stops offering them */
+export function showOnlyOidc(): void {
+  const entry = document.getElementById('login-entry');
+  const gone = [
+    document.getElementById('login-form'),
+    document.getElementById('login-plex'),
+    entry?.querySelector<HTMLElement>('.launch-pin-forgot') ?? null,
+    document.querySelector<HTMLElement>(`#${WRAP_ID} .login-oidc-or`),
+  ];
+  for (const node of gone) if (node) node.style.display = 'none';
+  const sub = entry?.querySelector<HTMLElement>('.launch-pin-subtitle');
+  if (sub) sub.textContent = 'Sign in with your account at the provider';
+}
+
 /** show the button when the admin turned oidc sign-in on, and wire it once */
 export async function initOidcSignIn(
   go: (url: string) => void = (url) => window.location.assign(url),
@@ -57,9 +78,16 @@ export async function initOidcSignIn(
       headers: { Accept: 'application/json' },
     });
     const data = resp.ok
-      ? ((await resp.json()) as { enabled?: boolean; label?: string; error?: string | null })
+      ? ((await resp.json()) as {
+          enabled?: boolean;
+          label?: string;
+          error?: string | null;
+          oidc_only?: boolean;
+        })
       : {};
     wrap.hidden = data.enabled !== true;
+    window.__soulsyncOidcOnly = data.oidc_only === true;
+    if (data.oidc_only === true && data.enabled === true) showOnlyOidc();
     if (typeof data.label === 'string' && data.label) button.textContent = data.label;
     if (typeof data.error === 'string' && data.error) showError(data.error);
   } catch {
@@ -68,7 +96,7 @@ export async function initOidcSignIn(
   button.addEventListener('click', () => {
     button.disabled = true;
     button.textContent = 'Redirecting...';
-    go(OIDC_START_URL);
+    go(appURL(OIDC_START_URL));
   });
 }
 
@@ -188,7 +216,7 @@ export async function renderOidcAdmin(
       enabled = false;
     }
     if (enabled) {
-      go(OIDC_CONNECT_URL);
+      go(appURL(OIDC_CONNECT_URL));
       return;
     }
     box.querySelector('.security-oidc-admin-note')?.remove();

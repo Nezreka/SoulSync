@@ -5461,6 +5461,56 @@ const TOOL_HELP_CONTENT = {
             </ul>
         `
     },
+    'video-scan': {
+        title: 'Library Scan',
+        content: `
+            <h4>What is this?</h4>
+            <p>SoulSync reads your media server (Plex or Jellyfin) into its own video database. Everything else on the video side, from detail pages to missing episodes to the maintenance jobs, works off what this scan read in.</p>
+
+            <h4>Scan types</h4>
+            <ul>
+                <li><strong>Incremental Update:</strong> only what changed on the server since the last full read. The fast one.</li>
+                <li><strong>Full Refresh:</strong> reads every movie and show again, updating anything that drifted.</li>
+                <li><strong>Deep Scan:</strong> a full refresh that also removes titles the server no longer has.</li>
+            </ul>
+
+            <h4>Good to know</h4>
+            <p>Movies and TV are separate libraries, so you can scan one or both. Nothing on disk or on the server is changed by a scan. If you just downloaded something, run a <strong>Server Scan</strong> first so the server knows about the file.</p>
+        `
+    },
+    'video-server-scan': {
+        title: 'Server Scan',
+        content: `
+            <h4>What is this?</h4>
+            <p>Asks your media server to rescan its own folders, so files that just landed get indexed. It's the manual twin of the post-download "Scan Video Server" automation.</p>
+
+            <h4>How it fits with Library Scan</h4>
+            <p>Server Scan makes the <em>server</em> notice new files. Library Scan then reads the server into SoulSync. After a big import, run them in that order.</p>
+
+            <h4>Good to know</h4>
+            <p>Plex doesn't report a percentage, so the bar just shows that the server is working. Some servers can't say when they're done; the card tells you when that's the case.</p>
+        `
+    },
+    'video-overlay-studio': {
+        title: 'Overlay Studio',
+        content: `
+            <h4>What is this?</h4>
+            <p>A visual editor for poster overlays: ratings, resolution, HDR, awards, streaming badges and more, designed once and applied across your library.</p>
+
+            <h4>How it works</h4>
+            <p>Build a template, pick which titles it targets with filters, and apply it. The nightly automation re-applies it as ratings and files change, and the original artwork is kept so you can restore clean posters any time.</p>
+        `
+    },
+    'video-collection-studio': {
+        title: 'Collection Studio',
+        content: `
+            <h4>What is this?</h4>
+            <p>Builds living collections on your media server: franchises, universes, charts, seasonal windows and smart rules that keep themselves up to date.</p>
+
+            <h4>How it works</h4>
+            <p>Pick a source or write rules, preview the members, generate a poster and sync it to the server. Missing films can go straight to the wishlist, and seasonal collections only appear inside their window.</p>
+        `
+    },
     'video-rename': {
         title: 'Mass Rename',
         content: `

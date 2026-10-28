@@ -38,6 +38,10 @@ function stubFetch(
     processing?: boolean;
     /** Artists the server reports as filed under audiobooks. */
     routed?: string[];
+    /** a wishlist batch already running, and what its status says. */
+    run?: { batchId: string; status: unknown };
+    /** every POST, as [url, parsed body]. */
+    posts?: [string, unknown][];
   } = {},
 ) {
   const {
@@ -45,13 +49,30 @@ function stubFetch(
     singles = [],
     processing = false,
     routed = [],
+    run,
+    posts = [],
   } = opts;
   const total = opts.total ?? albums.length + singles.length;
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes('/api/audiobook-routes/check')) return routedAnswer(input, routed);
+      const method = input instanceof Request ? input.method : init?.method;
+      if (method === 'POST') {
+        const raw =
+          input instanceof Request
+            ? await input.clone().text()
+            : typeof init?.body === 'string'
+              ? init.body
+              : '';
+        posts.push([url, raw ? JSON.parse(raw) : null]);
+        if (url.includes('/api/wishlist/download_missing'))
+          return res({ success: true, batch_id: 'new-run' });
+        if (url.includes('/cancel_batch')) return res({ success: true, cancelled_batches: 2 });
+      }
+      if (url.includes('/api/download_status/batch'))
+        return res({ batches: run ? { [run.batchId]: run.status } : {} });
       if (url.includes('/api/wishlist/stats'))
         return res({
           total,
@@ -61,7 +82,10 @@ function stubFetch(
           is_auto_processing: processing,
         });
       // The live poller hits this on mount; stub it so nothing silently 404s.
-      if (url.includes('/api/active-processes')) return res({ active_processes: [] });
+      if (url.includes('/api/active-processes'))
+        return res({
+          active_processes: run ? [{ playlist_id: 'wishlist', batch_id: run.batchId }] : [],
+        });
       if (url.includes('/api/wishlist/cycle')) return res({ cycle: 'albums' });
       if (url.includes('category=albums'))
         return res({ tracks: albums, artist_images: { 'Aphex Twin': 'library.jpg' } });
@@ -375,14 +399,75 @@ describe('wishlist route', () => {
       fireEvent.click(more);
       fireEvent.click(screen.getByRole('menuitem', { name }));
     }
-    fireEvent.click(screen.getByRole('button', { name: 'Download Wishlist' }));
 
     // These own module-scoped state (activeDownloadProcesses, WishlistModalState),
     // so they are invoked rather than reimplemented.
     expect(window.openWishlistIgnoreModal).toHaveBeenCalled();
     expect(window.cleanupWishlistOverview).toHaveBeenCalled();
     expect(window.clearEntireWishlist).toHaveBeenCalled();
+  });
+
+  it('downloads the whole wishlist in one click, no category step (#1822)', async () => {
+    const posts: [string, unknown][] = [];
+    stubFetch({ posts });
+    renderRoute();
+
+    const now = await screen.findByRole('button', { name: /Download now/ });
+    await waitFor(() => expect(now).not.toBeDisabled());
+    fireEvent.click(now);
+
+    await waitFor(() =>
+      expect(posts).toContainEqual([expect.stringContaining('/api/wishlist/download_missing'), {}]),
+    );
+    // the run shows on the page straight away
+    expect(await screen.findByRole('status')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Downloading/ })).toBeDisabled();
+  });
+
+  it('keeps the album / single split behind the arrow', async () => {
+    const posts: [string, unknown][] = [];
+    stubFetch({ posts });
+    renderRoute();
+
+    const arrow = await screen.findByRole('button', { name: 'Choose what to download' });
+    await waitFor(() => expect(arrow).not.toBeDisabled());
+    fireEvent.click(arrow);
+    fireEvent.click(screen.getByRole('menuitem', { name: /Albums & EPs only/ }));
+
+    await waitFor(() =>
+      expect(posts).toContainEqual([
+        expect.stringContaining('/api/wishlist/download_missing'),
+        { category: 'albums' },
+      ]),
+    );
+  });
+
+  it('follows a running batch, opens its details and stops the whole run', async () => {
+    const posts: [string, unknown][] = [];
+    stubFetch({
+      posts,
+      run: {
+        batchId: 'auto-1',
+        status: {
+          phase: 'downloading',
+          tasks: [{ status: 'completed' }, { status: 'failed' }, { status: 'downloading' }],
+        },
+      },
+    });
+    window._nebulaDownload = vi.fn();
+    window.showConfirmDialog = vi.fn(async () => true);
+    renderRoute();
+
+    expect(await screen.findByText('Downloading 3 tracks · 1 done · 1 failed')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'View details' }));
     expect(window._nebulaDownload).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await waitFor(() =>
+      expect(posts.map(([url]) => url)).toContainEqual(
+        expect.stringContaining('/api/playlists/auto-1/cancel_batch'),
+      ),
+    );
   });
 
   it('hands the countdown to downloads.js with the cycle and remaining seconds', async () => {

@@ -202,7 +202,10 @@ describe('finding labels', () => {
     expect(FINDING_FIXABLE_TYPES.quality_upgrade_review).toBe('Monitor & Upgrade');
     expect(FINDING_FIXABLE_TYPES.quality_format_not_targeted).toBe('Leave As-is');
     expect(FINDING_FIXABLE_TYPES.quality_unknown).toBe('Leave As-is');
-    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(16);
+    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(30);
+    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(29);
+    // 16 music + obsolete + the 10 video fix actions + the scan retirement
+    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(28);
   });
 
   it('labels known finding types', () => {
@@ -802,8 +805,53 @@ describe('bulkFixRunMessage', () => {
     );
   });
 
+  it('appends the run-level note when a completed mixed run carries one (#1879 breaker)', () => {
+    expect(
+      bulkFixRunMessage({
+        fixed: 2,
+        failed: 5,
+        total: 9,
+        note: 'LRCLib stopped answering reliably — remaining lyrics findings stay pending',
+        errors: [{ error: 'LRCLib rate-limited (429) — retry later' }],
+      }).message,
+    ).toBe(
+      'Fixed 2, 5 failed of 9: LRCLib stopped answering reliably — remaining lyrics findings stay pending',
+    );
+  });
+
+  it('prefers the run-level error when a stopped run carries one (#1879 breaker)', () => {
+    expect(
+      bulkFixRunMessage({
+        fixed: 0,
+        failed: 5,
+        total: 30,
+        stopped: true,
+        error: 'LRCLib stopped answering reliably — bulk fix stopped early',
+        errors: [{ error: 'LRCLib rate-limited (429) — retry later' }],
+      }).message,
+    ).toBe(
+      'Bulk fix stopped — fixed 0, 5 failed of 30: LRCLib stopped answering reliably — bulk fix stopped early',
+    );
+  });
+
   it('is an error when nothing was fixed, even with no failures', () => {
     expect(bulkFixRunMessage({ fixed: 0, failed: 0, total: 4 }).type).toBe('error');
+  });
+
+  it('reports findings skipped by design apart from failures', () => {
+    expect(
+      bulkFixRunMessage({
+        fixed: 0,
+        failed: 0,
+        skipped: 3,
+        total: 3,
+        note: '2 track(s) by other artists were not added to the wishlist. Fix those albums on their own to add them.',
+      }),
+    ).toEqual({
+      message:
+        'Fixed 0, 3 skipped of 3: 2 track(s) by other artists were not added to the wishlist. Fix those albums on their own to add them.',
+      type: 'success',
+    });
   });
 });
 
@@ -816,6 +864,16 @@ describe('bulkFixLoopMessage', () => {
     expect(bulkFixLoopMessage(4, 1, 'nope').message).toBe('Fixed 4, 1 failed: nope');
     expect(bulkFixLoopMessage(4, 1, '').message).toBe('Fixed 4, 1 failed');
     expect(bulkFixLoopMessage(0, 2, 'nope').type).toBe('error');
+    expect(bulkFixLoopMessage(0, 0, '', 2)).toEqual({
+      message: 'Fixed 0, 2 skipped',
+      type: 'success',
+    });
+    // skipped-by-design does not turn a run with real failures green
+    expect(bulkFixLoopMessage(0, 5, 'nope', 1).type).toBe('error');
+    // a partial gate on a fixed finding is reported, not silent
+    expect(bulkFixLoopMessage(3, 0, '', 0, 2).message).toBe(
+      'Fixed 3: 2 track(s) by other artists were not added to the wishlist. To add them, fix the album on its own (reopen its finding first if it resolved)',
+    );
     // The `failed` half of the guard is load-bearing even though the caller only
     // ever sets lastError alongside a failure — a stale error must not surface
     // on a clean run.

@@ -459,13 +459,13 @@ describe('simple mode triage buttons', () => {
     });
   });
 
-  it('inspect quarantine shows the findings, opened on the quarantined type', async () => {
+  it('needs-your-call shows the findings, opened on the file-touching type', async () => {
     const { container } = render(<MaintenanceHero />);
     await flush();
     const chassis = container.querySelector('.repair-advanced-chassis') as HTMLElement;
     expect(chassis.hidden).toBe(true);
 
-    const button = await screen.findByRole('button', { name: /Inspect Quarantine/ });
+    const button = await screen.findByRole('button', { name: /^Review Orphan/ });
     await waitFor(() => expect(button.closest('button')?.disabled).toBe(false));
     fetchMock.mockClear();
     fireEvent.click(button);

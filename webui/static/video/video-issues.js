@@ -529,7 +529,8 @@
                 return;
             case 'find_duplicates':
                 toast('Run the duplicate scan in Library Maintenance, then resolve this', 'info');
-                document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-tools' }));
+                document.dispatchEvent(new CustomEvent('soulsync:video-navigate',
+                    { detail: { page: 'video-tools', job: 'duplicate_movies' } }));
                 return;
             default:
                 sendTo();

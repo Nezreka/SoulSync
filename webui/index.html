@@ -1940,130 +1940,6 @@
                         </div>
                     </div>
                 </section>
-                <!-- Calendar — upcoming TV episodes for owned shows (agenda + day
-                     strip). Built by video/video-calendar.js, styled by .vcal-* in
-                     video-side.css. -->
-                <section class="video-subpage" data-video-subpage="video-calendar" hidden>
-                    <div class="vcal-page">
-                        <div class="vcal-head">
-                            <div class="vcal-head-glow" aria-hidden="true"></div>
-                            <div class="vcal-head-row">
-                                <div class="vcal-head-titles">
-                                    <h1 class="vcal-title" data-video-cal-title>This Week</h1>
-                                    <p class="vcal-sub" data-video-cal-sub>Upcoming episodes from your shows</p>
-                                </div>
-                                <div class="vcal-controls">
-                                    <div class="vcal-nav" role="group" aria-label="Week">
-                                        <button class="vcal-nav-btn" type="button" data-video-cal-prev
-                                            aria-label="Previous week">&#8249;</button>
-                                        <button class="vcal-nav-today" type="button" data-video-cal-today>Today</button>
-                                        <button class="vcal-nav-btn" type="button" data-video-cal-next
-                                            aria-label="Next week">&#8250;</button>
-                                    </div>
-                                    <div class="vcal-views" role="group" aria-label="View">
-                                        <button class="vcal-view-btn" type="button" data-video-cal-view="cards"
-                                            title="Card view with episode art">
-                                            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"
-                                                aria-hidden="true">
-                                                <rect x="1" y="1" width="6" height="6" rx="1.6" />
-                                                <rect x="9" y="1" width="6" height="6" rx="1.6" />
-                                                <rect x="1" y="9" width="6" height="6" rx="1.6" />
-                                                <rect x="9" y="9" width="6" height="6" rx="1.6" />
-                                            </svg>
-                                            <span>Cards</span>
-                                        </button>
-                                        <button class="vcal-view-btn vcal-view-btn--on" type="button"
-                                            data-video-cal-view="compact"
-                                            title="Compact view — hide art to fit more episodes">
-                                            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"
-                                                aria-hidden="true">
-                                                <rect x="1" y="2.4" width="14" height="2.3" rx="1.1" />
-                                                <rect x="1" y="6.85" width="14" height="2.3" rx="1.1" />
-                                                <rect x="1" y="11.3" width="14" height="2.3" rx="1.1" />
-                                            </svg>
-                                            <span>Compact</span>
-                                        </button>
-                                        <button class="vcal-view-btn" type="button" data-video-cal-view="agenda"
-                                            title="Agenda — one chronological list, day by day">
-                                            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"
-                                                aria-hidden="true">
-                                                <rect x="1" y="2" width="3" height="3" rx="1" />
-                                                <rect x="6" y="2.4" width="9" height="2.2" rx="1.1" />
-                                                <rect x="1" y="8" width="3" height="3" rx="1" />
-                                                <rect x="6" y="8.4" width="9" height="2.2" rx="1.1" />
-                                            </svg>
-                                            <span>Agenda</span>
-                                        </button>
-                                    </div>
-                                    <div class="vcal-filter" role="group" aria-label="Source">
-                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button"
-                                            data-video-cal-scope="watchlist"
-                                            title="Only shows on your watchlist">Watchlist</button>
-                                        <button class="vcal-filter-btn" type="button" data-video-cal-scope="all"
-                                            title="Every airing show in your library">All library</button>
-                                    </div>
-                                    <div class="vcal-filter" role="group" aria-label="Filter">
-                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button"
-                                            data-video-cal-filter="all">All</button>
-                                        <button class="vcal-filter-btn" type="button" data-video-cal-filter="owned">In
-                                            library</button>
-                                        <button class="vcal-filter-btn" type="button"
-                                            data-video-cal-filter="missing">Missing</button>
-                                        <!-- Aired, nothing has it, nothing is looking for it. The
-                                             server decides this so the filter and the count agree. -->
-                                        <button class="vcal-filter-btn vcal-filter-btn--needs" type="button"
-                                            data-video-cal-filter="needs">Needs action</button>
-                                    </div>
-                                    <div class="vcal-filter hidden" role="group" aria-label="Movie releases"
-                                        data-video-cal-movies-wrap>
-                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button"
-                                            data-video-cal-movietype="cinema"
-                                            title="Theatrical premieres of wishlisted movies">🎬 Cinema</button>
-                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button"
-                                            data-video-cal-movietype="available"
-                                            title="Home releases (digital/physical) of wishlisted movies">🏠
-                                            Home</button>
-                                    </div>
-                                    <button class="vcal-addmissing hidden" type="button" data-video-cal-addmissing
-                                        title="Add already-aired missing episodes to your wishlist">
-                                        <span class="vcal-addmissing-ic" aria-hidden="true">&#43;</span>
-                                        <span data-video-cal-addmissing-label>Add missing to wishlist</span>
-                                    </button>
-                                    <button class="vcal-nav-btn vcal-ics-btn" type="button" data-video-cal-ical
-                                        title="Subscribe to this calendar from Google/Apple/Outlook (iCal feed)"
-                                        aria-label="Subscribe (iCal feed)">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                            stroke-linejoin="round" aria-hidden="true">
-                                            <rect x="3" y="4" width="18" height="18" rx="2" />
-                                            <line x1="16" y1="2" x2="16" y2="6" />
-                                            <line x1="8" y1="2" x2="8" y2="6" />
-                                            <line x1="3" y1="10" x2="21" y2="10" />
-                                            <line x1="12" y1="13.5" x2="12" y2="18.5" />
-                                            <line x1="9.5" y1="16" x2="14.5" y2="16" />
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="vcal-body">
-                            <div class="vcal-loading hidden" data-video-cal-loading>
-                                <div class="loading-spinner"></div>
-                                <div class="loading-text">Loading calendar&hellip;</div>
-                            </div>
-                            <div class="vcal-hero-wrap" data-video-cal-hero></div>
-                            <div class="vcal-grid" data-video-cal-grid>
-                                <div class="vcal-cols" data-video-cal-cols></div>
-                            </div>
-                            <div class="vcal-state hidden" data-video-cal-empty>
-                                <div class="vcal-state-ic">&#128250;</div>
-                                <div class="vcal-state-title">Nothing scheduled this week</div>
-                                <div class="vcal-state-sub">No upcoming episodes for your shows in the next 7 days.
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
                 <!-- Watchlist (nav page): the shows + people you follow, split by
                      a tab switcher. Built by video/video-watchlist.js, styled by
                      .vwlp-* in video-side.css. -->
@@ -2302,6 +2178,14 @@
                             </div>
                         </div>
                         <div class="vd-body">
+                            <!-- Two tabs on a library title: the page as you know it, and Your library
+                                 (files, quality, match, monitoring) — a React island,
+                                 webui/src/features/video-library. Hidden on previews and YouTube. -->
+                            <div class="vd-tabs" data-vd-tabs role="tablist" aria-label="Page sections" hidden>
+                                <button class="vd-tab" type="button" role="tab" data-vd-tab="main" aria-selected="true">Episodes</button>
+                                <button class="vd-tab" type="button" role="tab" data-vd-tab="library" aria-selected="false">Your library</button>
+                            </div>
+                            <div class="vd-library-panel" data-vd-library-panel role="tabpanel" aria-label="Your library" hidden></div>
                             <!-- Where acquisition stands RIGHT NOW. First thing in the
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
@@ -2310,8 +2194,8 @@
                                 <div class="vd-acq" data-vd-acq></div>
                             </div>
                             <!-- Subtitle language overrides (per show/movie) — video-subtitles.js. -->
-                            <div class="vd-subcfg-section" data-vd-subcfg-section hidden>
-                                <h2 class="vd-section-h">Subtitles</h2>
+                            <div class="vd-subcfg-section vd-lib-extra" data-vd-subcfg-section hidden>
+                                <h2 class="vd-section-h">Subtitle languages</h2>
                                 <div class="vd-subcfg" data-vd-subcfg></div>
                             </div>
                             <div class="vd-ep-toolbar">
@@ -2346,11 +2230,13 @@
                                 <div class="vd-crew" data-vd-crew></div>
                                 <div class="vd-cast" data-vd-cast></div>
                             </div>
-                            <div class="vd-facts-section" data-vd-facts-section hidden>
-                                <h2 class="vd-section-h">Details</h2>
-                                <div class="vd-facts" data-vd-facts></div>
-                                <div class="vd-studios" data-vd-studios></div>
-                                <div class="vd-keywords" data-vd-keywords></div>
+                            <div class="vd-collection-section" data-vd-collection-section hidden>
+                                <h2 class="vd-section-h" data-vd-collection-title>Collection</h2>
+                                <div class="vd-similar" data-vd-collection></div>
+                            </div>
+                            <div class="vd-similar-section" data-vd-similar-section hidden>
+                                <h2 class="vd-section-h">More Like This</h2>
+                                <div class="vd-similar" data-vd-similar></div>
                             </div>
                             <div class="vd-videos-section" data-vd-videos-section hidden>
                                 <h2 class="vd-section-h">Videos</h2>
@@ -2360,23 +2246,21 @@
                                 <h2 class="vd-section-h">Photos</h2>
                                 <div class="vd-gallery" data-vd-gallery></div>
                             </div>
-                            <div class="vd-review-section" data-vd-review-section hidden>
-                                <h2 class="vd-section-h">Review</h2>
-                                <div class="vd-review" data-vd-review></div>
+                            <div class="vd-facts-section" data-vd-facts-section hidden>
+                                <h2 class="vd-section-h">About</h2>
+                                <div class="vd-facts" data-vd-facts></div>
+                                <div class="vd-studios" data-vd-studios></div>
+                                <div class="vd-keywords" data-vd-keywords></div>
                             </div>
                             <div class="vd-providers-section" data-vd-providers-section hidden>
                                 <h2 class="vd-section-h">Where to Watch</h2>
                                 <div class="vd-providers" data-vd-providers></div>
                             </div>
-                            <div class="vd-collection-section" data-vd-collection-section hidden>
-                                <h2 class="vd-section-h" data-vd-collection-title>Collection</h2>
-                                <div class="vd-similar" data-vd-collection></div>
+                            <div class="vd-review-section" data-vd-review-section hidden>
+                                <h2 class="vd-section-h">Review</h2>
+                                <div class="vd-review" data-vd-review></div>
                             </div>
-                            <div class="vd-similar-section" data-vd-similar-section hidden>
-                                <h2 class="vd-section-h">More Like This</h2>
-                                <div class="vd-similar" data-vd-similar></div>
-                            </div>
-                            <div class="vd-history-section" data-vd-history-section hidden>
+                            <div class="vd-history-section vd-lib-extra" data-vd-history-section hidden>
                                 <h2 class="vd-section-h">Acquisition History</h2>
                                 <div class="vd-history" data-vd-history></div>
                             </div>
@@ -2425,6 +2309,14 @@
                             </div>
                         </div>
                         <div class="vd-body">
+                            <!-- Two tabs on a library title: the page as you know it, and Your library
+                                 (files, quality, match, monitoring) — a React island,
+                                 webui/src/features/video-library. Hidden on previews and YouTube. -->
+                            <div class="vd-tabs" data-vd-tabs role="tablist" aria-label="Page sections" hidden>
+                                <button class="vd-tab" type="button" role="tab" data-vd-tab="main" aria-selected="true">Overview</button>
+                                <button class="vd-tab" type="button" role="tab" data-vd-tab="library" aria-selected="false">Your library</button>
+                            </div>
+                            <div class="vd-library-panel" data-vd-library-panel role="tabpanel" aria-label="Your library" hidden></div>
                             <!-- Where acquisition stands RIGHT NOW. First thing in the
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
@@ -2434,8 +2326,8 @@
                                 <div class="vd-acq" data-vd-acq></div>
                             </div>
                             <!-- Subtitle language overrides (per show/movie) — video-subtitles.js. -->
-                            <div class="vd-subcfg-section" data-vd-subcfg-section hidden>
-                                <h2 class="vd-section-h">Subtitles</h2>
+                            <div class="vd-subcfg-section vd-lib-extra" data-vd-subcfg-section hidden>
+                                <h2 class="vd-section-h">Subtitle languages</h2>
                                 <div class="vd-subcfg" data-vd-subcfg></div>
                             </div>
                             <div class="vd-cast-section" data-vd-cast-section hidden>
@@ -2446,11 +2338,13 @@
                                 <div class="vd-crew" data-vd-crew></div>
                                 <div class="vd-cast" data-vd-cast></div>
                             </div>
-                            <div class="vd-facts-section" data-vd-facts-section hidden>
-                                <h2 class="vd-section-h">Details</h2>
-                                <div class="vd-facts" data-vd-facts></div>
-                                <div class="vd-studios" data-vd-studios></div>
-                                <div class="vd-keywords" data-vd-keywords></div>
+                            <div class="vd-collection-section" data-vd-collection-section hidden>
+                                <h2 class="vd-section-h" data-vd-collection-title>Collection</h2>
+                                <div class="vd-similar" data-vd-collection></div>
+                            </div>
+                            <div class="vd-similar-section" data-vd-similar-section hidden>
+                                <h2 class="vd-section-h">More Like This</h2>
+                                <div class="vd-similar" data-vd-similar></div>
                             </div>
                             <div class="vd-videos-section" data-vd-videos-section hidden>
                                 <h2 class="vd-section-h">Videos</h2>
@@ -2460,279 +2354,29 @@
                                 <h2 class="vd-section-h">Photos</h2>
                                 <div class="vd-gallery" data-vd-gallery></div>
                             </div>
-                            <div class="vd-review-section" data-vd-review-section hidden>
-                                <h2 class="vd-section-h">Review</h2>
-                                <div class="vd-review" data-vd-review></div>
+                            <div class="vd-facts-section" data-vd-facts-section hidden>
+                                <h2 class="vd-section-h">About</h2>
+                                <div class="vd-facts" data-vd-facts></div>
+                                <div class="vd-studios" data-vd-studios></div>
+                                <div class="vd-keywords" data-vd-keywords></div>
                             </div>
                             <div class="vd-providers-section" data-vd-providers-section hidden>
                                 <h2 class="vd-section-h">Where to Watch</h2>
                                 <div class="vd-providers" data-vd-providers></div>
                             </div>
-                            <div class="vd-collection-section" data-vd-collection-section hidden>
-                                <h2 class="vd-section-h" data-vd-collection-title>Collection</h2>
-                                <div class="vd-similar" data-vd-collection></div>
+                            <div class="vd-review-section" data-vd-review-section hidden>
+                                <h2 class="vd-section-h">Review</h2>
+                                <div class="vd-review" data-vd-review></div>
                             </div>
-                            <div class="vd-similar-section" data-vd-similar-section hidden>
-                                <h2 class="vd-section-h">More Like This</h2>
-                                <div class="vd-similar" data-vd-similar></div>
-                            </div>
-                            <div class="vd-history-section" data-vd-history-section hidden>
+                            <div class="vd-history-section vd-lib-extra" data-vd-history-section hidden>
                                 <h2 class="vd-section-h">Acquisition History</h2>
                                 <div class="vd-history" data-vd-history></div>
                             </div>
                         </div>
                     </div>
                 </section>
-                <section class="video-subpage" data-video-subpage="video-tools" hidden>
-                    <div class="page-shell tools-page-container">
-                        <div class="dashboard-header">
-                            <div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
-                            <div class="header-text">
-                                <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon"
-                                        alt=""><span>Tools</span></h2>
-                                <p class="header-subtitle">Maintenance jobs and library tools</p>
-                            </div>
-                        </div>
-
-                        <!-- ── Library Maintenance (jobs & findings — the music standard, video-scoped).
-                             Same classes as the music hero (shared styling); ids are video-prefixed
-                             because both Tools pages live in this one document. Driven by
-                             video/video-repair.js against /api/video/repair. -->
-                        <div class="tools-maintenance-hero" data-video-repair>
-                            <div class="tools-maintenance-header">
-                                <div class="tools-maintenance-header-left">
-                                    <img src="/static/whisoul.png" alt="" class="tools-maintenance-logo" />
-                                    <div>
-                                        <h3 class="tools-maintenance-title">Library Maintenance</h3>
-                                        <p class="tools-maintenance-subtitle">Jobs that scan your video library and
-                                            report findings for review</p>
-                                    </div>
-                                </div>
-                                <label class="repair-master-toggle">
-                                    <input type="checkbox" id="video-repair-master-toggle">
-                                    <span class="repair-toggle-slider"></span>
-                                    <span class="repair-toggle-label" id="video-repair-master-label">Enabled</span>
-                                </label>
-                            </div>
-
-                            <div class="repair-tabs" data-video-repair-tabs>
-                                <button class="repair-tab active" type="button"
-                                    data-video-repair-tab="jobs">Jobs</button>
-                                <button class="repair-tab" type="button" data-video-repair-tab="findings">
-                                    Findings <span class="repair-tab-badge" id="video-repair-findings-tab-badge"
-                                        style="display:none">0</span>
-                                </button>
-                                <button class="repair-tab" type="button"
-                                    data-video-repair-tab="history">History</button>
-                            </div>
-
-                            <div class="repair-tab-content" id="video-repair-tab-jobs">
-                                <div class="repair-jobs-list" id="video-repair-jobs-list">
-                                    <div class="repair-loading">Loading jobs...</div>
-                                </div>
-                            </div>
-
-                            <div class="repair-tab-content" id="video-repair-tab-findings" style="display:none;">
-                                <div class="repair-findings-toolbar">
-                                    <div class="repair-findings-filters">
-                                        <select id="video-repair-findings-job-filter">
-                                            <option value="">All Jobs</option>
-                                        </select>
-                                        <select id="video-repair-findings-severity-filter">
-                                            <option value="">All Severity</option>
-                                            <option value="info">Info</option>
-                                            <option value="warning">Warning</option>
-                                        </select>
-                                        <select id="video-repair-findings-status-filter">
-                                            <option value="pending">Pending</option>
-                                            <option value="">All Status</option>
-                                            <option value="resolved">Resolved</option>
-                                            <option value="dismissed">Dismissed</option>
-                                        </select>
-                                    </div>
-                                    <label class="repair-select-all" title="Select all on this page">
-                                        <input type="checkbox" id="video-repair-select-all-cb">
-                                        <span>Select All</span>
-                                    </label>
-                                    <div class="repair-findings-bulk" id="video-repair-findings-bulk"
-                                        style="display:none;">
-                                        <span class="repair-bulk-count" id="video-repair-bulk-count"></span>
-                                        <button class="btn btn--sm btn--primary" type="button"
-                                            data-video-repair-bulk="fix">Approve Selected</button>
-                                        <button class="btn btn--sm btn--secondary" type="button"
-                                            data-video-repair-bulk="dismiss">Dismiss Selected</button>
-                                    </div>
-                                    <button class="repair-clear-btn" type="button" data-video-repair-clear
-                                        title="Clear findings matching current filters">Clear Findings</button>
-                                </div>
-                                <div class="repair-findings-list" id="video-repair-findings-list">
-                                    <div class="repair-loading">Loading findings...</div>
-                                </div>
-                                <div class="repair-findings-pagination" id="video-repair-findings-pagination"></div>
-                            </div>
-
-                            <div class="repair-tab-content" id="video-repair-tab-history" style="display:none;">
-                                <div class="repair-history-list" id="video-repair-history-list">
-                                    <div class="repair-loading">Loading history...</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- ── Studios: the visual editors, launchable as tools (they also live
-                             on the dashboard). Admin-only — hidden for non-admin profiles. -->
-                        <div class="tools-section" data-video-studios-section>
-                            <h3 class="tools-section-title">Studios</h3>
-                            <div class="tools-grid">
-                                <div class="tool-card">
-                                    <div class="tool-card-header">
-                                        <h4 class="tool-card-title">🎨 Overlay Studio</h4>
-                                        <button class="tool-help-button" data-tool="video-overlay-studio"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
-                                    <p class="tool-card-info">Design poster overlays (ratings, resolution, awards…) in a
-                                        visual editor and apply them to your whole library — filtered targeting, nightly
-                                        re-apply, clean-art restore.</p>
-                                    <div class="tool-card-controls">
-                                        <button type="button" data-video-overlay-studio>Open Overlay Studio</button>
-                                    </div>
-                                </div>
-                                <div class="tool-card">
-                                    <div class="tool-card-header">
-                                        <h4 class="tool-card-title">🗂️ Collection Studio</h4>
-                                        <button class="tool-help-button" data-tool="video-collection-studio"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
-                                    <p class="tool-card-info">Build living collections — charts, franchises, universes,
-                                        seasonal windows, smart rules — with generated posters, server sync, and
-                                        wishlist tie-ins.</p>
-                                    <div class="tool-card-controls">
-                                        <button type="button" data-video-collection-studio>Open Collection
-                                            Studio</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="tools-section">
-                            <h3 class="tools-section-title">Database &amp; Scanning</h3>
-                            <div class="tools-grid">
-                                <div class="tool-card" data-video-backups-card>
-                                    <div class="tool-card-header">
-                                        <h4 class="tool-card-title">💾 Backups</h4>
-                                        <button class="tool-help-button" data-tool="video-backups"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
-                                    <p class="tool-card-info">Verified snapshots of the video database (wishlist,
-                                        watchlist, history, settings). The nightly automation keeps a rolling set;
-                                        restore stages a swap for the next restart — your current database is set aside,
-                                        never deleted.</p>
-                                    <div class="vbk-pending hidden" data-vbk-pending>
-                                        ⏳ A restore is staged — it applies on the next restart.
-                                        <button type="button" class="vbk-cancel" data-vbk-cancel>Cancel</button>
-                                    </div>
-                                    <div class="vbk-list" data-vbk-list></div>
-                                    <div class="tool-card-controls">
-                                        <button type="button" data-vbk-create>Back up now</button>
-                                    </div>
-                                </div>
-                                <div class="tool-card" data-video-rename-card>
-                                    <div class="tool-card-header">
-                                        <h4 class="tool-card-title">✏️ Mass Rename</h4>
-                                        <button class="tool-help-button" data-tool="video-rename"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
-                                    <p class="tool-card-info">Re-render every file name to your current naming templates
-                                        (Settings → Organization). Preview first — nothing moves until you apply.
-                                        Subtitles and sidecars travel with their file; the server re-adopts the names on
-                                        its next scan.</p>
-                                    <div class="vbk-list" data-vrn-list></div>
-                                    <div class="tool-card-controls">
-                                        <button type="button" data-vrn-preview>Preview</button>
-                                        <button type="button" data-vrn-apply style="display:none">Apply renames</button>
-                                    </div>
-                                </div>
-                                <div class="tool-card">
-                                    <div class="tool-card-header">
-                                        <h4 class="tool-card-title" data-video-scan-title>Library Scan</h4>
-                                        <button class="tool-help-button" data-tool="video-scan"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
-                                    <p class="tool-card-info">Last Scan: <span data-video-scan-last>Never</span></p>
-                                    <div class="tool-card-stats">
-                                        <div class="stat-item">
-                                            <span class="stat-item-label">Movies:</span>
-                                            <span class="stat-item-value" data-video-scan-stat="movies">0</span>
-                                        </div>
-                                        <div class="stat-item">
-                                            <span class="stat-item-label">Shows:</span>
-                                            <span class="stat-item-value" data-video-scan-stat="shows">0</span>
-                                        </div>
-                                        <div class="stat-item">
-                                            <span class="stat-item-label">Episodes:</span>
-                                            <span class="stat-item-value" data-video-scan-stat="episodes">0</span>
-                                        </div>
-                                        <div class="stat-item">
-                                            <span class="stat-item-label">Size:</span>
-                                            <span class="stat-item-value" data-video-scan-stat="size">0.0 MB</span>
-                                        </div>
-                                    </div>
-                                    <div class="tool-card-controls">
-                                        <select data-video-scan-target aria-label="Which library to scan"
-                                            title="Movies and TV are separate libraries — scan one or both">
-                                            <option value="all">All Libraries</option>
-                                            <option value="movie">Movies Only</option>
-                                            <option value="show">TV Shows Only</option>
-                                        </select>
-                                        <select data-video-scan-select aria-label="Scan type">
-                                            <option value="incremental">Incremental Update</option>
-                                            <option value="full">Full Refresh</option>
-                                            <option value="deep">Deep Scan</option>
-                                        </select>
-                                        <button type="button" data-video-scan-run>Scan Library</button>
-                                    </div>
-                                    <div class="tool-card-progress-section">
-                                        <p class="progress-phase-label" data-video-scan-phase>Idle</p>
-                                        <div class="progress-bar-container">
-                                            <div class="progress-bar-fill" data-video-scan-bar style="width: 0%;"></div>
-                                        </div>
-                                        <p class="progress-details-label" data-video-scan-detail>0 movies, 0 shows</p>
-                                    </div>
-                                </div>
-                                <!-- Server Scan: tells the media server to rescan its OWN folders so
-                                     newly-downloaded files get indexed (distinct from the Library Scan
-                                     above, where SoulSync READS the server into its DB). -->
-                                <div class="tool-card">
-                                    <div class="tool-card-header">
-                                        <h4 class="tool-card-title" data-video-srvscan-title>Server Scan</h4>
-                                        <button class="tool-help-button" data-tool="video-server-scan"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
-                                    <p class="tool-card-info">Tell the media server to scan its folders for
-                                        newly-downloaded movies &amp; episodes — then a Library Scan pulls them into
-                                        SoulSync.</p>
-                                    <div class="tool-card-controls">
-                                        <select data-video-srvscan-target
-                                            aria-label="Which library the server should scan"
-                                            title="Movies and TV are separate server libraries — scan one or both">
-                                            <option value="all">All Libraries</option>
-                                            <option value="movie">Movies Only</option>
-                                            <option value="show">TV Shows Only</option>
-                                        </select>
-                                        <button type="button" data-video-srvscan-run>Scan Server</button>
-                                    </div>
-                                    <div class="tool-card-progress-section">
-                                        <p class="progress-phase-label" data-video-srvscan-phase>Idle</p>
-                                        <div class="progress-bar-container">
-                                            <div class="progress-bar-fill" data-video-srvscan-bar style="width: 0%;">
-                                            </div>
-                                        </div>
-                                        <p class="progress-details-label" data-video-srvscan-detail></p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
+                <!-- Tools: the React /tools page on ?media=video (webui/src/routes/tools),
+                     handed off by gotoUnifiedTools() in video/video-side.js. -->
                 <!-- Person detail (drill-in from a cast/crew member; not a nav page).
                      Bio + filmography, every credit links back into SoulSync. Built
                      by video/video-person.js, styled by .vp-* in video-side.css. -->
@@ -3006,7 +2650,7 @@
                                         <path
                                             d="M21.71 20.29l-5.4-5.4a8 8 0 1 0-1.42 1.42l5.4 5.4a1 1 0 0 0 1.42-1.42zM4 10a6 6 0 1 1 6 6 6 6 0 0 1-6-6z" />
                                     </svg>
-                                    <input type="text" id="stg-search-input" placeholder="Search settings..."
+                                    <input type="text" id="stg-search-input" placeholder="Search settings  (Ctrl K)"
                                         aria-label="Search settings" autocomplete="off"
                                         aria-controls="stg-search-results"
                                         onkeydown="if(event.key==='Escape'){this.value='';filterSettings('')}"
@@ -3064,6 +2708,15 @@
                                     </span>
                                     <span class="stg-tab-label">Library</span>
                                 </button>
+                                <button type="button" class="stg-tab" data-tab="discovery"
+                                    onclick="switchSettingsTab('discovery')">
+                                    <span class="stg-tab-badge badge-discovery">
+                                        <svg viewBox="0 0 24 24">
+                                            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm4.24 5.76-2.12 6.36-6.36 2.12 2.12-6.36zM12 13a1 1 0 1 0-1-1 1 1 0 0 0 1 1z" />
+                                        </svg>
+                                    </span>
+                                    <span class="stg-tab-label">Discovery</span>
+                                </button>
                                 <button type="button" class="stg-tab" data-tab="appearance"
                                     onclick="switchSettingsTab('appearance')">
                                     <span class="stg-tab-badge badge-appearance">
@@ -3082,7 +2735,7 @@
                                                 d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54A.48.48 0 0 0 13.9 2h-3.8a.49.49 0 0 0-.49.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.73 8.47c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.48.48 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.8c.24 0 .44-.17.49-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
                                         </svg>
                                     </span>
-                                    <span class="stg-tab-label">Advanced</span>
+                                    <span class="stg-tab-label">System</span>
                                 </button>
                                 <button type="button" class="stg-tab" data-tab="logs"
                                     onclick="switchSettingsTab('logs')">
@@ -3646,6 +3299,32 @@
                                                 </div>
                                                 <div class="form-actions">
                                                     <button class="test-button" type="button" onclick="testConnection('genius')">Test Connection</button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Pollinations (optional; playlist cover art works without a key) -->
+                                        <div class="api-service-frame stg-service" data-service="pollinations">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: #7ad3a7;"></span>
+                                                <h4 class="service-title">Pollinations</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>API Key (optional):</label>
+                                                    <input type="password" id="pollinations-api-key"
+                                                        placeholder="Pollinations API key" autocomplete="off">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-help">Makes cover art for playlists, from the ⋯ menu on any playlist.
+                                                        Works without a key: one image every 45 seconds, with a small Pollinations mark in the corner.</div>
+                                                    <div class="callback-help">A key from <a
+                                                            href="https://enter.pollinations.ai" target="_blank" rel="noopener noreferrer"
+                                                            style="color: #7ad3a7;">enter.pollinations.ai</a> removes the mark and the wait.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('pollinations')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -4666,6 +4345,17 @@
                                                 </label>
                                             </div>
                                             <div class="vq-block">
+                                                <div class="vq-label">Audio language <span class="vq-hint">for
+                                                        dubbed or MULTI releases. a release with no language tag is
+                                                        the original audio</span></div>
+                                                <div class="vq-seg" id="vq-lang-mode">
+                                                    <button type="button" data-vq-lang-mode="off">Don't care</button>
+                                                    <button type="button" data-vq-lang-mode="prefer">Prefer</button>
+                                                    <button type="button" data-vq-lang-mode="require">Require</button>
+                                                </div>
+                                                <div class="vq-chips" id="vq-langs" style="margin-top:10px;" hidden></div>
+                                            </div>
+                                            <div class="vq-block">
                                                 <div class="vq-label">Max size <span class="vq-hint">skip anything
                                                         bigger — set per type so a movie and an episode aren't judged
                                                         the same</span></div>
@@ -5368,6 +5058,26 @@
                                                     <div class="setting-help-text">
                                                         Seconds between YouTube downloads to avoid bot detection.
                                                         Default: 3
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <div class="setting-row">
+                                                        <label class="checkbox-label">
+                                                            <input type="checkbox" id="youtube-album-bundle">
+                                                            Download whole albums from YouTube Music
+                                                        </label>
+                                                        <span class="info-icon" role="button" tabindex="0"
+                                                            title="What's this?" onclick="toggleSettingHelp(this)"
+                                                            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    </div>
+                                                    <div class="setting-help-body" hidden>
+                                                        For an album, find the album itself on YouTube Music and
+                                                        download its playlist, instead of searching for each song.
+                                                        Helps with albums whose songs never show up in a song
+                                                        search. The artist and album title must both match; if
+                                                        they don't, SoulSync searches track by track as usual.
+                                                        Some albums need YouTube Music Premium cookies.
+                                                        Off by default.
                                                     </div>
                                                 </div>
                                                 <div class="form-group">
@@ -7318,7 +7028,27 @@
                                                         <code>$track_disambiguation</code> (the recording's version
                                                         note, like &ldquo;acoustic&rdquo;; added to the filename
                                                         automatically when your template leaves it out, unless the
-                                                        same toggle above is turned off). The
+                                                        same toggle above is turned off),
+                                                        <code>$explicit</code> ([E] on explicit tracks, nothing
+                                                        otherwise), <code>$contentrating</code> ([E] or [C]) and
+                                                        <code>$contentratingfull</code> ([Explicit] or [Clean]); these
+                                                        stay empty when the source doesn't say, and in a folder they
+                                                        follow the album, not the track.
+                                                        To tell same-named artists apart:
+                                                        <code>$albumartistdisambiguation</code> (MusicBrainz's note,
+                                                        like &ldquo;US grunge band&rdquo;),
+                                                        <code>$albumartistcountry</code> (US, GB, JM),
+                                                        <code>$albumartistgenre</code>,
+                                                        <code>$albumartistinfo</code> (the first of those three the
+                                                        artist has), <code>$albumartistcomposite</code> (the note, else
+                                                        country and genre together, like &ldquo;US Rock&rdquo;) and
+                                                        <code>$albumartistclash</code> (the same as info, but
+                                                        only when another artist in your library shares the name, so
+                                                        <code>$albumartist ($albumartistclash)</code> keeps unique
+                                                        artists plain). The <code>$artist</code> versions
+                                                        (<code>$artistinfo</code> and so on) describe the track
+                                                        artist. They come from enrichment, so an artist that hasn't
+                                                        been matched to MusicBrainz yet renders nothing. The
                                                         three disc variables work in a folder segment as well as in the
                                                         filename and are empty on a single-disc album, so
                                                         <code>$albumartist/$album/Disc $discnum/$track - $title</code>
@@ -7391,8 +7121,10 @@
                                      normally into Artist/Album and the Playlists/ folder is a symlink
                                      view that mirrors the real library filename, so this template no
                                      longer drives playlist-file naming. Kept in the DOM (display:none)
-                                     so settings load/save still round-trips the stored value. -->
-                                                <div class="form-group" style="display: none;">
+                                     so settings load/save still round-trips the stored value.
+                                     hidden, not style="display: none": the media card's
+                                     display:block !important beat the inline style. -->
+                                                <div class="form-group" hidden>
                                                     <label>Playlist Path Template:</label>
                                                     <input type="text" id="template-playlist-path"
                                                         placeholder="$playlist/$artist - $title">
@@ -7506,6 +7238,24 @@
                                                         <code>#/</code>). Accented letters fold to their base letter
                                                         (Édith Piaf → <code>E/</code>). Off = the literal first
                                                         character, exactly as before.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>
+                                                        <input type="checkbox" id="unicode-substitution">
+                                                        Keep symbols in names with lookalike characters
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Windows
+                                                        doesn't allow <code>: ? / \ " * | &lt; &gt;</code> in file or
+                                                        folder names. Off, they become <code>_</code>
+                                                        (<code>AC_DC</code>). On, they become lookalike characters
+                                                        that work everywhere (<code>AC∕DC</code>,
+                                                        <code>What's Going On？</code>), and a trailing dot is kept
+                                                        (<code>DAMN․</code>). Applies to new downloads; run
+                                                        Reorganize to rename what's already there.</small>
                                                 </div>
 
 
@@ -8138,7 +7888,8 @@
                                                         placeholder="$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality">
                                                     <small class="settings-hint">Variables: $series, $season (01),
                                                         $seasonraw (1), $episode (01), $episodetitle, $year, $quality,
-                                                        $resolution, $source, $codec, $tvdbid.</small>
+                                                        $resolution, $source, $codec, $tmdbid, $imdbid, $tvdbid (the show's
+                                                        ids).</small>
                                                     <small class="settings-hint">Example: <code
                                                             id="vo-episode-preview">&hellip;</code></small>
                                                 </div>
@@ -9120,7 +8871,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="settings-section-header collapsed" data-stg="library"
+                                    <div class="settings-section-header collapsed" data-stg="downloads"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -9129,8 +8880,8 @@
                                             data-stg-fallback="Explicit content &amp; genre whitelist">Explicit content
                                             &amp; genre whitelist</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="library">
-                                        <div class="settings-group" data-stg="library">
+                                    <div class="settings-section-body collapsed" data-stg="downloads">
+                                        <div class="settings-group" data-stg="downloads">
                                             <div class="form-group">
                                                 <label class="checkbox-label">
                                                     <input type="checkbox" id="allow-explicit" checked
@@ -9242,12 +8993,12 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="stg-cardgroup" data-stg="library">
-                                        <span class="stg-cardgroup-label">Your library</span>
+                                    <div class="stg-cardgroup" data-stg="discovery">
+                                        <span class="stg-cardgroup-label">Discovery &amp; playlists</span>
                                         <span class="stg-cardgroup-sub">Playlists, history and how recommendations
                                             behave</span>
                                     </div>
-                                    <div class="settings-section-header collapsed" data-stg="library"
+                                    <div class="settings-section-header collapsed" data-stg="discovery"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -9256,8 +9007,8 @@
                                             data-stg-fallback="M3U export &amp; server playlist sync">M3U export &amp;
                                             server playlist sync</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="library">
-                                        <div class="settings-group" data-stg="library">
+                                    <div class="settings-section-body collapsed" data-stg="discovery">
+                                        <div class="settings-group" data-stg="discovery">
                                             <div class="form-group">
                                                 <label class="checkbox-label">
                                                     <input type="checkbox" id="m3u-export-enabled">
@@ -9358,7 +9109,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="settings-section-header collapsed" data-stg="library"
+                                    <div class="settings-section-header collapsed" data-stg="discovery"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -9367,8 +9118,8 @@
                                             data-stg-fallback="Play history from your media server">Play history from
                                             your media server</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="library">
-                                        <div class="settings-group" data-stg="library">
+                                    <div class="settings-section-body collapsed" data-stg="discovery">
+                                        <div class="settings-group" data-stg="discovery">
                                             <div class="form-group">
                                                 <label class="checkbox-label">
                                                     <input type="checkbox" id="listening-stats-enabled">
@@ -9390,7 +9141,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="settings-section-header collapsed" data-stg="library"
+                                    <div class="settings-section-header collapsed" data-stg="discovery"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -9399,9 +9150,9 @@
                                             data-stg-fallback="How adventurous your recommendations are">How adventurous
                                             your recommendations are</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="library"
+                                    <div class="settings-section-body collapsed" data-stg="discovery"
                                         style="display:none">
-                                        <div class="settings-group" data-stg="library">
+                                        <div class="settings-group" data-stg="discovery">
                                             <div class="form-group">
                                                 <label>Adventurousness</label>
                                                 <div style="display:flex; align-items:center; gap:12px; margin-top:8px">
@@ -9421,6 +9172,10 @@
                                                 </div>
                                             </div>
                                         </div>
+                                    </div>
+                                    <div class="stg-cardgroup" data-stg="library">
+                                        <span class="stg-cardgroup-label">Video</span>
+                                        <span class="stg-cardgroup-sub">Where to watch and what detail pages show</span>
                                     </div>
                                     <div class="settings-section-header collapsed" data-stg="library"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
@@ -9664,6 +9419,12 @@
                                                         the admin, save these settings, then connect your own account
                                                         at the bottom.
                                                     </div>
+                                                    <div class="setting-warning" id="security-oidc-callback-warn" role="status" hidden>
+                                                        SoulSync sees this connection as plain http, so that's the
+                                                        callback it sends your provider. Turn on Behind a reverse proxy
+                                                        below and restart, have your proxy send X-Forwarded-Proto, or
+                                                        set the Callback URL override to your https address.
+                                                    </div>
                                                     <!-- the provider's settings: one nested block inside the toggle's row -->
                                                     <div class="security-nested security-nested-block" id="security-oidc-provider">
                                                         <div class="form-group">
@@ -9717,7 +9478,9 @@
                                                                 autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
                                                             <div class="setting-help-text">
                                                                 Add the scope your provider needs to send groups, if you set a
-                                                                required group (Pocket ID: <code>groups</code>).
+                                                                required group (Pocket ID: <code>groups</code>). Add
+                                                                <code>offline_access</code> on Authentik or Authelia so signing
+                                                                someone out there signs them out here too.
                                                             </div>
                                                         </div>
                                                         <div class="form-group">
@@ -9744,8 +9507,28 @@
                                                              status, icon and disconnect when connected, else connect -->
                                                         <div class="form-group security-oidc-admin" id="security-oidc-admin">
                                                             <button type="button" class="auth-button"
-                                                                onclick="window.location.assign('/api/profiles/me/oidc-connect/start')">Connect
+                                                                onclick="window.location.assign(window.SoulSyncURL.resolve('/api/profiles/me/oidc-connect/start'))">Connect
                                                                 my admin account</button>
+                                                        </div>
+                                                        <!-- sign in with oidc only (#1839; webui/src/shell/oidc-only.ts) -->
+                                                        <div class="form-group" id="security-oidc-only-wrap">
+                                                            <label class="toggle-label">
+                                                                <input type="checkbox" id="security-oidc-only">
+                                                                <span>OIDC only: turn off every other way to sign in</span>
+                                                            </label>
+                                                            <div class="setting-help-text">
+                                                                Password sign-in, the recovery question, Sign in with Plex
+                                                                and switching profiles with a password stop working, and
+                                                                anyone signed in some other way is signed out. Invites send
+                                                                people to your provider instead of asking for a password.
+                                                                Needs login mode, and you have to be signed in with OIDC
+                                                                yourself to turn it on. Every profile needs an OIDC
+                                                                connection first. Passwords are kept and work again if you
+                                                                turn this off. If the provider is ever down, set
+                                                                <code>SOULSYNC_OIDC_ONLY_OVERRIDE=off</code> on the
+                                                                container and restart, then sign in with the admin password.
+                                                            </div>
+                                                            <div class="setting-help-text" id="security-oidc-only-status" hidden></div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -9842,15 +9625,15 @@
 
                                     <!-- Discovery Settings -->
                                     <!-- Discovery Pool Settings (collapsible tile) -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced" data-music-only
+                                    <div class="settings-section-header collapsed" data-stg="discovery" data-music-only
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
                                         <h3>Discovery Pool Settings</h3>
                                         <span class="settings-section-hint">Lookback &amp; hemisphere</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced" data-music-only>
-                                        <div class="settings-group" data-stg="advanced" data-music-only>
+                                    <div class="settings-section-body collapsed" data-stg="discovery" data-music-only>
+                                        <div class="settings-group" data-stg="discovery" data-music-only>
 
                                             <div class="form-group">
                                                 <label>Lookback Period:</label>
@@ -10343,15 +10126,15 @@
                                     </div><!-- end Artwork Cache body -->
 
                                     <!-- Sidebar Weather (collapsible tile) -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                    <div class="settings-section-header collapsed" data-stg="appearance"
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
                                         <h3>Sidebar Weather</h3>
                                         <span class="settings-section-hint">Time, temp &amp; forecast line</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced">
-                                        <div class="settings-group" data-stg="advanced">
+                                    <div class="settings-section-body collapsed" data-stg="appearance">
+                                        <div class="settings-group" data-stg="appearance">
 
                                             <div class="form-group">
                                                 <label>Location:</label>
@@ -10415,6 +10198,179 @@
                                             </div>
                                         </div>
                                     </div><!-- end Sidebar Weather body -->
+
+                                    <!-- MetaSync (collapsible tile) -->
+                                    <div class="settings-section-header collapsed" data-stg="connections"
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>MetaSync</h3>
+                                        <span class="settings-section-hint">Join SIN, the signal network,
+                                            through the MetaSync companion</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="connections">
+                                        <div class="settings-group" data-stg="connections">
+
+                                            <div class="help-text" style="margin-bottom:12px;">
+                                                MetaSync is a small companion program that runs next to
+                                                SoulSync and joins pools for you — the first pool is
+                                                SIN, the signal network from step 2 below. Two separate
+                                                steps happen on this page, and they are not the same
+                                                thing:
+                                                <br><strong>Step 1</strong> connects SoulSync and
+                                                MetaSync to each other, on this machine.
+                                                <br><strong>Step 2</strong> joins a pool. MetaSync does
+                                                the joining — SoulSync itself never talks to a pool, it
+                                                only hands MetaSync your pool key.
+                                                <br>Installing MetaSync joins nothing by itself.
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label>Step 1 — Connect SoulSync and MetaSync:</label>
+                                                <div class="help-text" style="margin-bottom:6px;">
+                                                    Connecting pairs the two programs. When you click
+                                                    Connect, a code appears here and in MetaSync's
+                                                    dashboard; approve it there and the two programs swap
+                                                    keys automatically — MetaSync gets a key to read this
+                                                    SoulSync, SoulSync gets a key to talk to MetaSync.
+                                                    You never type or see either key.
+                                                </div>
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                                    <button class="test-button"
+                                                        onclick="metasyncPairRequest()">Connect</button>
+                                                    <span id="metasync-connect-state" class="readonly-field">Not
+                                                        connected</span>
+                                                </div>
+                                                <div id="metasync-pair-box" style="display:none; margin-top:10px;">
+                                                    <div class="help-text">
+                                                        MetaSync is showing a pairing request. Open the
+                                                        MetaSync dashboard, check the code matches, and
+                                                        approve it there — then finish here.
+                                                    </div>
+                                                    <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top:6px;">
+                                                        <span>Code: <strong id="metasync-pair-code"
+                                                                style="font-size:18px; letter-spacing:2px;"></strong></span>
+                                                        <span>MetaSync's ID: <code
+                                                                id="metasync-pair-fingerprint"></code></span>
+                                                        <button class="test-button"
+                                                            onclick="metasyncPairClaim()">I've approved it —
+                                                            finish connecting</button>
+                                                    </div>
+                                                    <div class="help-text">
+                                                        Check the code and the ID match what MetaSync's
+                                                        dashboard shows. Codes last 10 minutes, and SoulSync
+                                                        can only finish after you approve — the code on its
+                                                        own connects nothing.
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label for="metasync-node-url">MetaSync URL:</label>
+                                                <input type="text" id="metasync-node-url"
+                                                    placeholder="http://localhost:8790">
+                                                <div class="help-text">
+                                                    Where the MetaSync program answers. If it runs on
+                                                    this same machine, SoulSync finds it on its own
+                                                    (port 8790) — type an address only if MetaSync
+                                                    lives somewhere else.
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <details>
+                                                    <summary style="cursor:pointer;">Rather type a key?
+                                                        Connect manually instead of pairing</summary>
+                                                    <div class="help-text" style="margin-top:6px;">
+                                                        Pairing above does this for you. The manual way:
+                                                        in MetaSync's dashboard, create a local API key
+                                                        and paste it here, then Save. SoulSync ends up
+                                                        holding the same kind of key either way.
+                                                    </div>
+                                                    <div style="display: flex; gap: 8px; margin-top:6px;">
+                                                        <input type="password" id="metasync-local-key"
+                                                            placeholder="MetaSync local API key (paste to connect manually)"
+                                                            style="flex:1;">
+                                                    </div>
+                                                </details>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label>Step 2 — Join a pool (optional):</label>
+                                                <div class="help-text">
+                                                    A pool is a network your MetaSync can join. The
+                                                    first pool is SIN, the SoulSync Intelligence
+                                                    Network: it collects anonymous taste signals from
+                                                    SoulSync installs — bulk counts of what people
+                                                    watchlist and wishlist, never your personal data —
+                                                    and turns them into shared playlists, like Trending
+                                                    and Most Wanted, which MetaSync brings back into
+                                                    this SoulSync. Get a key from your pool account,
+                                                    put it below, and send it to MetaSync. MetaSync
+                                                    joins and does all the talking — it swaps your key
+                                                    for short-lived access tokens, so the key itself
+                                                    stays between you and MetaSync. Nothing is joined
+                                                    until you send the key.
+                                                </div>
+                                                <div class="help-text">
+                                                    No key yet? <a href="https://metasync.ssync.net"
+                                                        target="_blank" rel="noopener">Get one at the SIN
+                                                        front desk</a> — sign in there, create a key, then
+                                                    come back and put it below.
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="metasync-pool-url">Pool URL:</label>
+                                                <input type="text" id="metasync-pool-url"
+                                                    placeholder="Pool URL from your pool account">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="metasync-pool-key">Pool key:</label>
+                                                <input type="password" id="metasync-pool-key"
+                                                    placeholder="Your pool account key">
+                                                <div class="help-text">
+                                                    Your own key for the pool, from your pool account.
+                                                    SoulSync stores it here only so it can hand it to
+                                                    MetaSync when you click Send — SoulSync never uses
+                                                    it itself.
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                                    <button class="test-button"
+                                                        onclick="metasyncHandoff()">Send pool key to
+                                                        MetaSync</button>
+                                                    <button class="test-button"
+                                                        onclick="saveMetaSyncSettings()">Save</button>
+                                                    <button class="test-button"
+                                                        onclick="refreshMetaSyncStatus()">Refresh
+                                                        status</button>
+                                                </div>
+                                                <div class="help-text">
+                                                    Send pool key is the button that joins the pool.
+                                                    Save only stores what you typed above, for later.
+                                                </div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <label>Status:</label>
+                                                <span id="metasync-status" class="readonly-field">Loading...</span>
+                                                <div id="metasync-status-detail" class="help-text"></div>
+                                            </div>
+
+                                            <div class="form-group">
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                                                    <button class="test-button"
+                                                        onclick="metasyncDisconnect()">Disconnect</button>
+                                                    <span class="help-text" style="margin:0;">Undoes step 1 and
+                                                        step 2: MetaSync leaves the pool, the key it reads
+                                                        this SoulSync with is revoked, and SoulSync forgets
+                                                        MetaSync's key. Your pool key stays saved above.</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div><!-- end MetaSync body -->
 
                                     <!-- Developer (collapsible tile): tools for checking how things look.
                                          Wired by webui/src/shell/weather-preview-settings.ts. Nothing here
@@ -10504,15 +10460,15 @@
                                  would do nothing on the music side. The retired video source picker
                                  rides along inside: it is hidden, and video-settings.js still reads its
                                  ids on load, so it has to stay somewhere in the page. -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced" data-video-only
+                                    <div class="settings-section-header collapsed" data-stg="connections" data-video-only
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
                                         <h3>Notifications</h3>
                                         <span class="settings-section-hint">Discord, webhooks &amp; Telegram</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced" data-video-only>
-                                        <div class="settings-group" data-stg="advanced" data-video-only>
+                                    <div class="settings-section-body collapsed" data-stg="connections" data-video-only>
+                                        <div class="settings-group" data-stg="connections" data-video-only>
                                             <!-- Was "Download Source". The source picker below is retired: the shared
                                      download-chain widget (Source Settings) is the one editor for the video
                                      chain now, and it carries a Video tab. The select and its arrow list stay
@@ -10562,7 +10518,7 @@
                                  background machinery lives. Still data-video-only - the endpoints are
                                  /api/video/downloads/config/import-lists and it feeds the VIDEO
                                  wishlist, so it would do nothing on the music side. -->
-                                    <div class="settings-section-header collapsed" data-stg="advanced" data-video-only
+                                    <div class="settings-section-header collapsed" data-stg="discovery" data-video-only
                                         onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
                                         role="button" tabindex="0" aria-expanded="false">
                                         <span class="settings-section-arrow">&#9660;</span>
@@ -10570,8 +10526,8 @@
                                         <span class="settings-section-hint">Auto-add movies &amp; shows from a
                                             list</span>
                                     </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced" data-video-only>
-                                        <div class="settings-group" data-stg="advanced" data-video-only>
+                                    <div class="settings-section-body collapsed" data-stg="discovery" data-video-only>
+                                        <div class="settings-group" data-stg="discovery" data-video-only>
                                             <!-- Import lists (arr-parity P6) -->
                                             <div class="form-group" id="video-import-lists">
                                                 <label>Import lists:</label>
@@ -12991,6 +12947,7 @@
     <script src="{{ url_for('static', filename='docs-content/15-sample-studio.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='docs-content/16-api.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='docs-content/17-podcasts-audiobooks.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='docs-content/18-metasync.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='helper.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='particles.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='worker-orbs.js', v=static_v) }}"></script>
@@ -12998,7 +12955,6 @@
     <script src="{{ url_for('static', filename='video/video-side.js', v=static_v) }}"></script>
     <!-- Shared video scan controller (triggers + polls scans for all video pages) -->
     <script src="{{ url_for('static', filename='video/video-scan.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='video/video-server-scan.js', v=static_v) }}"></script>
     <!-- Video settings additions (isolated; library mapping on the settings page) -->
     <script src="{{ url_for('static', filename='video/video-settings.js', v=static_v) }}"></script>
     <!-- Video enrichment dashboard buttons (isolated; polls /api/video/enrichment) -->
@@ -13020,7 +12976,6 @@
     <!-- Manage panel (per-item metadata editor slide-over; "Manage" on detail pages) -->
     <script src="{{ url_for('static', filename='video/video-manage-panel.js', v=static_v) }}"></script>
     <!-- Library Maintenance (jobs & findings on the video Tools page) -->
-    <script src="{{ url_for('static', filename='video/video-repair.js', v=static_v) }}"></script>
     <!-- Issues (report on items via the Manage sidebar; triage on the Issues page) -->
     <script src="{{ url_for('static', filename='video/video-issues.js', v=static_v) }}"></script>
     <!-- Overlay Studio (full-bleed visual editor for poster-overlay templates; Artwork Studio) -->
@@ -13047,7 +13002,6 @@
     <script src="{{ url_for('static', filename='video/video-search.js', v=static_v) }}"></script>
     <!-- Video discover (isolated; trending hero + lazy genre/decade rails + filter grid) -->
     <script src="{{ url_for('static', filename='video/video-discover.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='video/video-calendar.js', v=static_v) }}"></script>
     <!-- Video person page (isolated; cast/crew drill-in → filmography) -->
     <script src="{{ url_for('static', filename='video/video-person.js', v=static_v) }}"></script>
     <!-- Video studio page (isolated; production-company drill-in → film collection) -->

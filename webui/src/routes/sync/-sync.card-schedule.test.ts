@@ -304,3 +304,79 @@ describe('the controller', () => {
     expect(readsAfter.length).toBeGreaterThan(readsBefore.length);
   });
 });
+
+/** A daily mix scheduled from the auto-sync sidebar: by kind, not by mirrored id. */
+function dailyMix(variant: string, hours: number, id = 300) {
+  return {
+    id,
+    name: `Auto-Sync: Daily Mix ${variant}`,
+    enabled: true,
+    trigger_type: 'schedule',
+    trigger_config: { interval: hours, unit: 'hours' },
+    action_type: 'personalized_pipeline',
+    action_config: { kinds: [{ kind: 'daily_mix', variant }], refresh_first: true },
+  };
+}
+
+const MIRROR = {
+  id: 55,
+  name: 'Daily Mix 1',
+  source: 'soulsync_discovery',
+  source_playlist_id: 'ssd_daily_mix_1',
+};
+
+describe('discovery mirrors', () => {
+  it('a "refresh & mirror" copy shows the schedule its daily mix runs on', async () => {
+    const { cardScheduleFor } = await import('./-sync.card-schedule');
+    const schedules = cardSchedulesFrom([dailyMix('1', 24), hourly(7, 6)]);
+    expect(cardScheduleFor(schedules, MIRROR)?.hours).toBe(24);
+    expect(
+      cardScheduleFor(schedules, { ...MIRROR, source_playlist_id: 'ssd_daily_mix_2' }),
+    ).toBeUndefined();
+    // a plain playlist still reads its own
+    expect(cardScheduleFor(schedules, { id: 7, source: 'spotify' })?.hours).toBe(6);
+  });
+
+  it('rescheduling the mirror edits that automation, never adds a second one', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({
+          url,
+          method: init?.method ?? 'GET',
+          body: init?.body ? JSON.parse(init.body as string) : undefined,
+        });
+        if (url === '/api/automations' && (init?.method ?? 'GET') === 'GET') {
+          return new Response(JSON.stringify({ automations: [dailyMix('1', 8)] }));
+        }
+        return new Response(JSON.stringify({ success: true }));
+      }),
+    );
+    const { result } = renderHook(() => useCardSchedules());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.scheduleFor(MIRROR)?.hours).toBe(8);
+    await act(async () => {
+      await result.current.set(MIRROR, 24);
+    });
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+    const put = calls.find((c) => c.method === 'PUT')!;
+    expect(put.url).toContain('/300');
+    expect(put.body).toMatchObject({
+      action_type: 'personalized_pipeline',
+      action_config: { kinds: [{ kind: 'daily_mix', variant: '1' }], refresh_first: true },
+    });
+  });
+
+  it('a first schedule on a mirror is its personalized playlist, not a pipeline on the copy', async () => {
+    const { result } = renderHook(() => useCardSchedules());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    await act(async () => {
+      await result.current.set({ ...MIRROR, source_playlist_id: 'ssd_hidden_gems' }, 24);
+    });
+    const post = calls.find((c) => c.method === 'POST')!;
+    expect(post.body).toMatchObject({
+      action_type: 'personalized_pipeline',
+      action_config: { kinds: [{ kind: 'hidden_gems' }] },
+    });
+  });
+});

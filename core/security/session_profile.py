@@ -71,11 +71,17 @@ _ALLOWED_POST = frozenset({
 
 def is_open_profile_path(path: str, method: str) -> bool:
     """paths every gate leaves open: accepting an invite link (the token is
-    the credential, an admin minted it) and a profile's avatar image, which
-    the picker draws before anyone is signed in."""
+    the credential, an admin minted it), a profile's video calendar feed (same,
+    its token), and a profile's avatar image, which the picker draws before
+    anyone is signed in."""
     import re
     method = (method or 'GET').upper()
     if path.startswith('/api/invite/') and method in ('GET', 'POST'):
+        return True
+    # the video calendar's iCal feed: calendar apps fetch it with no cookie, and
+    # the token in the path is the credential (the route refuses unknown ones)
+    from core.video.calendar_feed import is_feed_path
+    if is_feed_path(path, method):
         return True
     return method == 'GET' and re.fullmatch(r'/api/profiles/\d+/avatar', path or '') is not None
 

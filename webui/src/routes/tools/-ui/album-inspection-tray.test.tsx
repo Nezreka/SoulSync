@@ -52,11 +52,15 @@ const fixableFinding: RepairFinding = {
 
 function renderTray(items: RepairFinding[]) {
   const posted: string[] = [];
+  const bodies: unknown[] = [];
   const onInspectRedownload = vi.fn();
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, options?: RequestInit) => {
-      if (options?.method === 'POST') posted.push(url);
+      if (options?.method === 'POST') {
+        posted.push(url);
+        bodies.push(JSON.parse(String(options.body ?? '{}')));
+      }
       return {
         ok: true,
         json: async () =>
@@ -75,7 +79,7 @@ function renderTray(items: RepairFinding[]) {
       onRefresh={vi.fn()}
     />,
   );
-  return { posted, onInspectRedownload };
+  return { posted, bodies, onInspectRedownload };
 }
 
 afterEach(() => {
@@ -99,11 +103,13 @@ it('offers only a delete for a fake-lossless file outside the catalogue', async 
 it('asks before resolving an album whose fake-lossless files will be moved aside', async () => {
   const confirm = vi.fn(async () => true);
   vi.stubGlobal('showConfirmDialog', confirm);
-  const { posted } = renderTray([fakeLossless, fixableFinding]);
+  const { posted, bodies } = renderTray([fakeLossless, fixableFinding]);
   await screen.findByRole('button', { name: 'Apply Lyrics' });
   fireEvent.click(screen.getByRole('button', { name: 'Resolve Album' }));
   await waitFor(() =>
     expect(posted).toEqual(['/api/repair/findings/1/fix', '/api/repair/findings/2/fix']),
   );
   expect(confirm).toHaveBeenCalledTimes(1);
+  // upstream: the resolve-all loop is no explicit fix of one finding
+  expect(bodies.every((body) => (body as { bulk?: boolean }).bulk === true)).toBe(true);
 });

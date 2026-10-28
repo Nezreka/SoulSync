@@ -166,3 +166,207 @@ def test_specific_folder_on_extra_drive_beats_primary_basename():
     files = {"/primary/movie.mkv", "/extra/Film/movie.mkv"}
     assert resolve_video_file_path("/server/Film/movie.mkv", ["/primary", "/extra"],
                                    exists=lambda path: path in files) == "/extra/Film/movie.mkv"
+
+
+# ── a NEW episode of an owned show lands in the show's existing folder ──────
+def _show_with_episodes(db, eps, tmdb_id=9):
+    """eps: [(season, episode, stored_path, size)]"""
+    seasons = {}
+    for sn, en, path, size in eps:
+        seasons.setdefault(sn, []).append(
+            {"server_id": "e%s-%s" % (sn, en), "episode_number": en, "title": "E%s" % en,
+             "file": {"relative_path": path, "size_bytes": size}})
+    db.upsert_show_tree("plex", {"server_id": "s%s" % tmdb_id, "tmdb_id": tmdb_id,
+                                 "title": "Firefly", "seasons": [
+                                     {"season_number": sn, "episodes": e}
+                                     for sn, e in sorted(seasons.items())]})
+
+
+def _episode_dl(season, episode, tmdb_id=9):
+    return {"id": 7, "kind": "episode", "media_source": "tmdb", "media_id": str(tmdb_id),
+            "search_ctx": json.dumps({"scope": "episode", "title": "Firefly", "year": 2002,
+                                      "season": season, "episode": episode})}
+
+
+def test_show_episode_file_path_prefers_the_same_season(db):
+    _show_with_episodes(db, [(1, 1, "/data/tv/F/Season 01/a.mkv", 5),
+                             (1, 2, "/data/tv/F/Season 01/b.mkv", 5),
+                             (2, 1, "/data/tv/F/Season 02/c.mkv", 5)])
+    assert db.video_show_episode_file_path(9, season=1) \
+        == {"path": "/data/tv/F/Season 01/b.mkv", "size_bytes": 5, "season_number": 1}
+    # a season with nothing owned yet: the latest season's latest episode
+    assert db.video_show_episode_file_path(9, season=3)["path"] == "/data/tv/F/Season 02/c.mkv"
+    assert db.video_show_episode_file_path(999, season=1) is None
+    assert db.video_show_episode_file_path(None, season=1) is None
+
+
+def test_episode_folders_below_series():
+    from core.video.organization import episode_folders_below_series
+    f = {"series": "Firefly", "year": 2002, "season": 3}
+    assert episode_folders_below_series({}, f) == ["Season 03"]
+    assert episode_folders_below_series(
+        {"episode_template": "$series ($year)/S$season - $series/x"}, f) == ["S03 - Firefly"]
+    # the last segment is the file name, never a folder
+    assert episode_folders_below_series(
+        {"episode_template": "$series ($year)/S$season - $series"}, f) == []
+    assert episode_folders_below_series(
+        {"episode_template": "${series}/$series - S${season}E$episode"}, f) == []
+    assert episode_folders_below_series(
+        {"episode_template": "TV/$series/Specials/Season $season/x"}, f) == ["Specials", "Season 03"]
+    # no series folder at all -> nothing to place under
+    assert episode_folders_below_series({"episode_template": "Season $season/$series"}, f) is None
+    assert episode_folders_below_series({"episode_template": "$series - S$season"}, f) is None
+
+
+def _sonarr_tree(tmp_path, db):
+    show = tmp_path / "tv" / "Firefly (2002) {imdb-tt0303461}"
+    (show / "Season 01").mkdir(parents=True)
+    (show / "Season 01" / "Firefly (2002) - S01E01 [Bluray-1080p].mkv").write_bytes(b"xxxxx")
+    db.set_setting("tv_path", str(tmp_path / "tv"))
+    _show_with_episodes(db, [(1, 1, "/data/Firefly (2002) {imdb-tt0303461}/Season 01/"
+                                    "Firefly (2002) - S01E01 [Bluray-1080p].mkv", 5)])
+    return show
+
+
+def test_new_episode_same_season_goes_beside_its_siblings(db, tmp_path):
+    from core.video.download_monitor import _owned_library_dir
+    show = _sonarr_tree(tmp_path, db)
+    assert _owned_library_dir(db, _episode_dl(1, 2), {}) == str(show / "Season 01")
+
+
+def test_new_season_goes_under_the_existing_show_folder(db, tmp_path):
+    from core.video.download_monitor import _owned_library_dir
+    show = _sonarr_tree(tmp_path, db)
+    assert _owned_library_dir(db, _episode_dl(2, 1), {}) == str(show / "Season 02")
+    # the template's own season folder shape is what's created
+    s = {"episode_template": "$series/Series $seasonraw/$series - S$seasonE$episode"}
+    assert _owned_library_dir(db, _episode_dl(2, 1), s) == str(show / "Series 2")
+
+
+def test_new_season_with_a_flat_template_uses_the_show_folder(db, tmp_path):
+    from core.video.download_monitor import _owned_library_dir
+    show = tmp_path / "tv" / "Firefly"
+    show.mkdir(parents=True)
+    (show / "e1.mkv").write_bytes(b"xxxxx")
+    db.set_setting("tv_path", str(tmp_path / "tv"))
+    _show_with_episodes(db, [(1, 1, "/data/Firefly/e1.mkv", 5)])
+    s = {"episode_template": "$series/$series - S$seasonE$episode"}
+    assert _owned_library_dir(db, _episode_dl(2, 1), s) == str(show)
+
+
+def test_new_season_never_climbs_out_of_the_library(db, tmp_path):
+    """An owned episode sitting directly in the library root (no show folder) must
+    not make the library root itself the 'show folder' -> template path instead."""
+    from core.video.download_monitor import _owned_library_dir
+    root = tmp_path / "tv"
+    (root / "Season 01").mkdir(parents=True)
+    (root / "Season 01" / "e1.mkv").write_bytes(b"xxxxx")
+    db.set_setting("tv_path", str(root))
+    _show_with_episodes(db, [(1, 1, "/data/Season 01/e1.mkv", 5)])
+    assert _owned_library_dir(db, _episode_dl(2, 1), {}) is None
+
+
+def test_new_episode_of_an_unowned_or_unresolvable_show_uses_the_template(db, tmp_path):
+    from core.video.download_monitor import _owned_library_dir
+    _sonarr_tree(tmp_path, db)
+    assert _owned_library_dir(db, _episode_dl(1, 2, tmdb_id=999), {}) is None
+    db.set_setting("tv_path", str(tmp_path / "elsewhere"))   # file can't be found here
+    assert _owned_library_dir(db, _episode_dl(1, 2), {}) is None
+
+
+def test_an_owned_episode_still_upgrades_in_place(db, tmp_path):
+    from core.video.download_monitor import _owned_library_dir
+    show = _sonarr_tree(tmp_path, db)
+    assert _owned_library_dir(db, _episode_dl(1, 1), {}) == str(show / "Season 01")
+
+
+def test_plan_import_files_a_new_episode_in_the_show_folder(db, tmp_path):
+    from core.video.download_monitor import _owned_library_dir
+    from core.video.importer import plan_import
+    from tests.test_video_importer import FakeFS
+    show = _sonarr_tree(tmp_path, db)
+    dl = dict(_episode_dl(1, 2), title="Firefly", target_dir="/lib/tv",
+              release_title="Firefly.S01E02.1080p.BluRay.x264-GRP")
+    lib = _owned_library_dir(db, dl, {})
+    plan = plan_import(dl, "/dl/Firefly.S01E02.1080p.BluRay.x264-GRP.mkv",
+                       list_dir=FakeFS().list_dir, library_dir=lib)
+    assert plan["action"] == "import"
+    assert plan["dest"]["dir"] == str(show / "Season 01")
+    assert plan["dest"]["filename"].startswith("Firefly - S01E02")
+
+
+# ── a sibling renamed in place since the last scan still names the show folder ──
+def test_resolve_video_dir_reroots_the_folder_deepest_first():
+    from core.video.path_resolver import resolve_video_dir
+    dirs = {"/lib/tv/Show (2022)/Season 01", "/lib/tv/Season 01", "/lib/tv/Show (2022)"}
+    isdir = dirs.__contains__
+    stored = "\\\\?\\Y:\\media\\tv\\Show (2022)\\Season 01\\Show - S01E01 [long].mkv"
+    assert resolve_video_dir(stored, ["/lib/tv"], isdir=isdir) == "/lib/tv/Show (2022)/Season 01"
+    # the raw stored folder wins when it exists here
+    assert resolve_video_dir("/srv/x/a.mkv", ["/lib/tv"], isdir={"/srv/x"}.__contains__) == "/srv/x"
+
+
+def test_resolve_video_dir_never_trusts_a_bare_season_folder():
+    from core.video.path_resolver import resolve_video_dir
+    # the show folder is gone; only a stray root-level 'Season 01' exists
+    isdir = {"/lib/tv/Season 01"}.__contains__
+    stored = "/srv/Show (2022)/Season 01/e1.mkv"
+    assert resolve_video_dir(stored, ["/lib/tv"], min_segments=2, isdir=isdir) is None
+    assert resolve_video_dir(stored, ["/lib/tv"], min_segments=1, isdir=isdir) == "/lib/tv/Season 01"
+    assert resolve_video_dir("", ["/lib/tv"]) is None
+    assert resolve_video_dir("e1.mkv", ["/lib/tv"]) is None
+
+
+def _renamed_tree(tmp_path, db):
+    """The server still reports Sonarr's long name; the file on disk was renamed
+    to the short template name since (a rename pass), same bytes."""
+    show = tmp_path / "anime" / "Cyberpunk Edgerunners (2022) {imdb-tt12590266}"
+    (show / "Season 01").mkdir(parents=True)
+    (show / "Season 01" / "Cyberpunk Edgerunners (2022) - S01E01.mkv").write_bytes(b"xxxxx")
+    db.set_setting("tv_path", str(tmp_path / "tv"))
+    db.set_setting("anime_path", str(tmp_path / "anime"))
+    _show_with_episodes(db, [(1, 1, "\\\\?\\Y:\\media\\screens\\anime\\Cyberpunk Edgerunners (2022) "
+                                    "{imdb-tt12590266}\\Season 01\\Cyberpunk Edgerunners (2022) - "
+                                    "S01E01 - 001 [NF WEBDL-1080p][EAC3 5.1]-NanDesuKa.mkv", 5)])
+    return show
+
+
+def test_new_episode_follows_a_renamed_sibling_into_its_folder(db, tmp_path):
+    from core.video.download_monitor import _owned_library_dir
+    show = _renamed_tree(tmp_path, db)
+    assert _owned_library_dir(db, _episode_dl(1, 2), {}) == str(show / "Season 01")
+
+
+def test_new_season_climbs_from_a_renamed_sibling(db, tmp_path):
+    from core.video.download_monitor import _owned_library_dir
+    show = _renamed_tree(tmp_path, db)
+    assert _owned_library_dir(db, _episode_dl(2, 10), {}) == str(show / "Season 02")
+
+
+def test_an_owned_episode_renamed_in_place_still_upgrades_in_its_folder(db, tmp_path):
+    from core.video.download_monitor import _owned_library_dir
+    show = _renamed_tree(tmp_path, db)
+    assert _owned_library_dir(db, _episode_dl(1, 1), {}) == str(show / "Season 01")
+
+
+def test_a_renamed_sibling_whose_show_folder_is_gone_uses_the_template(db, tmp_path):
+    from core.video.download_monitor import _owned_library_dir
+    show = _renamed_tree(tmp_path, db)
+    import shutil
+    shutil.rmtree(show)
+    (tmp_path / "anime" / "Season 01").mkdir()   # a stray bare season folder
+    assert _owned_library_dir(db, _episode_dl(1, 2), {}) is None
+    assert _owned_library_dir(db, _episode_dl(1, 1), {}) is None
+
+
+def test_plan_import_files_beside_a_renamed_sibling(db, tmp_path):
+    from core.video.download_monitor import _owned_library_dir
+    from core.video.importer import plan_import
+    from tests.test_video_importer import FakeFS
+    show = _renamed_tree(tmp_path, db)
+    dl = dict(_episode_dl(1, 2), title="Firefly", target_dir="/lib/anime",
+              release_title="Firefly.S01E02.1080p.BluRay.x264-GRP")
+    plan = plan_import(dl, "/dl/Firefly.S01E02.1080p.BluRay.x264-GRP.mkv",
+                       list_dir=FakeFS().list_dir, library_dir=_owned_library_dir(db, dl, {}))
+    assert plan["action"] == "import"
+    assert plan["dest"]["dir"] == str(show / "Season 01")

@@ -130,6 +130,9 @@
     --success-strong: #22c55e;
     --gold-rgb: 245, 185, 66;
     --gold: #f5b942;
+    /* wanted: on a wishlist, being searched (the video calendar's state colour) */
+    --wanted-rgb: 139, 147, 255;
+    --wanted: rgb(var(--wanted-rgb));
 
     /* ── Radius ─────────────────────────────────────────────────────── */
     --radius-xs: 4px;

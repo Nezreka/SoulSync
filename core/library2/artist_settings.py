@@ -123,10 +123,22 @@ def _bool_value(row, columns: Iterable[str], field: str, default: bool) -> bool:
     return bool(row[field]) if field in columns and row[field] is not None else default
 
 
+def _release_rules(watchlist, columns: Iterable[str]) -> tuple[Dict[str, bool], bool]:
+    """The nine release rules a scan applies, and whether they are the
+    watchlist defaults the artist follows (#1822) rather than its own."""
+    from core.settings import config_manager
+    from core.watchlist_defaults import effective_rules, follows_defaults, legacy_override_on
+
+    row = {column: watchlist[column] for column in columns}
+    override = legacy_override_on(config_manager)
+    return effective_rules(row, config_manager, override), follows_defaults(row, override)
+
+
 def get_artist_settings(conn, artist_id: int, *, profile_id: int = 1) -> Dict[str, Any]:
     """Return lib2 + watchlist settings for one monitored artist."""
     artist = _artist_row(conn, artist_id)
     watchlist, columns = _watchlist_row(conn, artist, profile_id)
+    rules, following = _release_rules(watchlist, columns)
     provider_ids = {
         provider: (str(watchlist[column]) if watchlist[column] not in (None, "") else None)
         for provider, column in WATCHLIST_PROVIDER_FIELDS.items()
@@ -141,21 +153,8 @@ def get_artist_settings(conn, artist_id: int, *, profile_id: int = 1) -> Dict[st
         ),
         "provider_ids": provider_ids,
         "monitor_new_items": artist["monitor_new_items"] or "all",
-        "include_albums": _bool_value(watchlist, columns, "include_albums", True),
-        "include_eps": _bool_value(watchlist, columns, "include_eps", True),
-        "include_singles": _bool_value(watchlist, columns, "include_singles", True),
-        "include_live": _bool_value(watchlist, columns, "include_live", False),
-        "include_remixes": _bool_value(watchlist, columns, "include_remixes", False),
-        "include_acoustic": _bool_value(watchlist, columns, "include_acoustic", False),
-        "include_compilations": _bool_value(
-            watchlist, columns, "include_compilations", False
-        ),
-        "include_instrumentals": _bool_value(
-            watchlist, columns, "include_instrumentals", False
-        ),
-        "include_other_artists": _bool_value(
-            watchlist, columns, "include_other_artists", False
-        ),
+        **rules,
+        "follow_defaults": following,
         "auto_download": _bool_value(watchlist, columns, "auto_download", True),
         "lookback_days": watchlist["lookback_days"] if "lookback_days" in columns else None,
         "preferred_metadata_source": (
@@ -181,20 +180,23 @@ def update_artist_settings(
     watchlist, columns = _watchlist_row(conn, artist, profile_id)
 
     values: Dict[str, Any] = {}
-    for field in WATCHLIST_BOOLEAN_FIELDS:
+    for field in (*WATCHLIST_BOOLEAN_FIELDS, "follow_defaults"):
         if field in updates:
             if not isinstance(updates[field], bool):
                 raise ArtistSettingsError(f"{field} must be a boolean")
             if field in columns:
                 values[field] = int(updates[field])
 
-    effective_release_types = {
-        field: bool(
-            values.get(field, _bool_value(watchlist, columns, field, True))
-        )
+    # #1822: a follower given rules of its own stops following, starting from
+    # the defaults it was getting rather than the stale columns
+    rules, following = _release_rules(watchlist, columns)
+    if following and "follow_defaults" not in updates and set(values) & set(rules):
+        values = {**{k: int(v) for k, v in rules.items() if k in columns},
+                  **values, "follow_defaults": 0}
+    if not values.get("follow_defaults", following) and not any(
+        values.get(field, rules[field])
         for field in ("include_albums", "include_eps", "include_singles")
-    }
-    if not any(effective_release_types.values()):
+    ):
         raise ArtistSettingsError("At least one of Albums, EPs or Singles must be enabled")
 
     if "lookback_days" in updates:

@@ -112,9 +112,17 @@ export function FindingsInbox({
                       touches files
                     </span>
                   ) : null}
+                  {info?.acquires ? (
+                    <span
+                      className="repair-inbox-risk acquires"
+                      title="Fixing this starts downloads, so fix all safe leaves it alone"
+                    >
+                      downloads
+                    </span>
+                  ) : null}
                 </span>
                 <span className="repair-inbox-blurb">
-                  {findingTypeBlurb(group.finding_type) ||
+                  {findingTypeBlurb(group.finding_type, info) ||
                     (info?.fixable ? '' : 'Review only — no automatic fix for this one.')}
                 </span>
               </span>

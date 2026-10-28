@@ -45,6 +45,11 @@ class WebScanManager:
         self._scan_progress = {}
         self._completion_check_timer = None
         self._shutting_down = False
+        # exact completion (#1899): a client that reports its own scan state
+        # (Navidrome's getScanStatus) is read before the trigger and polled
+        # after it, instead of waiting out the 5-minute floor
+        self._scan_baseline = None
+        self._seen_scanning = False
 
         logger.info(f"WebScanManager initialized with {delay_seconds}s debounce delay")
 
@@ -207,6 +212,17 @@ class WebScanManager:
                     "message": f"Triggering {server_type.upper()} library scan"
                 }
 
+            # a server that reports its own scan state: remember where it
+            # stood, so a scan faster than one poll still reads as finished
+            read_state = getattr(media_client, "get_scan_state", None)
+            self._seen_scanning = False
+            self._scan_baseline = None
+            if callable(read_state):
+                try:
+                    self._scan_baseline = read_state() or {}
+                except Exception as e:
+                    logger.debug(f"Web scan: could not read the scan state before triggering ({e})")
+                    self._scan_baseline = None
             success = media_client.trigger_library_scan()
 
             if success:
@@ -237,6 +253,23 @@ class WebScanManager:
                 }
             self._reset_scan_state()
 
+    EXACT_POLL_SECONDS = 10
+
+    @staticmethod
+    def scan_finished(baseline, state, seen_scanning) -> bool:
+        """Whether a server that reports its own scan state has finished the
+        scan we triggered. ``baseline`` is its state read just before the
+        trigger, ``state`` the latest read. Done means not scanning now, and
+        either we watched it scan or its last-scan stamp moved past the
+        baseline (a scan quicker than one poll). Never compares clocks across
+        machines. An unreadable state is never done."""
+        if not state or state.get("scanning"):
+            return False
+        if seen_scanning:
+            return True
+        last = state.get("last_scan")
+        return bool(last) and last != (baseline or {}).get("last_scan")
+
     def _server_still_scanning(self) -> bool:
         """Ask the active media client whether its own library scan is still
         running. The probe is the source of truth for completion; the
@@ -265,6 +298,34 @@ class WebScanManager:
                 "assuming still scanning")
             return True
 
+    def _state_client(self):
+        """The active client when it reports its own scan state, else None."""
+        try:
+            client = self._engine.client(self._current_server_type) if (
+                self._engine and self._current_server_type) else None
+        except Exception:
+            return None
+        return client if callable(getattr(client, "get_scan_state", None)) else None
+
+    def _poll_seconds(self) -> int:
+        return self.EXACT_POLL_SECONDS if (
+            self._scan_baseline is not None and self._state_client()) else 30
+
+    def _exact_scan_done(self) -> bool:
+        if self._scan_baseline is None:
+            return False
+        client = self._state_client()
+        if client is None:
+            return False
+        try:
+            state = client.get_scan_state()
+        except Exception as e:
+            logger.debug(f"Web scan: scan state unreadable ({e})")
+            return False
+        if state and state.get("scanning"):
+            self._seen_scanning = True
+        return self.scan_finished(self._scan_baseline, state, self._seen_scanning)
+
     def _start_periodic_completion_check(self):
         """Start periodic checking for scan completion"""
         def check_completion():
@@ -279,6 +340,20 @@ class WebScanManager:
                         self._scan_progress = {
                             "status": "timeout",
                             "message": "Scan timed out - assuming complete"
+                        }
+                    self._handle_scan_completion()
+                    return
+
+                # Exact path (#1899): a server that reports its own scan state
+                # says when it's done, so a 20-second Navidrome scan doesn't
+                # sit out the 5-minute floor below.
+                if self._exact_scan_done():
+                    elapsed_time = time.time() - self._scan_start_time if self._scan_start_time else 0
+                    logger.info(f"Web scan completion reported by the server after {elapsed_time:.0f} seconds")
+                    with self._lock:
+                        self._scan_progress = {
+                            "status": "completed",
+                            "message": "Scan completed successfully"
                         }
                     self._handle_scan_completion()
                     return
@@ -308,7 +383,7 @@ class WebScanManager:
                     # Continue checking
                     if self._shutting_down:
                         return
-                    timer = threading.Timer(30, check_completion)  # Check every 30 seconds
+                    timer = threading.Timer(self._poll_seconds(), check_completion)
                     timer.daemon = True
                     self._completion_check_timer = timer
                     timer.start()
@@ -317,8 +392,8 @@ class WebScanManager:
                 logger.error(f"Error during web scan completion check: {e}")
                 self._reset_scan_state()
 
-        # Start first check after 30 seconds
-        timer = threading.Timer(30, check_completion)
+        # First check after one poll interval
+        timer = threading.Timer(self._poll_seconds(), check_completion)
         timer.daemon = True
         self._completion_check_timer = timer
         timer.start()
@@ -361,6 +436,8 @@ class WebScanManager:
             self._current_server_type = None
             self._scan_start_time = None
             self._scan_progress = {}
+            self._scan_baseline = None
+            self._seen_scanning = False
             # Don't clear callbacks - they might be reused
 
     def shutdown(self):

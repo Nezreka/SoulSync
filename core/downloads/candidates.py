@@ -39,6 +39,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from core.downloads.track_metadata_backfill import hydrate_download_metadata
+from core.imports.context import has_real_album_name
 from core.download_plugins.release_identity import (
     candidate_release_key, candidate_release_id, candidate_endpoint_id,
     dedupe_release_candidates, release_sources,
@@ -156,6 +157,9 @@ def _priority_sort_key(r):
     """Today's confidence-first key: never download a high-quality WRONG file."""
     return (
         getattr(r, 'confidence', 0) or 0,
+        # confidence caps at 1.0, so same-song copies tie; the album's own
+        # release goes first (#1866)
+        getattr(r, 'album_match', 0) or 0,
         getattr(r, 'quality_score', 0) or 0,
         getattr(r, 'upload_speed', 0) or 0,
         -(getattr(r, 'queue_length', 0) or 0),
@@ -940,10 +944,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                         else:
                             # Fall back to guessing based on clean data
                             is_album_context = (
-                                track.album and
-                                track.album.strip() and
-                                track.album != "Unknown Album" and
-                                track.album.lower() != track.name.lower()  # Album different from track
+                                has_real_album_name(track.album)
+                                and track.album.lower() != track.name.lower()  # Album different from track
                             )
                     else:
                         # Fallback to original data

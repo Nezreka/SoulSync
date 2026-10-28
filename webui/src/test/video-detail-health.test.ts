@@ -176,7 +176,7 @@ describe('youtube owned counts', () => {
       var ytFilter = { q: '', sort: 'newest', state: 'all', duration: 'all' };
       function ytProx(u) { return u || ''; }
     `;
-    const bodies = ['ytOwnedCount', 'ytEpisodeOf', 'ytPlaylistToShow', 'ytFlatSeason']
+    const bodies = ['ytOwnedCount', 'ytEpisodeOf', 'ytHiRes', 'ytPlaylistToShow', 'ytFlatSeason']
       .map((n) => extractFunction(n, SRC))
       .join('\n');
     // eslint-disable-next-line @typescript-eslint/no-implied-eval

@@ -357,11 +357,15 @@ export function useSourceVertical(
         const response = await startSourceDiscovery(config, sourceId, body);
         if (response.error) {
           // The beatport/LB pattern: revert to fresh on a failed start (4700, 11304).
+          // and say why, or the modal just quietly goes back to Start Identifying
           patch(sourceId, (s) => ({ ...s, phase: 'fresh' }));
+          window.showToast?.(`Couldn't start identifying: ${response.error}`, 'error');
           return;
         }
-      } catch {
+      } catch (error) {
         patch(sourceId, (s) => ({ ...s, phase: 'fresh' }));
+        const message = error instanceof Error ? error.message : 'unknown error';
+        window.showToast?.(`Couldn't start identifying: ${message}`, 'error');
         return;
       }
       startDiscoveryPoll(sourceId);

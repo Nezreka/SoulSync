@@ -609,6 +609,17 @@ _ADDED_COLUMNS = (
     # instead of guessing from the outside.
     ("lib2_artists", "soul_id_path",
      "ALTER TABLE lib2_artists ADD COLUMN soul_id_path TEXT"),
+    # Upstream kinded_v2 (9b21ba217): the cutover parks every pre-v2 id here so
+    # a peer can bridge old -> new, then re-mints. It refuses to reset ids it
+    # has nowhere to park.
+    ("lib2_artists", "soul_id_legacy",
+     "ALTER TABLE lib2_artists ADD COLUMN soul_id_legacy TEXT"),
+    ("lib2_albums", "soul_id_legacy",
+     "ALTER TABLE lib2_albums ADD COLUMN soul_id_legacy TEXT"),
+    ("lib2_tracks", "soul_id_legacy",
+     "ALTER TABLE lib2_tracks ADD COLUMN soul_id_legacy TEXT"),
+    ("lib2_tracks", "album_soul_id_legacy",
+     "ALTER TABLE lib2_tracks ADD COLUMN album_soul_id_legacy TEXT"),
     # A release and a release GROUP are different MusicBrainz entities with
     # different ids, and lib2_albums.musicbrainz_id had been asked to hold
     # both: the importer and the embedded-tag reconcile write the concrete
@@ -621,6 +632,10 @@ _ADDED_COLUMNS = (
     # the release column on its next run.
     ("lib2_albums", "musicbrainz_release_group_id",
      "ALTER TABLE lib2_albums ADD COLUMN musicbrainz_release_group_id TEXT"),
+    # When the MusicBrainz worker last asked which group an album's release
+    # belongs to (upstream 9c06ffd5b); paces its retries to retry_days.
+    ("lib2_albums", "musicbrainz_release_group_attempted",
+     "ALTER TABLE lib2_albums ADD COLUMN musicbrainz_release_group_attempted TIMESTAMP"),
     # The MusicBrainz recording comment ("acoustic", "live") that tells two
     # versions of a song apart (upstream 5170059ed / #1536). It belongs to one
     # recording: trg_lib2_tracks_recording_comment clears it whenever
@@ -1086,6 +1101,25 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         """)
     except Exception as e:  # noqa: BLE001
         logger.debug("recording comment trigger skipped: %s", e)
+    # A release group never outlives a CHANGED release id (upstream 9c06ffd5b):
+    # a retag or re-match must not keep the old edition's group. A first
+    # release id keeps the group mb_reconcile already browsed for the album.
+    try:
+        cursor.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_lib2_albums_release_group_reset
+            AFTER UPDATE OF musicbrainz_id ON lib2_albums
+            FOR EACH ROW
+            WHEN COALESCE(OLD.musicbrainz_id, '') <> ''
+             AND LOWER(OLD.musicbrainz_id) <> LOWER(COALESCE(NEW.musicbrainz_id, ''))
+             AND NEW.musicbrainz_release_group_id IS OLD.musicbrainz_release_group_id
+            BEGIN
+                UPDATE lib2_albums SET musicbrainz_release_group_id = NULL,
+                                       musicbrainz_release_group_attempted = NULL
+                 WHERE id = NEW.id;
+            END
+        """)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("release group trigger skipped: %s", e)
     _migrate_lib2_profiles_to_app_wide(cursor)
     _migrate_quality_profile_constraints(cursor)
     _backfill_quality_profile_provenance(cursor)

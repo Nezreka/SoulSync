@@ -24,7 +24,8 @@ beforeEach(() => {
 });
 it('uses one category bar instead of a second sidebar', () => {
   expect(document.querySelectorAll('.stg-category-nav .stg-tabbar')).toHaveLength(1);
-  expect(document.querySelectorAll('.stg-category-nav .stg-tab')).toHaveLength(8);
+  // #1822: Discovery got its own tab, everything else regrouped into the eight
+  expect(document.querySelectorAll('.stg-category-nav .stg-tab')).toHaveLength(9);
   expect(document.querySelector('.stg-nav-rail')).toBeNull();
 });
 it('search leaves mounted forms and their visibility unchanged until selecting a result', () => {

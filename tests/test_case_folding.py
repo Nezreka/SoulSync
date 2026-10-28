@@ -196,3 +196,23 @@ def test_a_directory_created_mid_run_is_seen(root):
     resolved = resolve_existing_case_dir(root, 'Artist/Album')
 
     assert resolved == os.path.join(root, 'artist', 'Album')
+
+
+# ── '&' vs 'and' (TheHomeGuy) ────────────────────────────────────────────────
+
+def test_ampersand_and_and_are_the_same_folder(root):
+    _mk(root, 'Huey Lewis & The News')
+    got = resolve_existing_case_dir(root, 'Huey Lewis and the News/Sports')
+    assert got == os.path.join(root, 'Huey Lewis & The News', 'Sports')
+
+
+def test_and_on_disk_takes_an_ampersand_ask(root):
+    _mk(root, 'Grandmaster Flash And The Furious Five')
+    got = resolve_existing_case_dir(root, 'Grandmaster Flash & The Furious Five')
+    assert got == os.path.join(root, 'Grandmaster Flash And The Furious Five')
+
+
+def test_a_word_containing_and_is_not_folded(root):
+    _mk(root, 'Brand New')
+    got = resolve_existing_case_dir(root, 'Br&ew')
+    assert got == os.path.join(root, 'Br&ew')

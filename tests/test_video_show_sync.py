@@ -235,6 +235,6 @@ def test_endpoint_and_admin_gate():
 def test_ui_button_and_handler():
     js = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(
         encoding="utf-8", errors="replace")
-    assert 'data-vd-act="sync-show"' in js
+    assert "moreItem('sync-show'" in js
     assert "function syncShowNow" in js
     assert "/sync'" in js

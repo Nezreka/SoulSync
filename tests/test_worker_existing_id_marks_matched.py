@@ -245,3 +245,36 @@ class TestMusicBrainzWorkerMarksMatched:
         fake_service.update_artist_mbid.assert_called_once_with(
             artist_id, "mb-uuid", "matched"
         )
+
+
+# ---------------------------------------------------------------------------
+# #1889: the match-status backfill ran 17 full-table UPDATEs on every boot.
+# Library v2 records provider outcomes in lib2_provider_attempts and has no
+# such backfill; upstream's TestBackfillRunsOnce tests the legacy-only
+# _backfill_match_status_once, so the port pins that no boot issues one.
+# ---------------------------------------------------------------------------
+
+def test_a_boot_runs_no_match_status_backfill(tmp_path, monkeypatch):
+    import sqlite3
+
+    import database.music_database as mdb
+    from database import connection_pool
+
+    path = str(tmp_path / "boot.db")
+    seen = []
+    real_connect = sqlite3.connect
+
+    def traced(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        conn.set_trace_callback(seen.append)
+        return conn
+
+    monkeypatch.setattr(sqlite3, "connect", traced)
+    try:
+        for _boot in range(2):
+            monkeypatch.setattr(mdb, "_database_initialized_paths", set())
+            mdb.MusicDatabase(path)
+    finally:
+        connection_pool.discard(path)
+    assert seen
+    assert not [s for s in seen if s.lstrip().upper().startswith("UPDATE") and "_match_status" in s]

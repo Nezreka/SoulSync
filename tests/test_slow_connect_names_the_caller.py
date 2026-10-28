@@ -21,6 +21,8 @@ def test_slow_connect_warning_names_the_caller_and_thread(tmp_path, monkeypatch)
     monkeypatch.setattr(mdb.time, "perf_counter", lambda: next(clock))
     monkeypatch.setattr(mdb.sqlite3, "connect", lambda *a, **k: real_connect(*a, **k))
 
+    mdb.connection_pool.discard(db.database_path)   # a reused connection opens nothing, so nothing is slow
+
     def the_job_that_waited():
         db._get_connection().close()
 

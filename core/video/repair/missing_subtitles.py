@@ -17,8 +17,10 @@ Either way, subtitles already there get recorded as 'have'. In dry run
 nothing is written at all.
 
 Findings key on the title + a hash of its missing set, so a changed set
-replaces the stale pending finding and a handled one never comes back; a
-complete scan retires pending findings whose gaps got filled elsewhere.
+replaces the stale pending finding; a dismissed one never comes back and
+a resolved one only after the recurrence grace window, if the set is
+still missing (see VideoDatabase.repair_create_finding). A complete scan
+retires pending findings whose gaps got filled elsewhere.
 """
 
 from __future__ import annotations

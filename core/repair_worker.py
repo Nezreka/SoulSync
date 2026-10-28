@@ -41,6 +41,38 @@ _CHANGE_SYNC_MAX_ATTEMPTS = 3
 #: A claim older than this is treated as abandoned (process died mid-fix).
 _FIX_CLAIM_TIMEOUT_MINUTES = 30
 
+# Consecutive transient LRCLib failures after which a background bulk
+# fix stops early instead of grinding through a whole lyrics backlog
+# against a service that is refusing (#1879; mirrors the Lyrics Filler
+# scan's MAX_CONSECUTIVE_UNKNOWN).
+MAX_CONSECUTIVE_LRCLIB_TRANSIENT = 5
+
+_LRCLIB_TRANSIENT_MARKERS = ('rate-limited', 'server error', 'timed out',
+                             'Could not reach', 'busy (', 'not available')
+
+
+def _is_lrclib_transient_error(error) -> bool:
+    """True when a fix error is an LRCLib TRANSIENT failure reason (the
+    tri-state reasons core.lyrics_client produces: rate-limited / server
+    error / timeout / unreachable / busy), as opposed to a definitive
+    answer like "no longer available"."""
+    if not isinstance(error, str) or 'LRCLib' not in error:
+        return False
+    return any(marker in error for marker in _LRCLIB_TRANSIENT_MARKERS)
+
+
+def _is_lrclib_definitive_error(error) -> bool:
+    """True when a fix error is a DEFINITIVE LRCLib answer: the service
+    responded — the lyrics are absent ("no longer available") or the
+    query was permanently rejected — as opposed to a transient failure
+    or a purely local error (missing file, write failure), which says
+    nothing about LRCLib at all."""
+    if not isinstance(error, str):
+        return False
+    if 'no longer available' in error:
+        return True
+    return error.startswith('LRCLib') and not _is_lrclib_transient_error(error)
+
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 # How long a RESOLVED finding keeps suppressing its own recurrence. See
@@ -244,7 +276,52 @@ def _album_fill_artist_names_match(expected_artist: str, candidate_artist: str) 
     Auto-fill moves/copies files into an existing album, so artist identity
     must outrank album/title similarity. Use the alias-aware matcher when it
     is available, then fall back to conservative normalized similarity.
+
+    The alias matcher splits only the CANDIDATE side of a combined credit,
+    so a duo album artist ("John Lennon & Yoko Ono") never matched its own
+    members' solo credits. Split the expected side too and retry each
+    member: a track credited to one member of the credited duo is that
+    album artist's track.
+
+    Split members match on EXACT normalized equality only, never the
+    fuzzy 0.82: a member name is a weaker claim than the full credit,
+    so a near-name must not carry it — a duo album wrongly matched to
+    a member's solo release must not pass the wrong-release check
+    because a member's name is close to the track's artist ("Beyond"
+    the band vs "Beyonder"). Exactness cannot help when the names are
+    literally identical (a track by an artist actually called
+    "Beyond" on an Above & Beyond album reads as the album's own);
+    that collision is indistinguishable from a real member credit.
     """
+    if _album_fill_artist_names_match_direct(expected_artist, candidate_artist):
+        return True
+    try:
+        from core.matching.artist_aliases import split_artist_credit
+        parts = split_artist_credit(expected_artist or '')
+    except Exception:
+        parts = []
+    expected_norm = (expected_artist or '').strip().lower()
+    candidate_norm = _album_fill_normalized_name(candidate_artist)
+    if not candidate_norm:
+        return False
+    return any(
+        len(part) >= 2 and part.lower() != expected_norm
+        and _album_fill_normalized_name(part) == candidate_norm
+        for part in parts)
+
+
+def _album_fill_normalized_name(name: str) -> str:
+    """The matching engine's cleaned form of a name, for exact compares."""
+    try:
+        from core.matching_engine import MusicMatchingEngine
+        return MusicMatchingEngine().clean_artist(name or '')
+    except Exception:
+        return (name or '').strip().lower()
+
+
+def _album_fill_artist_names_match_direct(expected_artist: str, candidate_artist: str) -> bool:
+    """One expected name against one candidate credit (which the alias
+    matcher itself splits). See `_album_fill_artist_names_match`."""
     expected = (expected_artist or '').strip()
     candidate = (candidate_artist or '').strip()
     if not expected or not candidate:
@@ -294,6 +371,61 @@ def _album_fill_target_artist_allows_track(album_artist: str, track_artists: Lis
         return True
 
     return any(_album_fill_artist_names_match(album_artist, artist) for artist in source_artists)
+
+
+def _album_fill_track_is_other_artist(album_artist: str, track_artists: List[str]) -> bool:
+    """Return whether a source track is credited to someone other than the
+    album artist.
+
+    This is the strict per-track test the WISHLIST fallback uses, unlike
+    ``_album_fill_target_artist_allows_track`` above: no Various
+    Artists / soundtrack blanket (every credited track on such an album
+    is someone else's track), and no album-level tracklist exemption (a
+    guest credit somewhere on the album does not make every other
+    artist's track the album artist's).
+
+    Fail-closed edges, all verified review shapes:
+
+    - No usable album artist (empty, or the providers' "Unknown Artist"
+      placeholder): no track can be shown to be theirs, so every
+      credited track counts as other. Two placeholders matching each
+      other is not evidence of identity.
+    - No credited track artists on a normal album: NOT other-artist —
+      thin metadata must not drop what may be the album artist's own
+      track, and the wishlist payload falls back to the album artist
+      for such tracks anyway. On a compilation/soundtrack album the
+      same empty credit proves nothing either way, so it counts as
+      other there rather than being wishlisted under the blanket label.
+    """
+    album_artist = (album_artist or '').strip()
+    album_norm = album_artist.lower()
+    compilation_album = album_norm in {'various artists', 'various', 'soundtrack'}
+
+    if not album_artist or album_norm == 'unknown artist':
+        # Checked before the empty-credit case on purpose: a track with
+        # no credit on an album with no usable artist would be
+        # wishlisted under the placeholder name itself.
+        return True
+
+    source_artists = [str(a).strip() for a in (track_artists or []) if str(a or '').strip()]
+    if not source_artists:
+        return compilation_album
+
+    if compilation_album and any(a.lower() in {'various artists', 'various', 'soundtrack'}
+                                 for a in source_artists):
+        # A track credited to the blanket label itself, on an album
+        # credited to the same blanket, is the album's own track.
+        return False
+
+    # "X feat. Y" / "X (feat. Y)" is still X's track. the credit splitter
+    # breaks band names that carry an "&" ("Above & Beyond feat. Zoe"
+    # splits into Above, Beyond, Zoe), so also compare the feat-stripped
+    # credit against the album artist exactly.
+    album_clean = _album_fill_normalized_name(album_artist)
+    return not any(
+        _album_fill_artist_names_match(album_artist, artist)
+        or (album_clean and _album_fill_normalized_name(artist) == album_clean)
+        for artist in source_artists)
 
 
 def _split_acoustid_credit(credit: str) -> List[str]:
@@ -722,20 +854,22 @@ class RepairWorker:
                 logger.info("Removed queued job %s from the run queue", job_id)
         return {'stopped': was_running or dequeued, 'was_running': was_running, 'dequeued': dequeued}
 
-    def set_job_enabled(self, job_id: str, enabled: bool):
-        """Enable or disable a specific job."""
+    def set_job_enabled(self, job_id: str, enabled: bool, bridge: bool = True):
+        """Enable or disable a specific job. bridge=False when the automation
+        row was the one flipped and already holds the new state."""
         if self._config_manager:
             self._config_manager.set(f'repair.jobs.{job_id}.enabled', enabled)
         # #1289 item 12: bridge to the system automation row so the engine's
         # scheduler honors the toggle. The row's enabled flag is the source of
         # truth for scheduling; the legacy config remains for the worker's
         # respect_enabled check on manual/Run Now paths.
-        try:
-            from core.automation.migrate_repair_jobs import set_system_job_enabled
-            set_system_job_enabled(self.db, getattr(self, '_automation_engine', None),
-                                   job_id, enabled)
-        except Exception as e:
-            logger.debug("Could not bridge job toggle to automation for %s: %s", job_id, e)
+        if bridge:
+            try:
+                from core.automation.migrate_repair_jobs import set_system_job_enabled
+                set_system_job_enabled(self.db, getattr(self, '_automation_engine', None),
+                                       job_id, enabled)
+            except Exception as e:
+                logger.debug("Could not bridge job toggle to automation for %s: %s", job_id, e)
         # Turning a job OFF must also stop it if it's mid-run — otherwise the toggle
         # only affects the NEXT scheduled run and the current scan keeps going (#970).
         if not enabled:
@@ -847,41 +981,14 @@ class RepairWorker:
 
         Returns {job_id: {'automation_id': int, 'interval_hours': float,
         'next_run': str|None}}. Used by get_all_job_info to avoid N+1 queries.
+        the scan itself is shared with the video side (system_job_schedules).
         """
-        result = {}
         try:
-            from core.automation.migrate_repair_jobs import _SYSTEM_OWNER
-            import json
-            automations = self.db.get_automations(1)
-            for a in automations or []:
-                if a.get("owned_by") != _SYSTEM_OWNER:
-                    continue
-                if a.get("action_type") != "run_repair_job":
-                    continue
-                try:
-                    cfg = a.get("action_config") or "{}"
-                    if isinstance(cfg, str):
-                        cfg = json.loads(cfg)
-                    job_id = cfg.get("job_id")
-                    if not job_id or job_id in result:
-                        continue  # Skip duplicates; migration logs them.
-                    # Extract interval from trigger_config if it's a schedule trigger.
-                    interval_hours = None
-                    if a.get("trigger_type") == "schedule":
-                        tcfg = a.get("trigger_config") or "{}"
-                        if isinstance(tcfg, str):
-                            tcfg = json.loads(tcfg)
-                        interval_hours = tcfg.get("interval")
-                    result[job_id] = {
-                        "automation_id": a.get("id"),
-                        "interval_hours": interval_hours,
-                        "next_run": a.get("next_run"),
-                    }
-                except Exception:
-                    continue
+            from core.automation.migrate_repair_jobs import system_job_schedules
         except Exception as e:
             logger.debug("Could not scan system automations: %s", e)
-        return result
+            return {}
+        return system_job_schedules(self.db, "run_repair_job", 1)
 
     def _get_pending_count_by_job(self) -> dict:
         """Return ``{job_id: pending_count}`` for every job that has
@@ -2491,12 +2598,20 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-    def fix_finding(self, finding_id: int, fix_action: str = None) -> dict:
+    def fix_finding(self, finding_id: int, fix_action: str = None, explicit: bool = False) -> dict:
         """Execute the appropriate fix action for a finding, then mark it resolved.
 
         Args:
             finding_id: ID of the finding to fix
             fix_action: Optional action override (e.g. 'staging' or 'delete' for orphan files)
+            explicit: True ONLY for a fix of the one finding in front of
+                the user (their click on that finding's own Fix button,
+                declared by the single-fix API route). It defaults to
+                False on purpose: the incomplete-album fixer relies on it
+                before wishlisting other artists' tracks from a
+                compilation or soundtrack, so any caller that forgets
+                the flag — a new bulk loop, an automation — gets the
+                gated behavior, never the explicit one.
         """
         # Refresh transfer folder from config before each fix — same logic as _run_next_job
         if self._config_manager:
@@ -2550,6 +2665,12 @@ class RepairWorker:
             # Pass fix_action through to handler via details
             if fix_action:
                 details['_fix_action'] = fix_action
+
+            # How this fix was asked for, stamped fresh on every run: the
+            # flag lives only in this in-memory copy of the details, never
+            # in the stored finding, so a finding row cannot carry an
+            # explicit request from one run into a later bulk run.
+            details['_explicit_single_fix'] = bool(explicit)
 
             # Dispatch fix by finding type
             result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
@@ -4991,17 +5112,37 @@ class RepairWorker:
         try:
             from core.lyrics_client import lyrics_client
             duration = details.get('duration')
-            ok = lyrics_client.create_lrc_file(
-                resolved,
-                details.get('track_title') or '',
-                details.get('artist') or '',
-                album_name=details.get('album_title'),
-                duration_seconds=int(duration) if duration else None,
-            )
+            # Prefer the detailed variant (#1879): it distinguishes a
+            # definitive "LRCLib has no lyrics" from a transient failure
+            # (429/503/timeout), whose real reason is surfaced instead of
+            # the old misleading "no longer available?" text. The finding
+            # stays pending either way, so a later run can retry.
+            detailed = getattr(lyrics_client, 'create_lrc_file_detailed', None)
+            if callable(detailed):
+                ok, fetch_reason = detailed(
+                    resolved,
+                    details.get('track_title') or '',
+                    details.get('artist') or '',
+                    album_name=details.get('album_title'),
+                    duration_seconds=int(duration) if duration else None,
+                )
+            else:
+                ok = lyrics_client.create_lrc_file(
+                    resolved,
+                    details.get('track_title') or '',
+                    details.get('artist') or '',
+                    album_name=details.get('album_title'),
+                    duration_seconds=int(duration) if duration else None,
+                )
+                fetch_reason = None
         except Exception as e:
             logger.error("Lyrics fix failed for %s: %s", os.path.basename(raw_path), e)
             return {'success': False, 'error': str(e)}
         if not ok:
+            if fetch_reason:
+                # Transient/permanent fetch failure — report the real
+                # reason (e.g. "LRCLib rate-limited (429) — retry later").
+                return {'success': False, 'error': fetch_reason}
             # Lyrics vanished between scan and apply (rare) — report, don't crash.
             return {'success': False, 'error': 'Could not fetch lyrics (no longer available?)'}
         if native_track_id is not None:
@@ -6303,6 +6444,8 @@ class RepairWorker:
 
             fixed = 0
             failed = 0
+            skipped = 0
+            other_artist_skipped = 0
             errors = []
             for fid in ids_to_fix:
                 try:
@@ -6315,18 +6458,28 @@ class RepairWorker:
                     # The background twin (_run_bulk_fix) has always had this
                     # guard; this loop never got it.
                     result = {'success': False, 'error': str(e)}
+                # Tracks the album gate held back, counted even on a
+                # successful finding so a partial gate is never silent.
+                other_artist_skipped += result.get('other_artist_skipped', 0) or 0
                 if result.get('success'):
                     fixed += 1
+                elif result.get('skipped_by_design'):
+                    # Held back on purpose (e.g. an album whose only
+                    # missing tracks are other artists') — pending with
+                    # its reason on the row, but not a failure.
+                    skipped += 1
                 else:
                     error_msg = result.get('error', 'unknown error')
                     logger.warning("Fix failed for finding #%s: %s", fid, error_msg)
                     errors.append({'id': fid, 'error': error_msg})
                     failed += 1
 
-            return {'fixed': fixed, 'failed': failed, 'total': len(ids_to_fix), 'errors': errors}
+            return {'fixed': fixed, 'failed': failed, 'skipped': skipped,
+                    'other_artist_skipped': other_artist_skipped,
+                    'total': len(ids_to_fix), 'errors': errors}
         except Exception as e:
             logger.error("Error bulk fixing findings: %s", e, exc_info=True)
-            return {'fixed': 0, 'failed': 0, 'total': 0, 'error': str(e)}
+            return {'fixed': 0, 'failed': 0, 'skipped': 0, 'total': 0, 'error': str(e)}
 
     # ------------------------------------------------------------------
     # Background bulk fix — "Fix All" at library scale
@@ -6398,12 +6551,22 @@ class RepairWorker:
                 'done': 0,
                 'fixed': 0,
                 'failed': 0,
+                # Findings held back by design (the album gate), and how
+                # many tracks it held back across the whole run — a
+                # partial gate on a resolved finding counts here too, so
+                # it is never silent.
+                'skipped': 0,
+                'other_artist_skipped': 0,
                 'stopped': False,
                 'job_id': job_id,
                 'finding_type': finding_type,
                 'safe_only': bool(safe_only),
                 'errors': [],
                 'error': None,
+                # Run-level note (e.g. the LRCLib circuit breaker skipped
+                # the remaining lyrics findings in a mixed run) — shown
+                # in the completion toast when there is no stop error.
+                'note': None,
                 # Per-type tallies so a mixed run can say WHAT it is fixing
                 # ("312 cover art, 40 lyrics") instead of one opaque number.
                 'per_type': {},
@@ -6480,6 +6643,15 @@ class RepairWorker:
     def _run_bulk_fix(self, ids: List[int], fix_action: str = None):
         state = self._bulk_fix_state
         types = self._types_for_findings(ids)
+        # LRCLib circuit breaker (#1879): the Lyrics Filler scan stops
+        # after 5 consecutive transient unknowns; a Fix All over
+        # thousands of lyrics findings must do the same instead of
+        # grinding through every one against a service that is already
+        # refusing (each failure is honestly reported, but at library
+        # scale the run would take hours and record thousands of
+        # "failed" fixes for what is one outage).
+        lrclib_transient_streak = 0
+        lrclib_tripped = False
         try:
             for fid in ids:
                 if self._bulk_fix_stop_event.is_set() or self.should_stop:
@@ -6487,13 +6659,80 @@ class RepairWorker:
                     logger.info("Background bulk fix stopped at %d/%d",
                                 state['done'], state['total'])
                     break
+                if lrclib_tripped and types.get(fid) == 'missing_lyrics':
+                    # Breaker tripped earlier in this run: skip the
+                    # remaining lyrics findings (they stay pending) but
+                    # let other finding types finish — they have nothing
+                    # to do with LRCLib.
+                    state['done'] += 1
+                    continue
                 try:
                     result = self.fix_finding(fid, fix_action=fix_action)
                 except Exception as e:  # fix_finding shouldn't raise, but never kill the run
                     result = {'success': False, 'error': str(e)}
                 state['done'] += 1
                 slug = types.get(fid)
-                if slug:
+                # Breaker bookkeeping only — the tallies below run as
+                # usual for this finding; the loop breaks afterwards
+                # only when nothing but lyrics findings remains. The
+                # streak counts LYRICS findings only: other types neither
+                # increment nor reset it (they say nothing about LRCLib),
+                # while a lyrics success or a definitive lyrics failure
+                # (LRCLib answered) resets it.
+                trip_lrclib_breaker = False
+                if slug == 'missing_lyrics':
+                    if result.get('success'):
+                        lrclib_transient_streak = 0
+                    elif _is_lrclib_transient_error(result.get('error')):
+                        lrclib_transient_streak += 1
+                        if lrclib_transient_streak >= MAX_CONSECUTIVE_LRCLIB_TRANSIENT \
+                                and not lrclib_tripped:
+                            lrclib_tripped = True
+                            trip_lrclib_breaker = True
+                            breaker_base = (
+                                f'LRCLib stopped answering reliably after '
+                                f'{lrclib_transient_streak} consecutive failed lyrics '
+                                f'fixes ({result.get("error")}).')
+                            remaining = ids[state['done']:]
+                            skipped_lyrics = sum(
+                                1 for r in remaining
+                                if types.get(r) == 'missing_lyrics')
+                            if remaining and skipped_lyrics == len(remaining):
+                                # Nothing left but lyrics — stop the run.
+                                state['stopped'] = True
+                                state['error'] = (
+                                    breaker_base + ' Bulk fix stopped early; the '
+                                    'remaining findings stay pending and can be '
+                                    'retried later.')
+                                logger.warning("Background bulk fix stopping early: %s",
+                                               state['error'])
+                            elif remaining:
+                                # Mixed run: skip only the lyrics rest
+                                # (which may be none, if the trip landed
+                                # on the last lyrics finding in the run).
+                                state['note'] = breaker_base + (
+                                    f' {skipped_lyrics} remaining lyrics '
+                                    f'finding(s) skipped — they stay pending '
+                                    f'and can be retried later.'
+                                    if skipped_lyrics else '')
+                                logger.warning("Background bulk fix: %s", state['note'])
+                            # No remaining findings: a completed run —
+                            # no stop claim at all.
+                    elif _is_lrclib_definitive_error(result.get('error')):
+                        # LRCLib answered definitively — reset.
+                        lrclib_transient_streak = 0
+                    # Any other failure (a purely local error: missing
+                    # file, write failure) says nothing about LRCLib —
+                    # it neither increments nor resets the streak.
+                # Tracks the album gate held back, counted even on a
+                # successful finding so a partial gate is never silent.
+                # .get with a default: some test harnesses seed a partial
+                # state dict that predates these keys.
+                state['other_artist_skipped'] = (
+                    state.get('other_artist_skipped', 0)
+                    + (result.get('other_artist_skipped', 0) or 0))
+                skipped_by_design = bool(result.get('skipped_by_design'))
+                if slug and not skipped_by_design:
                     tally = state['per_type'].get(slug)
                     if tally is None:
                         # Seeded whole, never key-by-key: get_bulk_fix_status
@@ -6504,16 +6743,32 @@ class RepairWorker:
                     tally['fixed' if result.get('success') else 'failed'] += 1
                 if result.get('success'):
                     state['fixed'] += 1
+                elif skipped_by_design:
+                    # Held back on purpose — pending with its reason on
+                    # the row, tallied apart so a Fix All does not report
+                    # it as a failure on every run forever.
+                    state['skipped'] = state.get('skipped', 0) + 1
                 else:
                     state['failed'] += 1
                     error_msg = result.get('error', 'unknown error')
                     logger.warning("Bulk fix failed for finding #%s: %s", fid, error_msg)
                     if len(state['errors']) < 20:
                         state['errors'].append({'id': fid, 'error': error_msg})
+                if trip_lrclib_breaker and state['stopped']:
+                    break
         except Exception as e:
             logger.error("Background bulk fix crashed: %s", e, exc_info=True)
             state['error'] = str(e)
         finally:
+            if state.get('other_artist_skipped'):
+                # An album that otherwise fixed resolves its finding, so
+                # "fix it on its own" needs the reopen step for those;
+                # a fully gated album is still pending and needs neither.
+                gate_note = (
+                    f"{state['other_artist_skipped']} track(s) by other artists were not "
+                    f"added to the wishlist. To add them, fix the album on its own "
+                    f"(reopen its finding first if it resolved).")
+                state['note'] = f"{state['note']} {gate_note}" if state.get('note') else gate_note
             # Release the thread reference BEFORE clearing the running flag.
             #
             # start_bulk_fix's single-flight guard asks `_bulk_fix_thread

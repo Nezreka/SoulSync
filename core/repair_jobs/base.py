@@ -20,6 +20,13 @@ DELETED_QUARANTINE_DIRNAME = '.deleted'
 LEGACY_DELETED_DIRNAME = 'deleted'
 
 
+def _id_sort_key(value: Any):
+    """The order SQLite's ``ORDER BY id`` gives: integers before text."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return (0, value, '')
+    return (1, 0, str(value))
+
+
 def deleted_quarantine_root(transfer_folder: str) -> str:
     """The quarantine folder under ``transfer_folder`` — always the hidden
     spelling, migrating a legacy bare ``deleted`` folder when one exists.
@@ -531,12 +538,26 @@ class RepairJob(ABC):
         except Exception as exc:  # noqa: BLE001 - a broken store starts at the top
             logger.warning("[%s] could not read checkpoint: %s", self.job_id, exc)
             return 0
-        if not isinstance(saved, dict) or saved.get('scan') != scan_key:
+        if not isinstance(saved, dict):
+            return 0
+        if saved.get('scan') != scan_key:
+            logger.info("[%s] starting at the top, the scan settings changed", self.job_id)
             return 0
         keys = [str(i) for i in ids]
         if str(saved.get('id')) in keys:
             index = keys.index(str(saved.get('id'))) + 1
             return index if index < len(keys) else 0
+        # upstream #1857: the item is gone (deleted, merged). Starting over threw
+        # away the whole pass; with ids in ascending order, carry on from the
+        # first one after it -- the one this pass would have reached next.
+        order = [_id_sort_key(i) for i in ids]
+        if order == sorted(order):
+            gone = _id_sort_key(saved.get('id'))
+            for index, key in enumerate(order):
+                if key > gone:
+                    logger.info("[%s] checkpoint %s is gone, resuming at item %d",
+                                self.job_id, saved.get('id'), index + 1)
+                    return index
         return 0
 
     def save_checkpoint(self, context: JobContext, last_id: Any, scan_key: str = '') -> None:

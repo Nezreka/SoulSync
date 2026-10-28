@@ -746,11 +746,6 @@ button.stepItem:hover {
   flex-grow: 1;
 }
 
-.mono {
-  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
-  font-size: 13px;
-}
-
 .pinInput {
   width: 180px;
   letter-spacing: 0.4em;

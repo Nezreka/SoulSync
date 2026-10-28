@@ -13,6 +13,7 @@ import {
   filterArtists,
   formatArtistCount,
   formatCountdown,
+  formatSince,
   formatRelativeScanTime,
   formatTimeAgo,
   primaryArtistId,
@@ -365,5 +366,28 @@ describe('auto-download preference', () => {
     expect(describeAutoDownload(0, true)).toContain('this artist');
     expect(describeAutoDownload(null, false)).toContain('OFF');
     expect(describeAutoDownload(null, true)).toContain('ON');
+  });
+});
+
+describe('formatSince', () => {
+  const now = Date.parse('2026-10-24T12:00:00Z');
+
+  it('reads a bare db stamp as utc', () => {
+    // 11:00 utc is an hour ago whatever the viewer's zone
+    expect(formatSince('2026-10-24 11:00:00', now)).toBe('today');
+    expect(formatSince('2026-10-23 06:00:00', now)).toBe('yesterday');
+  });
+
+  it('coarsens as it gets older', () => {
+    expect(formatSince('2026-10-19T12:00:00Z', now)).toBe('5 days ago');
+    expect(formatSince('2026-09-26T12:00:00Z', now)).toBe('4 weeks ago');
+    expect(formatSince('2026-05-24T12:00:00Z', now)).toBe('5 months ago');
+    expect(formatSince('2025-10-01T12:00:00Z', now)).toBe('a year ago');
+    expect(formatSince('2023-10-01T12:00:00Z', now)).toBe('3 years ago');
+  });
+
+  it('is empty for nothing usable', () => {
+    expect(formatSince(null, now)).toBe('');
+    expect(formatSince('not a date', now)).toBe('');
   });
 });

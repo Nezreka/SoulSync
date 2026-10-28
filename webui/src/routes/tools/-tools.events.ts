@@ -18,10 +18,15 @@ import { useShellEvent } from '@/platform/shell/use-shell-event';
 
 import type { MediaScanStatus, RepairJobProgress, RepairStatus } from './-tools.types';
 
+import { toolsMedia } from './-tools.media';
+
 /** `enrichment:repair` — worker state, findings count, master enabled flag. */
 export const REPAIR_STATUS_EVENT = 'ss:repair-status';
 /** `repair:progress` — a partial map of jobId → live frame. */
 export const REPAIR_PROGRESS_EVENT = 'ss:repair-progress';
+/** `video:repair:progress`, the video side's frame, same shape. core.js
+ *  re-broadcasts it since the video tools page went React. */
+export const VIDEO_REPAIR_PROGRESS_EVENT = 'ss:video-repair-progress';
 /** `scan:media` — pushed every 2s whether or not a scan is running. */
 export const MEDIA_SCAN_EVENT = 'ss:media-scan';
 
@@ -31,13 +36,18 @@ export interface MediaScanFrame {
 }
 
 export function useRepairStatusEvent(onFrame: (frame: RepairStatus) => void): void {
-  useShellEvent<RepairStatus>(REPAIR_STATUS_EVENT, onFrame);
+  // video has no status push (its worker has no dashboard orb). the music
+  // frame must not land on the video page, so it listens to nothing there and
+  // the hero polls instead.
+  useShellEvent<RepairStatus>(toolsMedia() === 'video' ? null : REPAIR_STATUS_EVENT, onFrame);
 }
 
 export function useRepairProgressEvent(
   onFrame: (frames: Record<string, RepairJobProgress>) => void,
 ): void {
-  useShellEvent<Record<string, RepairJobProgress>>(REPAIR_PROGRESS_EVENT, onFrame);
+  // the tools page keys its tree on the media, so this is fixed per mount
+  const name = toolsMedia() === 'video' ? VIDEO_REPAIR_PROGRESS_EVENT : REPAIR_PROGRESS_EVENT;
+  useShellEvent<Record<string, RepairJobProgress>>(name, onFrame);
 }
 
 export function useMediaScanEvent(onFrame: (frame: MediaScanFrame) => void): void {

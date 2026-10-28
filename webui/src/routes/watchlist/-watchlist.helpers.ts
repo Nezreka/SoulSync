@@ -164,6 +164,24 @@ export type PillSource = Pick<
   | 'include_compilations'
 >;
 
+/**
+ * Does this artist have its own release rules (#1822)? The server says so
+ * with follow_defaults; an older server doesn't, so then it's guessed from
+ * rules that differ from a fresh install's.
+ */
+export function hasCustomRules(artist: PillSource & { follow_defaults?: boolean }): boolean {
+  if (typeof artist.follow_defaults === 'boolean') return !artist.follow_defaults;
+  return (
+    !artist.include_albums ||
+    !artist.include_eps ||
+    !artist.include_singles ||
+    Boolean(artist.include_live) ||
+    Boolean(artist.include_remixes) ||
+    Boolean(artist.include_acoustic) ||
+    Boolean(artist.include_compilations)
+  );
+}
+
 export function artistPills(artist: PillSource): WatchlistPill[] {
   const pills: WatchlistPill[] = [];
   if (artist.include_albums) pills.push({ label: 'Albums', kind: 'active' });
@@ -298,4 +316,23 @@ export function describeAutoDownload(
   return globalDefault
     ? 'Following the global default, which is currently ON — new releases download.'
     : 'Following the global default, which is currently OFF — nothing downloads automatically.';
+}
+
+/**
+ * "today" / "yesterday" / "3 days ago" / "2 weeks ago" / "5 months ago" for a
+ * db stamp (bare stamps are utc). '' when absent or unparseable.
+ */
+export function formatSince(stamp: string | null | undefined, now = Date.now()): string {
+  if (!stamp) return '';
+  const bare = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(stamp);
+  const then = Date.parse(bare ? `${stamp.replace(' ', 'T')}Z` : stamp);
+  if (!Number.isFinite(then)) return '';
+  const days = Math.floor((now - then) / 86_400_000);
+  if (days < 1) return 'today';
+  if (days < 2) return 'yesterday';
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.floor(days / 7)} weeks ago`;
+  if (days < 365) return `${Math.floor(days / 30)} months ago`;
+  const years = Math.floor(days / 365);
+  return years === 1 ? 'a year ago' : `${years} years ago`;
 }

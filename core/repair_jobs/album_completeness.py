@@ -84,8 +84,15 @@ class AlbumCompletenessJob(RepairJob):
                                              inherit_monitoring=False)
                         loaded.add(album_id)
                     edition_id = default_edition_id(conn, album_id)
+                    # upstream b12666102/bfe5cd21c: a track credited only to other
+                    # artists (a compilation, a soundtrack) is filled only when this
+                    # album was asked for; a guest on the artist's own track is fine
                     tracks = conn.execute(
-                        'SELECT t.id,t.title,EXISTS(SELECT 1 FROM lib2_track_files f '
+                        'SELECT t.id,t.title,'
+                        'EXISTS(SELECT 1 FROM lib2_track_artists ta WHERE ta.track_id=t.id) AND NOT EXISTS('
+                        'SELECT 1 FROM lib2_track_artists ta JOIN lib2_albums al ON al.id=t.album_id '
+                        'WHERE ta.track_id=t.id AND ta.artist_id=al.primary_artist_id) AS other_artist,'
+                        'EXISTS(SELECT 1 FROM lib2_track_files f '
                         'WHERE f.track_id=t.id AND f.owner_profile_id IS ? '
                         "AND COALESCE(f.file_state,'active') NOT IN ('missing_confirmed','deleted') "
                         "AND COALESCE(f.import_status,'imported')='imported' "
@@ -102,6 +109,7 @@ class AlbumCompletenessJob(RepairJob):
                         result.skipped += 1
                         continue
                     missing = [int(t['id']) for t in tracks if not t['owned']
+                               and (target or not t['other_artist'])
                                and str(t['title'] or '').strip()
                                and not re.fullmatch(r'Track\s+\d+', t['title'], re.I)]
                     existing = {int(r[0]) for r in conn.execute(

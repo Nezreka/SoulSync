@@ -47,6 +47,8 @@ import {
 } from '../-tools.core';
 import { useRepairProgressEvent, useRepairStatusEvent } from '../-tools.events';
 import { takeFindingsFocus } from '../-tools.findings-focus';
+import { useToolsMedia } from '../-tools.media';
+import { fetchVideoLibraryStats } from '../-video-tools.api';
 import { FindingsSurface } from './findings-surface';
 import { Operations } from './operations';
 import { OperationsStudio } from './operations-studio';
@@ -54,6 +56,9 @@ import { RunHistory } from './run-history';
 
 /** The vanilla hides a finished job's progress panel 30s after it lands. */
 const PROGRESS_HIDE_MS = 30000;
+
+/** the video worker has no status push, so its badge and toggle poll. */
+const VIDEO_STATUS_POLL_MS = 15000;
 
 /** Optional-called: jsdom has no scrollIntoView, and a nav button is not
  *  worth failing a render over. */
@@ -180,6 +185,7 @@ const SECTIONS: Array<{ id: RepairSection; label: string; anchor: string }> = [
 ];
 
 export function MaintenanceHero() {
+  const media = useToolsMedia();
   const [enabled, setEnabled] = useState(false);
   // Driven by the same /api/repair/status payload as the master toggle. Hidden
   // at zero rather than showing a "0" pill, matching updateRepairStatusFromData.
@@ -191,6 +197,8 @@ export function MaintenanceHero() {
   /** Library size — the health score is per 1,000 tracks, so 200 orphans in a
    *  2,000-track library and in a 200,000-track one don't score the same. */
   const [trackCount, setTrackCount] = useState<number | null>(null);
+  /** what the library size is OF, for the health meta line. */
+  const [sizeLabel, setSizeLabel] = useState<string | null>(null);
   const [progress, setProgress] = useState<Record<string, RepairJobProgress>>({});
   const hideTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -252,13 +260,31 @@ export function MaintenanceHero() {
     });
     void loadJobs();
     void loadHistory();
-    void fetchDatabaseStats().then((stats) => {
-      if (stats) setTrackCount(stats.tracks || 0);
-    });
+    if (media === 'video') {
+      // a video library is movies AND episodes. both are things a finding can
+      // be about, so both count toward the per-1,000 health normalisation.
+      void fetchVideoLibraryStats().then((stats) => {
+        if (!stats) return;
+        setTrackCount(stats.movies + stats.episodes);
+        setSizeLabel(
+          `${stats.movies.toLocaleString()} movies · ${stats.episodes.toLocaleString()} episodes`,
+        );
+      });
+    } else {
+      void fetchDatabaseStats().then((stats) => {
+        if (stats) setTrackCount(stats.tracks || 0);
+      });
+    }
     void fetchRepairProgress().then((frames) => {
       if (Object.keys(frames).length) setProgress(frames);
     });
-  }, [loadHistory, loadJobs]);
+  }, [loadHistory, loadJobs, media]);
+
+  useEffect(() => {
+    if (media !== 'video') return;
+    const timer = setInterval(refreshStatus, VIDEO_STATUS_POLL_MS);
+    return () => clearInterval(timer);
+  }, [media, refreshStatus]);
 
   // A finished panel hides itself after 30s and the list reloads for fresh
   // stats — same contract as the vanilla's _repairProgressHideTimers.
@@ -391,7 +417,9 @@ export function MaintenanceHero() {
           <div>
             <h3 className="tools-maintenance-title">Library Maintenance</h3>
             <p className="tools-maintenance-subtitle">
-              Automated scanning, detection, and repair of library issues
+              {media === 'video'
+                ? 'Jobs that check your movies, shows and YouTube, and the findings they raise'
+                : 'Automated scanning, detection, and repair of library issues'}
             </p>
           </div>
         </div>
@@ -409,7 +437,7 @@ export function MaintenanceHero() {
               aria-selected={mode === 'simple'}
               className={`operations-mode-toggle-btn ${mode === 'simple' ? 'active' : ''}`}
               onClick={() => handleModeChange('simple')}
-              title="Switch to Simple Studio Mode (Recommended)"
+              title="The overview (recommended)"
             >
               <span className="operations-mode-toggle-icon">✦</span>
               <span>Simple Mode</span>
@@ -420,7 +448,7 @@ export function MaintenanceHero() {
               aria-selected={mode === 'advanced'}
               className={`operations-mode-toggle-btn ${mode === 'advanced' ? 'active' : ''}`}
               onClick={() => handleModeChange('advanced')}
-              title="Switch to Advanced Mode (30 Micro-Jobs & Granular Queries)"
+              title="Every finding and every job, one by one"
             >
               <span className="operations-mode-toggle-icon">⚙</span>
               <span>Advanced Mode</span>
@@ -449,6 +477,7 @@ export function MaintenanceHero() {
           progress={progress}
           runs={history || []}
           trackCount={trackCount}
+          sizeLabel={sizeLabel}
           onChanged={loadJobs}
           onShowFindings={showJobFindings}
           onSwitchToAdvanced={(_cat) => handleModeChange('advanced')}
@@ -488,9 +517,9 @@ export function MaintenanceHero() {
           jobs={jobs || []}
           runs={history || []}
           trackCount={trackCount}
+          sizeLabel={sizeLabel}
           focusJob={jobFocus}
           onStatusChanged={refreshStatus}
-          defaultView="albums"
         />
 
         <section className="repair-section" id="repair-section-operations">

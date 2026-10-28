@@ -25,6 +25,7 @@ from datetime import datetime
 
 from flask import request
 
+from core.soulid_worker import SOULID_VERSION
 from database.music_database import get_database
 
 from .auth import require_api_key
@@ -60,6 +61,30 @@ def _decode_cursor(raw: str) -> str:
         return base64.urlsafe_b64decode(raw.encode("ascii")).decode("utf-8")
     except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
         raise ValueError("cursor is not a valid base64 token") from exc
+
+
+def _install_soulid_version(db, entity):
+    """The soul_id scheme the ids in THIS entity's walk belong to.
+
+    SOULID_VERSION once that table's worker cutover has run on THIS
+    database, else None. The stamp must come from the DB's own cutover
+    flag, not the code constant: right after an upgrade the worker may
+    not have cut over yet, and stamping the new version over pre-v2 rows
+    would mislabel exactly the ids the field exists to disambiguate.
+    Per-entity, because the three cutovers are independent — one failed
+    table must not unstamp the two that landed."""
+    key = f"soulid_{entity}_version"
+    try:
+        conn = db._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT value FROM metadata WHERE key = ?", (key,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        return None
+    return SOULID_VERSION if row and row[0] == SOULID_VERSION else None
 
 
 def register_routes(bp):
@@ -117,6 +142,9 @@ def register_routes(bp):
 
         return api_success({
             "entity": entity,
+            # The soul_id scheme the ids in this walk belong to (None
+            # until this entity's kinded_v2 cutover has run).
+            "soulid_version": _install_soulid_version(db, entity),
             "items": items,
             "next_cursor": next_cursor,
             # The soul_unnamed_ filter is applied in SQL before the LIMIT, so a

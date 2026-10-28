@@ -53,6 +53,8 @@ describe('mirroredSourceIcon (571-572)', () => {
       'youtube',
       'beatport',
       'file',
+      // added past the vanilla: the newpipe import
+      'newpipe',
     ]);
   });
 });
@@ -300,6 +302,7 @@ describe('the detail modal tables are NOT the card tables', () => {
       deezer: '🎧',
       qobuz: '♫',
       soulsync: '♥',
+      newpipe: '▶',
     });
     // The card knows `file`; the detail modal does not (571 vs 1086).
     expect('file' in MIRRORED_DETAIL_SOURCE_ICONS).toBe(false);
@@ -321,6 +324,7 @@ describe('the detail modal tables are NOT the card tables', () => {
       deezer: 'Deezer',
       qobuz: 'Qobuz',
       soulsync: 'SoulSync',
+      newpipe: 'NewPipe',
     });
     expect(Object.keys(MIRRORED_DETAIL_SOURCE_LABELS)).toEqual(
       Object.keys(MIRRORED_DETAIL_SOURCE_ICONS),

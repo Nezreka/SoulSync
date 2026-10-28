@@ -32,6 +32,14 @@ def _hydrate_curated(deps: Any, curated_type_prefix: str, config: PlaylistConfig
     profile_id = _resolve_profile_id(deps)
     active_source = _resolve_active_source(deps)
 
+    # the full-row snapshot curation stores, the one discover shows. hydrating
+    # ids from the pool shrank the synced list every time the pool rotated
+    # (13 of 50 on a real install) while the page still showed all of them
+    from core.discovery.curated_full import read_curated_full
+    full_rows = read_curated_full(db, curated_type_prefix, active_source, profile_id)
+    if full_rows:
+        return [Track.from_dict(r) for r in full_rows if isinstance(r, dict)][:config.limit]
+
     # Try source-specific then generic, mirrors web_server endpoint behavior.
     curated_ids = (
         db.get_curated_playlist(f'{curated_type_prefix}_{active_source}', profile_id=profile_id)

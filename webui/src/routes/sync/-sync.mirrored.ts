@@ -97,6 +97,8 @@ export const MIRRORED_SOURCE_ICONS: Readonly<Record<string, string>> = {
   youtube: '▶',
   beatport: '🎛',
   file: '📄',
+  // newpipe playlists are youtube videos, so they wear youtube's mark
+  newpipe: '▶',
 };
 
 export function mirroredSourceIcon(source: string | null | undefined): string {
@@ -121,6 +123,7 @@ export const MIRRORED_DETAIL_SOURCE_ICONS: Readonly<Record<string, string>> = {
   deezer: '🎧',
   qobuz: '♫',
   soulsync: '♥',
+  newpipe: '▶',
 };
 
 /** Same keys; an unlisted source falls back to its RAW name (1089). */
@@ -133,6 +136,7 @@ export const MIRRORED_DETAIL_SOURCE_LABELS: Readonly<Record<string, string>> = {
   deezer: 'Deezer',
   qobuz: 'Qobuz',
   soulsync: 'SoulSync',
+  newpipe: 'NewPipe',
 };
 
 export function mirroredDetailSourceIcon(source: string): string {

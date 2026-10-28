@@ -131,8 +131,13 @@ def _vorbis_to_mp4(fields, dest, symbols):
         elif key in _LYRICS_KEYS:
             dest["\xa9lyr"] = [values[0]]
         elif key == "BPM":
-            if _int(values[0]):
-                dest["tmpo"] = [_int(values[0])]
+            # tmpo is an integer atom: store the same rounded stored
+            # form the tag writers use (#1871). The generic _int would
+            # drop a fractional text BPM ('128.7') entirely.
+            from core.tag_writer import _stored_bpm
+            stored_bpm = _stored_bpm(values[0])
+            if stored_bpm:
+                dest["tmpo"] = [stored_bpm]
         else:
             write_tag(dest, canonical.get(key, key), values, symbols)
 
