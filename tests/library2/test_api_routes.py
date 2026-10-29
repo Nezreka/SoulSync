@@ -4413,3 +4413,45 @@ def test_acquisition_search_loads_the_same_album_catalogue_before_search(api, mo
     created = client.post('/api/library/v2/acquisition/requests', json={'scope': scope, 'entity_id': ids['views'] if scope == 'release_group' else rid, 'idempotency_key': 'catalogue-before-search-' + scope}).get_json()
     client.post(f"/api/library/v2/acquisition/requests/{created['request']['id']}/search")
     assert calls == [ids['views']]
+
+
+def test_the_old_track_delete_route_keeps_the_file_by_default(api, tmp_path):
+    """dev's artist page and songs view call DELETE /api/library/track/<id>.
+    The PR had dropped it (405); it now removes the library record through
+    the journaled path and leaves the file on disk, like it always did."""
+    client, db, ids = api
+    path = tmp_path / "keep-me.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?",
+                     (str(path), ids["album_track"]))
+        conn.commit()
+    body = client.delete(f"/api/library/track/{ids['album_track']}").get_json()
+    assert body["success"] is True and body["file_deleted"] is False
+    assert path.exists()
+    with _conn(db) as conn:
+        assert conn.execute("SELECT file_state FROM lib2_track_files WHERE track_id=?",
+                            (ids["album_track"],)).fetchone()[0] == "deleted"
+
+
+def test_the_old_track_delete_route_can_delete_the_file(api, tmp_path, monkeypatch):
+    client, db, ids = api
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "gone.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?",
+                     (str(path), ids["album_track"]))
+        conn.commit()
+    monkeypatch.setattr("core.library2.file_delete._library_roots", lambda _config=None: [str(root)])
+    body = client.delete(f"/api/library/track/{ids['album_track']}?delete_file=true").get_json()
+    assert body["success"] is True and body["file_deleted"] is True
+    assert not path.exists()
+    # restorable, the way the v2 page's delete is
+    assert list((tmp_path / "Transfer" / ".deleted").rglob(path.name))
+
+
+def test_the_old_track_delete_route_answers_404_for_an_unknown_track(api):
+    client, _db, _ids = api
+    assert client.delete("/api/library/track/999999").status_code == 404

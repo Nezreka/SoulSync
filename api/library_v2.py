@@ -4234,6 +4234,67 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except FileDeleteError as exc:
             return _fail(str(exc), exc.status)
 
+    def _legacy_delete(entity: str, eid: int, track_id: Optional[int], delete_files: bool):
+        """The artist page's and the songs view's delete, on the journaled
+        ADR-05 path: remove the library record and keep the file, or move the
+        file to the deleted-files folder. A track is its album's files narrowed
+        to that track. Answers the old routes' response shape."""
+        from core.library2.file_delete import (
+            FileDeleteError, delete_entity_files, preview_entity_files,
+            remove_entity_file_records,
+        )
+        db = get_database()
+        file_ids = None
+        if track_id is not None:
+            with closing(db._get_connection()) as conn:
+                row = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?",
+                                   (int(track_id),)).fetchone()
+                if not row:
+                    return _fail("Track not found", 404)
+                eid = int(row[0])
+                file_ids = [int(r[0]) for r in conn.execute(
+                    "SELECT id FROM lib2_track_files WHERE track_id=? "
+                    "AND COALESCE(file_state,'active')<>'deleted'", (int(track_id),))]
+            if not file_ids:
+                return _fail("Track has no file in the library", 404)
+        try:
+            if not delete_files:
+                operation = remove_entity_file_records(
+                    db, entity=entity, entity_id=eid, file_ids=file_ids,
+                    actor="user", actor_profile_id=_profile())
+                _reproject_after_file_removal(operation.get("track_ids") or [])
+                return jsonify({"success": True, "deleted_count": len(operation.get("track_ids") or []),
+                                "file_deleted": False, "blacklisted": False})
+            preview = preview_entity_files(db, entity=entity, entity_id=eid, file_ids=file_ids)
+            from core.imports.paths import docker_resolve_path
+            from core.library.deleted_quarantine import quarantine_mover
+            transfer = docker_resolve_path(config_get("soulseek.transfer_path", "./Transfer"))
+            operation = delete_entity_files(
+                db, entity=entity, entity_id=eid, preview_token=preview.get("preview_token"),
+                file_ids=file_ids, actor="user", actor_profile_id=_profile(),
+                unlink=quarantine_mover(transfer, "library_delete"), mode="quarantine")
+            _reproject_after_file_removal(operation.get("track_ids") or [])
+            result = {"success": True, "deleted_count": len(operation.get("track_ids") or []),
+                      "file_deleted": bool(preview.get("deletable_count")), "blacklisted": False}
+            if not preview.get("deletable_count"):
+                result["file_error"] = "The file couldn't be reached, so only the library record was removed"
+            return jsonify(result)
+        except FileDeleteError as exc:
+            return _fail(str(exc), exc.status)
+
+    @_route("/api/library/track/<int:track_id>", methods=["DELETE"])
+    def lib2_legacy_delete_track(track_id):
+        """DELETE /api/library/track/<id>[?delete_file=true], the route the
+        artist page and the songs view have always called."""
+        return _legacy_delete("albums", 0, track_id,
+                              request.args.get("delete_file", "false").lower() == "true")
+
+    @_route("/api/library/album/<int:album_id>", methods=["DELETE"])
+    def lib2_legacy_delete_album(album_id):
+        """DELETE /api/library/album/<id>[?delete_files=true]."""
+        return _legacy_delete("albums", album_id, None,
+                              request.args.get("delete_files", "false").lower() == "true")
+
     @_route("/api/library/v2/file-delete-operations/<operation_id>")
     def lib2_file_delete_operation(operation_id):
         from core.library2.file_delete import FileDeleteError, get_delete_operation
