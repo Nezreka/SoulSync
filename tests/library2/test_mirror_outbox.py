@@ -517,3 +517,52 @@ class TestReleaseScopedWithdrawal:
         with db._get_connection() as conn:
             assert conn.execute(
                 "SELECT COUNT(*) FROM wishlist_tracks").fetchone()[0] == 0
+
+
+def _owned_below_profile(db, monkeypatch, reason):
+    """The track has a file the profile would upgrade, and is wanted for
+    ``reason``: what the upgrade leaves on every imported track."""
+    import core.library2.wishlist_mirror as WM
+    flaky, conn = db
+    real = WM.track_wishlist_payload
+
+    def payload(c, tid):
+        out = real(c, tid)
+        out.update(_has_file=True, _should_queue=True)
+        return out
+
+    monkeypatch.setattr(WM, "track_wishlist_payload", payload)
+    from core.library2.wanted import PROJECTION_VERSION
+    conn.execute("INSERT INTO lib2_wanted_tracks(profile_id, track_id, wanted, reason, "
+                 "projection_version) VALUES(1, ?, 1, ?, ?)",
+                 (flaky.ids["track"], reason, PROJECTION_VERSION))
+    conn.commit()
+    return flaky, conn
+
+
+def _ops(conn):
+    return [r["op"] for r in conn.execute("SELECT op FROM lib2_mirror_outbox ORDER BY id")]
+
+
+def test_an_imported_file_is_never_queued_for_an_upgrade_on_its_own(db, monkeypatch):
+    """The live upgrade on a 310k library: every imported file is monitored
+    (track_rule:file_import), and the hourly reconcile queued every mp3 below
+    the default profile, 1,225 of them in ten minutes. dev never upgraded on
+    its own. A file you didn't ask to upgrade stays put."""
+    flaky, conn = _owned_below_profile(db, monkeypatch, "track_rule:file_import")
+    MO.enqueue_tracks(conn, [flaky.ids["track"]], True, profile_id=1)
+    assert "wishlist_add" not in _ops(conn)
+
+
+@pytest.mark.parametrize("reason", ["track_explicit", "album_rule:user_explicit", "track_rule:cascade"])
+def test_an_upgrade_you_asked_for_still_queues(db, monkeypatch, reason):
+    flaky, conn = _owned_below_profile(db, monkeypatch, reason)
+    MO.enqueue_tracks(conn, [flaky.ids["track"]], True, profile_id=1)
+    assert _ops(conn) == ["wishlist_add"]
+
+
+def test_a_click_queues_the_upgrade_whatever_the_rule(db, monkeypatch):
+    """Enhance Quality and the track menu pass user_initiated: a person asked."""
+    flaky, conn = _owned_below_profile(db, monkeypatch, "track_rule:file_import")
+    MO.enqueue_tracks(conn, [flaky.ids["track"]], True, profile_id=1, user_initiated=True)
+    assert _ops(conn) == ["wishlist_add"]
