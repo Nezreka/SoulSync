@@ -101,6 +101,8 @@ The video side keeps its own library paths, migrated from the legacy single vide
 
 The engine routes each finished download to the library path matching its type.
 
+In Docker, Movies, TV and YouTube start on \`/media/movies\`, \`/media/tv\` and \`/media/youtube\` when the container has those mapped (the default compose file does), the way Music starts on \`/app/Transfer\`. Like the Music folders, each is locked: hit **Unlock** to change one. A folder you've cleared or set yourself is never reset.
+
 ## 4K libraries
 
 To keep 4K copies apart, like a separate **Movies 4K** library in Plex, switch on **Separate 4K movies folder** and / or **Separate 4K TV folder** under Settings > Folders > Video > 4K libraries and give each a folder. Then set **Save to: 4K library** on the [quality profile](#vdl-quality) those titles use.

@@ -275,3 +275,60 @@ def test_a_fresh_install_reports_4k_off(tmp_path, monkeypatch):
     cfg = app.test_client().get("/api/video/downloads/config").get_json()
     assert cfg["movies_4k_enabled"] is False and cfg["tv_4k_enabled"] is False
     assert cfg["movies_4k_path"] == "" and cfg["tv_4k_path"] == ""
+
+
+# ── docker installs start on the compose folders ─────────────────────────────
+
+def test_docker_seeds_only_mapped_never_saved_folders(db):
+    from core.video.library_roots import seed_docker_defaults
+    mounts = ["/", "/media/movies", "/media/tv"]          # youtube isn't mapped
+    assert seed_docker_defaults(db, docker=True, mounts=mounts) == {
+        "movies_path": "/media/movies", "tv_path": "/media/tv"}
+    assert db.get_setting("movies_path") == "/media/movies"
+    assert db.get_setting("youtube_path") is None          # would land inside the container
+
+
+def test_docker_seeding_never_touches_a_saved_value(db):
+    from core.video.library_roots import seed_docker_defaults
+    db.set_setting("movies_path", "/data/films")
+    db.set_setting("tv_path", "")                          # cleared on purpose
+    mounts = ["/", "/media/movies", "/media/tv", "/media/youtube"]
+    assert seed_docker_defaults(db, docker=True, mounts=mounts) == {"youtube_path": "/media/youtube"}
+    assert db.get_setting("movies_path") == "/data/films"
+    assert db.get_setting("tv_path") == ""
+
+
+def test_docker_seeding_keeps_the_legacy_transfer_folder(db):
+    from core.video.library_roots import seed_docker_defaults
+    db.set_setting("transfer_path", "/legacy")
+    seed_docker_defaults(db, docker=True, mounts=["/", "/media/movies"])
+    assert db.get_setting("movies_path") is None
+    assert output_paths(db)["movies_path"] == "/legacy"
+
+
+def test_bare_metal_and_unknown_mounts_seed_nothing(db):
+    from core.video.library_roots import seed_docker_defaults
+    assert seed_docker_defaults(db, docker=False, mounts=["/", "/media/movies"]) == {}
+    assert seed_docker_defaults(db, docker=True, mounts=[]) == {}
+    assert db.get_setting("movies_path") is None
+
+
+def test_get_video_db_seeds_on_first_build(monkeypatch, tmp_path):
+    import api.video as videoapi
+    import core.onboarding.environment as env
+    import core.onboarding.paths as paths
+    import database.video_database as vdbmod
+    built = []
+
+    class _Db(VideoDatabase):
+        def __init__(self):
+            super().__init__(database_path=str(tmp_path / "v.db"))
+            built.append(self)
+
+    monkeypatch.setattr(vdbmod, "VideoDatabase", _Db)
+    monkeypatch.setattr(env, "is_docker", lambda *a, **k: True)
+    monkeypatch.setattr(paths, "mount_points", lambda *a, **k: ["/", "/media/tv"])
+    monkeypatch.setattr(videoapi, "_video_db", None)
+    db = videoapi.get_video_db()
+    assert built and db.get_setting("tv_path") == "/media/tv"
+    assert db.get_setting("movies_path") is None

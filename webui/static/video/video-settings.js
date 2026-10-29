@@ -1003,8 +1003,15 @@
             box._vdWired = true;
             box.addEventListener('change', function () {
                 refreshVideoFolders();
-                var path = document.getElementById('video-' + box.dataset.video4kToggle + '-4k-path');
-                if (box.checked && path && !path.value.trim()) path.focus();
+                var path = document.getElementById('video-' + box.getAttribute('data-video-4k-toggle') + '-4k-path');
+                if (box.checked && path && !path.value.trim()) {
+                    // nothing to protect yet: open the lock so the folder can be typed
+                    var lock = path.parentElement.querySelector('.browse-button.locked');
+                    path.readOnly = false;
+                    path.removeAttribute('readonly');
+                    if (lock) { lock.textContent = 'Lock'; lock.classList.remove('locked'); }
+                    path.focus();
+                }
                 saveDownloads(true);
             });
         });

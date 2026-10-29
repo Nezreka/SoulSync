@@ -38,7 +38,21 @@ def get_video_db():
                 # yield to an install that beat us to it.
                 if _video_db is None:
                     _video_db = db
+                    _seed_folder_defaults(db)
     return db
+
+
+def _seed_folder_defaults(db):
+    """docker: start unset video folders on the compose file's mounts"""
+    try:
+        from core.onboarding.environment import is_docker
+        from core.onboarding.paths import mount_points
+        from core.video.library_roots import seed_docker_defaults
+        seeded = seed_docker_defaults(db, docker=is_docker(), mounts=mount_points())
+        if seeded:
+            logger.info("video folders started on the compose defaults: %s", seeded)
+    except Exception as exc:   # noqa: BLE001 - a nicety, the folders can be set by hand
+        logger.debug("video folder defaults skipped: %s", exc)
 
 
 def create_video_blueprint() -> Blueprint:

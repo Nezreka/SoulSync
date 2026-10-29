@@ -69,6 +69,32 @@ def output_paths(db):
     return out
 
 
+# the video folders the default compose file maps
+DOCKER_DEFAULTS = {"movies_path": "/media/movies", "tv_path": "/media/tv",
+                   "youtube_path": "/media/youtube"}
+
+
+def seed_docker_defaults(db, *, docker, mounts):
+    """Docker installs start on the compose file's video folders, the way
+    music starts on /app/Transfer. Only a folder never saved (a cleared one
+    stays cleared), never over the legacy transfer folder, and only one the
+    container really has mapped: a default on no volume would download into
+    the container and be lost on the next recreate. Returns what it set."""
+    if not docker:
+        return {}
+    from core.onboarding.paths import on_mapped_volume
+    seeded = {}
+    for key, path in DOCKER_DEFAULTS.items():
+        if db.get_setting(key) is not None:
+            continue
+        if key == "movies_path" and db.get_setting("transfer_path"):
+            continue
+        if on_mapped_volume(path, mounts) is True:
+            db.set_setting(key, path)
+            seeded[key] = path
+    return seeded
+
+
 def library_roots(db, kind=None):
     roots = []
     kinds = (kind,) if kind else ("movie", "episode", "youtube")

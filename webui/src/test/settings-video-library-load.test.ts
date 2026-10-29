@@ -159,3 +159,30 @@ it('locks the shared download folder on the video tab like the music one', () =>
   expect(lock?.getAttribute('onclick')).toBe("togglePathLock('video-download', this)");
   expect(doc.getElementById('download-path')?.hasAttribute('readonly')).toBe(true);
 });
+
+it('locks every video folder, and a 4K switch with no folder yet opens its lock', async () => {
+  const { doc, show } = setup();
+  for (const id of ['movies', 'tv', 'anime', 'youtube', 'movies-4k', 'tv-4k']) {
+    const input = doc.getElementById(`video-${id}-path`) as HTMLInputElement;
+    expect(input.readOnly).toBe(true);
+    expect(
+      input.closest('.path-input-group')?.querySelector('button')?.getAttribute('onclick'),
+    ).toBe(`togglePathLock('video-${id}', this)`);
+  }
+  show();
+  const tvBox = doc.getElementById('video-tv-4k-enabled') as HTMLInputElement;
+  const tvPath = doc.getElementById('video-tv-4k-path') as HTMLInputElement;
+  await waitFor(() => expect(tvPath.value).toBe('/tv-4k'));
+  await waitFor(() => expect(tvBox.disabled).toBe(false));
+  // a folder already set stays locked
+  tvBox.checked = true;
+  tvBox.dispatchEvent(new Event('change'));
+  expect(tvPath.readOnly).toBe(true);
+  tvBox.checked = false;
+  tvBox.dispatchEvent(new Event('change'));
+  tvPath.value = '';
+  tvBox.checked = true;
+  tvBox.dispatchEvent(new Event('change'));
+  expect(tvPath.readOnly).toBe(false);
+  expect(tvPath.parentElement?.querySelector('button')?.textContent).toBe('Lock');
+});

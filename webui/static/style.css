@@ -75443,7 +75443,6 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .folder-check[data-tone="bad"]::before { content: "\2715"; }
 #settings-page .video-4k-path { margin: 8px 0 0 26px; }
 #settings-page .video-4k-path[hidden] { display: none; }
-#settings-page .video-4k-path input { width: 100%; }
 #settings-page .video-compose-lines {
     margin: 10px 0;
     padding: 12px 14px;

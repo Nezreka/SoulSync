@@ -6233,6 +6233,17 @@
                                                     under it: whether SoulSync can write there and how much room is
                                                     left. Video folders are separate from your Music folders.
                                                 </div>
+                                                <!-- settings.js applyPathsEnvironment shows the one that fits -->
+                                                <div class="setting-help-text" data-paths-guide="docker">
+                                                    <strong>Docker / Unraid detected:</strong> these start on the
+                                                    container paths your compose file maps. Leave them and map your
+                                                    real folders in the container config. Unlock one only if you mapped
+                                                    it somewhere else.
+                                                </div>
+                                                <div class="setting-help-text" data-paths-guide="native">
+                                                    <strong>Bare metal / Proxmox LXC / systemd:</strong> there is no
+                                                    container, so unlock each folder and point it at your real one.
+                                                </div>
                                                 <div class="form-group">
                                                     <label for="video-download-path">Download folder (input, shared with Music):</label>
                                                     <div class="path-input-group">
@@ -6258,18 +6269,30 @@
                                                 </div>
                                                 <div class="form-group">
                                                     <label for="video-movies-path">🎬 Movies:</label>
-                                                    <input type="text" id="video-movies-path" placeholder="/media/movies"
-                                                        data-folder-check="video" data-folder-label="Movies library">
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-movies-path" readonly placeholder="/media/movies"
+                                                            data-folder-check="video" data-folder-label="Movies library">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-movies', this)">Unlock</button>
+                                                    </div>
                                                 </div>
                                                 <div class="form-group">
                                                     <label for="video-tv-path">📺 TV shows:</label>
-                                                    <input type="text" id="video-tv-path" placeholder="/media/tv"
-                                                        data-folder-check="video" data-folder-label="TV library">
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-tv-path" readonly placeholder="/media/tv"
+                                                            data-folder-check="video" data-folder-label="TV library">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-tv', this)">Unlock</button>
+                                                    </div>
                                                 </div>
                                                 <div class="form-group">
                                                     <label for="video-anime-path">🍥 Anime (optional):</label>
-                                                    <input type="text" id="video-anime-path" placeholder="/media/anime"
-                                                        data-folder-check="video" data-folder-label="Anime library">
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-anime-path" readonly placeholder="/media/anime"
+                                                            data-folder-check="video" data-folder-label="Anime library">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-anime', this)">Unlock</button>
+                                                    </div>
                                                     <div class="setting-help-text">New episodes of anime shows go
                                                         here instead of the TV folder: shows in a TV library ticked Anime
                                                         (Settings &gt; Connections), shows set to Anime by hand, and shows
@@ -6280,8 +6303,12 @@
                                                 </div>
                                                 <div class="form-group">
                                                     <label for="video-youtube-path">▶️ YouTube:</label>
-                                                    <input type="text" id="video-youtube-path" placeholder="/media/youtube"
-                                                        data-folder-check="video" data-folder-label="YouTube library">
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-youtube-path" readonly placeholder="/media/youtube"
+                                                            data-folder-check="video" data-folder-label="YouTube library">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-youtube', this)">Unlock</button>
+                                                    </div>
                                                 </div>
                                             </div>
 
@@ -6301,9 +6328,13 @@
                                                         Separate 4K movies folder
                                                     </label>
                                                     <div class="video-4k-path" data-folder-optional data-video-4k-row="movies" hidden>
-                                                        <input type="text" id="video-movies-4k-path"
-                                                            placeholder="/media/movies-4k" aria-label="4K movies folder"
-                                                            data-folder-check="video" data-folder-label="Movies 4K library">
+                                                        <div class="path-input-group">
+                                                            <input type="text" id="video-movies-4k-path" readonly
+                                                                placeholder="/media/movies-4k" aria-label="4K movies folder"
+                                                                data-folder-check="video" data-folder-label="Movies 4K library">
+                                                            <button type="button" class="browse-button locked"
+                                                                onclick="togglePathLock('video-movies-4k', this)">Unlock</button>
+                                                        </div>
                                                     </div>
                                                 </div>
                                                 <div class="form-group">
@@ -6313,9 +6344,13 @@
                                                         Separate 4K TV folder
                                                     </label>
                                                     <div class="video-4k-path" data-folder-optional data-video-4k-row="tv" hidden>
-                                                        <input type="text" id="video-tv-4k-path"
-                                                            placeholder="/media/tv-4k" aria-label="4K TV folder"
-                                                            data-folder-check="video" data-folder-label="TV 4K library">
+                                                        <div class="path-input-group">
+                                                            <input type="text" id="video-tv-4k-path" readonly
+                                                                placeholder="/media/tv-4k" aria-label="4K TV folder"
+                                                                data-folder-check="video" data-folder-label="TV 4K library">
+                                                            <button type="button" class="browse-button locked"
+                                                                onclick="togglePathLock('video-tv-4k', this)">Unlock</button>
+                                                        </div>
                                                     </div>
                                                     <div class="setting-help-text">Anime keeps its own folder when one
                                                         is set, whatever the profile.</div>
