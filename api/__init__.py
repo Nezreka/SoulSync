@@ -23,6 +23,30 @@ limiter = Limiter(
 )
 
 
+def _rate_limit_exempt():
+    """True when the request carries a valid admin-scope API key.
+
+    The 60/minute cap guards the unauthenticated surface: key guessing and
+    scraping without a credential. An admin key is a trusted local
+    credential — SoulSync mints one for MetaSync itself — and paginated
+    walks are a designed use of it: MetaSync's weekly report pages
+    /library/albums at limit=200, so a library past ~12,000 albums needs
+    more pages than the cap allows in a minute and the walk died with a
+    429 (#1923). No key, an invalid key, a read-scope key and
+    session-only requests all stay capped.
+
+    Fail closed: any error in the auth check means not exempt, so a
+    broken auth path can never silently disable the limiter.
+    """
+    try:
+        from .auth import SCOPE_ADMIN, key_scope, matched_api_key
+
+        record = matched_api_key()
+        return record is not None and key_scope(record) == SCOPE_ADMIN
+    except Exception:
+        return False
+
+
 def create_api_blueprint():
     """Build and return the /api/v1 Blueprint with all sub-modules registered."""
 
@@ -48,8 +72,9 @@ def create_api_blueprint():
     from .sample import register_routes as reg_sample
     from .request import start_cleanup_thread as _start_request_cleanup
 
-    # ---- rate-limit only /api/v1 routes (not the whole app) ----
-    limiter.limit("60 per minute")(bp)
+    # ---- rate-limit only /api/v1 routes (not the whole app); requests
+    # carrying a valid admin API key are exempt (see _rate_limit_exempt) ----
+    limiter.limit("60 per minute", exempt_when=_rate_limit_exempt)(bp)
 
     reg_library(bp)
     reg_system(bp)
