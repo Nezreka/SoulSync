@@ -4498,3 +4498,17 @@ def test_the_old_track_delete_route_can_delete_the_file(api, tmp_path, monkeypat
 def test_the_old_track_delete_route_answers_404_for_an_unknown_track(api):
     client, _db, _ids = api
     assert client.delete("/api/library/track/999999").status_code == 404
+
+
+def test_artist_detail_releases_carry_their_musicbrainz_id(api):
+    """the release card's view on musicbrainz link needs the release id."""
+    client, db, ids = api
+    with closing(_conn(db)) as conn:
+        conn.execute("UPDATE lib2_albums SET musicbrainz_id='mb-views' WHERE id=?",
+                     (ids["views"],))
+        conn.commit()
+
+    data = client.get(f"/api/library/v2/artists/{ids['artist']}").get_json()
+
+    views = next(a for a in data["artist"]["albums"] if a["id"] == ids["views"])
+    assert views["musicbrainz_id"] == "mb-views"

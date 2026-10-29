@@ -174,6 +174,7 @@ import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { OwnedArtistDiscographyButton } from './owned-artist-discography';
 import { OwnedArtistHeroExtras } from './owned-artist-hero-extras';
+import { openProviderRelease, ReleaseCardExtras } from './owned-artist-release-cards';
 import { OwnedTopTrackActions, OwnedTopTracksDownloadAll } from './owned-artist-top-tracks';
 import { AlbumUnlockMenuItem, OwnedTrackMoreMenu } from './owned-artist-track-actions';
 import { QualityProfilePicker } from './quality-profile-modal';
@@ -6017,6 +6018,7 @@ interface DiscographyCard {
   ownedTracks: number;
   totalTracks: number;
   releaseDate?: string | null;
+  musicbrainzId?: string | null;
 }
 
 function catalogueCard(album: LibraryV2AlbumSummary): DiscographyCard {
@@ -6034,6 +6036,7 @@ function catalogueCard(album: LibraryV2AlbumSummary): DiscographyCard {
     owned: album.tracks_present > 0,
     ownedTracks: album.tracks_present,
     totalTracks: album.track_count,
+    musicbrainzId: album.musicbrainz_id ?? null,
   };
 }
 
@@ -6052,6 +6055,7 @@ function providerCard(release: ProviderRelease): DiscographyCard {
     ownedTracks: completion?.owned_tracks ?? 0,
     totalTracks: completion?.total_tracks ?? 0,
     releaseDate: release.release_date,
+    musicbrainzId: release.musicbrainz_release_id ?? null,
   };
 }
 
@@ -6079,10 +6083,13 @@ function ReleaseCardGrid({
   cards,
   onOpen,
   openTitle,
+  extras,
 }: {
   cards: DiscographyCard[];
   onOpen?: (card: DiscographyCard) => void;
   openTitle?: string;
+  /** play button and musicbrainz link, dev's release card extras */
+  extras?: (card: DiscographyCard) => ReactNode;
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
   useLazyBackgrounds(gridRef, cards.map((c) => c.key).join('|'));
@@ -6139,6 +6146,7 @@ function ReleaseCardGrid({
                 {card.gapSource}
               </div>
             ) : null}
+            {extras?.(card)}
           </div>
         );
       })}
@@ -6841,6 +6849,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     providerId: artistProviderIds.spotify ?? artistProviderIds.deezer ?? null,
     artistName: artistQuery.data?.name ?? '',
   });
+  // the provider identity a "+ other sources" card opens and plays under
+  const releaseCardArtist = {
+    id: artistProviderIds.spotify ?? artistProviderIds.deezer ?? null,
+    name: artistQuery.data?.name ?? '',
+    imageUrl: artistQuery.data?.image_url ?? '',
+    source: artistProviderIds.spotify ? 'spotify' : artistProviderIds.deezer ? 'deezer' : null,
+  };
   const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('artists', artistId));
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const artist = artistQuery.data;
@@ -7350,8 +7365,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                           ? void navigate({
                               search: (p) => ({ ...p, album: card.albumId }),
                             })
-                          : undefined
+                          : card.providerId
+                            ? void openProviderRelease(card, releaseCardArtist)
+                            : undefined
                       }
+                      extras={(card) => (
+                        <ReleaseCardExtras card={card} artist={releaseCardArtist} />
+                      )}
                     />
                   </DiscographySection>
                 );

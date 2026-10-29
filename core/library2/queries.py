@@ -546,7 +546,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         SELECT al.id, al.title, al.album_type, al.release_date, al.year,
                al.image_url, {monitored_sql("album", "al")} AS monitored, al.quality_profile_id,
                al.quality_profile_explicit, al.track_count,
-               al.expected_track_count, al.origin, al.spotify_id,
+               al.expected_track_count, al.origin, al.spotify_id, al.musicbrainz_id,
                al.primary_artist_id,
                pa.quality_profile_id AS artist_quality_profile_id,
                pa.quality_profile_explicit AS artist_quality_profile_explicit,
@@ -632,6 +632,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "quality_profile_explicit": album_profile["explicit"],
             "origin": r["origin"] or "library",
             "spotify_id": r["spotify_id"],
+            # the release card's "view on musicbrainz" link
+            "musicbrainz_id": r["musicbrainz_id"],
             "explicit": (bool(effective["explicit"]) if effective["explicit"] is not None else None),
             "label": effective["label"],
             "style": effective["style"],
