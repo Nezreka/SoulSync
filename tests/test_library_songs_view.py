@@ -103,6 +103,16 @@ def test_recent_is_newest_first(db):
     assert titles(db.get_library_songs(sort='recent'))[0] == "'Til Tomorrow"
 
 
+def test_recent_is_insertion_order_not_the_text_id(db):
+    # ids are text: by id, "10" would sort below "9". recent means added last.
+    c = sqlite3.connect(str(db.database_path))
+    c.execute("INSERT INTO tracks (id, album_id, artist_id, title, server_source, file_path) "
+              "VALUES ('10', 'al1', 'a1', 'Newest Song', 'plex', '/m/10.flac')")
+    c.commit()
+    c.close()
+    assert titles(db.get_library_songs(sort='recent'))[0] == 'Newest Song'
+
+
 def test_pages(db):
     first = db.get_library_songs(limit=5, page=1)
     second = db.get_library_songs(limit=5, page=2)
@@ -126,3 +136,34 @@ def test_another_profiles_own_library_is_not_listed(db):
     c.commit()
     c.close()
     assert 'Arcadia' not in titles(db.get_library_songs())
+
+
+def _plan(db, sql, params):
+    conn = sqlite3.connect(str(db.database_path))
+    try:
+        return [row[3] for row in conn.execute(f"EXPLAIN QUERY PLAN {sql}", params)]
+    finally:
+        conn.close()
+
+
+def _reads_only_indexes(plan):
+    tracks_scans = [line for line in plan
+                    if line.startswith('SCAN') and line.split()[1] in ('tracks', 't')]
+    return bool(tracks_scans) and all('COVERING INDEX' in line for line in tracks_scans)
+
+
+def test_a_search_never_reads_the_whole_tracks_table(db):
+    """the regression that made a typed search take 20 s on a real library:
+    a candidate subquery asking for tracks.id (a text column in none of the
+    indexes) planned as SCAN tracks, a read of every row. every scan the
+    search plans must be an index's."""
+    clause = db._songs_search_clause(ready=True)
+    plan = _plan(db, f"SELECT 1 FROM tracks t WHERE {clause}", ['%x%'] * 3)
+    assert _reads_only_indexes(plan), plan
+
+
+def test_ranking_a_search_reads_only_the_indexes(db):
+    """ranking every match by reading its row cost 5-8 s for "lo" or "the"
+    on a 300k library; the ranking must come from the indexes alone."""
+    plan = _plan(db, db._songs_rank_sql(ready=True), ['x', 'x%', '%x%', '%x%', '%x%'])
+    assert _reads_only_indexes(plan), plan

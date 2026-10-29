@@ -12694,16 +12694,12 @@ class MusicDatabase:
                                  f"({t_title} < 'a' AND SUBSTR({stripped}, 1, 1) = ?))")
                     params += [low, chr(ord(low) + 1), low]
 
+            # the server, scope and letter: filters on rows something else found
+            filter_sql = " AND ".join(where)
+            filter_params = list(params)
             if qn:
                 like = f"%{qn}%"
-                a_name = self._norm_expr(ready, "artists", "name", "name_norm")
-                t_artist = self._norm_expr(ready, "tracks", "track_artist", "track_artist_norm")
-                tr_title = self._norm_expr(ready, "tracks", "title", "title_norm")
-                where.append(f"""t.id IN (
-                    SELECT tracks.id FROM tracks WHERE {tr_title} LIKE ?
-                    UNION SELECT tracks.id FROM tracks WHERE {t_artist} LIKE ?
-                    UNION SELECT tracks.id FROM tracks WHERE tracks.artist_id IN (
-                        SELECT artists.id FROM artists WHERE {a_name} LIKE ?))""")
+                where.append(self._songs_search_clause(ready))
                 params += [like, like, like]
 
             where_sql = " AND ".join(where)
@@ -12715,18 +12711,19 @@ class MusicDatabase:
             else:
                 cursor.execute(f"SELECT COUNT(*) FROM tracks t WHERE {where_sql}", params)
             total = cursor.fetchone()[0]
-            if qn:
-                order = (f"CASE WHEN {t_title} = ? THEN 0 WHEN {t_title} LIKE ? THEN 1 "
-                         f"WHEN {t_title} LIKE ? THEN 2 ELSE 3 END, {t_title}, t.id")
-                order_params = [qn, f"{qn}%", f"%{qn}%"]
-            else:
-                order = "t.id DESC" if sort == "recent" else f"{t_title}, t.id"
-                order_params = []
 
-            cursor.execute(
-                f"SELECT t.id FROM tracks t WHERE {where_sql} ORDER BY {order} LIMIT ? OFFSET ?",
-                params + order_params + [limit, offset])
-            ids = [r[0] for r in cursor.fetchall()]
+            if qn:
+                ids = self._ranked_song_page(cursor, ready, qn, filter_sql, filter_params,
+                                             limit, offset)
+            else:
+                # rowid, not t.id: the id is text, so "recent" by it put 999
+                # above 1000, and a tie on it was a sort the index can't give
+                order = "t.rowid DESC" if sort == "recent" else f"{t_title}, t.rowid"
+                cursor.execute(
+                    f"SELECT t.id FROM tracks t WHERE {where_sql} ORDER BY {order} "
+                    f"LIMIT ? OFFSET ?",
+                    params + [limit, offset])
+                ids = [r[0] for r in cursor.fetchall()]
             songs = self._library_song_rows(cursor, ids, ready, scope_sql, scope_params,
                                             config_manager.get_active_media_server())
         finally:
@@ -12748,6 +12745,78 @@ class MusicDatabase:
                 'has_next': page < total_pages or (capped and len(songs) == limit),
             },
         }
+
+    # rows a search page filters per round trip: enough that the usual page
+    # (nearly every match is on this server and in scope) takes one
+    _SONGS_FILTER_CHUNK = 400
+
+    def _ranked_song_page(self, cursor, ready: bool, qn: str, filter_sql: str,
+                          filter_params: list, limit: int, offset: int) -> List[Any]:
+        """One page of a song search, best match first, in two steps.
+
+        Ranking every match in one query read every match's row, for its
+        server and scope, before the LIMIT: 5-8 s for "lo" or "the" on a 300k
+        library. Here the ranking reads only the indexes (an exact title, then
+        titles starting with it, then titles containing it, alphabetical; then
+        songs that match by artist, in library order, which keeps an album's
+        songs together), and the server/scope/letter filter reads just the
+        ranked rows the page needs, a chunk at a time."""
+        like = f"%{qn}%"
+        cursor.execute(self._songs_rank_sql(ready), [qn, f"{qn}%", like, like, like])
+        ranked = [row[0] for row in cursor.fetchall()]
+
+        wanted = offset + limit
+        kept: List[Any] = []
+        for start in range(0, len(ranked), self._SONGS_FILTER_CHUNK):
+            chunk = ranked[start:start + self._SONGS_FILTER_CHUNK]
+            marks = ",".join("?" * len(chunk))
+            cursor.execute(
+                f"SELECT t.rowid, t.id FROM tracks t WHERE t.rowid IN ({marks}) AND {filter_sql}",
+                [*chunk, *filter_params])
+            passed = {row[0]: row[1] for row in cursor.fetchall()}
+            kept.extend(passed[rid] for rid in chunk if rid in passed)
+            if len(kept) >= wanted:
+                break
+        return kept[offset:wanted]
+
+    def _songs_rank_sql(self, ready: bool) -> str:
+        """Every match's rowid, best first, from the indexes alone. Takes the
+        query, the query + '%', then the LIKE pattern three times."""
+        tr_title = self._norm_expr(ready, "tracks", "title", "title_norm")
+        t_artist = self._norm_expr(ready, "tracks", "track_artist", "track_artist_norm")
+        a_name = self._norm_expr(ready, "artists", "name", "name_norm")
+        return f"""
+            SELECT rid FROM (
+                SELECT tracks.rowid AS rid,
+                       CASE WHEN {tr_title} = ? THEN 0 WHEN {tr_title} LIKE ? THEN 1 ELSE 2 END AS r,
+                       {tr_title} AS k
+                FROM tracks WHERE {tr_title} LIKE ?
+                UNION ALL
+                SELECT tracks.rowid, 3, NULL FROM tracks WHERE {t_artist} LIKE ?
+                UNION ALL
+                SELECT tracks.rowid, 3, NULL FROM tracks WHERE tracks.artist_id IN (
+                    SELECT artists.id FROM artists WHERE {a_name} LIKE ?)
+            )
+            GROUP BY rid
+            ORDER BY MIN(r), MIN(k) IS NULL, MIN(k), rid"""
+
+    def _songs_search_clause(self, ready: bool) -> str:
+        """The Songs search's candidate rows, as a WHERE fragment taking the
+        LIKE pattern three times: title, the track's own artist credit, and
+        the artist's name.
+
+        rowid, never tracks.id: the id is a text column of its own, in none
+        of these indexes, so asking for it read every row of a table that
+        carries lyrics (33 s per search on a 300k library, #1906). The rowid
+        is in every index, so each arm scans an index and never the table."""
+        a_name = self._norm_expr(ready, "artists", "name", "name_norm")
+        t_artist = self._norm_expr(ready, "tracks", "track_artist", "track_artist_norm")
+        tr_title = self._norm_expr(ready, "tracks", "title", "title_norm")
+        return f"""t.rowid IN (
+            SELECT tracks.rowid FROM tracks WHERE {tr_title} LIKE ?
+            UNION SELECT tracks.rowid FROM tracks WHERE {t_artist} LIKE ?
+            UNION SELECT tracks.rowid FROM tracks WHERE tracks.artist_id IN (
+                SELECT artists.id FROM artists WHERE {a_name} LIKE ?))"""
 
     def _library_song_rows(self, cursor, ids: List[int], ready: bool, scope_sql: str,
                            scope_params: list, server_source: str) -> List[Dict[str, Any]]:
