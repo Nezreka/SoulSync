@@ -6177,6 +6177,17 @@
                                                         and organized. Keep this separate from your music library so a
                                                         media server does not index chapter files as albums.</small>
                                                 </div>
+                                                <div class="form-group">
+                                                    <label>More audiobook folders:</label>
+                                                    <div id="audiobooks-extra-paths"></div>
+                                                    <button type="button" class="test-button"
+                                                        onclick="addAudiobookExtraPathRow()">+ Add folder</button>
+                                                    <small class="settings-hint">An existing collection on another
+                                                        drive. SoulSync scans and manages it, but new books always land
+                                                        in the folder above. In Docker, mount it at its own container
+                                                        path, like /app/audiobooks2. If a drive is unplugged, its
+                                                        books stay in your library until it's back.</small>
+                                                </div>
                                             </div>
 
                                             <div class="settings-group">

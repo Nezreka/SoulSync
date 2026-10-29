@@ -71,6 +71,9 @@ services:
       # Keep this OUT of your music library: a book is a folder of chapter files,
       # and a music scanner will happily index it as an album of 300 tracks.
       # - ./audiobooks:/app/audiobooks
+      # An existing collection on another drive: mount it at its own path and add
+      # it under Settings → Library → Folders → Audiobooks → More audiobook folders.
+      # - /mnt/drive2/Audiobooks:/app/audiobooks2:rw
       # ─── Sample Studio folders (OUTPUT) — optional: uncomment + set your path ───
       # Saved Sample Studio chops are rendered here, organized as Artist/Track
       # folders by the sample path template. UNCOMMENT the line below, point the

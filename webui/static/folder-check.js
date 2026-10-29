@@ -79,6 +79,11 @@
                  'and are lost when it is recreated. Map it in your compose file');
             return;
         }
+        // an extra folder is only ever read: missing means unplugged or mistyped
+        if (result.state === 'create' && input.getAttribute('data-folder-role') === 'existing') {
+            show(input, 'warn', 'Not found. Check the drive is plugged in and the path is right');
+            return;
+        }
         if (result.state === 'create') {
             show(input, 'info', 'Doesn\'t exist yet. SoulSync creates it on first use' +
                  (room ? ' · ' + room : ''));

@@ -477,6 +477,7 @@
         input.placeholder = host.dataset.videoExtraKind === 'movies' ? '/media/movies2' : '/media/tv2';
         input.setAttribute('aria-label', host.dataset.videoExtraKind === 'movies' ? 'Additional movie library path' : 'Additional TV library path');
         input.setAttribute('data-folder-check', 'video');
+        input.setAttribute('data-folder-role', 'existing');
         input.setAttribute('data-folder-label', host.dataset.videoExtraKind === 'movies' ? 'Movie folder' : 'TV folder');
         input.style.cssText = 'flex:1;min-width:0';
         input.addEventListener('change', function () { saveDownloads(true); });

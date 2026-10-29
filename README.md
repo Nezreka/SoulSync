@@ -209,7 +209,7 @@ A full web player built into the sidebar.
 ## Podcasts & audiobooks
 
 - **Podcasts**: discover via Apple Podcasts search or add any RSS feed (private and Patreon feeds included), OPML import/export, show notes and transcripts, and a watchlist that auto-downloads new episodes and cleans up old ones.
-- **Audiobooks**: browse Audible's catalogue by genre, series, author and narrator, follow authors for new books, and fetch releases from Soulseek, torrent or usenet. SoulSync looks inside each release before downloading, matches your existing books to catalogue editions, and keeps its own wishlist, blocklist and recycle bin.
+- **Audiobooks**: browse Audible's catalogue by genre, series, author and narrator, follow authors for new books, and fetch releases from Soulseek, torrent or usenet. SoulSync looks inside each release before downloading, matches your existing books to catalogue editions (across extra folders on other drives too), and keeps its own wishlist, blocklist and recycle bin.
 
 ---
 

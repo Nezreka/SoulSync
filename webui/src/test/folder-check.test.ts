@@ -90,3 +90,21 @@ it('puts the line after a flex row, never beside the row button', async () => {
   expect(row.querySelector('.folder-check')).toBeNull();
   expect(row.nextElementSibling?.textContent).toBe('Ready');
 });
+
+it('a missing extra folder is a warning, not "will be created"', async () => {
+  document.body.innerHTML = `<input id="e" data-folder-check="x" data-folder-role="existing" value="/mnt/drive2">`;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ results: { e: { state: 'create', resolved: '/mnt/drive2' } } }),
+        ),
+    ),
+  );
+  new Function(source)();
+  (window as unknown as { SoulSyncFolderCheck: Check }).SoulSyncFolderCheck.refresh('x');
+  const input = document.getElementById('e')!;
+  await waitFor(() => expect((input.nextElementSibling as HTMLElement)?.dataset.tone).toBe('warn'));
+  expect(input.nextElementSibling?.textContent).toContain('Not found');
+});

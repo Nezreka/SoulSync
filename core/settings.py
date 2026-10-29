@@ -919,6 +919,9 @@ class ConfigManager:
                 "music_videos_path": "",
                 "podcasts_path": default_podcast_path,
                 "audiobooks_path": default_audiobook_path,
+                # extra folders an existing audiobook collection lives in (a
+                # second drive). scanned and managed, never downloaded into.
+                "audiobooks_additional_paths": [],
                 # Sample Studio output folders (Phase 6): where saved chops
                 # are rendered. A list like music_paths — the first entry is
                 # the default destination; the save dialog lets the user pick

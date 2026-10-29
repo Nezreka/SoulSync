@@ -566,6 +566,51 @@ def library_root() -> str:
     return str(configured or "").strip() or os.path.join(".", "audiobooks")
 
 
+def additional_roots() -> List[str]:
+    """The extra audiobook folders from settings, cleaned. Never raises."""
+    try:
+        from core.settings import config_manager
+        raw = config_manager.get("library.audiobooks_additional_paths", []) or []
+    except Exception:                                       # noqa: BLE001
+        raw = []
+    if isinstance(raw, str):
+        raw = [raw]
+    return [str(p).strip() for p in raw if isinstance(p, str) and str(p).strip()]
+
+
+def library_roots() -> List[str]:
+    """Every audiobook folder: the main one first (new books land there), then
+    the extra ones an existing collection lives in. An extra folder that's
+    the same as, inside or around one already listed is dropped, its books
+    would be read twice."""
+    roots: List[str] = []
+    resolved: List[Path] = []
+    for raw in [library_root(), *additional_roots()]:
+        path = Path(raw).expanduser().resolve()
+        # inside a kept folder, or holding one: either way read twice
+        if any(path.is_relative_to(r) or r.is_relative_to(path) for r in resolved):
+            continue
+        roots.append(raw)
+        resolved.append(path)
+    return roots
+
+
+def root_for(path: Any) -> Optional[Path]:
+    """The configured audiobook folder holding ``path`` (resolved), or None
+    when it's outside all of them. A root itself is not "inside" it."""
+    try:
+        target = Path(str(path or "")).resolve()
+    except (OSError, ValueError):
+        return None
+    if not str(path or "").strip():
+        return None
+    for raw in library_roots():
+        root = Path(raw).expanduser().resolve()
+        if target != root and target.is_relative_to(root):
+            return root
+    return None
+
+
 def configured_template() -> str:
     """The audiobook path template, honouring the organization master switch.
 
