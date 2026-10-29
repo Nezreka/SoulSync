@@ -12635,6 +12635,178 @@ class MusicDatabase:
             params)
         return [dict(r) for r in cursor.fetchall()]
 
+    # a search or a letter ("love", or every B song in a 300k library) is
+    # counted row by row, since the server and scope live on the rows; past
+    # this the page says "1,000+". the whole library counts off an index.
+    SONGS_COUNT_CAP = 1000
+
+    def get_library_songs(self, search_query: str = "", letter: str = "", page: int = 1,
+                          limit: int = 50, sort: str = "title") -> Dict[str, Any]:
+        """Songs for the library page's Songs view (#1906): every track this
+        profile can see on the active server, searchable by title and artist.
+
+        Same scoping as get_library_albums (active server + the caller's
+        library scope). Built for big libraries: every predicate the planner
+        could walk is an index (title_norm / track_artist_norm / the artist
+        name), the server and scope are '+'-guarded filters on the rows those
+        found, and the rows a page shows are fetched by id. A search or letter
+        counts at most SONGS_COUNT_CAP songs.
+
+        sort is 'title' (the default) or 'recent'; a search orders by match
+        (exact title, then title prefix, then title, then artist). Errors
+        propagate: the route tells a failed search apart from an empty one.
+        """
+        from core.settings import config_manager
+        page = max(1, int(page or 1))
+        limit = max(1, min(int(limit or 50), 200))
+        offset = (page - 1) * limit
+        qn = self._normalize_for_comparison(search_query or '') if search_query else ''
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            gaps = [self._norm_unfilled_count(cursor, table, norm, _NORM_INLINE_LIMIT + 1)
+                    for table, raw, norm, _kind in self._NORM_COLUMNS]
+            if any(gaps):
+                if any(n > _NORM_INLINE_LIMIT for n in gaps):
+                    ready = False
+                else:
+                    self.ensure_norm_backfilled()
+                    ready = True
+            else:
+                ready = True
+            t_title = self._norm_expr(ready, "t", "title", "title_norm")
+
+            scope_sql, scope_params = self._current_scope_sql("t.owner_profile_id")
+            where = ["+t.server_source = ?", scope_sql]
+            params: list = [config_manager.get_active_media_server(), *scope_params]
+
+            if letter and letter != "all":
+                # an index range on the normalized title, plus the small block
+                # of titles that start with punctuation or a digit, filed by
+                # their first letter the way the albums view files them
+                stripped = _library_stripped_sql(t_title)
+                if letter == "#":
+                    where.append(f"({t_title} < 'a' OR {t_title} >= '{{') "
+                                 f"AND SUBSTR({stripped}, 1, 1) NOT GLOB '[a-z]'")
+                else:
+                    low = letter.lower()[:1]
+                    where.append(f"(({t_title} >= ? AND {t_title} < ?) OR "
+                                 f"({t_title} < 'a' AND SUBSTR({stripped}, 1, 1) = ?))")
+                    params += [low, chr(ord(low) + 1), low]
+
+            if qn:
+                like = f"%{qn}%"
+                a_name = self._norm_expr(ready, "artists", "name", "name_norm")
+                t_artist = self._norm_expr(ready, "tracks", "track_artist", "track_artist_norm")
+                tr_title = self._norm_expr(ready, "tracks", "title", "title_norm")
+                where.append(f"""t.id IN (
+                    SELECT tracks.id FROM tracks WHERE {tr_title} LIKE ?
+                    UNION SELECT tracks.id FROM tracks WHERE {t_artist} LIKE ?
+                    UNION SELECT tracks.id FROM tracks WHERE tracks.artist_id IN (
+                        SELECT artists.id FROM artists WHERE {a_name} LIKE ?))""")
+                params += [like, like, like]
+
+            where_sql = " AND ".join(where)
+            filtered = bool(qn) or bool(letter and letter != "all")
+            if filtered:
+                cursor.execute(
+                    f"SELECT COUNT(*) FROM (SELECT 1 FROM tracks t WHERE {where_sql} LIMIT ?)",
+                    params + [self.SONGS_COUNT_CAP + 1])
+            else:
+                cursor.execute(f"SELECT COUNT(*) FROM tracks t WHERE {where_sql}", params)
+            total = cursor.fetchone()[0]
+            if qn:
+                order = (f"CASE WHEN {t_title} = ? THEN 0 WHEN {t_title} LIKE ? THEN 1 "
+                         f"WHEN {t_title} LIKE ? THEN 2 ELSE 3 END, {t_title}, t.id")
+                order_params = [qn, f"{qn}%", f"%{qn}%"]
+            else:
+                order = "t.id DESC" if sort == "recent" else f"{t_title}, t.id"
+                order_params = []
+
+            cursor.execute(
+                f"SELECT t.id FROM tracks t WHERE {where_sql} ORDER BY {order} LIMIT ? OFFSET ?",
+                params + order_params + [limit, offset])
+            ids = [r[0] for r in cursor.fetchall()]
+            songs = self._library_song_rows(cursor, ids, ready, scope_sql, scope_params,
+                                            config_manager.get_active_media_server())
+        finally:
+            conn.close()
+
+        capped = filtered and total > self.SONGS_COUNT_CAP
+        total = min(total, self.SONGS_COUNT_CAP) if capped else total
+        total_pages = (total + limit - 1) // limit
+        return {
+            'songs': songs,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total_count': total,
+                # a capped search keeps paging while pages come back full
+                'total_capped': capped,
+                'total_pages': total_pages,
+                'has_prev': page > 1,
+                'has_next': page < total_pages or (capped and len(songs) == limit),
+            },
+        }
+
+    def _library_song_rows(self, cursor, ids: List[int], ready: bool, scope_sql: str,
+                           scope_params: list, server_source: str) -> List[Dict[str, Any]]:
+        """The rows a Songs page shows, in ``ids`` order, with how many copies of
+        the same song (title + artist) the library holds, so duplicates read as
+        duplicates and their albums tell them apart."""
+        if not ids:
+            return []
+        marks = ",".join("?" * len(ids))
+        cursor.execute(f"""
+            SELECT t.id, t.title, t.track_number, t.disc_number, t.duration, t.bitrate,
+                   t.file_path, t.file_size, t.year AS track_year, t.play_count,
+                   t.artist_id, t.album_id, t.track_artist, t.title_norm,
+                   a.name AS artist_name, al.title AS album_title, al.year AS album_year,
+                   al.thumb_url AS album_thumb_url
+            FROM tracks t
+            LEFT JOIN artists a ON a.id = t.artist_id
+            LEFT JOIN albums al ON al.id = t.album_id
+            WHERE t.id IN ({marks})""", ids)
+        by_id = {row['id']: dict(row) for row in cursor.fetchall()}
+        rows = [by_id[i] for i in ids if i in by_id]
+
+        copies: Dict[tuple, int] = {}
+        keys = {(r['title_norm'], r['artist_id']) for r in rows if r.get('title_norm')}
+        if keys:
+            titles = sorted({k[0] for k in keys})
+            tmarks = ",".join("?" * len(titles))
+            cursor.execute(
+                f"SELECT t.title_norm, t.artist_id, COUNT(*) FROM tracks t "
+                f"WHERE t.title_norm IN ({tmarks}) AND +t.server_source = ? AND {scope_sql} "
+                f"GROUP BY t.title_norm, t.artist_id",
+                [*titles, server_source, *scope_params])
+            copies = {(r[0], r[1]): r[2] for r in cursor.fetchall()}
+
+        songs = []
+        for r in rows:
+            path = r.get('file_path') or ''
+            ext = os.path.splitext(path)[1].lstrip('.').upper() if path else ''
+            songs.append({
+                'id': r['id'],
+                'title': r['title'] or '',
+                # a compilation's row names its own artist; the album artist is the fallback
+                'artist_name': r.get('track_artist') or r.get('artist_name') or '',
+                'artist_id': r['artist_id'],
+                'album_id': r['album_id'],
+                'album_title': r.get('album_title') or '',
+                'album_thumb_url': r.get('album_thumb_url'),
+                'year': r.get('track_year') or r.get('album_year'),
+                'track_number': r.get('track_number'),
+                'disc_number': r.get('disc_number'),
+                'duration': r.get('duration'),
+                'bitrate': r.get('bitrate'),
+                'format': ext if 1 < len(ext) <= 5 else '',
+                'file_path': path,
+                'play_count': r.get('play_count') or 0,
+                'copies': copies.get((r.get('title_norm'), r['artist_id']), 1),
+            })
+        return songs
+
     def get_tracks_for_m3u_resolution(self, server_source: Optional[str] = None) -> List[Dict[str, str]]:
         """Bulk-load (artist, title, file_path) for in-memory M3U path resolution.
 

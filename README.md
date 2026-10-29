@@ -160,6 +160,8 @@ A personal front page shaped by your library, your listening and your watchlist.
 ## Library & artist pages
 
 - **Library**: every artist, filterable by letter, watch state, and which metadata sources each one is (or isn't) matched to. Export as JSON / CSV / text / M3U.
+- **Songs**: every song you own, searchable by title from any library view. Each one shows its album and file quality so copies are easy to tell apart; play it, add it to a playlist, and (admins) delete it.
+- **Fix a wrong match** by pasting the artist's link or ID from Spotify, Apple Music, Deezer, Discogs, Tidal, Qobuz and more. The watchlist follows the fix.
 - **Artist pages**: full discography with ownership, live completion bars for albums / EPs / singles, top tracks, similar artists, a **music video player**, and **concerts** (Ticketmaster dates and Setlist.fm setlists you can play from your own library).
   - **Gap-fill** pulls in releases your other metadata sources know about.
   - **Enhanced view** (admins): inline tag editing, bulk BPM / mood / style edits, write tags to files with a diff preview, ReplayGain, reorganize with a path preview, move an album to another artist, re-identify a track, redownload with source picking, and delete (database only, or files too).

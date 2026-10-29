@@ -189,7 +189,7 @@ describe('LibraryPage rendering', () => {
     // A 75-per-page library must report its TOTAL, not the 75 on screen.
     stubFetch([artist({ id: 1 })], 4213, 57);
     renderPage();
-    await waitFor(() => expect(document.querySelector('.stat-number')?.textContent).toBe('4213'));
+    await waitFor(() => expect(document.querySelector('.stat-number')?.textContent).toBe('4,213'));
   });
 
   it('calls the vanilla downloads-bubble renderer on mount', async () => {

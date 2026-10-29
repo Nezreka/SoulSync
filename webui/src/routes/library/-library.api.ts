@@ -9,6 +9,7 @@ import {
   type LibraryAlbumsResponse,
   type LibraryArtistsResponse,
   type LibrarySearch,
+  type LibrarySongsResponse,
   type UnmatchedSummary,
 } from './-library.types';
 
@@ -138,5 +139,28 @@ export function libraryUnmatchedQueryOptions() {
     queryKey: [...LIBRARY_QUERY_KEY, 'unmatched'] as const,
     queryFn: () => readJson<UnmatchedSummary>(apiClient.get('library/unmatched-summary')),
     staleTime: 60_000,
+  });
+}
+
+/**
+ * The Songs view (#1906), and the strip of song matches above an artist or
+ * album search (which asks for a few, ignoring that view's letter and page).
+ */
+export function librarySongsQueryOptions(
+  profileId: number,
+  search: LibrarySearch,
+  limit: number = LIBRARY_PAGE_SIZE,
+) {
+  const params: Record<string, string | number> = {
+    search: search.q,
+    letter: search.letter,
+    page: search.page,
+    limit,
+  };
+  if (search.sort === 'recent') params.sort = 'recent';
+  return queryOptions({
+    queryKey: [...LIBRARY_QUERY_KEY, 'songs', profileId, params] as const,
+    queryFn: () =>
+      readJson<LibrarySongsResponse>(apiClient.get('library/songs', { searchParams: params })),
   });
 }

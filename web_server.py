@@ -8924,6 +8924,35 @@ def get_library_albums():
             }
         }), 500
 
+@app.route('/api/library/songs')
+def get_library_songs():
+    """The library page's Songs view (#1906): this profile's songs on the
+    active server, searchable by title and artist. Same scoping as the
+    artists and albums views."""
+    try:
+        try:
+            page = max(1, int(request.args.get('page', 1)))
+            limit = max(1, min(200, int(request.args.get('limit', 75))))
+        except (TypeError, ValueError):
+            page, limit = 1, 75
+        result = get_database().get_library_songs(
+            search_query=(request.args.get('search') or '').strip(),
+            letter=request.args.get('letter', 'all'),
+            page=page,
+            limit=limit,
+            sort=request.args.get('sort', ''),
+        )
+        for song in result['songs']:
+            if song.get('album_thumb_url'):
+                song['album_thumb_url'] = fix_artist_image_url(song['album_thumb_url'])
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        logger.error(f"Error fetching library songs: {e}")
+        return jsonify({"success": False, "error": "Couldn't load your songs", "songs": [],
+                        "pagination": {"page": 1, "limit": 75, "total_count": 0, "total_pages": 0,
+                                       "has_prev": False, "has_next": False}}), 500
+
+
 @app.route('/api/library/albums/<album_id>/tracks')
 def get_library_album_tracks(album_id):
     """The tracks of one owned album, for the album card's play button.

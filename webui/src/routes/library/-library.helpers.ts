@@ -1,3 +1,5 @@
+import type { UserPlaylistTrack } from '@/features/playlists/user-playlists';
+
 import type {
   ArtistBadge,
   LibraryAlbum,
@@ -5,6 +7,8 @@ import type {
   LibraryArtist,
   LibraryArtistsResponse,
   LibraryPagination,
+  LibrarySong,
+  LibrarySongsResponse,
 } from './-library.types';
 
 import { getServiceUrl } from '../artist-detail/-artist-detail.enhanced-album';
@@ -396,4 +400,68 @@ function readPagination(p: LibraryPagination | undefined): LibraryPageState {
     hasPrev: p?.has_prev ?? false,
     hasNext: p?.has_next ?? false,
   };
+}
+
+/* ── Songs (#1906) ────────────────────────────────────────────────────────── */
+
+/** Unwrap /api/library/songs. Same contract as the other two views. */
+export function readSongsResponse(payload: LibrarySongsResponse | undefined): {
+  songs: LibrarySong[];
+  pagination: LibraryPageState;
+  /** the count stopped at the server's cap, so it reads "N+" */
+  capped: boolean;
+} {
+  if (payload?.success === false) throw new Error(payload.error || 'Failed to load songs');
+  return {
+    songs: payload?.songs ?? [],
+    pagination: readPagination(payload?.pagination),
+    capped: payload?.pagination?.total_capped === true,
+  };
+}
+
+/** The line after the album: year, and where it sits on the album. */
+export function songMeta(song: LibrarySong): string {
+  const bits: string[] = [];
+  if (song.year) bits.push(String(song.year));
+  if (song.track_number) {
+    bits.push(
+      song.disc_number && song.disc_number > 1
+        ? `disc ${song.disc_number}, track ${song.track_number}`
+        : `track ${song.track_number}`,
+    );
+  }
+  return bits.join(' · ');
+}
+
+/** What the add-to-playlist picker takes for a library song. */
+export function songPlaylistTrack(song: LibrarySong): UserPlaylistTrack | null {
+  const title = song.title.trim();
+  const artist = song.artist_name.trim();
+  if (!title || !artist) return null;
+  return {
+    track_name: title,
+    artist_name: artist,
+    album_name: song.album_title || '',
+    duration_ms: song.duration ?? 0,
+    image_url: song.album_thumb_url || null,
+  };
+}
+
+/** Play one library song from its file, the way the artist page's rows do. */
+export async function playLibrarySong(song: LibrarySong): Promise<void> {
+  if (!song.file_path) return;
+  try {
+    await window.SoulSyncWebShellBridge?.playLibraryTrack(
+      {
+        id: song.id,
+        title: song.title,
+        file_path: song.file_path,
+        _stats_image: song.album_thumb_url || null,
+      },
+      song.album_title,
+      song.artist_name,
+    );
+  } catch {
+    window.showToast?.(`Could not play ${song.title}`, 'error');
+  }
 }

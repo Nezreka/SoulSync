@@ -82,8 +82,11 @@ export const librarySearchSchema = z.object({
    */
   view: z
     .preprocess(
-      (v) => (searchString(v) === 'albums' ? 'albums' : 'artists'),
-      z.enum(['artists', 'albums']),
+      (v) => {
+        const s = searchString(v);
+        return s === 'albums' || s === 'songs' ? s : 'artists';
+      },
+      z.enum(['artists', 'albums', 'songs']),
     )
     .default('artists')
     .catch('artists'),
@@ -198,4 +201,37 @@ export interface UnmatchedSummary {
   count: number;
   /** Library artist row holding the most of them, for the link. */
   artist_id: string | number | null;
+}
+
+/** One row from /api/library/songs (#1906). */
+export interface LibrarySong {
+  id: string | number;
+  title: string;
+  artist_name: string;
+  artist_id: string | number;
+  album_id: string | number;
+  album_title: string;
+  album_thumb_url?: string | null;
+  year?: number | null;
+  track_number?: number | null;
+  disc_number?: number | null;
+  /** milliseconds */
+  duration?: number | null;
+  bitrate?: number | null;
+  /** the file's extension, upper-cased ('FLAC'); '' when unknown */
+  format: string;
+  file_path: string;
+  play_count: number;
+  /** how many copies of this song (title + artist) the library holds */
+  copies: number;
+}
+
+export interface LibrarySongsResponse {
+  success?: boolean;
+  error?: string;
+  songs?: LibrarySong[];
+  pagination?: LibraryPagination & {
+    /** the count stopped at the server's cap: "1,000+" */
+    total_capped?: boolean;
+  };
 }
