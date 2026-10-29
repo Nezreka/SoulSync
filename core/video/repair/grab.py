@@ -18,6 +18,17 @@ from utils.logging_config import get_logger
 logger = get_logger("video.repair.grab")
 
 
+def _title_profile_id(kind: str, *, tmdb_id=None, library_id=None):
+    """The title's own quality-profile id (None = Default) -- the one the
+    Quality Upgrade scan judged it by, so the grab searches, picks and files
+    under the same profile. A failed lookup grabs under the Default, as before."""
+    try:
+        from api.video import get_video_db
+        return get_video_db().quality_profile_id_for(kind, tmdb_id=tmdb_id, library_id=library_id)
+    except Exception:   # noqa: BLE001 - fall back to the Default profile
+        return None
+
+
 def grab_movie(details: dict) -> dict:
     """Search + enqueue one movie. Returns the music fix-handler contract:
     {'success', 'action', 'message'|'error'}."""
@@ -25,6 +36,8 @@ def grab_movie(details: dict) -> dict:
             "year": details.get("year"), "poster_url": details.get("poster_url")}
     if not item["tmdb_id"] or not item["title"]:
         return {"success": False, "error": "movie is not TMDB-matched yet"}
+    item["quality_profile_id"] = _title_profile_id(
+        "movie", tmdb_id=item["tmdb_id"], library_id=details.get("movie_id"))
     try:
         from core.automation.handlers import video_process_wishlist as vpw
         # _default_search returns (candidates, error): candidates is None when
@@ -58,6 +71,7 @@ def grab_episode(details: dict) -> dict:
         return {"success": False, "error": "show is not TMDB-matched yet"}
     if item["season_number"] is None or item["episode_number"] is None:
         return {"success": False, "error": "episode number is not known"}
+    item["quality_profile_id"] = _title_profile_id("show", tmdb_id=item["show_tmdb_id"])
     try:
         from core.automation.handlers import video_process_wishlist as vpw
         candidates, err = vpw._default_search(item, "episode")

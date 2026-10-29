@@ -167,7 +167,7 @@ def test_the_4k_folder_switched_off_keeps_the_main_folder(db, no_tmdb):
 
 
 def test_repair_movie_grab_follows_the_4k_rule(db, no_tmdb, monkeypatch):
-    """A repair grab carries no profile id, so the Default profile decides."""
+    """A title with no profile of its own grabs under the Default profile."""
     from core.video.quality_profile import load, save
     from core.video.repair.grab import grab_movie
     _four_k_movies(db)
