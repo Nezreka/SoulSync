@@ -1,0 +1,38 @@
+/* dev's artist and album tiles (style.css .library-artist-card and friends)
+   carry the look. this only lays nick's pieces on top of them */
+
+/* the whole tile opens the artist or album, as dev's link did */
+.open {
+  all: unset;
+  position: absolute;
+  inset: 0;
+  display: block;
+  cursor: pointer;
+  border-radius: inherit;
+}
+
+.open:focus-visible {
+  outline: 2px solid rgb(var(--accent-rgb));
+  outline-offset: -2px;
+}
+
+/* the monitor toggle in the top left, clear of dev's badge column on the right */
+.monitor {
+  top: 8px;
+  left: 8px;
+  z-index: 101;
+}
+
+/* the media-server tag next to the toggle */
+.recognition {
+  top: 10px;
+  left: 46px;
+  right: auto;
+  z-index: 101;
+}
+
+/* dev's play button was a span: a button needs its font back */
+.play {
+  font: inherit;
+  cursor: pointer;
+}

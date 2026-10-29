@@ -398,9 +398,93 @@ export function ProviderBadges({
   );
 }
 
+/** most badges one column holds before the rest move to a second, as on dev */
+const BADGES_PER_COLUMN = 6;
+
+/** One provider badge in the classic card's badge column. */
+function ClassicBadge({
+  service,
+  entity,
+  id,
+}: {
+  service: string;
+  entity: 'artist' | 'album';
+  id: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const url = getServiceUrl(service, entity, id);
+  const label = SOURCE_LABELS[service] ?? service;
+  const logo = BRAND_LOGOS[service];
+  const mark =
+    logo && !failed ? (
+      <img
+        src={logo}
+        style={{ width: 16, height: 'auto', display: 'block' }}
+        alt=""
+        onError={() => setFailed(true)}
+      />
+    ) : (
+      <span style={{ fontSize: 9, fontWeight: 700 }}>{BADGE_ABBR[service]}</span>
+    );
+  // a real link where the provider has a page, so middle-click works too
+  return url ? (
+    <a
+      className="source-card-icon"
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      title={`Open on ${label}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {mark}
+    </a>
+  ) : (
+    <div className="source-card-icon" title={label}>
+      {mark}
+    </div>
+  );
+}
+
+/** The provider badges in dev's card column markup, so its css places them:
+ *  past six, an overflow column comes first and the rest stay in the primary. */
+export function ClassicCardBadges({
+  ids,
+  entity,
+}: {
+  ids: Record<string, string> | undefined;
+  entity: 'artist' | 'album';
+}) {
+  if (!ids) return null;
+  const keys = filterJiosaavnEntries(
+    Object.keys(BADGE_ABBR)
+      .filter((key) => ids[key])
+      .map((key) => ({ key })),
+    'key',
+  ).map((entry) => entry.key);
+  if (!keys.length) return null;
+  const badge = (key: string) => (
+    <ClassicBadge key={key} service={key} entity={entity} id={ids[key]} />
+  );
+  if (keys.length <= BADGES_PER_COLUMN) {
+    return <div className="card-badge-container">{keys.map(badge)}</div>;
+  }
+  return (
+    <div className="card-badge-container">
+      <div className="badge-overflow-column">{keys.slice(BADGES_PER_COLUMN).map(badge)}</div>
+      <div className="badge-primary-column">{keys.slice(0, BADGES_PER_COLUMN).map(badge)}</div>
+    </div>
+  );
+}
+
 /** ▶ on an artist card: their top tracks, through the acquisition-aware
  *  player (owned files first, misses go to the normal download flow). */
-export function ArtistCardPlayButton({ artist }: { artist: LibraryV2ArtistSummary }) {
+export function ArtistCardPlayButton({
+  artist,
+  className = extras.cardPlay,
+}: {
+  artist: LibraryV2ArtistSummary;
+  className?: string;
+}) {
   const [pending, setPending] = useState(false);
   const play = async () => {
     if (pending) return;
@@ -431,7 +515,7 @@ export function ArtistCardPlayButton({ artist }: { artist: LibraryV2ArtistSummar
   return (
     <button
       type="button"
-      className={extras.cardPlay}
+      className={className}
       aria-label={`Play ${artist.name}'s top tracks`}
       title="Play top tracks"
       disabled={pending}
@@ -446,7 +530,13 @@ export function ArtistCardPlayButton({ artist }: { artist: LibraryV2ArtistSummar
 }
 
 /** ▶ on an album card: queue the tracks you own. */
-export function AlbumCardPlayButton({ album }: { album: LibraryV2AlbumListItem }) {
+export function AlbumCardPlayButton({
+  album,
+  className = extras.cardPlay,
+}: {
+  album: LibraryV2AlbumListItem;
+  className?: string;
+}) {
   const queryClient = useQueryClient();
   const [pending, setPending] = useState(false);
   const canPlay = album.tracks_present > 0;
@@ -470,7 +560,7 @@ export function AlbumCardPlayButton({ album }: { album: LibraryV2AlbumListItem }
   return (
     <button
       type="button"
-      className={extras.cardPlay}
+      className={className}
       aria-label={`Play ${album.title}`}
       title={canPlay ? 'Play' : 'No files in the library for this release'}
       disabled={pending || !canPlay}

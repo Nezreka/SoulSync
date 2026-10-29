@@ -171,9 +171,11 @@ import { FilePathCellBody } from './file-path-cell';
 import { HistoryEventList } from './history-event-list';
 import { groupHistoryEvents, summarizeRecentHistory } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
+import classic from './library-classic-cards.module.css';
 import {
-  AlbumCardExtras,
-  ArtistCardExtras,
+  AlbumCardPlayButton,
+  ArtistCardPlayButton,
+  ClassicCardBadges,
   CouldBeBetterToggle,
   LibraryAlphabetBar,
   LibraryExportButton,
@@ -5017,10 +5019,11 @@ function AlbumIndexView() {
           <LibrarySearchFallback noun="albums" />
         </div>
       ) : (
-        <div className={styles.cardGrid} id="library-albums-grid">
-          {albums.map((album) => (
+        <div className="library-artists-grid" id="library-albums-grid">
+          {albums.map((album, index) => (
             <AlbumListCard
               key={album.id}
+              index={index}
               album={album}
               onOpen={() => void navigate({ search: (p) => ({ ...p, album: album.id }) })}
               onOpenArtist={(artistId) =>
@@ -5039,55 +5042,81 @@ function AlbumIndexView() {
   );
 }
 
+/** stagger for a card's fade-in, capped so a long page doesn't trail off (dev's curve) */
+function cardDelay(index: number): number {
+  return Math.min(index, 20) * 30;
+}
+
+/** dev's card frame: the classes its css styles, the fade-in it animated with */
+const CARD_FRAME = {
+  position: 'relative',
+  display: 'block',
+  textDecoration: 'none',
+  color: 'inherit',
+} as const;
+
+/** "123 tracks", or nothing for none */
+function tracksLabel(count: number | undefined | null): string {
+  if (!count) return '';
+  return `${count.toLocaleString()} ${count === 1 ? 'track' : 'tracks'}`;
+}
+
 function AlbumListCard({
   album,
+  index = 0,
   onOpen,
-  onOpenArtist,
 }: {
   album: LibraryV2AlbumListItem;
+  index?: number;
   onOpen: () => void;
-  onOpenArtist: (artistId: number) => void;
+  onOpenArtist?: (artistId: number) => void;
 }) {
+  // dev's album tile (it wears the artist card's classes), with the monitor
+  // toggle on top. the open button and the toggle stay siblings, never nested
   return (
-    <article className={styles.artistCard}>
+    <article
+      className="library-artist-card library-album-card"
+      data-album-id={String(album.id)}
+      style={{
+        ...CARD_FRAME,
+        animation: `cardFadeIn 0.35s cubic-bezier(0.4,0,0.2,1) ${cardDelay(index)}ms both`,
+      }}
+    >
       <button
         type="button"
-        className={styles.artistCardLink}
+        className={classic.open}
         aria-label={`Open ${album.title}`}
         onClick={onOpen}
       >
-        <Artwork
-          src={album.image_url ?? ''}
-          remote={album.remote_image_url}
-          alt={album.title}
-          className={styles.artistThumb}
-          thumb
-        />
-        <span className={styles.artistInfo}>
-          <span className={styles.artistName} title={album.title}>
+        <div className="library-artist-image">
+          <Artwork
+            src={album.image_url ?? ''}
+            remote={album.remote_image_url}
+            alt={album.title}
+            className=""
+            thumb
+          />
+        </div>
+        <div className="library-artist-info">
+          <h3 className="library-artist-name" title={album.title}>
             {album.title}
-          </span>
-          <span className={styles.artistMeta}>
-            {[album.year, album.album_type].filter(Boolean).join(' · ')}
-          </span>
-          <span className={styles.artistMeta}>
-            <TrackPresence present={album.tracks_present} total={album.track_count} /> tracks
-          </span>
-        </span>
+          </h3>
+          <div className="library-artist-stats">
+            {album.artist_name ? (
+              <span className="library-artist-stat">{album.artist_name}</span>
+            ) : null}
+            {album.year ? <span className="library-artist-stat">{album.year}</span> : null}
+            {album.tracks_present ? (
+              <span className="library-artist-stat">{tracksLabel(album.tracks_present)}</span>
+            ) : null}
+          </div>
+        </div>
       </button>
-      {album.artist_id && album.artist_name ? (
-        <button
-          type="button"
-          className={styles.btnGhost}
-          onClick={() => album.artist_id && onOpenArtist(album.artist_id)}
-        >
-          {album.artist_name}
-        </button>
-      ) : null}
-      <span className={styles.cardMonitor}>
+      <ClassicCardBadges ids={album.provider_ids} entity="album" />
+      <AlbumCardPlayButton album={album} className={`library-artist-play-btn ${classic.play}`} />
+      <span className={`${styles.cardMonitor} ${classic.monitor}`}>
         <MonitorToggle entity="albums" id={album.id} monitored={album.monitored} />
       </span>
-      <AlbumCardExtras album={album} />
     </article>
   );
 }
@@ -5416,50 +5445,73 @@ function WantedIndexView() {
 
 export function ArtistCard({
   artist,
+  index = 0,
   onOpen,
   upgradable,
 }: {
   artist: LibraryV2ArtistSummary;
+  index?: number;
   onOpen: (artistId: number) => void;
   /** tracks that could be better, once counted */
   upgradable?: number;
 }) {
+  // dev's artist tile, with nick's monitor toggle and the media-server tag on
+  // top. the open button and the toggle stay siblings, never nested
+  const better = upgradable ?? artist.upgradable_count;
   return (
-    <article className={styles.artistCard}>
+    <article
+      className="library-artist-card"
+      data-artist-id={String(artist.id)}
+      data-artist-name={artist.name}
+      style={{
+        ...CARD_FRAME,
+        animation: `cardFadeIn 0.35s cubic-bezier(0.4,0,0.2,1) ${cardDelay(index)}ms both`,
+      }}
+    >
       <button
         type="button"
-        className={styles.artistCardLink}
+        className={classic.open}
         aria-label={`Open ${artist.name}`}
         onClick={() => onOpen(artist.id)}
       >
-        <Artwork
-          src={artist.image_url ?? ''}
-          remote={artist.remote_image_url}
-          alt={artist.name}
-          className={styles.artistThumb}
-          thumb
-        />
-        {artist.media_server_sources?.length ? (
-          <span className={styles.mediaServerBadges}>
-            <MediaServerRecognitionBadge sources={artist.media_server_sources} />
-          </span>
-        ) : null}
-        <span className={styles.artistInfo}>
-          <span className={styles.artistName} title={artist.name}>
+        <div className="library-artist-image">
+          <Artwork
+            src={artist.image_url ?? ''}
+            remote={artist.remote_image_url}
+            alt={artist.name}
+            className=""
+            thumb
+          />
+        </div>
+        <div className="library-artist-info">
+          <h3 className="library-artist-name" title={artist.name}>
             {artist.name}
-          </span>
-          <span className={styles.artistMeta}>
-            {artist.album_count} albums · {artist.single_count} singles
-          </span>
-          <span className={styles.artistMeta}>
-            <TrackPresence present={artist.tracks_present} total={artist.track_count} /> tracks
-          </span>
-        </span>
+          </h3>
+          <div className="library-artist-stats">
+            {artist.tracks_present ? (
+              <span className="library-artist-stat">{tracksLabel(artist.tracks_present)}</span>
+            ) : null}
+            {better ? (
+              <span
+                className="library-artist-stat library-artist-upgradable"
+                title="Tracks below their quality profile"
+              >
+                {better} could be better
+              </span>
+            ) : null}
+          </div>
+        </div>
       </button>
-      <span className={styles.cardMonitor}>
+      <ClassicCardBadges ids={artist.provider_ids} entity="artist" />
+      <ArtistCardPlayButton artist={artist} className={`library-artist-play-btn ${classic.play}`} />
+      <span className={`${styles.cardMonitor} ${classic.monitor}`}>
         <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
       </span>
-      <ArtistCardExtras artist={artist} upgradable={upgradable ?? artist.upgradable_count} />
+      {artist.media_server_sources?.length ? (
+        <span className={`${styles.mediaServerBadges} ${classic.recognition}`}>
+          <MediaServerRecognitionBadge sources={artist.media_server_sources} />
+        </span>
+      ) : null}
     </article>
   );
 }
@@ -5468,10 +5520,11 @@ function ArtistCards({ artists }: { artists: LibraryV2ArtistSummary[] }) {
   const navigate = useNavigate();
   const upgradable = useUpgradableCounts(artists);
   return (
-    <div className={styles.cardGrid} id="library-artists-grid">
-      {artists.map((artist) => (
+    <div className="library-artists-grid" id="library-artists-grid">
+      {artists.map((artist, index) => (
         <ArtistCard
           key={artist.id}
+          index={index}
           artist={artist}
           upgradable={upgradable.get(artist.id)}
           onOpen={(artistId) => void navigate({ search: (p) => openArtistSearch(p, artistId) })}
