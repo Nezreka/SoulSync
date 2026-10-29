@@ -18,6 +18,16 @@ class _Db:
     def _get_connection(self):
         return row_conn(self.path)
 
+    keys: set = set()
+
+    def manual_path_keys(self):
+        return set(self.keys)
+
+    @staticmethod
+    def manual_path_key(file_path):
+        from database.music_database import MusicDatabase
+        return MusicDatabase.manual_path_key(file_path)
+
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
@@ -32,8 +42,16 @@ def client(tmp_path, monkeypatch):
     conn.execute("INSERT INTO lib2_artists(id, name, sort_name, external_ids) "
                  "VALUES(2, 'Deezer Only', 'Deezer Only', '{\"deezer\":\"dz-9\"}')")
     conn.execute("INSERT INTO lib2_artists(id, name, sort_name) VALUES(3, 'Bare', 'Bare')")
+    for album_id, fpath in ((10, "/m/Drake/Hand Tagged/01.flac"), (11, "/m/Drake/Plain/01.flac")):
+        conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title) VALUES(?, 1, ?)",
+                     (album_id, f"a{album_id}"))
+        conn.execute("INSERT INTO lib2_tracks(id, album_id, title) VALUES(?, ?, 't')",
+                     (album_id, album_id))
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, ?)",
+                     (album_id, fpath))
     conn.commit()
     conn.close()
+    _Db.keys = {"drake/hand tagged/01.flac"}
     monkeypatch.setattr(ad, "get_database", lambda: _Db(path))
     app = flask.Flask(__name__)
     app.register_blueprint(ad.bp)
@@ -53,3 +71,9 @@ def test_identity_falls_back_to_other_providers(client):
 def test_identity_without_provider_ids_and_unknown_rows(client):
     assert client.get("/api/artist-detail/library/3/identity").get_json()["source"] is None
     assert client.get("/api/artist-detail/library/99/identity").status_code == 404
+
+
+def test_metadata_lock_reads_the_hand_tagged_files_of_a_lib2_album(client):
+    """the unlock item shows only on an album that was tagged by hand."""
+    assert client.get("/api/album/10/metadata-lock").get_json()["metadata_locked"] is True
+    assert client.get("/api/album/11/metadata-lock").get_json()["metadata_locked"] is False

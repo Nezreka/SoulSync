@@ -4,9 +4,9 @@ import { useLayoutEffect } from 'react';
 import { useShellBridge } from '@/platform/shell/route-controllers';
 import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
 
+import { fetchLibraryArtistIdentity } from '../-artist-detail.api';
 import { artistDetailSearchSchema } from '../-artist-detail.types';
 import { ArtistDetailPage } from '../-ui/artist-detail-page';
-import { fetchLibraryArtistIdentity } from '../-artist-detail.api';
 import {
   LIBRARY_V2_QUERY_KEY,
   resolveLibraryV2DiscoveryArtistOwnership,

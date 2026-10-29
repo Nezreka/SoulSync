@@ -172,6 +172,7 @@ import { HistoryEventList } from './history-event-list';
 import { groupHistoryEvents, summarizeRecentHistory } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
+import { AlbumUnlockMenuItem, OwnedTrackMoreMenu } from './owned-artist-track-actions';
 import { QualityProfilePicker } from './quality-profile-modal';
 import { reassignSubject } from './reassign';
 import { AlbumReorganizeModal, ArtistRenamePreviewModal } from './reorganize-modal';
@@ -3086,6 +3087,13 @@ export function AlbumOverflowMenu({
           >
             Album details
           </button>
+          {canWrite ? (
+            <AlbumUnlockMenuItem
+              albumId={album.id}
+              className={styles.overflowMenuItem}
+              onDone={() => setOpen(false)}
+            />
+          ) : null}
           <button
             type="button"
             className={styles.overflowMenuItem}
@@ -7047,7 +7055,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
         <div className={styles.loading}>Loading…</div>
       ) : (
         <>
-          {(
+          {
             <div className={styles.pageToolbar}>
               <div className={styles.toolbarGroup}>
                 {/* The primary bar as named actions, so a setting can later
@@ -7136,7 +7144,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 />
               </div>
             </div>
-          )}
+          }
 
           {grabBanner ? (
             <StatusNotice
@@ -10567,6 +10575,12 @@ function TrackRow(props: TrackRowProps) {
           <AddToPlaylistButton
             track={playlistTrack(track, albumTitle)}
             className={styles.iconAction}
+          />
+          <OwnedTrackMoreMenu
+            track={track}
+            albumId={entityBase.albumId}
+            albumTitle={albumTitle}
+            artistName={track.artists.map((a) => a.name).join(', ')}
           />
           {track.id ? (
             <TrackDetailButton

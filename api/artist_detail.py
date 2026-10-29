@@ -1356,6 +1356,26 @@ def set_album_art(album_id):
         return jsonify({"error": str(e)}), 500
 
 
+@bp.route('/api/album/<album_id>/metadata-lock', methods=['GET'])
+def get_album_metadata_lock(album_id):
+    """Whether a lib2 album was hand-tagged from basic search, so the library
+    view can offer the unlock only where there is something to unlock."""
+    try:
+        db = get_database()
+        keys = db.manual_path_keys()
+        if not keys:
+            return jsonify({"success": True, "album_id": album_id, "metadata_locked": False})
+        with db._get_connection() as conn:
+            paths = conn.execute(
+                "SELECT f.path FROM lib2_track_files f JOIN lib2_tracks t ON t.id = f.track_id"
+                " WHERE t.album_id = ?", (album_id,)).fetchall()
+        locked = any(fp and db.manual_path_key(fp) in keys for (fp,) in paths)
+        return jsonify({"success": True, "album_id": album_id, "metadata_locked": locked})
+    except Exception as e:
+        logger.error("[manual] lock read failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/album/<album_id>/metadata-lock', methods=['DELETE'])
 def clear_album_metadata_lock(album_id):
     """Unlock a hand-tagged album. it was tagged by hand from basic search
