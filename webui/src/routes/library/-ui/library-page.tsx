@@ -8,8 +8,10 @@ import type { LibraryAlbum, LibraryArtist, LibraryArtistsResponse } from '../-li
 
 import {
   libraryAlbumsQueryOptions,
+  fetchSongsToPlay,
   libraryArtistsQueryOptions,
   librarySongsQueryOptions,
+  PLAY_ALL_LIMIT,
   libraryUnmatchedQueryOptions,
   loadAlbumTracks,
   setArtistWatchlisted,
@@ -19,6 +21,8 @@ import {
   readAlbumsResponse,
   readArtistsResponse,
   readSongsResponse,
+  shuffled,
+  songQueueTrack,
   watchlistArtistId,
 } from '../-library.helpers';
 import { useLibraryChanged } from '../-library.live';
@@ -28,7 +32,12 @@ import { Route } from '../route';
 import { ExportArtistsModal } from './export-modal';
 import { LibraryAlbumCard } from './library-album-card';
 import { LibraryArtistCard } from './library-artist-card';
-import { LibrarySongList, LibrarySongsStrip, songsStripQueryOptions } from './library-songs';
+import {
+  LibrarySongList,
+  LibrarySongSkeleton,
+  LibrarySongsStrip,
+  songsStripQueryOptions,
+} from './library-songs';
 import { WatchAllModal } from './watch-all-modal';
 
 const ALPHABET = ['all', ...'abcdefghijklmnopqrstuvwxyz'.split(''), '#'];
@@ -96,6 +105,9 @@ const SORT_OPTIONS = {
   ],
   songs: [
     { value: '', label: 'A–Z' },
+    { value: 'artist', label: 'Artist' },
+    { value: 'album', label: 'Album' },
+    { value: 'year_desc', label: 'Newest first' },
     { value: 'recent', label: 'Recently added' },
   ],
 } as const;
@@ -282,7 +294,41 @@ export function LibraryPage() {
    */
   const switchView = (view: 'artists' | 'albums' | 'songs') => {
     const offered = SORT_OPTIONS[view].some((o) => o.value === search.sort);
-    setSearch({ view, sort: offered ? search.sort : '' });
+    setSearch({
+      view,
+      sort: offered ? search.sort : '',
+      // duplicates and lossless are song filters; "could be better" means
+      // something in the artists view too
+      dupes: view === 'songs' ? search.dupes : false,
+      quality: view === 'songs' || search.quality !== 'lossless' ? search.quality : '',
+    });
+  };
+
+  /** Play all / Shuffle: the first PLAY_ALL_LIMIT songs of what's shown. */
+  const [queueing, setQueueing] = useState(false);
+  const playSongs = async (shuffle: boolean) => {
+    if (queueing) return;
+    setQueueing(true);
+    try {
+      const list = (await fetchSongsToPlay(search)).filter((s) => s.file_path);
+      if (!list.length) {
+        window.showToast?.('Nothing here to play', 'info');
+        return;
+      }
+      const ordered = shuffle ? shuffled(list) : list;
+      const q = search.q.trim();
+      await window.playTrackList?.(
+        ordered.map(songQueueTrack),
+        q ? `Songs matching "${q}"` : 'Your songs',
+      );
+      if (pagination.totalCount > PLAY_ALL_LIMIT || capped) {
+        window.showToast?.(`Playing the first ${PLAY_ALL_LIMIT} songs`, 'info');
+      }
+    } catch {
+      window.showToast?.("Couldn't load the songs to play", 'error');
+    } finally {
+      setQueueing(false);
+    }
   };
 
   /**
@@ -469,6 +515,30 @@ export function LibraryPage() {
           <span className="watchlist-all-icon">📻</span>
           <span className="watchlist-all-text">Radio</span>
         </button>
+        {songsView ? (
+          <>
+            <button
+              type="button"
+              className="library-watchlist-all-btn library-songs-play-btn"
+              disabled={queueing || songs.length === 0}
+              title={`Play these songs in order (up to ${PLAY_ALL_LIMIT})`}
+              onClick={() => void playSongs(false)}
+            >
+              <span className="watchlist-all-icon">▶</span>
+              <span className="watchlist-all-text">Play all</span>
+            </button>
+            <button
+              type="button"
+              className="library-watchlist-all-btn library-songs-shuffle-btn"
+              disabled={queueing || songs.length === 0}
+              title={`Shuffle these songs (up to ${PLAY_ALL_LIMIT})`}
+              onClick={() => void playSongs(true)}
+            >
+              <span className="watchlist-all-icon">🔀</span>
+              <span className="watchlist-all-text">Shuffle</span>
+            </button>
+          </>
+        ) : null}
         {/* The export is artist-scoped (watchlist/library artists as JSON/CSV/
             text); in the album grid it would export something no card shows,
             so it is gone rather than present and misleading — the same call
@@ -545,6 +615,44 @@ export function LibraryPage() {
               </button>
             ))}
           </div>
+
+          {/* songs: copies of one song, lossless files, the ones the quality
+              jobs say could be better. toggles, so they combine */}
+          {songsView ? (
+            <div className="watchlist-filter" role="group" aria-label="Song filters">
+              <button
+                type="button"
+                className={`watchlist-filter-btn${search.dupes ? ' active' : ''}`}
+                aria-pressed={search.dupes}
+                title="Songs you have more than one copy of"
+                onClick={() => setSearch({ dupes: !search.dupes })}
+              >
+                Duplicates
+              </button>
+              <button
+                type="button"
+                className={`watchlist-filter-btn${search.quality === 'lossless' ? ' active' : ''}`}
+                aria-pressed={search.quality === 'lossless'}
+                title="FLAC, WAV, AIFF and other lossless files"
+                onClick={() =>
+                  setSearch({ quality: search.quality === 'lossless' ? '' : 'lossless' })
+                }
+              >
+                Lossless
+              </button>
+              <button
+                type="button"
+                className={`watchlist-filter-btn${search.quality === 'upgradable' ? ' active' : ''}`}
+                aria-pressed={search.quality === 'upgradable'}
+                title="Songs below their quality profile (from Library Maintenance)"
+                onClick={() =>
+                  setSearch({ quality: search.quality === 'upgradable' ? '' : 'upgradable' })
+                }
+              >
+                Could be better
+              </button>
+            </div>
+          ) : null}
 
           {/* The watchlist is a property of an ARTIST. In the album grid it
               would filter on something no card shows, so it is gone rather
@@ -665,7 +773,8 @@ export function LibraryPage() {
       </div>
 
       <div className="library-content">
-        {loading ? (
+        {loading && songsView ? <LibrarySongSkeleton /> : null}
+        {loading && !songsView ? (
           <div className="library-loading">
             <div className="loading-spinner" />
             <div className="loading-text">Loading {noun}...</div>
@@ -692,6 +801,9 @@ export function LibraryPage() {
           <LibrarySongList
             songs={songs}
             isAdmin={isAdmin}
+            query={search.q.trim()}
+            context={search.q.trim() ? `Songs matching "${search.q.trim()}"` : 'Your songs'}
+            stale={songsQuery.isPlaceholderData}
             onChanged={() => void songsQuery.refetch()}
           />
         ) : albumView ? (

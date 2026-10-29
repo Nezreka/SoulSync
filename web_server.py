@@ -8924,6 +8924,20 @@ def get_library_albums():
             }
         }), 500
 
+def _liked_song_keys(database):
+    """The profile's Liked Songs as the playlists' own song keys, for the
+    songs view's hearts. Empty when nothing's liked yet (or it can't tell)."""
+    try:
+        from core.playlists.user_playlists import _stored_tracks, liked_playlist, track_key
+        playlist = liked_playlist(database, get_current_profile_id())
+        if not playlist:
+            return set()
+        return {track_key(t) for t in _stored_tracks(database, playlist['id'])}
+    except Exception as e:
+        logger.debug("liked songs unavailable for the songs view: %s", e)
+        return set()
+
+
 @app.route('/api/library/songs')
 def get_library_songs():
     """The library page's Songs view (#1906): this profile's songs on the
@@ -8932,25 +8946,50 @@ def get_library_songs():
     try:
         try:
             page = max(1, int(request.args.get('page', 1)))
-            limit = max(1, min(200, int(request.args.get('limit', 75))))
+            # up to 500 so Play all can queue a whole search in one call
+            limit = max(1, min(500, int(request.args.get('limit', 75))))
         except (TypeError, ValueError):
             page, limit = 1, 75
-        result = get_database().get_library_songs(
+        sort = request.args.get('sort', '')
+        quality = request.args.get('quality', '')
+        database = get_database()
+        result = database.get_library_songs(
             search_query=(request.args.get('search') or '').strip(),
             letter=request.args.get('letter', 'all'),
             page=page,
             limit=limit,
-            sort=request.args.get('sort', ''),
+            sort=sort if sort in ('recent', 'artist', 'album', 'year') else 'title',
+            dupes=request.args.get('dupes') == '1',
+            quality=quality if quality in ('lossless', 'upgradable') else '',
         )
+        liked = _liked_song_keys(database)
+        from core.playlists.user_playlists import track_key
         for song in result['songs']:
             if song.get('album_thumb_url'):
                 song['album_thumb_url'] = fix_artist_image_url(song['album_thumb_url'])
+            song['liked'] = track_key(
+                {'track_name': song['title'], 'artist_name': song['artist_name']}) in liked
         return jsonify({"success": True, **result})
     except Exception as e:
         logger.error(f"Error fetching library songs: {e}")
         return jsonify({"success": False, "error": "Couldn't load your songs", "songs": [],
                         "pagination": {"page": 1, "limit": 75, "total_count": 0, "total_pages": 0,
                                        "has_prev": False, "has_next": False}}), 500
+
+
+@app.route('/api/library/songs/<track_id>/copies')
+def get_library_song_copies(track_id):
+    """Every copy of one song the songs view marked "N copies", best file
+    first, so they can be compared and the rest removed (#1906)."""
+    try:
+        copies = get_database().get_library_song_copies(track_id)
+        for song in copies:
+            if song.get('album_thumb_url'):
+                song['album_thumb_url'] = fix_artist_image_url(song['album_thumb_url'])
+        return jsonify({"success": True, "copies": copies})
+    except Exception as e:
+        logger.error(f"Error fetching copies of track {track_id}: {e}")
+        return jsonify({"success": False, "error": "Couldn't load the copies", "copies": []}), 500
 
 
 @app.route('/api/library/albums/<album_id>/tracks')

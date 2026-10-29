@@ -72,9 +72,18 @@ export const librarySearchSchema = z.object({
    * better; '' is everyone and is not sent.
    */
   quality: z
-    .preprocess((v) => (searchString(v) === 'upgradable' ? 'upgradable' : ''), z.string())
+    .preprocess((v) => {
+      const s = searchString(v);
+      // 'lossless' only means something in the songs view, which reads it
+      return s === 'upgradable' || s === 'lossless' ? s : '';
+    }, z.string())
     .default('')
     .catch(''),
+  /** Songs view: only songs the library holds more than one copy of. */
+  dupes: z
+    .preprocess((v) => v === true || v === 1 || v === '1' || v === 'true', z.boolean())
+    .default(false)
+    .catch(false),
   /**
    * Which grid the page shows. In the URL with the other filters rather than
    * in localStorage, for the same reason they are: a library you are looking
@@ -99,7 +108,13 @@ export const librarySearchSchema = z.object({
   sort: z
     .preprocess((v) => {
       const s = searchString(v) ?? '';
-      return s === 'year_desc' || s === 'year_asc' || s === 'recent' ? s : '';
+      return s === 'year_desc' ||
+        s === 'year_asc' ||
+        s === 'recent' ||
+        s === 'artist' ||
+        s === 'album'
+        ? s
+        : '';
     }, z.string())
     .default('')
     .catch(''),
@@ -222,8 +237,11 @@ export interface LibrarySong {
   format: string;
   file_path: string;
   play_count: number;
+  file_size?: number | null;
   /** how many copies of this song (title + artist) the library holds */
   copies: number;
+  /** in this profile's Liked Songs */
+  liked?: boolean;
 }
 
 export interface LibrarySongsResponse {

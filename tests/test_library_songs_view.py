@@ -167,3 +167,92 @@ def test_ranking_a_search_reads_only_the_indexes(db):
     on a 300k library; the ranking must come from the indexes alone."""
     plan = _plan(db, db._songs_rank_sql(ready=True), ['x', 'x%', '%x%', '%x%', '%x%'])
     assert _reads_only_indexes(plan), plan
+
+
+# ── sorts and filters (best in class pass) ───────────────────────────────────
+
+def test_artist_sort_groups_an_artists_albums_in_track_order(db):
+    assert titles(db.get_library_songs(sort='artist')) == [
+        # chris young, famous friends in track order
+        'Famous Friends', 'Whole Lotta Love', 'Friends', "'Til Tomorrow",
+        'Arcadia',                                   # love arcade
+        'You Proof', 'Sand in My Boots', 'You Proof',  # morgan wallen, album by album
+    ]
+
+
+def test_album_sort_is_by_album_title_then_track(db):
+    assert titles(db.get_library_songs(sort='album')) == [
+        'Arcadia', 'You Proof', 'Sand in My Boots', 'You Proof',
+        'Famous Friends', 'Whole Lotta Love', 'Friends', "'Til Tomorrow",
+    ]
+
+
+def test_year_sort_is_newest_album_first(db):
+    result = titles(db.get_library_songs(sort='year'))
+    assert result[-1] == 'Arcadia'                  # 2010, after every 2021 album
+    assert result[:3] == ['You Proof', 'Sand in My Boots', 'You Proof']
+
+
+def test_year_sort_pages(db):
+    first = titles(db.get_library_songs(sort='year', limit=3, page=1))
+    second = titles(db.get_library_songs(sort='year', limit=3, page=2))
+    assert first == ['You Proof', 'Sand in My Boots', 'You Proof']
+    assert second == ['Famous Friends', 'Whole Lotta Love', 'Friends']
+
+
+def test_a_search_keeps_best_match_whatever_the_sort(db):
+    assert titles(db.get_library_songs(search_query='friends', sort='artist')) == [
+        'Friends', 'Famous Friends']
+
+
+def test_duplicates_only(db):
+    # the same title by a different artist is a different song, not a copy
+    c = sqlite3.connect(str(db.database_path))
+    c.execute("INSERT INTO tracks (id, album_id, artist_id, title, server_source, file_path) "
+              "VALUES ('20', 'al4', 'a3', 'Friends', 'plex', '/m/20.flac')")
+    c.commit()
+    c.close()
+    result = db.get_library_songs(dupes=True)
+    assert titles(result) == ['You Proof', 'You Proof']
+    assert result['pagination']['total_count'] == 2
+
+
+def test_lossless_only(db):
+    result = titles(db.get_library_songs(quality='lossless'))
+    assert result.count('You Proof') == 1           # the mp3 copy is out
+    assert len(result) == 7
+
+
+def test_could_be_better_is_the_pending_quality_findings(db):
+    c = sqlite3.connect(str(db.database_path))
+    c.execute("INSERT INTO repair_findings (job_id, finding_type, status, entity_type, entity_id, title) "
+              "VALUES ('quality_upgrade', 'upgrade', 'pending', 'track', '3', 'x')")
+    c.execute("INSERT INTO repair_findings (job_id, finding_type, status, entity_type, entity_id, title) "
+              "VALUES ('quality_upgrade', 'upgrade', 'resolved', 'track', '4', 'x')")
+    c.commit()
+    c.close()
+    assert titles(db.get_library_songs(quality='upgradable')) == ['Sand in My Boots']
+
+
+def test_copies_compare_best_file_first(db):
+    c = sqlite3.connect(str(db.database_path))
+    c.execute("UPDATE tracks SET bitrate = 320 WHERE id = '2'")
+    c.commit()
+    c.close()
+    copies = db.get_library_song_copies('2')
+    # the flac first, though the mp3 was asked about
+    assert [(s['id'], s['format']) for s in copies] == [('1', 'FLAC'), ('2', 'MP3')]
+    assert {s['album_title'] for s in copies} == {'Dangerous', 'Dangerous: The Double Album'}
+    assert db.get_library_song_copies('nope') == []
+
+
+def test_artist_and_album_sorts_walk_an_index_not_a_full_sort(db):
+    """sorting every track by artist or album name took 20 s on a real
+    library; the walk must follow the name index and only sort within it.
+    a tiny test db plans more forgivingly than a 300k one (a text-id
+    tie-break plans fine here and sorted everything there), so this catches
+    a whole-library sort, not every slow shape: measure on a real copy."""
+    for sort in ('artist', 'album', 'title', 'recent'):
+        source, order = db._songs_sort_sql(sort, ready=True)
+        plan = _plan(db, f"SELECT t.id FROM {source} ORDER BY {order}", [])
+        assert 'USE TEMP B-TREE FOR ORDER BY' not in plan, (sort, plan)

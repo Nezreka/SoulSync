@@ -15,7 +15,13 @@ The Library page shows every artist in your collection as cards with images, alb
 ## Browsing
 
 - **Search bar** — find artists by name. When it matches songs, the best few show above the results, with a link into all of them
-- **Artists / Albums / Songs** — three views of the same library. **Songs** lists every song you can see, searchable by title or artist, A–Z or recently added. Each row shows its album, year and file quality, and copies of the same song are marked, so you can tell them apart. Play a song from its cover, add it to a playlist, or open its album; admins can also delete it from the library (and its file from disk) from the **⋯** menu. On a big library a broad search counts up to 1,000 songs and says "1,000+"
+- **Artists / Albums / Songs** — three views of the same library. **Songs** lists every song you can see, searchable by title or artist (the match is highlighted), sorted A–Z, by artist, by album, newest first or recently added
+  - **Click a song** to play it and the songs after it; the playing one shows moving bars. **Play all** / **Shuffle** queue up to 500 of what you're looking at
+  - **♥** saves a song to Liked Songs; the playlist button files it; **⋯** plays it next, adds it to the queue, opens its album or artist
+  - **Filters**: **Duplicates** (songs you have more than one copy of), **Lossless**, and **Could be better** (below their quality profile, from Library Maintenance)
+  - **N copies** opens the copies side by side, best file first (lossless, then bitrate), each playable; admins can **Keep this one** and remove the rest, from the library or from disk
+  - **Tick songs** (or shift-click a range) to play, queue, add to a playlist, like or (admins) delete them together
+  - On a big library a broad search or filter counts up to 1,000 songs and says "1,000+"
 - **Alphabet navigation** (A–Z, #) — jump through large collections
 - **Watchlist filter** — All, Watched, or Unwatched artists
 - **Metadata source filter** — find artists unmatched to a specific service (e.g. "No Discogs") or matched to one (e.g. "Has Spotify")

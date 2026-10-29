@@ -151,6 +151,8 @@ function setTrackInfo(track) {
     try {
         if (typeof window.__ssNowPlaying === 'function') window.__ssNowPlaying(track);
     } catch (e) { /* chat not loaded / not in a room */ }
+    // any page that marks the playing song (the library's songs) listens here
+    window.dispatchEvent(new CustomEvent('ss:now-playing', { detail: track }));
 
     const trackTitleElement = document.getElementById('track-title');
     const trackTitle = _stripSourceIdPrefix(track.title) || 'Unknown Track';
@@ -264,6 +266,7 @@ function clearTrack() {
     try {
         if (typeof window.__ssNowPlaying === 'function') window.__ssNowPlaying(null);
     } catch (e) { /* chat not loaded */ }
+    window.dispatchEvent(new CustomEvent('ss:now-playing', { detail: null }));
     npSetPlayContext('');   // hide "Playing from" when nothing's playing
 
     const trackTitleElement = document.getElementById('track-title');

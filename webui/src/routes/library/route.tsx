@@ -4,7 +4,11 @@ import { LegacyRouteController } from '@/platform/shell/route-controllers';
 import { guardPageAccess } from '@/platform/shell/route-guard';
 import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
 
-import { libraryAlbumsQueryOptions, libraryArtistsQueryOptions } from './-library.api';
+import {
+  libraryAlbumsQueryOptions,
+  libraryArtistsQueryOptions,
+  librarySongsQueryOptions,
+} from './-library.api';
 import { librarySearchSchema } from './-library.types';
 import { LibraryPage } from './-ui/library-page';
 
@@ -30,6 +34,17 @@ export const Route = createFileRoute('/library')({
     if (!isReactOwned()) return;
 
     const { profile } = context.shell;
+    // songs: start the fetch and let the page render without waiting for it.
+    // the list keeps the last results (dimmed) until these land, so a typed
+    // search moves at once. awaiting here also held every keystroke behind
+    // an artists search the songs view never shows (it fell to the branch
+    // below)
+    if (deps.view === 'songs') {
+      void context.queryClient
+        .prefetchQuery(librarySongsQueryOptions(profile.profileId, deps))
+        .catch(() => undefined);
+      return;
+    }
     // Warming the cache for the first paint — NOT a gate. Letting this reject
     // would hand the route to defaultErrorComponent and replace the whole page
     // with "Something went wrong" on any backend hiccup, where the vanilla page

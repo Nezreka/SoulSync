@@ -12640,8 +12640,12 @@ class MusicDatabase:
     # this the page says "1,000+". the whole library counts off an index.
     SONGS_COUNT_CAP = 1000
 
+    # what "lossless" means for the Songs filter: the file's extension
+    _LOSSLESS_EXTS = ('flac', 'wav', 'aiff', 'aif', 'ape', 'wv', 'dsf', 'dff', 'alac')
+
     def get_library_songs(self, search_query: str = "", letter: str = "", page: int = 1,
-                          limit: int = 50, sort: str = "title") -> Dict[str, Any]:
+                          limit: int = 50, sort: str = "title", dupes: bool = False,
+                          quality: str = "") -> Dict[str, Any]:
         """Songs for the library page's Songs view (#1906): every track this
         profile can see on the active server, searchable by title and artist.
 
@@ -12652,9 +12656,18 @@ class MusicDatabase:
         found, and the rows a page shows are fetched by id. A search or letter
         counts at most SONGS_COUNT_CAP songs.
 
-        sort is 'title' (the default) or 'recent'; a search orders by match
-        (exact title, then title prefix, then title, then artist). Errors
-        propagate: the route tells a failed search apart from an empty one.
+        sort is 'title' (the default), 'recent', 'artist', 'album' or 'year';
+        a search orders by match (exact title, then title prefix, then title,
+        then artist) whatever the sort. dupes keeps only songs the library
+        holds more than one copy of (same title and artist); quality is
+        'lossless' (by the file's extension) or 'upgradable' (a pending
+        quality finding). Errors propagate: the route tells a failed search
+        apart from an empty one.
+
+        The artist and album sorts walk that table's name index and each row's
+        tracks through their own index (a plain ORDER BY sorted every track
+        in the library, 20 s); year has no index, so it orders the albums and
+        then reads their tracks a chunk at a time.
         """
         from core.settings import config_manager
         page = max(1, int(page or 1))
@@ -12664,16 +12677,7 @@ class MusicDatabase:
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
-            gaps = [self._norm_unfilled_count(cursor, table, norm, _NORM_INLINE_LIMIT + 1)
-                    for table, raw, norm, _kind in self._NORM_COLUMNS]
-            if any(gaps):
-                if any(n > _NORM_INLINE_LIMIT for n in gaps):
-                    ready = False
-                else:
-                    self.ensure_norm_backfilled()
-                    ready = True
-            else:
-                ready = True
+            ready = self._songs_norm_ready(cursor)
             t_title = self._norm_expr(ready, "t", "title", "title_norm")
 
             scope_sql, scope_params = self._current_scope_sql("t.owner_profile_id")
@@ -12694,7 +12698,26 @@ class MusicDatabase:
                                  f"({t_title} < 'a' AND SUBSTR({stripped}, 1, 1) = ?))")
                     params += [low, chr(ord(low) + 1), low]
 
-            # the server, scope and letter: filters on rows something else found
+            if dupes:
+                # another copy: same title and artist, also visible here. the
+                # title index finds the few rows to compare per song
+                where.append(
+                    "EXISTS (SELECT 1 FROM tracks t2 WHERE t2.title_norm = t.title_norm "
+                    "AND t2.rowid != t.rowid AND t2.artist_id = t.artist_id "
+                    f"AND +t2.server_source = ? AND {scope_sql.replace('t.owner_profile_id', 't2.owner_profile_id')})")
+                params += [config_manager.get_active_media_server(), *scope_params]
+            if quality == 'lossless':
+                where.append("(" + " OR ".join(
+                    f"LOWER(t.file_path) LIKE '%.{ext}'" for ext in self._LOSSLESS_EXTS) + ")")
+            elif quality == 'upgradable':
+                from core.quality.upgrades import UPGRADE_JOBS
+                marks = ",".join("?" * len(UPGRADE_JOBS))
+                where.append(
+                    "t.id IN (SELECT f.entity_id FROM repair_findings f WHERE f.status = 'pending' "
+                    f"AND f.entity_type = 'track' AND f.job_id IN ({marks}))")
+                params += list(UPGRADE_JOBS)
+
+            # the server, scope, letter and filters: checks on rows something else found
             filter_sql = " AND ".join(where)
             filter_params = list(params)
             if qn:
@@ -12703,7 +12726,7 @@ class MusicDatabase:
                 params += [like, like, like]
 
             where_sql = " AND ".join(where)
-            filtered = bool(qn) or bool(letter and letter != "all")
+            filtered = bool(qn) or bool(letter and letter != "all") or dupes or bool(quality)
             if filtered:
                 cursor.execute(
                     f"SELECT COUNT(*) FROM (SELECT 1 FROM tracks t WHERE {where_sql} LIMIT ?)",
@@ -12715,12 +12738,14 @@ class MusicDatabase:
             if qn:
                 ids = self._ranked_song_page(cursor, ready, qn, filter_sql, filter_params,
                                              limit, offset)
+            elif sort == 'year':
+                ids = self._year_sorted_song_page(cursor, filter_sql, filter_params,
+                                                  config_manager.get_active_media_server(),
+                                                  limit, offset)
             else:
-                # rowid, not t.id: the id is text, so "recent" by it put 999
-                # above 1000, and a tie on it was a sort the index can't give
-                order = "t.rowid DESC" if sort == "recent" else f"{t_title}, t.rowid"
+                source, order = self._songs_sort_sql(sort, ready)
                 cursor.execute(
-                    f"SELECT t.id FROM tracks t WHERE {where_sql} ORDER BY {order} "
+                    f"SELECT t.id FROM {source} WHERE {where_sql} ORDER BY {order} "
                     f"LIMIT ? OFFSET ?",
                     params + [limit, offset])
                 ids = [r[0] for r in cursor.fetchall()]
@@ -12775,6 +12800,59 @@ class MusicDatabase:
                 [*chunk, *filter_params])
             passed = {row[0]: row[1] for row in cursor.fetchall()}
             kept.extend(passed[rid] for rid in chunk if rid in passed)
+            if len(kept) >= wanted:
+                break
+        return kept[offset:wanted]
+
+    def _songs_sort_sql(self, sort: str, ready: bool) -> Tuple[str, str]:
+        """FROM and ORDER BY for a songs page that isn't a search or by year.
+
+        rowid, not t.id: the id is text, so "recent" by it put 999 above
+        1000, and a tie on it was a sort the index can't give. CROSS JOIN
+        pins the walk to the sort's own name index, so a page reads its
+        rows in order instead of sorting the whole library (20 s)."""
+        if sort == 'artist':
+            a_name = self._norm_expr(ready, "a", "name", "name_norm")
+            return ("artists a CROSS JOIN tracks t ON t.artist_id = a.id",
+                    f"{a_name}, a.rowid, t.album_id, t.disc_number, t.track_number, t.rowid")
+        if sort == 'album':
+            al_title = self._norm_expr(ready, "al", "title", "title_norm")
+            return ("albums al CROSS JOIN tracks t ON t.album_id = al.id",
+                    f"{al_title}, al.rowid, t.disc_number, t.track_number, t.rowid")
+        if sort == 'recent':
+            return "tracks t", "t.rowid DESC"
+        t_title = self._norm_expr(ready, "t", "title", "title_norm")
+        return "tracks t", f"{t_title}, t.rowid"
+
+    # albums a year-sorted page reads tracks for per round trip
+    _SONGS_YEAR_CHUNK = 60
+
+    def _year_sorted_song_page(self, cursor, filter_sql: str, filter_params: list,
+                               server_source: str, limit: int, offset: int) -> List[Any]:
+        """A page of songs newest album first. albums.year has no index, so
+        the albums are ordered on their own (a few hundred ms on a big
+        library, against 20 s for sorting every track), then their tracks
+        are read in that order a chunk of albums at a time until the page is
+        full. An album's songs keep disc and track order."""
+        cursor.execute(
+            "SELECT id FROM albums WHERE +server_source = ? "
+            "ORDER BY year IS NULL, year DESC, title_norm, rowid",
+            [server_source])
+        album_ids = [row[0] for row in cursor.fetchall()]
+        wanted = offset + limit
+        kept: List[Any] = []
+        for start in range(0, len(album_ids), self._SONGS_YEAR_CHUNK):
+            chunk = album_ids[start:start + self._SONGS_YEAR_CHUNK]
+            marks = ",".join("?" * len(chunk))
+            cursor.execute(
+                f"SELECT t.album_id, t.id FROM tracks t WHERE t.album_id IN ({marks}) "
+                f"AND {filter_sql} ORDER BY t.disc_number, t.track_number, t.rowid",
+                [*chunk, *filter_params])
+            by_album: Dict[Any, List[Any]] = {}
+            for album_id, track_id in cursor.fetchall():
+                by_album.setdefault(album_id, []).append(track_id)
+            for album_id in chunk:
+                kept.extend(by_album.get(album_id, ()))
             if len(kept) >= wanted:
                 break
         return kept[offset:wanted]
@@ -12872,8 +12950,53 @@ class MusicDatabase:
                 'format': ext if 1 < len(ext) <= 5 else '',
                 'file_path': path,
                 'play_count': r.get('play_count') or 0,
+                'file_size': r.get('file_size'),
                 'copies': copies.get((r.get('title_norm'), r['artist_id']), 1),
             })
+        return songs
+
+    def _songs_norm_ready(self, cursor) -> bool:
+        """Whether the normalized columns can be read as they are. A few
+        unfilled rows (a fresh import) are filled inline; a big backfill
+        still running means the reads compute them per row instead. Probed
+        without kicking the backfill thread, which owns the big case."""
+        gaps = [self._norm_unfilled_count(cursor, table, norm, _NORM_INLINE_LIMIT + 1)
+                for table, raw, norm, _kind in self._NORM_COLUMNS]
+        if not any(gaps):
+            return True
+        if any(n > _NORM_INLINE_LIMIT for n in gaps):
+            return False
+        self.ensure_norm_backfilled()
+        return True
+
+    def get_library_song_copies(self, track_id: Any) -> List[Dict[str, Any]]:
+        """Every copy of one song (same title and artist) this profile can see
+        on the active server, best file first: lossless before lossy, then
+        the higher bitrate. What the songs view compares when it says
+        "2 copies"; [] for a track it doesn't know."""
+        from core.settings import config_manager
+        server = config_manager.get_active_media_server()
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            ready = self._songs_norm_ready(cursor)
+            t_title = self._norm_expr(ready, "t", "title", "title_norm")
+            cursor.execute(f"SELECT {t_title}, t.artist_id FROM tracks t WHERE t.id = ?",
+                           (str(track_id),))
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                return []
+            scope_sql, scope_params = self._current_scope_sql("t.owner_profile_id")
+            cursor.execute(
+                f"SELECT t.id FROM tracks t WHERE {t_title} = ? AND t.artist_id = ? "
+                f"AND +t.server_source = ? AND {scope_sql} ORDER BY t.rowid",
+                [row[0], row[1], server, *scope_params])
+            ids = [r[0] for r in cursor.fetchall()]
+            songs = self._library_song_rows(cursor, ids, ready, scope_sql, scope_params, server)
+        finally:
+            conn.close()
+        lossless = {e.upper() for e in self._LOSSLESS_EXTS}
+        songs.sort(key=lambda s: (s['format'] not in lossless, -(s.get('bitrate') or 0)))
         return songs
 
     def get_tracks_for_m3u_resolution(self, server_source: Optional[str] = None) -> List[Dict[str, str]]:
