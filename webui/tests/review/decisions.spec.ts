@@ -320,3 +320,30 @@ for (const width of [1800, 390]) {
     }
   });
 }
+
+test('disc-total-only edits retain the album numbering choice', async ({ page }) => {
+  const requests: unknown[] = [];
+  const handlers = reviewFixture(true, (review) => {
+    review.items[0].details = {
+      ...review.items[0].details,
+      routine_numbering: true,
+      changes: { total_discs: { old: 1, new: 2 } },
+    };
+    review.album_plan!.assignments[0].changes = { total_discs: { old: 1, new: 2 } };
+  });
+  await installShell(page, [
+    http.post('*/api/repair/review-queue/:id/decisions/numbering/apply', async ({ request }) => {
+      requests.push(await request.json());
+      return HttpResponse.json({ success: true, saved: 1 });
+    }),
+    ...handlers,
+  ]);
+  await page.goto(`${ORIGIN}/review?mode=all`);
+  await expect(page.getByRole('button', { name: /Total discs/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Change…', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: 'Album numbering' })
+    .getByRole('button', { name: 'Keep current numbering' })
+    .click();
+  await expect.poll(() => requests).toEqual([{ action: 'dismiss' }]);
+});

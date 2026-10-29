@@ -208,3 +208,13 @@ it('counts a file and library edit once and keeps undecided changes out of ready
     { key: 'title', label: 'Track titles', count: 2, valueSummary: 'Update 2 tracks' },
   ]);
 });
+
+it('labels disc-total-only edits as numbering without claiming track numbers will change', () => {
+  const item = {
+    ...idFinding(1, null, 'recording'),
+    details: { changes: { total_discs: { old: 1, new: 2 } } },
+  };
+  const groups = groupReadyChanges([item]);
+  expect(groups).toHaveLength(1);
+  expect(groups[0]).toMatchObject({ key: 'numbering', label: 'Total discs', count: 1 });
+});

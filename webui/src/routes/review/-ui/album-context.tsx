@@ -9,6 +9,7 @@ import { NumberingChoice } from './numbering-choice';
 import { ReleaseComparison } from './reconciliation-evidence';
 import { numberingSchemeLabel } from './review-labels';
 import styles from './review-page.module.css';
+import { NUMBERING_FIELDS } from './review-position';
 import { libraryRelativePath } from './review-presentation';
 import { record, textValue } from './review-presentation';
 
@@ -182,12 +183,7 @@ export function AlbumContext({
                   reviewCase.items.some(
                     (item) =>
                       item.details?.routine_numbering &&
-                      [
-                        'track_number',
-                        'disc_number',
-                        'library_track_number',
-                        'library_disc_number',
-                      ].some((field) => field in record(item.details?.changes)),
+                      NUMBERING_FIELDS.some((field) => field in record(item.details?.changes)),
                   ) && (
                     <NumberingChoice
                       key={caseId}

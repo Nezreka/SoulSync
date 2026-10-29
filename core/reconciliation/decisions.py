@@ -154,9 +154,11 @@ def numbering_choices(conn):
         return {}
     if 'numbering_signature' not in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_album_plans)')}:
         return {}
+    # Start with the few saved policies, not the much larger plan documents.
+    # Existing ANALYZE statistics otherwise favor scanning every plan at boot.
     return {case: json.loads(value) for case, value in conn.execute('''
-        SELECT a.case_id,d.value_json FROM reconcile_review_aliases a
-        JOIN reconcile_album_decisions d USING(review_id)
-        JOIN reconcile_album_plans p ON p.case_id=a.case_id
+        SELECT a.case_id,d.value_json FROM reconcile_album_decisions d
+        CROSS JOIN reconcile_review_aliases a USING(review_id)
+        CROSS JOIN reconcile_album_plans p ON p.case_id=a.case_id
         WHERE d.kind='numbering' AND p.numbering_signature!=''
           AND json_extract(d.dependencies_json,'$.signature')=p.numbering_signature''')}

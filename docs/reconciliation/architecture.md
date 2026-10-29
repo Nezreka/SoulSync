@@ -27,7 +27,7 @@ Startup upgrades are versioned in `reconcile_schema_versions`: identity/numberin
 
 ### Decision dependencies and approval
 
-Numbering is one album decision keyed to selected source/release and the ordered release slots. A later track assignment does not erase that decision. A different edition or changed slot structure invalidates it. Keeping current numbering remains independent of accepting other metadata. `fields.py` owns position fields and aliases, including disc totals, across planning and preview.
+Numbering is one album decision keyed to selected source/release and the ordered release slots. A later track assignment does not erase that decision. A different edition or changed slot structure invalidates it. Keeping current numbering remains independent of accepting other metadata. `fields.py` owns position fields and aliases, including disc totals, across planning and preview. The frontend shares its numbering display field list in `review-position.ts`, including disc totals.
 
 `signatures.py` versions meaningful approval dependencies. Titles used only for display, transient explanatory annotations, and equivalent option ordering do not revoke approval. Changed files, release/slot identities, planned values, locks, competing copies, and unknown guard fields do. The original reviewed payload remains available for execution guards.
 

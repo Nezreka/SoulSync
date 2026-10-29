@@ -59,7 +59,7 @@ def load_choices(conn, finding_id=None, *, case_id=None):
     if (result and 'approval_signature' in columns
             and 'review_signature' in {row[1] for row in conn.execute('PRAGMA table_info(repair_findings)')}):
         query = '''SELECT c.finding_id,f.details_json FROM reconcile_review_choices c
-            JOIN repair_findings f ON f.id=c.finding_id AND c.case_id=f.review_case_key
+            CROSS JOIN repair_findings f ON f.id=c.finding_id AND c.case_id=f.review_case_key
             WHERE c.approval_signature!='' AND c.approval_signature=f.review_signature'''
         if finding_id is not None:
             query += ' AND c.finding_id=?'

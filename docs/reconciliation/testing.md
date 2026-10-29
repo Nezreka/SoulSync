@@ -76,3 +76,14 @@ To deliberately regenerate the backend corpus, set `UPDATE_REVIEW_ACCEPTANCE=1` 
 6. Correct concrete findings, add the matching regression, deploy the correction, and repeat reconciliation and live inspection. Compare warm results with the baseline and explain changes in findings.
 
 Test moves must preserve collected case identities and assertions. Validation totals alone are insufficient: compare the collected cases before/after moving suites and retain the specific lifecycle evidence above.
+
+
+## Latest implementation validation
+
+The implementation pass preserved the collected backend and UI cases while moving them to the owners above. Validation covered 917 reconciliation cases and 429 related worker/library/download cases, 109 review unit cases, 31 browser journeys, and all 60 backend-derived browser acceptance cases. A second pass added a migration work-budget regression and disc-total-only UI coverage.
+
+The first live migration preserved 568 saved choices, 1,583 plans, one replacement journal, 48,425 findings, 13,873 indexed tracks, and 1,618 albums. Versions 1–4 produced 1,625 stable identities, 15 album policies, and 1,285 current accepted track decisions. Repeating the migration made no changes.
+
+Live startup exposed a query-planner cost with old SQLite statistics: numbering adoption joined the full findings history once per album. The corrected migration reads saved votes once. On the same isolated backup its measured duration fell from 100.74 seconds to 9.41 seconds. An independent replay compared every migrated policy value, alias/identity mapping, numbering signature, and saved choice; the results were equal. The regression test bounds SQLite work under stale statistics and fails against the original implementation.
+
+The first live reconciliation checked 13,872 files in 296.36 seconds with zero job errors and no file actions applied. All 28 concurrent search probes succeeded. Desktop/mobile inspection covered Plan, Release, and Tracks for LIVE, TRON, Blue, and Unwritten: 24 views, no page runtime errors or horizontal overflow. Missing catalogue IDs returned expected provider 404s; these were classified as not found, not scan failures.

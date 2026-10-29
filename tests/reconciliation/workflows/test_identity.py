@@ -164,3 +164,42 @@ def test_replacement_survives_verified_move_and_reapproval_without_losing_journa
     assert replacement.approve(album.db, str(moved), saved) == operation
     with album.db._get_connection() as conn:
         assert tuple(conn.execute('SELECT count(*),journal FROM reconcile_replacements').fetchone()) == (1,journal)
+
+
+def test_numbering_adoption_is_bounded_with_large_unrelated_history(tmp_path, monkeypatch):
+    """Startup must scale with saved policy, not albums multiplied by history."""
+    from core.reconciliation.migration import _upgrade_review_state
+    from core.reconciliation.store import persist_album_plan
+
+    album = build_album(tmp_path, monkeypatch, 'numbering_metadata_conflict')
+    case = scan_case(album)
+    assert album.worker.apply_review_decision_group(case['case_id'], 'numbering', action='dismiss')['success']
+    for index in range(50):
+        persist_album_plan(album.db, {
+            'album_id': str(1000 + index), 'profile_id': 1,
+            'album_folder': f'/music/unrelated-{index}', 'evidence_signature': 'old',
+        }, case['album_plan'])
+    with album.db._get_connection() as conn:
+        conn.executemany('''INSERT INTO repair_findings
+            (job_id,finding_type,severity,status,title,description,details_json)
+            VALUES('unrelated','old','info','resolved','Historical finding','','{}')''',
+            [()] * 10000)
+        conn.execute('ANALYZE')
+        # Retention can leave statistics that overestimate the saved choice
+        # set. The migration must stay bounded under that planner state.
+        conn.execute("DELETE FROM sqlite_stat1 WHERE tbl='reconcile_review_choices'")
+        conn.execute("INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES('reconcile_review_choices',NULL,'1000000')")
+        conn.execute('ANALYZE sqlite_schema')
+        conn.execute('DELETE FROM reconcile_schema_versions WHERE version=1')
+        conn.execute('DELETE FROM reconcile_album_decisions')
+        steps = 0
+        def limit_work():
+            nonlocal steps
+            steps += 1000
+            return steps > 200000
+        conn.set_progress_handler(limit_work, 1000)
+        try:
+            _upgrade_review_state(conn)
+        finally:
+            conn.set_progress_handler(None, 0)
+        assert decisions.numbering_choices(conn) == {case['case_id']: 'dismiss'}

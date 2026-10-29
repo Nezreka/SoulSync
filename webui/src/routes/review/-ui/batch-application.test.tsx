@@ -79,7 +79,7 @@ it.each(['metadata', 'user', undefined])('applies a ready plan (%s)', async (evi
             {
               album: 'Ashes of the Wake',
               case_id: 'album:1:ashes',
-              actions: [{ description: 'Update artist metadata' }],
+              actions: [{ id: 7, description: 'Update artist metadata' }],
             },
           ],
         }),

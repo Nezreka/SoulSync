@@ -175,19 +175,25 @@ def _upgrade_review_state(conn):
     conn.execute('CREATE TABLE IF NOT EXISTS reconcile_schema_versions(version INTEGER PRIMARY KEY)')
     if conn.execute('SELECT 1 FROM reconcile_schema_versions WHERE version=1').fetchone():
         return
+    # Read the small choice set once. With persisted SQLite statistics a
+    # per-album join may scan the entire finding history for every album.
+    votes_by_release = {}
+    for case, choice, raw in conn.execute("""SELECT c.case_id,
+            CASE WHEN c.category='numbering' THEN c.choice ELSE c.numbering_choice END,
+            c.evidence_json FROM reconcile_review_choices c CROSS JOIN repair_findings f
+            ON f.id=c.finding_id WHERE c.evidence_json=f.details_json
+            AND f.user_action IS NOT 'obsolete'
+            AND (c.category='numbering' OR c.numbering_choice!='')"""):
+        evidence = json.loads(raw)
+        key = (case, evidence.get('source'), evidence.get('release_id'))
+        votes_by_release.setdefault(key, set()).add(choice)
     for case, album, profile, raw in conn.execute(
             'SELECT case_id,album_id,profile_id,plan_json FROM reconcile_album_plans').fetchall():
         decisions.register_review(conn, case, album, profile)
         plan = json.loads(raw)
         conn.execute('UPDATE reconcile_album_plans SET numbering_signature=? WHERE case_id=?',
                      (decisions.plan_numbering_signature(plan), case))
-        votes = {choice for choice, evidence in conn.execute('''
-            SELECT CASE WHEN c.category='numbering' THEN c.choice ELSE c.numbering_choice END,c.evidence_json
-            FROM reconcile_review_choices c JOIN repair_findings f ON f.id=c.finding_id
-            WHERE c.case_id=? AND c.evidence_json=f.details_json AND f.user_action IS NOT 'obsolete'
-              AND (c.category='numbering' OR c.numbering_choice!='')''', (case,))
-            if (json.loads(evidence).get('source'), json.loads(evidence).get('release_id')) ==
-               (plan.get('source'), plan.get('release_id'))}
+        votes = votes_by_release.get((case, plan.get('source'), plan.get('release_id')), set())
         if len(votes) == 1:
             decisions.save_numbering(conn, case, next(iter(votes)))
     # These obsolete blockers belong to the old immediate-removal flow. Only

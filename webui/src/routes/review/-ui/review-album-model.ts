@@ -1,5 +1,6 @@
 import type { AlbumAssignment, ReviewCase, ReviewDecision, ReviewFinding } from '../-review.api';
 
+import { NUMBERING_FIELDS } from './review-position';
 import {
   assignmentKey,
   changeFieldLabel,
@@ -203,15 +204,7 @@ export function readyFieldGroup(field: string): { key: string; label: string } {
   if (field === 'album') {
     return { key: 'album', label: 'Album title' };
   }
-  if (
-    [
-      'track_number',
-      'disc_number',
-      'total_discs',
-      'library_track_number',
-      'library_disc_number',
-    ].includes(field)
-  ) {
+  if (NUMBERING_FIELDS.includes(field)) {
     return { key: 'numbering', label: 'Numbering' };
   }
   return { key: field, label: changeFieldLabel(field) };
@@ -273,7 +266,9 @@ export function groupReadyChanges(items: ReviewFinding[], readyOnly = true): Rea
           ? 'Disc and track numbering'
           : hasDisc
             ? 'Disc numbering'
-            : 'Track numbering';
+            : hasTrack
+              ? 'Track numbering'
+              : 'Total discs';
     }
     let valueSummary: string;
     const operations = new Map<string, number>();
