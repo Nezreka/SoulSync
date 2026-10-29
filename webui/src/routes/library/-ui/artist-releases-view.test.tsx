@@ -725,4 +725,45 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(screen.getAllByText('Dummy')).toHaveLength(1);
     expect(writes).toEqual([]);
   });
+
+  it('offers an album its own upgrade picker, dev-style "Upgrade N"', async () => {
+    const posts: unknown[] = [];
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            albums: [album({ id: 1, title: 'Dummy', tracks_present: 2, origin: 'library' })],
+          }),
+        }),
+      ),
+      http.get('/api/library/v2/artists/1/enhance', () =>
+        HttpResponse.json({
+          success: true,
+          tracks: [1, 2].map((n) => ({
+            track_id: n,
+            title: `Song ${n}`,
+            album_id: 1,
+            album_title: 'Dummy',
+            disc_number: 1,
+            track_number: n,
+            current: 'MP3 128',
+            profile: 'Lossless',
+            target: 'FLAC',
+            monitored: false,
+          })),
+        }),
+      ),
+      http.post('/api/library/v2/albums/1/enhance', async ({ request }) => {
+        posts.push(await request.json());
+        return HttpResponse.json({ success: true, job_id: 'e1' });
+      }),
+    );
+    renderArtist('/library?artist=1');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Upgrade 2' }));
+    expect(await screen.findByText('Enhance Quality — Dummy')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Enhance/ }));
+    await waitFor(() => expect(posts).toEqual([{ track_ids: [1, 2] }]));
+  });
 });

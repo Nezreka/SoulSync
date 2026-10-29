@@ -172,6 +172,7 @@ import { HistoryEventList } from './history-event-list';
 import { groupHistoryEvents, summarizeRecentHistory } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
+import { AlbumUpgradeButton } from './owned-album-upgrade';
 import {
   OwnedArtistDiscographyButton,
   useReadOnlyProviderDiscography,
@@ -7927,6 +7928,7 @@ function AlbumBlock({
             artistName={artistName}
             tracksPresent={album.tracks_present}
           />
+          <AlbumUpgradeButton albumId={album.id} albumTitle={album.title} />
           <IconActionButton
             icon="automatic"
             title="Automatic Search — search missing/upgradable tracks on this album"
