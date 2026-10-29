@@ -393,8 +393,33 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
     return track_id
 
 
+def server_track_names(track_obj: Any) -> Dict[str, Any]:
+    """What the server says a song is: title, album artist, album, numbers.
+    Plex names them on the object, Jellyfin and Navidrome in the raw item."""
+    data = getattr(track_obj, "data", None) or getattr(track_obj, "_data", None) or {}
+    if not isinstance(data, dict):
+        data = {}
+    artists = data.get("Artists") or []
+    artist = (getattr(track_obj, "grandparentTitle", None) or data.get("AlbumArtist")
+              or data.get("albumArtist") or data.get("displayAlbumArtist")
+              or data.get("artist") or (artists[0] if artists else None))
+    return {
+        "name": getattr(track_obj, "title", None),
+        "artist": artist,
+        "album": getattr(track_obj, "parentTitle", None) or data.get("Album") or data.get("album"),
+        "track_number": getattr(track_obj, "trackNumber", None) or getattr(track_obj, "index", None),
+        "disc_number": getattr(track_obj, "discNumber", None) or getattr(track_obj, "parentIndex", None),
+    }
+
+
+def _library_folders_visible(roots: Dict[str, int]) -> bool:
+    """Whether this process can see any of the library folders at all. When
+    it can't, the media server lives somewhere SoulSync has no view of."""
+    return any(os.path.isdir(prefix) for prefix in roots)
+
+
 def adopt_scanned_file(cursor, path: Optional[str], server_path: Optional[str],
-                       server_source: str) -> bool:
+                       server_source: str, server_info: Optional[Dict[str, Any]] = None) -> bool:
     """Bring a listed file the catalogue lacks in through the import writer.
 
     Only a file this process can open under one of the library folders counts:
@@ -410,16 +435,28 @@ def adopt_scanned_file(cursor, path: Optional[str], server_path: Optional[str],
             " AND COALESCE(file_state,'active')<>'deleted' LIMIT 1",
             (path, server_path or path)).fetchone():
         return False
-    from core.library2.library_roots import load_roots, owner_for_path
-    if not owner_for_path(load_roots(cursor), path)[0] or not os.path.isfile(path):
-        return False
-    from core.library2 import tag_cache
+    from core.library2.library_roots import load_roots
     from core.library2.autolink import link_download_into_library_v2
-    tags = tag_cache.read_tag_snapshot(path)
-    artist = tags.get("album_artist") or tags.get("artist")
-    track_info = {"name": tags.get("title"), "artist": artist, "album": tags.get("album"),
-                  "track_number": tags.get("track_number"),
-                  "disc_number": tags.get("disc_number")} if artist and tags.get("title") else {}
+    roots = load_roots(cursor)
+    if os.path.isfile(path):
+        # a file the server shares outside SoulSync's own folders is still
+        # music you own: the server listing it is how dev's library knew it
+        from core.library2 import tag_cache
+        tags = tag_cache.read_tag_snapshot(path)
+        artist = tags.get("album_artist") or tags.get("artist")
+        track_info = {"name": tags.get("title"), "artist": artist, "album": tags.get("album"),
+                      "track_number": tags.get("track_number"),
+                      "disc_number": tags.get("disc_number")} if artist and tags.get("title") else {}
+    elif (server_info and server_info.get("name") and server_info.get("artist")
+          and not _library_folders_visible(roots)):
+        # the media server is on another machine: SoulSync can't open its
+        # files, so the server's word is the identity, the way the upgrade
+        # imported every song it already knew. a local library that just
+        # lost a file stays out (Navidrome lists missing files for a while)
+        track_info = {key: server_info.get(key) for key in
+                      ("name", "artist", "album", "track_number", "disc_number")}
+    else:
+        return False
     # "username" is the file row's source; without track_info the writer
     # derives the identity from the file itself.
     if link_download_into_library_v2({"_final_processed_path": path, "track_info": track_info,

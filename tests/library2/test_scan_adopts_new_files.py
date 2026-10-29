@@ -115,16 +115,59 @@ def test_a_wanted_track_gets_the_file_instead_of_a_duplicate(lib):
     assert _count(db, "lib2_tracks") == 1
 
 
-@pytest.mark.parametrize("where", ["missing", "outside"])
-def test_a_file_the_library_cannot_own_stays_out(lib, tmp_path, where):
-    """A listed file that is gone (Navidrome's missing files, a delayed
-    removal) or that lies under no library folder is not ours to adopt."""
+def test_a_listed_file_that_is_gone_stays_out(lib):
+    """A listed file that is gone from a library this process can see
+    (Navidrome's missing files, a delayed removal) is not ours to adopt."""
     db, music, reconciles = lib
-    path = (music / "Muse" / "gone.flac" if where == "missing"
-            else _file(tmp_path / "elsewhere"))
+    path = music / "Muse" / "gone.flac"
 
     assert db.insert_or_update_media_track(_Track(path), "al-new", "ar-new",
                                            server_source="plex") is False
     assert (_count(db, "lib2_artists"), _count(db, "lib2_tracks"),
             _count(db, "lib2_track_files")) == (0, 0, 0)
     assert reconciles == []
+
+
+def test_a_server_folder_outside_soulsyncs_own_is_still_your_music(lib, tmp_path):
+    """dev's library showed every song the server shares, wherever its folder.
+    A readable file under a server folder SoulSync doesn't manage joins too."""
+    db, _music, _ = lib
+    path = _file(tmp_path / "old-rips" / "Muse")
+
+    assert db.insert_or_update_media_track(_Track(path), "al-new", "ar-new",
+                                           server_source="plex") == "inserted"
+    assert _count(db, "lib2_track_files") == 1
+
+
+def test_a_remote_server_adopts_by_what_the_server_says(tmp_path, monkeypatch):
+    """Plex on another machine: SoulSync can't open the files or even see the
+    library folder. dev listed those songs from the server, so they still
+    join, named by the server's album artist and album."""
+    from core.library2.library_roots import apply_roots, desired_roots
+    db = MusicDatabase(database_path=str(tmp_path / "music.db"))
+    with db._get_connection() as conn:
+        apply_roots(conn.cursor(), desired_roots(str(tmp_path / "not-mounted"), []))
+        conn.commit()
+    monkeypatch.setattr("database.music_database.get_database", lambda *a, **k: db)
+    monkeypatch.setattr("core.library2.autolink._warm_new_artwork", lambda *a, **k: None)
+    monkeypatch.setattr("core.library2.unmapped_trigger.schedule_unmapped_artist_reconcile",
+                        lambda *a, **k: None)
+    track = _Track("/data/music/Muse/Origin of Symmetry/01 Plug In Baby.flac")
+    track.grandparentTitle = "Muse"
+    track.parentTitle = "Origin of Symmetry"
+
+    assert db.insert_or_update_media_track(track, "al-new", "ar-new",
+                                           server_source="plex") == "inserted"
+    with db._get_connection() as conn:
+        row = conn.execute(
+            "SELECT ar.name AS artist, al.title AS album, t.title, t.monitored, f.path"
+            "  FROM lib2_track_files f JOIN lib2_tracks t ON t.id=f.track_id"
+            "  JOIN lib2_albums al ON al.id=t.album_id JOIN lib2_artists ar ON ar.id=al.primary_artist_id"
+        ).fetchone()
+    assert (row["artist"], row["album"], row["title"]) == ("Muse", "Origin of Symmetry", "Plug In Baby")
+    assert row["path"] == track.path and row["monitored"] == 0
+    assert db.get_track_by_server_id("srv-new", "plex") is not None
+    # and the next scan maps it instead of adding it again
+    assert db.insert_or_update_media_track(track, "al-new", "ar-new",
+                                           server_source="plex") == "updated"
+    assert _count(db, "lib2_tracks") == 1

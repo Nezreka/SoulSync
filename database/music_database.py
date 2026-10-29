@@ -10554,7 +10554,7 @@ class MusicDatabase:
         from core.library2.media_mappings import resolve_mapping
         from core.library2.media_server_sync import (
             adopt_scanned_file, recognize_track_artists, resolve_album, resolve_artist,
-            upsert_track,
+            server_track_names, upsert_track,
         )
         max_retries = 3
         retry_count = 0
@@ -10655,7 +10655,8 @@ class MusicDatabase:
                             (recording_id, title, duration, duration),
                         ).fetchall()
                     if len(candidates) != 1:
-                        if adopt_scanned_file(cursor, file_path, server_path, server_source):
+                        if adopt_scanned_file(cursor, file_path, server_path, server_source,
+                                              server_info=server_track_names(track_obj)):
                             return self.insert_or_update_media_track(
                                 track_obj, album_id, artist_id, server_source)
                         logger.warning(
@@ -10730,7 +10731,8 @@ class MusicDatabase:
                     bitrate=bitrate,
                 )
                 if catalogue_track_id is None:
-                    if adopt_scanned_file(cursor, file_path, server_path, server_source):
+                    if adopt_scanned_file(cursor, file_path, server_path, server_source,
+                                          server_info=server_track_names(track_obj)):
                         return self.insert_or_update_media_track(
                             track_obj, album_id, artist_id, server_source)
                     logger.info("Media track %s skipped: no active imported file row", title)
