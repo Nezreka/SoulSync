@@ -766,4 +766,18 @@ describe('Library V2 artist detail — All Releases views', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Enhance/ }));
     await waitFor(() => expect(posts).toEqual([{ track_ids: [1, 2] }]));
   });
+
+  it('labels the back link with where an arriving visit came from', async () => {
+    (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack = [
+      { type: 'page', pageId: 'search' },
+    ];
+    try {
+      renderArtist('/library?artist=1&view=discovery&immersive=true');
+      expect(await screen.findByText('← Back to Search')).toBeInTheDocument();
+    } finally {
+      delete (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack;
+    }
+    renderArtist('/library?artist=1');
+    expect(await screen.findByText('← All artists')).toBeInTheDocument();
+  });
 });

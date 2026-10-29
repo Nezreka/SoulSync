@@ -173,6 +173,7 @@ import { groupHistoryEvents, summarizeRecentHistory } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { AlbumUpgradeButton } from './owned-album-upgrade';
+import { useArrivalBack } from './owned-artist-back';
 import {
   OwnedArtistDiscographyButton,
   useReadOnlyProviderDiscography,
@@ -6845,6 +6846,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   // like every other Library V2 view setting.
   const releaseView = search.releaseView;
   const headerMode = search.header;
+  const arrivalBack = useArrivalBack(search.immersive);
   // the artist tools stay visible on arrival from an artist page, the way dev
   // showed them. immersive only remembers where the visit started.
   const { filters, setFilters } = useDiscographyFilters();
@@ -7100,8 +7102,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
 
   return (
     <div className={styles.page}>
-      <BackLink onClick={() => void navigate({ search: (p) => ({ ...p, artist: undefined }) })}>
-        ← All artists
+      <BackLink
+        onClick={
+          arrivalBack?.onBack ??
+          (() => void navigate({ search: (p) => ({ ...p, artist: undefined }) }))
+        }
+      >
+        {arrivalBack?.label ?? '← All artists'}
       </BackLink>
       {artistQuery.isError ? (
         // iss29-C04: without this branch `isLoading` false + `artist` undefined
