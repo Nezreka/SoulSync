@@ -179,6 +179,7 @@ import {
 } from './owned-artist-discography';
 import { OwnedArtistHeroExtras } from './owned-artist-hero-extras';
 import { openProviderRelease, ReleaseCardExtras } from './owned-artist-release-cards';
+import { OwnedArtistReorganizeQueue } from './owned-artist-reorganize-queue';
 import { OwnedTopTrackActions, OwnedTopTracksDownloadAll } from './owned-artist-top-tracks';
 import { AlbumUnlockMenuItem, OwnedTrackMoreMenu } from './owned-artist-track-actions';
 import { QualityProfilePicker } from './quality-profile-modal';
@@ -7205,6 +7206,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             </div>
           }
 
+          <OwnedArtistReorganizeQueue artistId={artistId} />
           {grabBanner ? (
             <StatusNotice
               tone={grabBanner.tone}
