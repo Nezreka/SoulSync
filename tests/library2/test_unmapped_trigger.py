@@ -165,13 +165,18 @@ def test_scheduling_never_raises_into_the_import_pipeline():
 
 
 @pytest.mark.parametrize('result,expected', [
-    ({'success': True}, ['workers']),
-    ({'skipped': 'already_done'}, ['reconcile', 'workers']),
+    # a fresh migration: workers first, then credits + tracklists + tags behind them
+    ({'success': True}, ['workers', 'prepare:full']),
+    # a restart: workers first, then the credit pass behind them
+    ({'skipped': 'already_done'}, ['workers', 'prepare:credits']),
     ({'skipped': 'empty_source'}, ['workers']),
 ])
-def test_autostart_reconciles_completed_migrations_without_waiting_for_new_import(monkeypatch, result, expected):
+def test_autostart_starts_workers_before_the_preparation(monkeypatch, result, expected):
+    """The preparation used to run inside the upgrade barrier: on a 300k
+    library every worker stayed stopped for hours. The queues keep combined
+    credits out on their own, so the workers start first now."""
     import web_server
-    from core.library2 import bootstrap, file_delete, migration_gate
+    from core.library2 import bootstrap, file_delete, migration_gate, post_import
     calls = []
     database = object()
     monkeypatch.setattr(web_server, 'get_database', lambda: database)
@@ -179,7 +184,8 @@ def test_autostart_reconciles_completed_migrations_without_waiting_for_new_impor
     monkeypatch.setattr(bootstrap, 'run_deferred_backfills', lambda *a, **k: None)
     monkeypatch.setattr(bootstrap, 'run_bootstrap_if_needed', lambda *a, **k: result)
     monkeypatch.setattr(file_delete, 'reconcile_incomplete_deletes', lambda *a, **k: 0)
-    monkeypatch.setattr('core.library2.post_import.prepare_imported_artists', lambda *a: calls.append('reconcile'))
+    monkeypatch.setattr(post_import, 'start_background_preparation',
+                        lambda *a, full, **k: calls.append('prepare:full' if full else 'prepare:credits'))
     monkeypatch.setattr(migration_gate, 'start_deferred_workers', lambda *a: calls.append('workers'))
     web_server._autostart_library_v2_bootstrap_import()
     assert calls == expected

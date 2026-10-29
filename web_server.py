@@ -20374,16 +20374,9 @@ def _autostart_library_v2_bootstrap_import():
     """
     import time as _t
     from core.library2 import bootstrap as lib2_bootstrap
-    from core.library2.post_import import run_post_import_precache
     from api.library_v2 import start_artwork_precache
 
     process_started_at = _t.time()
-
-    def _post_import(progress):
-        """Everything a migrated library needs beyond its catalogue rows."""
-        run_post_import_precache(get_database(), config_manager, progress=progress)
-        # Artwork runs in its own worker: the library is browsable without it.
-        start_artwork_precache(get_database, config_manager)
 
     try:
         lib2_bootstrap.reclaim_abandoned_claim(
@@ -20436,19 +20429,20 @@ def _autostart_library_v2_bootstrap_import():
     while True:
         try:
             database = get_database()
-            result = lib2_bootstrap.run_bootstrap_if_needed(
-                database, config_manager.get, post_import=_post_import,
-            )
+            result = lib2_bootstrap.run_bootstrap_if_needed(database, config_manager.get)
             if lib2_bootstrap.should_stop_autostart(result):
-                if result.get("skipped") == "already_done":
-                    # Older completed migrations need the same preparation.
-                    # A timer here released workers before the split happened.
-                    from core.library2.post_import import prepare_imported_artists
-                    from core.library2.migration_gate import migration_activity
-                    with migration_activity():
-                        prepare_imported_artists(database, config_manager)
                 from core.library2.migration_gate import start_deferred_workers
+                from core.library2.post_import import start_background_preparation
                 start_deferred_workers(database)
+                # the credit split, tracklists and tags run behind a library
+                # that already works. the worker queues skip an unresolved
+                # combined credit on their own, so nothing waits on this
+                if result.get("success"):
+                    start_background_preparation(
+                        database, config_manager, full=True,
+                        after=lambda: start_artwork_precache(get_database, config_manager))
+                elif result.get("skipped") == "already_done":
+                    start_background_preparation(database, config_manager, full=False)
                 return
             # A tick that actually migrated something means the source is live;
             # start checking frequently again. Only genuinely idle ticks back off.

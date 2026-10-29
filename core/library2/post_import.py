@@ -18,6 +18,7 @@ if that stage cannot run, the migration barrier must remain in place.
 
 from __future__ import annotations
 
+import threading
 from contextlib import closing
 from typing import Any, Callable, Dict, Optional
 
@@ -113,3 +114,49 @@ def run_post_import_precache(database: Any, config_manager: Any, *,
 
 
 __all__ = ["run_post_import_precache", "prepare_imported_artists", "ArtistPreparationError"]
+
+
+_background_lock = threading.Lock()
+_background_thread: Optional[threading.Thread] = None
+
+
+def start_background_preparation(database: Any, config_manager: Any, *, full: bool,
+                                 after: Optional[Callable[[], Any]] = None
+                                 ) -> Optional[threading.Thread]:
+    """Run the post-upgrade preparation behind a library that already works.
+
+    It used to run inside the upgrade barrier, so every worker stayed stopped
+    and every library change answered 503 until it was done. On a 300k-track
+    library that is the network pass over ~29k imported credits plus a
+    tracklist for every album: hours, on every restart for the credit pass.
+    None of it has to hold the library: the worker queues keep an unresolved
+    combined credit out on their own (artist_credit_gate), whether or not
+    this pass has reached it, and the caches are best effort.
+
+    ``full`` runs everything a fresh migration needs (credits, tracklists,
+    tags); otherwise only the credit pass a restart repeats. ``after`` runs
+    when it finishes. One run at a time; a second call while one is alive is
+    a no-op.
+    """
+    global _background_thread
+
+    def run():
+        try:
+            if full:
+                run_post_import_precache(database, config_manager)
+            else:
+                prepare_imported_artists(database, config_manager)
+        except Exception as exc:  # noqa: BLE001 - best effort, the next start retries
+            logger.warning("Library v2 background preparation stopped: %s", exc)
+        if after is not None:
+            try:
+                after()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Library v2 post-preparation step failed: %s", exc)
+
+    with _background_lock:
+        if _background_thread is not None and _background_thread.is_alive():
+            return None
+        _background_thread = threading.Thread(target=run, name="Lib2Preparation", daemon=True)
+        _background_thread.start()
+        return _background_thread
