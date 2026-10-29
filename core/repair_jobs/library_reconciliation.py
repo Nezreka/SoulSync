@@ -21,6 +21,7 @@ from core.library.path_resolver import resolve_library_file_path
 from core.library.duplicate_keep import pick_duplicate_to_keep
 from core.library.duplicate_rules import is_lossy_companion_file, is_lossy_companion_pair, lossy_companion_exts
 from core.reconciliation.candidates import ScoredCandidate, assignment_evidence, pair_display_fields
+from core.reconciliation.discovery import search_release_candidates as _search_release_candidates, supported_search_context
 from core.library_reorganize import _safe_filename
 from core.reconciliation.inventory import (
     ScanScope, InventoryRequest, load_inventory_request, track_selection,
@@ -960,33 +961,6 @@ def _release_group_candidates(release_id: str, files: list[dict], context: JobCo
     return cache[release_id]
 
 
-def _search_release_candidates(album: dict | None, context: JobContext,
-                               search_cache: dict) -> list[tuple[str, str]]:
-    """Bounded Picard-style title/artist fallback for albums with no usable ID."""
-    if not album or not context.mb_client:
-        return []
-    title = str(album.get('album_title') or '').strip()
-    artist = str(album.get('artist_name') or '').strip()
-    if not title:
-        return []
-    key = (title.casefold(), artist.casefold())
-    if key not in search_cache:
-        try:
-            search_cache[key] = context.mb_client.search_release(
-                title, artist_name=artist or None, limit=4)
-        except Exception as exc:
-            logger.debug('Could not search MusicBrainz release %r by %r: %s',
-                         title, artist, exc)
-            search_cache[key] = []
-    candidates = []
-    for row in search_cache[key] or []:
-        release_id = str(row.get('id') or '')
-        score = float(row.get('score') or 0)
-        release_title = str(row.get('title') or '')
-        if (release_id and score >= 90 and
-                normalize(title) == normalize(release_title)):
-            candidates.append(('musicbrainz', release_id))
-    return candidates[:4]
 
 
 def _trailing_album_qualifier(value: str) -> tuple[str, str] | None:
@@ -2437,9 +2411,14 @@ class LibraryReconciliationJob(RepairJob):
                         not plan_only and best_expanded and not _edition_preference(_release_metadata(
                             best_expanded, release_meta_cache, exact_musicbrainz_releases))[0]
                     )
-                    if needs_digital and not any(row.source == 'musicbrainz' for row in scored):
+                    search_album = supported_search_context(
+                        album, files, best_expanded,
+                        _release_metadata(best_expanded, release_meta_cache, exact_musicbrainz_releases)
+                        if best_expanded and not plan_only else {})
+                    needs_artist_discovery = search_album is not album
+                    if (needs_digital or needs_artist_discovery) and not plan_only and not any(row.source == 'musicbrainz' for row in scored):
                         searched = [candidate for candidate in _search_release_candidates(
-                            album, context, release_search_cache) if candidate not in candidates]
+                            search_album, context, release_search_cache) if candidate not in candidates]
                         exact_musicbrainz_releases.update(
                             release_id for source, release_id in searched
                             if source == 'musicbrainz')
@@ -2470,7 +2449,7 @@ class LibraryReconciliationJob(RepairJob):
                             files, editions, release_cache, exact_musicbrainz_releases))
                     if not plan_only and (not scored or max(row.matched for row in scored) == 0):
                         searched = [candidate for candidate in _search_release_candidates(
-                            album, context, release_search_cache) if candidate not in candidates]
+                            search_album, context, release_search_cache) if candidate not in candidates]
                         exact_musicbrainz_releases.update(
                             release_id for source, release_id in searched
                             if source == 'musicbrainz')
@@ -2548,7 +2527,7 @@ class LibraryReconciliationJob(RepairJob):
                             scored[0], release_meta_cache, exact_musicbrainz_releases)
                         if _single_file_album_context_conflict(album, release_meta):
                             searched = [candidate for candidate in _search_release_candidates(
-                                album, context, release_search_cache)
+                                search_album, context, release_search_cache)
                                 if candidate not in candidates]
                             exact_musicbrainz_releases.update(
                                 release_id for source, release_id in searched
