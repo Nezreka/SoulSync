@@ -69,7 +69,12 @@ export async function playLibrarySong(song: LibrarySong): Promise<void> {
   try {
     await window.SoulSyncWebShellBridge?.playLibraryTrack(
       {
-        id: song.id,
+        // a catalogue id means nothing to the media server: the typed ids ride along
+        id: song.server_track_id ?? song.legacy_track_id ?? null,
+        lib2_track_id: songLib2Id(song),
+        legacy_track_id: song.legacy_track_id ?? null,
+        server_track_id: song.server_track_id ?? null,
+        lib2_artist_id: song.artist_id ?? null,
         title: song.title,
         file_path: song.file_path,
         _stats_image: song.album_thumb_url || null,
@@ -82,7 +87,16 @@ export async function playLibrarySong(song: LibrarySong): Promise<void> {
   }
 }
 
-/** A library song as the player's queue takes it, the album card's shape. */
+/** The song's Library v2 track id, what the player keys a library play by. */
+export function songLib2Id(song: LibrarySong): number | null {
+  const raw = song.lib2_track_id ?? song.id;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** A library song as the player's queue takes it, the same row shape the
+ *  album and artist play buttons build (-library-v2.play.ts): `id` is a
+ *  server or legacy id or null, the lib2 ids ride alongside. */
 export function songQueueTrack(song: LibrarySong) {
   const title = song.title || 'Unknown Track';
   const artist = song.artist_name || 'Unknown Artist';
@@ -97,9 +111,12 @@ export function songQueueTrack(song: LibrarySong) {
     is_library: true,
     playback_status: 'ready',
     image_url: song.album_thumb_url ?? null,
-    id: song.id,
-    artist_id: song.artist_id,
-    album_id: song.album_id,
+    id: song.server_track_id ?? song.legacy_track_id ?? null,
+    lib2_track_id: songLib2Id(song),
+    lib2_album_id: song.album_id ?? null,
+    lib2_artist_id: song.artist_id ?? null,
+    legacy_track_id: song.legacy_track_id ?? null,
+    server_track_id: song.server_track_id ?? null,
     track_number: song.track_number,
     duration: song.duration,
     bitrate: song.bitrate,

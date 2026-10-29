@@ -13,6 +13,10 @@ export type LibraryV2Sort = (typeof LIBRARY_V2_SORTS)[number];
 export const LIBRARY_V2_ALBUM_SORTS = ['title', 'year_desc', 'year_asc', 'added'] as const;
 export type LibraryV2AlbumSort = (typeof LIBRARY_V2_ALBUM_SORTS)[number];
 
+/** The songs tab's orders (#1906); 'title' is A-Z. */
+export const LIBRARY_V2_SONG_SORTS = ['title', 'artist', 'album', 'year_desc', 'recent'] as const;
+export type LibraryV2SongSort = (typeof LIBRARY_V2_SONG_SORTS)[number];
+
 export const LIBRARY_V2_MONITOR_FILTERS = ['all', 'monitored', 'unmonitored'] as const;
 export type LibraryV2MonitorFilter = (typeof LIBRARY_V2_MONITOR_FILTERS)[number];
 
@@ -30,7 +34,7 @@ const coercedString = z.preprocess(
 );
 
 const libraryV2SearchObject = z.object({
-  section: z.enum(['artists', 'albums', 'wanted']).default('artists').catch('artists'),
+  section: z.enum(['artists', 'albums', 'songs', 'wanted']).default('artists').catch('artists'),
   // Same trap as `discover`/`discoverName` below, and it bit here too: a filter
   // of "123" or "702" arrives as a NUMBER, a bare z.string() rejects it and
   // `.catch('')` silently swallows the filter — the URL said one thing and the
@@ -61,10 +65,66 @@ const libraryV2SearchObject = z.object({
   releaseView: z.enum(['table', 'cards']).optional().catch(undefined),
   /** ldp-05: compact V2 artist header vs. the rich legacy hero. */
   header: z.enum(['compact', 'rich']).optional().catch(undefined),
+  /** the old page's alphabet bar: 'all', a-z or '#' */
+  letter: z
+    .preprocess(
+      (v) => (typeof v === 'string' || typeof v === 'number' ? String(v).toLowerCase() : 'all'),
+      z.string(),
+    )
+    .default('all')
+    .catch('all'),
+  /** has / has no provider id: 'spotify' or '!spotify'; '' is everything */
+  source: coercedString.default('').catch(''),
+  /** 'upgradable' (could be better; artists and songs) or 'lossless' (songs) */
+  quality: z.enum(['', 'lossless', 'upgradable']).default('').catch(''),
+  /** songs tab: only songs held more than once */
+  dupes: z
+    .preprocess((v) => v === true || v === 1 || v === '1' || v === 'true', z.boolean())
+    .default(false)
+    .catch(false),
+  /** songs tab order */
+  songSort: z.enum(LIBRARY_V2_SONG_SORTS).default('title').catch('title'),
 });
 
+/**
+ * Bookmarks from the old library page: `view` named the grid (artists,
+ * albums, songs) and `sort`/`watchlist` used that page's values. Map them
+ * onto this page's params so an old link opens the same view.
+ */
+export function mapLegacyLibrarySearch(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const input = raw as Record<string, unknown>;
+  const view = input.view;
+  if (view !== 'artists' && view !== 'albums' && view !== 'songs') return raw;
+  const out: Record<string, unknown> = { ...input };
+  delete out.view;
+  const section = typeof input.section === 'string' ? input.section : view;
+  out.section = section;
+  const sort = typeof input.sort === 'string' ? input.sort : '';
+  delete out.sort;
+  if (section === 'songs') {
+    if (['artist', 'album', 'year_desc', 'recent'].includes(sort)) out.songSort = sort;
+  } else if (section === 'albums') {
+    if (sort === 'recent') out.albumSort = 'added';
+    else if (sort === 'year_desc' || sort === 'year_asc') out.albumSort = sort;
+  } else if (sort === 'recent') {
+    out.sort = 'added';
+  }
+  if (input.watchlist === 'watched') out.monitored = 'monitored';
+  else if (input.watchlist === 'unwatched') out.monitored = 'unmonitored';
+  delete out.watchlist;
+  return out;
+}
+
 /** Discovery is an entry intent; explicit display choices remain authoritative. */
-export const libraryV2SearchSchema = libraryV2SearchObject.transform((value) => ({
+// the cast keeps the object's input type for links and navigate(); the
+// preprocess only rewrites old bookmark params before they are read
+const libraryV2SearchWithLegacy = z.preprocess(
+  mapLegacyLibrarySearch,
+  libraryV2SearchObject,
+) as unknown as typeof libraryV2SearchObject;
+
+export const libraryV2SearchSchema = libraryV2SearchWithLegacy.transform((value) => ({
   ...value,
   header: value.header ?? (value.view === 'discovery' ? ('rich' as const) : ('compact' as const)),
   releases:
@@ -157,6 +217,10 @@ export interface LibraryV2ArtistSummary {
   /** Media servers that positively mapped this imported catalogue artist. */
   media_server_sources?: string[];
   user_overrides: Record<string, unknown>;
+  /** provider ids for the card's badges (`spotify`, `deezer`, ...) */
+  provider_ids?: Record<string, string>;
+  /** tracks below their quality profile; only with include=upgradable */
+  upgradable_count?: number;
 }
 
 /** One row of the album browse (`GET /api/library/v2/albums`). */
@@ -174,6 +238,8 @@ export interface LibraryV2AlbumListItem {
   track_count: number;
   tracks_present: number;
   tracks_missing: number;
+  /** provider ids for the card's badges */
+  provider_ids?: Record<string, string>;
 }
 
 export interface LibraryV2AlbumSummary {

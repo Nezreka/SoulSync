@@ -1,0 +1,139 @@
+/* the old library page's index tools on the v2 page: plain on purpose */
+
+.searchWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.searchWrap input {
+  padding-right: 28px;
+}
+
+.searchClear {
+  position: absolute;
+  right: 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.searchClear:hover {
+  opacity: 1;
+}
+
+.alphabet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 8px 0 12px;
+}
+
+.alphabet button {
+  min-width: 26px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.alphabet button:hover {
+  opacity: 1;
+}
+
+.alphabet button.letterActive {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  color: var(--accent);
+  opacity: 1;
+  font-weight: 700;
+}
+
+.toggleActive {
+  border-color: currentcolor;
+  font-weight: 700;
+}
+
+.count {
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.cardExtras {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.cardPlay {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--white-a25);
+  border-radius: var(--radius-pill);
+  background: var(--black-a55);
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cardPlay:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 2px;
+  border-radius: var(--radius-xs);
+  background: var(--white-a07);
+  color: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.badge img {
+  display: block;
+  width: 14px;
+  height: auto;
+}
+
+.upgradable {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.fallbackNote {
+  margin-top: 8px;
+  opacity: 0.8;
+}
+
+.searchOnline {
+  margin-top: 12px;
+  padding: 8px 14px;
+  border: 1px solid currentcolor;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}

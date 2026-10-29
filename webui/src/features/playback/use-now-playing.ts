@@ -9,16 +9,27 @@ import { useEffect, useState } from 'react';
  */
 export interface NowPlaying {
   id: string | null;
+  /** the Library v2 track id, when the track came from the library */
+  lib2Id: string | null;
   playing: boolean;
 }
 
-function idOf(track: { id?: unknown } | null | undefined): string | null {
-  const id = track?.id;
-  return typeof id === 'string' || typeof id === 'number' ? String(id) : null;
+type PlayerTrack = { id?: unknown; lib2_track_id?: unknown } | null | undefined;
+
+function asId(value: unknown): string | null {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : null;
 }
 
-function currentId(): string | null {
-  return idOf((window as { __ssCurrentTrack?: { id?: unknown } | null }).__ssCurrentTrack);
+function idOf(track: PlayerTrack): string | null {
+  return asId(track?.id);
+}
+
+function lib2IdOf(track: PlayerTrack): string | null {
+  return asId(track?.lib2_track_id);
+}
+
+function currentTrack(): PlayerTrack {
+  return (window as { __ssCurrentTrack?: PlayerTrack }).__ssCurrentTrack;
 }
 
 function audio(): HTMLAudioElement | null {
@@ -27,14 +38,15 @@ function audio(): HTMLAudioElement | null {
 
 export function useNowPlaying(): NowPlaying {
   const [state, setState] = useState<NowPlaying>(() => ({
-    id: currentId(),
+    id: idOf(currentTrack()),
+    lib2Id: lib2IdOf(currentTrack()),
     playing: Boolean(audio() && !audio()!.paused),
   }));
 
   useEffect(() => {
     const onTrack = (event: Event) => {
-      const track = (event as CustomEvent<{ id?: unknown } | null>).detail;
-      setState((s) => ({ ...s, id: idOf(track) }));
+      const track = (event as CustomEvent<PlayerTrack | null>).detail;
+      setState((s) => ({ ...s, id: idOf(track), lib2Id: lib2IdOf(track) }));
     };
     const onPlay = () => setState((s) => ({ ...s, playing: true }));
     const onPause = () => setState((s) => ({ ...s, playing: false }));

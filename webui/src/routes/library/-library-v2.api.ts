@@ -92,8 +92,26 @@ export async function fetchLibraryV2Enabled(): Promise<LibraryV2Availability> {
   };
 }
 
+/** The old library page's filters, on the v2 lists: the alphabet bar, has or
+ *  has no provider id ("!spotify"), and "could be better". All optional. */
+export interface LibraryV2ListFilters {
+  letter?: string;
+  source?: string;
+  quality?: string;
+  /** ask for each artist card's "could be better" count */
+  includeUpgradable?: boolean;
+}
+
+function setListFilters(params: URLSearchParams, filters: LibraryV2ListFilters) {
+  if (filters.letter && filters.letter !== 'all') params.set('letter', filters.letter);
+  if (filters.source) params.set('source', filters.source);
+  if (filters.quality === 'upgradable') params.set('quality', 'upgradable');
+}
+
 export async function fetchLibraryV2Artists(
-  search: Pick<LibraryV2Search, 'q' | 'sort' | 'page' | 'monitored'> & { includeSize?: boolean },
+  search: Pick<LibraryV2Search, 'q' | 'sort' | 'page' | 'monitored'> & {
+    includeSize?: boolean;
+  } & LibraryV2ListFilters,
 ): Promise<ArtistsResponse> {
   const params = new URLSearchParams();
   if (search.q) params.set('search', search.q);
@@ -105,7 +123,11 @@ export async function fetchLibraryV2Artists(
   // server used to derive it from. That silently zeroed the field for every
   // other consumer of this endpoint and didn't invalidate an already-fetched
   // list when the preference was toggled.
-  if (search.includeSize) params.set('include', 'size');
+  const include = [search.includeSize ? 'size' : '', search.includeUpgradable ? 'upgradable' : '']
+    .filter(Boolean)
+    .join(',');
+  if (include) params.set('include', include);
+  setListFilters(params, search);
   return lib2Json<ArtistsResponse>(
     apiClient.get('library/v2/artists', { searchParams: params }),
     'Failed to load library',
@@ -119,13 +141,15 @@ interface AlbumsResponse extends Ok {
 
 /** The library by release (A07). */
 export async function fetchLibraryV2Albums(
-  search: Pick<LibraryV2Search, 'q' | 'albumSort' | 'page' | 'monitored'>,
+  search: Pick<LibraryV2Search, 'q' | 'albumSort' | 'page' | 'monitored'> &
+    Pick<LibraryV2ListFilters, 'letter' | 'source'>,
 ): Promise<AlbumsResponse> {
   const params = new URLSearchParams();
   if (search.q) params.set('search', search.q);
   params.set('sort', search.albumSort);
   params.set('monitored', search.monitored);
   params.set('page', String(search.page));
+  setListFilters(params, { letter: search.letter, source: search.source });
   return lib2Json<AlbumsResponse>(
     apiClient.get('library/v2/albums', { searchParams: params }),
     'Failed to load albums',
@@ -1985,7 +2009,9 @@ export function libraryV2EnabledQueryOptions() {
 }
 
 export function libraryV2ArtistsQueryOptions(
-  search: Pick<LibraryV2Search, 'q' | 'sort' | 'page' | 'monitored'> & { includeSize?: boolean },
+  search: Pick<LibraryV2Search, 'q' | 'sort' | 'page' | 'monitored'> & {
+    includeSize?: boolean;
+  } & LibraryV2ListFilters,
 ) {
   return queryOptions({
     queryKey: [
@@ -1996,13 +2022,18 @@ export function libraryV2ArtistsQueryOptions(
       search.monitored,
       search.page,
       Boolean(search.includeSize),
+      search.letter ?? 'all',
+      search.source ?? '',
+      search.quality === 'upgradable' ? 'upgradable' : '',
+      Boolean(search.includeUpgradable),
     ],
     queryFn: () => fetchLibraryV2Artists(search),
   });
 }
 
 export function libraryV2AlbumsQueryOptions(
-  search: Pick<LibraryV2Search, 'q' | 'albumSort' | 'page' | 'monitored'>,
+  search: Pick<LibraryV2Search, 'q' | 'albumSort' | 'page' | 'monitored'> &
+    Pick<LibraryV2ListFilters, 'letter' | 'source'>,
 ) {
   return queryOptions({
     queryKey: [
@@ -2012,6 +2043,8 @@ export function libraryV2AlbumsQueryOptions(
       search.albumSort,
       search.monitored,
       search.page,
+      search.letter ?? 'all',
+      search.source ?? '',
     ],
     queryFn: () => fetchLibraryV2Albums(search),
   });

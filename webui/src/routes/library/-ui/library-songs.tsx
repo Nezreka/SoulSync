@@ -16,6 +16,7 @@ import { librarySongsQueryOptions } from '../-library-songs.api';
 import {
   matchParts,
   readSongsResponse,
+  songLib2Id,
   songMeta,
   songPlaylistTrack,
   songQueueTrack,
@@ -107,12 +108,19 @@ function SongRow({
   onDelete,
 }: RowProps) {
   const navigate = useNavigate();
-  const albumHref = `/artist-detail/library/${song.artist_id}?album=${song.album_id}`;
+  // the ids are Library v2's: open them on the library page itself
+  const albumHref = `/library?album=${song.album_id}`;
   const openArtist = (album?: boolean) =>
     void navigate({
-      to: '/artist-detail/$source/$id',
-      params: { source: 'library', id: String(song.artist_id) },
-      search: album ? { album: String(song.album_id) } : {},
+      to: '/library',
+      search: album
+        ? { album: Number(song.album_id) }
+        : {
+            artist: Number(song.artist_id),
+            releases: 'library' as const,
+            releaseView: 'table' as const,
+            header: 'compact' as const,
+          },
     });
   const quality = [song.format, song.bitrate ? `${song.bitrate}k` : ''].filter(Boolean).join(' ');
   const playable = Boolean(song.file_path);
@@ -207,7 +215,15 @@ function SongRow({
         <div className={styles.meta}>
           <Marked text={song.artist_name} query={query} />
           <span className={styles.dot}>·</span>
-          <a className={styles.album} href={albumHref}>
+          <a
+            className={styles.album}
+            href={albumHref}
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+              e.preventDefault();
+              openArtist(true);
+            }}
+          >
             {song.album_title || 'Unknown album'}
           </a>
           {songMeta(song) ? (
@@ -441,7 +457,9 @@ export function LibrarySongList({
             selecting={selected.size > 0}
             liked={isLiked(song)}
             nowPlaying={{
-              here: nowPlaying.id !== null && nowPlaying.id === String(song.id),
+              // the player names a library track by its lib2 id; its `id` is
+              // a server id that can collide with a catalogue one
+              here: nowPlaying.lib2Id !== null && nowPlaying.lib2Id === String(songLib2Id(song)),
               playing: nowPlaying.playing,
             }}
             onPlay={() => playFrom(index)}

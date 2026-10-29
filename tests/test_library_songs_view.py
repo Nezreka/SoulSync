@@ -86,6 +86,20 @@ def test_a_row_says_which_album_and_counts_its_copies(db):
     assert one['album_thumb_url'].startswith('/art/')
 
 
+def test_a_row_carries_the_ids_the_player_reads(db):
+    # the player keys a library play by lib2_track_id; `id` alone is a
+    # catalogue id the media server can't stream by
+    c = sqlite3.connect(str(db.database_path))
+    c.execute("UPDATE lib2_tracks SET legacy_track_id = 4242 WHERE title = 'Arcadia'")
+    c.commit()
+    c.close()
+    rows = {s['title']: s for s in db.get_library_songs()['songs']}
+    arcadia = rows['Arcadia']
+    assert arcadia['lib2_track_id'] == arcadia['id']
+    assert arcadia['legacy_track_id'] == 4242 and arcadia['server_track_id'] == 4242
+    assert rows['Friends']['legacy_track_id'] is None
+
+
 def test_search_finds_titles_first_then_artists(db):
     # "love" is in one title and one artist's name: the title match leads,
     # though alphabetically the artist's song comes first

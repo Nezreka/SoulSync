@@ -10,7 +10,8 @@ import type { LibrarySong } from '../-library-songs.types';
 
 /**
  * #1906: search your library by song title. Through the real router, like the
- * page's other tests: the view lives in the URL.
+ * page's other tests: the view lives in the URL. The Songs tab is a section of
+ * the Library v2 page; an old `?view=songs` bookmark still opens it.
  */
 
 function song(over: Partial<LibrarySong> & { id: number }): LibrarySong {
@@ -51,6 +52,24 @@ let songs: LibrarySong[] = PROOF;
 let songTotal = 2;
 let capped = false;
 let artistRows: { id: number; name: string }[] = [{ id: 1, name: 'Morgan Wallen' }];
+/** the v2 page's write capability: admins delete songs */
+let canWrite = true;
+
+function v2Artist(row: { id: number; name: string }) {
+  return {
+    ...row,
+    image_url: null,
+    genres: [],
+    monitored: false,
+    album_count: 1,
+    single_count: 0,
+    track_count: 1,
+    tracks_present: 1,
+    tracks_missing: 0,
+    total_size_bytes: 0,
+    user_overrides: {},
+  };
+}
 let copiesRows: LibrarySong[] = [];
 /** a search whose request never answers, to see the list while it loads */
 let holdSearch = '';
@@ -67,7 +86,26 @@ function stubFetch() {
       if (holdSearch && url.includes(`search=${holdSearch}`)) {
         return new Promise<Response>(() => {});
       }
-      if (url.includes('/copies')) {
+      if (url.includes('/api/library/v2/enabled')) {
+        body = { success: true, enabled: true, can_write: canWrite, can_wish: canWrite };
+      } else if (url.includes('/api/library/v2/import/status')) {
+        body = { success: true, running: false, stage: 'done', artwork_cache: { running: false } };
+      } else if (url.includes('/api/library/v2/artists/upgradable-counts')) {
+        body = { success: true, counts: {} };
+      } else if (url.includes('/api/library/v2/artists')) {
+        body = {
+          success: true,
+          artists: artistRows.map(v2Artist),
+          pagination: {
+            page: 1,
+            limit: 75,
+            total_count: artistRows.length,
+            total_pages: 1,
+            has_prev: false,
+            has_next: false,
+          },
+        };
+      } else if (url.includes('/copies')) {
         body = { success: true, copies: copiesRows };
       } else if (url.includes('/api/user-playlists/liked')) {
         body = { success: true, id: 1, added: 1, removed: 1, track_count: 1 };
@@ -126,6 +164,7 @@ beforeEach(() => {
   songTotal = 2;
   capped = false;
   artistRows = [{ id: 1, name: 'Morgan Wallen' }];
+  canWrite = true;
   copiesRows = [];
   holdSearch = '';
   window.SoulSyncWebShellBridge = createShellBridge();
@@ -151,7 +190,7 @@ describe('the Songs view', () => {
     expect(screen.getByText('FLAC 900k')).toBeTruthy();
     const params = new URL(songCalls().at(-1)!.url, 'http://x').searchParams;
     expect(params.get('search')).toBe('you proof');
-    expect(document.querySelector('.library-stats')?.textContent).toContain('Songs');
+    expect(document.querySelector('#library-artist-count')?.textContent).toBe('2');
   });
 
   it('plays the song and the list after it, from its file', async () => {
@@ -164,8 +203,9 @@ describe('the Songs view', () => {
       Record<string, unknown>[],
       string,
     ];
-    expect(queue.map((t) => t.id)).toEqual([1, 2]);
-    expect(queue[0]).toMatchObject({ file_path: '/m/1.flac', is_library: true });
+    // the player keys a library play by its lib2 id; `id` is for the media server
+    expect(queue.map((t) => t.lib2_track_id)).toEqual([1, 2]);
+    expect(queue[0]).toMatchObject({ file_path: '/m/1.flac', is_library: true, id: null });
     expect(context).toBe('Your songs');
     delete window.playTrackList;
   });
@@ -174,7 +214,7 @@ describe('the Songs view', () => {
     songs = [song({ id: 1, title: 'Love Story' })];
     songTotal = 1000;
     capped = true;
-    renderPage('/library?view=songs&q=love');
+    renderPage('/library?section=songs&q=love');
     // the search's hit is marked, so the title is split around it
     await screen.findByRole('mark');
     expect(document.querySelector('#library-artist-count')?.textContent).toBe('1,000+');
@@ -197,10 +237,11 @@ describe('the Songs view', () => {
   });
 
   it('everyone else gets play, playlist and open, but no delete', async () => {
+    canWrite = false;
     window.SoulSyncWebShellBridge = createShellBridge({
       getCurrentProfileContext: vi.fn(() => ({ profileId: 3, isAdmin: false })),
     });
-    renderPage('/library?view=songs');
+    renderPage('/library?section=songs');
     await screen.findAllByText('You Proof');
     fireEvent.click(screen.getAllByLabelText('More for You Proof')[0]);
     expect(await screen.findByText('Open album')).toBeTruthy();
@@ -219,15 +260,19 @@ describe('a library search finds songs from any view', () => {
     const params = new URL(songCalls()[0].url, 'http://x').searchParams;
     expect(params.get('limit')).toBe('5');
     fireEvent.click(within(strip).getByText('See all 12 songs →'));
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ view: 'songs' }));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ section: 'songs', q: 'you proof' }),
+    );
   });
 
   it('found songs but no artists is not "not in your library"', async () => {
     artistRows = [];
     renderPage('/library?q=you%20proof');
     await screen.findByRole('region', { name: 'Songs that match' });
-    expect(await screen.findByText('No artists match "you proof"')).toBeTruthy();
-    expect(screen.queryByText(/isn't in your library/)).toBeNull();
+    expect(
+      await screen.findByText(/No artists match "you proof"\. The songs above do\./),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Search online/)).toBeNull();
   });
 
   it('no strip for a one-letter search, or in the Songs view itself', async () => {
@@ -254,8 +299,8 @@ describe('best in class: playing', () => {
     renderPage('/library?view=songs');
     await screen.findByText('You Proof');
     fireEvent.click(row(2));
-    const queue = (playTrackList.mock.calls[0] as unknown as [{ id: number }[]])[0];
-    expect(queue.map((t) => t.id)).toEqual([2, 3]);
+    const queue = (playTrackList.mock.calls[0] as unknown as [{ lib2_track_id: number }[]])[0];
+    expect(queue.map((t) => t.lib2_track_id)).toEqual([2, 3]);
     delete window.playTrackList;
   });
 
@@ -263,14 +308,17 @@ describe('best in class: playing', () => {
     songs = THREE;
     const playTrackList = vi.fn(async () => ({}));
     window.playTrackList = playTrackList as never;
-    renderPage('/library?view=songs&sort=artist');
+    renderPage('/library?section=songs&songSort=artist');
     await screen.findByText('You Proof');
-    fireEvent.click(screen.getByText('Play all'));
+    fireEvent.click(screen.getByText(/Play all/));
     await waitFor(() => expect(playTrackList).toHaveBeenCalled());
     expect(lastSongsParams().get('limit')).toBe('500');
     expect(lastSongsParams().get('sort')).toBe('artist');
-    const [queue, context] = playTrackList.mock.calls[0] as unknown as [{ id: number }[], string];
-    expect(queue.map((t) => t.id)).toEqual([1, 2, 3]);
+    const [queue, context] = playTrackList.mock.calls[0] as unknown as [
+      { lib2_track_id: number }[],
+      string,
+    ];
+    expect(queue.map((t) => t.lib2_track_id)).toEqual([1, 2, 3]);
     expect(context).toBe('Your songs');
     delete window.playTrackList;
   });
@@ -279,7 +327,8 @@ describe('best in class: playing', () => {
     songs = THREE;
     renderPage('/library?view=songs');
     await screen.findByText('You Proof');
-    fireEvent(window, new CustomEvent('ss:now-playing', { detail: { id: 2 } }));
+    // the player's `id` is a server id; the row matches on lib2_track_id
+    fireEvent(window, new CustomEvent('ss:now-playing', { detail: { id: 1, lib2_track_id: 2 } }));
     await waitFor(() => expect(row(2).hasAttribute('data-playing')).toBe(true));
     expect(row(1).hasAttribute('data-playing')).toBe(false);
     fireEvent(window, new CustomEvent('ss:now-playing', { detail: null }));
@@ -336,7 +385,7 @@ describe('best in class: filters, sorts, searching', () => {
     await waitFor(() => expect(lastSongsParams().get('dupes')).toBe('1'));
     fireEvent.click(screen.getByText('Lossless'));
     await waitFor(() => expect(lastSongsParams().get('quality')).toBe('lossless'));
-    fireEvent.change(screen.getByLabelText('Sort library'), { target: { value: 'year_desc' } });
+    fireEvent.change(screen.getByLabelText('Sort songs'), { target: { value: 'year_desc' } });
     await waitFor(() => expect(lastSongsParams().get('sort')).toBe('year'));
     expect(router.state.location.search).toMatchObject({ dupes: true, quality: 'lossless' });
     // leaving songs drops the song-only filters
@@ -347,16 +396,19 @@ describe('best in class: filters, sorts, searching', () => {
   });
 
   it('a new search keeps the last results on screen, dimmed, until it answers', async () => {
-    const { router } = renderPage('/library?view=songs&q=proof');
+    const { router } = renderPage('/library?section=songs&q=proof');
     await screen.findAllByRole('mark');
     holdSearch = 'pending';
-    void router.navigate({ to: '/library', search: (p) => ({ ...p, q: 'pending' }) });
+    void router.navigate({
+      to: '/library',
+      search: ((p: Record<string, unknown>) => ({ ...p, q: 'pending' })) as never,
+    });
     await waitFor(() =>
       expect(document.querySelector('#library-songs-list')?.hasAttribute('data-stale')).toBe(true),
     );
     expect(document.querySelectorAll('#library-songs-list li')).toHaveLength(2);
     // and the songs view never waits on an artists search it doesn't show
-    expect(requested.some((r) => r.url.includes('/api/library/artists'))).toBe(false);
+    expect(requested.some((r) => r.url.includes('/api/library/v2/artists'))).toBe(false);
   });
 });
 

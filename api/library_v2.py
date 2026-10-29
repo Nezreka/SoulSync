@@ -1562,7 +1562,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             albums, total = Q.list_albums(
                 conn, search=request.args.get("search", ""),
                 sort=request.args.get("sort", "title"),
-                monitored=request.args.get("monitored", "all"), page=page, limit=limit)
+                monitored=request.args.get("monitored", "all"), page=page, limit=limit,
+                letter=(request.args.get("letter") or "all").lower(),
+                source_filter=request.args.get("source", ""))
         for album in albums:
             _apply_artwork_urls(album, "album")
         total_pages = (total + limit - 1) // limit
@@ -1601,14 +1603,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # unrelated refetch happened to land.  An explicit parameter, set
             # by the component that actually renders the column, fixes both:
             # it's requestable by anyone, and it's part of the cache key.
-            include_size = "size" in {
+            include = {
                 token.strip()
                 for token in request.args.get("include", "").split(",")
                 if token.strip()
             }
+            # the old library page's filters: alphabet bar, has/no provider
+            # id, and "could be better" (the live quality evaluator)
+            quality = request.args.get("quality", "")
             artists, total = Q.list_artists(conn, search=search, sort=sort,
                                             monitored=monitored, page=page, limit=limit,
-                                            include_size=include_size)
+                                            include_size="size" in include,
+                                            letter=(request.args.get("letter") or "all").lower(),
+                                            source_filter=request.args.get("source", ""),
+                                            quality_filter=quality if quality == "upgradable" else "",
+                                            include_upgradable="upgradable" in include)
         for a in artists:
             _apply_artwork_urls(a, "artist")
         total_pages = (total + limit - 1) // limit if limit else 0
@@ -1621,6 +1630,26 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 "has_prev": page > 1, "has_next": page < total_pages,
             },
         })
+
+    @_route("/api/library/v2/artists/upgradable-counts")
+    def lib2_artist_upgradable_counts():
+        """Each listed artist's "could be better" count, apart from the list
+        so the cards draw first and the live evaluator runs after."""
+        from core.library2.artist_reader import upgradable_track_counts
+        try:
+            ids = [int(token) for token in request.args.get("ids", "").split(",")
+                   if token.strip()]
+        except ValueError:
+            return _fail("ids must be integers")
+        ids = ids[:500]
+        if not ids:
+            return jsonify({"success": True, "counts": {}})
+        with closing(_conn()) as conn:
+            counts = upgradable_track_counts(
+                conn, "a.id IN (SELECT value FROM json_each(:ids))",
+                {"ids": json.dumps(ids)})
+        return jsonify({"success": True,
+                        "counts": {str(i): counts.get(i, 0) for i in ids}})
 
     @_route("/api/library/v2/discovery/artist", methods=["GET", "POST"])
     def lib2_discovery_artist():

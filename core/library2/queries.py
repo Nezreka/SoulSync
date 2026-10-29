@@ -251,13 +251,37 @@ def _scoped_flag(conn, entity: str, row) -> bool:
     return override.get(int(row["id"]), False)
 
 
+def _provider_ids(row: Mapping[str, Any]) -> Dict[str, str]:
+    """The provider ids a list row holds, for the card's badges: the
+    external_ids blob plus the spotify and musicbrainz columns."""
+    keys = set(row.keys()) if hasattr(row, "keys") else set()
+    ids: Dict[str, str] = {}
+    try:
+        raw = json.loads(row["external_ids"] or "{}") if "external_ids" in keys else {}
+    except (TypeError, ValueError):
+        raw = {}
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if value not in (None, "") and not isinstance(value, (dict, list)):
+                ids[str(key).lower()] = str(value)
+    for key in ("spotify", "musicbrainz"):
+        value = row[f"{key}_id"] if f"{key}_id" in keys else None
+        if value:
+            ids[key] = str(value)
+    return ids
+
+
 def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str = "all",
                  page: int = 1, limit: int = 75, include_size: bool = True,
                  letter: str = "all", watchlist_filter: str = "all",
                  source_filter: str = "", quality_filter: str = "",
-                 profile_id: int = 1) -> Tuple[List[Dict[str, Any]], int]:
-    """Library-v2 display adapter over the shared artist page reader."""
-    from .artist_reader import read_artist_page
+                 profile_id: int = 1,
+                 include_upgradable: bool = False) -> Tuple[List[Dict[str, Any]], int]:
+    """Library-v2 display adapter over the shared artist page reader.
+
+    include_upgradable adds each card's "could be better" count, judged by
+    the same live evaluator as the upgradable filter, for this page only."""
+    from .artist_reader import read_artist_page, upgradable_track_counts
 
     rows, total = read_artist_page(
         conn, search=search, sort=sort, monitored=monitored, page=page,
@@ -271,6 +295,12 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
     )
     media_sources = _media_server_sources_many(
         conn, "artist", [int(row["id"]) for row in rows])
+    upgradable: Dict[int, int] = {}
+    if include_upgradable and rows:
+        page_ids = [int(row["id"]) for row in rows]
+        upgradable = upgradable_track_counts(
+            conn, "a.id IN (SELECT value FROM json_each(:page_artist_ids))",
+            {"page_artist_ids": json.dumps(page_ids)})
     artists = []
     for r in rows:
         effective, overrides = projected[int(r["id"])]
@@ -300,6 +330,9 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
             "total_size_bytes": r["total_size_bytes"] or 0,
             "media_server_sources": media_sources.get(int(r["id"]), []),
             "user_overrides": overrides,
+            "provider_ids": _provider_ids(r),
+            **({"upgradable_count": upgradable.get(int(r["id"]), 0)}
+               if include_upgradable else {}),
         })
     return artists, total
 
@@ -313,7 +346,8 @@ _ALBUM_SORTS = {
 
 
 def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str = "all",
-                page: int = 1, limit: int = 75) -> Tuple[List[Dict[str, Any]], int]:
+                page: int = 1, limit: int = 75, letter: str = "all",
+                source_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
     """The whole library by release (upstream's album browse, A07).
 
     The releases the artist list counts -- a library row, or one this library
@@ -344,6 +378,24 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
         clauses.append(f"{album_monitored} = 1")
     elif monitored == "unmonitored":
         clauses.append(f"{album_monitored} = 0")
+    if letter and letter != "all":
+        # the alphabet bar, by the album's title, same rule as the artists
+        from database.music_database import _library_stripped_sql
+        stripped = _library_stripped_sql("al.title")
+        if letter == "#":
+            clauses.append(f"SUBSTR(UPPER({stripped}),1,1) NOT GLOB '[A-Z]'")
+        else:
+            clauses.append(f"UPPER(SUBSTR({stripped},1,1)) = UPPER(:letter)")
+            params["letter"] = str(letter)[:1]
+    from .provider_ids import normalize_provider_name
+    source = normalize_provider_name(str(source_filter or "").lstrip("!"))
+    if source:
+        # has / has no id from one provider; a leading ! means has none
+        parts = [f"COALESCE(json_extract(al.external_ids, '$.{source}'),'') <> ''"]
+        if source in ("spotify", "musicbrainz"):
+            parts.append(f"COALESCE(al.{source}_id,'') <> ''")
+        predicate = "(" + " OR ".join(parts) + ")"
+        clauses.append(f"NOT {predicate}" if str(source_filter).startswith("!") else predicate)
     where = " AND ".join(clauses)
     base = ("FROM lib2_albums al LEFT JOIN lib2_artists ar"
             " ON ar.id = al.primary_artist_id WHERE " + where)
@@ -354,6 +406,7 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
         f"""
         WITH page_albums AS MATERIALIZED (
             SELECT al.id, al.title, al.album_type, al.year, al.image_url, al.added_at,
+                   al.spotify_id, al.musicbrainz_id, al.external_ids,
                    {album_monitored} AS monitored,
                    COALESCE(ar.canonical_artist_id, ar.id) AS artist_id,
                    ar.name AS artist_name
@@ -393,6 +446,7 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
             "monitored": bool(r["monitored"]), "artist_id": r["artist_id"],
             "artist_name": r["artist_name"], "track_count": count,
             "tracks_present": present, "tracks_missing": max(0, count - present),
+            "provider_ids": _provider_ids(r),
         })
     return albums, int(total)
 
