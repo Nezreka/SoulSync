@@ -412,7 +412,8 @@ def test_regression_old_fields_unchanged_track():
 
 # ── Route tests against a real (temp) database ───────────────
 #
-# Library v2 port: the catalogue ids are integers (1, 42, 77, 99). Provider ids
+# Library v2 port: the catalogue ids are integers (1, 42, 77, 99) in the database
+# and strings on the wire, as the v1 API always typed them. Provider ids
 # live in external_ids, the Discogs/Bandcamp payload in the enrichment buckets,
 # attempts in lib2_provider_attempts, hand-set fields in the overrides (lib2's
 # locks). A non-numeric id is simply not a catalogue id: a 404, never a 400.
@@ -509,7 +510,7 @@ def test_artist_detail_carries_the_enriched_fields(client):
     assert data["artist"]["genres_locked"] is False
     assert data["artist"]["discogs_id"] == "111"
     assert data["artist"]["jiosaavn_match_status"] == "not_found"
-    assert [a["id"] for a in data["albums"]] == [1]
+    assert [a["id"] for a in data["albums"]] == ["1"]
     assert data["albums"][0]["release_date"] == "1999-05-04"
 
 
@@ -536,7 +537,7 @@ def test_album_detail_carries_the_enriched_fields(client):
     assert album["bandcamp_last_attempted"] == "2026-01-08 00:00:00"
     # the hand-set genres are lib2's lock
     assert album["genres_locked"] is True and album["metadata_locked"] is True
-    assert [t["id"] for t in data["tracks"]] == [1]
+    assert [t["id"] for t in data["tracks"]] == ["1"]
     assert data["tracks"][0]["server_path"] == "/music/song-one.flac"
 
 
@@ -581,19 +582,19 @@ def test_albums_artist_id_filter_takes_a_string_id(client):
     resp = client.get("/api/v1/library/albums?artist_id=1")
     assert resp.status_code == 200, resp.get_json()
     albums = resp.get_json()["data"]["albums"]
-    assert [a["id"] for a in albums] == [1]
+    assert [a["id"] for a in albums] == ["1"]
 
     resp = client.get("/api/v1/library/albums?artist_id=42")
     assert resp.status_code == 200, resp.get_json()
     albums = resp.get_json()["data"]["albums"]
-    assert [a["id"] for a in albums] == [77]
+    assert [a["id"] for a in albums] == ["77"]
 
 
 def test_artist_list_carries_new_fields(client):
     resp = client.get("/api/v1/library/artists")
     assert resp.status_code == 200, resp.get_json()
     artists = {a["id"]: a for a in resp.get_json()["data"]["artists"]}
-    artist = artists[1]
+    artist = artists["1"]
     assert artist["aliases"] == ["The Testers UK", "Testers"]
     assert artist["soul_id_path"] == "canonical"
     assert artist["discogs_bio"] == "A band from nowhere."
@@ -608,16 +609,16 @@ def test_artist_list_carries_new_fields(client):
 
 
 @pytest.mark.parametrize("entity,provider,ext_id,expect_id", [
-    ("artist", "discogs", "111", 1),
-    ("album", "discogs", "222", 1),
-    ("album", "amazon", "amz-al", 1),
-    ("track", "amazon", "amz-tr", 1),
-    ("artist", "jiosaavn", "jio-ar", 1),
-    ("track", "jiosaavn", "jio-tr", 1),
-    ("album", "bandcamp", "bc-al", 1),
-    ("track", "bandcamp", "bc-tr", 1),
+    ("artist", "discogs", "111", "1"),
+    ("album", "discogs", "222", "1"),
+    ("album", "amazon", "amz-al", "1"),
+    ("track", "amazon", "amz-tr", "1"),
+    ("artist", "jiosaavn", "jio-ar", "1"),
+    ("track", "jiosaavn", "jio-tr", "1"),
+    ("album", "bandcamp", "bc-al", "1"),
+    ("track", "bandcamp", "bc-tr", "1"),
     # the stored bandcamp provider id is the url; it finds the row too
-    ("album", "bandcamp", "https://testers.bandcamp.com/album/first-record", 1),
+    ("album", "bandcamp", "https://testers.bandcamp.com/album/first-record", "1"),
 ])
 def test_lookup_new_providers(client, entity, provider, ext_id, expect_id):
     resp = client.get(
@@ -652,4 +653,48 @@ def test_albums_artist_id_empty_means_no_filter(client):
         resp = client.get(f"/api/v1/library/albums?artist_id={raw}")
         assert resp.status_code == 200, resp.get_json()
         ids = {a["id"] for a in resp.get_json()["data"]["albums"]}
-        assert ids == {1, 77}
+        assert ids == {"1", "77"}
+
+
+# ── ids saved before the Library v2 upgrade (#1062 review) ───────────────────
+
+def _old_ids(db, *statements):
+    conn = db._get_connection()
+    for sql, params in statements:
+        conn.execute(sql, params)
+    conn.commit()
+    conn.close()
+
+
+def test_an_id_saved_before_the_upgrade_still_finds_its_entry(client, db):
+    # the upgrade keeps the old row's id; the media server's id is in the mapping
+    _old_ids(db, ("UPDATE lib2_artists SET legacy_artist_id = 'ar1::soulsync' WHERE id = 1", ()),
+             ("UPDATE lib2_tracks SET legacy_track_id = 'tr1::soulsync' WHERE id = 1", ()),
+             ("INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source, server_id)"
+              " VALUES ('album', 77, 'plex', '5077')", ()))
+    artist = client.get("/api/v1/library/artists/ar1::soulsync").get_json()["data"]
+    assert artist["artist"]["id"] == "1" and artist["artist"]["name"] == "The Testers"
+    assert client.get("/api/v1/library/tracks/tr1::soulsync").get_json()["data"]["track"]["id"] == "1"
+    album = client.get("/api/v1/library/albums/5077").get_json()["data"]
+    assert album["album"]["id"] == "77" and [t["id"] for t in album["tracks"]] == ["99"]
+    assert [a["id"] for a in client.get(
+        "/api/v1/library/albums?artist_id=ar1::soulsync").get_json()["data"]["albums"]] == ["1"]
+
+
+def test_an_old_id_that_is_also_a_catalogue_id_is_an_error_naming_both(client, db):
+    # a Plex ratingKey "1" of the artist now at 42, and catalogue artist 1
+    _old_ids(db, ("INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source,"
+                  " server_id) VALUES ('artist', 42, 'plex', '1')", ()))
+    for url in ("/api/v1/library/artists/1", "/api/v1/library/artists/1/albums",
+                "/api/v1/library/albums?artist_id=1"):
+        resp = client.get(url)
+        assert resp.status_code == 409, url
+        error = resp.get_json()["error"]
+        assert error["code"] == "AMBIGUOUS_ID"
+        assert "The Testers" in error["message"] and "Numeric Artist" in error["message"]
+
+
+def test_an_old_id_of_the_same_entry_is_no_clash(client, db):
+    _old_ids(db, ("INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source,"
+                  " server_id) VALUES ('artist', 1, 'plex', '1')", ()))
+    assert client.get("/api/v1/library/artists/1").status_code == 200

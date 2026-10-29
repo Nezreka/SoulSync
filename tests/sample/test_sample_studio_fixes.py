@@ -195,7 +195,8 @@ def test_free_text_single_db_call_no_double_cascade(fake_db):
     tracks = sample_api.search_library_tracks(q="Virtual Mage")
     assert calls == [("interactive", "Virtual Mage", 50)], f"extra DB calls: {calls}"
     assert len(tracks) == 50
-    assert all(t["id"] == i for i, t in enumerate(tracks))
+    # the v1 serializer types library ids as strings (#1062 review)
+    assert all(t["id"] == str(i) for i, t in enumerate(tracks))
 
 
 def test_free_text_result_order_is_db_order(fake_db):
@@ -205,14 +206,14 @@ def test_free_text_result_order_is_db_order(fake_db):
     db.rows = [[_row(9, title="Track 0007-03"), _row(1), _row(2)]]
     tracks = sample_api.search_library_tracks(q="Track 0007-03", limit=50)
     assert calls == [("interactive", "Track 0007-03", 50)]
-    assert [t["id"] for t in tracks] == [9, 1, 2]
+    assert [t["id"] for t in tracks] == ["9", "1", "2"]
 
 
 def test_free_text_dedupes_and_caps_at_limit(fake_db):
     db, _ = fake_db
     db.rows = [[_row(1), _row(1), _row(2), _row(3)]]
     tracks = sample_api.search_library_tracks(q="x", limit=2)
-    assert [t["id"] for t in tracks] == [1, 2]
+    assert [t["id"] for t in tracks] == ["1", "2"]
 
 
 def test_search_title_artist_params(fake_db):
@@ -220,7 +221,7 @@ def test_search_title_artist_params(fake_db):
     db.rows = [[_row(9)]]
     tracks = sample_api.search_library_tracks(title="Windowlicker", artist="")
     assert calls == [("dual", "Windowlicker", "", 50)]
-    assert [t["id"] for t in tracks] == [9]
+    assert [t["id"] for t in tracks] == ["9"]
 
 
 def test_search_title_and_artist_keeps_dual_constraint(fake_db):
@@ -228,7 +229,7 @@ def test_search_title_and_artist_keeps_dual_constraint(fake_db):
     db.rows = [[_row(9)]]
     tracks = sample_api.search_library_tracks(title="Windowlicker", artist="Aphex Twin")
     assert calls == [("dual", "Windowlicker", "Aphex Twin", 50)]
-    assert [t["id"] for t in tracks] == [9]
+    assert [t["id"] for t in tracks] == ["9"]
 
 
 def test_search_requires_a_query():
