@@ -39,7 +39,8 @@
     }
 
     function statusEl(input) {
-        var anchor = input.closest('.path-input-group') || input;
+        // after the input's group or row, never inside a flex row beside its button
+        var anchor = input.closest('.path-input-group, [data-folder-row]') || input;
         var next = anchor.nextElementSibling;
         if (next && next.classList.contains('folder-check')) return next;
         var el = document.createElement('div');

@@ -70,3 +70,23 @@ it('a failed check shows nothing rather than an error', async () => {
   await new Promise((done) => setTimeout(done, 20));
   expect(document.querySelectorAll('.folder-check:not([hidden])').length).toBe(0);
 });
+
+it('puts the line after a flex row, never beside the row button', async () => {
+  document.body.innerHTML = `
+    <div id="host"><div data-folder-row style="display:flex"><input id="x" data-folder-check="r" value="/music2"><button>×</button></div></div>`;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify({ results: { x: { state: 'ok', resolved: '/music2' } } })),
+    ),
+  );
+  new Function(source)();
+  (window as unknown as { SoulSyncFolderCheck: Check }).SoulSyncFolderCheck.refresh('r');
+  const row = document.querySelector('[data-folder-row]')!;
+  await waitFor(() =>
+    expect(row.nextElementSibling?.classList.contains('folder-check')).toBe(true),
+  );
+  expect(row.querySelector('.folder-check')).toBeNull();
+  expect(row.nextElementSibling?.textContent).toBe('Ready');
+});

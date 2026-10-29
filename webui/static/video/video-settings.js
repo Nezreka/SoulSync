@@ -469,6 +469,7 @@
 
     function addVideoPathRow(host, value) {
         var row = document.createElement('div');
+        row.setAttribute('data-folder-row', '');
         row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px';
         var input = document.createElement('input');
         input.type = 'text';
@@ -484,7 +485,11 @@
         remove.className = 'test-button';
         remove.textContent = 'Remove';
         remove.setAttribute('aria-label', 'Remove library path');
-        remove.addEventListener('click', function () { row.remove(); saveDownloads(true); refreshVideoFolders(); });
+        remove.addEventListener('click', function () {
+            var status = row.nextElementSibling;
+            if (status && status.classList.contains('folder-check')) status.remove();
+            row.remove(); saveDownloads(true); refreshVideoFolders();
+        });
         if (host.closest('[aria-busy="true"]')) {
             [input, remove].forEach(function (control) {
                 control.setAttribute('data-library-disabled', 'false');

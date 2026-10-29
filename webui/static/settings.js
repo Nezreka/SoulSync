@@ -5826,15 +5826,15 @@ function renderMusicPaths(paths) {
         return;
     }
     container.innerHTML = paths.map((p, i) => `
-        <div class="form-group music-path-row" style="margin-bottom: 4px;">
-            <input type="text" class="music-path-input" value="${escapeHtml(p)}" placeholder="/music or C:\\Music" style="flex:1;">
+        <div class="form-group music-path-row" data-folder-row style="margin-bottom: 4px;">
+            <input type="text" class="music-path-input" value="${escapeHtml(p)}" placeholder="/music or C:\\Music" style="flex:1;" data-folder-check="music" data-folder-label="Extra music folder">
             <button class="test-button" onclick="_removeMusicPathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
         </div>
     `).join('');
     // Attach auto-save to dynamically rendered inputs
     container.querySelectorAll('.music-path-input').forEach(input => {
         input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
-    });
+    });    if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('music');
 }
 
 function addMusicPathRow() {
@@ -5845,9 +5845,10 @@ function addMusicPathRow() {
     if (placeholder && !container.querySelector('.music-path-row')) placeholder.remove();
     const row = document.createElement('div');
     row.className = 'form-group music-path-row';
+    row.setAttribute('data-folder-row', '');
     row.style.marginBottom = '4px';
     row.innerHTML = `
-        <input type="text" class="music-path-input" value="" placeholder="/music or C:\\Music" style="flex:1;">
+        <input type="text" class="music-path-input" value="" placeholder="/music or C:\\Music" style="flex:1;" data-folder-check="music" data-folder-label="Extra music folder">
         <button class="test-button" onclick="_removeMusicPathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
     `;
     container.appendChild(row);
@@ -5858,7 +5859,11 @@ function addMusicPathRow() {
 }
 
 function _removeMusicPathRow(btn) {
-    btn.closest('.music-path-row').remove();
+    const row = btn.closest('.music-path-row');
+    const status = row.nextElementSibling;
+    if (status && status.classList.contains('folder-check')) status.remove();
+    row.remove();
+    if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('music');
     // Auto-save after removing a path
     if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
 }
