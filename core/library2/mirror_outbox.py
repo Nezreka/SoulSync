@@ -110,18 +110,20 @@ _IMPORTED_BASELINE_REASONS = frozenset({
 
 
 def upgrade_opted_in(conn, track_id: int, profile_id: int = 1) -> bool:
-    """Whether someone asked for upgrades on this track: monitored it, its
-    album or its artist, or picked it in Enhance Quality. dev never queued an
-    upgrade on its own; an imported file stays put until you do."""
+    """Whether anything beyond the upgrade's own baseline wants this track:
+    the track, its album or its artist monitored on purpose, a wishlist
+    item, a new-release rule. dev never queued an upgrade or an album's
+    missing tracks on its own. False only when the projection positively
+    says the import is the only reason; a track with no projection row is
+    left to the caller as before."""
     try:
         row = conn.execute(
             "SELECT reason FROM lib2_wanted_tracks WHERE track_id=? AND profile_id=? AND wanted=1",
             (int(track_id), int(profile_id))).fetchone()
-    except Exception as exc:  # noqa: BLE001 - unknown means don't re-download
+    except Exception as exc:  # noqa: BLE001 - no projection table: nothing to judge by
         logger.debug("upgrade opt-in lookup failed for track %s: %s", track_id, exc)
-        return False
-    reason = str(row[0] or "") if row else ""
-    return bool(reason) and reason not in _IMPORTED_BASELINE_REASONS
+        return True
+    return not (row and str(row[0] or "") in _IMPORTED_BASELINE_REASONS)
 
 
 def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
@@ -149,12 +151,15 @@ def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
         payload.pop("_source_album_id", "")
         source_info = payload.pop("_source_info", {})
         has_file = bool(payload.pop("_has_file", None))
-        if (monitored and should_queue and has_file and not user_initiated
+        if (monitored and should_queue and not user_initiated
                 and not upgrade_opted_in(conn, tid, profile_id)):
-            # a file you already have is only re-fetched for quality when you
-            # asked for upgrades on it. the upgrade marks every imported file
-            # monitored; that alone queued every mp3 in a 300k library. the
-            # branch below then takes off one an older run already added
+            # nothing goes on the wishlist by itself unless someone asked for
+            # it: the track, its album or its artist monitored on purpose, a
+            # wishlist item, a new-release rule. the upgrade's own baseline
+            # isn't asking. without this it queued every mp3 in a 300k library
+            # for an upgrade, then every missing track of every album it had
+            # fetched a tracklist for (280k). the branch below takes off one
+            # an older run already added
             should_queue = False
         # SYNC-02/03: the wishlist stores a RELEASE of a recording. Derive that
         # key once, here, so the add, the presence probe, the remove and the

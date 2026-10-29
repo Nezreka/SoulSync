@@ -80,8 +80,11 @@ def _add_artist(conn, name, *, monitored=1, spotify_id=None, external_ids=None):
     return cur.lastrowid
 
 
+# the reconcile wishlists what someone asked for: an album monitored on purpose.
+# the upgrade's own legacy baseline never queues anything by itself (see
+# test_mirror_outbox's missing-slot test), so these use an explicit rule
 def _add_track(conn, artist_id, title, *, monitored=1, with_file=False,
-               spotify_id=None, provenance=PROVENANCE_LEGACY):
+               spotify_id=None, provenance=PROVENANCE_USER):
     cur = conn.execute(
         "INSERT INTO lib2_albums(primary_artist_id, title, monitored) VALUES(?,?,?)",
         (artist_id, f"Alb-{title}", monitored))

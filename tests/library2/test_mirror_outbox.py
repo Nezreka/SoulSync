@@ -566,3 +566,32 @@ def test_a_click_queues_the_upgrade_whatever_the_rule(db, monkeypatch):
     flaky, conn = _owned_below_profile(db, monkeypatch, "track_rule:file_import")
     MO.enqueue_tracks(conn, [flaky.ids["track"]], True, profile_id=1, user_initiated=True)
     assert _ops(conn) == ["wishlist_add"]
+
+
+def _missing_slot(db, reason):
+    """A catalogue slot without a file, wanted for ``reason``: what the
+    upgrade's tracklist fetch left on every partly owned album."""
+    from core.library2.wanted import PROJECTION_VERSION
+    flaky, conn = db
+    conn.execute("INSERT INTO lib2_wanted_tracks(profile_id, track_id, wanted, reason, "
+                 "projection_version) VALUES(1, ?, 1, ?, ?)",
+                 (flaky.ids["track"], reason, PROJECTION_VERSION))
+    conn.commit()
+    return flaky, conn
+
+
+def test_a_missing_slot_the_upgrade_marked_wanted_never_queues_on_its_own(db):
+    """the live upgrade marked 279,596 missing slots wanted through the
+    imported album rule; the hourly reconcile would have wishlisted them all.
+    dev never downloaded an album's missing tracks unless asked."""
+    flaky, conn = _missing_slot(db, "album_rule:legacy_import")
+    MO.enqueue_tracks(conn, [flaky.ids["track"]], True, profile_id=1)
+    assert "wishlist_add" not in _ops(conn)
+
+
+@pytest.mark.parametrize("reason", ["album_rule:user_explicit", "track_rule:wishlist_import",
+                                    "track_rule:new_release"])
+def test_a_missing_track_someone_asked_for_still_queues(db, reason):
+    flaky, conn = _missing_slot(db, reason)
+    MO.enqueue_tracks(conn, [flaky.ids["track"]], True, profile_id=1)
+    assert _ops(conn) == ["wishlist_add"]
