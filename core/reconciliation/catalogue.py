@@ -199,7 +199,7 @@ class CatalogueSession:
                                             for key, value in self.seconds.items() if value > before[key]}})
             self.slowest = sorted(self.slowest, key=lambda x: x['seconds'], reverse=True)[:10]
 
-    def _read(self, key):
+    def _read(self, key, *, count_expiry=True):
         if not self.store_available or self.force:
             return None
         try:
@@ -210,7 +210,7 @@ class CatalogueSession:
                 self.touches.add(key)
                 self.counts['persistent_hits'] += 1
                 return row[:2]
-            if row:
+            if row and count_expiry:
                 self.counts['expired'] += 1
         except Exception:
             self.counts['cache_errors'] += 1
@@ -232,6 +232,13 @@ class CatalogueSession:
         except Exception:
             self.counts['cache_errors'] += 1
 
+    def _cached_response(self, key, path, *, recheck=False):
+        cached = self._read(key, count_expiry=False) if recheck else self._read(key)
+        if cached is not None and cached[1] == 200 and not _valid(path, json.loads(cached[0])):
+            self.counts['cache_errors'] += 1
+            return None
+        return cached
+
     def request(self, endpoint, path, params, fetch):
         params = dict(params or {})
         parts = path.strip('/').split('/')
@@ -248,10 +255,7 @@ class CatalogueSession:
             self.counts['memory_hits'] += 1
             raw, status = self.memory[key]
         else:
-            cached = self._read(key)
-            if cached is not None and cached[1] == 200 and not _valid(path, json.loads(cached[0])):
-                self.counts['cache_errors'] += 1
-                cached = None
+            cached = self._cached_response(key, path)
             if cached is not None:
                 raw, status = cached
             else:
@@ -261,7 +265,15 @@ class CatalogueSession:
                     owner = flight_key not in _flights
                     future = _flights.setdefault(flight_key, Future())
                 try:
+                    # A previous owner can publish and retire its flight after
+                    # our initial cache miss but before we acquire ownership.
+                    # Recheck before making another upstream request.
                     if owner:
+                        cached = self._cached_response(key, path, recheck=True)
+                    if owner and cached is not None:
+                        raw, status = cached
+                        future.set_result((raw, status))
+                    elif owner:
                         self.counts['upstream_' + operation] += 1
                         try:
                             response = fetch(path, params=params)

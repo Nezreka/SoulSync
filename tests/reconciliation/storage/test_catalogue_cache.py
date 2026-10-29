@@ -116,10 +116,20 @@ def test_invalid_and_corrupt_payloads_are_not_evidence(db):
     assert len(calls) == 2
 
 
-def test_single_flight_shares_success_and_releases_failure(db):
+def test_single_flight_shares_success_and_releases_failure(db, monkeypatch):
     one, two = catalogue.CatalogueSession(db), catalogue.CatalogueSession(db)
     entered, release = threading.Event(), threading.Event()
+    missed, resume = threading.Event(), threading.Event()
     calls = []
+
+    read = two._read
+    def delayed_miss(key, **kwargs):
+        result = read(key, **kwargs)
+        if result is None and not missed.is_set():
+            missed.set()
+            assert resume.wait(3)
+        return result
+    monkeypatch.setattr(two, '_read', delayed_miss)
 
     def fetch(path, *, params):
         entered.set()
@@ -130,8 +140,14 @@ def test_single_flight_shares_success_and_releases_failure(db):
         a = pool.submit(one.request, 'http://mirror', '/release/release', {}, fetch)
         assert entered.wait(2)
         b = pool.submit(two.request, 'http://mirror', '/release/release', {}, fetch)
-        release.set()
-        assert a.result().json() == b.result().json()
+        try:
+            assert missed.wait(2)
+            release.set()
+            first = a.result().json()
+        finally:
+            release.set()
+            resume.set()
+        assert first == b.result().json()
     assert len(calls) == 1
     assert not catalogue._flights
 

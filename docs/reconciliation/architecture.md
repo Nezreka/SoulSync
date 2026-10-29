@@ -39,7 +39,7 @@ Numbering is one album decision keyed to selected source/release and the ordered
 
 A policy command commits its related rows and durable follow-up request together. `work.py` coalesces follow-up work by case and kind with a generation number. An old worker cannot acknowledge newer work. Failed work retains its error and retry time; startup resumes pending requests.
 
-`publication.py` atomically publishes each album's findings and plan. Analysis captures decision revisions before doing expensive work; publication compares them inside the transaction. If a user changes policy during a scan, the old projection is discarded and a fresh replan is queued. Readers use a consistent SQLite snapshot. Network/catalogue work stays outside the short publication transaction.
+`publication.py` atomically publishes each album's findings and plan. Analysis captures decision revisions before doing expensive work; publication compares them inside the transaction. If a user changes policy during a scan, the old projection is discarded and a fresh replan is queued. Readers use a consistent SQLite snapshot. Queue totals, filters, and visible album summaries reuse one compact effective-policy projection; complete evidence is loaded for detail and execution. Indexed job/case predicates keep unrelated pending jobs outside the search read path. Network/catalogue work stays outside the short publication transaction.
 
 Operations revalidate actual file state before mutation. Partial success remains partial success; restart does not replay a half-applied operation. A replacement waits for an exact verified arrival and playlist handoff before quarantining the old file. Ordinary removal still requires resolving or explicitly acknowledging its current playlist references.
 
