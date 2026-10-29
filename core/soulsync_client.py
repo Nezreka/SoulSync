@@ -13,6 +13,7 @@ import threading
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from core.audio_tags import easy_tags
 from core.text.normalize import fold_dashes
 from utils.logging_config import get_logger
 
@@ -37,9 +38,9 @@ def _read_tags(file_path: str) -> Dict[str, Any]:
     try:
         from mutagen import File as MutagenFile
         audio = MutagenFile(file_path, easy=True)
-        if audio:
+        if audio is not None:
             if audio.tags:
-                tags = audio.tags
+                tags = easy_tags(audio)
                 result['title'] = (tags.get('title', [''])[0] or '').strip()
                 result['artist'] = (tags.get('artist', [''])[0] or '').strip()
                 result['album_artist'] = (tags.get('albumartist', [''])[0] or '').strip()

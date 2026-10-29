@@ -19,8 +19,9 @@ from mutagen.apev2 import APEv2, APENoHeaderError
 
 logger = logging.getLogger("tag_writer")
 
-# Supported extensions
+# Write support is deliberately narrower than read support.
 SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}
+READABLE_EXTENSIONS = SUPPORTED_EXTENSIONS | {'.aif', '.aiff', '.wav'}
 
 
 def read_file_tags(file_path: str) -> Dict[str, Any]:
@@ -55,7 +56,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         return result
 
     ext = os.path.splitext(file_path)[1].lower()
-    if ext not in SUPPORTED_EXTENSIONS:
+    if ext not in READABLE_EXTENSIONS:
         result['error'] = f'Unsupported format: {ext}'
         return result
 
@@ -68,7 +69,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         result['format'] = ext.lstrip('.').upper()
 
         if isinstance(audio.tags, ID3):
-            # MP3
+            # ID3 (MP3 / AIFF / WAV)
             result['title'] = _id3_text(audio.tags, 'TIT2')
             result['artist'] = _id3_text(audio.tags, 'TPE1')
             result['album_artist'] = _id3_text(audio.tags, 'TPE2')

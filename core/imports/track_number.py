@@ -35,6 +35,7 @@ import os
 import re
 from typing import Any, Optional
 
+from core.audio_tags import easy_tags
 from core.imports.filename import extract_explicit_track_number
 
 # Audio extensions considered when deriving a scan-order fallback number
@@ -100,7 +101,7 @@ def read_embedded_track_number(file_path: str) -> Optional[int]:
         audio = MutagenFile(file_path, easy=True)
         if audio is None:
             return None
-        raw = audio.get('tracknumber')
+        raw = easy_tags(audio).get('tracknumber')
         if isinstance(raw, list):
             raw = raw[0] if raw else None
         if raw is None:
@@ -131,7 +132,7 @@ def read_embedded_album(file_path: str) -> Optional[str]:
         audio = MutagenFile(file_path, easy=True)
         if audio is None:
             return None
-        raw = audio.get('album')
+        raw = easy_tags(audio).get('album')
         if isinstance(raw, list):
             raw = raw[0] if raw else None
         if raw is None:
@@ -159,7 +160,7 @@ def read_embedded_album_artist(file_path: str) -> Optional[str]:
         if audio is None:
             return None
         for key in ('albumartist', 'album artist'):
-            raw = audio.get(key)
+            raw = easy_tags(audio).get(key)
             if isinstance(raw, list):
                 raw = raw[0] if raw else None
             if raw is None:
