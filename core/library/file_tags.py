@@ -42,6 +42,7 @@ _ID3_TEXT_FRAMES = {
     "TPE2": "album_artist",
     "TALB": "album",
     "TDRC": "date",
+    "TSRC": "isrc",
     "TCON": "genre",
     "TRCK": "tracknumber",
     "TPOS": "discnumber",

@@ -40,7 +40,7 @@ def _make_db():
         " album_id TEXT REFERENCES albums(id),"
         " artist_id TEXT REFERENCES artists(id),"
         " title TEXT, track_number INTEGER, disc_number INTEGER, duration INTEGER,"
-        " file_path TEXT, bitrate INTEGER, year INTEGER, server_source TEXT,"
+        " file_path TEXT, bitrate INTEGER, year INTEGER, isrc TEXT, server_source TEXT,"
         " created_at TEXT, updated_at TEXT)"
     )
 
@@ -125,6 +125,22 @@ def test_reporters_known_pair_collides_at_the_helper_level():
     a = "/app/Transfer/Demo Artist 19610/Demo Album (2020)/01 - Demo Track 19610.flac"
     b = "/app/Transfer/Demo Artist 23487/Demo Album (2020)/01 - Demo Track 23487.flac"
     assert _stable_id(a) == _stable_id(b) == "463751062"
+
+
+def test_collision_retry_preserves_isrc(refresh, tmp_path):
+    transfer = str(tmp_path / 'Transfer')
+    first, second = _colliding_pair(transfer)
+    first_tags = {**_tags('First', 'Artist', 'Album'), 'isrc': 'QZZ792411931'}
+    second_tags = {**_tags('Second', 'Artist', 'Album'), 'isrc': 'USUM72202156'}
+    conn, finished, _ = refresh({
+        os.path.basename(first): first_tags,
+        os.path.basename(second): second_tags,
+    })
+    rows = conn.execute('SELECT title, isrc FROM tracks').fetchall()
+    assert {row['title']: row['isrc'] for row in rows} == {
+        'First': 'QZZ792411931', 'Second': 'USUM72202156',
+    }
+    assert finished[-1] == (1, 1, 2, 2, 0)
 
 
 def test_colliding_track_files_both_land(refresh, tmp_path):
