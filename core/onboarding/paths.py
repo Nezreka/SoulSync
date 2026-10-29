@@ -4,6 +4,11 @@ answers the questions people get wrong on day one: does it exist, can
 soulsync write there, how much room is left, and is it a windows path typed
 into a linux container. nothing is created here, a missing folder only
 reports whether it could be.
+
+two softer notes ride along for the settings page: a folder sitting inside
+another one being checked (``inside``: that row's key), and in docker a folder
+on no mapped volume (``unmapped``), which lives in the container and is gone
+the next time it's recreated.
 """
 
 from __future__ import annotations
@@ -95,7 +100,45 @@ def check_path(path: str, *, docker: bool,
     return out
 
 
-def check_paths(paths: dict, *, docker: bool, **kwargs) -> dict:
+def _unescape_mount(field: str) -> str:
+    # mountinfo writes a space as \040, a tab as \011 and so on
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
+
+
+def mount_points(mountinfo: str = "/proc/self/mountinfo") -> list:
+    """every mount point this process sees, [] when it can't tell"""
+    try:
+        with open(mountinfo, encoding="utf-8", errors="replace") as fh:
+            return [_unescape_mount(line.split()[4]) for line in fh if len(line.split()) > 4]
+    except OSError:
+        return []
+
+
+def _within(child: str, parent: str) -> bool:
+    if parent == "/":
+        return child.startswith("/")
+    return child == parent or child.startswith(parent.rstrip("/") + "/")
+
+
+def _inside(child: str, parent: str) -> bool:
+    try:
+        return os.path.commonpath([child, parent]) == parent
+    except ValueError:   # different drives on windows
+        return False
+
+
+def on_mapped_volume(resolved: str, mounts: list) -> Optional[bool]:
+    """False when the deepest mount holding the folder is the container's own
+    root, None when there's nothing to go on"""
+    if not mounts or not resolved.startswith("/"):
+        return None
+    deepest = max((m for m in mounts if _within(resolved, m)), key=len, default=None)
+    if deepest is None:
+        return None
+    return deepest != "/"
+
+
+def check_paths(paths: dict, *, docker: bool, mounts: Optional[list] = None, **kwargs) -> dict:
     """check several at once and flag two rows pointing at the same folder,
     a download folder that is also the library is how half-finished albums
     end up in plex"""
@@ -111,4 +154,20 @@ def check_paths(paths: dict, *, docker: bool, **kwargs) -> dict:
             result["state"] = "problem"
             result["message"] = "Same folder as another row. Each one needs its own"
         seen.setdefault(norm, key)
+    # a folder inside another row's folder: the library inside the download
+    # folder gets half-finished files scanned, the other way round imports
+    # the library into itself
+    norms = {key: os.path.normcase(os.path.normpath(r["resolved"]))
+             for key, r in results.items() if r.get("resolved")}
+    for key, norm in norms.items():
+        parents = [other for other, onorm in norms.items()
+                   if other != key and onorm != norm and _inside(norm, onorm)]
+        if parents:
+            results[key]["inside"] = max(parents, key=lambda other: len(norms[other]))
+    if docker:
+        mounts = mount_points() if mounts is None else mounts
+        for result in results.values():
+            if result.get("resolved") and result["state"] != "problem":
+                if on_mapped_volume(result["resolved"], mounts) is False:
+                    result["unmapped"] = True
     return results

@@ -12,6 +12,12 @@
  * the backend dedupes on, so importing twice opens the first one.
  */
 
+import {
+  createUserPlaylist,
+  setPlaylistCoverUrl,
+  type UserPlaylistTrack,
+} from '@/features/playlists/user-playlists';
+
 import type { SourceSkipped } from './-sync.state';
 
 import { postMirrorPlaylist } from './-sync.api';
@@ -83,4 +89,53 @@ export async function importPlaylist(spec: ImportSpec): Promise<number> {
     throw new Error(res.error || `Couldn't import ${spec.name}`);
   }
   return res.playlist_id;
+}
+
+/**
+ * Whether a playlist can be kept as your own copy (#1913): it has to load its
+ * own tracks. Beatport and SoulSync Discovery save server-side and keep their
+ * frozen copies their own way (Beatport's Save snapshot).
+ */
+export function canCopyAsMine(spec: ImportSpec): boolean {
+  return Boolean(spec.loadTracks && spec.toMirrorTracks && !spec.save);
+}
+
+/**
+ * Keep it as your own (#1913): a playlist in My Playlists with the source's
+ * songs, not a mirror. It never refreshes from the source, so it's yours to
+ * edit, and Sync & download leaves it as it is. Its songs carry where they
+ * came from, so identifying them fetches each one directly. Resolves to the
+ * new playlist's id.
+ */
+export async function copyPlaylistAsMine(spec: ImportSpec): Promise<number> {
+  if (!canCopyAsMine(spec) || !spec.loadTracks || !spec.toMirrorTracks) {
+    throw new Error(`${spec.name} can only be imported, not copied`);
+  }
+  const { tracks } = await spec.loadTracks();
+  const normalized = buildMirrorPayload(
+    spec.source,
+    spec.sourceId,
+    spec.name,
+    spec.toMirrorTracks(tracks) as MirrorSourceTrack[],
+  ).tracks;
+  const songs: UserPlaylistTrack[] = [];
+  for (const t of normalized) {
+    if (!t.track_name || !t.artist_name) continue;
+    const id = String(t.source_track_id ?? '');
+    songs.push({
+      track_name: t.track_name,
+      artist_name: t.artist_name,
+      album_name: t.album_name,
+      duration_ms: t.duration_ms,
+      image_url: t.image_url ?? null,
+      ...(id ? { source: spec.source, source_id: id } : {}),
+    });
+  }
+  if (!songs.length) throw new Error(`${spec.name} has no tracks to copy`);
+  const created = await createUserPlaylist(spec.name, songs);
+  if (spec.imageUrl) {
+    // the source's cover comes along when it can; a copy without one still works
+    await setPlaylistCoverUrl(created.id, spec.imageUrl).catch(() => undefined);
+  }
+  return created.id;
 }

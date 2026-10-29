@@ -48,16 +48,29 @@ def tv_root_for(series_type: Any, tv_root: Any, anime_root: Any) -> str:
     return str(tv_root or "")
 
 
-def target_dir_for(kind: str, paths: dict, series_type: Any = None) -> str:
+def target_dir_for(kind: str, paths: dict, series_type: Any = None,
+                   library: Any = None) -> str:
     """Pick the library folder for a download's kind. ``paths`` = the config dict
-    ({movies_path, tv_path, anime_path, youtube_path}). ``series_type`` is the
-    show's effective type (standard / daily / anime); TV downloads of an anime
-    show go to ``anime_path`` when it is set (see ``tv_root_for``)."""
+    (library_roots.output_paths: movies/tv/anime/youtube, and the 4K folders,
+    '' while switched off). ``series_type`` is the show's effective type
+    (standard / daily / anime); TV downloads of an anime show go to
+    ``anime_path`` when it is set (see ``tv_root_for``). ``library`` is the
+    title's quality profile's choice: '4k' files into that kind's 4K library
+    when it's on, else the main one. Anime keeps its own folder either way:
+    it's a library by type, the 4K one is by quality."""
     paths = paths or {}
     k = str(kind or "").lower()
+    four_k = str(library or "").strip().lower() == "4k"
     if k == "movie":
+        if four_k and paths.get("movies_4k_path"):
+            return paths["movies_4k_path"]
         return paths.get("movies_path") or ""
     if k in ("show", "tv", "episode", "season", "series"):
+        anime = str(paths.get("anime_path") or "").strip()
+        if anime and str(series_type or "").strip().lower() == "anime":
+            return anime
+        if four_k and paths.get("tv_4k_path"):
+            return paths["tv_4k_path"]
         return tv_root_for(series_type, paths.get("tv_path"), paths.get("anime_path"))
     if k == "youtube":
         return paths.get("youtube_path") or ""

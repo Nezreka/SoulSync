@@ -83,7 +83,7 @@ describe('SpotifyTab search', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('filters the cards by name and says so when nothing is left', async () => {
-    render(<SpotifyTab registerRows={() => {}} />);
+    render(<SpotifyTab />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText('Search playlists'), { target: { value: 'gym' } });

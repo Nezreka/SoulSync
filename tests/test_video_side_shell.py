@@ -358,7 +358,9 @@ def test_video_settings_module_referenced_and_isolated():
     stripped = _VSETTINGS_JS.strip()
     assert stripped.startswith("/*") or stripped.startswith("(function")
     assert "(function" in _VSETTINGS_JS and "})();" in _VSETTINGS_JS
-    assert set(re.findall(r"window\.\w+", _VSETTINGS_JS)) <= {"window.refreshLibrarySummaries"}
+    # the folder checker is the shared settings helper (folder-check.js), not music
+    assert set(re.findall(r"window\.\w+", _VSETTINGS_JS)) <= {"window.refreshLibrarySummaries",
+                                                                 "window.SoulSyncFolderCheck"}
     assert "addEventListener" in _VSETTINGS_JS
     assert "/api/video/libraries" in _VSETTINGS_JS
     assert "soulsync:video-page-shown" in _VSETTINGS_JS

@@ -18,6 +18,9 @@ logger = get_logger("video.health")
 
 _ROOTS = (("movies_path", "Movie library"), ("tv_path", "TV library"),
           ("youtube_path", "YouTube library"))
+# the optional 4K libraries, checked only while switched on
+_FOUR_K_ROOTS = (("movie", "movies_4k_path", "4K movie library"),
+                 ("episode", "tv_4k_path", "4K TV library"))
 
 
 def _check(cid, label, status, detail) -> dict:
@@ -289,8 +292,10 @@ def collect(db) -> dict:
     # 1) library folders: set-but-unreachable = a down mount (error); unset is fine
     from core.video import organization
     settings = organization.load(db)
-    for key, label in _ROOTS:
-        path = str(db.get_setting(key) or "").strip()
+    from core.video.library_roots import four_k_path
+    roots = [(key, label, str(db.get_setting(key) or "").strip()) for key, label in _ROOTS]
+    roots += [(key, label, four_k_path(db, kind)) for kind, key, label in _FOUR_K_ROOTS]
+    for key, label, path in roots:
         if not path:
             continue
         if not os.path.isdir(path):

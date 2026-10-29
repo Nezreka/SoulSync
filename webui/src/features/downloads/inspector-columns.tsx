@@ -16,6 +16,7 @@ import {
   overrideConfirm,
   scoreClass,
 } from './inspector';
+import { canListen, listenToCandidate } from './inspector-listen';
 
 /**
  * One source's column in the candidate inspector: the accepted hits (pick one
@@ -35,6 +36,37 @@ export interface SourceColumnData {
   source: string;
   candidates: InspectorCandidate[];
   rejected: RejectedSummary;
+}
+
+/** Sources whose filename is a dispatch key, mirroring the backend's
+ * decode set (core/downloads/candidate_pool.py `DECODE_USERNAMES`). */
+const KEYED_SERVICES = new Set([
+  'youtube',
+  'tidal',
+  'qobuz',
+  'hifi',
+  'deezer_dl',
+  'lidarr',
+  'soundcloud',
+  'amazon',
+  'torrent',
+  'usenet',
+]);
+
+/**
+ * The hover text for a row's name: a peer's full remote path is worth
+ * showing (even with `||` in a folder name), but a dispatch-key source's
+ * filename is a key (`id||name`, torrent/usenet: an opaque store token) —
+ * for those the decoded display name is the meaningful hover (#1911).
+ */
+export function nameTip(row: InspectorCandidate): string {
+  const filename = String(row.filename || '');
+  // The backend decodes on the row's username, not its source label:
+  // a torrent row's source can read 'hybrid' on the fallback search path
+  // while its username is still 'torrent'.
+  return filename.includes('||') && KEYED_SERVICES.has(String(row.username || ''))
+    ? String(row.display_name || '')
+    : filename;
 }
 
 export function SourceColumn({
@@ -96,9 +128,10 @@ export function SourceColumn({
                 )}
                 <div className="rdl-src-item-body">
                   <div className="rdl-src-item-top">
-                    <div className="rdl-src-item-name" title={String(c.filename || '')}>
+                    <div className="rdl-src-item-name" title={nameTip(c)}>
                       {c.display_name}
                     </div>
+                    <ListenButton row={c} expected={expected} />
                     {isRec ? <span className="rdl-src-recommended">Best</span> : null}
                   </div>
                   <CandidateDetails row={c} source={column.source} />
@@ -152,6 +185,29 @@ export function SourceColumn({
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * Play the hit before picking it. It sits inside the row's label, so the
+ * click mustn't also pick the row.
+ */
+function ListenButton({ row, expected }: { row: InspectorCandidate; expected: InspectorExpected }) {
+  if (!canListen(row)) return null;
+  return (
+    <button
+      type="button"
+      className="rdl-src-listen"
+      title="Listen before you pick"
+      aria-label={`Listen to ${row.display_name || 'this result'}`}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void listenToCandidate(row, expected);
+      }}
+    >
+      ▶
+    </button>
   );
 }
 
@@ -225,9 +281,10 @@ function RejectedRow({
       <div className="rdl-src-radio-placeholder" />
       <div className="rdl-src-item-body">
         <div className="rdl-src-item-top">
-          <div className="rdl-src-item-name" title={String(row.filename || '')}>
+          <div className="rdl-src-item-name" title={nameTip(row)}>
             {row.display_name}
           </div>
+          <ListenButton row={row} expected={expected} />
           <span className={`rdl-rej-pill stage-${stage}`}>
             {decisionPill(row, expected.duration_ms)}
           </span>

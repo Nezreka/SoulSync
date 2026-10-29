@@ -639,6 +639,45 @@ def _default_route_type(item: Dict[str, Any]) -> Optional[str]:
         return None
 
 
+def _default_four_k_dir(media_type: str) -> str:
+    """The 4K library for this kind ('' while it's switched off). Best-effort:
+    an unreadable setting reads as off, never stalls the drain."""
+    try:
+        from api.video import get_video_db
+        from core.video.library_roots import four_k_path
+        return four_k_path(get_video_db(), "movie" if media_type == "movie" else "episode")
+    except Exception:   # noqa: BLE001 - routing falls back to the main folder
+        return ""
+
+
+def _default_profile_library(item: Dict[str, Any]) -> str:
+    """Which library the item's quality profile files it in ('main' / '4k')."""
+    try:
+        from api.video import get_video_db
+        from core.video.quality_profile import load_for_item
+        return str(load_for_item(get_video_db(), item).get("library") or "main")
+    except Exception:   # noqa: BLE001 - routing falls back to the main folder
+        return "main"
+
+
+def item_target_dir(item: Dict[str, Any], media_type: str, root: str, anime_root: str,
+                    four_k_root: str, route_type: Callable[[Dict[str, Any]], Optional[str]],
+                    profile_library: Callable[[Dict[str, Any]], str]) -> str:
+    """The folder ONE wished item is filed in. The anime folder by the show's
+    routing type (never the genre tag); else the 4K folder when the item's
+    quality profile says 4K and that library is on; else the main folder.
+    Each lookup only runs when its folder is set. Shared by the drain and RSS
+    sync so both route the same way."""
+    if media_type == "episode" and anime_root:
+        from core.video.download_pipeline import tv_root_for
+        anime = tv_root_for(route_type(item), "", anime_root)
+        if anime:
+            return anime
+    if four_k_root and profile_library(item) == "4k":
+        return four_k_root
+    return root
+
+
 def _default_anime_dir() -> str:
     """The optional anime library folder ('' = off: anime shows use the TV folder).
     Best-effort: an unreadable setting reads as off, never stalls the drain."""
@@ -1033,7 +1072,9 @@ def auto_video_process_wishlist(
     active_keys: Optional[Callable[[str], Iterable]] = None,
     target_dir: Optional[Callable[[str], str]] = None,
     anime_dir: Optional[Callable[[], str]] = None,
+    four_k_dir: Optional[Callable[[str], str]] = None,
     route_type: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None,
+    profile_library: Optional[Callable[[Dict[str, Any]], str]] = None,
     search: Optional[Callable[[Dict[str, Any], str], List[Dict[str, Any]]]] = None,
     enqueue: Optional[Callable[..., bool]] = None,
     record_outcome: Optional[Callable[[Dict[str, Any], str, bool], None]] = None,
@@ -1049,7 +1090,9 @@ def auto_video_process_wishlist(
     active_keys = active_keys or _default_active_keys
     target_dir = target_dir or _default_target_dir
     anime_dir = anime_dir or _default_anime_dir
+    four_k_dir = four_k_dir or _default_four_k_dir
     route_type = route_type or _default_route_type
+    profile_library = profile_library or _default_profile_library
     search = search or _default_search
     enqueue = enqueue or _default_enqueue
     record_outcome = record_outcome or _default_record_outcome
@@ -1078,8 +1121,8 @@ def auto_video_process_wishlist(
         root = target_dir(media_type)
         # episodes of anime-type shows go to the anime folder when one is set;
         # each wished episode carries its show's routing type (route_series_type)
-        from core.video.download_pipeline import tv_root_for
         anime_root = anime_dir() if media_type == 'episode' else ''
+        four_k_root = four_k_dir(media_type)
         if not root:
             where = 'Movie' if media_type == 'movie' else 'TV'
             deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
@@ -1183,14 +1226,14 @@ def auto_video_process_wishlist(
                         slots_claimed[0] += 1
                 if slot:
                     for cand in usable[:MAX_GRAB_ATTEMPTS]:
-                        # the FOLDER follows route_type (set by hand, an anime-
-                        # marked library, or a not-yet-owned show's hint) --
-                        # never the genre tag, which only shapes the search.
-                        # Only asked when an anime folder is set.
+                        # the FOLDER: anime by route_type (set by hand, an
+                        # anime-marked library, or a not-yet-owned show's
+                        # hint -- never the genre tag), else 4K by the item's
+                        # quality profile, else the main folder
                         out = enqueue_outcome(enqueue(
                             it, cand, cands, media_type,
-                            tv_root_for(route_type(it), root, anime_root)
-                            if media_type == 'episode' and anime_root else root))
+                            item_target_dir(it, media_type, root, anime_root, four_k_root,
+                                            route_type, profile_library)))
                         if out["ok"]:
                             clear_source_refusal(it, media_type, cand)
                             ok = True

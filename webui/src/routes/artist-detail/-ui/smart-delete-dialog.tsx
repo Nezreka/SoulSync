@@ -14,6 +14,9 @@ import styles from './smart-delete-dialog.module.css';
 
 export interface SmartDeleteCopy {
   title: string;
+  /** what's being deleted, when it isn't one track or one album
+   *  ("3 songs", "other copy"); the question reads "the <noun>" */
+  noun?: string;
   keepDesc: string;
   deleteTitle: string;
   deleteDesc: string;
@@ -64,7 +67,9 @@ export function SmartDeleteDialog({
         </button>
       </div>
       <p className="smart-delete-desc">
-        How should this {copy.title === 'Delete Album' ? 'album' : 'track'} be deleted?
+        {copy.noun
+          ? `How should the ${copy.noun} be deleted?`
+          : `How should this ${copy.title === 'Delete Album' ? 'album' : 'track'} be deleted?`}
       </p>
       <div className="smart-delete-options">
         <button className="smart-delete-option" type="button" onClick={() => onChoose('db_only')}>

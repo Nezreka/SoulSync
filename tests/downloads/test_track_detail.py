@@ -87,3 +87,13 @@ def test_history_fills_missing_title_from_task():
     d = build_track_detail(task, history)
     assert d['title'] == 'Recovered Title'
     assert d['artist'] == 'Some Artist'
+
+
+def test_streaming_task_location_names_the_song_not_the_key():
+    # No history row yet: the task's filename is a dispatch key, and the
+    # detail's location must not show it (#1911).
+    d = build_track_detail(
+        {'task_id': 't9', 'status': 'downloading', 'username': 'soundcloud',
+         'filename': '999||https://soundcloud.com/u/slug||Artist - Song',
+         'track_info': {'name': 'Song', 'artists': [{'name': 'Artist'}]}})
+    assert d['file_path'] == 'Artist - Song'

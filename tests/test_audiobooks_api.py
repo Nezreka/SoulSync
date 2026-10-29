@@ -1525,3 +1525,31 @@ def test_confirming_a_library_match_verifies_in_the_configured_marketplace():
                              body={"action": "confirm", "catalog_asin": "B0H373Y5M7",
                                    "scan_signature": "v1", "match_revision": 0})
     assert catalog.get_book.call_args.kwargs["marketplace"] == "de"
+
+
+def test_a_book_in_an_extra_folder_can_be_deleted_and_shows_its_cover(client, wishlist_db, tmp_path):
+    main, extra = tmp_path / 'books', tmp_path / 'drive2'
+    book = extra / 'Author' / 'Book'
+    book.mkdir(parents=True)
+    (book / 'cover.jpg').write_bytes(b'cover data')
+    main.mkdir()
+    wishlist_db.add_to_library({'asin': 'local:x', 'title': 'Book'}, str(book))
+    with patch('core.audiobook_organizer.library_root', return_value=str(main)), \
+         patch('core.audiobook_organizer.additional_roots', return_value=[str(extra)]):
+        cover = client.get('/api/audiobooks/library/local:x/cover')
+        assert cover.status_code == 200 and cover.data == b'cover data'
+        with patch('core.audiobook_recycle.discard', return_value={'ok': True}) as discard:
+            assert client.delete('/api/audiobooks/library/local:x').status_code == 200
+    discard.assert_called_once()
+    assert not wishlist_db.is_owned('local:x')
+
+
+def test_an_extra_folder_itself_is_never_deleted(client, wishlist_db, tmp_path):
+    extra = tmp_path / 'drive2'
+    extra.mkdir()
+    wishlist_db.add_to_library({'asin': 'local:root', 'title': 'Root'}, str(extra))
+    with patch('core.audiobook_organizer.library_root', return_value=str(tmp_path / 'books')), \
+         patch('core.audiobook_organizer.additional_roots', return_value=[str(extra)]), \
+         patch('core.audiobook_recycle.discard') as discard:
+        assert client.delete('/api/audiobooks/library/local:root').status_code == 400
+    discard.assert_not_called()

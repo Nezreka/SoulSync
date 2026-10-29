@@ -89,6 +89,41 @@ def test_two_rows_on_one_folder_are_flagged(tmp_path):
     assert "Same folder" in results["library"]["message"]
 
 
+def test_a_folder_inside_another_row_is_noted(tmp_path):
+    lib = tmp_path / "library"
+    results = paths.check_paths({"download": str(tmp_path), "library": str(lib),
+                                 "other": str(tmp_path.parent / "elsewhere")}, docker=False)
+    assert results["library"]["inside"] == "download"
+    assert "inside" not in results["download"] and "inside" not in results["other"]
+    # the nearest parent wins
+    deep = paths.check_paths({"a": str(tmp_path), "b": str(lib), "c": str(lib / "x")},
+                             docker=False)
+    assert deep["c"]["inside"] == "b"
+
+
+def test_docker_folder_on_no_mapped_volume_is_noted(tmp_path):
+    mounts = ["/", str(tmp_path / "mapped")]
+    results = paths.check_paths({"lost": str(tmp_path / "loose"),
+                                 "kept": str(tmp_path / "mapped" / "movies")},
+                                docker=True, mounts=mounts)
+    assert results["lost"].get("unmapped") is True
+    assert "unmapped" not in results["kept"]
+    # bare metal never asks
+    assert "unmapped" not in paths.check_paths({"x": str(tmp_path / "loose")},
+                                               docker=False, mounts=mounts)["x"]
+
+
+def test_mount_points_reads_mountinfo_and_fails_soft(tmp_path):
+    info = tmp_path / "mountinfo"
+    info.write_text("22 1 0:21 / / rw - overlay overlay rw\n"
+                    "23 22 8:1 /m /media/my\\040movies rw - ext4 /dev/sda1 rw\n")
+    assert paths.mount_points(str(info)) == ["/", "/media/my movies"]
+    assert paths.mount_points(str(tmp_path / "nope")) == []
+    assert paths.on_mapped_volume("/media/my movies/x", ["/", "/media/my movies"]) is True
+    assert paths.on_mapped_volume("/app/downloads", ["/", "/app/config"]) is False
+    assert paths.on_mapped_volume("/app/downloads", []) is None
+
+
 # ---- probes -------------------------------------------------------------
 
 class _Resp:

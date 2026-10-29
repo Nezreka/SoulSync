@@ -711,7 +711,10 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             # seeding lifecycle (arr-parity P5) rides the same config payload
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
             "seed_mode": "soulsync", "seed_overrides": {},
-            "movies_additional_paths": [], "tv_additional_paths": []}
+            "movies_additional_paths": [], "tv_additional_paths": [],
+            # the optional 4K libraries, off until switched on
+            "movies_4k_enabled": False, "movies_4k_path": "",
+            "tv_4k_enabled": False, "tv_4k_path": ""}
         # Round-trips: libraries → video.db, the INPUT folder → the SHARED music key.
         client.post("/api/video/downloads/config",
                     json={"download_path": " /mnt/v/dl ", "movies_path": "/media/movies",
@@ -723,7 +726,10 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"],
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
             "seed_mode": "soulsync", "seed_overrides": {},
-            "movies_additional_paths": [], "tv_additional_paths": []}
+            "movies_additional_paths": [], "tv_additional_paths": [],
+            # the optional 4K libraries, off until switched on
+            "movies_4k_enabled": False, "movies_4k_path": "",
+            "tv_4k_enabled": False, "tv_4k_path": ""}
         # The input folder is the SHARED soulseek.download_path (so music sees it too);
         # it is NOT stored in video.db.
         assert fake.get("soulseek.download_path") == "/mnt/v/dl"

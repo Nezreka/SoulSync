@@ -1,0 +1,629 @@
+/* The library's songs (#1906): one row per song, cover first so a play is one
+   click, then title over "artist · album · year", the file's quality, the
+   length and the row's actions. Copies of one song read as copies. */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* the whole row plays (or ticks, while songs are ticked) */
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto 48px auto;
+  gap: 14px;
+  align-items: center;
+  padding: 7px 10px 7px 7px;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: background var(--dur-base) var(--ease-out);
+}
+
+.row:hover,
+.row:focus-within {
+  background: var(--white-a05);
+}
+
+.art {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-xs);
+  background: var(--white-a05);
+  color: var(--white-a55);
+  font-size: 16px;
+  cursor: pointer;
+  place-items: center;
+}
+
+.art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.art:disabled {
+  cursor: default;
+}
+
+.playIcon {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  background: var(--black-a55);
+  color: var(--text-1);
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
+  place-items: center;
+}
+
+.row:hover .art:not(:disabled) .playIcon,
+.art:focus-visible .playIcon {
+  opacity: 1;
+}
+
+.art:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copies {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.meta {
+  overflow: hidden;
+  color: var(--white-a55);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  margin: 0 6px;
+  color: var(--white-a25);
+}
+
+.album {
+  color: var(--white-a70);
+  text-decoration: none;
+}
+
+.album:hover {
+  color: var(--text-1);
+  text-decoration: underline;
+}
+
+.quality {
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+  background: var(--white-a05);
+  color: var(--white-a70);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.time {
+  color: var(--white-a55);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.iconBtn {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--white-a70);
+  font-size: 16px;
+  cursor: pointer;
+  place-items: center;
+  transition:
+    background var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out);
+}
+
+.iconBtn:hover,
+.iconBtn:focus-visible {
+  background: var(--white-a10);
+  color: var(--text-1);
+}
+
+.strip {
+  margin: 0 0 18px;
+  padding: 12px 12px 8px;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-card);
+  background: var(--white-a03);
+}
+
+.stripHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 4px 6px;
+}
+
+.stripHead h3 {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.seeAll {
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.seeAll:hover {
+  text-decoration: underline;
+}
+
+/* phone: the quality and length go (the album line is what tells copies
+   apart), and the icon buttons match the app's 38px touch height */
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  .quality,
+  .time {
+    display: none;
+  }
+
+  .iconBtn {
+    width: 38px;
+    height: 38px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row,
+  .playIcon,
+  .iconBtn {
+    transition: none;
+  }
+}
+
+/* ── best in class pass ──────────────────────────────────────────────────── */
+
+.row:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.55);
+  outline-offset: -2px;
+}
+
+.row[data-selected] {
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.row[data-playing] .titleText {
+  color: var(--accent);
+}
+
+/* a newer list is loading; this one stays readable and says so */
+.list[data-stale] {
+  opacity: 0.55;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+
+/* the tick: in the gutter, on hover or focus, always while ticking */
+.check {
+  position: absolute;
+  top: 50%;
+  left: -26px;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-50%);
+}
+
+.row:hover .check,
+.row:focus-within .check,
+.list[data-selecting] .check {
+  opacity: 1;
+}
+
+.titleText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hit {
+  padding: 0 1px;
+  border-radius: var(--radius-xs);
+  background: rgba(var(--accent-rgb), 0.24);
+  color: inherit;
+}
+
+.copies[role='button'] {
+  cursor: pointer;
+}
+
+.copies[role='button']:hover,
+.copies[role='button']:focus-visible {
+  background: rgba(var(--accent-rgb), 0.26);
+}
+
+.copies[role='button']:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 1px;
+}
+
+.iconBtn[data-liked] {
+  color: var(--accent);
+}
+
+/* the playing song: moving bars on its cover */
+.nowPlaying {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  background: var(--black-a55);
+  place-items: center;
+}
+
+.bars {
+  display: inline-flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: 14px;
+}
+
+.bars i {
+  width: 3px;
+  height: 40%;
+  border-radius: var(--radius-xs);
+  background: var(--accent);
+}
+
+.bars[data-playing] i {
+  animation: bar 0.9s ease-in-out infinite;
+}
+
+.bars[data-playing] i:nth-child(2) {
+  animation-delay: -0.3s;
+}
+
+.bars[data-playing] i:nth-child(3) {
+  animation-delay: -0.6s;
+}
+
+@keyframes bar {
+  0%,
+  100% {
+    height: 30%;
+  }
+
+  50% {
+    height: 100%;
+  }
+}
+
+/* several songs ticked: what you can do with them */
+.selectionBar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 14px auto 0;
+  padding: 10px 12px;
+  border: 1px solid var(--white-a14);
+  border-radius: var(--radius-card);
+  background: var(--bg-raised);
+  box-shadow: 0 10px 30px var(--black-a50);
+}
+
+.selectionCount {
+  margin-right: 6px;
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.barBtn {
+  padding: 7px 13px;
+  border: 1px solid var(--white-a14);
+  border-radius: var(--radius-pill);
+  background: var(--white-a05);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.barBtn:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.6);
+  background: rgba(var(--accent-rgb), 0.16);
+}
+
+.barBtn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.barDanger:hover:not(:disabled) {
+  border-color: rgba(var(--danger-rgb), 0.7);
+  background: rgba(var(--danger-rgb), 0.16);
+}
+
+.barClear {
+  margin-left: auto;
+  padding: 6px 8px;
+  border: 0;
+  background: none;
+  color: var(--white-a70);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+/* first load: rows in the list's own shape */
+.skeleton {
+  cursor: default;
+}
+
+.skelArt,
+.skelText i {
+  border-radius: var(--radius-xs);
+  background: var(--white-a07);
+  animation: skel 1.2s ease-in-out infinite;
+}
+
+.skelArt {
+  width: 44px;
+  height: 44px;
+}
+
+.skelText {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.skelText i {
+  width: 46%;
+  height: 11px;
+}
+
+.skelText i + i {
+  width: 30%;
+}
+
+@keyframes skel {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* the copies of one song, side by side */
+.copiesDialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(80vh, 760px);
+  overflow: auto;
+  padding: 18px 18px 14px;
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-card);
+  background: var(--bg-raised);
+}
+
+.copiesHead {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.copiesHead h3 {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 17px;
+}
+
+.copiesHead p,
+.copiesNote {
+  margin: 2px 0 0;
+  color: var(--white-a55);
+  font-size: 13px;
+}
+
+.copiesList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.copyRow {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-control);
+  background: var(--white-a03);
+}
+
+.copyArt {
+  display: grid;
+  overflow: hidden;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-xs);
+  background: var(--white-a05);
+  color: var(--white-a55);
+  place-items: center;
+}
+
+.copyArt img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.copyText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.copyAlbum {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.copySpecs {
+  color: var(--white-a70);
+  font-size: 12.5px;
+}
+
+.copyPath {
+  overflow: hidden;
+  color: var(--white-a40);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.best {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--success-rgb), 0.14);
+  color: rgb(var(--success-rgb));
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.copyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* a touch screen has no hover to find the tick boxes with: always shown */
+@media (hover: none) {
+  .check {
+    opacity: 0.85;
+  }
+}
+
+@media (max-width: 640px) {
+  /* over the cover's corner here, so it has to sit above the cover's
+     play button or a tap on the box plays the song */
+  .check {
+    left: 2px;
+    top: 4px;
+    z-index: 2;
+    transform: none;
+  }
+
+  /* one row that scrolls sideways, clear of the floating buttons */
+  .selectionBar {
+    bottom: 84px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .selectionCount {
+    flex-shrink: 0;
+  }
+
+  .barClear {
+    margin-left: 0;
+  }
+
+  .copyRow {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .copyActions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bars[data-playing] i,
+  .skelArt,
+  .skelText i {
+    animation: none;
+  }
+}
