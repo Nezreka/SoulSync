@@ -429,6 +429,11 @@ def test_m3_retry_remaps_stale_final_file_path(monkeypatch, tmp_path):
     state = {"fail_b": True, "fail_rollback_a": True}
     monkeypatch.setattr(file_ops, "safe_move_file",
                         _flaky_mover_factory(state, staged_a, staged_b, final_a))
+    # On this branch a publish that moves a file the catalogue does not know
+    # is rolled back (L2-002); this test is about the task remap, so every
+    # file is one the catalogue knows.
+    import core.downloads.atomic_recovery as atomic_recovery
+    monkeypatch.setattr(atomic_recovery, "make_db_path_updater", lambda db, **kw: lambda old, new: 1)
 
     batch = {
         "_atomic_active": True,

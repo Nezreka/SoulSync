@@ -28,52 +28,6 @@ import core.runtime_state as runtime_state
 # ---------------------------------------------------------------------------
 
 
-class _FakeDB:
-    def __init__(self, conn):
-        self._conn = conn
-
-    def _get_connection(self):
-        return self._conn
-
-
-def _make_soulsync_db():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        CREATE TABLE artists (
-            id TEXT PRIMARY KEY, name TEXT, genres TEXT, thumb_url TEXT,
-            server_source TEXT, created_at TEXT, updated_at TEXT,
-            spotify_artist_id TEXT
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE albums (
-            id TEXT PRIMARY KEY, artist_id TEXT, title TEXT, year INTEGER,
-            thumb_url TEXT, genres TEXT, track_count INTEGER, duration INTEGER,
-            server_source TEXT, created_at TEXT, updated_at TEXT,
-            spotify_album_id TEXT
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE tracks (
-            id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT, title TEXT,
-            track_number INTEGER, duration INTEGER, file_path TEXT,
-            bitrate INTEGER, file_size INTEGER, track_artist TEXT,
-            musicbrainz_recording_id TEXT, isrc TEXT,
-            quality_profile_id INTEGER, server_source TEXT,
-            created_at TEXT, updated_at TEXT, spotify_track_id TEXT,
-            deezer_id TEXT
-        )
-        """
-    )
-    return conn
-
-
 def _track_context(final_path, track_id, track_name, track_number):
     return {
         "source": "spotify",
@@ -97,9 +51,13 @@ def _track_context(final_path, track_id, track_name, track_number):
 
 
 @pytest.fixture()
-def soulsync_db(monkeypatch):
-    conn = _make_soulsync_db()
-    monkeypatch.setattr(side_effects, "get_database", lambda: _FakeDB(conn))
+def soulsync_db(monkeypatch, tmp_path):
+    """Library v2: the SoulSync server writes ``lib2_*`` through
+    ``upsert_track``; the server id is the stable id of the path."""
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    monkeypatch.setattr(side_effects, "get_database", lambda: db)
     monkeypatch.setattr(
         side_effects,
         "_get_config_manager",
@@ -108,7 +66,15 @@ def soulsync_db(monkeypatch):
     import core.genre_filter as genre_filter
 
     monkeypatch.setattr(genre_filter, "filter_genres", lambda genres, _cfg: genres)
-    return conn
+    conn = db._get_connection()
+    conn.row_factory = sqlite3.Row
+    yield conn
+    conn.close()
+
+
+_TRACK_ROWS = """SELECT t.id, t.server_id, t.title, t.spotify_id, f.path AS file_path
+                   FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id = t.id
+                  WHERE COALESCE(f.file_state, 'active') = 'active'"""
 
 
 # Real collision re-verified 2026-09-28 against current code.
@@ -137,10 +103,12 @@ def test_colliding_track_ids_both_persist(soulsync_db):
         {"album_name": "Some Album", "track_number": 2},
     )
 
-    rows = soulsync_db.execute("SELECT id, file_path FROM tracks ORDER BY file_path").fetchall()
+    rows = soulsync_db.execute(_TRACK_ROWS + " ORDER BY f.path").fetchall()
     assert len(rows) == 2
     assert rows[0]["id"] != rows[1]["id"]
+    assert rows[0]["server_id"] != rows[1]["server_id"]
     assert {r["file_path"] for r in rows} == {_COLLIDING_A, _COLLIDING_B}
+    assert {r["title"] for r in rows} == {"Track 22873", "Track 28946"}
 
 
 def test_colliding_track_keeps_source_id_on_reminted_id(soulsync_db):
@@ -160,14 +128,10 @@ def test_colliding_track_keeps_source_id_on_reminted_id(soulsync_db):
         {"album_name": "Some Album", "track_number": 2},
     )
 
-    row_a = soulsync_db.execute(
-        "SELECT spotify_track_id FROM tracks WHERE file_path = ?", (_COLLIDING_A,)
-    ).fetchone()
-    row_b = soulsync_db.execute(
-        "SELECT spotify_track_id FROM tracks WHERE file_path = ?", (_COLLIDING_B,)
-    ).fetchone()
-    assert row_a["spotify_track_id"] == "sp-track-a"
-    assert row_b["spotify_track_id"] == "sp-track-b"
+    row_a = soulsync_db.execute(_TRACK_ROWS + " AND f.path = ?", (_COLLIDING_A,)).fetchone()
+    row_b = soulsync_db.execute(_TRACK_ROWS + " AND f.path = ?", (_COLLIDING_B,)).fetchone()
+    assert row_a["spotify_id"] == "sp-track-a"
+    assert row_b["spotify_id"] == "sp-track-b"
 
 
 def test_reimport_same_path_does_not_duplicate(soulsync_db):
@@ -180,7 +144,7 @@ def test_reimport_same_path_does_not_duplicate(soulsync_db):
     side_effects.record_soulsync_library_entry(ctx, artist_context, album_info)
     side_effects.record_soulsync_library_entry(ctx, artist_context, album_info)
 
-    rows = soulsync_db.execute("SELECT id FROM tracks").fetchall()
+    rows = soulsync_db.execute(_TRACK_ROWS).fetchall()
     assert len(rows) == 1
 
 
@@ -898,10 +862,12 @@ def test_wrapper_fails_unrecognized_no_destination_outcome(_isolate_runtime_stat
     assert ("b1", "t1", False) in completion_calls
 
 
-def test_wrapper_completes_pipeline_succeeded_without_path(_isolate_runtime_state, monkeypatch):
-    """H4: a legitimate no-destination success (e.g. redundant source
-    removal where the destination already exists) carries
-    _pipeline_import_succeeded — it must still complete."""
+def test_wrapper_fails_pipeline_succeeded_without_path(_isolate_runtime_state, monkeypatch):
+    """H4, this branch's stricter contract: every real success path sets
+    ``_final_processed_path`` before ``_pipeline_import_succeeded`` (a
+    redundant-source removal points at the destination that already holds
+    the file), so a success flag with no destination is not evidence of an
+    import and the task fails instead of "assuming success"."""
     completion_calls = []
     _seed_wrapper_task()
 
@@ -910,8 +876,8 @@ def test_wrapper_completes_pipeline_succeeded_without_path(_isolate_runtime_stat
 
     _run_wrapper({"task_id": "t1", "batch_id": "b1"}, monkeypatch, fake_inner, completion_calls)
 
-    assert runtime_state.download_tasks["t1"]["status"] == "completed"
-    assert ("b1", "t1", True) in completion_calls
+    assert runtime_state.download_tasks["t1"]["status"] == "failed"
+    assert ("b1", "t1", False) in completion_calls
 
 
 def test_missing_artist_leaves_failure_flag_and_fails_task(
@@ -953,6 +919,6 @@ def test_missing_artist_leaves_failure_flag_and_fails_task(
         "test::ctx", context, str(source), "t1", "b1", runtime
     )
 
-    assert context.get("_context_failure_msg") == "Missing artist context"
+    assert "artist context" in context.get("_context_failure_msg", "")
     assert runtime_state.download_tasks["t1"]["status"] == "failed"
     assert ("b1", "t1", True) not in completion_calls

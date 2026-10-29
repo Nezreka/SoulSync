@@ -72,25 +72,16 @@ def client(db, monkeypatch):
 def _seed(db):
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES (1, 'The Testers')")
-    cur.execute(
-        "INSERT INTO albums (id, artist_id, title, musicbrainz_release_id) "
-        "VALUES (10, 1, 'Album A', ?)", (REL_A,))
-    cur.execute(
-        "INSERT INTO albums (id, artist_id, title, musicbrainz_release_id) "
-        "VALUES (11, 1, 'Album NoMBID', NULL)")
-    cur.execute(
-        "INSERT INTO albums (id, artist_id, title, musicbrainz_release_id) "
-        "VALUES (12, 1, 'Album Quiet', ?)", (REL_B,))
-    cur.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-        "VALUES (100, 10, 1, 'A1', '/music/a1.flac')")
-    cur.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-        "VALUES (101, 10, 1, 'A2', '/music/a2.flac')")
-    cur.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-        "VALUES (102, 11, 1, 'B1', '/music/b1.flac')")
+    # lib2 port: the release id is lib2_albums.musicbrainz_id, the paths are
+    # the tracks' files
+    from tests.lib2_seed import track
+    for album, title, path in (("Album A", "A1", "/music/a1.flac"),
+                               ("Album A", "A2", "/music/a2.flac"),
+                               ("Album NoMBID", "B1", "/music/b1.flac")):
+        track(conn, "The Testers", album, title, path=path)
+    track(conn, "The Testers", "Album Quiet", "Q1", owned=False)
+    for album, release in (("Album A", REL_A), ("Album Quiet", REL_B)):
+        cur.execute("UPDATE lib2_albums SET musicbrainz_id = ? WHERE title = ?", (release, album))
 
     def td(path, status, when):
         cur.execute(
@@ -187,3 +178,15 @@ def test_until_closes_the_window(db, client):
 def test_malformed_until_is_a_400(db, client):
     _seed(db)
     assert _get(client, until="next-friday").status_code == 400
+
+
+def test_a_path_two_file_rows_share_counts_once(db, client):
+    """lib2 port: the file path is not unique (twin catalogue rows), and one
+    download must not count twice."""
+    _seed(db)
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_track_files (track_id, path) "
+                 "SELECT track_id, path FROM lib2_track_files WHERE path = '/music/a2.flac'")
+    conn.commit()
+    row = _get(client).get_json()["data"]["albums"][0]
+    assert row["completed_downloads"] == 2

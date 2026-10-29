@@ -48,7 +48,8 @@ def member():
 @pytest.fixture
 def tracks():
     """three library tracks: explicit, clean, unknown, plus one clean track
-    on an explicit album."""
+    on an explicit album. library v2 rows: on this branch the guard reads
+    lib2, the legacy tables are not the catalogue."""
     db = web_server.get_database()
     base = 900000 + (uuid4().int % 50000) * 10
     ar, al_clean, al_expl = base, base + 1, base + 2
@@ -59,20 +60,25 @@ def tracks():
         'on_explicit_album': (base + 6, al_expl, 0, f'/music/kids_{base}/B/01 clean.flac'),
     }
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name) VALUES (?, ?)", (ar, f'Artist {base}'))
-        conn.execute("INSERT INTO albums (id, artist_id, title, explicit) VALUES (?, ?, 'A', 0)",
+        conn.execute("INSERT INTO lib2_artists (id, name) VALUES (?, ?)", (ar, f'Artist {base}'))
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, explicit) VALUES (?, ?, 'A', 0)",
                      (al_clean, ar))
-        conn.execute("INSERT INTO albums (id, artist_id, title, explicit) VALUES (?, ?, 'B', 1)",
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, explicit) VALUES (?, ?, 'B', 1)",
                      (al_expl, ar))
         for tid, alb, expl, fp in rows.values():
-            conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path, explicit) "
-                         "VALUES (?, ?, ?, 't', ?, ?)", (tid, alb, ar, fp, expl))
+            conn.execute("INSERT INTO lib2_tracks (id, album_id, title, explicit, legacy_track_id) "
+                         "VALUES (?, ?, 't', ?, ?)", (tid, alb, expl, tid + 7))
+            conn.execute("INSERT INTO lib2_track_files (track_id, path, is_primary, file_state) "
+                         "VALUES (?, ?, 1, 'active')", (tid, fp))
         conn.commit()
-    yield {k: {'id': v[0], 'file_path': v[3]} for k, v in rows.items()}
+    yield {k: {'id': v[0], 'legacy_id': v[0] + 7, 'file_path': v[3]} for k, v in rows.items()}
     with db._get_connection() as conn:
-        conn.execute("DELETE FROM tracks WHERE artist_id = ?", (ar,))
-        conn.execute("DELETE FROM albums WHERE artist_id = ?", (ar,))
-        conn.execute("DELETE FROM artists WHERE id = ?", (ar,))
+        ids = [v[0] for v in rows.values()]
+        marks = ','.join('?' * len(ids))
+        conn.execute(f"DELETE FROM lib2_track_files WHERE track_id IN ({marks})", ids)
+        conn.execute(f"DELETE FROM lib2_tracks WHERE id IN ({marks})", ids)
+        conn.execute("DELETE FROM lib2_albums WHERE primary_artist_id = ?", (ar,))
+        conn.execute("DELETE FROM lib2_artists WHERE id = ?", (ar,))
         conn.commit()
 
 
@@ -88,11 +94,42 @@ def test_kid_cannot_play_or_stream_an_explicit_track(kid, tracks):
     c = _client_as(kid)
     for key in ('explicit', 'on_explicit_album'):
         t = tracks[key]
-        r = c.post('/api/library/play', json={'file_path': t['file_path'], 'track_id': t['id']})
+        r = c.post('/api/library/play', json={'file_path': t['file_path'], 'lib2_track_id': t['id']})
         assert r.status_code == 403, key
         assert r.get_json() == {'success': False, 'error': 'restricted', 'restricted': True}
         r = c.get('/stream/library-audio', query_string={'path': t['file_path']})
         assert r.status_code == 403, key
+
+
+def test_the_ids_alone_are_enough_to_block(kid, tracks):
+    # a streamed (un-mounted) library plays by id: the lib2 id, or the
+    # server/legacy id the player sends as track_id
+    c = _client_as(kid)
+    t = tracks['explicit']
+    assert c.post('/api/library/play', json={'file_path': '/gone.flac',
+                                             'lib2_track_id': t['id']}).status_code == 403
+    assert c.post('/api/library/play', json={'file_path': '/gone.flac',
+                                             'track_id': t['legacy_id']}).status_code == 403
+    assert c.get('/stream/library-audio', query_string={
+        'path': '/gone.flac', 'track_id': t['legacy_id']}).status_code == 403
+
+
+def test_a_user_override_counts(kid, tracks):
+    # the explicit flag the library page shows is the one the guard enforces
+    db = web_server.get_database()
+    t = tracks['clean']
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO lib2_metadata_overrides (entity_type, entity_id, field_name, value_json) "
+                     "VALUES ('track', ?, 'explicit', '1')", (t['id'],))
+        conn.commit()
+    try:
+        r = _client_as(kid).post('/api/library/play', json={'file_path': t['file_path']})
+        assert r.status_code == 403
+    finally:
+        with db._get_connection() as conn:
+            conn.execute("DELETE FROM lib2_metadata_overrides WHERE entity_type='track' AND entity_id=?",
+                         (t['id'],))
+            conn.commit()
 
 
 def test_a_rerooted_path_does_not_walk_around_the_block(kid, tracks):
@@ -106,7 +143,7 @@ def test_kid_can_play_clean_and_unknown_tracks(kid, tracks):
     for key in ('clean', 'unknown'):
         t = tracks[key]
         # past the guard to the route's own "file not found" answer
-        r = c.post('/api/library/play', json={'file_path': t['file_path'], 'track_id': t['id']})
+        r = c.post('/api/library/play', json={'file_path': t['file_path'], 'lib2_track_id': t['id']})
         assert r.status_code == 404, key
         r = c.get('/stream/library-audio', query_string={'path': t['file_path']})
         assert r.status_code == 404, key
@@ -115,7 +152,7 @@ def test_kid_can_play_clean_and_unknown_tracks(kid, tracks):
 def test_unrestricted_profiles_play_explicit(member, tracks):
     t = tracks['explicit']
     for c in (_client_as(member), _client_as(1)):
-        r = c.post('/api/library/play', json={'file_path': t['file_path'], 'track_id': t['id']})
+        r = c.post('/api/library/play', json={'file_path': t['file_path'], 'lib2_track_id': t['id']})
         assert r.status_code == 404
 
 
@@ -191,3 +228,88 @@ def test_source_search_stream_drops_explicit_rows(kid, member, monkeypatch):
     assert [x['id'] for x in k['tracks']] == ['t2'] and k['albums'] == [] and 'done' in k
     m = _lines(_client_as(member))
     assert len(m['tracks']) == 2 and len(m['albums']) == 1
+
+
+# ── library v2 pages ─────────────────────────────────────────────────────────
+
+def test_lib2_artist_page_drops_explicit_releases(kid, member, monkeypatch):
+    from core.library2 import queries as Q
+    artist = {'id': 1, 'name': 'A',
+              'albums': [{'id': 1, 'title': 'Clean', 'explicit': False},
+                         {'id': 2, 'title': 'Dirty', 'explicit': True}],
+              'eps': [{'id': 3, 'title': 'EP', 'explicit': None}],
+              'singles': [{'id': 4, 'title': 'Single', 'explicit': True}]}
+    monkeypatch.setattr(Q, 'get_artist', lambda conn, aid: json.loads(json.dumps(artist)))
+    d = _client_as(kid).get('/api/library/v2/artists/1').get_json()['artist']
+    assert [a['title'] for a in d['albums']] == ['Clean']
+    assert [a['title'] for a in d['eps']] == ['EP'] and d['singles'] == []
+    d = _client_as(member).get('/api/library/v2/artists/1').get_json()['artist']
+    assert len(d['albums']) == 2 and len(d['singles']) == 1
+
+
+def test_lib2_album_page_drops_explicit_tracks(kid, member, monkeypatch):
+    from core.library2 import queries as Q
+    album = {'id': 1, 'title': 'X', 'explicit': False,
+             'tracks': [{'id': 1, 'explicit': True}, {'id': 2, 'explicit': False}, {'id': 3, 'explicit': None}]}
+    monkeypatch.setattr(Q, 'get_album', lambda conn, aid: json.loads(json.dumps(album)))
+    d = _client_as(kid).get('/api/library/v2/albums/1').get_json()['album']
+    assert [t['id'] for t in d['tracks']] == [2, 3]
+    assert len(_client_as(member).get('/api/library/v2/albums/1').get_json()['album']['tracks']) == 3
+    album['explicit'] = True
+    assert _client_as(kid).get('/api/library/v2/albums/1').get_json()['album']['tracks'] == []
+
+
+def test_lib2_track_page_refuses_an_explicit_track(kid, member, tracks, monkeypatch):
+    from core.library2 import queries as Q
+    monkeypatch.setattr(Q, 'get_track', lambda conn, tid: {'id': tid, 'title': 't'})
+    for key, code in (('explicit', 403), ('on_explicit_album', 403), ('clean', 200), ('unknown', 200)):
+        r = _client_as(kid).get(f"/api/library/v2/tracks/{tracks[key]['id']}")
+        assert r.status_code == code, key
+    assert _client_as(member).get(f"/api/library/v2/tracks/{tracks['explicit']['id']}").status_code == 200
+
+
+def test_lib2_play_queue_drops_explicit_files(kid, member, tracks):
+    # the real queue reader: the fixture's rows are owned files of the artist
+    artist_id = tracks['explicit']['id'] - 3
+    got = _client_as(kid).get(f'/api/library/v2/artists/{artist_id}/play-queue').get_json()['files']
+    assert sorted(f['track_id'] for f in got) == sorted([tracks['clean']['id'], tracks['unknown']['id']])
+    got = _client_as(member).get(f'/api/library/v2/artists/{artist_id}/play-queue').get_json()['files']
+    assert len(got) == 4
+
+
+def test_kid_still_hears_the_library_track_it_was_allowed(kid, tmp_path):
+    # /api/library/play readies a (checked) library track and the player then
+    # fetches it from /stream/audio. blocking that route whole for a kid, as
+    # the soulseek guard does, silenced every library track too
+    audio = tmp_path / 'clean.flac'
+    audio.write_bytes(b'fLaC' + b'\0' * 64)
+    c = _client_as(kid)
+    with c.session_transaction() as s:
+        s['stream_sid'] = f'kidtest{uuid4().hex[:8]}'
+        sid = s['stream_sid']
+    sess = web_server.stream_state_store.get(sid)
+    from api.content_guard import VOUCHED_KEY
+    # upstream 2a4811360: /api/library/play vouches for the exact file it
+    # checked; the stream serves a kid only while the session still plays it
+    with sess.lock:
+        sess.update({'status': 'ready', 'file_path': str(audio), 'stream_url': None,
+                     'is_library': True, 'error_message': None,
+                     VOUCHED_KEY: str(audio)})
+    assert c.get('/stream/audio').status_code in (200, 206)
+    # a session moved on to another file loses the vouch
+    with sess.lock:
+        sess.update({'file_path': str(tmp_path / 'other.flac')})
+    assert c.get('/stream/audio').status_code == 403
+    # a stream that isn't a library track stays unvouched
+    with sess.lock:
+        sess.update({'file_path': str(audio), 'is_library': False})
+    assert c.get('/stream/audio').status_code == 403
+
+
+def test_library_v2_discovery_feeds_are_cleaned_too():
+    # the discovery view reads /api/artist-detail and the gap-fill releases
+    from api import content_guard as cg
+    for path in ('/api/artist-detail/abc', '/api/artist/abc/discography',
+                 '/api/artist/abc/discography/gap-fill'):
+        assert cg._DEEP.match(path), path
+    assert not cg._DEEP.match('/api/artist/abc/discography/other')

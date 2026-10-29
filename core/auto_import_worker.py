@@ -31,6 +31,28 @@ AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.
 DISC_FOLDER_RE = re.compile(r'^(?:disc|cd|disk)\s*(\d+)$', re.IGNORECASE)
 
 
+def _owner_breadcrumb(file_path: str, consume: bool = False):
+    """#1504: the owning user profile an AcoustID relocate left next to a
+    staged file, or None. ``consume`` deletes the breadcrumb after reading it
+    so a later staged file with the same basename can never pick up a stale
+    owner."""
+    sidecar = file_path + ".soulsync-owner.json"
+    try:
+        if not os.path.isfile(sidecar):
+            return None
+        with open(sidecar, encoding='utf-8') as handle:
+            owner = json.load(handle).get('owner_profile_id')
+    except Exception as exc:  # noqa: BLE001 - a bad crumb means no owner
+        logger.debug("owner breadcrumb read failed: %s", exc)
+        return None
+    if consume:
+        try:
+            os.remove(sidecar)
+        except OSError as exc:
+            logger.debug("owner breadcrumb cleanup failed: %s", exc)
+    return int(owner) if owner else None
+
+
 @dataclass
 class FolderCandidate:
     path: str
@@ -2207,6 +2229,9 @@ class AutoImportWorker:
                     source_hint=source,
                     album_name=album_name,
                     quality_profile=gate_profile,
+                    # the USER profile the file is imported for (#1504
+                    # breadcrumb), so another library's copy never skips it
+                    profile_id=_owner_breadcrumb(file_path),
                 )
             except Exception as e:
                 logger.debug("library pre-check failed, importing anyway: %s", e)
@@ -2348,24 +2373,9 @@ class AutoImportWorker:
                 # carry a sidecar with the owning user profile. Read it into
                 # the context as profile_id (the USER profile, not the quality
                 # profile above) so the import lands in the right library.
-                try:
-                    import json as _json
-                    _sidecar = file_path + ".soulsync-owner.json"
-                    if os.path.isfile(_sidecar):
-                        with open(_sidecar, encoding='utf-8') as _sf:
-                            _crumb = _json.load(_sf)
-                        _owner = _crumb.get('owner_profile_id')
-                        if _owner:
-                            context['profile_id'] = int(_owner)
-                        # #1504: delete the breadcrumb after reading it so a
-                        # later staged file with the same basename can never
-                        # pick up a stale owner.
-                        try:
-                            os.remove(_sidecar)
-                        except OSError as exc:
-                            logger.debug("owner breadcrumb cleanup failed: %s", exc)
-                except Exception as exc:
-                    logger.debug("owner breadcrumb read failed: %s", exc)
+                _owner = _owner_breadcrumb(file_path, consume=True)
+                if _owner:
+                    context['profile_id'] = _owner
 
                 self._process_callback(context_key, context, file_path)
                 rejection = import_rejection_reason(context)

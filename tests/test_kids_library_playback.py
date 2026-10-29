@@ -79,23 +79,23 @@ def test_a_kid_still_cant_stream_or_play_unchecked_files(kid):
 
 def test_an_explicit_track_is_still_refused(kid, song):
     db = web_server.get_database()
-    conn = db._get_connection()
-    try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (?, 'A')", (f'kid-artist-{kid}',))
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (?, ?, 'B')",
-                     (f'kid-album-{kid}', f'kid-artist-{kid}'))
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path, explicit) "
-                     "VALUES (?, ?, ?, 'Dirty', ?, 1)",
-                     (f'kid-track-{kid}', f'kid-album-{kid}', f'kid-artist-{kid}', song))
+    from tests.lib2_seed import track
+    with db._get_connection() as conn:
+        track_id = track(conn, f"kid-artist-{kid}", f"kid-album-{kid}", "Dirty",
+                         path=song, explicit=1)
+        album_id = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)).fetchone()[0]
+        artist_id = conn.execute("SELECT primary_artist_id FROM lib2_albums WHERE id=?", (album_id,)).fetchone()[0]
         conn.commit()
+    try:
         r = _as(kid).post('/api/library/play', json={'file_path': song})
         assert r.status_code == 403 and r.get_json()['restricted'] is True
     finally:
-        conn.execute("DELETE FROM tracks WHERE id = ?", (f'kid-track-{kid}',))
-        conn.execute("DELETE FROM albums WHERE id = ?", (f'kid-album-{kid}',))
-        conn.execute("DELETE FROM artists WHERE id = ?", (f'kid-artist-{kid}',))
-        conn.commit()
-        conn.close()
+        with db._get_connection() as conn:
+            conn.execute("DELETE FROM lib2_track_files WHERE track_id=?", (track_id,))
+            conn.execute("DELETE FROM lib2_tracks WHERE id=?", (track_id,))
+            conn.execute("DELETE FROM lib2_albums WHERE id=?", (album_id,))
+            conn.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
+            conn.commit()
 
 
 def test_an_unrestricted_profile_is_untouched(song):

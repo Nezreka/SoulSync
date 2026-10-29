@@ -1,0 +1,45 @@
+.banner {
+  position: fixed;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(720px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(20, 20, 24, 0.96);
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
+  color: var(--text-primary, #fff);
+  font-size: 13px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+.failed {
+  border-color: rgba(255, 99, 99, 0.6);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.detail {
+  display: block;
+  color: var(--text-muted, #aaa);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action {
+  flex: none;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(var(--accent-rgb), 0.6);
+  background: rgba(var(--accent-rgb), 0.18);
+  color: inherit;
+  cursor: pointer;
+}

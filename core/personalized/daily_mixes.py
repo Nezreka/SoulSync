@@ -518,8 +518,12 @@ def _seed_edges(database, seed_names: List[str], profile_id: int,
     owned, seed_source_ids, seed_id_to_name = set(), [], {}
     with database._get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT name, spotify_artist_id, itunes_artist_id, deezer_id, "
-                    "musicbrainz_id FROM artists WHERE name IS NOT NULL AND name != ''")
+        cur.execute(
+            "SELECT name, spotify_id, "
+            "json_extract(external_ids, '$.itunes'), "
+            "json_extract(external_ids, '$.deezer'), "
+            "musicbrainz_id FROM lib2_artists "
+            "WHERE name IS NOT NULL AND name != ''")
         wanted = set(seed_names)
         for row in cur.fetchall():
             nm = row[0]
@@ -601,6 +605,7 @@ def _owned_tracks_for(database, artist_names: Sequence[str],
     one copy of each song. play_count is this pile's own plays from
     listening_history when it has any for the track, the media server's
     count otherwise."""
+    from core.library2.sql_util import owned_sql
     from core.personalized.for_you import _artists_named, _chunks
 
     out: Dict[str, List[dict]] = {}
@@ -612,24 +617,28 @@ def _owned_tracks_for(database, artist_names: Sequence[str],
         ids = [r[0] for r in artist_rows]
         rows = []
         for chunk in _chunks(ids, 900):
+            # the album's artist, as upstream reads tracks.artist_id: every row
+            # is filed under the artist it is labelled with
             rows += conn.execute(
                 f"""
                 SELECT t.id, t.title, t.duration, t.play_count,
                        ar.name AS artist, al.title AS album,
-                       COALESCE(al.thumb_url, ar.thumb_url) AS cover
-                FROM tracks t
-                JOIN artists ar ON ar.id = t.artist_id
-                LEFT JOIN albums al ON al.id = t.album_id
-                WHERE t.artist_id IN ({','.join('?' * len(chunk))})
-                  AND t.file_path IS NOT NULL AND t.file_path != ''
+                       COALESCE(al.image_url, ar.image_url) AS cover
+                FROM lib2_tracks t
+                JOIN lib2_albums al ON al.id = t.album_id
+                JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                WHERE al.primary_artist_id IN ({','.join('?' * len(chunk))})
+                  AND {owned_sql('track', 't')}
                 """, list(chunk)).fetchall()
         plays: Dict[str, int] = {}
         if owner is not None and rows:
+            # listening_history links a play to the catalogue by lib2_track_id;
+            # db_track_id is the media server's own id
             for chunk in _chunks([r[0] for r in rows], 900):
                 for tid, n in conn.execute(
-                        f"SELECT db_track_id, COUNT(*) FROM listening_history "
-                        f"WHERE +profile_id = ? AND db_track_id IN ({','.join('?' * len(chunk))}) "
-                        f"GROUP BY db_track_id", [owner, *chunk]).fetchall():
+                        f"SELECT lib2_track_id, COUNT(*) FROM listening_history "
+                        f"WHERE +profile_id = ? AND lib2_track_id IN ({','.join('?' * len(chunk))}) "
+                        f"GROUP BY lib2_track_id", [owner, *chunk]).fetchall():
                     plays[str(tid)] = n
     finally:
         conn.close()
@@ -647,7 +656,7 @@ def _owned_tracks_for(database, artist_names: Sequence[str],
             # the art resolves only for tracks that make a mix (see _clean):
             # doing it here registered every owned track's thumb
             "album": {"name": album or "", "images": []},
-            "duration_ms": int(duration or 0),  # tracks.duration is already milliseconds
+            "duration_ms": int(duration or 0),  # lib2_tracks.duration is milliseconds
             "play_count": count,
             "owned": True,
             "_cover": cover or None,
@@ -795,10 +804,12 @@ def _library_seeds(database, limit: int) -> List[dict]:
     then the ones you own most of."""
     try:
         with database._get_connection() as conn:
+            from core.library2.sql_util import owned_sql
             rows = conn.execute(
                 "SELECT ar.name, SUM(COALESCE(t.play_count, 0)) AS plays, COUNT(*) AS n "
-                "FROM tracks t JOIN artists ar ON ar.id = t.artist_id "
-                "WHERE t.file_path IS NOT NULL AND t.file_path != '' "
+                "FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
+                "JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
+                f"WHERE {owned_sql('track', 't')} "
                 "AND ar.name IS NOT NULL AND ar.name != '' "
                 "GROUP BY ar.id ORDER BY plays DESC, n DESC LIMIT ?", (limit,)).fetchall()
     except Exception as e:  # noqa: BLE001 - no fallback is the old behaviour

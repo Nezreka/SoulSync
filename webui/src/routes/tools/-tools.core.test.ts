@@ -24,6 +24,8 @@ import {
   cacheSourceLabel,
   findingFilePath,
   findingFixLabel,
+  findingRedownloadTrackId,
+  findingRowFixLabel,
   findingSeverityClass,
   findingSeverityIcon,
   findingStatusBadge,
@@ -194,8 +196,14 @@ describe('finding labels', () => {
     // know only `critical`, which nothing has ever emitted. Both map to the
     // same icon and the same CSS class while old rows exist.
     expect(Object.keys(FINDING_SEVERITY_ICONS)).toHaveLength(4);
-    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(25);
-    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(23);
+    expect(FINDING_TYPE_LABELS.quality_upgrade_review).toBe('Quality Upgrade Review');
+    expect(FINDING_TYPE_LABELS.quality_format_not_targeted).toBe('Format Not in Profile');
+    expect(FINDING_TYPE_LABELS.quality_unknown).toBe('Quality Unknown');
+    expect(FINDING_FIXABLE_TYPES.quality_upgrade_review).toBe('Monitor & Upgrade');
+    expect(FINDING_FIXABLE_TYPES.quality_format_not_targeted).toBe('Leave As-is');
+    expect(FINDING_FIXABLE_TYPES.quality_unknown).toBe('Leave As-is');
+    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(30);
+    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(29);
     // 16 music + obsolete + the 10 video fix actions + the scan retirement
     expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(28);
   });
@@ -216,8 +224,44 @@ describe('finding labels', () => {
     expect(findingFixLabel('duplicate_tracks')).toBe('Keep Best');
     expect(findingFixLabel('genre_enrichment')).toBe('Apply Genres');
     expect(findingFixLabel('comma_artist_split')).toBe('Split Artists');
-    expect(findingFixLabel('fake_lossless')).toBeNull();
+    expect(findingFixLabel('fake_lossless')).toBe('Re-download');
+    expect(findingFixLabel('album_needs_enrichment')).toBeNull();
     expect(findingFixLabel('path_mismatch')).toBeNull();
+  });
+
+  it('names the delete for a finding with no track behind it', () => {
+    // The corruption detector walks the library folders too, so it raises rows
+    // with `entity_type: 'file'` and no id. There is no track to re-request,
+    // and the button used to promise one anyway — over a fix that could only
+    // answer "No track ID associated with this finding".
+    const stray = { finding_type: 'corrupt_audio', entity_type: 'file', entity_id: null };
+    expect(findingRowFixLabel(stray)).toBe('Delete File');
+    expect(findingRowFixLabel({ ...stray, finding_type: 'short_preview_track' })).toBe(
+      'Delete File',
+    );
+    expect(findingRowFixLabel({ ...stray, finding_type: 'fake_lossless' })).toBe('Delete File');
+  });
+
+  it('searches a file finding by the track behind the file, never by the file id', () => {
+    const fake = {
+      entity_type: 'file',
+      entity_id: 'lib2:31',
+      details: { library_v2: { file_id: 31, track_id: 7 } },
+    };
+    expect(findingRedownloadTrackId(fake)).toBe('lib2:7');
+    expect(findingRedownloadTrackId({ ...fake, details: {} })).toBeNull();
+    expect(findingRedownloadTrackId({ ...fake, entity_id: null })).toBeNull();
+    expect(findingRedownloadTrackId({ entity_type: 'track', entity_id: 'lib2:9' })).toBe('lib2:9');
+  });
+
+  it('leaves a finding that DOES name a track on the re-download wording', () => {
+    expect(
+      findingRowFixLabel({
+        finding_type: 'short_preview_track',
+        entity_type: 'track',
+        entity_id: 'lib2:7',
+      }),
+    ).toBe('Re-download');
   });
 
   it('knows missing_discography_track is fixable despite having no type label', () => {

@@ -15,35 +15,7 @@ from datetime import datetime, timedelta
 import pytest
 
 
-# api/__init__.py imports flask_limiter at module load. Stub it.
-def _install_flask_limiter_stub():
-    if "flask_limiter" in sys.modules:
-        return
-    stub = types.ModuleType("flask_limiter")
-
-    class _Limiter:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def limit(self, *args, **kwargs):
-            def decorator(target):
-                return target
-            return decorator
-
-        def init_app(self, app):
-            pass
-
-    stub.Limiter = _Limiter
-    sys.modules["flask_limiter"] = stub
-
-    util_stub = types.ModuleType("flask_limiter.util")
-    util_stub.get_remote_address = lambda: "127.0.0.1"
-    sys.modules["flask_limiter.util"] = util_stub
-
-
-_install_flask_limiter_stub()
-
-from api import request as request_mod  # noqa: E402
+from api import request as request_mod
 
 
 @pytest.fixture(autouse=True)

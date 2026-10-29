@@ -10,17 +10,17 @@ import {
   type UserPlaylistTrack,
 } from '@/features/playlists/user-playlists';
 
-import type { LibrarySearch, LibrarySong } from '../-library.types';
+import type { LibrarySearch, LibrarySong } from '../-library-v2.songs';
 
-import { librarySongsQueryOptions } from '../-library.api';
 import {
+  deleteLibraryTrackRequest,
+  librarySongsQueryOptions,
   matchParts,
   readSongsResponse,
   songMeta,
   songPlaylistTrack,
   songQueueTrack,
-} from '../-library.helpers';
-import { deleteLibraryTrackRequest } from '../../artist-detail/-artist-detail.manage-actions';
+} from '../-library-v2.songs';
 import { ActionMenu } from '../../artist-detail/-ui/action-menu';
 import { SmartDeleteDialog, TRACK_DELETE_COPY } from '../../artist-detail/-ui/smart-delete-dialog';
 import { SongCopiesDialog } from './library-song-copies';
@@ -291,7 +291,7 @@ async function deleteSongs(songs: LibrarySong[], choice: string): Promise<void> 
   let last: Awaited<ReturnType<typeof deleteLibraryTrackRequest>> | null = null;
   for (const song of songs) {
     try {
-      last = await deleteLibraryTrackRequest(song.id, mode);
+      last = await deleteLibraryTrackRequest(song, mode);
       if (last.extra) window.showToast?.(last.extra, 'warning');
     } catch {
       failed += 1;

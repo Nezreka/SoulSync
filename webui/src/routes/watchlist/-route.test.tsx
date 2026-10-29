@@ -153,10 +153,16 @@ function stubFetch(options: StubOptions = {}) {
       if (url.includes('/api/watchlist/reset-to-defaults')) {
         return createResponse({ success: true, reset: customCount });
       }
-      if (url.includes('/api/library/albums/9/tracks')) {
+      // the panel plays a Library v2 album through the library page's queue rows
+      if (url.includes('/api/library/v2/albums/9')) {
         return createResponse({
           success: true,
-          tracks: [{ id: 't1', title: 'Minipops 67', file_path: '/m/syro/01.flac' }],
+          album: {
+            id: 9,
+            title: 'Syro',
+            image_url: null,
+            tracks: [{ id: 1, title: 'Minipops 67', file: { path: '/m/syro/01.flac' } }],
+          },
         });
       }
       if (url.includes('/link-provider')) {

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { openDownloadTaskInspector } from '@/features/downloads/inspector-modal';
+import { openDownloadTaskSearch } from '@/routes/library/-ui/interactive-search-host';
 
 import type { AdlDownload } from '../-adl.types';
 
@@ -9,7 +9,10 @@ import { AdlHeader } from './adl-header';
 import { BatchFilterBanner } from './adl-list';
 import { AdlRow } from './adl-row';
 
-vi.mock('@/features/downloads/inspector-modal', () => ({ openDownloadTaskInspector: vi.fn() }));
+// the library's Interactive Search for a library track, else the inspector
+vi.mock('@/routes/library/-ui/interactive-search-host', () => ({
+  openDownloadTaskSearch: vi.fn(),
+}));
 
 afterEach(cleanup);
 
@@ -322,7 +325,7 @@ describe('AdlRow', () => {
       const btn = container.querySelector('.dlc-acts .dlc-btn-primary') as HTMLButtonElement;
       expect(btn.textContent).toContain('Search');
       fireEvent.click(btn);
-      expect(openDownloadTaskInspector).toHaveBeenCalledWith('tf', {
+      expect(openDownloadTaskSearch).toHaveBeenCalledWith('tf', {
         name: 'Xtal',
         artist: 'Aphex Twin',
         album: 'SAW',

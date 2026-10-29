@@ -104,14 +104,13 @@ def test_a_scan_for_one_profile_leaves_the_other_alone(db, monkeypatch):
     other = json.dumps([{'name': 'Kavinsky', 'seeds': ['Justice'], 'seed_count': 1, 'score': 1.0}])
     db.set_metadata('listening_recs_artists:2', other)
 
+    from tests.lib2_seed import artist as _artist, track as _track
     conn = db._get_connection()
     cur = conn.cursor()
     for aid, name, sp in ((1, 'Daft Punk', 'sp1'), (2, 'Justice', 'sp2')):
-        cur.execute("INSERT INTO artists (id, name, spotify_artist_id) VALUES (?,?,?)", (aid, name, sp))
-        cur.execute("INSERT INTO albums (id, title, artist_id) VALUES (?,?,?)", (aid * 10, 'Al', aid))
+        _artist(conn, name, spotify_id=sp)
         for t in range(8):
-            cur.execute("INSERT INTO tracks (title, artist_id, album_id, file_path) VALUES (?,?,?,?)",
-                        (f'{name} {t}', aid, aid * 10, f'/m/{aid}-{t}.flac'))
+            _track(conn, name, 'Al', f'{name} {t}', path=f'/m/{aid}-{t}.flac')
         for i in range(20):
             cur.execute("INSERT INTO listening_history (title, artist, played_at) "
                         "VALUES (?,?,datetime('now', ?))", (f'{name} {i % 8}', name, f'-{i} hours'))

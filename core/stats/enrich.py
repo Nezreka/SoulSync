@@ -19,6 +19,13 @@ logger = get_logger("stats_enrich")
 ARTIST_LIST_KEYS = ('top_artists', 'discoveries')
 
 
+def _name_key(name) -> str:
+    """Return the same indexed, Unicode-aware artist key as Library v2."""
+    from core.library2.importer import normalize_name
+
+    return normalize_name(str(name or ''))
+
+
 def enrich_stats_items(db, cache):
     """Add image URLs, IDs, and Last.fm data to cached stats items.
 
@@ -48,10 +55,10 @@ def enrich_stats_items(db, cache):
         conn = db._get_connection()
         cursor = conn.cursor()
 
-        # ---- top_artists: match by LOWER(name) ----
+        # ---- artist-shaped rows: match by Library v2's normalized key ----
         if top_artists:
-            names = [a.get('name') or '' for a in top_artists]
-            unique_names = {n.lower() for n in names if n}
+            unique_names = {_name_key(a.get('name')) for a in top_artists
+                            if a.get('name')}
             artist_rows = {}
             if unique_names:
                 name_list = list(unique_names)
@@ -61,10 +68,14 @@ def enrich_stats_items(db, cache):
                     placeholders = ','.join(['?'] * len(sub))
                     cursor.execute(
                         f"""
-                        SELECT LOWER(name), thumb_url, id, lastfm_listeners,
-                               lastfm_playcount, soul_id
-                        FROM artists
-                        WHERE LOWER(name) IN ({placeholders})
+                        SELECT name_key, image_url,
+                               COALESCE(canonical_artist_id, id),
+                               json_extract(enrichment, '$.lastfm.listeners'),
+                               json_extract(enrichment, '$.lastfm.playcount'),
+                               soul_id
+                        FROM lib2_artists
+                        WHERE name_key IN ({placeholders})
+                        ORDER BY (canonical_artist_id IS NOT NULL), id
                         """,
                         sub,
                     )
@@ -73,7 +84,7 @@ def enrich_stats_items(db, cache):
                         artist_rows.setdefault(row[0], row)
 
             for artist in top_artists:
-                key = (artist.get('name') or '').lower()
+                key = _name_key(artist.get('name'))
                 r = artist_rows.get(key)
                 if r:
                     artist['image_url'] = _fix_image(r[1]) or None
@@ -95,9 +106,11 @@ def enrich_stats_items(db, cache):
                     placeholders = ','.join(['?'] * len(sub))
                     cursor.execute(
                         f"""
-                        SELECT LOWER(title), thumb_url, id, artist_id
-                        FROM albums
-                        WHERE LOWER(title) IN ({placeholders})
+                        SELECT LOWER(al.title), al.image_url, al.id,
+                               COALESCE(ar.canonical_artist_id, ar.id)
+                        FROM lib2_albums al
+                        JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                        WHERE LOWER(al.title) IN ({placeholders})
                         """,
                         sub,
                     )
@@ -117,7 +130,7 @@ def enrich_stats_items(db, cache):
             pairs = set()
             for t in top_tracks:
                 name = (t.get('name') or '').lower()
-                artist = (t.get('artist') or '').lower()
+                artist = _name_key(t.get('artist'))
                 if name:
                     pairs.add((name, artist))
             track_rows = {}
@@ -130,12 +143,13 @@ def enrich_stats_items(db, cache):
                     flat = [v for pair in sub for v in pair]
                     cursor.execute(
                         f"""
-                        SELECT LOWER(t.title), LOWER(ar.name),
-                               al.thumb_url, t.id, t.artist_id
-                        FROM tracks t
-                        JOIN albums al ON al.id = t.album_id
-                        JOIN artists ar ON ar.id = t.artist_id
-                        WHERE (LOWER(t.title), LOWER(ar.name)) IN ({placeholders})
+                        SELECT LOWER(t.title), ar.name_key,
+                               al.image_url, t.id,
+                               COALESCE(ar.canonical_artist_id, ar.id)
+                        FROM lib2_tracks t
+                        JOIN lib2_albums al ON al.id = t.album_id
+                        JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                        WHERE (LOWER(t.title), ar.name_key) IN ({placeholders})
                         """,
                         flat,
                     )
@@ -144,7 +158,7 @@ def enrich_stats_items(db, cache):
 
             for track in top_tracks:
                 key = ((track.get('name') or '').lower(),
-                       (track.get('artist') or '').lower())
+                       _name_key(track.get('artist')))
                 r = track_rows.get(key)
                 if r:
                     track['image_url'] = _fix_image(r[2]) or None

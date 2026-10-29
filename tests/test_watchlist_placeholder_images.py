@@ -73,12 +73,13 @@ def test_update_refuses_a_placeholder_and_keeps_what_was_there(db):
 
 
 def test_library_thumbs_by_name_is_case_insensitive_and_skips_empty(db):
+    from tests.support.catalogue_seed import seed_artist
+
     conn = db._get_connection()
     try:
-        conn.execute("INSERT INTO artists (id, name, thumb_url) VALUES (?,?,?)",
-                     ("486570", "Breakbot", "/library/metadata/486570/thumb/1776139955"))
-        conn.execute("INSERT INTO artists (id, name, thumb_url) VALUES (?,?,?)",
-                     ("1", "No Thumb", None))
+        seed_artist(conn, server_id="486570", name="Breakbot",
+                    image_url="/library/metadata/486570/thumb/1776139955")
+        seed_artist(conn, server_id="1", name="No Thumb", image_url=None)
         conn.commit()
     finally:
         conn.close()
@@ -106,8 +107,9 @@ def test_list_endpoint_serves_the_library_thumb_for_a_placeholder(monkeypatch):
         # written straight in: this is the state an existing install is in
         conn.execute("UPDATE watchlist_artists SET image_url = ? WHERE artist_name = 'Breakbot'", (EMPTY_HASH,))
         conn.execute("UPDATE watchlist_artists SET image_url = ? WHERE artist_name = 'bbno$'", (REAL,))
-        conn.execute("INSERT OR REPLACE INTO artists (id, name, thumb_url) VALUES (?,?,?)",
-                     ("486570", "Breakbot", "/library/metadata/486570/thumb/1776139955"))
+        from tests.support.catalogue_seed import seed_artist
+        seed_artist(conn, server_id="486570", name="Breakbot",
+                    image_url="/library/metadata/486570/thumb/1776139955")
         conn.commit()
     finally:
         conn.close()
@@ -124,7 +126,7 @@ def test_list_endpoint_serves_the_library_thumb_for_a_placeholder(monkeypatch):
         conn = database._get_connection()
         try:
             conn.execute("DELETE FROM watchlist_artists WHERE artist_name IN ('Breakbot', 'bbno$')")
-            conn.execute("DELETE FROM artists WHERE id = '486570'")
+            conn.execute("DELETE FROM lib2_artists WHERE server_id = '486570'")
             conn.commit()
         finally:
             conn.close()

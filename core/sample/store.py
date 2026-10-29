@@ -36,7 +36,7 @@ def sample_data_dir() -> str:
 
 
 def source_signature(path: Optional[str]) -> Optional[str]:
-    """size + mtime of an audio file. changes when the file gets replaced
+    """Path identity + size + mtime. Changes when the file gets replaced
     (an upgrade, a re-tag, a new rip), which is when cached results go stale."""
     if not path:
         return None
@@ -44,7 +44,10 @@ def source_signature(path: Optional[str]) -> Optional[str]:
         st = os.stat(path)
     except OSError:
         return None
-    return f"{st.st_size}:{st.st_mtime_ns}"
+    import hashlib
+
+    identity = hashlib.sha1(os.path.abspath(path).encode("utf-8")).hexdigest()[:16]
+    return f"{identity}:{st.st_size}:{st.st_mtime_ns}"
 
 
 def _sig_tag(sig: Optional[str]) -> str:
@@ -171,11 +174,22 @@ def save_analysis(track_id: str, result: Dict[str, Any], source_sig: Optional[st
 
 
 def get_track_file_path(track_id: str) -> Optional[str]:
-    """file_path for a library track, or None when the id is unknown."""
+    """file_path for a library track, or None when the id is unknown.
+
+    Library v2: the track's primary live file (a track can carry several)."""
+    from core.library2.sql_util import owner_clause
+    from core.library2.track_files import primary_order
+
     db = get_database()
     conn = db._get_connection()
     try:
-        row = conn.execute("SELECT file_path FROM tracks WHERE id = ?", (track_key(track_id),)).fetchone()
+        row = conn.execute(
+            "SELECT f.path AS file_path FROM lib2_track_files f "
+            "WHERE f.track_id = ? AND COALESCE(f.file_state, 'active') = 'active' "
+            "AND COALESCE(f.path, '') != '' "
+            f"{owner_clause(column='f.owner_profile_id')} "
+            f"ORDER BY {primary_order('f')} LIMIT 1",
+            (track_key(track_id),)).fetchone()
     finally:
         conn.close()
     if row is None or not row["file_path"]:
@@ -186,7 +200,11 @@ def get_track_file_path(track_id: str) -> Optional[str]:
 # ── Stems (Phase 4) ──────────────────────────────────────────────────────
 
 def stems_dir() -> str:
-    d = os.path.join(sample_data_dir(), "stems")
+    from core.library_scope import current_library_scope
+
+    scope = current_library_scope()
+    library = "all" if scope is None else ("shared" if scope == "shared" else f"owner-{int(scope)}")
+    d = os.path.join(sample_data_dir(), "stems", library)
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -258,11 +276,17 @@ def get_stems(track_id: str, method: str = "demucs", source_sig: Any = _UNSET) -
         from .worker import track_source
 
         _, source_sig = track_source(track_id)
+        if source_sig is None:
+            # Without a reachable source we cannot prove these global cache
+            # rows describe the caller's library. Explicit source_sig=None
+            # remains available for cache inspection that does not serve audio.
+            return None
     if source_sig is not None:
         for s in wanted:
             row_sig = by_stem[s]["source_sig"] if "source_sig" in by_stem[s].keys() else None
-            # rows from before signatures existed are trusted, a mismatch isn't
-            if row_sig is not None and row_sig != source_sig:
+            # An artifact without source identity cannot prove it came from
+            # this library's copy. Regenerate old rows rather than share audio.
+            if row_sig != source_sig:
                 return None
     return {
         "stems": {s: str(by_stem[s]["file_path"]) for s in wanted},
@@ -303,7 +327,7 @@ def _row_to_entry(row) -> Dict[str, Any]:
         "id": row["id"],
         "name": row["name"],
         "tags": json.loads(row["tags_json"] or "[]"),
-        "track_id": str(row["track_id"]),
+        "track_id": str(row["track_id"]) if row["track_id"] is not None else None,
         "track_title": row["track_title"],
         "artist_name": row["artist_name"],
         "start_s": row["start_s"],
@@ -319,16 +343,27 @@ def _row_to_entry(row) -> Dict[str, Any]:
     }
 
 
-_STASH_SELECT = """
-    SELECT s.id, s.name, s.tags_json, s.track_id,
+# Library v2: a track's artist is its own credit, else its album's artist.
+_TRACK_ARTIST_SQL = """COALESCE(
+           (SELECT ar2.name FROM lib2_track_artists ta
+              JOIN lib2_artists ar2 ON ar2.id = ta.artist_id
+             WHERE ta.track_id = t.id
+             ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
+                      ta.position, ta.artist_id LIMIT 1),
+           (SELECT ar3.name FROM lib2_albums al3
+              JOIN lib2_artists ar3 ON ar3.id = al3.primary_artist_id
+             WHERE al3.id = t.album_id))"""
+
+_STASH_SELECT = f"""
+    SELECT s.id, s.name, s.tags_json,
+           CASE WHEN s.track_id_kind='lib2' THEN s.track_id END AS track_id,
            COALESCE(t.title, '') AS track_title,
-           COALESCE(a.name, '') AS artist_name,
+           COALESCE({_TRACK_ARTIST_SQL}, '') AS artist_name,
            s.start_s, s.end_s, s.pitch_st, s.target_bpm,
            s.format, s.file_path, s.created_at, s.stem, s.folder,
            s.normalize, s.fade_ms, s.reverse, s.space, s.delay_json
     FROM sample_stash s
-    LEFT JOIN tracks t ON t.id = s.track_id
-    LEFT JOIN artists a ON a.id = t.artist_id
+    LEFT JOIN lib2_tracks t ON t.id = s.track_id AND s.track_id_kind = 'lib2'
 """
 
 
@@ -338,10 +373,9 @@ def get_track_metadata(track_id: str) -> Dict[str, str]:
     conn = db._get_connection()
     try:
         row = conn.execute(
-            """SELECT t.title AS title, a.name AS artist, al.title AS album
-               FROM tracks t
-               LEFT JOIN artists a ON a.id = t.artist_id
-               LEFT JOIN albums al ON al.id = t.album_id
+            f"""SELECT t.title AS title, {_TRACK_ARTIST_SQL} AS artist, al.title AS album
+               FROM lib2_tracks t
+               LEFT JOIN lib2_albums al ON al.id = t.album_id
                WHERE t.id = ?""",
             (track_key(track_id),),
         ).fetchone()
@@ -379,8 +413,8 @@ def create_stash_entry(
             """INSERT INTO sample_stash
                    (name, tags_json, track_id, start_s, end_s, pitch_st,
                     target_bpm, format, file_path, created_at, stem, folder,
-                    normalize, fade_ms, reverse, space, delay_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    normalize, fade_ms, reverse, space, delay_json, track_id_kind)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'lib2')""",
             (
                 name,
                 json.dumps([str(t) for t in (tags or [])]),

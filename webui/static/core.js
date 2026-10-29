@@ -483,7 +483,7 @@ function cleanupBeatportContent() {
 
     // the sliders went with beatport-ui.js; the react tab owns that view now
     stopBeatportDiscoveryAndSyncPolling();
-
+    // React BeatportSlider releases its autoplay timer when it unmounts.
     beatportContentState.loadingPromise = null;
     beatportContentState.loaded = false;
 
@@ -921,6 +921,7 @@ function initializeWebSocket() {
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
     socket.on('enrichment:listening-stats', () => { }); // Status only, no UI update needed
+    socket.on('library:changed', (data) => window.dispatchEvent(new CustomEvent('ss:library-changed', { detail: data })));
     socket.on('repair:progress', (data) => { qaSignal('tools'); updateRepairJobProgressFromData(data); if (typeof updateMusicRepairTask === 'function') updateMusicRepairTask(data); });
     // Server Activity live push — feed the open drawer (Tautulli replacement)
     socket.on('activity:update', (data) => {

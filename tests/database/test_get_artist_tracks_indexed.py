@@ -4,38 +4,31 @@ two-step lookup that backs the sync candidate pool fast path."""
 from __future__ import annotations
 
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
 
 
 def _seed(db: MusicDatabase, rows):
-    """Insert (artist_name, album_title, track_title, server_source) tuples.
-    IDs are TEXT PRIMARY KEY in this schema so we hand-mint string IDs to
-    keep foreign-key wiring happy."""
+    """Insert (artist_name, album_title, track_title, server_source) tuples as
+    the media-server scan would leave them in the catalogue."""
     conn = db._get_connection()
-    cursor = conn.cursor()
     artist_ids: dict = {}
     album_ids: dict = {}
     track_counter = 0
     for artist_name, album_title, track_title, server_source in rows:
         if artist_name not in artist_ids:
-            aid = f"a-{len(artist_ids) + 1}"
-            cursor.execute(
-                "INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-                (aid, artist_name, server_source),
-            )
-            artist_ids[artist_name] = aid
+            artist_ids[artist_name] = seed_artist(
+                conn, server_id=f"a-{len(artist_ids) + 1}", name=artist_name,
+                server_source=server_source)
         album_key = (artist_name, album_title, server_source)
         if album_key not in album_ids:
-            alid = f"al-{len(album_ids) + 1}"
-            cursor.execute(
-                "INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, ?)",
-                (alid, artist_ids[artist_name], album_title, server_source),
-            )
-            album_ids[album_key] = alid
+            album_ids[album_key] = seed_album(
+                conn, server_id=f"al-{len(album_ids) + 1}", title=album_title,
+                artist_id=artist_ids[artist_name], server_source=server_source)
         track_counter += 1
-        cursor.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, server_source) VALUES (?, ?, ?, ?, ?)",
-            (f"t-{track_counter}", album_ids[album_key], artist_ids[artist_name], track_title, server_source),
-        )
+        seed_track(conn, server_id=f"t-{track_counter}", title=track_title,
+                   album_id=album_ids[album_key],
+                   artist_id=artist_ids[artist_name],
+                   server_source=server_source)
     conn.commit()
 
 
@@ -61,6 +54,16 @@ def test_case_insensitive_fallback_finds_artist(tmp_path):
     tracks = db.get_artist_tracks_indexed('DRAKE')
     assert len(tracks) == 1
     assert tracks[0].title == 'IDGAF'
+
+
+def test_case_fold_is_not_ascii_only(tmp_path):
+    """SQLite's LOWER() only folds A-Z, so 'BJÖRK' never matched 'Björk' and
+    the caller paid for the slow LIKE path on every such artist. The catalogue
+    carries `name_key` (a real casefold), which is what the fallback uses."""
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    _seed(db, [('Björk', 'Post', 'Army Of Me', 'plex')])
+    tracks = db.get_artist_tracks_indexed('BJÖRK')
+    assert [t.title for t in tracks] == ['Army Of Me']
 
 
 def test_artist_absent_returns_empty_list(tmp_path):

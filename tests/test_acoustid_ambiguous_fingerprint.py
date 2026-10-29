@@ -225,15 +225,23 @@ def test_duration_guard_still_catches_a_real_collision():
     assert captured == []
 
 
-def test_retag_is_refused_for_an_ambiguous_finding():
-    """The guard that stops a wrong suggestion becoming wrong data."""
+@pytest.mark.parametrize('fix_action', ['retag', 'relocate'])
+def test_retag_is_refused_for_an_ambiguous_finding(fix_action):
+    """The guard that stops a wrong suggestion becoming wrong data.
+
+    The subject is ``lib2:99`` because that is the only kind the scanner emits.
+    Written against a bare ``'99'`` this passed while testing nothing that runs:
+    the guard sat in the legacy branch, and the native path — the one every real
+    finding takes — wrote the arbitrary pick into the file's tags.
+    """
     from core.repair_worker import RepairWorker
 
     worker = RepairWorker.__new__(RepairWorker)
     out = worker._fix_acoustid_mismatch(
-        'track', '99', '/music/track.flac',
-        {'_fix_action': 'retag', 'ambiguous': True,
+        'track', 'lib2:99', '/music/track.flac',
+        {'_fix_action': fix_action, 'ambiguous': True,
          'acoustid_title': 'Saturday in the Park',
+         'acoustid_artist': 'Chicago',
          'candidates': ['"Saturday in the Park" by Chicago',
                         '"You\'re the Inspiration" by Chicago']},
     )
@@ -360,11 +368,15 @@ def test_a_picked_candidate_unlocks_the_retag():
     chosen = RepairWorker._acoustid_candidate(details, 1)
     assert chosen == ('I Wish (My Taylor Swift) (Jayceeoh Remix)', 'The Knocks & Matthew Koma')
     # and the guard itself no longer refuses: drive _fix_acoustid_mismatch far
-    # enough to pass the ambiguity check (it will fail later on the missing
-    # DB plumbing of this bare worker, which is fine - what matters is the
-    # error is NOT the several-recordings refusal)
-    out = worker._fix_acoustid_mismatch('track', '99', '', details)
-    assert 'several different recordings' not in str(out.get('error', ''))
+    # enough to pass the ambiguity check. It gets as far as the catalogue this
+    # bare worker has no connection to — reaching there IS the assertion; what
+    # must not happen is the several-recordings refusal.
+    try:
+        out = worker._fix_acoustid_mismatch('track', 'lib2:99', '', details)
+    except AttributeError as exc:
+        assert 'db' in str(exc), exc          # the missing DB plumbing, nothing else
+    else:
+        assert 'several different recordings' not in str(out.get('error', ''))
 
 
 def test_an_old_finding_without_structured_candidates_still_resolves_the_pick():
@@ -387,7 +399,7 @@ def test_a_stale_candidate_index_is_refused_not_guessed():
 
     worker = RepairWorker.__new__(RepairWorker)
     out = worker._fix_acoustid_mismatch(
-        'track', '99', '', _ambiguous_details(_fix_action='retag:7'))
+        'track', 'lib2:99', '', _ambiguous_details(_fix_action='retag:7'))
     assert out['success'] is False
     assert 'not on this finding' in out['error']
 
@@ -396,6 +408,6 @@ def test_no_pick_still_refuses_exactly_as_before():
     from core.repair_worker import RepairWorker
 
     worker = RepairWorker.__new__(RepairWorker)
-    out = worker._fix_acoustid_mismatch('track', '99', '', _ambiguous_details())
+    out = worker._fix_acoustid_mismatch('track', 'lib2:99', '', _ambiguous_details())
     assert out['success'] is False
     assert 'several different recordings' in out['error']

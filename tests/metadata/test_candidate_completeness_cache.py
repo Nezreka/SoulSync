@@ -2,6 +2,8 @@
 
 import types
 import pytest
+
+ALB: dict = {}
 from database.music_database import DatabaseAlbum, DatabaseTrack, MusicDatabase
 
 
@@ -153,41 +155,48 @@ def test_completeness_parity_sql_vs_cache(tmp_path):
     db = MusicDatabase(db_path)
 
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES (1, 'Daft Punk', 'local')")
+        # lib2 ids are assigned, not chosen, so ALB maps each case to the row
+        # the helper made. Everything else is upstream's fixture unchanged:
+        # a complete album, a partial one, and a title split across two rows
+        # (the case the cache exists to get right) with a duplicate track and
+        # one with an empty path.
+        from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
+
+        artist = seed_artist(conn, server_id='ar-1', name='Daft Punk', server_source='local')
+
+        def _album(key, title, year, track_count):
+            ALB[key] = seed_album(conn, server_id=f'al-{key}', title=title,
+                                  artist_id=artist, server_source='local',
+                                  year=year, track_count=track_count)
+            return ALB[key]
+
+        def _track(album_key, seq, title, number, path, bitrate):
+            seed_track(conn, server_id=f'tr-{album_key}-{seq}', title=title,
+                       album_id=ALB[album_key], artist_id=artist,
+                       server_source='local', track_number=number,
+                       file_path=path, bitrate=bitrate)
 
         # Case 1: Complete album (single DB row)
-        conn.execute("INSERT INTO albums (id, artist_id, title, year, track_count, server_source) VALUES (10, 1, 'Discovery', 2001, 14, 'local')")
+        _album(10, 'Discovery', 2001, 14)
         for i in range(1, 15):
-            conn.execute(
-                "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, bitrate, server_source) "
-                "VALUES (?, 10, 1, ?, ?, ?, ?, 'local')",
-                (100 + i, f"Track {i}", i, f"/music/discovery/{i:02d}.flac", None)
-            )
+            _track(10, i, f"Track {i}", i, f"/music/discovery/{i:02d}.flac", None)
 
         # Case 2: Partial album (3 of 10 tracks) with MP3 bitrates
-        conn.execute("INSERT INTO albums (id, artist_id, title, year, track_count, server_source) VALUES (20, 1, 'Homework', 1997, 10, 'local')")
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, bitrate, server_source) VALUES (201, 20, 1, 'Daftendirekt', 1, '/music/hw/01.mp3', 320, 'local')")
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, bitrate, server_source) VALUES (202, 20, 1, 'WDPK 83.7 FM', 2, '/music/hw/02.mp3', 320, 'local')")
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, bitrate, server_source) VALUES (203, 20, 1, 'Revolution 909', 3, '/music/hw/03.mp3', 256, 'local')")
+        _album(20, 'Homework', 1997, 10)
+        _track(20, 1, 'Daftendirekt', 1, '/music/hw/01.mp3', 320)
+        _track(20, 2, 'WDPK 83.7 FM', 2, '/music/hw/02.mp3', 320)
+        _track(20, 3, 'Revolution 909', 3, '/music/hw/03.mp3', 256)
 
-        # Case 3: Split album across 2 rows (same title, year, artist_id) with duplicate track and empty file_path
-        conn.execute("INSERT INTO albums (id, artist_id, title, year, track_count, server_source) VALUES (30, 1, 'Random Access Memories', 2013, 13, 'local')")
-        conn.execute("INSERT INTO albums (id, artist_id, title, year, track_count, server_source) VALUES (31, 1, 'Random Access Memories', 2013, 13, 'local')")
-
-        # Tracks on album 30: 1, 2, 3, 4
+        # Case 3: Split album across 2 rows (same title, year, artist) with a
+        # duplicate track and one with an empty file_path
+        _album(30, 'Random Access Memories', 2013, 13)
+        _album(31, 'Random Access Memories', 2013, 13)
         for i in range(1, 5):
-            conn.execute(
-                "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, bitrate, server_source) "
-                "VALUES (?, 30, 1, ?, ?, ?, ?, 'local')",
-                (300 + i, f"RAM Track {i}", i, f"/music/ram/30_{i}.flac", None)
-            )
-        # Duplicate track on album 31 (same title and track_number as track 1)
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, bitrate, server_source) VALUES (399, 31, 1, 'RAM Track 1', 1, '/music/ram/dup_1.flac', NULL, 'local')")
-        # Unique tracks on album 31: 5, 6
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, bitrate, server_source) VALUES (305, 31, 1, 'RAM Track 5', 5, '/music/ram/31_5.mp3', 320, 'local')")
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, bitrate, server_source) VALUES (306, 31, 1, 'RAM Track 6', 6, '/music/ram/31_6.mp3', 320, 'local')")
-        # Track with empty file path (should be excluded by both SQL and cache)
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, bitrate, server_source) VALUES (398, 31, 1, 'Ghost Track', 7, '', NULL, 'local')")
+            _track(30, i, f"RAM Track {i}", i, f"/music/ram/30_{i}.flac", None)
+        _track(31, 99, 'RAM Track 1', 1, '/music/ram/dup_1.flac', None)
+        _track(31, 5, 'RAM Track 5', 5, '/music/ram/31_5.mp3', 320)
+        _track(31, 6, 'RAM Track 6', 6, '/music/ram/31_6.mp3', 320)
+        _track(31, 98, 'Ghost Track', 7, '', None)
 
         conn.commit()
 
@@ -196,7 +205,7 @@ def test_completeness_parity_sql_vs_cache(tmp_path):
     cache = db.build_candidate_completeness_cache(candidate_albums, candidate_tracks)
 
     test_cases = [
-        # (album_id, expected_track_count)
+        # (album key, expected_track_count)
         (10, None),
         (10, 14),
         (10, 16),  # Deluxe expected (14 >= 16 * 0.6)
@@ -212,7 +221,8 @@ def test_completeness_parity_sql_vs_cache(tmp_path):
         (31, 13),
     ]
 
-    for album_id, expected_count in test_cases:
+    for album_key, expected_count in test_cases:
+        album_id = ALB[album_key]
         # 1. Original un-cached execution (runs raw SQL)
         sql_result = db.check_album_completeness(album_id, expected_track_count=expected_count, completeness_cache=None)
 
@@ -237,14 +247,18 @@ def test_check_album_completion_parity_uncached_vs_cached(tmp_path):
     db = MusicDatabase(db_path)
 
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES (1, 'Justice', 'local')")
-        conn.execute("INSERT INTO albums (id, artist_id, title, year, track_count, server_source, deezer_id) VALUES (50, 1, 'Cross', 2007, 12, 'local', 'DZ-50')")
+        from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
+
+        artist = seed_artist(conn, server_id='ar-1', name='Justice', server_source='local')
+        album = seed_album(conn, server_id='al-50', title='Cross', artist_id=artist,
+                           server_source='local', year=2007, track_count=12)
+        # the card is matched by its deezer id, which lives in external_ids here
+        conn.execute("UPDATE lib2_albums SET external_ids=json_set(COALESCE(external_ids,'{}'),"
+                     " '$.deezer', 'DZ-50') WHERE id=?", (album,))
         for i in range(1, 13):
-            conn.execute(
-                "INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path, bitrate, server_source) "
-                "VALUES (?, 50, 1, ?, ?, ?, ?, 'local')",
-                (500 + i, f"Genesis {i}", i, f"/music/cross/{i:02d}.flac", None)
-            )
+            seed_track(conn, server_id=f'tr-{i}', title=f"Genesis {i}", album_id=album,
+                       artist_id=artist, server_source='local', track_number=i,
+                       file_path=f"/music/cross/{i:02d}.flac")
         conn.commit()
 
     candidate_albums = db.get_candidate_albums_for_artist('Justice', server_source='local')
@@ -298,7 +312,9 @@ def test_unowned_releases_do_not_call_external_api(tmp_path, monkeypatch):
     db = MusicDatabase(db_path)
 
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES (1, 'Bicep', 'local')")
+        from tests.support.catalogue_seed import seed_artist
+
+        seed_artist(conn, server_id='ar-1', name='Bicep', server_source='local')
         conn.commit()
 
     candidate_albums = db.get_candidate_albums_for_artist('Bicep', server_source='local')
@@ -410,13 +426,21 @@ def test_cached_completeness_matches_sql_title_semantics():
     import sqlite3
     conn = sqlite3.connect(':memory:')
     conn.row_factory = sqlite3.Row
-    conn.executescript('CREATE TABLE albums(id,title,year,artist_id,track_count); CREATE TABLE tracks(album_id,title,track_number,file_path,bitrate);')
+    conn.executescript(
+        'CREATE TABLE lib2_albums(id,title,year,primary_artist_id,track_count);'
+        ' CREATE TABLE lib2_tracks(id INTEGER PRIMARY KEY, album_id,title,track_number);'
+        ' CREATE TABLE lib2_track_files(track_id,path,bitrate,is_primary,file_state);')
     db = object.__new__(MusicDatabase)
     db._get_connection = lambda: conn
     albums = [types.SimpleNamespace(id=i, title=title, year=2000, artist_id=1, track_count=10) for i, title in [(1, 'Album'), (2, 'album'), (3, 'Album ')]]
     tracks = [types.SimpleNamespace(album_id=i, title=title, track_number=1, file_path='/song.flac', bitrate=None) for i in [1, 2, 3] for title in ['Song', 'song', 'song ', 'Ä', 'ä']]
-    conn.executemany('INSERT INTO albums VALUES(?,?,?,?,?)', [(a.id, a.title, a.year, a.artist_id, a.track_count) for a in albums])
-    conn.executemany('INSERT INTO tracks VALUES(?,?,?,?,?)', [(t.album_id, t.title, t.track_number, t.file_path, t.bitrate) for t in tracks])
+    conn.executemany('INSERT INTO lib2_albums VALUES(?,?,?,?,?)',
+                     [(a.id, a.title, a.year, a.artist_id, a.track_count) for a in albums])
+    for n, tr in enumerate(tracks, start=1):
+        conn.execute('INSERT INTO lib2_tracks VALUES(?,?,?,?)',
+                     (n, tr.album_id, tr.title, tr.track_number))
+        conn.execute("INSERT INTO lib2_track_files VALUES(?,?,?,1,'active')",
+                     (n, tr.file_path, tr.bitrate))
     try:
         cache = db.build_candidate_completeness_cache(albums, tracks)
         for album in albums:

@@ -25,6 +25,9 @@ def _cfg():
         "metadata_enhancement.tags.feat_in_title": False,
         "metadata_enhancement.tags.artist_separator": ", ",
         "file_organization.collab_artist_mode": "first",
+        # the fork reports a file without embeddable art as not enhanced
+        # (3827b0227); these tests are about the album tag
+        "metadata_enhancement.embed_album_art": False,
     }.get(key, default)
     return cfg
 

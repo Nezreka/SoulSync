@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react';
 
-import { openDownloadTaskInspector } from '@/features/downloads/inspector-modal';
+import { openDownloadTaskSearch } from '@/routes/library/-ui/interactive-search-host';
 
 import type { AdlDownload, AdlTaskDetail } from '../-adl.types';
 import type { DlFact } from './dl-parts';
 
 import { fetchTaskDetail } from '../-adl.api';
 import {
+  downloadFailureSummary,
   formatBytes,
   formatSpeed,
   liveDetailLines,
@@ -102,7 +103,10 @@ function subLine(
   const who = [dl.artist, compact ? '' : dl.album].filter(Boolean).join(' · ');
   if (cls === 'failed' || cls === 'cancelled') {
     return {
+      // an exhausted search reads as one plain sentence; the raw breakdown
+      // stays in the open sheet's "What happened"
       text:
+        downloadFailureSummary(dl)?.message ||
         dl.error ||
         (dl.status === 'not_found' ? 'Nothing matched on any source' : statusLabel(dl.status).text),
       tone: 'bad',
@@ -331,12 +335,13 @@ export function AdlRow({
     dl.status === 'completed'
       ? clockTime(dl.is_persistent_history ? parseStamp(dl.created_at) : parseStamp(dl.timestamp))
       : '';
-  const label = statusLabel(dl.status).text;
+  const label = statusLabel(downloadFailureSummary(dl)?.status ?? dl.status).text;
 
   const play = historyId ? () => void unverifiedPlay(dl, historyId) : undefined;
   const search = canSearch
     ? () =>
-        openDownloadTaskInspector(dl.task_id, {
+        // the library's Interactive Search for a library track, else the inspector
+        void openDownloadTaskSearch(dl.task_id, {
           name: dl.title,
           artist: dl.artist,
           album: dl.album,

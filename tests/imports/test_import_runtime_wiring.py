@@ -14,7 +14,9 @@ the other web_server tests do, so they fail if a caller goes bare again.
 """
 
 import ast
+import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -101,6 +103,8 @@ def test_both_post_process_wrappers_pass_the_live_runtime(tree, monkeypatch, wra
         _load(tree, "_import_pipeline_runtime", scope)
     scope["_build_metadata_enrichment_runtime"] = lambda **kw: None
     scope["download_orchestrator"] = None   # the wrappers guard on it
+    # the fork's wrappers first restore a quarantine recovery from the database
+    scope["get_database"] = lambda: SimpleNamespace(_get_connection=lambda: sqlite3.connect(":memory:"))
     _load(tree, wrapper, scope)(*args)
 
     for field, glob in _GLOBALS.items():

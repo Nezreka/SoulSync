@@ -40,20 +40,39 @@ class _Config:
         return default
 
 
+# lib2 ids are autoincrementing integers, not the media-server strings legacy used.
+# The names are kept as a lookup so the test bodies stay readable.
+_IDS = {}
+
+
+def _id(name):
+    return _IDS.setdefault(name, len(_IDS) + 1)
+
+
 def _add_album(db, album_id, artist_id, tracks):
-    """tracks: list of (track_id, file_path_or_None)."""
+    """tracks: list of (track_id, file_path_or_None).
+
+    Seeds Library v2: the job's subject boundary is lib2 (T-11), and a subject only
+    exists where there is an active file row — which is also why a track with
+    ``file_path=None`` here gets a track row and no file row, and so is correctly
+    invisible to the scan.
+    """
     with db._get_connection() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO artists (id, name, server_source) VALUES (?, ?, 'test')",
-            (artist_id, f'Artist {artist_id}'))
+            "INSERT OR IGNORE INTO lib2_artists (id, name, sort_name) VALUES (?, ?, ?)",
+            (_id(artist_id), f'Artist {artist_id}', f'Artist {artist_id}'))
         conn.execute(
-            "INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, 'test')",
-            (album_id, artist_id, f'Album {album_id}'))
+            "INSERT INTO lib2_albums (id, primary_artist_id, title, album_type) "
+            "VALUES (?, ?, ?, 'album')",
+            (_id(album_id), _id(artist_id), f'Album {album_id}'))
         for track_id, file_path in tracks:
             conn.execute(
-                "INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source) "
-                "VALUES (?, ?, ?, ?, ?, 'test')",
-                (track_id, album_id, artist_id, f'Track {track_id}', file_path))
+                "INSERT INTO lib2_tracks (id, album_id, title) VALUES (?, ?, ?)",
+                (_id(track_id), _id(album_id), f'Track {track_id}'))
+            if file_path:
+                conn.execute(
+                    "INSERT INTO lib2_track_files (track_id, path, file_state) "
+                    "VALUES (?, ?, 'active')", (_id(track_id), file_path))
         conn.commit()
 
 
@@ -93,7 +112,12 @@ def test_breakdown_reports_excluded_albums(tmp_path):
     # Excluded: single-track album
     _add_album(db, 'AL_SINGLE', 'AR2', [('T3', str(f1))])
 
-    # Excluded: 2 tracks but no stored file paths (the Navidrome-shaped gap)
+    # Two tracks, no stored file paths — the Navidrome-shaped gap. In lib2 such a
+    # track has no active file row at all, so the album is not a file subject and
+    # never reaches the scan. That is why this breakdown counts two albums, not
+    # three: the exclusion happens one level lower than it did on legacy, where the
+    # album row existed with empty tracks.file_path. The category is kept in the
+    # message because an active file row CAN carry an empty path.
     _add_album(db, 'AL_NOPATH', 'AR3', [('T4', None), ('T5', '')])
 
     result, progress_calls, findings = _run_scan(db, tmp_path)
@@ -103,13 +127,13 @@ def test_breakdown_reports_excluded_albums(tmp_path):
 
     log_lines = [c.get('log_line', '') for c in progress_calls if c.get('log_line')]
     breakdown = next((l for l in log_lines if 'eligible' in l), '')
-    assert '3 albums in the database' in breakdown
+    assert '2 albums in the database' in breakdown
     assert '1 eligible' in breakdown
     assert '1 single-track' in breakdown
-    assert '1 without stored file paths' in breakdown
+    assert '0 without stored file paths' in breakdown
 
     phases = [c.get('phase', '') for c in progress_calls if c.get('phase')]
-    assert any('1 of 3 albums' in p for p in phases)
+    assert any('1 of 2 albums' in p for p in phases)
 
 
 def test_unreadable_albums_get_a_warning(tmp_path):

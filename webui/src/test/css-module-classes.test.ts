@@ -31,6 +31,12 @@ const DYNAMIC: Record<string, { classes: string[]; reason: string }[]> = {
       reason: 'issue-detail-modal.tsx: styles[link.className] from the external-links table',
     },
   ],
+  'src/routes/library/-ui/status-notice.module.css': [
+    {
+      classes: ['busy', 'ok', 'err'],
+      reason: "status-notice.tsx: styles[tone], tone is 'busy' | 'ok' | 'err'",
+    },
+  ],
   'src/routes/stats/-ui/stats-page.module.css': [
     {
       classes: ['statsCardDelta_*'],

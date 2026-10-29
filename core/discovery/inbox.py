@@ -400,9 +400,11 @@ def _library_has(database) -> Callable[[str, str], bool]:
         try:
             with database._get_connection() as conn:
                 cur = conn.cursor()
+                # Library v2: ownership needs a live file in the selected library.
+                from core.library2.sql_util import owned_sql
                 cur.execute(
-                    "SELECT 1 FROM albums al JOIN artists ar ON ar.id = al.artist_id "
-                    "WHERE LOWER(al.title) = ? AND LOWER(ar.name) = ? LIMIT 1",
+                    "SELECT 1 FROM lib2_albums al JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
+                    f"WHERE LOWER(al.title) = ? AND LOWER(ar.name) = ? AND {owned_sql('album', 'al')} LIMIT 1",
                     (_norm(album), _norm(artist)))
                 return cur.fetchone() is not None
         except Exception as exc:  # noqa: BLE001 - unknown means not added
@@ -508,7 +510,9 @@ def refresh_in_background(database, profile_id: int) -> bool:
         finally:
             lock.release()
 
-    threading.Thread(target=run, name=f"inbox-refresh-{profile_id}", daemon=True).start()
+    from core.library_scope import carrying_scope
+
+    threading.Thread(target=carrying_scope(run), name=f"inbox-refresh-{profile_id}", daemon=True).start()
     return True
 
 

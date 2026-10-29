@@ -1,10 +1,9 @@
-"""sample studio on a jellyfin or navidrome library (discord, Specialmed).
+"""Upstream Sample Studio regressions through native Library-v2 identities.
 
-tracks.id is TEXT: jellyfin ids are guids, navidrome ids are alphanumeric.
-every studio route cast the id with int(), so analysis and the waveform were
-a 400 on every track, the page blamed the connection, and the waveform stayed
-black. the analysis table also couldn't hold a text id. these run the real
-blueprint over a real database and the real analysis worker.
+Jellyfin/Navidrome IDs live in media mappings; Sample Studio uses the native
+ID returned by Library v2. Real server-mapped files still analyze, draw and
+chop, and track/stash IDs use the same string representation. Server IDs do
+not become a second way to bypass native file ownership.
 """
 
 import sqlite3
@@ -14,6 +13,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 from flask import Blueprint, Flask
+from tests.lib2_seed import file_track
+from core.library2.media_mappings import upsert_mapping
 
 GUID = "5f1c0a3e9b7d4e21a8c6f0b2d4e6a8c0"
 SR = 22050
@@ -44,20 +45,26 @@ def studio(tmp_path, monkeypatch):
     sample_api.register_routes(bp)
     app.register_blueprint(bp, url_prefix="/api/v1")
 
+    from core.sample import worker
+    monkeypatch.setattr(worker, "_status", {})
+    monkeypatch.setattr(worker, "_pending", set())
     db = mdb.get_database()
 
-    def add_track(track_id, title="Song"):
-        wav = tmp_path / f"{track_id}.wav"
+    def add_track(server_id, title="Song", source="jellyfin"):
+        track_id = int(server_id) if server_id.isdecimal() else 1
+        wav = tmp_path / f"{server_id}.wav"
         _click_track(wav)
         conn = db._get_connection()
         try:
-            conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar1', 'Some Artist')")
-            conn.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES ('al1', 'ar1', 'Some Album')")
-            conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (?, 'al1', 'ar1', ?, ?)",
-                         (track_id, title, str(wav)))
+            conn.execute("INSERT OR IGNORE INTO lib2_artists (id, name) VALUES (1, 'Some Artist')")
+            conn.execute("INSERT OR IGNORE INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'Some Album')")
+            file_track(conn, track_id, 1, title, str(wav))
+            upsert_mapping(conn.cursor(), "track", track_id, source, server_id, server_path=str(wav))
             conn.commit()
         finally:
             conn.close()
+
+        return str(track_id)
 
     with app.test_client() as c:
         yield c, db, add_track
@@ -76,32 +83,33 @@ def _analysis_done(c, track_id, timeout=90):
     raise AssertionError("analysis never finished")
 
 
-def test_a_jellyfin_track_analyzes_draws_and_chops(studio):
+@pytest.mark.parametrize("source, server_id", [("jellyfin", GUID), ("navidrome", "nd-song_9af")])
+def test_a_server_mapped_track_analyzes_draws_and_chops(studio, source, server_id):
     c, _, add_track = studio
-    add_track(GUID)
+    track_id = add_track(server_id, source=source)
 
-    analysis = _analysis_done(c, GUID)
-    assert analysis["track_id"] == GUID
+    analysis = _analysis_done(c, track_id)
+    assert analysis["track_id"] == track_id
     assert abs(analysis["bpm"] - 100) < 5
 
-    r = c.get("/api/v1/sample/peaks", query_string={"track_id": GUID, "buckets": 200})
+    r = c.get("/api/v1/sample/peaks", query_string={"track_id": track_id, "buckets": 200})
     assert r.status_code == 200, r.get_json()
     assert len(r.get_json()["data"]["max"]) == 200
 
-    r = c.post("/api/v1/sample/chop", json={"track_id": GUID, "start_s": 0, "end_s": 1,
+    r = c.post("/api/v1/sample/chop", json={"track_id": track_id, "start_s": 0, "end_s": 1,
                                             "name": "guid chop", "format": "wav16"})
     assert r.status_code == 201, r.get_json()
-    assert r.get_json()["data"]["track_id"] == GUID
+    assert r.get_json()["data"]["track_id"] == track_id
     stash = c.get("/api/v1/sample/stash").get_json()["data"]["entries"]
-    assert [e["track_id"] for e in stash] == [GUID]
+    assert [e["track_id"] for e in stash] == [track_id]
 
 
 def test_stems_routes_take_a_text_id(studio):
     c, _, add_track = studio
-    add_track(GUID)
-    r = c.get("/api/v1/sample/stems/status", query_string={"track_id": GUID})
+    track_id = add_track(GUID)
+    r = c.get("/api/v1/sample/stems/status", query_string={"track_id": track_id})
     assert r.status_code == 200, r.get_json()
-    r = c.get(f"/api/v1/sample/stems/{GUID}/drums/audio")
+    r = c.get(f"/api/v1/sample/stems/{track_id}/drums/audio")
     assert r.status_code == 404                     # not split yet, not a 500
     assert "split" in r.get_json()["error"]["message"]
 
@@ -110,7 +118,7 @@ def test_a_plex_id_comes_back_as_text_and_matches_its_stash(studio):
     """stash rows came back numeric and tracks as text, so the page's
     "is this the open track" check never matched."""
     c, _, add_track = studio
-    add_track("12345")
+    add_track("12345", source="plex")
     assert _analysis_done(c, 12345)["track_id"] == "12345"   # a number still works
     r = c.post("/api/v1/sample/chop", json={"track_id": "12345", "start_s": 0, "end_s": 1,
                                             "name": "plex chop", "format": "wav16"})
@@ -158,9 +166,19 @@ def test_recent_tracks_carry_artist_and_album_names(studio):
     """the panel listed every track as "Unknown artist": the recent route
     returned bare track rows with no names."""
     _, _, add_track = studio
-    add_track(GUID, title="Leuchtturm")
+    track_id = add_track(GUID, title="Leuchtturm")
     from api.sample import recent_library_tracks
     tracks = recent_library_tracks(10)
-    assert tracks[0]["id"] == GUID
+    assert str(tracks[0]["id"]) == track_id
     assert tracks[0]["artist_name"] == "Some Artist"
     assert tracks[0]["album_title"] == "Some Album"
+
+
+def test_a_server_guid_is_not_an_alternate_catalogue_identity(studio):
+    c, db, add_track = studio
+    track_id = add_track(GUID)
+    with db._get_connection() as conn:
+        row = conn.execute("SELECT entity_id, server_id FROM lib2_media_server_mappings WHERE server_source='jellyfin'").fetchone()
+        assert str(row["entity_id"]) == track_id and row["server_id"] == GUID
+    assert c.get("/api/v1/sample/analysis", query_string={"track_id": GUID}).status_code == 404
+    assert c.get("/api/v1/sample/stems/status", query_string={"track_id": track_id}).status_code == 200

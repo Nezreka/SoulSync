@@ -19,28 +19,41 @@ from database.music_database import MusicDatabase
 
 @pytest.fixture
 def db(tmp_path):
+    """The catalogue as a scan leaves it, with the ids the tests address.
+
+    Written straight into lib2_* rather than through the seed helper because
+    every case below names its artist by id (1 Daft Punk, 2 Justice, 3 No
+    Files); a playable track is a track with a primary ACTIVE file row, which
+    is what makes artist 3 the "nothing to play" case.
+    """
     d = MusicDatabase(str(tmp_path / 'm.db'))
     conn = d._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name, thumb_url) VALUES (1,'Daft Punk','http://dp.jpg')")
-    cur.execute("INSERT INTO artists (id, name) VALUES (2,'Justice')")
-    cur.execute("INSERT INTO artists (id, name) VALUES (3,'No Files')")
-    cur.execute("INSERT INTO albums (id, title, artist_id) VALUES (10,'Discovery',1)")
-    cur.execute("INSERT INTO albums (id, title, artist_id) VALUES (20,'Cross',2)")
-    cur.execute("INSERT INTO albums (id, title, artist_id) VALUES (30,'Ghost',3)")
+    for artist_id, name, image in ((1, 'Daft Punk', 'http://dp.jpg'),
+                                   (2, 'Justice', None),
+                                   (3, 'No Files', None)):
+        cur.execute("INSERT INTO lib2_artists (id, name, name_key, image_url)"
+                    " VALUES (?,?,?,?)", (artist_id, name, name.lower(), image))
+    for album_id, title, artist_id in ((10, 'Discovery', 1), (20, 'Cross', 2),
+                                       (30, 'Ghost', 3)):
+        cur.execute("INSERT INTO lib2_albums (id, title, primary_artist_id)"
+                    " VALUES (?,?,?)", (album_id, title, artist_id))
     real = tmp_path / 'real.flac'
     real.write_text('x')
-    # ids are EXPLICIT: tracks.id is TEXT PRIMARY KEY after the id migration, so
-    # an insert without one stores NULL and every id lookup - including radio's
-    # own seed resolution - silently finds nothing.
+
+    def _track(track_id, title, album_id, duration, path):
+        cur.execute("INSERT INTO lib2_tracks (id, title, album_id, duration)"
+                    " VALUES (?,?,?,?)", (track_id, title, album_id, duration))
+        if path is not None:
+            cur.execute("INSERT INTO lib2_track_files (track_id, path, is_primary, file_state)"
+                        " VALUES (?,?,1,'active')", (track_id, path))
+
     for i in range(4):
-        cur.execute("INSERT INTO tracks (id, title, artist_id, album_id, file_path, duration) "
-                    "VALUES (?,?,1,10,?,214000)", (f'dp{i}', f'DP {i}', str(real)))
+        _track(100 + i, f'DP {i}', 10, 214000, str(real))
     for i in range(6):
-        cur.execute("INSERT INTO tracks (id, title, artist_id, album_id, file_path, duration) "
-                    "VALUES (?,?,2,20,?,190000)",
-                    (f'j{i}', f'J {i}', str(tmp_path / f'gone{i}.flac')))
-    cur.execute("INSERT INTO tracks (id, title, artist_id, album_id) VALUES ('n1','Nope',3,30)")
+        # a stored path whose file is gone: still a library reference
+        _track(200 + i, f'J {i}', 20, 190000, str(tmp_path / f'gone{i}.flac'))
+    _track(300, 'Nope', 30, None, None)
     conn.commit()
     conn.close()
     return d
@@ -175,7 +188,7 @@ def test_cover_urls_go_through_the_browser_safe_conversion(db, monkeypatch):
     import core.metadata as metadata
 
     conn = db._get_connection()
-    conn.execute("UPDATE albums SET thumb_url = '/library/metadata/1/thumb/2' WHERE id = 10")
+    conn.execute("UPDATE lib2_albums SET image_url = '/library/metadata/1/thumb/2' WHERE id = 10")
     conn.commit()
     conn.close()
 

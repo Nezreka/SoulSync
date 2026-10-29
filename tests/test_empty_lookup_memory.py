@@ -88,14 +88,14 @@ def test_a_broken_database_disables_the_memory_instead_of_failing():
 
 # ---- the Cover Art Filler --------------------------------------------------
 
-def _album_db(tmp_path, album_row=(1, 'Album', 1, '', 'sp-album', None, None, None, None)):
-    """The cover-art schema in a file, so every _get_connection is its own
-    connection (the scan closes the ones it is given)."""
-    seed = base._make_db(album_row)
+def _album_db(tmp_path, album_row=None):
+    """A native owned album; each reader gets its own connection."""
+    audio = tmp_path / 'track.flac'
+    audio.write_bytes(b'audio')
+    seed = base._make_db(file_path=str(audio))
     path = str(tmp_path / "music.db")
-    disk = sqlite3.connect(path)
-    seed.backup(disk)
-    disk.close()
+    with sqlite3.connect(path) as disk:
+        seed.backup(disk)
 
     def connect():
         conn = sqlite3.connect(path)
@@ -150,9 +150,30 @@ class _Broken:
 
 @pytest.fixture
 def source(monkeypatch):
+    from core.library2.provider_adapters import ArtworkProviderResult
+    from core.lookup_failures import report_lookup_failure
+
     holder = SimpleNamespace(client=_Empty())
-    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'spotify')
-    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: holder.client)
+    # Exercise the job's memory with real client responses through the native
+    # adapter boundary. Provider ordering/matching belongs to adapter tests.
+    def lookup(kind, **kwargs):
+        try:
+            getter = getattr(holder.client, 'get_album', None) or holder.client.get_album_metadata
+            result = getter('12345')
+            if not result:
+                holder.client.search_albums('Artist Album')
+            url = getattr(result, 'image_url', None)
+            if isinstance(result, dict):
+                url = result.get('image_url') or result.get('cover_xl')
+            return ArtworkProviderResult(kind='album', source='spotify',
+                                         provider_entity_id='sp-album', url=url) if url else None
+        except Exception:
+            report_lookup_failure()
+            return None
+
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_artwork_url', lookup)
+    monkeypatch.setattr('core.library2.tag_cache.observe_file_tags',
+                        lambda *a, **kw: {'has_cover_art': False, 'cover_sidecar': False})
     return holder
 
 
@@ -202,7 +223,7 @@ def test_a_renamed_album_is_searched_again(tmp_path, source):
     mca.MissingCoverArtJob().scan(ctx())
     first = source.client.calls
     conn = db._get_connection()
-    conn.execute("UPDATE albums SET title = 'Album (Remaster)'")
+    conn.execute("UPDATE lib2_albums SET title = 'Album (Remaster)'")
     conn.commit()
     conn.close()
     mca.MissingCoverArtJob().scan(ctx())
@@ -213,7 +234,7 @@ def test_art_found_later_still_makes_a_finding(tmp_path, source):
     db = _album_db(tmp_path)
     ctx = lambda: _ctx(db, remember_empty_lookups=True, recheck_after_days=0)  # noqa: E731
     mca.MissingCoverArtJob().scan(ctx())
-    source.client = base._FakeClient(album_image='https://img/x')
+    source.client = SimpleNamespace(get_album=lambda *a, **kw: SimpleNamespace(image_url='https://img/x'))
     later = ctx()
     result = mca.MissingCoverArtJob().scan(later)
     assert result.findings_created == 1
@@ -247,15 +268,24 @@ def wire(monkeypatch):
 
     elm._install()
     state = SimpleNamespace(reply=_reply(200), requests=0)
+    import threading
+    caller_thread = threading.get_ident()
 
     def send(self, request, *args, **kwargs):
+        # The failure observer is request/thread-scoped. Independent background
+        # enrich jobs must neither add to this job's wire count nor consume its
+        # injected quota failure (a longer combined run can outlive debounce).
+        if threading.get_ident() != caller_thread:
+            return _reply(200)
         state.requests += 1
         if isinstance(state.reply, Exception):
             raise state.reply
         return state.reply
 
     monkeypatch.setattr(elm, '_send', send)
-    quiet = SimpleNamespace(get_search_results=lambda *a, **k: None,
+    quiet = SimpleNamespace(get_entity=lambda *a, **k: None,
+                            store_entity=lambda *a, **k: None,
+                            get_search_results=lambda *a, **k: None,
                             store_search_results=lambda *a, **k: None)
     for module in (deezer_client, itunes_client):
         monkeypatch.setattr(module, 'get_metadata_cache', lambda: quiet)
@@ -267,9 +297,7 @@ def _real(source, name, monkeypatch):
     from core.deezer_client import DeezerClient
     from core.itunes_client import iTunesClient
     client = DeezerClient() if name == 'deezer' else iTunesClient()
-    monkeypatch.setattr(mca, 'get_primary_source', lambda: name)
-    monkeypatch.setattr(mca, 'get_source_priority', lambda primary: [name])
-    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: client)
+    source.client = client
     return client
 
 
@@ -373,7 +401,7 @@ class _Socket:
         return self._reply
 
 
-def _hydrabase(socket, monkeypatch):
+def _hydrabase(socket, monkeypatch, source):
     import threading
     from core.hydrabase_client import HydrabaseClient
     client = HydrabaseClient(lambda: (socket, threading.Lock()))
@@ -385,9 +413,7 @@ def _hydrabase(socket, monkeypatch):
         return real(*a, **k)
 
     client._send_and_recv = counted
-    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'hydrabase')
-    monkeypatch.setattr(mca, 'get_source_priority', lambda primary: ['hydrabase'])
-    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: client)
+    source.client = client
     return client
 
 
@@ -397,7 +423,7 @@ def _hydrabase(socket, monkeypatch):
     _Socket(reply='not json'),
 ], ids=['disconnected', 'timeout', 'garbage'])
 def test_a_hydrabase_failure_is_not_remembered(tmp_path, source, monkeypatch, socket):
-    _hydrabase(socket, monkeypatch)
+    _hydrabase(socket, monkeypatch, source)
     again = _runs(tmp_path)
     first = socket.asked
     assert first > 0
@@ -407,7 +433,7 @@ def test_a_hydrabase_failure_is_not_remembered(tmp_path, source, monkeypatch, so
 
 def test_a_hydrabase_empty_answer_is_remembered(tmp_path, source, monkeypatch):
     socket = _Socket(reply='[]')
-    _hydrabase(socket, monkeypatch)
+    _hydrabase(socket, monkeypatch, source)
     again = _runs(tmp_path)
     first = socket.asked
     assert first > 0

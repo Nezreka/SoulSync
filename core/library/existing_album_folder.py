@@ -165,12 +165,16 @@ def _find_album(db: Any, spotify_album_id: Optional[str], album_name: Optional[s
 
 
 def _row_release_id(db: Any, album_id: Any) -> str:
-    """The album row's musicbrainz release id, "" when unknown."""
+    """The album row's musicbrainz release id, "" when unknown.
+
+    The album comes from the catalogue lookups above, which are Library v2 on
+    this branch, so the id is a ``lib2_albums`` id and the release id lives in
+    its ``musicbrainz_id`` (the *release*, not the group)."""
     conn = None
     try:
         conn = db._get_connection()
         row = conn.execute(
-            "SELECT musicbrainz_release_id FROM albums WHERE id = ?", (str(album_id),),
+            "SELECT musicbrainz_id FROM lib2_albums WHERE id = ?", (int(album_id),),
         ).fetchone()
         return str((row[0] if row else "") or "").strip()
     except Exception as e:
@@ -185,40 +189,24 @@ def _row_release_id(db: Any, album_id: Any) -> str:
 
 
 def _row_album_type(db: Any, album_id: Any) -> str:
-    """The album row's stored release type, "" when unknown/unreadable.
-
-    ``record_type`` is the populated column (the Deezer/Spotify/iTunes/
-    JioSaavn enrichment workers backfill it: album / single / ep /
-    compilation); ``album_type`` is legacy and unwritten by current code but
-    still honored when a DB carries it. Each column is queried separately so
-    a missing column never hides the other.
-    """
-    for col in ("record_type", "album_type"):
-        conn = None
-        try:
-            conn = db._get_connection()
-            row = conn.execute(
-                f"SELECT {col} FROM albums WHERE id = ?", (str(album_id),),
-            ).fetchone()
-            # Strip before the truthiness check: a whitespace-only value is
-            # unknown and must fall through to the next column, not return "".
-            val = str(row[0]).strip() if row and row[0] else ""
-            if val:
-                return val.lower()
-        except Exception as e:
-            # Fail-open by design (pinned by
-            # test_db_without_the_column_falls_back_to_file_tags): any
-            # unreadable kind — missing column on legacy DBs, dead
-            # connection, locked DB — keeps today's reuse instead of
-            # splitting folders or breaking an import.
-            logger.debug("%s lookup for album %s failed: %s", col, album_id, e)
-        finally:
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:  # noqa: S110 - cleanup only
-                    pass
-    return ""
+    """The album row's stored album_type, "" when unknown/unreadable. A
+    ``lib2_albums`` id, like :func:`_row_release_id`'s."""
+    conn = None
+    try:
+        conn = db._get_connection()
+        row = conn.execute(
+            "SELECT album_type FROM lib2_albums WHERE id = ?", (int(album_id),),
+        ).fetchone()
+        return str((row[0] if row else "") or "").strip()
+    except Exception as e:
+        logger.debug("album_type lookup for album %s failed: %s", album_id, e)
+        return ""
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: S110 - cleanup only
+                pass
 
 
 def _same_release(db: Any, album: Any, sample_file: Optional[str],
@@ -331,12 +319,15 @@ def resolve_existing_album_folder(
         # "single" — too ambiguous to judge an edition by, and refusing it
         # would split thin-metadata tracks off their album under template
         # drift. Totals of 2+ are never the fallback, so they judge.
+        # Library v2: the album's rows include its wanted tracklist, which has
+        # no files yet. Only tracks with a file are what the folder holds.
+        held = sum(1 for t in tracks if getattr(t, 'file_path', None))
         if (expected_track_count and expected_track_count > 1
-                and len(tracks) > expected_track_count):
+                and held > expected_track_count):
             logger.info(
                 "[Existing Album Folder] '%s' holds %d tracks but the incoming "
                 "release has %d — a different edition, not reusing it",
-                reuse, len(tracks), expected_track_count)
+                reuse, held, expected_track_count)
             return None
         if not _same_release(db, album, sample_file,
                              (musicbrainz_release_id or "").strip(),

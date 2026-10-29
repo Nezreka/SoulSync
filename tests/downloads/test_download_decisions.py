@@ -402,4 +402,3 @@ def test_automatic_path_records_nothing(env, monkeypatch):
     env['slsk'].formats = {'flac'}
     out = get_valid_candidates(_pool(), WANT, 'q')
     assert out
-

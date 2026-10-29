@@ -175,31 +175,17 @@ def test_mbid_flagged_by_repair_finding_real_sql(tmp_path, monkeypatch):
 
 def test_default_track_lookup_real_sql(tmp_path, monkeypatch):
     """_default_track_lookup (the default track_lookup_fn) runs the real _db_match text
-    match and hands back (track_id, file_path)."""
-    import sqlite3
-    import types
+    match against the Library v2 catalogue and hands back (lib2 track id, file_path)."""
     import core.exports.export_sources as es
 
-    dbfile = tmp_path / "lib.db"
-    con = sqlite3.connect(str(dbfile))
-    con.executescript(
-        "CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT);"
-        "CREATE TABLE tracks (id TEXT, artist_id TEXT, title TEXT, "
-        "musicbrainz_recording_id TEXT, file_path TEXT);"
-        "INSERT INTO artists VALUES ('a1','Fall Out Boy');"
-        "INSERT INTO tracks VALUES ('t1','a1','Thnks fr th Mmrs','bad-mbid','/music/t1.mp3');"
-    )
-    con.commit()
-    con.close()
+    monkeypatch.setattr("database.music_database.get_database",
+                        lambda: _lib2_fixture(tmp_path))
 
-    fake_db = types.SimpleNamespace(_get_connection=lambda: sqlite3.connect(str(dbfile)))
-    monkeypatch.setattr("database.music_database.get_database", lambda: fake_db)
+    track_id, path = es._default_track_lookup("Kendrick Lamar", "Not Like Us")
+    assert path == "/m/nlu.flac"
+    assert track_id is not None and str(track_id).isdigit()
+    assert es._default_track_lookup("Kendrick Lamar", "Unknown Song") == (None, None)
 
-    assert es._default_track_lookup("Fall Out Boy", "Thnks fr th Mmrs") == ("t1", "/music/t1.mp3")
-    assert es._default_track_lookup("Fall Out Boy", "Unknown Song") == (None, None)
-
-
-# ── build_resolve_fn() with no kwargs wires the REAL default gate ──
 
 def test_build_resolve_fn_no_kwargs_wires_real_default_gates(monkeypatch):
     import core.exports.export_sources as es
@@ -224,12 +210,14 @@ def test_build_resolve_fn_no_kwargs_wires_real_default_gates(monkeypatch):
 from core.exports.export_sources import (
     db_service_track_id,
     build_service_resolve_fn,
-    _SERVICE_ID_COLUMNS,
+    _SERVICES,
 )
 
 
-def test_service_id_column_mapping():
-    assert _SERVICE_ID_COLUMNS == {'spotify': 'spotify_track_id', 'deezer': 'deezer_id'}
+def test_only_the_two_addressable_services_are_offered():
+    """Not a column map any more: lib2 keeps Spotify in its own column and every
+    other provider in external_ids, so the resolver names services, not columns."""
+    assert _SERVICES == ('spotify', 'deezer')
 
 
 def test_db_service_track_id_unknown_service_is_none():
@@ -250,33 +238,75 @@ def test_build_service_resolve_fn_returns_id_and_source(monkeypatch):
     assert fn('Artist', 'Miss') == (None, None)
 
 
-def test_db_service_track_id_real_sql_executes(tmp_path, monkeypatch):
-    """Run the ACTUAL query against a real (temp) tracks/artists schema — the broad
-    except→None in db_service_track_id would otherwise mask a column/join typo as
-    'no match' for every track (#945 verification)."""
+def _lib2_fixture(tmp_path, artist='Kendrick Lamar'):
+    """A real Library-v2 database with one matched, filed track."""
     import sqlite3
     import types
-    import core.exports.export_sources as es
+
+    from core.library2.importer import normalize_name
+    from core.library2.schema import ensure_library_v2_schema
 
     dbfile = tmp_path / "lib.db"
     con = sqlite3.connect(str(dbfile))
-    con.executescript(
-        "CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT);"
-        "CREATE TABLE tracks (id TEXT, artist_id TEXT, title TEXT, "
-        "spotify_track_id TEXT, deezer_id TEXT);"
-        "INSERT INTO artists VALUES ('a1','Kendrick Lamar');"
-        "INSERT INTO tracks VALUES ('t1','a1','Not Like Us','spid-NLU','dz-NLU');"
-    )
+    ensure_library_v2_schema(con)
+    aid = con.execute(
+        "INSERT INTO lib2_artists(name, name_key, sort_name) VALUES(?,?,?)",
+        (artist, normalize_name(artist), artist)).lastrowid
+    alb = con.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'GNX')",
+        (aid,)).lastrowid
+    tid = con.execute(
+        "INSERT INTO lib2_tracks(album_id, title, musicbrainz_id, spotify_id, external_ids) "
+        "VALUES(?, 'Not Like Us', 'mbid-NLU', 'spid-NLU', '{\"deezer\": \"dz-NLU\"}')",
+        (alb,)).lastrowid
+    con.execute(
+        "INSERT INTO lib2_track_files(track_id, path, is_primary) VALUES(?, '/m/nlu.flac', 1)",
+        (tid,))
     con.commit()
     con.close()
 
-    # fresh connection per call (db_service_track_id closes it in finally)
-    fake_db = types.SimpleNamespace(_get_connection=lambda: sqlite3.connect(str(dbfile)))
-    monkeypatch.setattr("database.music_database.get_database", lambda: fake_db)
+    # fresh connection per call (the lookups close theirs in `finally`)
+    return types.SimpleNamespace(_get_connection=lambda: sqlite3.connect(str(dbfile)))
+
+
+def test_db_service_track_id_real_sql_executes(tmp_path, monkeypatch):
+    """Run the ACTUAL query against a real Library-v2 schema — the broad
+    except→None in the lookup would otherwise mask a column/join typo as
+    'no match' for every track (#945 verification)."""
+    import core.exports.export_sources as es
+
+    monkeypatch.setattr("database.music_database.get_database",
+                        lambda: _lib2_fixture(tmp_path))
 
     assert es.db_service_track_id("Kendrick Lamar", "Not Like Us", "spotify") == "spid-NLU"
-    assert es.db_service_track_id("kendrick lamar", "not like us", "deezer") == "dz-NLU"  # case-insensitive
+    # Deezer lives in external_ids, not a column of its own.
+    assert es.db_service_track_id("kendrick lamar", "not like us", "deezer") == "dz-NLU"
     assert es.db_service_track_id("Kendrick Lamar", "Unknown Song", "spotify") is None
+
+
+def test_db_match_returns_recording_id_and_the_primary_file(tmp_path, monkeypatch):
+    """The DB rung answers with both halves: the stored recording id, and the path
+    the file rung reads tags from when the row has no id."""
+    import core.exports.export_sources as es
+
+    monkeypatch.setattr("database.music_database.get_database",
+                        lambda: _lib2_fixture(tmp_path))
+
+    mbid, path, track_id = es._db_match("Kendrick Lamar", "Not Like Us")
+    assert (mbid, path) == ("mbid-NLU", "/m/nlu.flac")
+    assert track_id is not None
+    assert es.db_recording_mbid("Kendrick Lamar", "Not Like Us") == "mbid-NLU"
+
+
+def test_a_non_ascii_artist_reaches_the_db_rung(tmp_path, monkeypatch):
+    """``LOWER()`` is ASCII-only in SQLite, so the old comparison skipped the DB
+    step for every non-Latin artist and sent the row to the MusicBrainz tail."""
+    import core.exports.export_sources as es
+
+    monkeypatch.setattr("database.music_database.get_database",
+                        lambda: _lib2_fixture(tmp_path, artist='Björk'))
+
+    assert es.db_service_track_id("BJÖRK", "Not Like Us", "spotify") == "spid-NLU"
 
 
 # ── discovery-cache resolution (#945: use the already-discovered IDs, no API call) ──

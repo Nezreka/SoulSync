@@ -20,10 +20,8 @@ from database.music_database import MusicDatabase
 def db(tmp_path):
     d = MusicDatabase(database_path=str(tmp_path / "music.db"))
     c = sqlite3.connect(str(d.database_path))
-    c.execute("INSERT INTO artists (id, name) VALUES ('1', 'Oasis')")
-    c.execute("INSERT INTO albums (id, artist_id, title) VALUES ('10', '1', 'Definitely Maybe')")
-    c.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-              "VALUES ('100', '10', '1', 'Live Forever', '/m/oasis/live forever.flac')")
+    from tests import lib2_seed
+    lib2_seed.track(c, 'Oasis', 'Definitely Maybe', 'Live Forever', path='/m/oasis/live forever.flac')
     c.commit()
     c.close()
     return d
@@ -42,21 +40,24 @@ def test_init_creates_the_lower_indexes(db):
     sqls = {name: sql for name, sql in c.execute(
         "SELECT name, sql FROM sqlite_master WHERE type = 'index'")}
     c.close()
-    for name, table, column in MusicDatabase._LOWER_TEXT_INDEXES:
+    for name, table, column in (
+        ('idx_lib2_tracks_title_lower', 'lib2_tracks', 'title'),
+        ('idx_lib2_albums_title_lower', 'lib2_albums', 'title'),
+        ('idx_lib2_artists_name_lower', 'lib2_artists', 'name')):
         assert name in sqls, name
-        assert f"ON {table} (LOWER({column}))" in sqls[name]
+        assert f"ON {table}(LOWER({column}))" in sqls[name]
 
 
 @pytest.mark.parametrize("sql, index", [
-    ("SELECT * FROM tracks WHERE LOWER(title) = LOWER(?) LIMIT 1", "idx_tracks_title_lower"),
-    ("SELECT t.id FROM tracks t WHERE LOWER(t.title) IN (?, ?)", "idx_tracks_title_lower"),
-    ("SELECT id FROM albums al WHERE LOWER(al.title) = LOWER(?)", "idx_albums_title_lower"),
-    ("SELECT id FROM artists WHERE LOWER(name) = LOWER(?)", "idx_artists_name_lower"),
+    ("SELECT * FROM lib2_tracks WHERE LOWER(title) = LOWER(?) LIMIT 1", "idx_lib2_tracks_title_lower"),
+    ("SELECT t.id FROM lib2_tracks t WHERE LOWER(t.title) IN (?, ?)", "idx_lib2_tracks_title_lower"),
+    ("SELECT id FROM lib2_albums al WHERE LOWER(al.title) = LOWER(?)", "idx_lib2_albums_title_lower"),
+    ("SELECT id FROM lib2_artists WHERE LOWER(name) = LOWER(?)", "idx_lib2_artists_name_lower"),
 ])
 def test_lower_lookups_search_the_index(db, sql, index):
     params = tuple("x" for _ in range(sql.count("?")))
     plan = _plan(db, sql, params)
-    assert any(f"USING INDEX {index}" in step for step in plan), plan
+    assert any(index in step and "SEARCH" in step for step in plan), plan
 
 
 def test_playable_resolver_searches_titles_instead_of_scanning(db, monkeypatch):
@@ -83,7 +84,7 @@ def test_playable_resolver_searches_titles_instead_of_scanning(db, monkeypatch):
     assert out["matched"] == 1
     assert plans, "the resolver's title query never ran"
     for plan in plans:
-        assert any("USING INDEX idx_tracks_title_lower" in s for s in plan), plan
+        assert any("USING INDEX idx_lib2_tracks_title_lower" in s for s in plan), plan
         assert not any(s.startswith("SCAN t") for s in plan), plan
 
 
@@ -96,20 +97,20 @@ def test_playable_resolver_searches_titles_instead_of_scanning(db, monkeypatch):
 
 def test_init_creates_the_file_path_index(db):
     c = sqlite3.connect(str(db.database_path))
-    sql = c.execute("SELECT sql FROM sqlite_master WHERE name = 'idx_tracks_file_path'").fetchone()
+    sql = c.execute("SELECT sql FROM sqlite_master WHERE name = 'idx_lib2_track_files_path'").fetchone()
     c.close()
-    assert sql and "ON tracks (file_path)" in sql[0]
+    assert sql and "ON lib2_track_files(path)" in sql[0]
 
 
 @pytest.mark.parametrize("sql", [
-    "SELECT id FROM tracks WHERE file_path = ?",                     # imports, repair
-    "SELECT 1 FROM tracks WHERE file_path = ? LIMIT 1",              # rematch hints
-    "UPDATE tracks SET file_path = ? WHERE file_path = ?",           # atomic recovery, repair moves
-    "UPDATE tracks SET verification_status = ? WHERE file_path = ?",  # verification
-    "DELETE FROM tracks WHERE file_path = ?",
+    "SELECT id FROM lib2_track_files WHERE path = ?",                     # imports, repair
+    "SELECT 1 FROM lib2_track_files WHERE path = ? LIMIT 1",              # rematch hints
+    "UPDATE lib2_track_files SET path = ? WHERE path = ?",           # atomic recovery, repair moves
+    "UPDATE lib2_track_files SET verification_status = ? WHERE path = ?",  # verification
+    "DELETE FROM lib2_track_files WHERE path = ?",
 ])
 def test_exact_path_lookups_search_the_index(db, sql):
     params = tuple("x" for _ in range(sql.count("?")))
     plan = _plan(db, sql, params)
-    assert any("idx_tracks_file_path" in step for step in plan), plan
-    assert not any(step == "SCAN tracks" for step in plan), plan
+    assert any("idx_lib2_track_files_path" in step for step in plan), plan
+    assert not any(step == "SCAN lib2_track_files" for step in plan), plan

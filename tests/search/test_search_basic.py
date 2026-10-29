@@ -156,6 +156,100 @@ def test_source_param_routes_to_specific_client():
     assert orch.default_search_calls == 0
     # Tidal client was called exactly once.
     assert orch.per_source_calls.get('tidal') == 1
+    assert result[0]['source'] == 'tidal'
+
+
+def test_scoped_prowlarr_result_keeps_release_title_and_uses_entity_artist():
+    """Indexer release titles are not semantic artist/title columns.
+
+    A Library-v2 search has server-validated entity metadata, so it should use
+    that identity while preserving Prowlarr's raw value as the release title.
+    """
+    meta = {
+        'protocol': 'usenet',
+        'indexer': 'NZBGeek',
+        'release_title': 'TEAM-WEB-Various.Artists-Compilation-FLAC-2026',
+    }
+    track = _real_track(
+        username='usenet',
+        artist='TEAM',
+        title='WEB-Various.Artists-Compilation',
+        _source_metadata=meta,
+    )
+    album = _real_album(
+        username='usenet',
+        artist='TEAM',
+        album_title='WEB-Various.Artists-Compilation',
+        tracks=[track],
+    )
+    client = _FakeSoulseek(tracks=[track], albums=[album])
+
+    result = basic.run_basic_search(
+        'Real Artist Real Album',
+        client,
+        _sync_run_async,
+        source='usenet',
+        entity_context={
+            'album_id': 7,
+            'artist_name': 'Real Artist',
+            'album_name': 'Real Album',
+        },
+    )
+
+    # Album-scoped Prowlarr searches expose one release row, not the legacy
+    # track+album duplicate pair.
+    assert len(result) == 1
+    assert result[0]['result_type'] == 'album'
+    assert result[0]['artist'] == 'Real Artist'
+    assert result[0]['matched_album_title'] == 'Real Album'
+    assert result[0]['release_title'] == meta['release_title']
+    assert result[0]['source'] == 'usenet'
+
+
+def test_judge_sees_the_raw_hits_before_the_entity_artist_is_painted_on():
+    """The verdict must be about what the indexer said ("TEAM"), not about the
+    library artist the row is displayed under afterwards."""
+    meta = {'protocol': 'usenet', 'release_title': 'TEAM-WEB-Compilation-FLAC-2026'}
+    track = _real_track(username='usenet', artist='TEAM', title='WEB', _source_metadata=meta)
+    seen = []
+
+    def judge(tracks, albums, query):
+        seen.extend((row.artist, query) for row in tracks)
+        return {id(track): {'accepted': False, 'code': 'artist_mismatch'}}
+
+    result = basic.run_basic_search(
+        'Real Artist Real Song', _FakeSoulseek(tracks=[track]), _sync_run_async,
+        source='usenet', judge=judge,
+        entity_context={'track_id': 3, 'artist_name': 'Real Artist', 'track_title': 'Real Song'})
+
+    assert seen == [('TEAM', 'Real Artist Real Song')]
+    assert result[0]['artist'] == 'Real Artist'
+    assert result[0]['decision'] == {'accepted': False, 'code': 'artist_mismatch'}
+
+
+def test_an_entity_search_asks_every_query_and_survives_one_failing():
+    track = _real_track(username='peer', filename='a/Song.flac')
+
+    class _Flaky:
+        def __init__(self):
+            self.asked = []
+
+        async def search(self, query):
+            self.asked.append(query)
+            if query.startswith('broken'):
+                raise RuntimeError('indexer down')
+            return [track], []
+
+    client = _Flaky()
+    result = basic.run_basic_search('artist song', client, _sync_run_async,
+                                    more_queries=['song', 'broken', 'artist song'])
+
+    assert sorted(client.asked) == ['artist song', 'broken', 'song']
+    assert len(result) == 1  # the same file found by two queries shows once
+
+    import pytest
+    with pytest.raises(RuntimeError):  # every query failed: say so
+        basic.run_basic_search('broken', client, _sync_run_async, more_queries=['broken again'])
 
 
 def test_no_source_param_falls_through_to_orchestrator_default():

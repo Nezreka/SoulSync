@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+import pytest
+
 from core.downloads import validation
 from core.downloads.validation import (
     filter_soundcloud_previews,
@@ -170,6 +172,45 @@ def test_keeps_torrent_title_match_when_artist_is_indexer_fallback(monkeypatch):
     result = get_valid_candidates([candidate], expected, 'Olivia Dean The Man I Need')
 
     assert result == [candidate]
+
+
+@pytest.mark.parametrize("source", ["torrent", "usenet"])
+def test_missing_release_artist_does_not_reject_matching_title(monkeypatch, source):
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    expected = _Track(duration_ms=240_000, name="Gangsta's Paradise", artists=('Coolio', 'L.V.'))
+    candidate = _Candidate(
+        username=source, duration=None, title="Gangsta's Paradise", artist='Unknown Artist',
+    )
+    candidate._source_metadata = {'indexer': 'NZBGeek'}
+
+    assert validation._score_streaming_candidates([candidate], expected) == [candidate]
+
+
+@pytest.mark.parametrize("source", ["torrent", "usenet"])
+def test_missing_release_artist_does_not_accept_unrelated_title(monkeypatch, source):
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    expected = _Track(duration_ms=240_000, name="Gangsta's Paradise", artists=('Coolio',))
+    candidate = _Candidate(
+        username=source, duration=None, title='Completely Different Song', artist='Unknown Artist',
+    )
+
+    assert validation._score_streaming_candidates([candidate], expected) == []
+
+
+def test_hifi_artist_placeholder_still_requires_artist_evidence(monkeypatch):
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    expected = _Track(duration_ms=240_000, name="Gangsta's Paradise", artists=('Coolio',))
+    candidate = _Candidate(
+        username='hifi', duration=240_000, title="Gangsta's Paradise", artist='Unknown Artist',
+    )
+
+    assert validation._score_streaming_candidates([candidate], expected) == []
 
 
 class _DispatchEngine:

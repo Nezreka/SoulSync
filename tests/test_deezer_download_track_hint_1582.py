@@ -156,3 +156,11 @@ def test_the_orchestrator_hands_the_hint_to_the_source(monkeypatch):
 @pytest.mark.parametrize("artists", [[{"name": "Auli'i Cravalho"}], ["Auli'i Cravalho"]])
 def test_artist_shapes(artists):
     assert hint_from_track({"name": "x", "artists": artists})["artist"] == "Auli'i Cravalho"
+
+
+def test_release_hint_retains_provider_album_identity():
+    hint = hint_from_track({'id': 'track', 'name': 'Song', '_source': 'deezer',
+                            'artists': [{'name': 'Artist'}],
+                            'album': {'id': '42', 'name': 'Album'}})
+    assert hint['catalogue_context']['album']['id'] == '42'
+    assert hint['catalogue_context']['source'] == 'deezer'

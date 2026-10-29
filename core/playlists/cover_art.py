@@ -194,13 +194,17 @@ def collect_vibe(db: Any, playlist: Dict[str, Any]) -> Dict[str, Any]:
             cur = conn.cursor()
             for chunk in _chunks(lib_ids):
                 marks = ",".join("?" * len(chunk))
+                # a playlist row names its track by the catalogue id or by the
+                # media server's id; lib2 answers both (the mapping holds the latter)
                 cur.execute(
-                    "SELECT COALESCE(NULLIF(al.genres, ''), ar.genres), ar.style, "
-                    "COALESCE(t.mood, al.mood, ar.mood), COALESCE(t.year, al.year) "
-                    "FROM tracks t LEFT JOIN albums al ON al.id = t.album_id "
-                    "LEFT JOIN artists ar ON ar.id = t.artist_id "
-                    f"WHERE t.id IN ({marks})",
-                    chunk,
+                    "SELECT COALESCE(NULLIF(NULLIF(al.genres, ''), '[]'), ar.genres), ar.style, "
+                    "COALESCE(t.mood, al.mood, ar.mood), al.year "
+                    "FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
+                    "LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
+                    f"WHERE CAST(t.id AS TEXT) IN ({marks}) OR t.id IN ("
+                    "SELECT m.entity_id FROM lib2_media_server_mappings m "
+                    f"WHERE m.entity_type = 'track' AND m.server_id IN ({marks}))",
+                    [*chunk, *chunk],
                 )
                 for g, style, mood, year in cur.fetchall():
                     for tag in _parse_tags(g) + _parse_tags(style):
@@ -215,7 +219,7 @@ def collect_vibe(db: Any, playlist: Dict[str, Any]) -> Dict[str, Any]:
             for chunk in _chunks(names):
                 marks = ",".join("?" * len(chunk))
                 cur.execute(
-                    "SELECT LOWER(name), genres, style, mood FROM artists "
+                    "SELECT LOWER(name), genres, style, mood FROM lib2_artists "
                     f"WHERE LOWER(name) IN ({marks})",
                     chunk,
                 )

@@ -406,3 +406,16 @@ describe('refetch intervals', () => {
     expect(idle(fakeQuery({ status: 'queued' }))).toBe(false);
   });
 });
+
+describe('native catalogue track IDs', () => {
+  it.each(['', 'Song'])('normalizes numeric Library-v2 IDs for query %s', async (query) => {
+    routes[query ? '/api/library/tracks?' : '/api/library/tracks/recent'] = ok({
+      success: true,
+      data: { tracks: [{ id: 7, title: 'Song', artist_name: 'Artist', duration: 120000 }] },
+      error: null,
+    });
+    const opts = studioTrackSearchQueryOptions(query);
+    const rows = await opts.queryFn!({} as never);
+    expect(rows).toEqual([{ id: '7', title: 'Song', artist_name: 'Artist', duration: 120 }]);
+  });
+});

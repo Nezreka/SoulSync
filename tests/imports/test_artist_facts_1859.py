@@ -31,11 +31,13 @@ def db(tmp_path, monkeypatch):
         ("1", "Nirvana", US, "dz-us", '["grunge"]'),
         ("2", "Nirvana", UK, "dz-uk", "[]"),
         ("3", "Culture", CULTURE, "dz-culture", '["reggae", "roots reggae"]'),
-        ("4", "Nirvana", US, None, None),   # the same us band on a second server
+        ("4", "Nirvana", US, None, None),   # the same us band, a twin not folded yet
     ]
+    # lib2 port: deezer's id lives in external_ids
     for artist_id, name, mbid, dz, genres in rows:
-        conn.execute("INSERT INTO artists (id, name, musicbrainz_id, deezer_id, genres) "
-                     "VALUES (?, ?, ?, ?, ?)", (artist_id, name, mbid, dz, genres))
+        conn.execute("INSERT INTO lib2_artists (id, name, name_key, musicbrainz_id, external_ids, genres) "
+                     "VALUES (?, ?, ?, ?, ?, ?)", (artist_id, name, name.lower(), mbid,
+                                                   json.dumps({"deezer": dz} if dz else {}), genres or "[]"))
     payloads = {
         US: {"disambiguation": "US grunge band", "country": "US"},
         UK: {"disambiguation": "UK 60s band", "country": "GB",

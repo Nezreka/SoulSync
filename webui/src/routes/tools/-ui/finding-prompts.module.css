@@ -26,6 +26,10 @@
   max-width: 460px;
 }
 
+.box480 {
+  max-width: 480px;
+}
+
 /* The mass-deletion gate: its own black scrim and a danger-bordered box. */
 .witnessOverlay {
   position: fixed;

@@ -3,7 +3,7 @@
 two artists can share a name (nirvana the us band, nirvana the uk band) and
 land in one folder. musicbrainz tells them apart with a disambiguation note,
 a country and tags. this reads those from what enrichment already stored (the
-artists row and the cached musicbrainz artist payload). it never calls out to
+lib2_artists row and the cached musicbrainz artist payload). it never calls out to
 musicbrainz: a path is built for every imported track, and an artist that
 isn't enriched yet simply has no facts until it is.
 """
@@ -36,17 +36,21 @@ def _resolve_mbid(cursor, name: str, mbid: str, source: str, source_id: str) -> 
     if mbid:
         # a compilation's context can name a track artist while carrying the
         # album artist's id: only trust the id when it is this name's
-        cursor.execute("SELECT name FROM artists WHERE musicbrainz_id = ? LIMIT 1", (mbid,))
+        cursor.execute("SELECT name FROM lib2_artists WHERE musicbrainz_id = ? LIMIT 1", (mbid,))
         row = cursor.fetchone()
         if not row or str(row[0] or "").casefold() == name.casefold():
             return mbid
     if source and source_id:
-        from core.source_ids import id_column
-        column = id_column(source, "artist")
+        # lib2: spotify has its column, every other source sits in external_ids
+        from core.library2.provider_ids import external_id_sql, normalize_provider_name
+        provider = normalize_provider_name(source)
+        column = ("spotify_id" if provider == "spotify"
+                  else external_id_sql("external_ids", provider)
+                  if provider and provider.isalnum() else None)
         if column:
             try:
                 cursor.execute(
-                    f"SELECT name, musicbrainz_id FROM artists WHERE {column} = ? "  # noqa: S608 - column from a fixed map
+                    f"SELECT name, musicbrainz_id FROM lib2_artists WHERE {column} = ? "  # noqa: S608 - column from a fixed map
                     "AND musicbrainz_id IS NOT NULL AND musicbrainz_id != '' LIMIT 1",
                     (str(source_id),))
                 row = cursor.fetchone()
@@ -61,7 +65,7 @@ def _resolve_mbid(cursor, name: str, mbid: str, source: str, source_id: str) -> 
 
 def _mbids_named(cursor, name: str) -> list:
     cursor.execute(
-        "SELECT DISTINCT musicbrainz_id FROM artists WHERE name = ? COLLATE NOCASE "
+        "SELECT DISTINCT musicbrainz_id FROM lib2_artists WHERE name = ? COLLATE NOCASE "
         "AND musicbrainz_id IS NOT NULL AND musicbrainz_id != ''", (name,))
     return [str(r[0]) for r in cursor.fetchall()]
 
@@ -69,8 +73,8 @@ def _mbids_named(cursor, name: str) -> list:
 def _first_genre(cursor, mbid: str, payload: dict) -> str:
     try:
         cursor.execute(
-            "SELECT genres FROM artists WHERE musicbrainz_id = ? AND genres IS NOT NULL "
-            "AND genres != '' LIMIT 1", (mbid,))
+            "SELECT genres FROM lib2_artists WHERE musicbrainz_id = ? "
+            "AND COALESCE(genres, '') NOT IN ('', '[]') LIMIT 1", (mbid,))
         row = cursor.fetchone()
         genres = json.loads(row[0]) if row and row[0] else []
         if isinstance(genres, list):

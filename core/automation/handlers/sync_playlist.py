@@ -305,6 +305,7 @@ def _sync_single_mirrored_playlist(
                 _track_entry['track_number'] = md['track_number']
             if md.get('disc_number'):
                 _track_entry['disc_number'] = md['disc_number']
+            _track_entry.update({key: md[key] for key in ('source', 'provider', 'provider_ids', 'external_ids') if md.get(key)})
             tracks_json.append(_track_entry)
         else:
             # NOT discovered — try to include using available metadata so

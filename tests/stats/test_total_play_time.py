@@ -20,17 +20,18 @@ from database.music_database import MusicDatabase
 def conn(tmp_path):
     d = MusicDatabase(database_path=str(tmp_path / "music.db"))
     c = sqlite3.connect(str(d.database_path))
-    c.execute("INSERT INTO artists (id, name) VALUES ('1', 'A')")
-    c.execute("INSERT INTO albums (id, artist_id, title) VALUES ('10', '1', 'B')")
-    for tid, dur in (('100', 200_000), ('101', None), ('102', 0), ('103', 90_000)):
-        c.execute("INSERT INTO tracks (id, album_id, artist_id, title, duration) VALUES (?, '10', '1', 't', ?)",
+    # Library v2: the play's catalogue link is lib2_track_id
+    c.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'A')")
+    c.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (10, 1, 'B')")
+    for tid, dur in ((100, 200_000), (101, None), (102, 0), (103, 90_000)):
+        c.execute("INSERT INTO lib2_tracks (id, album_id, title, duration) VALUES (?, 10, 't', ?)",
                   (tid, dur))
     c.commit()
     yield c
     c.close()
 
 
-# (duration_ms, db_track_id): every shape a play row comes in
+# (duration_ms, lib2_track_id): every shape a play row comes in
 SHAPES = [
     (180_000, 100),     # own duration wins over the track's
     (0, 100),           # no duration: the track's length
@@ -52,13 +53,13 @@ def test_matches_the_per_play_sum(conn, shapes):
     conn.execute("DELETE FROM listening_history")
     for i, (dur, tid) in enumerate(shapes):
         conn.execute(
-            "INSERT INTO listening_history (title, artist, played_at, duration_ms, db_track_id, profile_id) "
+            "INSERT INTO listening_history (title, artist, played_at, duration_ms, lib2_track_id, profile_id) "
             "VALUES ('t', 'a', datetime('now', ?), ?, ?, 1)", (f"-{i} minutes", dur, tid))
     conn.commit()
     per_play = conn.execute(
         f"SELECT COALESCE(SUM({play_duration_sql()}), 0) FROM listening_history").fetchone()[0]
     grouped = conn.execute(
-        f"WITH r AS MATERIALIZED (SELECT duration_ms, db_track_id FROM listening_history) "
+        f"WITH r AS MATERIALIZED (SELECT duration_ms, lib2_track_id FROM listening_history) "
         f"SELECT {total_play_ms_sql('r')} FROM r").fetchone()[0]
     assert grouped == per_play
 

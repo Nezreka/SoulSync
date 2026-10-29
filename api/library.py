@@ -9,6 +9,7 @@ from database.music_database import get_database
 from .auth import require_api_key
 from .helpers import api_success, api_error, build_pagination, parse_pagination, parse_fields, parse_profile_id
 from .serializers import serialize_artist, serialize_album, serialize_track
+from core.library2.api_ids import AmbiguousApiId
 
 # The longest window /library/listening-activity answers. The MetaSync
 # node asks for one ISO week; a month of slack, never the whole history.
@@ -27,6 +28,22 @@ def _parse_instant(value):
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _catalogue_id(db, entity_type, raw_id):
+    """The catalogue id a v1 caller means: today's id or the one the API
+    handed out before the Library v2 upgrade (core.library2.api_ids).
+    Raises AmbiguousApiId when the id names two different entries."""
+    from core.library2.api_ids import resolve_api_id
+    conn = db._get_connection()
+    try:
+        return resolve_api_id(conn, entity_type, raw_id)
+    finally:
+        conn.close()
+
+
+def _ambiguous(e):
+    return api_error("AMBIGUOUS_ID", str(e), 409)
 
 
 def register_routes(bp):
@@ -79,17 +96,20 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            # IDs are TEXT in the DB: numeric-string IDs from existing clients
-            # and opaque '...::soulsync' IDs both resolve by exact match.
-            artist = db.api_get_artist(artist_id)
+            # a catalogue id, or an old server id ('77', '...::soulsync') a
+            # client saved before the Library v2 upgrade
+            resolved = _catalogue_id(db, "artist", artist_id)
+            artist = db.api_get_artist(resolved) if resolved is not None else None
             if not artist:
                 return api_error("NOT_FOUND", f"Artist {artist_id} not found.", 404)
 
-            albums = db.api_get_albums_by_artist(artist_id)
+            albums = db.api_get_albums_by_artist(resolved)
             return api_success({
                 "artist": serialize_artist(artist, fields),
                 "albums": [serialize_album(a, fields) for a in albums],
             })
+        except AmbiguousApiId as e:
+            return _ambiguous(e)
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -100,8 +120,11 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            albums = db.api_get_albums_by_artist(artist_id)
+            resolved = _catalogue_id(db, "artist", artist_id)
+            albums = db.api_get_albums_by_artist(resolved) if resolved is not None else []
             return api_success({"albums": [serialize_album(a, fields) for a in albums]})
+        except AmbiguousApiId as e:
+            return _ambiguous(e)
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -129,6 +152,9 @@ def register_routes(bp):
 
         try:
             db = get_database()
+            if artist_id is not None:
+                resolved = _catalogue_id(db, "artist", artist_id)
+                artist_id = resolved if resolved is not None else artist_id
             result = db.api_list_albums(
                 search=search,
                 artist_id=artist_id,
@@ -143,6 +169,8 @@ def register_routes(bp):
                 {"albums": [serialize_album(a, fields) for a in albums]},
                 pagination=pagination,
             )
+        except AmbiguousApiId as e:
+            return _ambiguous(e)
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -153,15 +181,18 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            album = db.api_get_album(album_id)
+            resolved = _catalogue_id(db, "album", album_id)
+            album = db.api_get_album(resolved) if resolved is not None else None
             if not album:
                 return api_error("NOT_FOUND", f"Album {album_id} not found.", 404)
 
-            tracks = db.api_get_tracks_by_album(album_id)
+            tracks = db.api_get_tracks_by_album(resolved)
             return api_success({
                 "album": serialize_album(album, fields),
                 "tracks": [serialize_track(t, fields) for t in tracks],
             })
+        except AmbiguousApiId as e:
+            return _ambiguous(e)
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -172,8 +203,11 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            tracks = db.api_get_tracks_by_album(album_id)
+            resolved = _catalogue_id(db, "album", album_id)
+            tracks = db.api_get_tracks_by_album(resolved) if resolved is not None else []
             return api_success({"tracks": [serialize_track(t, fields) for t in tracks]})
+        except AmbiguousApiId as e:
+            return _ambiguous(e)
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -184,11 +218,14 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            track = db.api_get_track(track_id)
+            resolved = _catalogue_id(db, "track", track_id)
+            track = db.api_get_track(resolved) if resolved is not None else None
             if not track:
                 return api_error("NOT_FOUND", f"Track {track_id} not found.", 404)
 
             return api_success({"track": serialize_track(track, fields)})
+        except AmbiguousApiId as e:
+            return _ambiguous(e)
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -287,7 +324,8 @@ def register_routes(bp):
         try:
             db = get_database()
             # Get recently played with library track IDs for playback.
-            # Uses listening_history joined to tracks for file_path.
+            # A play is linked to the catalogue by lib2_track_id; the file is
+            # the track's primary one.
             from core.stats.queries import listening_owner, owner_clause
             scope = owner_clause(listening_owner(db, profile_id), 'lh')
             conn = db._get_connection()
@@ -296,11 +334,14 @@ def register_routes(bp):
                 cursor.execute(
                     f"""
                     SELECT lh.title, lh.artist, lh.album, lh.played_at,
-                           t.id as track_id, t.file_path, t.artist_id,
-                           t.album_id, al.thumb_url
+                           t.id as track_id, f.path, al.primary_artist_id,
+                           t.album_id, al.image_url
                     FROM listening_history lh
-                    LEFT JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
-                    LEFT JOIN albums al ON al.id = t.album_id
+                    LEFT JOIN lib2_tracks t ON t.id = lh.lib2_track_id
+                    LEFT JOIN lib2_albums al ON al.id = t.album_id
+                    LEFT JOIN lib2_track_files f
+                           ON f.track_id = t.id AND f.is_primary = 1
+                          AND COALESCE(f.file_state, 'active') <> 'deleted'
                     WHERE {scope}
                     ORDER BY lh.played_at DESC
                     LIMIT ?

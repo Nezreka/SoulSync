@@ -114,9 +114,22 @@ def test_magnet_goes_straight_to_the_client(monkeypatch):
 def test_http_url_is_fetched_and_pushed_as_file(monkeypatch):
     _serve(monkeypatch, [_Resp(200, TORRENT_BYTES)])
     adapter = _Adapter()
-    ref = asyncio.run(add_torrent_smart(
-        adapter, "http://prowlarr:9696/download?apikey=k",
-        category="music", save_path="/dl"))
+
+    async def exercise():
+        loop = asyncio.get_running_loop()
+        assert loop._default_executor is None
+        result = await add_torrent_smart(
+            adapter,
+            "http://prowlarr:9696/download?apikey=k",
+            category="music",
+            save_path="/dl",
+        )
+        # Regression: a loop-owned executor made asyncio.run() hang in
+        # shutdown_default_executor() under Python 3.14.6.
+        assert loop._default_executor is None
+        return result
+
+    ref = asyncio.run(exercise())
     assert ref == "hash-from-file"
     assert adapter.file_calls == [(TORRENT_BYTES, "music", "/dl")]
     assert not adapter.url_calls               # the client never sees the URL

@@ -11,6 +11,7 @@ The background analysis worker runs for real (daemon thread); the poll loop
 waits for it with a timeout.
 """
 
+from tests.lib2_seed import file_track
 import io
 import json
 import time
@@ -49,6 +50,12 @@ def client(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mdb, "_database_instances", {})
 
+    from core.sample import worker
+    # Other test databases use the same catalogue ids; their sticky outcomes
+    # do not describe this new database's audio.
+    monkeypatch.setattr(worker, "_status", {})
+    monkeypatch.setattr(worker, "_pending", set())
+
     import api.sample as sample_api
 
     monkeypatch.setattr(sample_api, "require_api_key", lambda f: f)
@@ -65,11 +72,9 @@ def client(tmp_path, monkeypatch):
     db = mdb.get_database()
     conn = db._get_connection()
     try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'E2E Artist')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'E2E Album')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (1, 1, 1, 'E2E Track', ?)",
-            (str(wav),),
+        conn.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'E2E Artist')")
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'E2E Album')")
+        file_track(conn, 1, 1, 'E2E Track', str(wav),
         )
         conn.commit()
     finally:
@@ -171,10 +176,7 @@ def test_preview_rejects_long_slice(client, tmp_path):
     _click_track(long_wav, seconds=70.0)
     conn = db._get_connection()
     try:
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (3, 1, 1, 'Long', ?)",
-            (long_wav,),
-        )
+        file_track(conn, 3, 1, 'Long', long_wav)
         conn.commit()
     finally:
         conn.close()
@@ -208,10 +210,7 @@ def test_stretch_needs_analysis_bpm(client):
     _click_track(wav2)
     conn = db._get_connection()
     try:
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (2, 1, 1, 'T2', ?)",
-            (wav2,),
-        )
+        file_track(conn, 2, 1, 'T2', wav2)
         conn.commit()
     finally:
         conn.close()
