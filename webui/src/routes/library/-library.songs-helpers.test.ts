@@ -20,11 +20,11 @@ describe('matchParts', () => {
   });
 
   it('marks every hit', () => {
-    expect(matchParts('La La Land', 'la').filter((p) => p.hit).map((p) => p.text)).toEqual([
-      'La',
-      'La',
-      'La',
-    ]);
+    expect(
+      matchParts('La La Land', 'la')
+        .filter((p) => p.hit)
+        .map((p) => p.text),
+    ).toEqual(['La', 'La', 'La']);
   });
 
   it('no query, or no hit, marks nothing', () => {
