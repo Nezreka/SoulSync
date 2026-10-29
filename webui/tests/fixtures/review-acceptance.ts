@@ -41,6 +41,9 @@ export function acceptanceApi(initial: string) {
     unexpected,
     handlers: [
       ...shellHandlers,
+      http.get('*/api/repair/review-queue/:id/playlist-references', () =>
+        HttpResponse.json({ playlists: [] }),
+      ),
       http.get('*/api/repair/review-queue/summary', () => HttpResponse.json(snapshot.summary)),
       http.get('*/api/repair/review-queue', () => HttpResponse.json(snapshot.queue)),
       http.get('*/api/repair/review-queue/apply-ready', () =>

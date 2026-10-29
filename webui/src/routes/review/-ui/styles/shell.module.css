@@ -494,15 +494,6 @@
 .tabMain {
   container: review-main / inline-size;
 }
-@container review-main (max-width: 480px) {
-  .albumApplyAll {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-  }
-  .albumApplyAll button {
-    white-space: normal;
-  }
-}
 @media (max-width: 700px) {
   .albumApplyAll {
     align-items: flex-start;
@@ -545,6 +536,15 @@
   margin-bottom: 20px;
   margin-block: var(--space-4);
   gap: var(--space-4);
+}
+@container review-main (max-width: 480px) {
+  .albumApplyAll {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+  .albumApplyAll button {
+    white-space: normal;
+  }
 }
 
 .page .albumViews button[data-slot='control'] {

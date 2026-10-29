@@ -15,6 +15,7 @@ const idleServices: Record<string, Record<string, unknown>> = {
   '/api/requests/music/counts': { success: true, pending: 0, updates: 0 },
   '/api/discover/inbox/counts': { success: true, pending: 0, total: 0 },
   '/api/video/requests/counts': { success: true, pending: 0, updates: 0 },
+  '/api/wishlist/count': { success: true, count: 0 },
   '/api/watchlist/count': { success: true, count: 0 },
   '/api/update-check': { update_available: false },
   '/api/artist_bubbles/hydrate': { success: true, bubbles: {}, stats: {} },

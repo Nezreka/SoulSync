@@ -1,8 +1,9 @@
 import type { Locator, Page } from '@playwright/test';
-import { expect, test } from '../review/harness';
+
 import { http, HttpResponse, type RequestHandler } from 'msw';
 
 import { acceptanceApi, acceptanceSnapshot } from '../fixtures/review-acceptance';
+import { expect, test } from '../review/harness';
 import { installShell, ORIGIN } from '../review/harness';
 
 // These are independent product expectations, not assertions derived from the
@@ -20,7 +21,7 @@ const scenarios = [
     name: 'recording_conflict',
     ready: false,
     title: 'Home',
-    status: 'extra',
+    status: 'audio_conflict',
     reason: 'Unrelated Song',
   },
   {
@@ -89,7 +90,7 @@ const scenarios = [
   },
   { name: 'partial', ready: false, chooser: 'Choose album completeness' },
   { name: 'selective', ready: false, chooser: 'Choose missing tracks' },
-  { name: 'waiting', ready: false, plan: 'Missing tracks being acquired' },
+  { name: 'waiting', ready: true, plan: 'Missing tracks being acquired' },
   { name: 'cancelled', ready: false, chooser: 'Choose missing tracks' },
   { name: 'saved', ready: true, plan: 'Ready change summary' },
   { name: 'duplicate_saved', ready: true, plan: 'Ready change summary' },
@@ -147,14 +148,24 @@ for (const width of [1800, 390]) {
   test(`assignment and file metadata dialogs ${width}px`, async ({ page }) => {
     const api = acceptanceApi('repeated_recording');
     const { errors, missing } = await openAcceptance(page, width, api, [
-      http.get('*/api/repair/review-queue/:id/file-metadata', () => HttpResponse.json({
-        success: true, record: { File: '01 - Home.flac', Format: 'FLAC', 'Tag: TITLE': ['Home'], 'Tag: ARTIST': ['Acceptance Artist', 'Guest'], 'Tag: COMMENT': ['Original file note'], 'Embedded pictures': [{ mime: 'image/jpeg', data: { binary_bytes: 24000 } }] },
-      })),
+      http.get('*/api/repair/review-queue/:id/file-metadata', () =>
+        HttpResponse.json({
+          success: true,
+          record: {
+            File: '01 - Home.flac',
+            Format: 'FLAC',
+            'Tag: TITLE': ['Home'],
+            'Tag: ARTIST': ['Acceptance Artist', 'Guest'],
+            'Tag: COMMENT': ['Original file note'],
+            'Embedded pictures': [{ mime: 'image/jpeg', data: { binary_bytes: 24000 } }],
+          },
+        }),
+      ),
     ]);
     await page.getByRole('tab', { name: /^Tracks/ }).click();
     await page.locator('[data-review-assignment]').first().click();
-    await page.getByRole('button', { name: 'Change track assignment', exact: true }).click();
-    const assignment = page.getByRole('dialog', { name: 'Change track assignment' });
+    await page.getByRole('button', { name: 'Change match…', exact: true }).click();
+    const assignment = page.getByRole('dialog', { name: 'Change match' });
     await expect(assignment.getByRole('button', { name: 'Save plan assignment' })).toBeDisabled();
     await expect(assignment.getByRole('button', { name: /Open Water/ })).toBeVisible();
     await settle(page);
@@ -225,7 +236,11 @@ for (const width of [1800, 390]) {
       await expect(page.locator('[data-review-assignment]')).toHaveCount(2);
       if (numbering) {
         await page.getByRole('tab', { name: /^Plan/ }).click();
-        await page.getByRole('button', { name: 'Keep current numbering', exact: true }).click();
+        await page.getByRole('button', { name: 'Change…', exact: true }).click();
+        await page
+          .getByRole('dialog', { name: 'Album numbering' })
+          .getByRole('button', { name: 'Keep current numbering', exact: true })
+          .click();
         await board.getByRole('button', { name: /Resolve conflicting album metadata/ }).click();
         const pending = page.locator('[data-review-assignment][data-status="uncertain"]');
         await expect(pending).toHaveCount(1);
@@ -233,7 +248,7 @@ for (const width of [1800, 390]) {
         await expect(page.getByRole('button', { name: /Apply \d+ ready change/ })).toHaveCount(0);
         await pending.click();
         await expect(
-          page.getByRole('button', { name: 'Use proposed change', exact: true }),
+          page.getByRole('button', { name: 'Accept changes', exact: true }),
         ).toBeVisible();
         expect(requests).toEqual([{ action: 'dismiss' }]);
       }
@@ -306,10 +321,16 @@ for (const width of [1800, 390, 320]) {
         await page.getByLabel(scenario.plan, { exact: true }).scrollIntoViewIfNeeded();
         await expect(page.getByLabel('Ready change summary', { exact: true })).toHaveCount(1);
         if (scenario.name === 'duplicate_saved') {
-          await expect(page.getByLabel('Planned file actions')).toContainText(
-            /Keep .*01 - Home.flac; move to recoverable quarantine: .*01 - Home.copy.flac/,
-          );
-          await page.getByLabel('Planned file actions').scrollIntoViewIfNeeded();
+          const files = page.getByRole('region', { name: 'File decisions included' });
+          await expect(
+            files.getByRole('columnheader', { name: 'Keep', exact: true }),
+          ).toBeVisible();
+          await expect(
+            files.getByRole('columnheader', { name: 'Quarantine', exact: true }),
+          ).toBeVisible();
+          await expect(files.getByText('01 - Home.flac', { exact: true })).toBeVisible();
+          await expect(files.getByText('01 - Home.copy.flac', { exact: true })).toBeVisible();
+          await files.scrollIntoViewIfNeeded();
         }
         if (scenario.name === 'waiting') {
           const waiting = page.getByLabel('Missing tracks being acquired');
@@ -445,19 +466,22 @@ for (const width of [1800, 390, 320]) {
     await expect(page.getByText(/All required decisions are planned and saved/)).toBeVisible();
     await page.getByRole('button', { name: 'Apply 2 ready changes', exact: true }).click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText(/01 - Home.flac/)).toBeVisible();
-    await expect(dialog.getByText(/02 - Open Water.flac/)).toBeVisible();
+    await dialog.locator('summary').filter({ hasText: 'Metadata fills' }).click();
+    await expect(dialog.getByRole('rowheader', { name: 'Home', exact: true })).toBeVisible();
+    await expect(dialog.getByRole('rowheader', { name: 'Open Water', exact: true })).toBeVisible();
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     expect(requests).toHaveLength(1);
     await page.getByRole('button', { name: 'Apply 2 ready changes', exact: true }).click();
-    await dialog.getByRole('button', { name: 'Apply plans', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Apply selected plans', exact: true }).click();
     await expect(page.getByText(/The ready album plans changed/)).toBeVisible();
     expect(requests[1]).toEqual({
       case_id: 'album:10:relocated',
       organize: false,
       signature: acceptanceSnapshot('relocated').ready_preview.signature,
+      case_ids: ['album:10:relocated'],
+      organize_case_ids: [],
     });
-    await page.getByRole('button', { name: 'Reload queue', exact: true }).click();
+    await page.reload();
     await expect(
       page.getByRole('button', { name: 'Apply 2 ready changes', exact: true }),
     ).toHaveCount(0);
@@ -535,7 +559,9 @@ for (const width of [1800, 390, 320]) {
     expect(requests[1]).toEqual({ finding_ids: [selected.id] });
     // Cancellation happens in Wishlist; reloading Review must retain partial intent.
     api.setCase('cancelled');
-    await page.getByRole('button', { name: 'Reload queue', exact: true }).click();
+    await page.reload();
+    await page.getByRole('tab', { name: /^Tracks/ }).click();
+    await page.getByRole('button', { name: 'Release order', exact: true }).click();
     await expect(page.getByText('Request cancelled · still wanted').first()).toBeVisible();
     await expect(
       page.locator('[data-review-assignment]').filter({ hasText: 'Afterglow' }),
@@ -571,7 +597,7 @@ for (const width of [1800, 390, 320]) {
       { action: 'fix', fix_action: '1', evidence_token: finding.evidence_token },
     ]);
     await page.getByRole('tab', { name: /^Plan/ }).click();
-    await page.getByRole('button', { name: 'Review file decision', exact: true }).click();
+    await page.getByRole('button', { name: 'Review file decision for Home', exact: true }).click();
     await expect(page.getByRole('tab', { name: /^Tracks/ })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -580,11 +606,13 @@ for (const width of [1800, 390, 320]) {
     await page.getByRole('tab', { name: /^Plan/ }).click();
     await page.getByRole('button', { name: 'Apply 2 ready changes', exact: true }).click();
     const dialog = page.getByRole('dialog');
+    const files = dialog.getByRole('region', { name: 'File decisions included' });
+    await expect(files.getByRole('columnheader', { name: 'Keep', exact: true })).toBeVisible();
     await expect(
-      dialog.getByText(
-        /Keep .*01 - Home.flac; move to recoverable quarantine: .*01 - Home.copy.flac/,
-      ),
+      files.getByRole('columnheader', { name: 'Quarantine', exact: true }),
     ).toBeVisible();
+    await expect(files.getByText('01 - Home.flac', { exact: true })).toBeVisible();
+    await expect(files.getByText('01 - Home.copy.flac', { exact: true })).toBeVisible();
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
     expect(requests).toHaveLength(1);
     expect(errors).toEqual([]);
