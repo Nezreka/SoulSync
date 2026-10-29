@@ -429,6 +429,15 @@ def _song_copies_sql() -> str:
             f" AND al2.primary_artist_id IS al.primary_artist_id AND {_live_file_sql('t2')})")
 
 
+def _fold_sql(column: str) -> str:
+    """``column`` folded like ``normalize_for_comparison`` (unidecode +
+    lowercase, upstream's *_norm columns). Only a value with a non-ASCII
+    character pays for the Python fold; plain ASCII is SQLite's own LOWER,
+    so a search over a big library stays a C-speed scan."""
+    return (f"(CASE WHEN {column} GLOB '*[^ -~]*' THEN norm_text({column})"
+            f" ELSE LOWER({column}) END)")
+
+
 _SONG_SORTS = {
     "title": "{title}, t.id",
     "recent": "t.added_at IS NULL, t.added_at DESC, t.id DESC",
@@ -475,31 +484,35 @@ def list_songs(conn, *, search: str = "", letter: str = "all", sort: str = "titl
     order = _SONG_SORTS.get(sort, _SONG_SORTS["title"]).replace("{title}", _alpha_key("t.title"))
     q = str(search or "").strip()
     if q:
-        # the query also searched with its accents off ("SÁND" finds "Sand");
-        # the catalogue keeps no folded title column to match the other way
-        import unicodedata
-        fq = "".join(c for c in unicodedata.normalize("NFKD", q) if not unicodedata.combining(c))
-        for key, text in (("", q), ("f", fq)):
-            escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            params.update({f"{key}q": text.lower(), f"{key}prefix": f"{escaped}%",
-                           f"{key}like": f"%{escaped}%"})
-        title = ("t.title LIKE :like ESCAPE '\\' OR t.title LIKE :flike ESCAPE '\\'")
-        where.append(f"({title} OR t.track_artist LIKE :like ESCAPE '\\'"
-                     " OR t.track_artist LIKE :flike ESCAPE '\\'"
-                     " OR ar.name LIKE :like ESCAPE '\\' OR ar.name LIKE :flike ESCAPE '\\')")
-        order = ("CASE WHEN LOWER(t.title) IN (:q, :fq) THEN 0"
-                 " WHEN t.title LIKE :prefix ESCAPE '\\' OR t.title LIKE :fprefix ESCAPE '\\' THEN 1"
-                 f" WHEN {title} THEN 2 ELSE 3 END,"
-                 f" CASE WHEN {title} THEN {_alpha_key('t.title')} END,"
+        # both sides folded the way upstream's *_norm columns are, so "sand"
+        # finds "Sánd" and "SÁND" finds "Sand"
+        from core.text.normalize import normalize_for_comparison
+        conn.create_function("norm_text", 1, lambda x: normalize_for_comparison(x) if x else "",
+                             deterministic=True)
+        # a query unidecode folds away entirely ("♥") must not match everything
+        fq = normalize_for_comparison(q) or q.lower()
+        escaped = fq.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params.update(q=fq, prefix=f"{escaped}%", like=f"%{escaped}%")
+        title = f"{_fold_sql('t.title')} LIKE :like ESCAPE '\\'"
+        where.append(f"({title} OR {_fold_sql('t.track_artist')} LIKE :like ESCAPE '\\'"
+                     f" OR {_fold_sql('ar.name')} LIKE :like ESCAPE '\\')")
+        # the hits carry their folded title (``ft``), read by the ranking
+        # below instead of folding every hit again per ORDER BY term
+        order = ("CASE WHEN t.ft = :q THEN 0 WHEN t.ft LIKE :prefix ESCAPE '\\' THEN 1"
+                 " WHEN t.ft LIKE :like ESCAPE '\\' THEN 2 ELSE 3 END,"
+                 " (CASE WHEN t.ft LIKE :like ESCAPE '\\' THEN t.ak END) COLLATE NOCASE,"
                  " t.album_id, t.disc_number, t.track_number, t.id")
     base = f"{_SONG_FROM} WHERE {' AND '.join(where)}"
     filtered = bool(q) or (letter not in ("", "all")) or dupes or bool(quality)
     total = conn.execute(
         f"SELECT COUNT(*) FROM (SELECT 1 {base} LIMIT {SONGS_COUNT_CAP + 1})" if filtered
         else f"SELECT COUNT(*) {base}", params).fetchone()[0]
+    page_sql = (f"WITH hits AS MATERIALIZED (SELECT t.id, t.album_id, t.disc_number, t.track_number,"
+                f" {_fold_sql('t.title')} AS ft, {_alpha_key('t.title')} AS ak {base})"
+                f" SELECT t.id FROM hits t" if q else f"SELECT t.id {base}")
     ids = [r[0] for r in conn.execute(
-        f"SELECT t.id {base} ORDER BY {order} LIMIT :limit OFFSET :offset",
-        {**params, "limit": limit, "offset": (page - 1) * limit})]
+        f"{page_sql} ORDER BY {order} LIMIT :limit OFFSET :offset",
+        {**params, "limit": limit, "offset": (page - 1) * limit})] if total else []
     songs = song_rows(conn, ids)
     capped = filtered and total > SONGS_COUNT_CAP
     total = min(total, SONGS_COUNT_CAP) if capped else total

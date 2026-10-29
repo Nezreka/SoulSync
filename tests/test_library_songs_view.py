@@ -10,7 +10,8 @@ Ported from upstream's legacy-table fixture: "another server" is another
 profile's library here, since the catalogue is not split by media server.
 Upstream's EXPLAIN-plan tests guard the indexes of its legacy normalized
 columns (title_norm/name_norm); Library v2 has none of those columns and
-searches with LIKE like its artist/album filters, so they have no counterpart.
+searches with LIKE over the same fold (normalize_for_comparison, computed per
+row only for values with a non-ASCII character), so they have no counterpart.
 The A-Z order uses the catalogue's A-Z key (leading punctuation skipped), as
 the artist and album lists do, so "'Til Tomorrow" files under T.
 """
@@ -92,8 +93,30 @@ def test_an_exact_title_outranks_a_title_containing_it(conn):
     assert titles(songs(conn, search='friends')) == ['Friends', 'Famous Friends']
 
 
-def test_search_ignores_case_and_the_querys_accents(conn):
+def test_equal_matches_are_alphabetical_whatever_their_case(conn):
+    lib2_seed.track(conn, 'Joji', 'Piss In The Wind', 'LOVE YOU LESS', path='/m/40.flac')
+    lib2_seed.track(conn, 'Joji', 'Piss In The Wind', 'Love Me Better', path='/m/41.flac')
+    conn.commit()
+    assert titles(songs(conn, search='love'))[:2] == ['Love Me Better', 'LOVE YOU LESS']
+
+
+def test_search_ignores_case_and_accents(conn):
     assert titles(songs(conn, search='SÁND')) == ['Sand in My Boots']
+
+
+def test_an_accented_title_or_artist_is_found_without_its_accents(conn):
+    lib2_seed.track(conn, 'Beyoncé', 'Lemonade', 'Mañana', path='/m/30.flac')
+    lib2_seed.track(conn, 'Sigur Rós', 'Takk', 'Hoppípolla', path='/m/31.flac')
+    conn.commit()
+    assert titles(songs(conn, search='manana')) == ['Mañana']
+    assert titles(songs(conn, search='beyonce')) == ['Mañana']
+    assert titles(songs(conn, search='HOPPIPOLLA')) == ['Hoppípolla']
+    # the exact title still ranks first once folded
+    assert titles(songs(conn, search='hoppípolla'))[0] == 'Hoppípolla'
+
+
+def test_a_query_with_nothing_left_after_folding_finds_nothing(conn):
+    assert titles(songs(conn, search='♥')) == []
 
 
 def test_nothing_found_is_an_empty_page_not_an_error(conn):
