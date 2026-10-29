@@ -1,6 +1,6 @@
 """Presentation changes preserve approvals; changed effects and guards revoke them."""
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 import pytest
 

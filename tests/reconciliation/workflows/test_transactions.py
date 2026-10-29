@@ -1,23 +1,26 @@
 """Commands, scan publication and recovery work share explicit boundaries."""
-import json
 import sqlite3
+import threading
 
 import pytest
 
+import core.reconciliation.projection as reconciliation_projection
 from core.reconciliation import album_state, decisions, work
-from core.reconciliation.fulfillment import outstanding
+from core.reconciliation import search as search
+from core.reconciliation.fulfillment import (
+    outstanding,
+)
 from core.repair_jobs.library_reconciliation import LibraryReconciliationJob
 from core.repair_worker import RepairWorker
 from tests.reconciliation.support.acceptance import build_album, scan_case
 
 
 def test_decision_during_scan_retains_previous_snapshot_and_queues_fresh_plan(tmp_path, monkeypatch):
-    import core.repair_jobs.library_reconciliation as job
     album = build_album(tmp_path, monkeypatch, 'numbering_metadata_conflict')
     case = scan_case(album)
     with album.db._get_connection() as conn:
         before = conn.execute('SELECT plan_json FROM reconcile_album_plans').fetchall()
-    publish = job._persist_selected_plan
+    publish = reconciliation_projection._persist_selected_plan
     changed = []
 
     def decide_before_publication(*args, **kwargs):
@@ -26,7 +29,7 @@ def test_decision_during_scan_retains_previous_snapshot_and_queues_fresh_plan(tm
             assert album.worker.apply_review_decision_group(case['case_id'], 'numbering', action='dismiss')['success']
         return publish(*args, **kwargs)
 
-    monkeypatch.setattr(job, '_persist_selected_plan', decide_before_publication)
+    monkeypatch.setattr('core.reconciliation.projection._persist_selected_plan', decide_before_publication)
     result = LibraryReconciliationJob().scan(album.context)
     assert 'decisions changed' in result.stopped_early
     with album.db._get_connection() as conn:
@@ -41,7 +44,6 @@ def test_decision_during_scan_retains_previous_snapshot_and_queues_fresh_plan(tm
 
 
 def test_failed_plan_publication_rolls_back_finding_updates(tmp_path, monkeypatch):
-    import core.repair_jobs.library_reconciliation as job
     album = build_album(tmp_path, monkeypatch, 'contradictory_metadata')
     scan_case(album)
     with album.db._get_connection() as conn:
@@ -56,7 +58,7 @@ def test_failed_plan_publication_rolls_back_finding_updates(tmp_path, monkeypatc
         raise RuntimeError('simulated snapshot write failure')
 
     album.context.create_finding = changed_findings
-    monkeypatch.setattr(job, 'persist_album_plan', fail_plan)
+    monkeypatch.setattr('core.reconciliation.projection.persist_album_plan', fail_plan)
     result = LibraryReconciliationJob().scan(album.context)
     assert result.stopped_early
     with album.db._get_connection() as conn:
@@ -127,3 +129,30 @@ def test_state_readers_do_not_write_or_repair_data(tmp_path, monkeypatch):
         outstanding(conn)
         work.pending(conn)
         assert not writes
+
+
+def test_same_album_planning_waits_and_next_mutation_cannot_overtake_a_plan():
+    from core.library.maintenance_lock import MaintenanceLock
+    lock = MaintenanceLock()
+    entered, finished = threading.Event(), threading.Event()
+    def mutate():
+        entered.set()
+        with lock:
+            finished.set()
+    with lock.planning('other'):
+        thread = threading.Thread(target=mutate)
+        thread.start()
+        assert entered.wait(1)
+        assert not finished.wait(.05)
+    thread.join(1)
+    assert finished.is_set()
+    blocked = threading.Event()
+    def plan():
+        with lock.planning('same'):
+            blocked.set()
+    with lock.for_album('same'):
+        thread = threading.Thread(target=plan)
+        thread.start()
+        assert not blocked.wait(.05)
+    thread.join(1)
+    assert blocked.is_set()

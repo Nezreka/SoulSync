@@ -1,6 +1,7 @@
 """Minimal persisted acquisition database."""
 import sqlite3
 
+
 class Database:
     def __init__(self, path):
         self.path = str(path)
@@ -9,4 +10,3 @@ class Database:
 
     def _get_connection(self):
         return sqlite3.connect(self.path)
-

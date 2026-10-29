@@ -3,7 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.reconciliation.discovery import search_release_candidates, supported_search_context
+from core.reconciliation.discovery import (
+    search_release_candidates,
+    supported_search_context,
+)
 
 
 @pytest.mark.parametrize('artist', ['LIVE', 'Live', 'Lïve'])

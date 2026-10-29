@@ -7,7 +7,11 @@ from core.reconciliation import decisions
 from core.reconciliation.audio_copy import save_choice
 from core.reconciliation.choices import remember_release_choice
 from core.reconciliation.fulfillment import record_request
-from core.reconciliation.migration import MigrationConflict, migrate_album, upgrade_review_state
+from core.reconciliation.migration import (
+    MigrationConflict,
+    migrate_album,
+    upgrade_review_state,
+)
 from core.reconciliation.redirects import record_relocation, resolve_case
 from core.reconciliation.replacement import ensure_schema as replacement_schema
 from core.reconciliation.stores import ALBUM_ID_STORES, DOCUMENT_STORES, STORE_OWNERS
@@ -123,7 +127,7 @@ def test_all_reconciliation_tables_have_documented_owners(tmp_path, monkeypatch)
 
 
 def test_replacement_survives_verified_move_and_reapproval_without_losing_journal(tmp_path, monkeypatch):
-    import os
+
     from core.reconciliation import replacement
     from core.reconciliation.evidence import file_identity
     album = build_album(tmp_path, monkeypatch, 'supported')

@@ -6,6 +6,7 @@ membership from album title text or a limited search result.
 """
 
 from __future__ import annotations
+from core.reconciliation.fields import POSITION_FIELDS, FILE_POSITION_FIELDS, preview_field
 
 import json
 import hashlib
@@ -556,7 +557,10 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
 def get_case(db, case_id: str, *, status: str = 'pending',
              job_id: str = '') -> dict[str, Any] | None:
     conn = db._get_connection()
+    own_snapshot = not conn.in_transaction
     try:
+        if own_snapshot:
+            conn.execute('BEGIN')
         rows = conn.execute(f"""
             SELECT id, job_id, finding_type, severity, status, entity_type,
                    entity_id, file_path, title, description, details_json,
@@ -682,8 +686,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                         if not assignment.get(field) and history['details'].get(field):
                             assignment[field] = history['details'][field]
                 if (numbering_choice_pending and
-                        {'track_number', 'disc_number', 'library_track_number',
-                         'library_disc_number'}.intersection(
+                        POSITION_FIELDS.intersection(
                              assignment.get('changes') or {})):
                     assignment['numbering_preview'] = True
                 finding = finding_by_path.get(assignment.get('file_path'))
@@ -799,6 +802,8 @@ def get_case(db, case_id: str, *, status: str = 'pending',
             'decisions': plan['decisions'],
         }
     finally:
+        if own_snapshot:
+            conn.rollback()
         conn.close()
 
 
@@ -884,18 +889,15 @@ def _ready_requests(item, peers=None):
 
 def _ready_action_changes(details):
     """Deduplicate matching tag/library effects for the review confirmation."""
-    aliases = {'library_title': 'title', 'library_track_artist': 'track_artist',
-               'library_recording_mbid': 'musicbrainz_recording_id',
-               'library_track_number': 'track_number', 'library_disc_number': 'disc_number'}
     changes, seen = [], set()
     for field, value in (details.get('changes') or {}).items():
-        field = aliases.get(field, field)
+        field = preview_field(field)
         key = json.dumps([field, value.get('old'), value.get('new')], sort_keys=True, default=str)
         if key in seen:
             continue
         seen.add(key)
         kind = ('album' if field == 'library_album_title' else 'filenames' if field == 'filename'
-                else 'numbering' if field in ('track_number', 'disc_number', 'total_discs')
+                else 'numbering' if field in FILE_POSITION_FIELDS
                 else 'fills' if value.get('old') in (None, '', [], {}) else 'corrections')
         changes.append({'field': field, 'old': value.get('old_label', value.get('old')),
                         'new': value.get('new_label', value.get('new')), 'kind': kind})

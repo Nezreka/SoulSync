@@ -5,8 +5,10 @@ decision policy, tag files and queue projection are production implementations.
 """
 from copy import deepcopy
 from types import SimpleNamespace
-from mutagen.flac import FLAC
+
 from mutagen.easyid3 import EasyID3
+from mutagen.flac import FLAC
+
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import LibraryReconciliationJob
 from core.repair_worker import RepairWorker
@@ -14,13 +16,19 @@ from database.music_database import MusicDatabase
 from tests.reconciliation.support.audio import _Acoustid, _minimal_flac
 
 RELEASE = '11111111-1111-4111-8111-111111111111'
+
+
 OTHER_RELEASE = '22222222-2222-4222-8222-222222222222'
+
+
 ARTIST = 'Acceptance Artist'
+
+
 ALBUM = 'Northbound' 
+
 
 def recording_id(index):
     return f'00000000-0000-4000-8000-{index:012d}'
-
 
 
 def build_album(tmp_path, monkeypatch, scenario):
@@ -116,20 +124,19 @@ def build_album(tmp_path, monkeypatch, scenario):
     reader = job._read_file_tags
     monkeypatch.setattr(job, '_read_file_tags',
                         lambda path: {**reader(path), 'duration_ms': durations[str(path)]})
-    monkeypatch.setattr(job, 'get_album_tracks_for_source', lambda *a, **k: deepcopy(slots))
-    monkeypatch.setattr(job, 'get_album_for_source', lambda *a, **k: {
+    monkeypatch.setattr('core.reconciliation.selection.get_album_tracks_for_source', lambda *a, **k: deepcopy(slots))
+    monkeypatch.setattr('core.reconciliation.selection.get_album_for_source', lambda *a, **k: {
         'name': ALBUM, 'artists': [{'name': ARTIST}], 'musicbrainz_release_id': RELEASE,
         'country': 'GB', 'date': '2001-01-01', 'media': [{'format': 'Digital Media'}],
     })
     monkeypatch.setattr(job, '_search_release_candidates', lambda *a, **k: [])
-    monkeypatch.setattr(job, '_release_group_candidates', lambda *a, **k: [])
+    monkeypatch.setattr('core.reconciliation.selection._release_group_candidates', lambda *a, **k: [])
     config = SimpleNamespace(get=lambda key, default=None:
         True if key == 'lossy_copy.enabled' and 'companion' in scenario else default)
     context = JobContext(db=db, transfer_folder=str(root), config_manager=config,
                          acoustid_client=client, create_finding=worker._create_finding)
     return SimpleNamespace(db=db, worker=worker, context=context, paths=paths,
                            folder=folder, root=root, slots=slots, durations=durations)
-
 
 
 def scan_case(album):
@@ -141,4 +148,3 @@ def scan_case(album):
     case = album.worker.get_review_case(case_id)
     assert case is not None
     return case
-

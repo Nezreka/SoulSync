@@ -45,7 +45,7 @@ def request_identity(details, slot):
 
 def record_request_on_connection(conn, details, slot):
     """Persist exact collection intent in the wishlist transaction."""
-    from core.repair_jobs.library_reconciliation import _wanted_slot_key
+    from core.reconciliation.projection import _wanted_slot_key
     ensure_schema(conn)
     conn.execute("""CREATE TABLE IF NOT EXISTS reconcile_wanted_slots (
         album_id TEXT PRIMARY KEY, source TEXT NOT NULL,

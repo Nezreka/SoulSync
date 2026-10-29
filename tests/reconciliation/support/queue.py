@@ -1,12 +1,16 @@
 """Minimal queue persistence for projection and policy tests."""
 import json
 import sqlite3
+
 from core.reconciliation.identity import review_case_key
+from core.reconciliation.queue import (
+    ready_batch_preview,
+)
+
 
 class _Connection(sqlite3.Connection):
     def close(self):
         pass
-
 
 
 class _Database:
@@ -40,3 +44,8 @@ class _Database:
               json.dumps(details), review_case_key(details, path, finding_id)))
         self.conn.commit()
 
+
+def _ready_selection(db, *, case_id=''):
+    preview = ready_batch_preview(db, case_id=case_id)
+    return ([action['id'] for album in preview['albums'] for action in album['actions']],
+            [album['case_id'] for album in preview['albums']])

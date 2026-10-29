@@ -10,3 +10,12 @@ FIELD_ALIASES = {'disc_total': 'total_discs', 'disctotal': 'total_discs', 'total
 
 def canonical_field(name):
     return FIELD_ALIASES.get(name, name)
+
+
+PREVIEW_ALIASES = {'library_title': 'title', 'library_track_artist': 'track_artist',
+                   'library_recording_mbid': 'musicbrainz_recording_id',
+                   'library_track_number': 'track_number', 'library_disc_number': 'disc_number',
+                   **FIELD_ALIASES}
+
+def preview_field(name):
+    return PREVIEW_ALIASES.get(name, name)

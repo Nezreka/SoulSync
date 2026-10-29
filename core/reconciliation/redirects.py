@@ -31,8 +31,9 @@ def record_relocation(db, old_folder: str, new_case: str) -> None:
             (old_folder, new_case, target[4]))]
         for old_case in previous_keys:
             from core.reconciliation.replacement import relocate_pending
-            plan = conn.execute('SELECT plan_json FROM reconcile_album_plans WHERE case_id=?', (new_case,)).fetchone()
-            relocate_pending(conn, old_case, new_case, target[1], json.loads(plan[0]))
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_replacements'").fetchone():
+                plan = conn.execute('SELECT plan_json FROM reconcile_album_plans WHERE case_id=?', (new_case,)).fetchone()
+                relocate_pending(conn, old_case, new_case, target[1], json.loads(plan[0]))
             rebind_review(conn, old_case, new_case, target[0])
             if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_settled_decisions'").fetchone():
                 conn.execute('UPDATE reconcile_settled_decisions SET case_id=? WHERE case_id=?', (new_case, old_case))
