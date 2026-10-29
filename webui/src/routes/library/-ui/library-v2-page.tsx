@@ -173,6 +173,7 @@ import { groupHistoryEvents, summarizeRecentHistory } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { OwnedArtistHeroExtras } from './owned-artist-hero-extras';
+import { OwnedTopTrackActions, OwnedTopTracksDownloadAll } from './owned-artist-top-tracks';
 import { AlbumUnlockMenuItem, OwnedTrackMoreMenu } from './owned-artist-track-actions';
 import { QualityProfilePicker } from './quality-profile-modal';
 import { reassignSubject } from './reassign';
@@ -6386,6 +6387,12 @@ function TopTracksSidebar({
               <span className="hero-top-track-name" title={track.name}>
                 {track.name}
               </span>
+              <OwnedTopTrackActions
+                track={track}
+                artistName={artistName}
+                artistId={trackArtistId}
+                downloadable={bookmarkable}
+              />
               {track.playcount ? (
                 <span className="hero-top-track-plays">{formatCompactNumber(track.playcount)}</span>
               ) : null}
@@ -6413,6 +6420,14 @@ function TopTracksSidebar({
           );
         })}
       </div>
+      {bookmarkable ? (
+        <OwnedTopTracksDownloadAll
+          tracks={tracks}
+          source={trackSource}
+          artistName={artistName}
+          artistId={trackArtistId}
+        />
+      ) : null}
     </div>
   );
 }
