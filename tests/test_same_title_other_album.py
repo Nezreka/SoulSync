@@ -72,14 +72,13 @@ def test_the_preference_never_invents_a_match(db, tmp_path):
 
 
 def test_media_server_rows_prefer_the_album_asked_about(db, tmp_path):
+    from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
     with db._get_connection() as conn:
-        c = conn.cursor()
-        c.execute("INSERT INTO artists (id, name, server_source) VALUES (1, 'Band', 'plex')")
-        for album_id, name in ((1, "First Album"), (2, "Second Album")):
-            c.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, 1, ?, 'plex')",
-                      (album_id, name))
-            c.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source) "
-                      "VALUES (?, ?, 1, 'Intro', ?, 'plex')", (album_id, album_id, f"/m/{album_id}.mp3"))
+        artist = seed_artist(conn, server_id="ar-1", name="Band")
+        for n, name in ((1, "First Album"), (2, "Second Album")):
+            album = seed_album(conn, server_id=f"al-{n}", title=name, artist_id=artist)
+            seed_track(conn, server_id=f"t-{n}", title="Intro", album_id=album,
+                       artist_id=artist, file_path=f"/m/{n}.mp3")
         conn.commit()
     for wanted in ("First Album", "Second Album"):
         track, _ = db.check_track_exists("Intro", "Band", server_source="plex", prefer_album=wanted)

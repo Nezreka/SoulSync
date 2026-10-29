@@ -10975,6 +10975,7 @@ class MusicDatabase:
             # with its file (#1199) -- "do we have this album's tracks" and
             # "which folder is it in" are both questions about one library
             from core.library2.sql_util import (
+                owned_in_library_sql,
                 in_library_sql, owner_clause, scoped_primary_file_join,
             )
             _file_on = (scoped_primary_file_join("t", "f") if owner_clause()
@@ -10987,7 +10988,7 @@ class MusicDatabase:
                 JOIN lib2_albums al ON al.id = t.album_id
                 LEFT JOIN lib2_track_files f
                        ON {_file_on}
-                WHERE t.album_id = ?{in_library_sql("track", "t")}
+                WHERE t.album_id = ?{owned_in_library_sql("track", "t")}
                 ORDER BY t.track_number, t.title
             """, (album_id,))
             rows = cursor.fetchall()
@@ -11781,8 +11782,8 @@ class MusicDatabase:
             return []
 
         # "do we already have this" asks the caller's library (#1199)
-        from core.library2.sql_util import in_library_sql, scoped_primary_file_join
-        where_clause = " AND ".join(where_conditions) + in_library_sql("track", "tracks")
+        from core.library2.sql_util import owned_in_library_sql, in_library_sql, scoped_primary_file_join
+        where_clause = " AND ".join(where_conditions) + owned_in_library_sql("track", "tracks")
 
         # Relevance ordering. The old `ORDER BY tracks.title` was case-SENSITIVE
         # (SQLite BINARY collation sorts 'B' before 'b'), so a lowercase exact
@@ -11906,8 +11907,8 @@ class MusicDatabase:
                 "OR tracks.server_source=?)")
             params.extend((server_source, server_source))
 
-        from core.library2.sql_util import in_library_sql, scoped_primary_file_join
-        where_clause = " AND ".join(where_parts) + in_library_sql("track", "tracks")
+        from core.library2.sql_util import owned_in_library_sql, in_library_sql, scoped_primary_file_join
+        where_clause = " AND ".join(where_parts) + owned_in_library_sql("track", "tracks")
         params.append(limit * 3)
 
         mapping_projection = "NULL AS requested_server_id"
@@ -12036,8 +12037,8 @@ class MusicDatabase:
                 # If no search criteria, return empty list
                 return []
 
-            from core.library2.sql_util import in_library_sql
-            where_clause = " AND ".join(where_conditions) + in_library_sql("album", "albums")
+            from core.library2.sql_util import owned_in_library_sql, in_library_sql
+            where_clause = " AND ".join(where_conditions) + owned_in_library_sql("album", "albums")
             params.append(limit)
 
             cursor.execute(f"""
@@ -13024,8 +13025,8 @@ class MusicDatabase:
                                "AND m.server_source=?) OR albums.server_source = ?)")
                         params.extend((server_source, server_source))
                     params.append(limit)
-                    from core.library2.sql_util import in_library_sql
-                    src += in_library_sql("album", "albums")
+                    from core.library2.sql_util import owned_in_library_sql, in_library_sql
+                    src += owned_in_library_sql("album", "albums")
                     cursor.execute(f"""
                         SELECT albums.*, albums.primary_artist_id AS artist_id,
                                albums.image_url AS thumb_url, albums.added_at AS created_at,
@@ -13100,9 +13101,10 @@ class MusicDatabase:
                 params.extend((server_source, server_source))
             params.append(limit)
             from core.library2.sql_util import (
+                owned_in_library_sql,
                 in_library_sql, owner_clause, scoped_primary_file_join,
             )
-            where += in_library_sql("track", "t")  # this library's (#1199)
+            where += owned_in_library_sql("track", "t")  # this library's (#1199)
             _file_on = (scoped_primary_file_join("t", "f") if owner_clause()
                         else f"f.track_id = t.id AND f.is_primary = 1 AND {_LIVE_FILE}")
 
@@ -13149,7 +13151,7 @@ class MusicDatabase:
             cursor = conn.cursor()
             placeholders = ','.join('?' for _ in album_ids)
             # the tracks this library has (#1199), with this library's file
-            from core.library2.sql_util import in_library_sql, scoped_primary_file_join
+            from core.library2.sql_util import owned_in_library_sql, in_library_sql, scoped_primary_file_join
             cursor.execute(f"""
                 SELECT t.*, al.primary_artist_id AS artist_id,
                        a.name as artist_name, al.title as album_title,
@@ -13160,7 +13162,7 @@ class MusicDatabase:
                 JOIN lib2_artists a ON a.id = al.primary_artist_id
                 LEFT JOIN lib2_track_files f
                        ON {scoped_primary_file_join("t", "f")}
-                WHERE t.album_id IN ({placeholders}){in_library_sql("track", "t")}
+                WHERE t.album_id IN ({placeholders}){owned_in_library_sql("track", "t")}
             """, list(album_ids))
             rows = cursor.fetchall()
             tracks: List[DatabaseTrack] = []

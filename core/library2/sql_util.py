@@ -368,6 +368,17 @@ def in_library_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
     return f" AND {owned_sql(entity_type, alias, scope=scope)}"
 
 
+def owned_in_library_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
+    """`` AND <alias has a live file in this library>`` for the "do we already
+    have this" matchers, ALWAYS, single library or not.
+
+    in_library_sql adds nothing on a single-library install, which was right
+    while every catalogue row had a file. It doesn't anymore: completeness
+    fills an album's missing slots, discography and wanted rows land too, and
+    a matcher that counted those as owned skipped the download for good."""
+    return f" AND {owned_sql(entity_type, alias, scope=separated(scope))}"
+
+
 def scoped_primary_file_join(track_alias: str, file_alias: str, *, scope=_AMBIENT) -> str:
     """The ON condition joining a track to the file a matcher reports: the
     primary flag, or -- when libraries are separated -- the best file of THIS
@@ -386,6 +397,6 @@ def scoped_primary_file_join(track_alias: str, file_alias: str, *, scope=_AMBIEN
             f" ORDER BY {primary_order('pf')} LIMIT 1)")
 
 
-__all__ = ["ANY_OWNER", "in_library_sql", "intent_profile_id", "library_artist_sql", "monitored_sql", "owned_sql",
+__all__ = ["ANY_OWNER", "in_library_sql", "owned_in_library_sql", "intent_profile_id", "library_artist_sql", "monitored_sql", "owned_sql",
            "owner_clause", "scoped_primary_file_join",
            "scope_visibility_sql", "scoped_monitored", "select_existing_ids"]

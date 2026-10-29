@@ -28,7 +28,10 @@ def _seed(db: MusicDatabase, rows):
         seed_track(conn, server_id=f"t-{track_counter}", title=track_title,
                    album_id=album_ids[album_key],
                    artist_id=artist_ids[artist_name],
-                   server_source=server_source)
+                   server_source=server_source,
+                   # an owned track has its file: a fileless catalogue row is
+                   # a missing slot, never a match
+                   file_path=f"/music/{server_source}/{track_counter}.flac")
     conn.commit()
 
 

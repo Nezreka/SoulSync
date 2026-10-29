@@ -55,3 +55,37 @@ def test_removal_still_sees_an_artist_whose_only_file_went_missing(single):
         conn.commit()
     assert "ar-2" in single.db.get_all_artist_ids_for_server("plex")
     assert "al-2" in single.db.get_all_album_ids_for_server("plex")
+
+
+def _album_with_a_missing_slot(db, shared):
+    """An album with one owned track and one catalogue slot without a file:
+    what completeness materializes for every partly owned album after the
+    upgrade."""
+    with db._get_connection() as conn:
+        artist = seed_artist(conn, server_id="ar-9", name="Slots")
+        album = seed_album(conn, server_id="al-9", title="Half There", artist_id=artist)
+        seed_track(conn, server_id="t-9a", title="Owned Song", album_id=album, artist_id=artist,
+                   file_path=os.path.join(shared, "Slots", "Half There", "01.flac"))
+        seed_track(conn, server_id=None, title="Missing Song", album_id=album, artist_id=artist)
+        conn.commit()
+    return album
+
+
+def test_a_missing_album_slot_is_never_owned(single):
+    """The album download modal maps an album's tracks by title and calls
+    every hit owned at confidence 1.0. A fileless catalogue slot in that map
+    meant the missing song was never downloaded. On a single-library install
+    the matchers must still require a live file."""
+    album = _album_with_a_missing_slot(single.db, single.shared)
+    titles = {t.title for t in single.db.get_tracks_by_album(album)}
+    assert titles == {"Owned Song"}
+    candidates = {t.title for t in single.db.get_candidate_tracks_for_albums([album])}
+    assert candidates == {"Owned Song"}
+
+
+def test_check_track_exists_does_not_match_a_missing_slot(single):
+    _album_with_a_missing_slot(single.db, single.shared)
+    track, confidence = single.db.check_track_exists("Missing Song", "Slots", confidence_threshold=0.8)
+    assert track is None or track.title != "Missing Song"
+    track, confidence = single.db.check_track_exists("Owned Song", "Slots", confidence_threshold=0.8)
+    assert track is not None and track.title == "Owned Song"

@@ -65,7 +65,7 @@ def _library(titles):
             db, server_id=f'tr-{i}', title=title,
             album_id=midnights if is_first else other,
             artist_id=taylor if is_first else various,
-            server_source='jellyfin',
+            server_source='jellyfin', file_path=f'/music/{i}.flac',
         )
     db.commit()
     return db
@@ -203,7 +203,7 @@ def _library_by_artist(pairs):
         artist_id = seed_artist(db, server_id=f'ar-{i}', name=artist)
         album_id = seed_album(db, server_id=f'al-{i}', title='A', artist_id=artist_id)
         seed_track(db, server_id=f'tr-{i}', title=title, album_id=album_id,
-                  artist_id=artist_id, server_source='jellyfin')
+                  artist_id=artist_id, server_source='jellyfin', file_path=f'/music/{i}.flac')
     db.commit()
     return db
 

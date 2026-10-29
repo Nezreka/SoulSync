@@ -50,7 +50,7 @@ def test_catalogue_and_server_ids_cannot_collide(tmp_path):
         conn.execute("INSERT INTO lib2_tracks(id,album_id,title,server_source,server_id) "
                      "VALUES(10,?,'Catalogue','plex','99')", (album,))
         seed_track(conn, server_id='10', title='Server', album_id=album,
-                   artist_id=artist)
+                   artist_id=artist, file_path='/scan/server.flac')
 
     assert db.get_track_by_id(10).title == 'Catalogue'
     assert db.get_track_by_server_id('10', 'plex').title == 'Server'
