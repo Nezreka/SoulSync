@@ -397,9 +397,13 @@ describe('Library V2 artist detail — All Releases views', () => {
     await waitFor(() => expect(router.state.location.search).toMatchObject({ album: 2 }));
   });
 
-  it('switches the header between compact and the rich legacy hero (ldp-05)', async () => {
+  it('opens on the rich hero and switches to compact and back (ldp-05)', async () => {
     const { router } = renderArtist('/library?artist=1');
     await screen.findByRole('heading', { name: 'Portishead' });
+    expect(document.querySelector('.artist-hero-section')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Compact header/ }));
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ header: 'compact' }));
     expect(document.querySelector('.artist-hero-section')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /Rich header/ }));
@@ -530,7 +534,7 @@ describe('Library V2 artist detail — All Releases views', () => {
         artist: 1,
         releases: 'library',
         releaseView: 'cards',
-        header: 'compact',
+        header: 'rich',
       }),
     );
   });

@@ -6016,7 +6016,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
           ? {
               releases: 'library' as const,
               releaseView: undefined,
-              header: 'compact' as const,
+              header: 'rich' as const,
             }
           : {}),
       }),
@@ -6176,7 +6176,7 @@ function useUrlSyncedFilter(
  *  "All Releases" shows the full provider discography. */
 /** ldp-05: which artist view you land on depends on where you came from.
  *  Opening an artist from inside Library V2 always starts in the V2 shape —
- *  My Library, compact header, with discovery back on its cards default, regardless of what the previous
+ *  My Library, rich header, with discovery back on its cards default, regardless of what the previous
  *  artist's URL happened to carry. Coming from search is the opposite case
  *  and is set by the artist-detail route. */
 function openArtistSearch<T extends Record<string, unknown>>(previous: T, artistId: number) {
@@ -6186,7 +6186,7 @@ function openArtistSearch<T extends Record<string, unknown>>(previous: T, artist
     album: undefined,
     releases: 'library' as const,
     releaseView: undefined,
-    header: 'compact' as const,
+    header: 'rich' as const,
   };
 }
 
@@ -6922,36 +6922,69 @@ const RING_RADIUS = 20;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 function EnrichmentCoverage({ coverage }: { coverage: Record<string, number> }) {
+  // the services that know this artist lead, strongest first. a row of zeros
+  // said nothing and was the loudest thing in the hero, so they wait behind
+  // one quiet toggle.
+  const [showUnmatched, setShowUnmatched] = useState(false);
   if (!coverage.total_tracks) return null;
+  const scored = ENRICH_SERVICES_COVERAGE.map((service) => ({
+    service,
+    pct: coverage[service.key] ?? 0,
+  }));
+  const matched = scored.filter((entry) => entry.pct > 0).sort((a, b) => b.pct - a.pct);
+  const unmatched = scored.filter((entry) => entry.pct <= 0);
+  const shown = showUnmatched ? [...matched, ...unmatched] : matched;
   return (
     <div className="artist-enrichment-coverage">
-      <div className="artist-enrich-title">Enrichment Coverage</div>
-      <div className="artist-enrich-grid">
-        {ENRICH_SERVICES_COVERAGE.map((service) => {
-          const pct = coverage[service.key] ?? 0;
-          const offset = RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * pct) / 100;
-          return (
-            <div className="artist-enrich-circle" key={service.key}>
-              <div className="artist-enrich-ring">
-                <svg viewBox="0 0 48 48">
-                  <circle className="ring-bg" cx="24" cy="24" r={RING_RADIUS} />
-                  <circle
-                    className="ring-fill"
-                    cx="24"
-                    cy="24"
-                    r={RING_RADIUS}
-                    stroke={service.color}
-                    strokeDasharray={RING_CIRCUMFERENCE.toFixed(1)}
-                    strokeDashoffset={offset.toFixed(1)}
-                  />
-                </svg>
-                <span className="ring-pct">{Math.round(pct)}</span>
-              </div>
-              <span className="artist-enrich-label">{service.label}</span>
-            </div>
-          );
-        })}
+      <div className="artist-enrich-title">
+        Enrichment Coverage
+        <span className={styles.enrichSummary}>
+          {matched.length
+            ? `${matched.length} of ${scored.length} services`
+            : 'no service has matched yet'}
+        </span>
       </div>
+      {shown.length ? (
+        <div className="artist-enrich-grid">
+          {shown.map(({ service, pct }) => {
+            const offset = RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * pct) / 100;
+            return (
+              <div
+                className={`artist-enrich-circle${pct > 0 ? '' : ` ${styles.enrichUnmatched}`}`}
+                key={service.key}
+                title={`${service.label}: ${Math.round(pct)}% of this artist's tracks`}
+              >
+                <div className="artist-enrich-ring">
+                  <svg viewBox="0 0 48 48">
+                    <circle className="ring-bg" cx="24" cy="24" r={RING_RADIUS} />
+                    <circle
+                      className="ring-fill"
+                      cx="24"
+                      cy="24"
+                      r={RING_RADIUS}
+                      stroke={service.color}
+                      strokeDasharray={RING_CIRCUMFERENCE.toFixed(1)}
+                      strokeDashoffset={offset.toFixed(1)}
+                    />
+                  </svg>
+                  <span className="ring-pct">{Math.round(pct)}</span>
+                </div>
+                <span className="artist-enrich-label">{service.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {unmatched.length ? (
+        <button
+          type="button"
+          className={styles.enrichToggle}
+          aria-expanded={showUnmatched}
+          onClick={() => setShowUnmatched((v) => !v)}
+        >
+          {showUnmatched ? 'Hide unmatched' : `+ ${unmatched.length} unmatched`}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -6989,9 +7022,12 @@ function LegacyArtistHero({
   titleLeading,
   onPickImage,
   eyebrow,
+  facts,
 }: {
   /** the quiet line above the name */
   eyebrow?: ReactNode;
+  /** what the library holds for this artist (catalogue artists only) */
+  facts?: ReactNode;
   name: string;
   imageUrl: string;
   remoteImageUrl?: string | null;
@@ -7061,69 +7097,106 @@ function LegacyArtistHero({
     return () => observer.disconnect();
   }, [cleanBio]);
   const backdrop = imageUrl || remoteImageUrl || '';
+  const hasNumbers = Boolean(listeners || playcount || followers);
   return (
-    <div className={`artist-hero-section ${styles.premierHero}`}>
-      {backdrop ? (
-        <div
-          className={styles.heroBackdrop}
-          style={{ backgroundImage: `url("${backdrop.replace(/"/g, '%22')}")` }}
-          aria-hidden="true"
-        />
-      ) : null}
-      <div className="artist-hero-content">
-        <div
-          className={`artist-image-container ${styles.heroImageBox}`}
-          title={onPickImage ? 'Change artist photo' : undefined}
-          onClick={onPickImage}
-        >
-          <Artwork
-            src={imageUrl}
-            remote={remoteImageUrl}
-            alt={name}
-            className={`artist-image ${styles.heroImage}`}
+    <>
+      <section className={`artist-hero-section ${styles.premierHero}`}>
+        {/* discover's billboard: the photo bleeds in from the right under a
+            scrim, sharp, not a blurred wash */}
+        {backdrop ? (
+          <div
+            className={styles.billboardPhoto}
+            style={{ backgroundImage: `url("${backdrop.replace(/"/g, '%22')}")` }}
+            aria-hidden="true"
           />
-          {onPickImage ? (
-            <div className={`artist-image-edit-overlay ${styles.heroImageOverlay}`}>
-              <SvgIcon name="cover" />
-              <span>Change photo</span>
-            </div>
-          ) : null}
-        </div>
-        <div className="artist-info">
-          <div className="artist-hero-identity">
-            {eyebrow ? (
-              <p className={styles.heroEyebrow}>
-                <span className={styles.heroEyebrowDot} aria-hidden="true" />
-                {eyebrow}
-              </p>
+        ) : (
+          <div className={styles.billboardGlow} aria-hidden="true" />
+        )}
+        <div className={styles.billboardScrim} aria-hidden="true" />
+        <div className="artist-hero-content">
+          <div
+            className={`artist-image-container ${styles.heroImageBox}`}
+            title={onPickImage ? 'Change artist photo' : undefined}
+            onClick={onPickImage}
+          >
+            <Artwork
+              src={imageUrl}
+              remote={remoteImageUrl}
+              alt={name}
+              className={`artist-image ${styles.heroImage}`}
+            />
+            {onPickImage ? (
+              <div className={`artist-image-edit-overlay ${styles.heroImageOverlay}`}>
+                <SvgIcon name="cover" />
+                <span>Change photo</span>
+              </div>
             ) : null}
-            <div className={styles.detailTitleRow}>
-              {titleLeading}
-              <h1 className="artist-name">{name}</h1>
-              {titleActions}
-            </div>
-            {genres.length > 0 ? (
-              <div className="artist-genres-container">{genres.join(' · ')}</div>
-            ) : null}
-            {badges ? <div className="artist-hero-badges">{badges}</div> : null}
           </div>
-          {actions ? <div className="artist-hero-actions">{actions}</div> : null}
-          {cleanBio ? (
-            <div ref={bioRef} className={`artist-hero-bio${expandedBio ? ' expanded' : ''}`}>
-              <span className="bio-text">{cleanBio}</span>
-              {bioFits ? null : (
-                <span
-                  className="artist-hero-bio-toggle"
-                  onClick={() => setExpandedBio((v) => !v)}
-                  role="button"
-                  onKeyDown={(e) => e.key === 'Enter' && setExpandedBio((v) => !v)}
-                >
-                  {expandedBio ? 'Show less' : 'Read more'}
-                </span>
-              )}
+          <div className="artist-info">
+            <div className="artist-hero-identity">
+              {eyebrow ? (
+                <p className={styles.heroEyebrow}>
+                  <span className={styles.heroEyebrowDot} aria-hidden="true" />
+                  {eyebrow}
+                </p>
+              ) : null}
+              <div className={styles.detailTitleRow}>
+                {titleLeading}
+                <h1 className="artist-name">{name}</h1>
+                {titleActions}
+              </div>
+              {genres.length > 0 ? (
+                <div className="artist-genres-container">{genres.join(' · ')}</div>
+              ) : null}
+              {facts ? <div className={styles.heroFacts}>{facts}</div> : null}
+              {badges ? <div className="artist-hero-badges">{badges}</div> : null}
             </div>
-          ) : null}
-          {listeners || playcount || followers ? (
+            {actions ? <div className="artist-hero-actions">{actions}</div> : null}
+            {cleanBio ? (
+              <div ref={bioRef} className={`artist-hero-bio${expandedBio ? ' expanded' : ''}`}>
+                <span className="bio-text">{cleanBio}</span>
+                {bioFits ? null : (
+                  <span
+                    className="artist-hero-bio-toggle"
+                    onClick={() => setExpandedBio((v) => !v)}
+                    role="button"
+                    onKeyDown={(e) => e.key === 'Enter' && setExpandedBio((v) => !v)}
+                  >
+                    {expandedBio ? 'Show less' : 'Read more'}
+                  </span>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </section>
+      {/* under the billboard, discover's card band: what's popular, and what
+          you hold */}
+      <div className={styles.heroBand}>
+        <div className={styles.bandPopular}>
+          <TopTracksSidebar artistName={name} providerId={providerId} source={source} />
+        </div>
+        <div className={styles.bandCollection}>
+          <p className={styles.bandEyebrow}>Your collection</p>
+          <div className="collection-overview">
+            {sections.map((section) => (
+              <div className="collection-category" key={section.label}>
+                <span className="category-label">{section.label}</span>
+                <div className="completion-bar">
+                  <div
+                    className="completion-fill"
+                    style={{
+                      width: `${section.total ? clampPercent((section.owned / section.total) * 100) : 0}%`,
+                    }}
+                  />
+                </div>
+                <span className="category-stats">
+                  {section.owned}/{section.total}
+                </span>
+              </div>
+            ))}
+          </div>
+          {hasNumbers ? (
             <div className="artist-hero-numbers">
               {listeners ? (
                 <div className="artist-hero-stat">
@@ -7145,29 +7218,10 @@ function LegacyArtistHero({
               ) : null}
             </div>
           ) : null}
-          <div className="collection-overview">
-            {sections.map((section) => (
-              <div className="collection-category" key={section.label}>
-                <span className="category-label">{section.label}</span>
-                <div className="completion-bar">
-                  <div
-                    className="completion-fill"
-                    style={{
-                      width: `${section.total ? clampPercent((section.owned / section.total) * 100) : 0}%`,
-                    }}
-                  />
-                </div>
-                <span className="category-stats">
-                  {section.owned}/{section.total}
-                </span>
-              </div>
-            ))}
-          </div>
           {coverage ? <EnrichmentCoverage coverage={coverage} /> : null}
         </div>
-        <TopTracksSidebar artistName={name} providerId={providerId} source={source} />
       </div>
-    </div>
+    </>
   );
 }
 
@@ -7224,10 +7278,12 @@ function CatalogueArtistHero({
   artist,
   onPickImage,
   headerToggle,
+  facts,
 }: {
   artist: LibraryV2ArtistDetail;
   onPickImage: () => void;
   headerToggle: ReactNode;
+  facts?: ReactNode;
 }) {
   const matchStatus = useQuery(libraryV2ArtistMatchStatusQueryOptions(artist.id));
   const providerIds = artist.provider_ids ?? {};
@@ -7278,6 +7334,7 @@ function CatalogueArtistHero({
       // asked for on top — they answer a different question (how many of this
       // artist's TRACKS a provider actually knows).
       badges={<ArtistMatchChips artist={artist} />}
+      facts={facts}
       coverage={matchStatus.data?.enrichmentCoverage}
       actions={
         <>
@@ -7609,8 +7666,33 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     });
   }
 
-  /** ldp-05: one switch, in both header shapes. Compact stays the default;
-   *  arriving from a search result preselects the rich hero. */
+  /** what this library holds for the artist: profile, releases, size, which
+   *  media servers know it, what's queued. both header shapes show it. */
+  const libraryFacts = artist ? (
+    <>
+      <span className={`${styles.detailLabel} ${styles.labelProfile}`}>
+        <SvgIcon name="star" />
+        {artist.quality_profile
+          ? profileLabel(artist.quality_profile.name, artist.quality_profile_source)
+          : 'No quality profile'}
+      </span>
+      <span className={styles.detailLabel}>
+        <SvgIcon name="tracks" />
+        {artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length} releases
+      </span>
+      {artist.total_size_bytes > 0 ? (
+        <span className={styles.detailLabel}>
+          <SvgIcon name="folder" />
+          {formatFileSize(artist.total_size_bytes)}
+        </span>
+      ) : null}
+      <MediaServerRecognitionBadge sources={artist.media_server_sources} />
+      <ArtistQueueSummary tracks={queueStatusQuery.data?.tracks ?? {}} />
+    </>
+  ) : null;
+
+  /** ldp-05: one switch, in both header shapes. The rich hero is the default
+   *  everywhere; compact is the opt-in for a denser page. */
   const headerToggle = (
     <IconActionButton
       icon={headerMode === 'rich' ? 'collapse' : 'expand'}
@@ -7777,6 +7859,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               artist={artist}
               onPickImage={() => setShowArtPicker(true)}
               headerToggle={headerToggle}
+              facts={libraryFacts}
             />
           ) : (
             <header className={styles.detailHeader}>
@@ -7815,28 +7898,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 <p className={styles.subtitle}>
                   {artist.album_count} albums · {artist.single_count} singles
                 </p>
-                <div className={styles.detailLabels}>
-                  <span className={`${styles.detailLabel} ${styles.labelProfile}`}>
-                    <SvgIcon name="star" />
-                    {artist.quality_profile
-                      ? profileLabel(artist.quality_profile.name, artist.quality_profile_source)
-                      : 'No quality profile'}
-                  </span>
-
-                  <span className={styles.detailLabel}>
-                    <SvgIcon name="tracks" />
-                    {artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length}{' '}
-                    releases
-                  </span>
-                  {artist.total_size_bytes > 0 ? (
-                    <span className={styles.detailLabel}>
-                      <SvgIcon name="folder" />
-                      {formatFileSize(artist.total_size_bytes)}
-                    </span>
-                  ) : null}
-                  <MediaServerRecognitionBadge sources={artist.media_server_sources} />
-                  <ArtistQueueSummary tracks={queueStatusQuery.data?.tracks ?? {}} />
-                </div>
+                <div className={styles.detailLabels}>{libraryFacts}</div>
                 {artist.genres.length > 0 ? (
                   <p className={styles.genres}>{artist.genres.join(', ')}</p>
                 ) : null}

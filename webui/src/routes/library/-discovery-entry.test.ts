@@ -12,8 +12,9 @@ describe('Discovery artist entry', () => {
     });
   });
   it('keeps explicit display choices and ordinary library defaults', () => {
+    // one hero everywhere: a plain library visit opens the rich header too
     expect(libraryV2SearchSchema.parse({ artist: 7 })).toMatchObject({
-      header: 'compact',
+      header: 'rich',
       releases: 'library',
       // the discovery tab opens on cards wherever the visit started
       releaseView: 'cards',

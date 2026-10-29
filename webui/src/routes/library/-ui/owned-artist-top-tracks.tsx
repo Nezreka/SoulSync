@@ -10,6 +10,7 @@ import {
   trackArtistLabel,
   wishlistTrackBody,
 } from '../../artist-detail/-artist-detail.top-tracks';
+import { LineIcon } from './line-icon';
 
 // dev's top-tracks row actions for the owned hero: play, add to playlist and
 // a real wishlist add (or a request). nick's bookmark (monitor) stays next to
@@ -92,7 +93,7 @@ export function OwnedTopTrackActions({
             void wishlist();
           }}
         >
-          ⬇
+          <LineIcon name="download" size={14} />
         </button>
       ) : null}
     </>

@@ -6966,7 +6966,12 @@ textarea.searchInput {
   inset: 0;
   z-index: 0;
   background:
-    linear-gradient(90deg, rgba(10, 13, 20, 0.92) 0%, rgba(10, 13, 20, 0.7) 55%, rgba(10, 13, 20, 0.45) 100%),
+    linear-gradient(
+      90deg,
+      rgba(10, 13, 20, 0.92) 0%,
+      rgba(10, 13, 20, 0.7) 55%,
+      rgba(10, 13, 20, 0.45) 100%
+    ),
     linear-gradient(0deg, rgba(10, 13, 20, 0.9) 0%, transparent 60%);
   pointer-events: none;
 }
@@ -7331,7 +7336,12 @@ textarea.searchInput {
   position: absolute;
   inset: 0;
   z-index: 0;
-  background: linear-gradient(90deg, rgba(10, 13, 20, 0.9) 0%, rgba(10, 13, 20, 0.62) 60%, rgba(10, 13, 20, 0.4) 100%);
+  background: linear-gradient(
+    90deg,
+    rgba(10, 13, 20, 0.9) 0%,
+    rgba(10, 13, 20, 0.62) 60%,
+    rgba(10, 13, 20, 0.4) 100%
+  );
   pointer-events: none;
 }
 
@@ -7571,7 +7581,8 @@ textarea.searchInput {
   filter: grayscale(0.7) brightness(0.6);
 }
 
-.detailView :global(.discography-sections .release-card.album-card.missing:hover .album-card-image) {
+.detailView
+  :global(.discography-sections .release-card.album-card.missing:hover .album-card-image) {
   filter: grayscale(0.2) brightness(0.85);
 }
 
@@ -8526,7 +8537,12 @@ textarea.searchInput {
   }
 
   .premierHero::after {
-    background: linear-gradient(0deg, rgba(10, 13, 20, 0.95) 0%, rgba(10, 13, 20, 0.7) 60%, rgba(10, 13, 20, 0.5) 100%);
+    background: linear-gradient(
+      0deg,
+      rgba(10, 13, 20, 0.95) 0%,
+      rgba(10, 13, 20, 0.7) 60%,
+      rgba(10, 13, 20, 0.5) 100%
+    );
   }
 
   .premierHero > :global(.artist-hero-content) {
@@ -8652,4 +8668,683 @@ textarea.searchInput {
 
 .artistSettingsGrid .select {
   font-size: 13px;
+}
+
+/* one hero everywhere: what your library holds for the artist sits under the
+   name, quieter than the play row and louder than the provider chips */
+.heroFacts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 4px;
+}
+
+.heroFacts .detailLabel {
+  min-height: 26px;
+  border-radius: 999px;
+  padding: 3px 11px;
+  background: var(--white-a06, rgba(255, 255, 255, 0.06));
+  border-color: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  font-weight: 500;
+  backdrop-filter: blur(8px);
+}
+
+.heroFacts .detailLabel :global(svg) {
+  width: 13px;
+  height: 13px;
+  opacity: 0.75;
+}
+
+/* coverage: the matched services lead, the zeros wait behind a toggle */
+.enrichSummary {
+  margin-left: 10px;
+  color: rgba(255, 255, 255, 0.38);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.enrichUnmatched {
+  opacity: 0.38;
+}
+
+.enrichToggle {
+  margin-top: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast, 120ms) ease,
+    background var(--dur-fast, 120ms) ease;
+}
+
+.enrichToggle:hover,
+.enrichToggle:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* ══ the artist billboard: discover's recipe, applied to the artist ════════
+   full-bleed photo anchored right, discover's obsidian scrim from the left,
+   a portrait beside a giant name, accent pill with a glow, glass secondaries.
+   underneath, discover's card band: popular tracks and your collection. */
+
+.premierHero {
+  display: flex;
+  align-items: flex-end;
+  min-height: 440px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--white-a10);
+  border-radius: 24px;
+  background: #0a0d14;
+  box-shadow:
+    0 24px 70px var(--black-a55),
+    inset 0 1px 0 var(--white-a15);
+}
+
+.premierHero::after {
+  content: none;
+}
+
+.billboardPhoto {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-position: 85% 25%;
+  background-size: cover;
+  filter: saturate(1.15) contrast(1.05);
+  transform: scale(1.02);
+  transition: transform 6s var(--ease-emphasized, cubic-bezier(0.2, 0, 0, 1));
+  pointer-events: none;
+}
+
+.premierHero:hover .billboardPhoto {
+  transform: scale(1.05);
+}
+
+/* no photo: the accent glow stands in, never a flat box */
+.billboardGlow {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse at 82% 18%, rgba(var(--accent-rgb), 0.34), transparent 58%),
+    radial-gradient(ellipse at 100% 100%, rgba(162, 56, 255, 0.24), transparent 55%);
+  pointer-events: none;
+}
+
+.billboardScrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(
+      90deg,
+      #0a0d14 0%,
+      rgba(10, 13, 20, 0.96) 34%,
+      rgba(10, 13, 20, 0.7) 58%,
+      rgba(10, 13, 20, 0.15) 86%,
+      transparent 100%
+    ),
+    linear-gradient(0deg, #0a0d14 0%, rgba(10, 13, 20, 0.75) 22%, transparent 60%),
+    linear-gradient(180deg, rgba(10, 13, 20, 0.45) 0%, transparent 35%);
+  pointer-events: none;
+}
+
+.premierHero > :global(.artist-hero-content) {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 40px;
+  width: 100%;
+  max-width: min(1180px, 84%);
+  padding: 64px 56px 48px;
+  box-sizing: border-box;
+}
+
+/* the portrait: a circle, like discover's "an artist you should know" */
+.premierHero .heroImageBox {
+  flex: none;
+  width: clamp(150px, 15vw, 200px);
+  aspect-ratio: 1;
+  border-radius: var(--radius-circle);
+}
+
+.premierHero .heroImageBox .heroImage {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: var(--radius-circle);
+  object-fit: cover;
+  box-shadow:
+    0 28px 60px var(--black-a60),
+    0 0 0 1px var(--white-a15),
+    0 0 0 6px rgba(255, 255, 255, 0.04);
+}
+
+.premierHero .heroImageOverlay {
+  border-radius: var(--radius-circle);
+}
+
+.premierHero :global(.artist-info) {
+  gap: 20px;
+  min-width: 0;
+  padding: 0;
+}
+
+/* eyebrow in discover's voice: a sentence, not shouty caps */
+.premierHero .heroEyebrow {
+  margin: 0 0 12px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.premierHero .heroEyebrowDot {
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.8);
+}
+
+.premierHero :global(.artist-hero-identity) .detailTitleRow :global(.artist-name) {
+  font-size: clamp(46px, 6.4vw, 104px);
+  font-weight: 900;
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+  text-shadow: 0 6px 30px var(--black-a70);
+  overflow-wrap: anywhere;
+}
+
+.premierHero :global(.artist-hero-identity) > :global(.artist-genres-container) {
+  margin: 14px 0 0;
+  color: var(--white-a85);
+  font-size: 1.02rem;
+  font-weight: 500;
+  text-shadow: 0 2px 10px var(--black-a60);
+}
+
+.premierHero .heroFacts {
+  margin: 16px 0 0;
+}
+
+.premierHero :global(.artist-hero-badges) {
+  margin: 12px 0 0;
+  opacity: 0.85;
+}
+
+/* the play row: discover's accent pill with its glow, glass for the rest */
+.premierHero :global(.artist-hero-actions) {
+  align-items: center;
+  gap: 12px;
+}
+
+.premierHero :global(.artist-hero-actions) .toolPrimary {
+  min-height: 46px;
+  padding: 0 28px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--accent);
+  color: #05130a;
+  font-size: 0.95rem;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.45);
+  transition:
+    transform var(--dur-quick, 160ms) var(--ease-emphasized, ease),
+    box-shadow var(--dur-quick, 160ms) ease;
+}
+
+.premierHero :global(.artist-hero-actions) .toolPrimary:hover:not(:disabled) {
+  background: var(--accent);
+  color: #000;
+  transform: scale(1.04) translateY(-1px);
+  box-shadow: 0 12px 32px rgba(var(--accent-rgb), 0.6);
+}
+
+.premierHero :global(.artist-hero-actions) .toolPrimary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.premierHero .heroSecondary,
+.premierHero :global(.discog-download-btn),
+.premierHero :global(.artist-hero-actions) .toolButton:not(.toolPrimary) {
+  min-height: 46px;
+  padding: 0 22px;
+  border: 1px solid var(--white-a18);
+  border-radius: 9999px;
+  background: var(--white-a12);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.premierHero .heroSecondary:hover,
+.premierHero :global(.discog-download-btn):hover,
+.premierHero :global(.artist-hero-actions) .toolButton:not(.toolPrimary):hover:not(:disabled) {
+  border-color: var(--white-a30);
+  background: rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
+}
+
+/* the small ones: round glass, like discover's "…" */
+.premierHero .aliasLinkButton,
+.premierHero :global(.artist-db-record-btn) {
+  min-height: 46px;
+  border: 1px solid var(--white-a18);
+  border-radius: 9999px;
+  background: rgba(10, 13, 20, 0.55);
+  backdrop-filter: blur(12px);
+}
+
+.premierHero :global(.artist-hero-bio) {
+  max-width: 640px;
+  margin: 0;
+  color: var(--white-a70);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+/* ── the band under the billboard ──────────────────────────────────────── */
+
+.heroBand {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 20px;
+  margin: 20px 0 12px;
+}
+
+.bandPopular,
+.bandCollection {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--white-a10);
+  border-radius: 24px;
+  padding: 26px 28px;
+  box-shadow:
+    0 18px 50px var(--black-a40),
+    inset 0 1px 0 var(--white-a08);
+}
+
+.bandPopular {
+  background:
+    linear-gradient(135deg, rgba(var(--accent-rgb), 0.1), rgba(255, 255, 255, 0.02) 55%), #11141c;
+}
+
+.bandCollection {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background:
+    linear-gradient(140deg, rgba(162, 56, 255, 0.18), rgba(255, 255, 255, 0.02) 62%), #14131d;
+}
+
+.bandEyebrow,
+.bandPopular :global(.hero-sidebar-title) {
+  margin: 0;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* popular: the top tracks as a two-column chart */
+.bandPopular :global(.artist-hero-right) {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+.bandPopular :global(.hero-top-tracks) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 18px;
+  margin: 14px 0 0;
+}
+
+.bandPopular :global(.hero-top-track) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  transition: background var(--dur-fast, 120ms) ease;
+}
+
+.bandPopular :global(.hero-top-track:hover) {
+  background: var(--white-a06);
+}
+
+.bandPopular :global(.hero-top-track-num) {
+  width: 18px;
+  flex: none;
+  color: var(--white-a40);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.bandPopular :global(.hero-top-track-name) {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bandPopular :global(.hero-top-track-plays) {
+  color: var(--white-a45);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bandPopular :global(.hero-top-tracks-download-all) {
+  margin: 16px 0 0;
+  min-height: 40px;
+  padding: 0 20px;
+  border: 1px solid var(--white-a18);
+  border-radius: 9999px;
+  background: var(--white-a08);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.bandPopular :global(.hero-top-tracks-download-all):hover {
+  border-color: var(--white-a30);
+  background: var(--white-a15);
+}
+
+/* your collection: big numbers in the dashboard's voice */
+.bandCollection :global(.collection-overview) {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.bandCollection :global(.collection-category) {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'label stats'
+    'bar bar';
+  gap: 8px 6px;
+  align-items: baseline;
+}
+
+.bandCollection :global(.collection-category .category-label) {
+  grid-area: label;
+  color: var(--white-a60);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.bandCollection :global(.collection-category .category-stats) {
+  grid-area: stats;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.bandCollection :global(.collection-category .completion-bar) {
+  grid-area: bar;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--white-a10);
+  overflow: hidden;
+}
+
+.bandCollection :global(.collection-category .completion-fill) {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.85), var(--accent));
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.5);
+}
+
+.bandCollection :global(.artist-hero-numbers) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  margin: 0;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--white-a08);
+}
+
+.bandCollection :global(.artist-hero-stat) {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.bandCollection :global(.artist-hero-stat .hero-stat-value) {
+  color: #fff;
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.bandCollection :global(.artist-hero-stat .hero-stat-label) {
+  color: var(--white-a50);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.bandCollection :global(.artist-enrichment-coverage) {
+  margin: 0;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--white-a08);
+}
+
+.bandCollection :global(.artist-enrich-title) {
+  margin: 0 0 12px;
+  color: var(--white-a60);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.bandCollection :global(.artist-enrich-grid) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.bandCollection :global(.artist-enrich-ring),
+.bandCollection :global(.artist-enrich-ring svg) {
+  width: 42px;
+  height: 42px;
+}
+
+.bandCollection :global(.artist-enrich-label) {
+  color: var(--white-a50);
+  font-size: 10.5px;
+}
+
+@media (max-width: 1000px) {
+  .heroBand {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .premierHero {
+    min-height: 0;
+  }
+
+  .billboardPhoto {
+    background-position: center 20%;
+    opacity: 0.55;
+  }
+
+  .premierHero > :global(.artist-hero-content) {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 22px;
+    max-width: 100%;
+    padding: 36px 22px 28px;
+  }
+
+  .premierHero .heroImageBox {
+    width: 128px;
+  }
+
+  .premierHero :global(.artist-hero-identity) .detailTitleRow :global(.artist-name) {
+    font-size: clamp(38px, 11vw, 56px);
+  }
+
+  .bandPopular :global(.hero-top-tracks) {
+    grid-template-columns: 1fr;
+  }
+
+  .bandCollection :global(.collection-overview) {
+    grid-template-columns: 1fr;
+  }
+
+  .bandPopular,
+  .bandCollection {
+    padding: 22px 20px;
+  }
+}
+
+/* popular rows: the hover buttons sat invisible but still took ~160px, so a
+   276px row left the title 92. play now covers the number on hover and the
+   rest take no room until the row is hovered or focused (spotify's pattern).
+   touch keeps them, there is no hover there. */
+.bandPopular :global(.hero-top-track) {
+  position: relative;
+}
+
+@media (hover: hover) {
+  .bandPopular :global(.hero-top-track-play) {
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+  .bandPopular :global(.hero-top-track:hover .hero-top-track-num),
+  .bandPopular :global(.hero-top-track:focus-within .hero-top-track-num) {
+    opacity: 0;
+  }
+
+  .bandPopular :global(.hero-top-track:focus-within .hero-top-track-play) {
+    opacity: 1;
+  }
+
+  .bandPopular :global(.hero-top-track-add),
+  .bandPopular :global(.hero-top-track-download) {
+    width: 0;
+    min-width: 0;
+    margin-left: -12px;
+    overflow: hidden;
+    transition:
+      width var(--dur-fast, 120ms) ease,
+      margin var(--dur-fast, 120ms) ease,
+      opacity var(--dur-fast, 120ms) ease;
+  }
+
+  .bandPopular :global(.hero-top-track:hover .hero-top-track-add),
+  .bandPopular :global(.hero-top-track:hover .hero-top-track-download),
+  .bandPopular :global(.hero-top-track:focus-within .hero-top-track-add),
+  .bandPopular :global(.hero-top-track:focus-within .hero-top-track-download) {
+    width: 24px;
+    margin-left: 0;
+    opacity: 1;
+  }
+}
+
+/* collection readouts stack like the dashboard's "393 plays": the number
+   leads, its label sits under it, the bar closes the column */
+.bandCollection :global(.collection-category) {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    'stats'
+    'label'
+    'bar';
+  gap: 4px;
+}
+
+.bandCollection :global(.collection-category .category-stats) {
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.bandCollection :global(.collection-category .completion-bar) {
+  margin-top: 6px;
+}
+
+.bandCollection :global(.collection-category .category-stats),
+.bandCollection :global(.collection-category .category-label) {
+  justify-self: start;
+  text-align: left;
+}
+
+/* the two cards share a height; download all closes its card, not the list */
+.bandPopular {
+  display: flex;
+  flex-direction: column;
+}
+
+.bandPopular :global(.artist-hero-right) {
+  flex: 1;
+}
+
+.bandPopular :global(.hero-top-tracks-download-all) {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
+.bandPopular :global(.hero-top-tracks) {
+  margin-bottom: 16px;
+}
+
+@media (max-width: 720px) {
+  /* "4/6" is short: three across still fits a phone */
+  .bandCollection :global(.collection-overview) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .bandCollection :global(.collection-category .category-stats),
+  .bandCollection :global(.artist-hero-stat .hero-stat-value) {
+    font-size: 24px;
+  }
 }

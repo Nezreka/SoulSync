@@ -7,6 +7,7 @@ import type { ProviderRelease } from '../-library-v2.api';
 
 import { artistDetailQueryOptions } from '../../artist-detail/-artist-detail.api';
 import { DiscographyModal } from '../../artist-detail/-ui/discography-modal';
+import { LineIcon } from './line-icon';
 
 // dev's download / request discography modal on the owned view: type filters,
 // select all/none, future releases, download + watch, retry failed, process
@@ -59,7 +60,9 @@ export function OwnedArtistDiscographyButton({
         disabled={open && detail.isFetching}
         onClick={() => setOpen(true)}
       >
-        <span className="discog-btn-icon">⬇</span>
+        <span className="discog-btn-icon">
+          <LineIcon name="download" />
+        </span>
         <span className="discog-btn-text">
           {open && detail.isFetching ? 'Loading discography…' : `${acquireVerb()} Discography`}
         </span>

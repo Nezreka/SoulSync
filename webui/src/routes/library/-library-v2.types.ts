@@ -126,7 +126,8 @@ const libraryV2SearchWithLegacy = z.preprocess(
 
 export const libraryV2SearchSchema = libraryV2SearchWithLegacy.transform((value) => ({
   ...value,
-  header: value.header ?? (value.view === 'discovery' ? ('rich' as const) : ('compact' as const)),
+  // one hero everywhere; compact is an opt-in (?header=compact)
+  header: value.header ?? ('rich' as const),
   releases:
     value.releases ?? (value.view === 'discovery' ? ('all' as const) : ('library' as const)),
   // the discovery tab opens on the cards view. table is an explicit choice.

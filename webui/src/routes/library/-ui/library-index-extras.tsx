@@ -17,6 +17,7 @@ import { ExportArtistsModal } from './export-modal';
 import extras from './library-index-extras.module.css';
 import { songsStripQueryOptions } from './library-songs';
 import styles from './library-v2-page.module.css';
+import { LineIcon } from './line-icon';
 
 /**
  * The old library page's index tools, put back on the Library v2 page: the
@@ -251,7 +252,7 @@ export function LibraryRadioButton() {
       title="Library Radio: shuffle your whole library, similar tracks keep auto-queuing"
       onClick={() => void window.startLibraryRadio?.()}
     >
-      📻 Radio
+      <LineIcon name="radio" /> Radio
     </button>
   );
 }
@@ -267,7 +268,7 @@ export function LibraryExportButton() {
         title="Export artists: pick watchlist or whole library, as JSON / CSV / text"
         onClick={() => setOpen(true)}
       >
-        ⬇ Export
+        <LineIcon name="download" /> Export
       </button>
       {open ? <ExportArtistsModal initialScope="library" onClose={() => setOpen(false)} /> : null}
     </>
