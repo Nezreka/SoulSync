@@ -2633,7 +2633,7 @@ class MusicDatabase:
             logger.error("Error adding library quality-profile column: %s", e)
 
     def set_album_canonical(self, album_id, source: str, canonical_album_id: str,
-                            score: float, locked: bool = False) -> bool:
+                            score: float, locked: bool = False, *, connection=None) -> bool:
         """Persist the resolved canonical (source, album_id, score) for an album
         (#765 Stage 2). Returns True if a row was updated.
 
@@ -2642,7 +2642,7 @@ class MusicDatabase:
         An AUTO write (``locked=False``, the resolve job) will NOT overwrite a
         locked pin — the guard is in the WHERE clause so it's atomic.
         """
-        conn = self._get_connection()
+        conn = connection or self._get_connection()
         try:
             cursor = conn.cursor()
             # Auto writes can't clobber a manual lock; manual writes always apply.
@@ -2662,13 +2662,17 @@ class MusicDatabase:
                 f"WHERE id = ?{guard}",
                 (source, str(canonical_album_id), float(score), 1 if locked else 0, album_id),
             )
-            conn.commit()
+            if connection is None:
+                conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
+            if connection is not None:
+                raise
             logger.error("Error setting album canonical for %s: %s", album_id, e)
             return False
         finally:
-            conn.close()
+            if connection is None:
+                conn.close()
 
     def get_album_canonical(self, album_id) -> Optional[dict]:
         """Return ``{'source','album_id','score','resolved_at','locked'}`` for an
@@ -9611,10 +9615,13 @@ class MusicDatabase:
             ensure_match_schema(cursor.connection)
             from core.reconciliation.store import ensure_schema
             ensure_schema(cursor.connection)
-            from core.reconciliation.migration import upgrade_review_state
-            upgrade_review_state(cursor.connection)
         except Exception as e:
             logger.error(f"Error migrating repair worker columns: {e}")
+            raise
+        # Required decision migrations must finish before serving queue reads.
+        # Continuing with partially upgraded policy could discard user choices.
+        from core.reconciliation.migration import upgrade_review_state
+        upgrade_review_state(cursor.connection)
 
     def _init_manual_library_match_table(self):
         """Create manual_library_track_matches table and indexes."""

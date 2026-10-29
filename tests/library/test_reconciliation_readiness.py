@@ -152,6 +152,9 @@ def test_numbering_recovery_survives_reindexing_but_not_replacement(tmp_path):
         title='Numbering', description='Legacy flattening', details=details)
     with db._get_connection() as conn:
         conn.execute("UPDATE repair_findings SET status='resolved', user_action='reconciliation_metadata'")
+        from core.reconciliation.settled import record
+        for fid, in conn.execute('SELECT id FROM repair_findings').fetchall():
+            record(conn, fid)
     file = {'db': {'id': 'new-id'}, 'path': '/music/song.flac',
             'acoustid': {'fingerprint_key': 'same-audio'}}
     assert recovers_flattened_numbering(flattened_numbering_history(db), file)
@@ -171,6 +174,9 @@ def test_numbering_recovery_survives_reindexing_but_not_replacement(tmp_path):
         title='Numbering', description='Source numbering restored', details=details)
     with db._get_connection() as conn:
         conn.execute("UPDATE repair_findings SET status='resolved', user_action='reconciliation_metadata'")
+        from core.reconciliation.settled import record
+        for fid, in conn.execute('SELECT id FROM repair_findings').fetchall():
+            record(conn, fid)
     file['acoustid']['fingerprint_key'] = 'same-audio'
     assert not recovers_flattened_numbering(flattened_numbering_history(db), file, **context)
     file.update(db={'id': 'third-id'}, path='/music/moved-again/song.flac')

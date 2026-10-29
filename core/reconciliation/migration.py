@@ -122,11 +122,25 @@ def _migrate_album(conn, old_id, new_id):
                 (old_id,)).fetchall():
             conn.execute(f'UPDATE {table} SET {json_col}=?, {case_col}=? WHERE {identity}=?',
                          (json.dumps(document(json.loads(raw))), case_key(key), fid))
+            if table == 'reconcile_settled_decisions':
+                extra = conn.execute('SELECT fields_json,numbering_evidence_json FROM reconcile_settled_decisions WHERE decision_id=?', (fid,)).fetchone()
+                fields = json.loads(extra[0])
+                if str(fields.get('library_album_assignment')) == old_id:
+                    fields['library_album_assignment'] = new_id
+                conn.execute('UPDATE reconcile_settled_decisions SET fields_json=?,numbering_evidence_json=? WHERE decision_id=?',
+                             (json.dumps(fields), json.dumps(document(json.loads(extra[1]))), fid))
             signature_column = {'repair_findings': 'review_signature', 'reconcile_review_choices': 'approval_signature'}.get(table)
             if signature_column in columns:
                 from core.reconciliation.signatures import signature
                 conn.execute(f'UPDATE {table} SET {signature_column}=? WHERE {identity}=?',
                              (signature(document(json.loads(raw))), fid))
+    if 'reconcile_review_work' in tables:
+        from core.reconciliation.work import enqueue
+        for key, kind, folder, scope, force in conn.execute('SELECT case_id,kind,folder,scope,refresh_catalogue FROM reconcile_review_work').fetchall():
+            updated = case_key(key)
+            if updated != key:
+                enqueue(conn, updated, folder, scope=scope, refresh_catalogue=bool(force), kind=kind)
+                conn.execute('DELETE FROM reconcile_review_work WHERE case_id=? AND kind=?', (key, kind))
     if 'reconcile_reviews' in tables:
         from core.reconciliation.decisions import rebind_review
         for key, in conn.execute('SELECT case_id FROM reconcile_reviews WHERE album_id=?', (old_id,)).fetchall():
@@ -146,6 +160,8 @@ def upgrade_review_state(conn):
     try:
         _upgrade_review_state(conn)
         _upgrade_signatures(conn)
+        _upgrade_current_decisions(conn)
+        _upgrade_acquisition(conn)
     except Exception:
         conn.execute('ROLLBACK TO review_schema_migration')
         conn.execute('RELEASE review_schema_migration')
@@ -189,11 +205,32 @@ def _upgrade_signatures(conn):
     from core.reconciliation.signatures import signature
     if conn.execute('SELECT 1 FROM reconcile_schema_versions WHERE version=2').fetchone():
         return
-    for fid, raw in conn.execute("SELECT id,details_json FROM repair_findings WHERE job_id='library_reconciliation' AND json_valid(details_json)").fetchall():
+    for fid, raw in conn.execute("SELECT id,details_json FROM repair_findings WHERE job_id='library_reconciliation' AND (status='pending' OR id IN (SELECT finding_id FROM reconcile_review_choices)) AND json_valid(details_json)").fetchall():
         conn.execute('UPDATE repair_findings SET review_signature=? WHERE id=?', (signature(json.loads(raw)), fid))
     for fid, raw in conn.execute('SELECT finding_id,evidence_json FROM reconcile_review_choices WHERE json_valid(evidence_json)').fetchall():
         conn.execute('UPDATE reconcile_review_choices SET approval_signature=? WHERE finding_id=?', (signature(json.loads(raw)), fid))
     conn.execute('INSERT INTO reconcile_schema_versions VALUES(2)')
+
+
+def _upgrade_current_decisions(conn):
+    from core.reconciliation import settled
+    if conn.execute('SELECT 1 FROM reconcile_schema_versions WHERE version=3').fetchone():
+        return
+    for fid, in conn.execute("SELECT id FROM repair_findings WHERE job_id='library_reconciliation' AND status IN ('resolved','dismissed') AND user_action IS NOT 'obsolete' ORDER BY id").fetchall():
+        settled.record(conn, fid)
+    settled.migrate_applied_releases(conn)
+    conn.execute('INSERT INTO reconcile_schema_versions VALUES(3)')
+
+
+def _upgrade_acquisition(conn):
+    from core.reconciliation import fulfillment
+    if conn.execute('SELECT 1 FROM reconcile_schema_versions WHERE version=4').fetchone():
+        return
+    fulfillment.migrate_legacy_replacement_requests(conn)
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name='wishlist_tracks'").fetchone():
+        fulfillment.backfill_requests(conn)
+        fulfillment.repair_request_payloads(conn)
+    conn.execute('INSERT INTO reconcile_schema_versions VALUES(4)')
 
 
 def repair_legacy_ids(db):

@@ -1033,7 +1033,9 @@
         "not_owned": 0,
         "extra": 0,
         "settled": 0
-      }
+      },
+      "review_id": "numbering_kept_metadata_conflict:review_id:7",
+      "decision_revision": 2
     },
     "decisions": [
       {
@@ -1118,7 +1120,7 @@
     "ready_albums_total": 0
   },
   "ready_preview": {
-    "signature": "numbering_kept_metadata_conflict:signature:7",
+    "signature": "numbering_kept_metadata_conflict:signature:8",
     "albums": [],
     "action_count": 0,
     "file_actions": 0

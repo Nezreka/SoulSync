@@ -22,6 +22,8 @@ class _Database:
             )
         ''')
         self.conn.execute('CREATE INDEX idx_review ON repair_findings(status, review_case_key)')
+        from core.reconciliation.choices import ensure_schema
+        ensure_schema(self.conn)
 
     def _get_connection(self):
         return self.conn

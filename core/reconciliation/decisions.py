@@ -74,6 +74,12 @@ def save(conn, case_id, kind, value, dependencies, *, expected_revision=None):
     return revision + 1
 
 
+def touch(conn, case_id):
+    row = find_review(conn, case_id)
+    if row:
+        conn.execute('UPDATE reconcile_reviews SET revision=revision+1 WHERE review_id=?', (row[0],))
+
+
 def clear(conn, case_id, kind):
     row = find_review(conn, case_id)
     if row and conn.execute('DELETE FROM reconcile_album_decisions WHERE review_id=? AND kind=?',
@@ -101,6 +107,8 @@ def rebind_review(conn, old_case, new_case, album_id):
                          (old[0], kind, value, dependencies, revision, updated))
         conn.execute('UPDATE reconcile_review_aliases SET review_id=? WHERE review_id=?', (old[0], target[0]))
         conn.execute('DELETE FROM reconcile_album_decisions WHERE review_id=?', (target[0],))
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_settled_decisions'").fetchone():
+            conn.execute('UPDATE reconcile_settled_decisions SET review_id=? WHERE review_id=?', (old[0], target[0]))
         conn.execute('DELETE FROM reconcile_reviews WHERE review_id=?', (target[0],))
     conn.execute('INSERT OR IGNORE INTO reconcile_review_aliases VALUES(?,?)', (new_case, old[0]))
     conn.execute('UPDATE reconcile_reviews SET album_id=?,case_id=?,revision=revision+1 WHERE review_id=?',

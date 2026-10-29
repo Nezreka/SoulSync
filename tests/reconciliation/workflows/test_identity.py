@@ -120,3 +120,43 @@ def test_all_reconciliation_tables_have_documented_owners(tmp_path, monkeypatch)
         assert tables <= STORE_OWNERS.keys()
         migrated = set(ALBUM_ID_STORES) | {'reconcile_reviews'}
         assert {table for table in tables if 'album_id' in {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}} <= migrated
+
+
+def test_replacement_survives_verified_move_and_reapproval_without_losing_journal(tmp_path, monkeypatch):
+    import os
+    from core.reconciliation import replacement
+    from core.reconciliation.evidence import file_identity
+    album = build_album(tmp_path, monkeypatch, 'supported')
+    case = scan_case(album)
+    path = album.paths[0]
+    stat = path.stat()
+    details = dict(album_id='10', profile_id=1, album_folder=str(album.folder),
+                   source='musicbrainz', release_id=case['album_plan']['release_id'], track_id=1,
+                   file_identity=file_identity(stat), fingerprint_key='unchanged-audio',
+                   size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns,
+                   replacement_track={'source_track_id':'wanted'})
+    monkeypatch.setattr('core.library.playlist_membership._active_server_and_client', lambda: ('navidrome', None))
+    operation = replacement.approve(album.db, str(path), details)
+    moved = tmp_path / 'moved' / path.name
+    moved.parent.mkdir()
+    path.rename(moved)
+    current = moved.stat()
+    new_key = case['case_id'] + '-moved'
+    journal = '{"playlists":{"p":{"phase":"saved"}}}'
+    with album.db._get_connection() as conn:
+        conn.execute('UPDATE tracks SET file_path=? WHERE id=1', (str(moved),))
+        conn.execute('UPDATE reconcile_replacements SET journal=?', (journal,))
+        plan = {'source':'musicbrainz', 'release_id': details['release_id'], '_planning': {'files':[
+            {'path':str(moved), 'fingerprint_key':'unchanged-audio', 'size_bytes':current.st_size,
+             'mtime_ns':current.st_mtime_ns, 'file_identity':file_identity(current)}]}}
+        replacement.relocate_pending(conn, case['case_id'], new_key, str(moved.parent), plan)
+        row = conn.execute('SELECT old_path,details_json,journal FROM reconcile_replacements').fetchone()
+        assert row[0] == str(moved) and row[2] == journal
+        saved = json.loads(row[1])
+        # A real case key is derived from the relocated folder on approval.
+        from core.reconciliation.fulfillment import request_identity
+        derived = request_identity(saved, saved['replacement_track'])['case_id']
+        conn.execute('UPDATE reconcile_replacements SET case_id=?', (derived,))
+    assert replacement.approve(album.db, str(moved), saved) == operation
+    with album.db._get_connection() as conn:
+        assert tuple(conn.execute('SELECT count(*),journal FROM reconcile_replacements').fetchone()) == (1,journal)

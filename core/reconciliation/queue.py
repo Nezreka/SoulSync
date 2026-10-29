@@ -404,7 +404,6 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
     page = max(0, int(page))
     limit = min(100, max(1, int(limit)))
     conn = db._get_connection()
-    choices.ensure_schema(conn)
     if q.strip():
         from core.reconciliation.search import prepare
         prepare(conn, status=status, job_id=job_id)
@@ -506,7 +505,6 @@ def matching_case_ids(db, case_ids, **filters) -> set[str]:
         from core.reconciliation.search import prepare
         prepare(conn, status=filters.get('status', 'pending'), job_id=filters.get('job_id', ''))
     where, params = queue_filter(conn=conn, **filters)
-    choices.ensure_schema(conn)
     try:
         placeholders = ','.join('?' for _ in case_ids)
         return {row[0] for row in conn.execute(
@@ -524,7 +522,6 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
     ready-action total. Use the exact same predicates as the paginated reader.
     """
     conn = db._get_connection()
-    choices.ensure_schema(conn)
     if q.strip():
         from core.reconciliation.search import prepare, matching_cases
         prepare(conn, status=status, job_id=job_id)
@@ -559,7 +556,6 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
 def get_case(db, case_id: str, *, status: str = 'pending',
              job_id: str = '') -> dict[str, Any] | None:
     conn = db._get_connection()
-    choices.ensure_schema(conn)
     try:
         rows = conn.execute(f"""
             SELECT id, job_id, finding_type, severity, status, entity_type,
@@ -932,7 +928,8 @@ def ready_batch_preview(db, *, case_id: str = '', include_snapshot: bool = False
                                 'file_action': bool(_ready_file_decision(item, row[0] if row else ''))})
             actions.sort(key=lambda action: not action['file_action'])
             albums.append({'artist': next((item['details'].get('artist_name') for item in value['items'] if item['details'].get('artist_name')), ''), 'case_id': key, 'album': next((item['details'].get('album_title') for item in value['items'] if item['details'].get('album_title')), key), 'actions': actions})
-        signature = hashlib.sha256(json.dumps(snapshot, sort_keys=True, default=str).encode()).hexdigest()
+        from core.reconciliation.signatures import signature as evidence_signature
+        signature = evidence_signature({'actions': [(case, fid, evidence_signature(details)) for case, fid, details in snapshot]})
         result = {'signature': signature, 'albums': albums, 'action_count': len(snapshot),
                   'file_actions': sum(action['file_action'] for album in albums for action in album['actions'])}
         if include_snapshot:

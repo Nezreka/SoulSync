@@ -56,7 +56,8 @@ def load_choices(conn, finding_id=None, *, case_id=None):
     result = {row[0]: tuple(row[1:]) for row in conn.execute(sql, params)}
     # Rebind only the read projection. Immutable approval evidence remains an
     # audit snapshot; execution still checks the current file and target.
-    if result and 'approval_signature' in columns:
+    if (result and 'approval_signature' in columns
+            and 'review_signature' in {row[1] for row in conn.execute('PRAGMA table_info(repair_findings)')}):
         query = '''SELECT c.finding_id,f.details_json FROM reconcile_review_choices c
             JOIN repair_findings f ON f.id=c.finding_id AND c.case_id=f.review_case_key
             WHERE c.approval_signature!='' AND c.approval_signature=f.review_signature'''
@@ -79,7 +80,7 @@ def load_choices(conn, finding_id=None, *, case_id=None):
             query_params = (case_id,)
         for fid, key, raw in conn.execute(query, query_params):
             choice = numbering.get(key)
-            if not choice:
+            if not choice or not POSITION_FIELDS.intersection(json.loads(raw or '{}').get('changes') or {}):
                 continue
             previous = result.get(fid)
             if previous and previous[0] == key and previous[1] == raw and previous[2] != 'numbering':
@@ -138,27 +139,8 @@ def plan_signature(items):
 
 
 def applied_numbering_choices(db):
-    """Keep an applied rejection of unchanged numbering across metadata repairs."""
-    conn = db._get_connection()
-    try:
-        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_review_choices'").fetchone():
-            return {}
-        result, seen = {}, set()
-        ensure_schema(conn)
-        for path, status, action, choice, raw in conn.execute('''
-            SELECT f.file_path, f.status, f.user_action,
-                CASE WHEN c.category='numbering' THEN c.choice ELSE c.numbering_choice END,
-                c.evidence_json
-            FROM reconcile_review_choices c JOIN repair_findings f ON f.id=c.finding_id
-            WHERE c.category='numbering' OR c.numbering_choice != '' ORDER BY f.id DESC'''):
-            if path in seen:
-                continue
-            seen.add(path)
-            if status in ('resolved', 'dismissed') and action != 'obsolete' and choice == 'dismiss':
-                result[path] = json.loads(raw)
-        return result
-    finally:
-        conn.close()
+    from core.reconciliation.settled import applied_numbering_choices as current
+    return current(db)
 
 
 def retains_numbering(previous, current):
@@ -174,34 +156,8 @@ def retains_numbering(previous, current):
 
 
 def flattened_numbering_history(db):
-    """Read latest numbering repairs, including those superseding legacy fixes."""
-    conn = db._get_connection()
-    try:
-        history, seen = {}, set()
-        for track_id, path, raw in conn.execute('''SELECT entity_id, file_path, details_json
-                FROM repair_findings WHERE job_id='library_reconciliation'
-                AND finding_type='reconciliation_metadata' AND status='resolved'
-                AND user_action='reconciliation_metadata' ORDER BY id DESC'''):
-            details = json.loads(raw or '{}')
-            positions = {'track_number', 'disc_number', 'total_discs', 'library_track_number', 'library_disc_number'}
-            if not positions.intersection(details.get('changes') or {}):
-                continue
-            identities = [('track', str(track_id))] if track_id else []
-            if path:
-                identities.append(('path', path))
-            for identity in identities:
-                if identity in seen:
-                    continue
-                seen.add(identity)
-                history[identity] = details
-            if (details.get('fingerprint_key') and details.get('album_id')
-                    and details.get('source') and details.get('release_id')):
-                identity = ('audio', str(details['album_id']), details['source'],
-                            details['release_id'], details['fingerprint_key'])
-                history.setdefault(identity, details)
-        return history
-    finally:
-        conn.close()
+    from core.reconciliation.settled import numbering_recovery_evidence
+    return numbering_recovery_evidence(db)
 
 
 def recovers_flattened_numbering(history, file, *, album_id=None, source='', release_id=''):
@@ -347,36 +303,7 @@ def remember_applied_releases(db, details):
 
 
 def backfill_applied_releases(db):
-    """Recover release acceptance from successful, explicitly approved operations."""
-    conn = db._get_connection()
-    try:
-        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        if not {'repair_operation_reports', 'repair_findings', 'albums'} <= tables:
-            return
-        existing = load_release_choices(db)
-        accepted = []
-        for raw, in conn.execute('SELECT report FROM repair_operation_reports ORDER BY updated_at DESC'):
-            report = json.loads(raw or '{}')
-            if (not report.get('review_approved') or report.get('running') or report.get('failed')
-                    or report.get('error') or report.get('stopped') or not report.get('fixed')):
-                continue
-            for key in report.get('review_case_ids') or []:
-                from core.reconciliation.redirects import resolve_case
-                key = resolve_case(db, key)
-                rows = conn.execute("SELECT details_json FROM repair_findings WHERE review_case_key=? "
-                    "AND status='resolved' AND user_action IN ('reconciliation_metadata', 'replacement_requested', 'wishlisted') "
-                    "ORDER BY id DESC", (key,)).fetchall()
-                for value, in rows:
-                    item = json.loads(value or '{}')
-                    album_id = str(item.get('album_id') or '')
-                    if not album_id or album_id in existing or not item.get('source') or not item.get('release_id'):
-                        continue
-                    album = conn.execute('SELECT canonical_locked, canonical_source, canonical_album_id '
-                                         'FROM albums WHERE id=?', (album_id,)).fetchone()
-                    if not album or (album[0] and (album[1], str(album[2])) != (item['source'], str(item['release_id']))):
-                        continue
-                    accepted.append(item)
-                    existing[album_id] = (item['source'], str(item['release_id']))
-    finally:
-        conn.close()
-    remember_applied_releases(db, accepted)
+    """Compatibility entry point for explicit migration tooling, never a read."""
+    from core.reconciliation.settled import migrate_applied_releases
+    with db._get_connection() as conn:
+        migrate_applied_releases(conn)

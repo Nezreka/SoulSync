@@ -101,7 +101,7 @@ def test_replacement_requires_the_published_copy_to_be_assigned(tmp_path):
 
 
 def test_migration_preserves_an_active_legacy_replacement_request(tmp_path):
-    from core.reconciliation.fulfillment import ensure_schema
+    from core.reconciliation.fulfillment import ensure_schema, migrate_legacy_replacement_requests
     db = Database(tmp_path / 'migration.db')
     details = {'album_id': 2, 'profile_id': 1, 'album_folder': str(tmp_path),
                'source': 'musicbrainz', 'release_id': 'release'}
@@ -114,6 +114,7 @@ def test_migration_preserves_an_active_legacy_replacement_request(tmp_path):
             json.dumps({'id': 'slot', 'provider': 'musicbrainz', 'album': {'id': 'release'}}),
             json.dumps({'reason': 'library_reconciliation_wrong_audio'})))
         ensure_schema(conn)
+        migrate_legacy_replacement_requests(conn)
         assert conn.execute('SELECT replacement_request, state FROM reconcile_fulfillment').fetchone() == (1, 'requested')
 
 

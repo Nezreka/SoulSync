@@ -961,7 +961,9 @@
         "not_owned": 0,
         "extra": 0,
         "settled": 0
-      }
+      },
+      "review_id": "compatible_qualifier:review_id:7",
+      "decision_revision": 0
     },
     "decisions": [
       {
@@ -1044,7 +1046,7 @@
     "ready_albums_total": 1
   },
   "ready_preview": {
-    "signature": "compatible_qualifier:signature:7",
+    "signature": "compatible_qualifier:signature:8",
     "albums": [
       {
         "artist": "Acceptance Artist",

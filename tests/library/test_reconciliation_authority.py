@@ -10,6 +10,7 @@ from core.repair_worker import RepairWorker
 
 from core.reconciliation.authority import conflict
 from core.reconciliation.choices import ensure_schema
+from core.reconciliation.settled import record as record_decision, reopen as reopen_decision
 
 
 class Database:
@@ -24,6 +25,7 @@ class Database:
             c.execute("CREATE TABLE repair_findings(id INTEGER, job_id TEXT, review_case_key TEXT, file_path TEXT, entity_id TEXT, status TEXT, user_action TEXT, details_json TEXT)")
             raw = json.dumps({'changes': {'track_number': {'old': 7, 'new': 2}, 'musicbrainz_recording_id': {'old': '', 'new': 'recording'}}})
             c.execute("INSERT INTO repair_findings VALUES (1,'library_reconciliation','case','/music/album/song.flac','track','pending',NULL,?)", (raw,))
+            c.execute("ALTER TABLE repair_findings ADD COLUMN finding_type TEXT NOT NULL DEFAULT 'reconciliation_metadata'")
             c.execute("INSERT INTO reconcile_review_choices(finding_id,case_id,evidence_json,category,choice) VALUES (1,'case',?,'numbering','dismiss')", (raw,))
 
     def _get_connection(self):
@@ -43,11 +45,14 @@ def test_resolved_identity_remains_authoritative_and_obsolete_history_does_not(t
     db = Database(tmp_path / 'db')
     with db._get_connection() as c:
         c.execute("UPDATE repair_findings SET status='resolved', user_action='retagged'")
+        record_decision(c, 1)
     args = dict(entity_type='track', entity_id='track')
     assert conflict(db, 'mbid_mismatch', **args)['review_conflict']
     assert conflict(db, 'metadata_gap', details={'found_fields': {'musicbrainz_recording_id': 'recording'}}, **args) is None
     with db._get_connection() as c:
         c.execute("UPDATE repair_findings SET user_action='obsolete'")
+        # History changes cannot revoke current decisions; reopening is explicit.
+        reopen_decision(c, 1)
     assert conflict(db, 'mbid_mismatch', **args) is None
 
 
@@ -77,6 +82,7 @@ def test_active_album_blocks_file_actions_and_completeness_uses_persisted_intent
         c.execute("UPDATE repair_findings SET status='resolved'")
         c.execute("CREATE TABLE reconcile_album_intent(album_id TEXT, scope TEXT)")
         c.execute("INSERT INTO reconcile_album_intent VALUES ('album','partial')")
+        record_decision(c, 1)
     assert conflict(db, 'incomplete_album', entity_type='album', entity_id='album')['review_conflict']
 
 
@@ -165,6 +171,7 @@ def test_accepted_release_id_governs_legacy_auto_resolver_without_explicit_pin(t
     with db._get_connection() as c:
         raw = json.dumps({'changes':{'musicbrainz_release_id':{'old':'old','new':'selected'}}})
         c.execute("UPDATE repair_findings SET details_json=?, status='resolved', user_action='retagged'", (raw,))
+        record_decision(c, 1)
     assert conflict(db,'canonical_version',entity_type='album',entity_id='album',
                     details={'source':'musicbrainz','album_id':'other'})['review_conflict']
     assert conflict(db,'canonical_version',entity_type='album',entity_id='album',
@@ -176,6 +183,7 @@ def test_album_tag_consistency_uses_tag_names_for_accepted_fields(tmp_path):
     with db._get_connection() as c:
         raw = json.dumps({'changes':{'musicbrainz_release_id':{'old':'old','new':'selected'}}})
         c.execute("UPDATE repair_findings SET details_json=?,status='resolved',user_action='retagged'", (raw,))
+        record_decision(c, 1)
     args = dict(entity_type='album',entity_id='album')
     assert conflict(db,'album_tag_inconsistency',details={'inconsistencies':[
         {'field':'musicbrainz_albumid','canonical':'other'}]},**args)['review_conflict']
@@ -321,6 +329,7 @@ def test_full_retag_preserves_identity_and_allows_independent_enrichment(tmp_pat
             'year': {'old': '2010', 'new': '2020'}}})
         conn.execute("UPDATE repair_findings SET file_path=?, details_json=?, status='resolved', user_action='retagged'",
                      (str(path), raw))
+        record_decision(conn, 1)
     monkeypatch.setattr(source, 'get_config_manager', lambda: {
         'metadata_enhancement.post_process_order': ['musicbrainz']})
 
@@ -350,6 +359,7 @@ def test_retag_date_and_count_aliases_respect_accepted_fields(tmp_path):
         conn.execute("UPDATE repair_findings SET status='resolved', details_json=?",
                      (json.dumps({'changes': {'year': {'old': 1999, 'new': 2020},
                                               'track_total': {'old': 9, 'new': 10}}}),))
+        record_decision(conn, 1)
     for values in ({'release_date': '1999-01-01'}, {'track_count': 9}):
         assert conflict(db, 'library_retag', entity_type='track', entity_id='track',
                         details={'db_data': values})['review_conflict']

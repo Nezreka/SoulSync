@@ -1355,7 +1355,9 @@
         "not_owned": 0,
         "extra": 0,
         "settled": 0
-      }
+      },
+      "review_id": "repeated_recording:review_id:9",
+      "decision_revision": 0
     },
     "decisions": [
       {
@@ -1464,7 +1466,7 @@
     "ready_albums_total": 0
   },
   "ready_preview": {
-    "signature": "repeated_recording:signature:9",
+    "signature": "repeated_recording:signature:10",
     "albums": [],
     "action_count": 0,
     "file_actions": 0

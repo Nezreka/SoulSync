@@ -1069,7 +1069,9 @@
         "not_owned": 0,
         "extra": 2,
         "settled": 0
-      }
+      },
+      "review_id": "unmatched_companion:review_id:10",
+      "decision_revision": 0
     },
     "decisions": [
       {
@@ -1203,7 +1205,7 @@
     "ready_albums_total": 0
   },
   "ready_preview": {
-    "signature": "unmatched_companion:signature:10",
+    "signature": "unmatched_companion:signature:11",
     "albums": [],
     "action_count": 0,
     "file_actions": 0

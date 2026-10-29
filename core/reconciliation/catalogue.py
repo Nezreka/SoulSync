@@ -128,6 +128,14 @@ class CatalogueSession:
         self.memory = {}
         self.counts, self.seconds = Counter(), Counter()
         self.failed = False
+        self.stale_decisions = set()
+        from core.reconciliation.publication import revisions
+        self.decision_revisions = {}
+        try:
+            with connection(db) as conn:
+                self.decision_revisions = revisions(conn)
+        except Exception:
+            log.debug('Decision revisions unavailable', exc_info=True)
         self.album_failed = False
         self.pending = None
         self.created = 0
@@ -160,13 +168,32 @@ class CatalogueSession:
                 for cache in caches:
                     cache.clear()
             if complete and not self.album_failed:
-                for kind, callback in pending:
-                    with stage('plan_publication_inclusive' if kind == 'plan' else 'finding_persistence'):
-                        value = callback()
-                    if kind == 'finding':
-                        self.created += bool(value)
-                    elif not value:
-                        self.failed = True
+                from core.reconciliation.publication import publish, StalePublication
+                cases = {case for _, _, case in pending if case}
+                created = 0
+                try:
+                    with publish(self.db, self.decision_revisions, cases):
+                        for kind, callback, _ in pending:
+                            with stage('plan_publication_inclusive' if kind == 'plan' else 'finding_persistence'):
+                                value = callback()
+                            if kind == 'finding':
+                                created += bool(value)
+                            elif not value:
+                                raise ValueError('Could not publish the complete album snapshot')
+                    self.created += created
+                except StalePublication:
+                    self.stale_decisions.update(cases)
+                    self.failed = True
+                    self.counts['stale_publications'] += 1
+                    from core.reconciliation.work import enqueue
+                    with connection(self.db) as conn:
+                        for case in cases:
+                            row = conn.execute('SELECT album_folder FROM reconcile_album_plans WHERE case_id=?', (case,)).fetchone()
+                            if row:
+                                enqueue(conn, case, row[0], scope='plan')
+                except Exception:
+                    self.failed = True
+                    log.exception('Album publication failed; the previous snapshot is retained')
             self.slowest.append({'album_ordinal': ordinal, 'seconds': round(time.perf_counter() - start, 4),
                                  'stages': {key: round(value - before[key], 4)
                                             for key, value in self.seconds.items() if value > before[key]}})
@@ -307,7 +334,9 @@ def catalogue_scan(fn):
         try:
             result = fn(self, context, *args, **kwargs)
             if session.failed:
-                result.stopped_early = 'Catalogue evidence is incomplete; prior album plans were retained. Retry analysis.'
+                result.stopped_early = ('Album decisions changed during analysis; prior plans were retained and a replan is needed.'
+                    if session.stale_decisions else
+                    'Catalogue evidence is incomplete; prior album plans were retained. Retry analysis.')
             result.findings_created += session.created
             return result
         finally:
@@ -332,7 +361,10 @@ def deferred(kind):
         def run(*args, **kwargs):
             session = current.get()
             if session is not None and session.pending is not None:
-                session.pending.append((kind, lambda: fn(*args, **kwargs)))
+                from core.reconciliation.identity import review_case_key
+                details = kwargs.get('details') or (args[1] if kind == 'plan' else {})
+                case = review_case_key(details, kwargs.get('file_path'))
+                session.pending.append((kind, lambda: fn(*args, **kwargs), case))
                 if kind == 'finding':
                     return False
                 from core.reconciliation.identity import review_case_key

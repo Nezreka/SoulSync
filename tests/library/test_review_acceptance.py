@@ -52,7 +52,7 @@ def assert_snapshot(name, case, tmp_path, album):
     """
     hashes = {}
     opaque = {'signature', 'plan_signature', 'evidence_signature', 'evidence_token',
-              'fingerprint_key', 'folder_audio_path_digest'}
+              'fingerprint_key', 'folder_audio_path_digest', 'review_id'}
 
     def normalize(value, key=''):
         if key == 'case_ids':

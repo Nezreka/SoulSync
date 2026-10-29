@@ -1,7 +1,7 @@
 """Respect existing review choices and pins at legacy maintenance boundaries.
 
-The finding journal remains the authority for accepted field decisions; this
-module does not create another preference store or silently dismiss findings.
+Current track decisions and album policies own accepted values. Pruning the
+operation history must not revoke them.
 """
 from __future__ import annotations
 
@@ -18,10 +18,11 @@ ALIASES = {
     'musicbrainz_album_id': 'musicbrainz_release_id',
     'library_recording_disambiguation': 'recording_disambiguation',
     'release_date': 'date', 'track_count': 'track_total',
+    'disc_total': 'total_discs', 'disctotal': 'total_discs', 'totaldiscs': 'total_discs',
 }
 IDENTITY = {'title', 'artist', 'album', 'album_artist', 'track_number', 'disc_number',
             'musicbrainz_recording_id', 'musicbrainz_release_id', 'filename',
-            'recording_disambiguation', 'year', 'date', 'track_total', 'disc_total'}
+            'recording_disambiguation', 'year', 'date', 'track_total', 'total_discs'}
 FIELDS = {
     'mbid_mismatch': {'musicbrainz_recording_id'},
     'album_mbid_mismatch': {'musicbrainz_release_id'},
@@ -159,13 +160,16 @@ def conflict(db, kind, *, entity_type='', entity_id=None, file_path=None, detail
                     return blocked('This file has a manually chosen release-track assignment.')
             if not _table(conn, 'reconcile_review_choices'):
                 continue
-            has_numbering = 'numbering_choice' in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}
-            numbering_column = 'c.numbering_choice' if has_numbering else "''"
-            rows = conn.execute(f"""SELECT f.file_path, f.entity_id, f.status, f.user_action,
-                    f.details_json, c.evidence_json, c.choice, c.category, c.case_id, {numbering_column}
-                FROM repair_findings f LEFT JOIN reconcile_review_choices c ON c.finding_id=f.id
-                WHERE f.review_case_key=? AND f.job_id='library_reconciliation'
-                AND f.status IN ('pending','resolved','dismissed') ORDER BY f.id DESC""", (case_id,))
+            from core.reconciliation.choices import load_choices
+            saved_choices = load_choices(conn, case_id=case_id)
+            rows = []
+            for fid, path, tid, status, action, raw in conn.execute('''SELECT id,file_path,entity_id,status,user_action,details_json
+                    FROM repair_findings WHERE review_case_key=? AND job_id='library_reconciliation'
+                    AND status='pending' ORDER BY id DESC''', (case_id,)):
+                saved = saved_choices.get(fid) or ('', '', '', '', '', '', '')
+                rows.append((path, tid, status, action, raw, saved[1], saved[3], saved[2], saved[0], saved[5]))
+            from core.reconciliation.settled import authority_rows
+            rows.extend(authority_rows(conn, case_id))
             seen = set()
             for path, tid, status, action, raw, saved, choice, category, choice_case, numbering in rows:
                 if action == 'obsolete':
@@ -189,7 +193,7 @@ def conflict(db, kind, *, entity_type='', entity_id=None, file_path=None, detail
                         continue
                     if field not in touched or not isinstance(change, dict) or (path, field) in seen:
                         continue
-                    position = field in ('track_number', 'disc_number', 'filename')
+                    position = field in ('track_number', 'disc_number', 'total_discs', 'filename')
                     if status == 'pending' and category == 'numbering' and not position:
                         continue
                     seen.add((path, field))
@@ -217,7 +221,7 @@ def enrichment_tag_guard(db, file_path):
         'TITLE': 'title', 'ARTIST': 'artist', 'ARTISTS': 'artist',
         'ALBUM': 'album', 'ALBUMARTIST': 'album_artist',
         'TRACKNUMBER': 'track_number', 'DISCNUMBER': 'disc_number',
-        'TOTALTRACKS': 'track_total', 'TOTALDISCS': 'disc_total',
+        'TOTALTRACKS': 'track_total', 'TOTALDISCS': 'total_discs',
         'DATE': 'date',
     }
 

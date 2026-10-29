@@ -1022,7 +1022,9 @@
         "not_owned": 0,
         "extra": 0,
         "settled": 0
-      }
+      },
+      "review_id": "stale:review_id:7",
+      "decision_revision": 2
     },
     "decisions": [
       {
@@ -1107,7 +1109,7 @@
     "ready_albums_total": 0
   },
   "ready_preview": {
-    "signature": "stale:signature:7",
+    "signature": "stale:signature:8",
     "albums": [],
     "action_count": 0,
     "file_actions": 0

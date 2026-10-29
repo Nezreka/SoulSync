@@ -34,6 +34,7 @@ from core.reconciliation.identity import missing_slot_key, review_case_key
 from core.reconciliation import choices as review_choices
 from core.reconciliation import decisions as album_decisions
 from core.reconciliation.fields import POSITION_FIELDS
+from core.reconciliation.signatures import matches as matching_evidence
 from core.reconciliation import queue as repair_review_queue
 from core.repair_jobs import get_all_jobs
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -58,7 +59,11 @@ def review_plan_mutation(method):
                         'error': 'This album is being applied. Its plan will refresh when the operation finishes.'}
             from core.library.maintenance_lock import mutation_lock
             with mutation_lock.planning(album_id):
-                return method(self, case_id, *args, **kwargs)
+                result = method(self, case_id, *args, **kwargs)
+                if result.get('success') and not kwargs.get('preview'):
+                    with self.db._get_connection() as conn:
+                        album_decisions.touch(conn, case_id)
+                return result
     return guarded
 
 
@@ -1127,6 +1132,7 @@ class RepairWorker:
 
         while not self._stop_event.is_set():
             try:
+                self._resume_review_work()
                 self._refresh_published_review_albums()
                 if time.monotonic() - getattr(self, '_replacement_checked_at', 0) >= 30:
                     self._replacement_checked_at = time.monotonic()
@@ -1513,8 +1519,10 @@ class RepairWorker:
                     report REAL new findings.
         """
         conn = None
+        from core.reconciliation.publication import connection_for
+        shared = connection_for(self.db)
         try:
-            conn = self.db._get_connection()
+            conn = shared or self.db._get_connection()
             cursor = conn.cursor()
             if job_id == 'library_reconciliation' and not getattr(self, '_review_decision_schema', False):
                 review_choices.ensure_schema(conn)
@@ -1538,6 +1546,11 @@ class RepairWorker:
             """, (job_id, finding_type, entity_type, entity_id, file_path))
 
             existing = cursor.fetchone()
+            if not existing and job_id == 'library_reconciliation':
+                from core.reconciliation.settled import suppresses
+                if suppresses(conn, review_case_key(details, file_path), finding_type,
+                              file_path, entity_id, details or {}):
+                    return False
             if existing:
                 existing_id, existing_status, resolved_at = existing[0], existing[1], existing[2]
                 if job_id == 'library_reconciliation':
@@ -1570,7 +1583,8 @@ class RepairWorker:
                         cursor.execute('UPDATE reconcile_review_choices SET approval_signature=? WHERE finding_id=? AND evidence_json=?',
                                        (review_choices.signature(details), existing_id, new_raw))
                         if existing_status in ('resolved', 'dismissed') and existing[4] != 'obsolete':
-                            conn.commit()
+                            if shared is None:
+                                conn.commit()
                             return False
                 if existing_status == 'pending':
                     cursor.execute("""
@@ -1590,7 +1604,8 @@ class RepairWorker:
                         cursor.execute(
                             "UPDATE repair_findings SET review_case_key = ? WHERE id = ?",
                             (review_case_key(details, file_path, existing_id), existing_id))
-                    conn.commit()
+                    if shared is None:
+                        conn.commit()
                     return False
                 if not supersede:
                     changed_reconciliation_evidence = False
@@ -1630,7 +1645,8 @@ class RepairWorker:
             if job_id == 'library_reconciliation':
                 cursor.execute('UPDATE repair_findings SET review_signature=? WHERE id=?',
                                (review_choices.signature(details or {}), cursor.lastrowid))
-            conn.commit()
+            if shared is None:
+                conn.commit()
             # getattr, not attribute access: tests build workers via __new__
             # (no __init__), and the emit must NEVER break a finding write.
             _emit = getattr(self, '_event_emit', None)
@@ -1643,10 +1659,12 @@ class RepairWorker:
                     logger.debug("repair finding event emit failed", exc_info=True)
             return True
         except Exception as e:
+            if shared is not None:
+                raise
             logger.debug("Error creating finding: %s", e)
             return False
         finally:
-            if conn:
+            if conn and shared is None:
                 conn.close()
 
     # Sort keys the inbox offers. Severity-first is the triage default; a flat
@@ -2028,6 +2046,25 @@ class RepairWorker:
                     self._set_finding_error(item['id'], None)
         return {'success': True, 'playlists': list(refs.values())}
 
+    def _resume_review_work(self):
+        from core.reconciliation import work
+        with self.db._get_connection() as conn:
+            rows = work.pending(conn)
+        for case, kind, folder, scope, force, generation in rows:
+            if kind == 'requests':
+                error = ''
+                try:
+                    self._sync_planned_replacement_requests(case)
+                except Exception as exc:
+                    error = str(exc)
+                with self.db._get_connection() as conn:
+                    work.complete(conn, case, generation, kind=kind, error=error)
+            else:
+                with self._album_refresh_lock:
+                    active = (self._album_refreshes.get(case) or {}).get('state') == 'running'
+                if not active:
+                    self._schedule_album_refresh(case, folder, scope=scope, refresh_catalogue=bool(force))
+
     def _schedule_review_refresh(self, case_id: str, folder: str,
                                  snapshot: dict, *, scope: str = 'album', refresh_catalogue: bool = False) -> bool:
         if not hasattr(self, '_review_refresh_snapshots'):
@@ -2106,9 +2143,13 @@ class RepairWorker:
         snapshot = getattr(self, '_review_refresh_snapshots', {}).pop(case_id, None)
         if not folder:
             return False
+        from core.reconciliation import work
+        with self.db._get_connection() as conn:
+            generation = work.enqueue(conn, case_id, folder, scope=scope, refresh_catalogue=refresh_catalogue)
         with self._album_refresh_lock:
             current = self._album_refreshes.get(case_id) or {}
             if current.get('state') == 'running':
+                current['generation'] = generation
                 current['again'] = True
                 current['refresh_catalogue'] = current.get('refresh_catalogue', False) or refresh_catalogue
                 ranks = {'plan': -1, 'album': 0, 'discovery': 1, 'library': 2}
@@ -2118,7 +2159,7 @@ class RepairWorker:
                 return True
             self._album_refreshes[case_id] = {
                 'state': 'running', 'again': False, 'snapshot': snapshot, 'scope': scope,
-                'refresh_catalogue': refresh_catalogue}
+                'refresh_catalogue': refresh_catalogue, 'generation': generation}
             if not hasattr(self, '_album_refresh_events'):
                 self._album_refresh_events = {}
             completed_event = threading.Event()
@@ -2129,6 +2170,7 @@ class RepairWorker:
             while True:
                 error = ''
                 metrics = {}
+                scan_generation = generation
                 try:
                     transfer = self.transfer_folder
                     if self._config_manager:
@@ -2146,6 +2188,7 @@ class RepairWorker:
                     with self._album_refresh_lock:
                         scan_scope = self._album_refreshes[case_id].get('scope', 'album')
                         force_catalogue = self._album_refreshes[case_id].get('refresh_catalogue', False)
+                        scan_generation = self._album_refreshes[case_id].get('generation', generation)
                     with self._reconciliation_scan_lock:
                         outcome = LibraryReconciliationJob().scan(
                             context, target_folder=folder, scope=scan_scope,
@@ -2158,6 +2201,8 @@ class RepairWorker:
                     logger.error('Album reconciliation failed for %s: %s',
                                  case_id, exc, exc_info=True)
                     error = str(exc)[:300]
+                with self.db._get_connection() as conn:
+                    work.complete(conn, case_id, scan_generation, error=error)
                 with self._album_refresh_lock:
                     state = self._album_refreshes.get(case_id) or {}
                     if state.get('again'):
@@ -2165,7 +2210,8 @@ class RepairWorker:
                             'state': 'running', 'again': False,
                             'snapshot': state.get('snapshot'),
                             'scope': state.get('scope', 'album'),
-                            'refresh_catalogue': state.get('refresh_catalogue', False)}
+                            'refresh_catalogue': state.get('refresh_catalogue', False),
+                            'generation': state.get('generation', generation)}
                         continue
                     self._album_refreshes[case_id] = {
                         'state': 'error' if error else 'complete',
@@ -2332,12 +2378,15 @@ class RepairWorker:
             return {'success': False, 'stale': True,
                     'error': 'That release is no longer a candidate for this album'}
         score = int(candidate.get('clear') or 0) / max(1, int(candidate.get('matched') or 0))
-        if not self.db.set_album_canonical(album_id, source, release_id,
-                                           score=score, locked=True):
-            return {'success': False, 'error': 'Could not pin that album release'}
-        review_choices.remember_release_choice(self.db, album_id, source, release_id)
-        from core.reconciliation.audio_copy import save_choice
-        save_choice(self.db, album_id, source, release_id, bool(audio_copy and (video_only or candidate.get('audio_copy_of_video'))))
+        from core.reconciliation.album_state import choose_release
+        try:
+            with self.db._get_connection() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                choose_release(conn, self.db, case_id, album_id, source, release_id, score,
+                    audio_copy=bool(audio_copy and (video_only or candidate.get('audio_copy_of_video'))),
+                    folder=case.get('folder') or '')
+        except ValueError as exc:
+            return {'success': False, 'error': str(exc)}
         queued = self._schedule_review_refresh(
             case_id, case.get('folder') or '', case, scope='discovery')
         return {'success': True, 'message': 'Release pinned; updating this album plan',
@@ -2358,22 +2407,29 @@ class RepairWorker:
                         'error': 'This decision is no longer available to reopen'}
             details = json.loads(row[1] or '{}')
             folder = details.get('album_folder') or os.path.dirname(row[0] or '')
-            if row[2] != 'pending' and not self.reopen_finding(finding_id):
-                return {'success': False, 'error': 'Could not reopen this decision'}
+            conn.execute('BEGIN IMMEDIATE')
+            if row[2] != 'pending':
+                conn.execute("UPDATE repair_findings SET status='pending',user_action=NULL,resolved_at=NULL,last_error=NULL WHERE id=?", (finding_id,))
             review_choices.ensure_schema(conn)
             previous = review_choices.load_choices(conn, finding_id).get(finding_id)
             if previous and (previous[2] == 'numbering' or previous[5]):
                 album_decisions.clear(conn, case_id, 'numbering')
+            from core.reconciliation.settled import reopen
+            reopen(conn, finding_id)
             conn.execute('DELETE FROM reconcile_review_choices WHERE finding_id=? OR (case_id=? AND fix_action=?)',
                          (finding_id, case_id, f'used_by:{finding_id}'))
-            conn.commit()
             if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_track_assignment'").fetchone():
                 deleted = conn.execute('''DELETE FROM reconcile_track_assignment
                     WHERE album_id = ? AND source = ? AND release_id = ? AND file_path = ?''',
                     (str(details.get('album_id')), details.get('source'),
                      details.get('release_id'), row[0]))
                 assignment_removed = deleted.rowcount > 0
-                conn.commit()
+            from core.reconciliation.work import enqueue
+            enqueue(conn, case_id, folder, kind='requests')
+            if assignment_removed or row[2] != 'pending':
+                enqueue(conn, case_id, folder, scope='plan')
+            album_decisions.touch(conn, case_id)
+            conn.commit()
         finally:
             conn.close()
         self._sync_planned_replacement_requests(case_id)
@@ -2429,6 +2485,9 @@ class RepairWorker:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(album_id, source, release_id, file_path)
                 DO UPDATE SET slot_key=excluded.slot_key, size_bytes=excluded.size_bytes,
                     mtime_ns=excluded.mtime_ns, fingerprint_key=excluded.fingerprint_key''', rows)
+            from core.reconciliation.work import enqueue
+            enqueue(conn, case_id, case.get('folder') or '', scope='plan')
+            album_decisions.touch(conn, case_id)
         queued = self._schedule_review_refresh(case_id, case.get('folder') or '', case, scope='plan')
         return {'success': True, 'saved': len(rows), 'refresh_queued': queued,
                 'message': 'Assignments confirmed. Updating the proposed metadata changes.'}
@@ -2523,6 +2582,9 @@ class RepairWorker:
                 # A newly reviewed choice may retry a failed apply. The file and
                 # release guards still run when the saved plan is applied.
                 conn.execute('UPDATE repair_findings SET last_error=NULL WHERE id=?', (item['id'],))
+            if fix_action in ('replace', 'request_missing'):
+                from core.reconciliation.work import enqueue
+                enqueue(conn, case_id, case.get('folder') or '', kind='requests')
             conn.commit()
         finally:
             conn.close()
@@ -2596,6 +2658,11 @@ class RepairWorker:
                     item['id']: item['evidence_token'] for item in case['items']}:
                 return {'success': False, 'stale': True, 'error': 'The album plan changed'}
             conn.execute("UPDATE repair_findings SET status='dismissed',user_action='leave_album_as_is',resolved_at=CURRENT_TIMESTAMP,last_error=NULL WHERE review_case_key=? AND status='pending'", (case_id,))
+            from core.reconciliation.settled import record
+            for row in rows:
+                record(conn, row[0])
+            if album_decisions.find_review(conn, case_id):
+                album_decisions.save(conn, case_id, 'disposition', 'keep', {})
             conn.execute('DELETE FROM reconcile_review_choices WHERE case_id=?', (case_id,))
             from core.repair_operation_reports import record_case_left_as_is
             record_case_left_as_is(conn, case_id)
@@ -2684,6 +2751,11 @@ class RepairWorker:
                 resolved_at=NULL WHERE id=(SELECT MAX(id) FROM repair_findings
                 WHERE review_case_key=? AND finding_type='reconciliation_intent'
                 AND status IN ('resolved','dismissed'))""", (case_id,))
+            conn.execute("DELETE FROM reconcile_settled_decisions WHERE case_id=? AND finding_type='reconciliation_intent'", (case_id,))
+            album_decisions.clear(conn, case_id, 'disposition')
+            album_decisions.touch(conn, case_id)
+            from core.reconciliation.work import enqueue
+            enqueue(conn, case_id, case.get('folder') or '', scope='plan')
             conn.commit()
         finally:
             conn.close()
@@ -3059,6 +3131,8 @@ class RepairWorker:
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ? AND status IN ('resolved', 'dismissed')
             """, (finding_id,))
+            from core.reconciliation.settled import reopen
+            reopen(conn, finding_id)
             conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
@@ -3351,6 +3425,8 @@ class RepairWorker:
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (action, finding_id))
+            from core.reconciliation.settled import record
+            record(conn, finding_id)
             conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
@@ -3385,12 +3461,12 @@ class RepairWorker:
                 for item in mode.get('items') or []:
                     if item['id'] not in remaining_ids:
                         continue
-                    if reviewed_details is not None and item['details'] != json.loads(reviewed_details.get(item['id']) or '{}'):
+                    if reviewed_details is not None and not matching_evidence(item['details'], json.loads(reviewed_details.get(item['id']) or '{}')):
                         return {'success': False, 'error': 'The proposed action changed during reconciliation; review the updated plan before applying.'}
             elif reviewed_details is not None:
                 current = review_choices.project(json.loads(raw or '{}'),
                     review_choices.load_choices(conn, finding_id).get(finding_id), case_id=key, raw_json=raw)
-                if current != json.loads(reviewed_details.get(finding_id) or '{}'):
+                if not matching_evidence(current, json.loads(reviewed_details.get(finding_id) or '{}')):
                     return {'success': False, 'error': 'The proposed action changed during reconciliation; review the updated plan before applying.'}
         finally:
             conn.close()
@@ -5599,97 +5675,57 @@ class RepairWorker:
         error = self._reconciliation_release_guard(details)
         if error:
             return {'success': False, 'error': error}
-        conn = self.db._get_connection()
-        try:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS reconcile_album_intent (
-                    album_id TEXT PRIMARY KEY, scope TEXT NOT NULL,
-                    source TEXT NOT NULL, release_id TEXT NOT NULL,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            conn.execute('''
-                INSERT INTO reconcile_album_intent (album_id, scope, source, release_id)
-                VALUES (?, ?, ?, ?) ON CONFLICT(album_id) DO UPDATE SET
-                    scope = excluded.scope, source = excluded.source,
-                    release_id = excluded.release_id, updated_at = CURRENT_TIMESTAMP
-            ''', (str(album_id), choice, details.get('source') or '',
-                  details.get('release_id') or ''))
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS reconcile_wanted_slots (
-                    album_id TEXT PRIMARY KEY, source TEXT NOT NULL,
-                    release_id TEXT NOT NULL, slots_json TEXT NOT NULL
-                )
-            ''')
-            conn.execute('''
-                INSERT INTO reconcile_wanted_slots (album_id, source, release_id, slots_json)
-                VALUES (?, ?, ?, ?) ON CONFLICT(album_id) DO UPDATE SET
-                    source = excluded.source, release_id = excluded.release_id,
-                    slots_json = excluded.slots_json
-            ''', (str(album_id), details.get('source') or '',
-                  details.get('release_id') or '', json.dumps(sorted(wanted_keys))))
-            conn.commit()
-        except Exception as exc:
-            return {'success': False, 'error': str(exc)}
-        finally:
-            conn.close()
+        from core.reconciliation.album_state import choose_scope
         from core.reconciliation.store import persist_album_plan
-        conn = self.db._get_connection()
-        try:
-            saved = conn.execute('SELECT plan_json FROM reconcile_album_plans WHERE album_id=? AND source=? AND release_id=?',
-                (str(album_id), details.get('source') or '', details.get('release_id') or '')).fetchall()
-        finally:
-            conn.close()
-        for row in saved:
-            document = json.loads(row[0])
-            document.update(intent_scope=choice, intent_inferred=False)
-            for assignment in document.get('assignments') or []:
-                if assignment.get('status') in ('missing', 'not_owned'):
-                    slot = {'source_track_id': assignment.get('source_track_id'),
-                            'disc_number': assignment.get('slot_disc_number'),
-                            'track_number': assignment.get('slot_track_number'),
-                            'title': assignment.get('slot_title')}
-                    assignment['status'] = ('missing' if choice == 'complete' or
-                        _wanted_slot_key(slot) in wanted_keys or assignment.get('fulfillment_state') else 'not_owned')
-            persist_album_plan(self.db, details, document)
-        # Reopening completeness retains submitted requests. Unsubmitted slots
-        # that are no longer wanted disappear immediately without a rescan.
+        from core.reconciliation.publication import publish
+        from core.reconciliation.work import enqueue
         case_key = review_case_key(details, None)
-        with self.db._get_connection() as conn:
+        with publish(self.db, {}, set(), exclusive=False) as conn:
+            choose_scope(conn, album_id, details.get('source') or '', details.get('release_id') or '', choice, wanted_keys)
+            saved = conn.execute('SELECT plan_json FROM reconcile_album_plans WHERE case_id=?', (case_key,)).fetchall()
+            for row in saved:
+                document = json.loads(row[0])
+                document.update(intent_scope=choice, intent_inferred=False)
+                for assignment in document.get('assignments') or []:
+                    if assignment.get('status') in ('missing', 'not_owned'):
+                        slot = {'source_track_id': assignment.get('source_track_id'),
+                                'disc_number': assignment.get('slot_disc_number'),
+                                'track_number': assignment.get('slot_track_number'),
+                                'title': assignment.get('slot_title')}
+                        assignment['status'] = ('missing' if choice == 'complete' or
+                            _wanted_slot_key(slot) in wanted_keys or assignment.get('fulfillment_state') else 'not_owned')
+                persist_album_plan(self.db, details, document)
             existing_requests = {}
-            for fid, raw in conn.execute("SELECT id,details_json FROM repair_findings WHERE review_case_key=? AND finding_type='reconciliation_missing' AND status='pending'", (case_key,)):
+            for fid, raw in conn.execute("SELECT id,details_json FROM repair_findings WHERE review_case_key=? AND finding_type='reconciliation_missing' AND status='pending'", (case_key,)).fetchall():
                 previous = json.loads(raw or '{}')
-                previous_slot = (previous.get('missing_tracks') or [{}])[0]
-                slot_key = _wanted_slot_key(previous_slot)
+                slot_key = _wanted_slot_key((previous.get('missing_tracks') or [{}])[0])
                 existing_requests[slot_key] = previous
                 if (choice == 'partial' and slot_key not in wanted_keys and
                         previous.get('fulfillment_state') not in ('wishlisted', 'downloading', 'downloaded') and
                         not previous.get('replacement_for_finding')):
                     conn.execute("UPDATE repair_findings SET status='resolved',user_action='not_collected',resolved_at=CURRENT_TIMESTAMP WHERE id=?", (fid,))
-        if choice == 'complete' or wanted_keys:
-            for slot in details.get('missing_tracks') or []:
-                if choice == 'partial' and _wanted_slot_key(slot) not in wanted_keys:
-                    continue
-                if not slot.get('title') and not slot.get('name'):
-                    continue
-                previous = existing_requests.get(_wanted_slot_key(slot)) or {}
-                if previous.get('fulfillment_state') in ('wishlisted', 'downloading', 'downloaded') or previous.get('replacement_for_finding'):
-                    continue
-                name = slot.get('title') or slot.get('name')
-                key = missing_slot_key(album_id, details.get('source'),
-                                       details.get('release_id'), slot)
-                self._create_finding(
-                    job_id='library_reconciliation', finding_type='reconciliation_missing',
-                    severity='info', entity_type='album_slot', entity_id=key,
-                    file_path=None, title=f'Missing: {name}',
-                    description='This track is absent from the intended complete release.',
-                    details={**details, 'missing_tracks': [{
-                        'name': name, 'track_number': slot.get('track_number'),
-                        'disc_number': slot.get('disc_number', 1),
-                        'source_track_id': slot.get('source_track_id') or '',
-                        'source': details.get('source'),
-                        'duration_ms': slot.get('duration_ms', 0),
-                    }]})
+            if choice == 'complete' or wanted_keys:
+                for slot in details.get('missing_tracks') or []:
+                    if choice == 'partial' and _wanted_slot_key(slot) not in wanted_keys:
+                        continue
+                    name = slot.get('title') or slot.get('name')
+                    if not name:
+                        continue
+                    previous = existing_requests.get(_wanted_slot_key(slot)) or {}
+                    if previous.get('fulfillment_state') in ('wishlisted', 'downloading', 'downloaded') or previous.get('replacement_for_finding'):
+                        continue
+                    key = missing_slot_key(album_id, details.get('source'), details.get('release_id'), slot)
+                    self._create_finding(job_id='library_reconciliation', finding_type='reconciliation_missing',
+                        severity='info', entity_type='album_slot', entity_id=key, file_path=None,
+                        title=f'Missing: {name}', description='This track is absent from the intended complete release.',
+                        details={**details, 'missing_tracks': [{'name': name,
+                            'track_number': slot.get('track_number'), 'disc_number': slot.get('disc_number', 1),
+                            'source_track_id': slot.get('source_track_id') or '', 'source': details.get('source'),
+                            'duration_ms': slot.get('duration_ms', 0)}]})
+            conn.execute("UPDATE repair_findings SET status='resolved',user_action='reconciliation_intent',resolved_at=CURRENT_TIMESTAMP WHERE review_case_key=? AND status='pending' AND finding_type='reconciliation_intent'", (case_key,))
+            album_decisions.clear(conn, case_key, 'disposition')
+            album_decisions.touch(conn, case_key)
+            enqueue(conn, case_key, details.get('album_folder') or '', scope='plan')
         return {'success': True, 'action': 'reconciliation_intent',
                 'message': ('Complete album selected. Review and submit the missing-track requests.' if choice == 'complete'
                             else 'Partial or playlist-only album accepted')}
@@ -5708,10 +5744,11 @@ class RepairWorker:
         if not source or not release_id:
             return {'success': False, 'error': 'The release choice has no source ID'}
         score = candidate.get('clear', 0) / max(1, candidate.get('matched', 0))
-        if not self.db.set_album_canonical(album_id, source, release_id,
-                                           score=score, locked=True):
-            return {'success': False, 'error': 'Could not pin that album release'}
-        review_choices.remember_release_choice(self.db, album_id, source, release_id)
+        from core.reconciliation.album_state import choose_release
+        with self.db._get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            choose_release(conn, self.db, review_case_key(details, file_path), album_id,
+                           source, release_id, score, folder=details.get('album_folder') or '')
         return {'success': True, 'action': 'reconciliation_release',
                 'message': 'Release choice saved.'}
 
@@ -5760,6 +5797,8 @@ class RepairWorker:
                 conn.execute('''DELETE FROM reconcile_track_assignment
                     WHERE album_id = ? AND source = ? AND release_id = ? AND file_path = ?''',
                     (str(album_id), source, release_id, file_path))
+                from core.reconciliation.work import enqueue
+                enqueue(conn, review_case_key(details, file_path), details.get('album_folder') or os.path.dirname(file_path), scope='plan')
                 conn.commit()
                 return {'success': True, 'action': 'reconciliation_assignment',
                         'message': 'Plan assignment reset to automatic matching.'}
@@ -5785,6 +5824,8 @@ class RepairWorker:
             ''', (str(album_id), source, release_id, file_path, slot_key,
                   details['size_bytes'], details['mtime_ns'],
                   details.get('fingerprint_key') or ''))
+            from core.reconciliation.work import enqueue
+            enqueue(conn, review_case_key(details, file_path), details.get('album_folder') or os.path.dirname(file_path), scope='plan')
             conn.commit()
         except Exception as exc:
             return {'success': False, 'error': str(exc)}
@@ -8446,6 +8487,8 @@ class RepairWorker:
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (finding_id,))
+            from core.reconciliation.settled import record
+            record(conn, finding_id)
             conn.commit()
             return cursor.rowcount > 0
         except Exception as e:
@@ -8799,7 +8842,7 @@ class RepairWorker:
                         for selected_id in selected_ids:
                             row = conn.execute('SELECT details_json FROM repair_findings WHERE id=?', (selected_id,)).fetchone()
                             current = review_choices.project(json.loads(row[0] or '{}'), saved.get(selected_id), case_id=key, raw_json=row[0]) if row else None
-                            if reviewed_details is not None and current != json.loads(reviewed_details.get(selected_id) or '{}'):
+                            if reviewed_details is not None and not matching_evidence(current, json.loads(reviewed_details.get(selected_id) or '{}')):
                                 evidence_changed = True
                                 break
                         if selected_ids != set(current_case_ids) or evidence_changed:
@@ -8846,7 +8889,7 @@ class RepairWorker:
                             effective = review_choices.project(json.loads(current[0] or '{}'), review_choices.load_choices(conn, fid).get(fid), raw_json=current[0]) if current else None
                         finally:
                             conn.close()
-                        if effective != json.loads(reviewed_details.get(fid) or '{}'):
+                        if not matching_evidence(effective, json.loads(reviewed_details.get(fid) or '{}')):
                             raise ValueError('The proposed action changed during reconciliation; review the updated plan before applying.')
                     if review_approved:
                         from core.library.maintenance_lock import mutation_lock

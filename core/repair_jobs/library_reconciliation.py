@@ -2001,64 +2001,20 @@ class LibraryReconciliationJob(RepairJob):
         return list(dict.fromkeys(candidates))[:6]
 
     def _intents(self, context: JobContext) -> dict[str, tuple[str, str, str, list[str]]]:
-        conn = context.db._get_connection()
-        try:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS reconcile_album_intent (
-                    album_id TEXT PRIMARY KEY, scope TEXT NOT NULL,
-                    source TEXT NOT NULL, release_id TEXT NOT NULL,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS reconcile_wanted_slots (
-                    album_id TEXT PRIMARY KEY, source TEXT NOT NULL,
-                    release_id TEXT NOT NULL, slots_json TEXT NOT NULL
-                )
-            ''')
-            return {str(row[0]): (row[1], row[2], row[3],
-                                  json.loads(row[4] or '[]') if row[4] else [])
-                    for row in conn.execute('''
-                        SELECT i.album_id, i.scope, i.source, i.release_id,
-                               CASE WHEN w.source = i.source AND w.release_id = i.release_id
-                                    THEN w.slots_json ELSE '[]' END
-                        FROM reconcile_album_intent i
-                        LEFT JOIN reconcile_wanted_slots w ON w.album_id = i.album_id
-                        UNION ALL
-                        SELECT w.album_id, '', w.source, w.release_id, w.slots_json
-                        FROM reconcile_wanted_slots w
-                        WHERE NOT EXISTS (SELECT 1 FROM reconcile_album_intent i WHERE i.album_id=w.album_id AND i.source=w.source AND i.release_id=w.release_id)
-                    ''')}
-        finally:
-            conn.close()
+        from core.reconciliation.album_state import intents
+        with context.db._get_connection() as conn:
+            return intents(conn)
 
     def _assignment_overrides(self, context: JobContext) -> dict[tuple[str, str, str, str], tuple]:
-        conn = context.db._get_connection()
-        try:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS reconcile_track_assignment (
-                    album_id TEXT NOT NULL, source TEXT NOT NULL,
-                    release_id TEXT NOT NULL, file_path TEXT NOT NULL,
-                    slot_key TEXT NOT NULL, size_bytes INTEGER NOT NULL,
-                    mtime_ns INTEGER NOT NULL, fingerprint_key TEXT NOT NULL,
-                    PRIMARY KEY (album_id, source, release_id, file_path)
-                )
-            ''')
-            return {(str(row[0]), row[1], row[2], row[3]): tuple(row[4:])
-                    for row in conn.execute('''
-                        SELECT album_id, source, release_id, file_path, slot_key,
-                               size_bytes, mtime_ns, fingerprint_key
-                        FROM reconcile_track_assignment
-                    ''')}
-        finally:
-            conn.close()
+        from core.reconciliation.album_state import assignments
+        with context.db._get_connection() as conn:
+            return assignments(conn)
 
     def _wishlisted_slots(self, context: JobContext) -> dict[int, set[tuple[str, str, str]]]:
         """Read exact requested tracks once for the current scan."""
         conn = context.db._get_connection()
         try:
-            from core.reconciliation.fulfillment import backfill_requests, outstanding
-            backfill_requests(conn)
+            from core.reconciliation.fulfillment import outstanding
             durable = outstanding(conn)
             replacements = conn.execute('''SELECT case_id, source, release_id, source_track_id, state, published_path
                 FROM reconcile_fulfillment WHERE replacement_request=1
@@ -2160,8 +2116,6 @@ class LibraryReconciliationJob(RepairJob):
         assignment_overrides = self._assignment_overrides(context)
         from core.reconciliation import choices as review_choices
         kept_numbering = review_choices.applied_numbering_choices(context.db)
-        if not plan_only:
-            review_choices.backfill_applied_releases(context.db)
         reviewed_releases = review_choices.load_release_choices(context.db)
         from core.reconciliation.audio_copy import load_choices as audio_copy_choices
         audio_copies = audio_copy_choices(context.db)

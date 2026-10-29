@@ -693,7 +693,9 @@
         "not_owned": 1,
         "extra": 0,
         "settled": 0
-      }
+      },
+      "review_id": "cancelled:review_id:6",
+      "decision_revision": 3
     },
     "decisions": [
       {
@@ -800,7 +802,7 @@
     "ready_albums_total": 0
   },
   "ready_preview": {
-    "signature": "cancelled:signature:6",
+    "signature": "cancelled:signature:7",
     "albums": [],
     "action_count": 0,
     "file_actions": 0

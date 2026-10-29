@@ -692,7 +692,9 @@
         "not_owned": 1,
         "extra": 0,
         "settled": 0
-      }
+      },
+      "review_id": "selective:review_id:6",
+      "decision_revision": 2
     },
     "decisions": [
       {
@@ -799,7 +801,7 @@
     "ready_albums_total": 0
   },
   "ready_preview": {
-    "signature": "selective:signature:6",
+    "signature": "selective:signature:7",
     "albums": [],
     "action_count": 0,
     "file_actions": 0

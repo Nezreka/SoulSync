@@ -19,18 +19,21 @@ def ensure_schema(conn):
     )''')
     if 'replacement_request' not in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_fulfillment)')}:
         conn.execute('ALTER TABLE reconcile_fulfillment ADD COLUMN replacement_request INTEGER NOT NULL DEFAULT 0')
-        if 'source_info' in {row[1] for row in conn.execute('PRAGMA table_info(wishlist_tracks)')}:
-            # Preserve requests made by earlier versions of the remediation UI.
-            conn.execute('''UPDATE reconcile_fulfillment SET replacement_request=1
-                WHERE EXISTS (SELECT 1 FROM wishlist_tracks w
-                    WHERE w.profile_id=reconcile_fulfillment.profile_id
-                      AND json_valid(w.source_info) AND json_valid(w.spotify_data)
-                      AND json_extract(w.source_info, '$.reason')='library_reconciliation_wrong_audio'
-                      AND json_extract(w.spotify_data, '$.provider')=reconcile_fulfillment.source
-                      AND json_extract(w.spotify_data, '$.album.id')=reconcile_fulfillment.release_id
-                      AND json_extract(w.spotify_data, '$.id')=reconcile_fulfillment.source_track_id)''')
-            conn.execute("""UPDATE reconcile_fulfillment SET state='requested'
-                WHERE replacement_request=1 AND state='fulfilled' AND published_path=''""")
+
+
+def migrate_legacy_replacement_requests(conn):
+    if 'source_info' in {row[1] for row in conn.execute('PRAGMA table_info(wishlist_tracks)')}:
+        # Preserve requests made by earlier versions of the remediation UI.
+        conn.execute('''UPDATE reconcile_fulfillment SET replacement_request=1
+            WHERE EXISTS (SELECT 1 FROM wishlist_tracks w
+                WHERE w.profile_id=reconcile_fulfillment.profile_id
+                  AND json_valid(w.source_info) AND json_valid(w.spotify_data)
+                  AND json_extract(w.source_info, '$.reason')='library_reconciliation_wrong_audio'
+                  AND json_extract(w.spotify_data, '$.provider')=reconcile_fulfillment.source
+                  AND json_extract(w.spotify_data, '$.album.id')=reconcile_fulfillment.release_id
+                  AND json_extract(w.spotify_data, '$.id')=reconcile_fulfillment.source_track_id)''')
+        conn.execute("""UPDATE reconcile_fulfillment SET state='requested'
+            WHERE replacement_request=1 AND state='fulfilled' AND published_path=''""")
 
 
 def request_identity(details, slot):
@@ -132,8 +135,8 @@ def published_wishlist_track(db, stored_id, profiles, path):
 
 
 def outstanding(conn):
-    ensure_schema(conn)
-    repair_request_payloads(conn)
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_fulfillment'").fetchone():
+        return []
     return conn.execute('''SELECT profile_id, source_track_id, release_id, state, source
         FROM reconcile_fulfillment WHERE state IN ('requested', 'published') ''').fetchall()
 
@@ -180,7 +183,6 @@ def repair_request_payloads(conn):
                              (json.dumps(payload), json.dumps(context), row_id))
         except (ValueError, TypeError, AttributeError):
             continue
-    conn.commit()
 
 
 def requested_folder(db, *, profile_id, source, release_id, track_id, disc_number, root):
@@ -305,7 +307,9 @@ def settle_assignments(db, case_id, assignments, release_id, source):
     """A published file stays pending until reconciliation assigns its exact slot."""
     if not assignments:
         return
-    conn = db._get_connection()
+    from core.reconciliation.publication import connection_for
+    shared = connection_for(db)
+    conn = shared or db._get_connection()
     try:
         ensure_schema(conn)
         rows = conn.execute('''SELECT source_track_id, state, published_path, replacement_request
@@ -326,9 +330,11 @@ def settle_assignments(db, case_id, assignments, release_id, source):
             conn.execute('''UPDATE reconcile_fulfillment SET state='fulfilled', refresh_needed=0,
                 updated_at=CURRENT_TIMESTAMP WHERE case_id=? AND release_id=? AND source_track_id=? AND source=?''',
                 (case_id, str(release_id), row[0], source))
-        conn.commit()
+        if shared is None:
+            conn.commit()
     finally:
-        conn.close()
+        if shared is None:
+            conn.close()
 
 
 def _planned_delivery(conn, case, profile, release, track, path, *, verified=False):
@@ -439,4 +445,3 @@ def backfill_requests(conn):
                     details.get('album_folder') or '', details.get('source') or '',
                     details.get('exact_release_id') or details.get('release_id') or '',
                     str(slot['source_track_id'])))
-    conn.commit()

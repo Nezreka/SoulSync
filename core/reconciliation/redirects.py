@@ -1,4 +1,5 @@
 """Exact case redirects after verified inventory relocation."""
+import json
 
 def resolve_case(db, key: str) -> str:
     conn = db._get_connection()
@@ -29,7 +30,17 @@ def record_relocation(db, old_folder: str, new_case: str) -> None:
             'SELECT case_id FROM reconcile_album_plans WHERE album_folder=? AND case_id!=? AND profile_id=?',
             (old_folder, new_case, target[4]))]
         for old_case in previous_keys:
+            from core.reconciliation.replacement import relocate_pending
+            plan = conn.execute('SELECT plan_json FROM reconcile_album_plans WHERE case_id=?', (new_case,)).fetchone()
+            relocate_pending(conn, old_case, new_case, target[1], json.loads(plan[0]))
             rebind_review(conn, old_case, new_case, target[0])
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_settled_decisions'").fetchone():
+                conn.execute('UPDATE reconcile_settled_decisions SET case_id=? WHERE case_id=?', (new_case, old_case))
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_review_work'").fetchone():
+                from core.reconciliation.work import enqueue
+                for kind, scope, force in conn.execute('SELECT kind,scope,refresh_catalogue FROM reconcile_review_work WHERE case_id=?', (old_case,)).fetchall():
+                    enqueue(conn, new_case, target[1], scope=scope, refresh_catalogue=bool(force), kind=kind)
+                conn.execute('DELETE FROM reconcile_review_work WHERE case_id=?', (old_case,))
         conn.execute('INSERT OR REPLACE INTO reconcile_case_redirects SELECT case_id, ? FROM reconcile_album_plans WHERE album_folder = ? AND case_id != ? AND profile_id=?', (new_case, old_folder, new_case, target[4]))
         if target and conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_fulfillment'").fetchone():
             from core.reconciliation.fulfillment import ensure_schema

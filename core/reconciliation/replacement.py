@@ -31,6 +31,17 @@ def approve(db, path, details):
     key = hashlib.sha256(json.dumps([identity, path, details.get('file_identity'), server_key], sort_keys=True).encode()).hexdigest()
     with connection(db) as conn:
         ensure_schema(conn)
+        # Album-ID/path migrations preserve the durable operation identifier.
+        # Find an existing exact request before deriving a new identifier.
+        for existing_key, raw in conn.execute(
+                'SELECT replacement_id,details_json FROM reconcile_replacements WHERE case_id=? AND old_path=?',
+                (identity['case_id'], path)):
+            saved = json.loads(raw)
+            if (request_identity(saved, saved.get('replacement_track') or {}) == identity
+                    and saved.get('file_identity') == details.get('file_identity')
+                    and saved.get('_replacement_server') == server_key):
+                key = existing_key
+                break
         conn.execute('''INSERT INTO reconcile_replacements
             (replacement_id,case_id,old_path,details_json) VALUES (?,?,?,?)
             ON CONFLICT(replacement_id) DO UPDATE SET state='waiting',journal='{}',error='',
@@ -227,3 +238,43 @@ def advance(worker):
                                            details.get('album_folder') or os.path.dirname(old), scope='discovery')
         except Exception as exc:
             persist(journal, 'attention', str(exc))
+
+
+def relocate_pending(conn, old_case, new_case, folder, plan):
+    """Rebind only the same indexed original with fresh, matching audio evidence.
+
+    A missing old path alone is insufficient. Ambiguous copies and changed
+    library identities remain blocked for review; the playlist journal is kept.
+    """
+    from core.reconciliation.evidence import file_identity
+    files = (plan.get('_planning') or {}).get('files') or []
+    for key, old, raw in conn.execute("SELECT replacement_id,old_path,details_json FROM reconcile_replacements WHERE case_id=? AND state NOT IN ('complete','cancelled')", (old_case,)).fetchall():
+        details = json.loads(raw)
+        if (details.get('source'), details.get('release_id')) != (plan.get('source'), plan.get('release_id')):
+            continue
+        if not details.get('fingerprint_key') or os.path.exists(old):
+            continue
+        candidates = [item for item in files if item.get('fingerprint_key') == details['fingerprint_key']
+                      and item.get('size_bytes') == details.get('size_bytes')]
+        if len(candidates) != 1:
+            continue
+        evidence = candidates[0]
+        path = evidence.get('path')
+        if not path or not os.path.isfile(path):
+            continue
+        stat = os.stat(path)
+        if (evidence.get('file_identity') != file_identity(stat)
+                or evidence.get('size_bytes') != stat.st_size or evidence.get('mtime_ns') != stat.st_mtime_ns):
+            continue
+        row = conn.execute('SELECT file_path,album_id FROM tracks WHERE id=?', (details.get('track_id'),)).fetchone()
+        if not row or str(row[1]) != str(details.get('album_id')):
+            continue
+        try:
+            if not os.path.samefile(row[0], path):
+                continue
+        except OSError:
+            continue
+        details.update(album_folder=folder, old_stored_path=row[0], file_identity=file_identity(stat),
+                       size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
+        conn.execute('UPDATE reconcile_replacements SET case_id=?,old_path=?,details_json=? WHERE replacement_id=?',
+                     (new_case, path, json.dumps(details), key))

@@ -87,7 +87,7 @@ def test_release_candidate_can_be_pinned_without_release_finding():
     class AlbumDatabase(_Database):
         selected = None
 
-        def set_album_canonical(self, album_id, source, release_id, *, score, locked):
+        def set_album_canonical(self, album_id, source, release_id, *, score, locked, connection=None):
             self.selected = (album_id, source, release_id, locked)
             return True
 
@@ -122,7 +122,7 @@ def test_manual_musicbrainz_release_is_previewed_before_pinning(monkeypatch, tmp
     release_id = '301434dc-e59a-467d-b950-abfa9a2ad32e'
     class AlbumDatabase(_Database):
         selected = None
-        def set_album_canonical(self, album_id, source, selected_id, *, score, locked):
+        def set_album_canonical(self, album_id, source, selected_id, *, score, locked, connection=None):
             self.selected = (album_id, source, selected_id, locked)
             return True
     class MusicBrainz:
@@ -1092,7 +1092,7 @@ def test_existing_findings_are_backfilled_into_exact_cases(tmp_path):
         conn.execute('''CREATE TABLE repair_findings (
             id INTEGER PRIMARY KEY, job_id TEXT, finding_type TEXT, status TEXT,
             entity_type TEXT, entity_id TEXT, file_path TEXT, details_json TEXT,
-            resolved_at TEXT
+            resolved_at TEXT, user_action TEXT
         )''')
         conn.execute('''CREATE TABLE repair_job_runs (id INTEGER PRIMARY KEY)''')
         conn.execute('''INSERT INTO repair_findings
@@ -1326,6 +1326,7 @@ def test_reopen_assignment_is_case_scoped_and_clears_only_its_saved_choice(tmp_p
     worker._review_apply_lock = threading.RLock()
     refreshed = []
     worker._schedule_album_refresh = lambda *args, **kwargs: refreshed.append(args) or True
+    db.conn.commit()
 
     assert worker.reopen_review_assignment('another-case', 1)['stale']
     assert not refreshed

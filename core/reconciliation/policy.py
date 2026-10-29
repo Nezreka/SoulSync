@@ -315,7 +315,8 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
         if compact:
             details = {k: v for k, v in details.items() if v is not None}
             raw = json.dumps(details)
-        if compact and kind == 'reconciliation_metadata' and key in album_numbering:
+        if (compact and kind == 'reconciliation_metadata' and key in album_numbering
+                and _POSITION_CHANGE_KEYS.intersection(details.get('changes') or {})):
             numbering = album_numbering[key]
             if not choice or category == 'numbering':
                 category, choice, action = 'numbering', numbering, ''

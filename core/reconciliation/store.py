@@ -48,6 +48,16 @@ def ensure_schema(conn) -> None:
         conn.execute("ALTER TABLE reconcile_album_plans ADD COLUMN numbering_signature TEXT NOT NULL DEFAULT ''")
     from core.reconciliation.decisions import ensure_schema as ensure_decisions
     ensure_decisions(conn)
+    from core.reconciliation.settled import ensure_schema as ensure_settled
+    ensure_settled(conn)
+    from core.reconciliation.work import ensure_schema as ensure_work
+    ensure_work(conn)
+    from core.reconciliation.album_state import ensure_schema as ensure_album_state
+    ensure_album_state(conn)
+    from core.reconciliation.fulfillment import ensure_schema as ensure_fulfillment
+    from core.reconciliation.replacement import ensure_schema as ensure_replacements
+    ensure_fulfillment(conn)
+    ensure_replacements(conn)
     conn.execute('''CREATE INDEX IF NOT EXISTS idx_reconcile_plans_state
                     ON reconcile_album_plans(state, updated_at)''')
     conn.execute('''CREATE INDEX IF NOT EXISTS idx_reconcile_plans_album
@@ -74,7 +84,9 @@ def persist_album_plan(db, header: dict[str, Any], payload: dict[str, Any]) -> s
         else 'changes' if counts['changed'] else 'confirmed'))
     document = {**payload, 'case_id': case_id, 'counts': counts,
                 'categories': categories, 'state': state}
-    conn = db._get_connection()
+    from core.reconciliation.publication import connection_for
+    shared = connection_for(db)
+    conn = shared or db._get_connection()
     try:
         ensure_schema(conn)
         from core.reconciliation.decisions import register_review, plan_numbering_signature
@@ -113,10 +125,12 @@ def persist_album_plan(db, header: dict[str, Any], payload: dict[str, Any]) -> s
         ))
         conn.execute('UPDATE reconcile_album_plans SET numbering_signature=? WHERE case_id=?',
                      (plan_numbering_signature(document), case_id))
-        conn.commit()
+        if shared is None:
+            conn.commit()
         return case_id
     finally:
-        conn.close()
+        if shared is None:
+            conn.close()
 
 
 def load_album_plan(conn, case_id: str) -> dict[str, Any] | None:

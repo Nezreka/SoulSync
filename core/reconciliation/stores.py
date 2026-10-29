@@ -6,6 +6,7 @@ ALBUM_ID_STORES = (
     'reconcile_audio_copy_releases',
 )
 DOCUMENT_STORES = (
+    ('reconcile_settled_decisions', 'decision_id', 'details_json', 'case_id'),
     ('repair_findings', 'id', 'details_json', 'review_case_key'),
     ('reconcile_review_choices', 'finding_id', 'evidence_json', 'case_id'),
     ('reconcile_replacements', 'replacement_id', 'details_json', 'case_id'),
@@ -21,6 +22,7 @@ STORE_OWNERS = {
     'reconcile_review_aliases': 'review identity',
     'reconcile_album_decisions': 'album decisions',
     'reconcile_track_assignment': 'track decisions',
+    'reconcile_settled_decisions': 'accepted track decisions',
     'reconcile_review_choices': 'track decisions',
     'reconcile_saved_plans': 'apply approval',
     'reconcile_fulfillment': 'acquisition',
@@ -28,6 +30,7 @@ STORE_OWNERS = {
     'reconcile_album_plans': 'evidence snapshots',
     'reconcile_case_redirects': 'review identity',
     'reconcile_schema_versions': 'schema migrations',
+    'reconcile_review_work': 'durable follow-up work',
     'repair_operation_reports': 'operation history',
     'repair_findings': 'proposals and findings history',
     'reconcile_file_fingerprints': 'evidence cache',

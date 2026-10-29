@@ -1037,7 +1037,9 @@
         "not_owned": 0,
         "extra": 1,
         "settled": 0
-      }
+      },
+      "review_id": "duplicate_saved:review_id:8",
+      "decision_revision": 1
     },
     "decisions": [
       {
@@ -1142,7 +1144,7 @@
     "ready_albums_total": 1
   },
   "ready_preview": {
-    "signature": "duplicate_saved:signature:8",
+    "signature": "duplicate_saved:signature:9",
     "albums": [
       {
         "artist": "Acceptance Artist",

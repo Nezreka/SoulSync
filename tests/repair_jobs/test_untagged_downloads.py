@@ -159,6 +159,9 @@ def test_fix_respects_reviewed_values_before_writing(tmp_path, field, compatible
             "INSERT INTO repair_findings VALUES (1, 'library_reconciliation', 'case', ?, 'track', 'resolved', 'retagged', ?)",
             (str(path), json.dumps({"changes": {field: {"old": "", "new": reviewed}}})),
         )
+        conn.execute("ALTER TABLE repair_findings ADD COLUMN finding_type TEXT NOT NULL DEFAULT 'reconciliation_metadata'")
+        from core.reconciliation.settled import record
+        record(conn, 1)
     worker = RepairWorker(database=db)
     result = worker._execute_fix("untagged_download", "file", "1", str(path), {
         "track_title": "Song", "artist": "Artist", "album_title": "Album", "track_number": 1,

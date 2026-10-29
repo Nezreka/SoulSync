@@ -278,6 +278,9 @@ def test_auto_resolver_respects_an_accepted_queue_release(tmp_path):
         'changes':{'musicbrainz_release_id':{'old':'old','new':'reviewed-release'}}})
     with db._get_connection() as conn:
         conn.execute("UPDATE repair_findings SET status='resolved',user_action='retagged'")
+        from core.reconciliation.settled import record
+        for fid, in conn.execute('SELECT id FROM repair_findings').fetchall():
+            record(conn, fid)
     result = resolve_and_store_canonical_for_album(db,album_id,
         fetch_tracklist=lambda *_: STD, source_priority=['spotify'])
     assert result['review_conflict']

@@ -1360,7 +1360,9 @@
         "not_owned": 0,
         "extra": 0,
         "settled": 0
-      }
+      },
+      "review_id": "companion:review_id:9",
+      "decision_revision": 0
     },
     "decisions": [
       {
@@ -1445,7 +1447,7 @@
     "ready_albums_total": 1
   },
   "ready_preview": {
-    "signature": "companion:signature:9",
+    "signature": "companion:signature:10",
     "albums": [
       {
         "artist": "Acceptance Artist",

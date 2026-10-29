@@ -1013,7 +1013,9 @@
         "not_owned": 0,
         "extra": 1,
         "settled": 0
-      }
+      },
+      "review_id": "duplicate:review_id:8",
+      "decision_revision": 0
     },
     "decisions": [
       {
@@ -1120,7 +1122,7 @@
     "ready_albums_total": 0
   },
   "ready_preview": {
-    "signature": "duplicate:signature:8",
+    "signature": "duplicate:signature:9",
     "albums": [],
     "action_count": 0,
     "file_actions": 0
