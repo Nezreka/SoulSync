@@ -301,6 +301,10 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_title_lower ON lib2_tracks(LOWER(title))",
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_title_lower ON lib2_albums(LOWER(title))",
     "CREATE INDEX IF NOT EXISTS idx_lib2_artists_name_lower ON lib2_artists(LOWER(name))",
+    # the track search's credit pass asks for rows WITH a per-track artist;
+    # most libraries have few or none, so this keeps it off a full scan
+    "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_track_artist ON lib2_tracks(track_artist) "
+    "WHERE track_artist IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS idx_lib2_mirror_outbox_status ON lib2_mirror_outbox(status)",
 )
 

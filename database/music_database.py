@@ -795,6 +795,9 @@ class MusicDatabase:
                 # COALESCE a not-yet-backfilled row to the same value
                 from core.text.normalize import normalize_for_comparison as _nfc
                 connection.create_function("norm_text", 1, lambda x: _nfc(x) if x else "", deterministic=True)
+                # punctuation dropped too: 'ACDC' finds 'AC/DC' (track search)
+                from core.text.normalize import normalize_key as _nkey
+                connection.create_function("norm_key", 1, lambda x: _nkey(x) if x else "", deterministic=True)
                 # Enable foreign key constraints and WAL mode for better concurrency.
                 # Docker Desktop bind mounts can briefly fail while SQLite opens the
                 # sidecar WAL/SHM files; retrying avoids surfacing transient 500s.
@@ -11113,37 +11116,9 @@ class MusicDatabase:
                 return []
 
             conn = self._get_connection()
-            cursor = conn.cursor()
+            rows = self._search_track_rows(conn.cursor(), title, artist, limit, server_source, rank_artist)
+            return self._rows_to_tracks(rows, server_source=server_source)
 
-            # STRATEGY 1: Try basic SQL LIKE search first (fastest)
-            basic_results = self._search_tracks_basic(cursor, title, artist, limit, server_source, rank_artist)
-
-            if basic_results:
-                logger.debug(f"Basic search found {len(basic_results)} results")
-                return basic_results
-
-            # STRATEGY 1b: Spotify renders versions as "Title - Qualifier"
-            # ("Calma - Remix") but libraries usually store just the base
-            # ("Calma"), so the literal search misses. Retry on the base title
-            # BEFORE the OR-fuzzy fallback (which would flood on the common
-            # qualifier word — every "... remix" matches "remix"). #: Calma - Remix
-            if title:
-                from core.text.title_match import base_title_before_dash
-                base_title = base_title_before_dash(title)
-                if base_title and base_title != title:
-                    base_results = self._search_tracks_basic(
-                        cursor, base_title, artist, limit, server_source, rank_artist)
-                    if base_results:
-                        logger.debug("Base-title search matched '%s' via '%s'", title, base_title)
-                        return base_results
-
-            # STRATEGY 2: Broader fuzzy search - splits into individual words with OR matching
-            fuzzy_results = self._search_tracks_fuzzy_fallback(cursor, title, artist, limit, server_source)
-            if fuzzy_results:
-                logger.debug(f"Fuzzy fallback search found {len(fuzzy_results)} results")
-            
-            return fuzzy_results
-            
         except Exception as e:
             logger.error(f"Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
@@ -11277,25 +11252,8 @@ class MusicDatabase:
             if not title and not artist:
                 return []
             conn = self._get_connection()
-            cursor = conn.cursor()
-
-            basic_rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source)
-            if basic_rows:
-                return self._api_project_lib2(conn, 'track', basic_rows)
-
-            # Base-title fallback for Spotify "Title - Qualifier" forms (see
-            # search_tracks STRATEGY 1b) before the OR-fuzzy flood.
-            if title:
-                from core.text.title_match import base_title_before_dash
-                base_title = base_title_before_dash(title)
-                if base_title and base_title != title:
-                    base_rows = self._search_tracks_basic_rows(
-                        cursor, base_title, artist, limit, server_source)
-                    if base_rows:
-                        return self._api_project_lib2(conn, 'track', base_rows)
-
-            fuzzy_rows = self._search_tracks_fuzzy_rows(cursor, title, artist, limit, server_source)
-            return self._api_project_lib2(conn, 'track', fuzzy_rows)
+            rows = self._search_track_rows(conn.cursor(), title, artist, limit, server_source)
+            return self._api_project_lib2(conn, 'track', rows)
         except Exception as e:
             logger.error(f"API: Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
@@ -11447,6 +11405,101 @@ class MusicDatabase:
             logger.error(f"Error bulk-loading tracks for M3U resolution: {e}")
             return []
 
+    def _artist_track_scope(self, cursor, artist: str, *, wide: bool = False):
+        """the tracks an artist search may look at, as (sql, params) over ``tracks``.
+
+        exact: catalogue artists whose name_key is the name (indexed), their
+        albums' tracks plus their per-track credits. wide: every artist whose
+        folded name contains it (one fold per artist row, ~35k, not per track)
+        plus a per-track credit text that does. either way the python fold in
+        the search below runs on that artist's rows, not the whole library.
+        exact returns None when no artist has that name."""
+        from core.library2.importer import normalize_name
+        if wide:
+            norm = self._normalize_for_comparison(artist)
+            cursor.execute("SELECT id FROM lib2_artists WHERE unidecode_lower(name) LIKE ?",
+                           (f"%{norm}%",))
+            ids = [int(r[0]) for r in cursor.fetchall()]
+            if not ids:
+                # "ACDC" for "AC/DC": the same artist once punctuation is gone
+                from core.text.normalize import normalize_key
+                key = normalize_key(artist)
+                if key:
+                    cursor.execute("SELECT id FROM lib2_artists WHERE norm_key(name) = ?", (key,))
+                    ids = [int(r[0]) for r in cursor.fetchall()]
+        else:
+            cursor.execute("SELECT id FROM lib2_artists WHERE name_key = ?",
+                           (normalize_name(artist),))
+            ids = [int(r[0]) for r in cursor.fetchall()]
+        if not ids and not wide:
+            return None
+        parts, params = [], []
+        if ids:
+            ph = ",".join("?" for _ in ids)
+            parts.append(
+                f"tracks.id IN (SELECT t2.id FROM lib2_tracks t2 JOIN lib2_albums a2 ON a2.id=t2.album_id "
+                f"WHERE a2.primary_artist_id IN ({ph}) "
+                f"UNION SELECT ta.track_id FROM lib2_track_artists ta WHERE ta.artist_id IN ({ph}))")
+            params.extend(ids + ids)
+        if wide:
+            # per-track credit text ("A feat. B" filed under A). resolved once
+            # here, through the partial index, instead of in every strategy
+            cursor.execute(
+                "SELECT id FROM lib2_tracks WHERE track_artist IS NOT NULL "
+                "AND unidecode_lower(track_artist) LIKE ?",
+                (f"%{self._normalize_for_comparison(artist)}%",))
+            credited = [int(r[0]) for r in cursor.fetchall()]
+            if credited:
+                parts.append(f"tracks.id IN ({','.join('?' for _ in credited)})")
+                params.extend(credited)
+        if not parts:
+            parts.append("0")
+        return "(" + " OR ".join(parts) + ")", params
+
+    def _search_track_rows(self, cursor, title: str, artist: str, limit: int,
+                           server_source: Optional[str] = None, rank_artist: Optional[str] = None):
+        """the one track search, as raw rows. strategies in order, each only
+        when the previous found nothing:
+          1. literal title (and artist) match
+          1b. the base title before a ' - qualifier' ("Calma - Remix" is
+              usually stored as "Calma"), before the fuzzy pass floods on the
+              qualifier word
+          2. word-or fuzzy match on the title
+        with an artist, every strategy stays inside that artist's tracks, first
+        the exact name, then names that contain it. the old word-or pass over
+        every artist in the library cost a python fold per track per term and
+        only turned up other bands' songs the scorer rejects anyway; on a 310k
+        library one playlist track took minutes."""
+        from core.text.title_match import base_title_before_dash
+        base_title = base_title_before_dash(title) if title else ''
+        if base_title == title:
+            base_title = ''
+
+        def scopes():
+            if not artist:
+                yield None
+                return
+            exact = self._artist_track_scope(cursor, artist)
+            if exact:
+                yield exact
+            yield self._artist_track_scope(cursor, artist, wide=True)
+
+        for scope in scopes():
+            rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source,
+                                                  rank_artist, scope=scope)
+            if rows:
+                return rows
+            if base_title:
+                rows = self._search_tracks_basic_rows(cursor, base_title, artist, limit, server_source,
+                                                      rank_artist, scope=scope)
+                if rows:
+                    logger.debug("Base-title search matched '%s' via '%s'", title, base_title)
+                    return rows
+            rows = self._search_tracks_fuzzy_rows(cursor, title, artist, limit, server_source, scope=scope)
+            if rows:
+                return rows
+        return []
+
     def _search_tracks_basic(self, cursor, title: str, artist: str, limit: int, server_source: str = None,
                              rank_artist: str = None) -> List[DatabaseTrack]:
         """Basic SQL LIKE search - fastest method"""
@@ -11454,19 +11507,27 @@ class MusicDatabase:
         return self._rows_to_tracks(rows, server_source=server_source)
 
     def _search_tracks_basic_rows(self, cursor, title: str, artist: str, limit: int,
-                                  server_source: Optional[str] = None, rank_artist: Optional[str] = None):
+                                  server_source: Optional[str] = None, rank_artist: Optional[str] = None,
+                                  scope=None):
         """Basic SQL LIKE search returning raw rows (shared by DatabaseTrack and dict-returning callers).
 
         ``rank_artist`` is a relevance-only hint (does NOT filter): when given,
-        rows by that artist sort to the top so an exact title+artist match wins."""
+        rows by that artist sort to the top so an exact title+artist match wins.
+
+        ``scope`` is ``_artist_track_scope``'s (sql, params): it stands in for
+        the artist match and keeps the scan to that artist's tracks."""
         where_conditions = []
         params = []
+
+        if scope:
+            where_conditions.append(scope[0])
+            params.extend(scope[1])
 
         if title:
             where_conditions.append("unidecode_lower(tracks.title) LIKE ?")
             params.append(f"%{self._normalize_for_comparison(title)}%")
 
-        if artist:
+        if artist and not scope:
             norm_artist = f"%{self._normalize_for_comparison(artist)}%"
             where_conditions.append("(unidecode_lower(artists.name) LIKE ? OR unidecode_lower(COALESCE(tracks.track_artist, '')) LIKE ?)")
             params.append(norm_artist)
@@ -11576,10 +11637,14 @@ class MusicDatabase:
         return terms
 
     def _search_tracks_fuzzy_rows(self, cursor, title: str, artist: str, limit: int,
-                                  server_source: Optional[str] = None):
-        """Broadest fuzzy search returning raw rows (shared by DatabaseTrack and dict-returning callers)."""
+                                  server_source: Optional[str] = None, scope=None):
+        """Broadest fuzzy search returning raw rows (shared by DatabaseTrack and dict-returning callers).
+
+        with a ``scope`` (``_artist_track_scope``) the word-or match runs on
+        the title only, inside that artist's tracks."""
         # Get broader results by searching for individual words
         search_terms = []
+        title_words = []
         if title:
             title_words = self._fuzzy_terms(self._normalize_for_comparison(title))
             search_terms.extend(title_words)
@@ -11594,14 +11659,22 @@ class MusicDatabase:
         like_conditions = []
         params = []
 
-        for term in search_terms[:5]:
-            like_conditions.append("(unidecode_lower(tracks.title) LIKE ? OR unidecode_lower(artists.name) LIKE ? OR unidecode_lower(COALESCE(tracks.track_artist, '')) LIKE ?)")
-            params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
+        if scope:
+            for term in title_words[:5]:
+                like_conditions.append("unidecode_lower(tracks.title) LIKE ?")
+                params.append(f"%{term}%")
+        else:
+            for term in search_terms[:5]:
+                like_conditions.append("(unidecode_lower(tracks.title) LIKE ? OR unidecode_lower(artists.name) LIKE ? OR unidecode_lower(COALESCE(tracks.track_artist, '')) LIKE ?)")
+                params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
 
         if not like_conditions:
             return []
 
         where_parts = [f"({' OR '.join(like_conditions)})"]
+        if scope:
+            where_parts.insert(0, scope[0])
+            params[:0] = scope[1]
         if server_source:
             where_parts.append(
                 "(EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
