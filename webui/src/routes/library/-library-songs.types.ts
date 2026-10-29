@@ -19,7 +19,13 @@ export interface SongsSearch {
 
 /** One row from /api/library/songs. */
 export interface LibrarySong {
+  /** the Library v2 track id */
   id: string | number;
+  /** the same id, named the way the player reads it */
+  lib2_track_id?: number | null;
+  /** the legacy row's id, the only one a media server can stream by */
+  legacy_track_id?: string | number | null;
+  server_track_id?: string | number | null;
   title: string;
   artist_name: string;
   artist_id: string | number;
