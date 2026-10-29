@@ -37,7 +37,7 @@ def grab_movie(details: dict) -> dict:
             return {"success": False,
                     "error": "no release matched your quality profile — finding stays pending"}
         ok = vpw._default_enqueue(item, best, candidates, "movie",
-                                  vpw._default_target_dir("movie"))
+                                  vpw.grab_target_dir(item, "movie", vpw._default_target_dir("movie")))
         if not ok:
             return {"success": False, "error": "slskd did not accept the download"}
         name = best.get("quality") or best.get("resolution") or "release"
@@ -68,7 +68,8 @@ def grab_episode(details: dict) -> dict:
             return {"success": False,
                     "error": "no release matched your quality profile — finding stays pending"}
         outcome = vpw.enqueue_outcome(vpw._default_enqueue(
-            item, best, candidates, "episode", vpw._default_target_dir("episode")))
+            item, best, candidates, "episode",
+            vpw.grab_target_dir(item, "episode", vpw._default_target_dir("episode"))))
         if not outcome["ok"]:
             return {"success": False, "error": outcome.get("error") or "download client did not accept the release"}
         name = best.get("quality") or best.get("resolution") or "release"
