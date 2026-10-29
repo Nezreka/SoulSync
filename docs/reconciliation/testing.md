@@ -93,3 +93,24 @@ The second live reconciliation completed in 133.92 seconds, again checking 13,87
 The warm search check still found a regression after those two passes. The corrective read path now reuses the compact effective projection for visible album summaries, extracts policy fields together, and uses direct indexed job/case predicates. Counts, filtering, and the page use one SQLite read snapshot. On the same saved database, six complete response payloads matched the preceding implementation exactly; warm query medians fell from 278–350 ms to 186–198 ms, and the unfiltered queue from 603 ms to 298 ms. A work-budget test with 20,000 unrelated pending findings fails against the previous predicates and passes with the indexed form. A concurrent publication test proves that one response cannot combine two snapshots.
 
 The broader suite also exposed a catalogue request race: a previous fetch could publish and retire its in-flight entry between another caller's cache miss and ownership acquisition. Owners now recheck the persistent cache before fetching. The concurrency regression explicitly schedules that interval; expiry and forced-refresh behavior retain their existing contracts.
+
+### Final corrective deployment
+
+The final runtime revision is `01f48b35cab4`. The full reconciliation suite passed **921 tests** after the corrections. The related worker/library/download suites passed 429 tests; UI validation covered 110 review unit cases, 32 browser journeys, and 60 backend-derived acceptance cases. UI check/build succeeded; the check retained existing warnings and reported zero errors.
+
+The final live scan checked **13,872 files in 132.69 seconds**, with **zero errors, zero new findings, and zero automatic file actions**. It reused all 13,872 tag reads, 13,846 fingerprint lookups, 8,837 persistent catalogue responses, and 10,024 matching results. One catalogue request reached the provider; rate-limit waiting was zero. All 13 concurrent queue probes succeeded (median 654 ms, maximum 1.73 s).
+
+Final idle medians below use the same five-request procedure as the original baseline, excluding the first request. Small differences on an empty result are within the observed request variation; named searches are back at baseline speed, with the matching rules retained.
+
+| Queue query | Original baseline | Final deployment |
+| --- | ---: | ---: |
+| Unfiltered | 363 ms | 305 ms |
+| `tron` | 241 ms | 210 ms |
+| `tron legacy` | 273 ms | 200 ms |
+| `awake` | 226 ms | 207 ms |
+| `prequelle` | 261 ms | 201 ms |
+| `every last crumb` | 216 ms | 218 ms |
+
+The final queue still contained 681 albums (368 needing review, 313 ready, 1,436 ready actions). Saved choices and accepted-policy counts remained unchanged. No unreviewed library changes were applied as part of validation. The disambiguation denylist remains outside this implementation.
+
+Final live inspection covered 24 Plan/Release/Tracks views across LIVE, TRON, Blue (Third Eye Blind), and Unwritten at 1,800 px and 390 px. There were no page runtime errors, repair API 5xx responses, or horizontal overflow. LIVE exposed MusicBrainz candidates with 19/19 assigned slots; Blue showed completed decisions and a collapsed historical operation report. The inspection used a local SSH tunnel after the Kubernetes port-forward transport timed out; the app remained ready with zero restarts. Music automation was restored after rollout. The feature image remains active for user review with the SoulSync Flux Kustomization suspended, as in the preceding feature-review deployment.
