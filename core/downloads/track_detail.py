@@ -10,6 +10,18 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from core.downloads.candidate_pool import DECODE_USERNAMES, display_name_for
+
+
+def _task_location(task: Dict[str, Any]) -> str:
+    """The detail's location line for a task with no history row yet."""
+    filename = (task.get('filename') or '').strip()
+    username = (task.get('username') or '').strip()
+    if username in DECODE_USERNAMES:
+        return display_name_for(filename, username)
+    return filename
+
+
 # error_message substrings that mean "quarantined" (file recoverable) rather
 # than a plain failure. Mirrors the download-modal status renderer.
 _QUARANTINE_KEYWORDS = (
@@ -97,7 +109,10 @@ def build_track_detail(task: Dict[str, Any], history: Optional[Dict[str, Any]] =
         'source': (task.get('username') or '').strip(),
         'reason': (task.get('error_message') or '').strip(),
         'quarantine_entry_id': task.get('quarantine_entry_id') or '',
-        'file_path': (task.get('filename') or '').strip(),
+        # A streaming task's filename is a dispatch key, not a location:
+        # name the song (#1911). A peer's path and a history row's real
+        # path both stay exactly as they are.
+        'file_path': _task_location(task),
         'quality': '',
         'acoustid_result': '',
         'thumb_url': '',

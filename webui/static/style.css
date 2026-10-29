@@ -56401,6 +56401,22 @@ tr.tag-diff-same {
     font-size: 13px; font-weight: 600; color: var(--white-a90);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;
 }
+.rdl-src-listen {
+    display: inline-grid; place-items: center; flex-shrink: 0;
+    width: 22px; height: 22px; padding: 0 0 0 2px;
+    border: 1px solid var(--white-a14); border-radius: var(--radius-pill);
+    background: var(--white-a05); color: var(--white-a85);
+    font-size: 9px; line-height: 1; cursor: pointer;
+    transition: background var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out), color var(--dur-base) var(--ease-out);
+}
+.rdl-src-listen:hover, .rdl-src-listen:focus-visible {
+    border-color: rgba(var(--accent-rgb), 0.6); background: rgba(var(--accent-rgb), 0.18); color: var(--accent);
+}
+.rdl-src-listen:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 2px; }
+/* phones give every button a 38px touch height; match it so it stays a circle */
+@media (max-width: 768px) {
+    .rdl-src-listen { width: 38px; height: 38px; font-size: 11px; }
+}
 .rdl-src-recommended {
     font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
     padding: 2px 6px; border-radius: var(--radius-xs);

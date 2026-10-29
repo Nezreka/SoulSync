@@ -100,6 +100,11 @@ function extractTrackTitle(filename) {
     const sepIdx = title.indexOf('||');
     if (sepIdx >= 0) {
         title = title.slice(sepIdx + 2);
+        // soundcloud keys carry the permalink too, id||url||name (#1911)
+        const urlEnd = title.indexOf('||');
+        if (urlEnd >= 0 && /^https?:\/\//.test(title)) {
+            title = title.slice(urlEnd + 2);
+        }
     }
 
     // Remove file extension

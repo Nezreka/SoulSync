@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
-from core.downloads.candidate_pool import ALTERNATIVES_KEPT, summarize_pool
+from core.downloads.candidate_pool import ALTERNATIVES_KEPT, display_name_for, summarize_pool
 from core.downloads.provenance import build_policy_facet
 from core.runtime_state import download_tasks, tasks_lock
 from utils.logging_config import get_logger
@@ -89,11 +89,34 @@ def note_retry_winner(task_id: str, *, database=None) -> None:
             key = (task.get('username'), task.get('filename'))
         if not summary or not all(key):
             return
-        name = key[1].replace('\\', '/').rsplit('/', 1)[-1]
         previous = summary.get('chosen')
         alternatives = list(summary.get('alternatives') or [])
+        # The retry took the file that was already the winner: its stored
+        # row, stats and all, stays the winner — demoting it to an
+        # alternative and naming a bare chosen would throw its record away.
+        if previous and _same_row(previous, {
+                'username': key[0], 'filename': key[1],
+                'display_name': display_name_for(key[1], key[0])}):
+            return
+        # Identity is (username, filename): several hits from one service
+        # can share a decoded display name (#1911 review). Briefs stored
+        # before filenames rode along carry only their pre-fix display
+        # name — the basename of the key — so that form is tried too, for
+        # filename-less rows only (a row WITH a filename that isn't the
+        # winner's is a different file, however its name reads), and only
+        # when exactly one row bears it: a shared name must never promote
+        # the wrong row's stats onto the winner. (One residual the guard
+        # cannot close: a filename-less row from one peer whose basename
+        # matches a different folder's file of the same name — the pre-fix
+        # behaviour for every row, and those rows age out with their tasks.)
         match = next((a for a in alternatives
-                      if a.get('username') == key[0] and a.get('display_name') == name), None)
+                      if a.get('username') == key[0] and a.get('filename') == key[1]), None)
+        if match is None:
+            legacy = str(key[1]).replace('\\', '/').rsplit('/', 1)[-1]
+            named = [a for a in alternatives
+                     if a.get('username') == key[0] and 'filename' not in a
+                     and a.get('display_name') == legacy]
+            match = named[0] if len(named) == 1 else None
         if match is not None:
             alternatives.remove(match)
         if previous:
@@ -114,6 +137,31 @@ def note_retry_winner(task_id: str, *, database=None) -> None:
         logger.debug("[Decisions] could not move the winner for %s: %s", task_id, exc)
 
 
+def _same_row(a: dict, b: dict) -> bool:
+    """Whether two stored briefs are the same file, across row generations.
+
+    New rows carry ``filename``; briefs stored before it rode along carry
+    only their pre-fix display name, which was the basename of the key —
+    so a filename-less row matches a new row when its name is the
+    basename of the new row's filename (#1911 review). Presence of the
+    key, not its truthiness, marks the generation: a new row whose
+    filename is '' is still a new row.
+    """
+    if a.get('username') != b.get('username'):
+        return False
+    fa, fb = a.get('filename'), b.get('filename')
+    if 'filename' in a and 'filename' in b:
+        return fa == fb
+    if 'filename' in a or 'filename' in b:
+        # The filename-less row's name was the basename of its key (the
+        # pre-fix display rule), and that form still carries the id/slug,
+        # so it identifies the file; the decoded display name does not.
+        named, keyed = (b, a) if 'filename' in a else (a, b)
+        return named.get('display_name') == str(
+            keyed.get('filename') or '').replace('\\', '/').rsplit('/', 1)[-1]
+    return a.get('display_name') == b.get('display_name')
+
+
 def _merge(previous: dict, latest: dict) -> dict:
     counts = dict(previous.get('rejected_counts') or {})
     for code, n in (latest.get('rejected_counts') or {}).items():
@@ -121,15 +169,15 @@ def _merge(previous: dict, latest: dict) -> dict:
     pool = list(latest.get('alternatives') or []) + list(previous.get('alternatives') or [])
     if previous.get('chosen'):
         pool.insert(0, previous['chosen'])  # tried, and it didn't stick
-    seen, alternatives = set(), []
+    kept, alternatives = [], []
     chosen = latest.get('chosen')
-    if chosen:
-        seen.add((chosen.get('username'), chosen.get('display_name')))
     for alt in pool:
-        key = (alt.get('username'), alt.get('display_name'))
-        if key not in seen:
-            seen.add(key)
-            alternatives.append(alt)
+        if chosen and _same_row(alt, chosen):
+            continue
+        if any(_same_row(alt, other) for other in kept):
+            continue
+        kept.append(alt)
+        alternatives.append(alt)
     alternatives.sort(key=lambda a: (
         not (a.get('decision') or {}).get('accepted'),
         -float((a.get('decision') or {}).get('score') or a.get('confidence') or 0),
@@ -173,7 +221,8 @@ def _bare_chosen(username: str, filename: str) -> dict:
     """A winner the pool never saw (the YouTube ytsearch fallback)."""
     return {
         'username': username,
-        'display_name': str(filename).replace('\\', '/').rsplit('/', 1)[-1],
+        'filename': filename,
+        'display_name': display_name_for(filename, username),
         'source_service': '',
         'quality': '', 'quality_label': '', 'bitrate': 0, 'size': 0, 'duration': 0,
         'confidence': 0.0,
