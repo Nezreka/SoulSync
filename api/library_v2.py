@@ -5662,7 +5662,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             **_import_state,
             "artwork_cache": _artwork_cache_snapshot(),
             "bootstrap": lib2_bootstrap.get_state(get_database()),
+            "preparation": _preparation_snapshot(),
         })
+
+    def _preparation_snapshot():
+        from core.library2.post_import import preparation_state
+        return preparation_state()
 
     logger.info("Library v2 routes registered (/api/library/v2/*)")
 

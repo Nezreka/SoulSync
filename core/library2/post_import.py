@@ -121,6 +121,14 @@ __all__ = ["run_post_import_precache", "prepare_imported_artists", "ArtistPrepar
 
 _background_lock = threading.Lock()
 _background_thread: Optional[threading.Thread] = None
+# what the background preparation is doing, for the library banner: the
+# library works while it runs, but pages are slower until it's done
+_preparation_state: Dict[str, Any] = {"active": False, "stage": None, "current": 0, "total": 0}
+
+
+def preparation_state() -> Dict[str, Any]:
+    """A copy of the background preparation's stage and counts."""
+    return dict(_preparation_state)
 
 
 def start_background_preparation(database: Any, config_manager: Any, *, full: bool,
@@ -147,6 +155,7 @@ def start_background_preparation(database: Any, config_manager: Any, *, full: bo
     last = [0.0]
 
     def progress(stage, current=0, total=0, *_rest):
+        _preparation_state.update(stage=stage, current=int(current or 0), total=int(total or 0))
         # one line every 30 s, so the log shows it moving without flooding
         now = time.monotonic()
         if total and current < total and now - last[0] < 30:
@@ -157,6 +166,7 @@ def start_background_preparation(database: Any, config_manager: Any, *, full: bo
                         f"{total:,}", int(current * 100 / total))
 
     def run():
+        _preparation_state.update(active=True, stage=None, current=0, total=0)
         try:
             if full:
                 run_post_import_precache(database, config_manager, progress=progress)
@@ -164,6 +174,8 @@ def start_background_preparation(database: Any, config_manager: Any, *, full: bo
                 prepare_imported_artists(database, config_manager, progress=progress)
         except Exception as exc:  # noqa: BLE001 - best effort, the next start retries
             logger.warning("Library v2 background preparation stopped: %s", exc)
+        finally:
+            _preparation_state.update(active=False)
         if after is not None:
             try:
                 after()

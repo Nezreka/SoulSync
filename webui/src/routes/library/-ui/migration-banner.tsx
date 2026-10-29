@@ -12,6 +12,8 @@ const STAGE_LABELS: Record<string, string> = {
   wanted: 'wanted tracks',
   tags: 'file tags',
   artist_rollup: 'artist list',
+  artists: 'matching artist credits',
+  tracklists: 'album tracklists',
 };
 
 function stageLabel(stage: string | null | undefined): string {
@@ -33,7 +35,8 @@ export function MigrationBanner() {
     retry: false,
     // its own cadence: only an upgrade that is under way or stuck needs watching
     refetchInterval: (query) =>
-      ['pending', 'running', 'failed'].includes(query.state.data?.bootstrap?.status ?? '')
+      ['pending', 'running', 'failed'].includes(query.state.data?.bootstrap?.status ?? '') ||
+      query.state.data?.preparation?.active
         ? 30_000
         : false,
   });
@@ -43,7 +46,25 @@ export function MigrationBanner() {
       queryClient.invalidateQueries({ queryKey: [...LIBRARY_V2_QUERY_KEY, 'import-status'] }),
   });
   const bootstrap = status.data?.bootstrap;
-  if (bootstrap?.status !== 'running' && bootstrap?.status !== 'failed') return null;
+  const preparation = status.data?.preparation;
+  if (bootstrap?.status !== 'running' && bootstrap?.status !== 'failed') {
+    // the upgrade itself is done and the library works; its finishing work
+    // still runs and pages are slower until it ends, so say what it's doing
+    if (!preparation?.active) return null;
+    const stage = stageLabel(preparation.stage);
+    const counts = preparation.total
+      ? ` ${preparation.current.toLocaleString()} of ${preparation.total.toLocaleString()}` +
+        ` (${Math.round((preparation.current / preparation.total) * 100)}%)`
+      : '';
+    return (
+      <div className={`${styles.banner} ${styles.finishing}`} role="status">
+        <span className={styles.text}>
+          {`Finishing your library upgrade${stage ? `: ${stage}${counts}` : ''}. ` +
+            'Everything works; some pages are slower until it’s done.'}
+        </span>
+      </div>
+    );
+  }
 
   const failed = bootstrap.status === 'failed';
   // the stage and its numbers: a percentage alone ran from 0 to 100 once per

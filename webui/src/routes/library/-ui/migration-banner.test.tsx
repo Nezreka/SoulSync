@@ -74,4 +74,26 @@ describe('MigrationBanner', () => {
     const { container } = renderBanner();
     await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
+
+  it('says what the finishing work is doing after the upgrade, and goes when it ends', async () => {
+    let active = true;
+    server.use(
+      http.get('/api/library/v2/import/status', () =>
+        HttpResponse.json({
+          ...status({ status: 'done' }),
+          preparation: { active, stage: 'artists', current: 1200, total: 2400 },
+        }),
+      ),
+    );
+    const { unmount } = renderBanner();
+    expect(
+      await screen.findByText(
+        /Finishing your library upgrade: matching artist credits 1,200 of 2,400 \(50%\)/,
+      ),
+    ).toBeInTheDocument();
+    unmount();
+    active = false;
+    renderBanner();
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+  });
 });

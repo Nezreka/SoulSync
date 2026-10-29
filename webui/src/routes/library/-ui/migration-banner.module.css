@@ -43,3 +43,9 @@
   color: inherit;
   cursor: pointer;
 }
+
+/* the finishing work after the upgrade: everything works, so it reads quieter */
+.finishing {
+  border-color: rgba(var(--accent-rgb), 0.25);
+  opacity: 0.92;
+}

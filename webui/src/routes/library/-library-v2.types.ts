@@ -684,6 +684,16 @@ export interface LibraryV2ImportState {
    * library migrated by a background worker, so this is the only thing that
    * can explain a still-empty page to the user. */
   bootstrap?: LibraryV2BootstrapState;
+  /** The upgrade's finishing work (credits, tracklists, tags) that runs after
+   * it, behind a library that already works. */
+  preparation?: LibraryV2PreparationState;
+}
+
+export interface LibraryV2PreparationState {
+  active: boolean;
+  stage: string | null;
+  current: number;
+  total: number;
 }
 
 export type LibraryV2BootstrapStatus =
