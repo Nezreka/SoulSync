@@ -172,6 +172,7 @@ import { HistoryEventList } from './history-event-list';
 import { groupHistoryEvents, summarizeRecentHistory } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
+import { OwnedArtistDiscographyButton } from './owned-artist-discography';
 import { OwnedArtistHeroExtras } from './owned-artist-hero-extras';
 import { OwnedTopTrackActions, OwnedTopTracksDownloadAll } from './owned-artist-top-tracks';
 import { AlbumUnlockMenuItem, OwnedTrackMoreMenu } from './owned-artist-track-actions';
@@ -6797,6 +6798,12 @@ function CatalogueArtistHero({
             📻 Artist Radio
           </button>
           {downloadAction}
+          <OwnedArtistDiscographyButton
+            artistId={artist.id}
+            artistName={artist.name}
+            imageUrl={artist.image_url ?? ''}
+            providerIds={artist.provider_ids}
+          />
           <NativeAudiobookRouteToggle name={artist.name} />
           <ArtistAliases artistId={artist.id} artistName={artist.name} />
           <OwnedArtistHeroExtras
