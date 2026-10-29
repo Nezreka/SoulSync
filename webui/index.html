@@ -6235,12 +6235,17 @@
                                                 </div>
                                                 <div class="form-group">
                                                     <label for="video-download-path">Download folder (input, shared with Music):</label>
-                                                    <input type="text" id="video-download-path" placeholder="./downloads"
-                                                        data-folder-check="video" data-folder-role="input"
-                                                        data-folder-label="Download folder">
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-download-path" placeholder="./downloads"
+                                                            readonly data-folder-check="video" data-folder-role="input"
+                                                            data-folder-label="Download folder">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-download', this)">Unlock</button>
+                                                    </div>
                                                     <div class="setting-help-text">Point this at the same folder as
                                                         your slskd / torrent / usenet client. It's the same setting as
-                                                        the Music side: change it here and it changes there too.
+                                                        the Music side's Download Folder, so it's locked here too:
+                                                        change it and Music changes with it.
                                                     </div>
                                                 </div>
                                             </div>

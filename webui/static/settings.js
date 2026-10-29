@@ -8725,6 +8725,7 @@ async function logoutQobuz() {
 
 const PATH_INPUT_IDS = {
     download: 'download-path',
+    'video-download': 'video-download-path',   // the same setting, from the Video folders tab
     transfer: 'transfer-path',
     podcasts: 'podcasts-path',
     audiobooks: 'audiobooks-path',

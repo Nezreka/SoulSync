@@ -150,3 +150,12 @@ it('lists a compose volume line for each folder that is set', async () => {
   // the TV 4K folder is off, so it has no line
   expect(text).not.toContain('tv-4k');
 });
+
+it('locks the shared download folder on the video tab like the music one', () => {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const input = doc.getElementById('video-download-path') as HTMLInputElement;
+  expect(input.readOnly).toBe(true);
+  const lock = input.closest('.path-input-group')?.querySelector('button');
+  expect(lock?.getAttribute('onclick')).toBe("togglePathLock('video-download', this)");
+  expect(doc.getElementById('download-path')?.hasAttribute('readonly')).toBe(true);
+});
