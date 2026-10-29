@@ -254,6 +254,36 @@ def _deezer_exact_title_first(query, plain, req_lib, limit=8):
     return plain
 
 
+def _direct_client(service):
+    """The enrichment client a direct lookup for ``service`` goes through, or None."""
+    worker = {
+        'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
+        'discogs': discogs_worker, 'tidal': tidal_enrichment_worker,
+        'qobuz': qobuz_enrichment_worker, 'audiodb': audiodb_worker,
+        'amazon': amazon_worker, 'genius': genius_worker, 'lastfm': lastfm_worker,
+        'bandcamp': bandcamp_worker, 'jiosaavn': jiosaavn_worker,
+    }.get(service)
+    return getattr(worker, 'client', None) if worker else None
+
+
+def _other_direct_lookup(service, entity_type, query):
+    """A pasted id or link for any service but MusicBrainz/Deezer (#1901):
+    confirm it by fetching that exact entity. [] when it doesn't resolve."""
+    from core.library.direct_id import parse_direct_ref
+    from core.library.direct_lookups import LOOKUPS
+    ref = parse_direct_ref(service, entity_type, query)
+    lookup = LOOKUPS.get(service)
+    client = _direct_client(service)
+    if not ref or not lookup or client is None:
+        return []
+    if service == 'jiosaavn':
+        from core.metadata.registry import is_jiosaavn_enabled
+        if not is_jiosaavn_enabled():
+            return []
+    kind, ref_id = ref
+    return lookup(client, entity_type, kind, ref_id)
+
+
 def _search_service(service, entity_type, query):
     """Search a service and return normalized results."""
     import requests as req_lib
@@ -273,6 +303,10 @@ def _search_service(service, entity_type, query):
                     return hit
             elif service == 'deezer':
                 hit = _deezer_direct_lookup(entity_type, direct_id, query)
+                if hit:
+                    return hit
+            else:
+                hit = _other_direct_lookup(service, entity_type, query)
                 if hit:
                     return hit
         except Exception as e:

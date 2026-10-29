@@ -50,6 +50,8 @@ Toggle **Enhanced** on any library artist's detail page to access the profession
 In the Enhanced view, each artist, album, and track shows **match status chips** — the service set differs by level: 12 on artists (adding Tidal, Qobuz and Amazon), 10 on albums, and 9 on tracks (Spotify, MusicBrainz, Deezer, JioSaavn, AudioDB, iTunes, Last.fm, Genius, Bandcamp — no Discogs, Tidal or Qobuz chip at track level).
 
 - Click any chip to **manually search and link** the correct external ID when automatic matching gets it wrong
+- **Paste a link or an ID** instead of a name when several artists share one (eleven called "1905"): open the right one on that service, copy its address, and paste it. Works for Spotify, MusicBrainz, Deezer, iTunes/Apple Music, Discogs, Tidal, Qobuz, Amazon, AudioDB, JioSaavn, Last.fm and Bandcamp links, and Genius IDs. A paste that doesn't resolve falls back to a normal search
+- Fixing an artist's match also fixes it on **your watchlist**, so new releases are scanned for the right artist. Only your own watchlist changes, and never onto an ID another watched artist already uses
 - Run per-service **enrichment** from the Enrich dropdown to pull in metadata from a specific source
 - Matched services show as clickable badges linking to the entity on that service's website
 

@@ -11572,8 +11572,18 @@ def library_manual_match():
         table = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}[entity_type]
 
         database = get_database()
+        watchlist_followed = {'updated': [], 'skipped': []}
         with database._get_connection() as conn:
             cursor = conn.cursor()
+            before = {}
+            if entity_type == 'artist':
+                # read before the change: the old ids are how the watchlist
+                # entry for this artist is found (#1901)
+                from core.watchlist.library_match import library_artist_ids
+                try:
+                    before = library_artist_ids(cursor, entity_id)
+                except Exception as e:
+                    logger.debug("watchlist follow: reading library ids failed: %s", e)
             cursor.execute(f"""
                 UPDATE {table}
                 SET {id_col} = ?, {status_col} = 'matched', {attempted_col} = CURRENT_TIMESTAMP
@@ -11582,6 +11592,18 @@ def library_manual_match():
             conn.commit()
             if cursor.rowcount == 0:
                 return jsonify({"success": False, "error": "Entity not found"}), 404
+            if before:
+                # the watchlist keeps its own copy of the artist's ids, so a fixed
+                # library match carries over to it, never failing the match itself
+                try:
+                    from core.watchlist.library_match import follow_library_artist_match
+                    watchlist_followed = follow_library_artist_match(
+                        cursor, before=before, service=service, new_id=str(service_id),
+                        profile_id=get_current_profile_id())
+                    conn.commit()
+                except Exception as e:
+                    logger.warning("Watchlist didn't follow the library match for artist %s: %s",
+                                   entity_id, e)
 
         # #758 — a manual ALBUM match also pins (and LOCKS) the canonical album
         # version to the chosen release, so the auto resolve job and every tool
@@ -11611,7 +11633,9 @@ def library_manual_match():
         return jsonify({
             "success": True,
             "message": f"Manually matched {entity_type} to {service} ID: {service_id}",
-            "updated_data": updated if updated.get('success') else None
+            "updated_data": updated if updated.get('success') else None,
+            "watchlist_updated": watchlist_followed['updated'],
+            "watchlist_skipped": watchlist_followed['skipped'],
         })
 
     except Exception as e:
