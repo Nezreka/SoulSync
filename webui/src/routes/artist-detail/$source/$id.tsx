@@ -54,6 +54,8 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
       return;
     }
     let known: number | null = null;
+    let focusAlbum: number | undefined =
+      isLibrary && search.album && /^\d+$/.test(search.album) ? Number(search.album) : undefined;
     if (isLibrary && /^\d+$/.test(params.id)) {
       known = Number(params.id);
     } else {
@@ -65,12 +67,14 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
             source,
             params.id,
             search.name,
+            search.album,
           ],
           queryFn: () =>
             resolveLibraryV2DiscoveryArtistOwnership({
               source,
               providerId: params.id,
               name: search.name,
+              albumProviderId: isLibrary ? undefined : search.album,
             }),
         })
         .catch(() => null);
@@ -78,16 +82,15 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
       // bookmarked or discography-only row keeps the original page. a
       // media-server id has no provider page, so any catalogue row will do.
       if (found?.artistId && (isLibrary || found.owned)) known = found.artistId;
+      // a provider ?album= keeps its focus when the release is catalogued here
+      if (found?.albumId) focusAlbum = found.albumId;
     }
     if (known) {
       throw redirect({
         to: '/library',
         search: {
           artist: known,
-          album:
-            isLibrary && search.album && /^\d+$/.test(search.album)
-              ? Number(search.album)
-              : undefined,
+          album: focusAlbum,
           view: 'discovery',
           immersive: true,
         },

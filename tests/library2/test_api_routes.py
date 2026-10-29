@@ -4512,3 +4512,22 @@ def test_artist_detail_releases_carry_their_musicbrainz_id(api):
 
     views = next(a for a in data["artist"]["albums"] if a["id"] == ids["views"])
     assert views["musicbrainz_id"] == "mb-views"
+
+
+def test_discovery_resolves_a_provider_album_link_to_the_catalogue_release(api):
+    """a provider ?album= link keeps its focus after the artist opens here."""
+    client, db, ids = api
+    with closing(_conn(db)) as conn:
+        conn.execute("UPDATE lib2_albums SET external_ids='{\"deezer\":\"dz-views\"}' WHERE id=?",
+                     (ids["views"],))
+        conn.commit()
+
+    hit = client.get("/api/library/v2/discovery/artist",
+                     query_string={"source": "deezer", "provider_id": "dz-1", "name": "Drake",
+                                   "album_provider_id": "dz-views"}).get_json()
+    miss = client.get("/api/library/v2/discovery/artist",
+                      query_string={"source": "deezer", "provider_id": "dz-1", "name": "Drake",
+                                    "album_provider_id": "dz-nope"}).get_json()
+
+    assert hit["album_id"] == ids["views"]
+    assert miss["album_id"] is None

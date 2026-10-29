@@ -41,7 +41,13 @@ describe('artist-detail route on a Library v2 catalogue', () => {
       http.get('/api/library/v2/discovery/artist', ({ request }) => {
         lookups.push(new URL(request.url));
         if (resolveFails) return HttpResponse.json({ success: false }, { status: 500 });
-        return HttpResponse.json({ success: true, artist_id: resolved, owned });
+        const albumLink = new URL(request.url).searchParams.get('album_provider_id');
+        return HttpResponse.json({
+          success: true,
+          artist_id: resolved,
+          owned,
+          album_id: albumLink === 'al-dummy' ? 55 : null,
+        });
       }),
       http.get('/api/artist-detail/:id', ({ request }) => {
         detailRequests.push(new URL(request.url));
@@ -213,6 +219,16 @@ describe('artist-detail route on a Library v2 catalogue', () => {
 
     expect(await screen.findByText('Drukqs')).toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/artist-detail/deezer/2481');
+  });
+
+  it('keeps a provider ?album= focus on the catalogued release', async () => {
+    resolved = 7;
+    const { router } = renderAt('/artist-detail/deezer/2481?name=Aphex%20Twin&album=al-dummy');
+
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ artist: 7, album: 55 }),
+    );
+    expect(lookups[0]?.searchParams.get('album_provider_id')).toBe('al-dummy');
   });
 
   it('still shows the provider page when the catalogue lookup fails', async () => {
