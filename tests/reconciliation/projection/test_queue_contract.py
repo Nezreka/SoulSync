@@ -389,6 +389,97 @@ def test_compact_queue_policy_agrees_with_full_execution_evidence():
     assert all('assignment_options' not in item['details'] for v in compact.values() for item in v['items'])
 
 
+def test_compact_projection_preserves_semantic_approval_and_album_numbering(monkeypatch):
+    from core.reconciliation import decisions
+    from core.reconciliation.policy import effective_case_modes
+    from core.reconciliation.signatures import signature
+    db = _Database()
+    for fid in (1, 2, 3):
+        details = {'album_id': fid, 'confidence': 'clear',
+                   'changes': {'total_discs': {'old': 1, 'new': 2},
+                               'title': {'old': 'Old', 'new': 'New'}}}
+        db.add(fid, f'/music/{fid}/track.flac', details,
+               job_id='library_reconciliation', kind='reconciliation_metadata')
+        key, raw = db.conn.execute('SELECT review_case_key,details_json FROM repair_findings WHERE id=?', (fid,)).fetchone()
+        db.conn.execute('''INSERT INTO reconcile_review_choices
+            (finding_id,case_id,evidence_json,category,choice,approval_signature)
+            VALUES (?,?,?,'metadata','fix',?)''', (fid, key, raw, signature(details)))
+        # Presentation refresh keeps approval; changed proposed values revoke it.
+        details['match_reasons'] = ['New presentation']
+        if fid == 3:
+            details['changes']['title']['new'] = 'Different target'
+        db.conn.execute('UPDATE repair_findings SET details_json=?,review_signature=? WHERE id=?',
+                        (json.dumps(details), signature(details), fid))
+    keys = dict(db.conn.execute('SELECT id,review_case_key FROM repair_findings'))
+    monkeypatch.setattr(decisions, 'numbering_choices', lambda conn: {keys[1]: 'dismiss'})
+    for compact in (False, True):
+        groups = effective_case_modes(db.conn, compact=compact)
+        first = groups[keys[1]]['items'][0]['details']
+        stale = groups[keys[3]]['items'][0]['details']
+        assert first['plan_approved'] and first['numbering_choice'] == 'dismiss'
+        assert first['changes'] == {'title': {'old': 'Old', 'new': 'New'}}
+        assert not stale.get('plan_approved')
+        assert stale['changes']['title']['new'] == 'Different target'
+
+
+def test_review_search_work_is_bounded_with_unrelated_pending_jobs():
+    from core.reconciliation.policy import effective_case_modes
+    db = _Database()
+    db.conn.execute('CREATE INDEX idx_job_case ON repair_findings(job_id,status,review_case_key)')
+    db.add(1, '/music/Tron/track.flac', {'album_title': 'TRON Legacy'},
+           job_id='library_reconciliation', kind='reconciliation_metadata')
+    db.conn.executemany('''INSERT INTO repair_findings
+        (id,job_id,status,review_case_key,title,details_json) VALUES (?,'another_job','pending',?,'Other','{}')''',
+        [(fid, f'unrelated-{fid}') for fid in range(2, 20002)])
+    db.conn.commit()
+    search.prepare(db.conn, status='pending', job_id='library_reconciliation')
+    db.conn.execute('ANALYZE')
+    instructions = 0
+    def budget():
+        nonlocal instructions
+        instructions += 1000
+        return instructions > 20000
+    db.conn.set_progress_handler(budget, 1000)
+    try:
+        search.prepare(db.conn, status='pending', job_id='library_reconciliation')
+        matches = search.matching_cases(db.conn, status='pending', job_id='library_reconciliation', query='tron')
+        modes = effective_case_modes(db.conn, job_id='library_reconciliation', compact=True)
+    finally:
+        db.conn.set_progress_handler(None, 0)
+    assert matches == list(modes)
+    assert len(matches) == 1
+
+
+def test_queue_page_uses_one_snapshot_during_concurrent_publication(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from core.reconciliation import queue
+    source = _Database()
+    source.add(1, '/music/one/track.flac', {'album_id': 1, 'album_title': 'One'},
+               job_id='library_reconciliation', kind='reconciliation_metadata')
+    path = tmp_path / 'queue.db'
+    with sqlite3.connect(path) as writer:
+        source.conn.backup(writer)
+        writer.execute('PRAGMA journal_mode=WAL')
+    db = SimpleNamespace(_get_connection=lambda: sqlite3.connect(path))
+    original = queue.effective_case_modes
+    def publish_after_projection(conn, **kwargs):
+        result = original(conn, **kwargs)
+        with sqlite3.connect(path) as writer:
+            writer.execute('''INSERT INTO repair_findings
+                (id,job_id,status,review_case_key,finding_type,severity,title,details_json)
+                VALUES (2,'library_reconciliation','pending','new-case',
+                        'reconciliation_metadata','warning','Two','{"album_title":"Two"}')''')
+        return result
+    monkeypatch.setattr(queue, 'effective_case_modes', publish_after_projection)
+    first = queue.list_cases(db, job_id='library_reconciliation')
+    assert first['total'] == len(first['items']) == 1
+    assert first['ready_total'] == first['items'][0]['plan']['ready'] == 1
+    monkeypatch.setattr(queue, 'effective_case_modes', original)
+    again = queue.list_cases(db, job_id='library_reconciliation')
+    assert again['total'] == len(again['items']) == 2
+    assert again['ready_total'] == sum(row['plan']['ready'] for row in again['items']) == 2
+
+
 def test_queue_navigation_spans_pages_in_the_same_filtered_order():
     db = _Database()
     for index in range(1, 6):

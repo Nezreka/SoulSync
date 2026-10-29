@@ -408,7 +408,10 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
     if q.strip():
         from core.reconciliation.search import prepare
         prepare(conn, status=status, job_id=job_id)
+    owns_snapshot = not conn.in_transaction
     try:
+        if owns_snapshot:
+            conn.execute('BEGIN')
         modes = effective_case_modes(conn, status=status, job_id=job_id, compact=True)
         where, params = queue_filter(conn=conn, case_modes=modes, status=status, job_id=job_id, q=q,
                                      category=category, risk=risk)
@@ -455,26 +458,14 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
             } for row in rows]
         if items:
             case_ids = [item['case_id'] for item in items]
-            placeholders = ','.join('?' for _ in case_ids)
-            detail_rows = conn.execute(f"""
-                SELECT review_case_key, finding_type, last_error, details_json, id
-                FROM repair_findings
-                WHERE status = ? AND review_case_key IN ({placeholders})
-                  AND (? = '' OR job_id = ?)
-            """, [status, *case_ids, job_id, job_id]).fetchall()
-            grouped: dict[str, list[dict[str, Any]]] = {}
-            saved_choices = choices.load_choices(conn)
-            for case_key, finding_type, last_error, raw_details, finding_id in detail_rows:
-                try:
-                    details = json.loads(raw_details) if raw_details else {}
-                    if not isinstance(details, dict):
-                        details = {}
-                except (TypeError, ValueError):
-                    details = {}
-                grouped.setdefault(case_key, []).append({
-                    'finding_type': finding_type, 'details': choices.project(details, saved_choices.get(finding_id), case_id=case_key, raw_json=raw_details),
-                    'last_error': last_error,
-                })
+            # The same effective projection already determined counts and
+            # filtering. Reuse it for visible summaries instead of decoding and
+            # projecting every complete evidence snapshot a second time.
+            grouped = {
+                key: [{field: row[field] for field in ('finding_type', 'details', 'last_error')}
+                      for row in modes.get(key, {}).get('items', [])]
+                for key in case_ids
+            }
             for item in items:
                 findings = grouped.get(item['case_id'], [])
                 item['plan'] = classify_case(findings)
@@ -494,6 +485,8 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
         return {'items': items, 'case_ids': ordered_case_ids, 'total': total, 'ready_total': ready_total,
                 'page': page, 'limit': limit}
     finally:
+        if owns_snapshot:
+            conn.rollback()
         conn.close()
 
 

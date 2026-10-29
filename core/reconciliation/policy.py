@@ -277,7 +277,7 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
     """One classification for counts, filtering and execution, including draft choices."""
     import json
     from core.reconciliation import choices as choices
-    saved = {} if compact else choices.load_choices(conn)
+    saved = {} if compact else choices.load_choices(conn, case_id=case_id or None)
     from core.reconciliation.decisions import numbering_choices
     album_numbering = numbering_choices(conn) if compact else {}
     grouped = {}
@@ -286,17 +286,22 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
     detail_sql, join = 'f.details_json', ''
     choice_sql = 'NULL, NULL, NULL, NULL'
     if compact:
-        fields = ('changes', 'fulfillment_state', 'audio_conflict', 'version_conflict', 'folder_issue',
+        fields = ('album_id', 'library_album_title', 'album_consistency', 'replacement_request',
+                  'changes', 'fulfillment_state', 'audio_conflict', 'version_conflict', 'folder_issue',
                   'title_difference_kind', 'confidence', 'numbering_mode',
                   'release_disc_count', 'local_file_count', 'release_track_count',
                   'recording_mbid', 'expected_duration_ms', 'expected_title',
                   'metadata_review_reason', 'assignment_evidence', 'companion_count', 'file_duration_ms',
                   'expected_artist_names', 'artist_aliases', 'routine_numbering', 'numbering_recovery')
         raw_details = "CASE WHEN json_valid(f.details_json) THEN f.details_json ELSE '{}' END"
-        pairs = [f"'{field}', json_extract({raw_details}, '$.{field}')" for field in fields]
-        pairs += [f"'current_tags', json_object('duration_ms', json_extract({raw_details}, '$.current_tags.duration_ms'))",
-                  f"'acoustid', CASE WHEN json_extract({raw_details}, '$.title_difference_kind') IN ('version', 'cosmetic') THEN json_extract({raw_details}, '$.acoustid') ELSE json_object('status', json_extract({raw_details}, '$.acoustid.status')) END"]
-        detail_sql = 'json_object(' + ', '.join(pairs) + ')'
+        # One multi-path extraction avoids validating and parsing the complete
+        # evidence once per field. Release candidates can make that evidence
+        # large even though classification needs only these small values.
+        paths = ', '.join(f"'$.{field}'" for field in
+                          (*fields, 'current_tags.duration_ms', 'acoustid.status'))
+        detail_sql = (f"json_array(json_extract({raw_details}, {paths}), "
+                      f"CASE WHEN json_extract({raw_details}, '$.title_difference_kind') "
+                      f"IN ('version', 'cosmetic') THEN json_extract({raw_details}, '$.acoustid') END)")
         if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_review_choices'").fetchone():
             comparable = 'c.evidence_json=f.details_json'
             if 'approval_signature' in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}:
@@ -304,22 +309,32 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
             join = ('LEFT JOIN reconcile_review_choices c ON c.finding_id=f.id '
                     f'AND c.case_id=f.review_case_key AND {comparable}')
             choice_sql = 'c.category, c.choice, c.fix_action, c.numbering_choice'
+    predicates, params = ['f.status = ?'], [status]
+    if job_id:
+        predicates.append('f.job_id = ?')
+        params.append(job_id)
+    if case_id:
+        predicates.append('f.review_case_key = ?')
+        params.append(case_id)
     for fid, key, kind, error, raw, category, choice, action, numbering in conn.execute(
             f"SELECT f.id, f.review_case_key, f.finding_type, f.last_error, {detail_sql}, {choice_sql} "
-            f"FROM repair_findings f {join} WHERE f.status = ? AND (? = '' OR f.job_id = ?) "
-            "AND (? = '' OR f.review_case_key = ?)", (status, job_id, job_id, case_id, case_id)):
+            f"FROM repair_findings f {join} WHERE {' AND '.join(predicates)}", params):
         try:
             details = json.loads(raw or '{}')
         except (TypeError, ValueError):
             details = {}
         if compact:
-            details = {k: v for k, v in details.items() if v is not None}
-            raw = json.dumps(details)
+            values, audio = details
+            details = {k: v for k, v in zip(fields, values) if v is not None}
+            details['current_tags'] = {'duration_ms': values[-2]}
+            details['acoustid'] = audio or {'status': values[-1]}
         if (compact and kind == 'reconciliation_metadata' and key in album_numbering
                 and _POSITION_CHANGE_KEYS.intersection(details.get('changes') or {})):
             numbering = album_numbering[key]
             if not choice or category == 'numbering':
                 category, choice, action = 'numbering', numbering, ''
+        if compact and choice:
+            raw = json.dumps(details)
         saved_choice = (key, raw, category, choice, action, numbering) if compact and choice else saved.get(fid)
         details = choices.project(details if isinstance(details, dict) else {}, saved_choice, case_id=key, raw_json=raw)
         grouped.setdefault(key, []).append({'id': fid, 'finding_type': kind, 'details': details, 'last_error': error})

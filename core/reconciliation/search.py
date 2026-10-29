@@ -59,10 +59,11 @@ def prepare(conn, *, status, job_id):
     conn.execute('''CREATE TRIGGER IF NOT EXISTS repair_review_search_deleted
         AFTER DELETE ON repair_findings
         BEGIN DELETE FROM repair_review_search_documents WHERE finding_id=OLD.id; END''')
-    rows = conn.execute('''SELECT f.id,f.title,f.details_json FROM repair_findings f
+    job_filter = 'AND f.job_id=?' if job_id else ''
+    params = (status, job_id) if job_id else (status,)
+    rows = conn.execute(f'''SELECT f.id,f.title,f.details_json FROM repair_findings f
         LEFT JOIN repair_review_search_documents d ON d.finding_id=f.id
-        WHERE f.status=? AND (?='' OR f.job_id=?) AND d.finding_id IS NULL''',
-        (status, job_id, job_id)).fetchall()
+        WHERE f.status=? {job_filter} AND d.finding_id IS NULL''', params).fetchall()
     documents = [(' '.join(sorted(set(names(title, raw).split()))), fid, title, raw)
                  for fid, title, raw in rows]
     if documents:
@@ -77,9 +78,10 @@ def matching_cases(conn, *, status, job_id, query):
     conn.create_function('review_search_names', 2, names, deterministic=True)
     # Combine names across an album before matching: album and track terms may
     # live on different findings. Filtering must retain its entire action plan.
-    rows = conn.execute('''SELECT f.review_case_key, group_concat(COALESCE(d.words, review_search_names(f.title,f.details_json)), ' ')
+    job_filter = 'AND f.job_id=?' if job_id else ''
+    params = (status, job_id) if job_id else (status,)
+    rows = conn.execute(f'''SELECT f.review_case_key, group_concat(COALESCE(d.words, review_search_names(f.title,f.details_json)), ' ')
         FROM repair_findings f LEFT JOIN repair_review_search_documents d ON d.finding_id=f.id
-        WHERE f.status=? AND (?='' OR f.job_id=?) GROUP BY f.review_case_key''',
-        (status, job_id, job_id))
+        WHERE f.status=? {job_filter} GROUP BY f.review_case_key''', params)
     return [key for key, text in rows
             if all(any(word.startswith(token) for word in text.split()) for token in tokens)]
