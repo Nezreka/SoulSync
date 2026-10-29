@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { http, HttpResponse } from 'msw';
 
-import { ambiguousReview, reviewFixture } from './fixtures/review';
-import { acceptanceApi } from './fixtures/review-acceptance';
-import { installShell, ORIGIN } from './visual/harness';
+import { ambiguousReview, reviewFixture } from '../fixtures/review';
+import { acceptanceApi } from '../fixtures/review-acceptance';
+import { installShell, ORIGIN } from '../visual/harness';
 
 for (const width of [1800, 390]) {
   test(`${width}px grouped apply preview and quarantine details`, async ({ page }, info) => {
@@ -72,7 +72,12 @@ for (const width of [1800, 390]) {
     const evidence = page.getByRole('region', { name: 'Why this track was paired' });
     await evidence.scrollIntoViewIfNeeded();
     const heading = evidence.locator('summary').filter({ hasText: 'Embedded recording ID' });
-    expect((await heading.boundingBox())!.height).toBeLessThan(45);
+    // Two readable lines are expected on a phone; the outcome stays beside
+    // its label instead of overlapping it or overflowing the evidence card.
+    const label = await heading.locator('span').boundingBox();
+    const outcome = await heading.locator('strong').boundingBox();
+    expect(label!.x + label!.width).toBeLessThanOrEqual(outcome!.x);
+    expect((await heading.boundingBox())!.height).toBeLessThanOrEqual(56);
     expect(await evidence.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
     await page.screenshot({ path: info.outputPath('pairing-evidence.png') });
   });
@@ -118,10 +123,27 @@ for (const width of [1800, 390]) {
       .boundingBox();
     const card = await evidence.boundingBox();
     expect(Math.abs(footer!.x + footer!.width / 2 - card!.x - card!.width / 2)).toBeLessThan(2);
-    expect(footer!.y + footer!.height).toBeGreaterThan(card!.y + card!.height);
-    await evidence.getByRole('button', { name: 'Show 3 more recordings' }).click();
+    expect(footer!.y + footer!.height + 4).toBeLessThanOrEqual(card!.y + card!.height);
+    const disclosure = evidence.getByRole('button', { name: 'Show 3 more recordings' });
+    await disclosure.focus();
+    await page.keyboard.press('Enter');
     await expect(evidence.getByRole('link', { name: /recording/i })).toHaveCount(8);
+    const expanded = evidence.getByRole('button', { name: 'Show fewer recordings' });
+    await expect(expanded).toHaveAttribute('aria-expanded', 'true');
+    const expandedBox = await expanded.boundingBox();
+    const expandedCard = await evidence.boundingBox();
+    expect(expandedBox!.y + expandedBox!.height + 4).toBeLessThanOrEqual(
+      expandedCard!.y + expandedCard!.height,
+    );
+    await page.screenshot({ path: info.outputPath('audio-expanded.png') });
     await evidence.getByRole('button', { name: 'Show fewer recordings' }).click();
+    await page.evaluate(() => { document.body.style.zoom = '2'; });
+    const zoomedFooter = await disclosure.boundingBox();
+    const zoomedCard = await evidence.boundingBox();
+    expect(zoomedFooter!.y + zoomedFooter!.height + 4).toBeLessThanOrEqual(
+      zoomedCard!.y + zoomedCard!.height,
+    );
+    await page.evaluate(() => { document.body.style.zoom = ''; });
     await evidence.getByRole('button', { name: 'About AcoustID audio evidence' }).click();
     const help = page.getByRole('dialog', { name: 'About AcoustID audio evidence' });
     await expect(help).toBeVisible();
@@ -203,7 +225,10 @@ for (const width of [1800, 390]) {
     await page.getByRole('button', { name: 'Replace file…' }).click();
     const replacement = page.getByRole('dialog', { name: 'Replace file', exact: true });
     await expect(replacement.getByRole('radio', { name: /Find another copy/ })).toBeChecked();
-    await expect(replacement).toContainText('recoverable quarantine when you apply the plan');
+    await expect(replacement).toContainText(
+      'Keep the current file playable until the replacement and playlist handoff are verified',
+    );
+    await expect(replacement).toContainText('then move it to recoverable quarantine');
     await page.screenshot({ path: info.outputPath('replacement.png') });
     await replacement.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.getByRole('button', { name: 'Change match…' }).click();

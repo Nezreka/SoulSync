@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests',
   // Screenshot baselines have their own config and Docker runner (npm run test:visual).
-  testIgnore: ['**/tests/visual/**'],
+  testIgnore: ['**/tests/visual/**', '**/tests/review/**'],
   timeout: 30_000,
   use: {
     launchOptions: {

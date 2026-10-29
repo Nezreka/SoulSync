@@ -102,6 +102,27 @@ jobs:
           path: webui/test-results
           retention-days: 7
 
+  review-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-jammy
+      options: --ipc=host
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - uses: actions/checkout@v6
+      - run: npm ci
+      - run: npm run test:review-browser
+      - name: Upload browser failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-browser-failures
+          path: webui/test-results
+          retention-days: 7
+
   webui-visual:
     runs-on: ubuntu-latest
     timeout-minutes: 20

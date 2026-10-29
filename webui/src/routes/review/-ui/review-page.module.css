@@ -3267,9 +3267,7 @@
 .disclosureFooter {
   display: flex;
   justify-content: center;
-  position: relative;
-  margin: 16px 0 -34px;
-  padding-bottom: 16px;
+  margin-top: 16px;
 }
 .disclosureFooter > button {
   border-radius: var(--radius-pill);

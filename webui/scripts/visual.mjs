@@ -26,8 +26,13 @@ const { version } = JSON.parse(
 );
 const IMAGE = `mcr.microsoft.com/playwright:v${version}-jammy`;
 
-const playwright = ['npx', 'playwright', 'test', '-c', 'playwright.visual.config.ts'];
 const args = process.argv.slice(2);
+const review = args[0] === '--review';
+if (review) args.shift();
+const playwright = [
+  'npx', 'playwright', 'test', '-c',
+  review ? 'playwright.review.config.ts' : 'playwright.visual.config.ts',
+];
 
 function run(command, commandArgs) {
   const result = spawnSync(command, commandArgs, { cwd: webui, stdio: 'inherit' });

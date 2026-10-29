@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { http, HttpResponse } from 'msw';
 
-import type { ReviewCase } from '../src/routes/review/-review.api';
+import type { ReviewCase } from '../../src/routes/review/-review.api';
 
-import { ambiguousReview, reviewFixture } from './fixtures/review';
-import { installShell, ORIGIN } from './visual/harness';
+import { ambiguousReview, reviewFixture } from '../fixtures/review';
+import { installShell, ORIGIN } from '../visual/harness';
 
 for (const width of [1800, 1280, 768, 390, 320]) {
   test(`${width}px uncertainty, comparisons and catalogue provenance`, async ({ page }, info) => {
