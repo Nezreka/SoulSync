@@ -4,11 +4,12 @@ import { useLayoutEffect } from 'react';
 import { useShellBridge } from '@/platform/shell/route-controllers';
 import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
 
+import { fetchLibraryArtistIdentity } from '../-artist-detail.api';
 import { artistDetailSearchSchema } from '../-artist-detail.types';
 import { ArtistDetailPage } from '../-ui/artist-detail-page';
 import {
   LIBRARY_V2_QUERY_KEY,
-  resolveLibraryV2DiscoveryArtist,
+  resolveLibraryV2DiscoveryArtistOwnership,
 } from '../../library/-library-v2.api';
 import { ArtistPageLibraryProvider } from '../../library/-ui/artist-page-release-actions';
 
@@ -34,35 +35,62 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
   beforeLoad: async ({ params, search, context }) => {
     const source = params.source.toLowerCase();
     const isLibrary = source === 'library';
-    const known =
-      isLibrary && /^\d+$/.test(params.id)
-        ? Number(params.id)
-        : await context.queryClient
-            .fetchQuery({
-              queryKey: [
-                ...LIBRARY_V2_QUERY_KEY,
-                'discovery-resolve',
-                source,
-                params.id,
-                search.name,
-              ],
-              queryFn: () =>
-                resolveLibraryV2DiscoveryArtist({
-                  source,
-                  providerId: params.id,
-                  name: search.name,
-                }),
-            })
-            .catch(() => null);
+    // dev let a profile with library OR search open artist pages. a profile
+    // without the library page keeps the original page instead of being
+    // bounced home by the library guard.
+    const libraryAllowed = context.shell.bridge.isPageAllowed('library');
+    if (!libraryAllowed) {
+      if (isLibrary && /^\d+$/.test(params.id)) {
+        const identity = await fetchLibraryArtistIdentity(Number(params.id)).catch(() => null);
+        if (identity?.source && identity.providerId) {
+          throw redirect({
+            to: '/artist-detail/$source/$id',
+            params: { source: identity.source, id: identity.providerId },
+            search: { name: identity.name || search.name },
+            replace: true,
+          });
+        }
+      }
+      return;
+    }
+    let known: number | null = null;
+    let focusAlbum: number | undefined =
+      isLibrary && search.album && /^\d+$/.test(search.album) ? Number(search.album) : undefined;
+    if (isLibrary && /^\d+$/.test(params.id)) {
+      known = Number(params.id);
+    } else {
+      const found = await context.queryClient
+        .fetchQuery({
+          queryKey: [
+            ...LIBRARY_V2_QUERY_KEY,
+            'discovery-resolve-owned',
+            source,
+            params.id,
+            search.name,
+            search.album,
+          ],
+          queryFn: () =>
+            resolveLibraryV2DiscoveryArtistOwnership({
+              source,
+              providerId: params.id,
+              name: search.name,
+              albumProviderId: isLibrary ? undefined : search.album,
+            }),
+        })
+        .catch(() => null);
+      // only an artist with files here leaves the artist page. a watchlisted,
+      // bookmarked or discography-only row keeps the original page. a
+      // media-server id has no provider page, so any catalogue row will do.
+      if (found?.artistId && (isLibrary || found.owned)) known = found.artistId;
+      // a provider ?album= keeps its focus when the release is catalogued here
+      if (found?.albumId) focusAlbum = found.albumId;
+    }
     if (known) {
       throw redirect({
         to: '/library',
         search: {
           artist: known,
-          album:
-            isLibrary && search.album && /^\d+$/.test(search.album)
-              ? Number(search.album)
-              : undefined,
+          album: focusAlbum,
           view: 'discovery',
           immersive: true,
         },

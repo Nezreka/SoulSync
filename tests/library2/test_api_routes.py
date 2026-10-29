@@ -3464,6 +3464,49 @@ def test_discovery_rejects_an_empty_identity(api):
     assert client.get("/api/library/v2/discovery/artist").status_code == 400
 
 
+def test_discovery_never_resolves_a_same_named_artist_with_another_id(api):
+    """a provider artist that merely shares a name with yours is someone else:
+    its page must not open your library artist."""
+    client, db, _ids = api
+
+    other = client.get("/api/library/v2/discovery/artist",
+                       query_string={"source": "spotify", "provider_id": "sp-other-drake",
+                                     "name": "Drake"}).get_json()
+
+    assert other["artist_id"] is None
+    assert other["owned"] is False
+
+
+def test_discovery_name_match_still_works_when_the_row_has_no_id_there(api):
+    client, db, _ids = api
+
+    hit = client.get("/api/library/v2/discovery/artist",
+                     query_string={"source": "deezer", "provider_id": "dz-1",
+                                   "name": "Drake"}).get_json()
+
+    assert hit["artist_id"] == _ids_artist(db, "Drake")
+
+
+def test_discovery_reports_owned_only_for_live_files(api):
+    """only an artist with files in the library leaves the artist page."""
+    client, db, _ids = api
+    with closing(_conn(db)) as conn:
+        conn.execute("INSERT INTO lib2_artists(name, sort_name, spotify_id, monitored) "
+                     "VALUES('Watched Only','Watched Only','sp-watched',1)")
+        conn.commit()
+
+    owned = client.get("/api/library/v2/discovery/artist",
+                       query_string={"source": "spotify", "provider_id": "sp-drake",
+                                     "name": "Drake"}).get_json()
+    watched = client.get("/api/library/v2/discovery/artist",
+                         query_string={"source": "spotify", "provider_id": "sp-watched",
+                                       "name": "Watched Only"}).get_json()
+
+    assert owned["owned"] is True
+    assert watched["artist_id"] is not None
+    assert watched["owned"] is False
+
+
 def _ids_artist(db, name: str) -> int:
     with closing(_conn(db)) as conn:
         return conn.execute(
@@ -4455,3 +4498,36 @@ def test_the_old_track_delete_route_can_delete_the_file(api, tmp_path, monkeypat
 def test_the_old_track_delete_route_answers_404_for_an_unknown_track(api):
     client, _db, _ids = api
     assert client.delete("/api/library/track/999999").status_code == 404
+
+
+def test_artist_detail_releases_carry_their_musicbrainz_id(api):
+    """the release card's view on musicbrainz link needs the release id."""
+    client, db, ids = api
+    with closing(_conn(db)) as conn:
+        conn.execute("UPDATE lib2_albums SET musicbrainz_id='mb-views' WHERE id=?",
+                     (ids["views"],))
+        conn.commit()
+
+    data = client.get(f"/api/library/v2/artists/{ids['artist']}").get_json()
+
+    views = next(a for a in data["artist"]["albums"] if a["id"] == ids["views"])
+    assert views["musicbrainz_id"] == "mb-views"
+
+
+def test_discovery_resolves_a_provider_album_link_to_the_catalogue_release(api):
+    """a provider ?album= link keeps its focus after the artist opens here."""
+    client, db, ids = api
+    with closing(_conn(db)) as conn:
+        conn.execute("UPDATE lib2_albums SET external_ids='{\"deezer\":\"dz-views\"}' WHERE id=?",
+                     (ids["views"],))
+        conn.commit()
+
+    hit = client.get("/api/library/v2/discovery/artist",
+                     query_string={"source": "deezer", "provider_id": "dz-1", "name": "Drake",
+                                   "album_provider_id": "dz-views"}).get_json()
+    miss = client.get("/api/library/v2/discovery/artist",
+                      query_string={"source": "deezer", "provider_id": "dz-1", "name": "Drake",
+                                    "album_provider_id": "dz-nope"}).get_json()
+
+    assert hit["album_id"] == ids["views"]
+    assert miss["album_id"] is None

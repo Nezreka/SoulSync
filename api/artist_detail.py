@@ -342,6 +342,35 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
     return jsonify(payload), status
 
 
+@bp.route('/api/artist-detail/library/<int:artist_id>/identity')
+def get_library_artist_identity(artist_id):
+    """A catalogue artist's provider identity, so a profile that may search but
+    may not open the library still gets the provider artist page for it, the
+    way dev let library OR search profiles open artist detail. names and ids
+    only, nothing from the library itself."""
+    try:
+        database = get_database()
+        with database._get_connection() as conn:
+            row = conn.execute(
+                f"SELECT name, {_ARTIST_IDS_SQL} FROM lib2_artists WHERE id = ?",
+                (artist_id,)).fetchone()
+        if row is None:
+            return jsonify({"success": False, "error": "artist not found"}), 404
+        row = dict(row)
+        for source, key in (("spotify", "spotify_artist_id"), ("deezer", "deezer_id"),
+                            ("itunes", "itunes_artist_id"), ("musicbrainz", "musicbrainz_id"),
+                            ("discogs", "discogs_id")):
+            value = str(row.get(key) or "").strip()
+            if value:
+                return jsonify({"success": True, "name": row.get("name") or "",
+                                "source": source, "provider_id": value})
+        return jsonify({"success": True, "name": row.get("name") or "",
+                        "source": None, "provider_id": None})
+    except Exception as e:
+        logger.error(f"Error reading library artist identity: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/artist-detail/<artist_id>')
 def get_artist_detail(artist_id):
     """Artist detail for an artist the catalogue does NOT hold.
@@ -1327,6 +1356,26 @@ def set_album_art(album_id):
         return jsonify({"error": str(e)}), 500
 
 
+@bp.route('/api/album/<album_id>/metadata-lock', methods=['GET'])
+def get_album_metadata_lock(album_id):
+    """Whether a lib2 album was hand-tagged from basic search, so the library
+    view can offer the unlock only where there is something to unlock."""
+    try:
+        db = get_database()
+        keys = db.manual_path_keys()
+        if not keys:
+            return jsonify({"success": True, "album_id": album_id, "metadata_locked": False})
+        with db._get_connection() as conn:
+            paths = conn.execute(
+                "SELECT f.path FROM lib2_track_files f JOIN lib2_tracks t ON t.id = f.track_id"
+                " WHERE t.album_id = ?", (album_id,)).fetchall()
+        locked = any(fp and db.manual_path_key(fp) in keys for (fp,) in paths)
+        return jsonify({"success": True, "album_id": album_id, "metadata_locked": locked})
+    except Exception as e:
+        logger.error("[manual] lock read failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/album/<album_id>/metadata-lock', methods=['DELETE'])
 def clear_album_metadata_lock(album_id):
     """Unlock a hand-tagged album. it was tagged by hand from basic search
@@ -1909,6 +1958,19 @@ def get_artist_db_record(artist_id):
                     counts[label] = cur.fetchone()[0]
                 except Exception:
                     counts[label] = None
+            # the hero's format tags (FLAC, MP3...): what the live files are
+            formats = []
+            try:
+                cur.execute(
+                    "SELECT DISTINCT UPPER(TRIM(f.format)) FROM lib2_track_files f "
+                    "JOIN lib2_tracks t ON t.id = f.track_id "
+                    "JOIN lib2_albums al ON al.id = t.album_id "
+                    "WHERE al.primary_artist_id = ? AND f.format IS NOT NULL "
+                    "AND TRIM(f.format) <> '' AND COALESCE(f.file_state, 'active') = 'active'",
+                    (str(artist_id),))
+                formats = sorted(r[0] for r in cur.fetchall() if r[0])
+            except Exception:  # noqa: BLE001 - the record matters more than its tags
+                formats = []
         finally:
             conn.close()
 
@@ -1916,6 +1978,7 @@ def get_artist_db_record(artist_id):
             "success": True,
             "artist_id": str(artist_id),
             "counts": counts,
+            "formats": formats,
             "record": record,
         })
     except Exception as e:

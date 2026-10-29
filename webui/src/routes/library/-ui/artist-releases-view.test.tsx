@@ -210,12 +210,15 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
   });
 
-  it('uses the existing rich header for immersive arrivals and restores tools after My Library', async () => {
+  it('uses the existing rich header for immersive arrivals and keeps the artist tools on show', async () => {
     const { router } = renderArtist('/library?artist=1&view=discovery&immersive=true');
     await screen.findByRole('heading', { name: 'Portishead' });
     expect(router.state.location.search).toMatchObject({ header: 'rich', releaseView: 'cards' });
-    expect(screen.queryByRole('button', { name: 'Artist Settings' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Automatic Search' })).not.toBeInTheDocument();
+    // dev showed the artist tools the moment the page opened
+    expect(screen.getByRole('button', { name: 'Artist Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Automatic Search' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Interactive Search' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'History' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Table View' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'My Library' }));
     await screen.findByRole('button', { name: 'Artist Settings' });
@@ -689,5 +692,92 @@ describe('Library V2 artist detail — All Releases views', () => {
     // lookup silently compares against whatever happens to be leftmost.
     const monitor = screen.getByLabelText(/^(Start|Stop) monitoring$/).querySelector('svg path');
     expect(bookmark.querySelector('svg path')?.getAttribute('d')).toBe(monitor?.getAttribute('d'));
+  });
+
+  it('lets a read-only profile browse the full provider discography without writing', async () => {
+    const writes: string[] = [];
+    server.use(
+      http.get('/api/library/v2/enabled', () =>
+        HttpResponse.json({ success: true, enabled: true, can_write: false, can_wish: false }),
+      ),
+      http.post('/api/library/v2/*', ({ request }) => {
+        writes.push(new URL(request.url).pathname);
+        return HttpResponse.json({ success: true, job_id: 'x' });
+      }),
+      http.get('/api/artist-detail/:id', () =>
+        HttpResponse.json({
+          success: true,
+          artist: { id: 'sp-1', name: 'Portishead' },
+          discography: {
+            source: 'spotify',
+            albums: [
+              { id: 'al-dummy', title: 'Dummy', album_type: 'album', track_count: 11 },
+              { id: 'al-third', title: 'Third', album_type: 'album', track_count: 11 },
+            ],
+          },
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&view=discovery&immersive=true');
+
+    expect(await screen.findByText('Third')).toBeInTheDocument();
+    // the catalogue's own dummy is not listed twice
+    expect(screen.getAllByText('Dummy')).toHaveLength(1);
+    expect(writes).toEqual([]);
+  });
+
+  it('offers an album its own upgrade picker, dev-style "Upgrade N"', async () => {
+    const posts: unknown[] = [];
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            albums: [album({ id: 1, title: 'Dummy', tracks_present: 2, origin: 'library' })],
+          }),
+        }),
+      ),
+      http.get('/api/library/v2/artists/1/enhance', () =>
+        HttpResponse.json({
+          success: true,
+          tracks: [1, 2].map((n) => ({
+            track_id: n,
+            title: `Song ${n}`,
+            album_id: 1,
+            album_title: 'Dummy',
+            disc_number: 1,
+            track_number: n,
+            current: 'MP3 128',
+            profile: 'Lossless',
+            target: 'FLAC',
+            monitored: false,
+          })),
+        }),
+      ),
+      http.post('/api/library/v2/albums/1/enhance', async ({ request }) => {
+        posts.push(await request.json());
+        return HttpResponse.json({ success: true, job_id: 'e1' });
+      }),
+    );
+    renderArtist('/library?artist=1');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Upgrade 2' }));
+    expect(await screen.findByText('Enhance Quality — Dummy')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Enhance/ }));
+    await waitFor(() => expect(posts).toEqual([{ track_ids: [1, 2] }]));
+  });
+
+  it('labels the back link with where an arriving visit came from', async () => {
+    (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack = [
+      { type: 'page', pageId: 'search' },
+    ];
+    try {
+      renderArtist('/library?artist=1&view=discovery&immersive=true');
+      expect(await screen.findByText('← Back to Search')).toBeInTheDocument();
+    } finally {
+      delete (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack;
+    }
+    renderArtist('/library?artist=1');
+    expect(await screen.findByText('← All artists')).toBeInTheDocument();
   });
 });

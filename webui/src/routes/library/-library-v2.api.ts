@@ -544,6 +544,34 @@ export async function resolveLibraryV2DiscoveryArtist(input: {
   return payload.artist_id;
 }
 
+/** The same read-only lookup, plus whether the row has live files here. */
+export async function resolveLibraryV2DiscoveryArtistOwnership(input: {
+  source: string;
+  providerId: string;
+  name: string;
+  /** a provider album id from an ?album= link, resolved to its release here */
+  albumProviderId?: string;
+}): Promise<{ artistId: number | null; owned: boolean; albumId: number | null }> {
+  const payload = await lib2Json<
+    Ok & { artist_id: number | null; owned?: boolean; album_id?: number | null }
+  >(
+    apiClient.get('library/v2/discovery/artist', {
+      searchParams: {
+        source: input.source,
+        provider_id: input.providerId,
+        name: input.name,
+        ...(input.albumProviderId ? { album_provider_id: input.albumProviderId } : {}),
+      },
+    }),
+    'Artist lookup failed',
+  );
+  return {
+    artistId: payload.artist_id,
+    owned: payload.owned === true,
+    albumId: payload.album_id ?? null,
+  };
+}
+
 /** Create and monitor exactly one provider release; browsing never calls this. */
 export async function monitorLibraryV2DiscoveryAlbum(input: {
   source: string;

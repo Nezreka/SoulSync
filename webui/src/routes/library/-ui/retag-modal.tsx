@@ -127,11 +127,14 @@ export function RetagModal({
   id,
   title,
   onClose,
+  trackIds,
 }: {
   entity: 'artists' | 'albums';
   id: number;
   title: string;
   onClose: () => void;
+  /** the bulk bar's selection: preview and write only these tracks */
+  trackIds?: number[];
 }) {
   const queryClient = useQueryClient();
   const [depth, setDepth] = useState<'light' | 'full'>('light');
@@ -149,10 +152,15 @@ export function RetagModal({
   });
   const tracks = useMemo(() => {
     const raw = previewQuery.data?.tracks ?? [];
+    const only = trackIds ? new Set(trackIds) : null;
     return raw.filter(
-      (t) => t.file_path && t.error !== 'No file' && t.error !== 'File not found on disk',
+      (t) =>
+        t.file_path &&
+        t.error !== 'No file' &&
+        t.error !== 'File not found on disk' &&
+        (!only || only.has(t.track_id)),
     );
-  }, [previewQuery.data]);
+  }, [previewQuery.data, trackIds]);
   const changed = useMemo(() => tracks.filter((t) => t.has_changes), [tracks]);
   const manualCount = tracks.reduce(
     (count, track) => count + track.diff.filter((field) => field.manual && field.manual_key).length,

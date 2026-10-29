@@ -186,6 +186,17 @@ import {
 } from './library-index-extras';
 import { LibrarySongsSection } from './library-songs-section';
 import styles from './library-v2-page.module.css';
+import { AlbumUpgradeButton } from './owned-album-upgrade';
+import { useArrivalBack } from './owned-artist-back';
+import {
+  OwnedArtistDiscographyButton,
+  useReadOnlyProviderDiscography,
+} from './owned-artist-discography';
+import { OwnedArtistHeroExtras } from './owned-artist-hero-extras';
+import { openProviderRelease, ReleaseCardExtras } from './owned-artist-release-cards';
+import { OwnedArtistReorganizeQueue } from './owned-artist-reorganize-queue';
+import { OwnedTopTrackActions, OwnedTopTracksDownloadAll } from './owned-artist-top-tracks';
+import { AlbumUnlockMenuItem, OwnedTrackMoreMenu } from './owned-artist-track-actions';
 import { QualityProfilePicker } from './quality-profile-modal';
 import { reassignSubject } from './reassign';
 import { AlbumReorganizeModal, ArtistRenamePreviewModal } from './reorganize-modal';
@@ -3100,6 +3111,13 @@ export function AlbumOverflowMenu({
           >
             Album details
           </button>
+          {canWrite ? (
+            <AlbumUnlockMenuItem
+              albumId={album.id}
+              className={styles.overflowMenuItem}
+              onDone={() => setOpen(false)}
+            />
+          ) : null}
           <button
             type="button"
             className={styles.overflowMenuItem}
@@ -6089,6 +6107,7 @@ interface DiscographyCard {
   ownedTracks: number;
   totalTracks: number;
   releaseDate?: string | null;
+  musicbrainzId?: string | null;
 }
 
 function catalogueCard(album: LibraryV2AlbumSummary): DiscographyCard {
@@ -6106,6 +6125,7 @@ function catalogueCard(album: LibraryV2AlbumSummary): DiscographyCard {
     owned: album.tracks_present > 0,
     ownedTracks: album.tracks_present,
     totalTracks: album.track_count,
+    musicbrainzId: album.musicbrainz_id ?? null,
   };
 }
 
@@ -6124,6 +6144,7 @@ function providerCard(release: ProviderRelease): DiscographyCard {
     ownedTracks: completion?.owned_tracks ?? 0,
     totalTracks: completion?.total_tracks ?? 0,
     releaseDate: release.release_date,
+    musicbrainzId: release.musicbrainz_release_id ?? null,
   };
 }
 
@@ -6151,10 +6172,13 @@ function ReleaseCardGrid({
   cards,
   onOpen,
   openTitle,
+  extras,
 }: {
   cards: DiscographyCard[];
   onOpen?: (card: DiscographyCard) => void;
   openTitle?: string;
+  /** play button and musicbrainz link, dev's release card extras */
+  extras?: (card: DiscographyCard) => ReactNode;
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
   useLazyBackgrounds(gridRef, cards.map((c) => c.key).join('|'));
@@ -6211,6 +6235,7 @@ function ReleaseCardGrid({
                 {card.gapSource}
               </div>
             ) : null}
+            {extras?.(card)}
           </div>
         );
       })}
@@ -6460,6 +6485,12 @@ function TopTracksSidebar({
               <span className="hero-top-track-name" title={track.name}>
                 {track.name}
               </span>
+              <OwnedTopTrackActions
+                track={track}
+                artistName={artistName}
+                artistId={trackArtistId}
+                downloadable={bookmarkable}
+              />
               {track.playcount ? (
                 <span className="hero-top-track-plays">{formatCompactNumber(track.playcount)}</span>
               ) : null}
@@ -6487,6 +6518,14 @@ function TopTracksSidebar({
           );
         })}
       </div>
+      {bookmarkable ? (
+        <OwnedTopTracksDownloadAll
+          tracks={tracks}
+          source={trackSource}
+          artistName={artistName}
+          artistId={trackArtistId}
+        />
+      ) : null}
     </div>
   );
 }
@@ -6856,8 +6895,19 @@ function CatalogueArtistHero({
             📻 Artist Radio
           </button>
           {downloadAction}
+          <OwnedArtistDiscographyButton
+            artistId={artist.id}
+            artistName={artist.name}
+            imageUrl={artist.image_url ?? ''}
+            providerIds={artist.provider_ids}
+          />
           <NativeAudiobookRouteToggle name={artist.name} />
           <ArtistAliases artistId={artist.id} artistName={artist.name} />
+          <OwnedArtistHeroExtras
+            artistId={artist.id}
+            artistName={artist.name}
+            genres={artist.genres}
+          />
         </>
       }
     />
@@ -6879,13 +6929,34 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   // like every other Library V2 view setting.
   const releaseView = search.releaseView;
   const headerMode = search.header;
-  const immersive = search.immersive && releasesMode === 'all';
+  const arrivalBack = useArrivalBack(search.immersive);
+  // the artist tools stay visible on arrival from an artist page, the way dev
+  // showed them. immersive only remembers where the visit started.
   const { filters, setFilters } = useDiscographyFilters();
   const artistQuery = useQuery(libraryV2ArtistQueryOptions(artistId));
   const artistProviderIds = artistQuery.data?.provider_ids ?? {};
   const otherSources = useOtherSources({
     providerId: artistProviderIds.spotify ?? artistProviderIds.deezer ?? null,
     artistName: artistQuery.data?.name ?? '',
+  });
+  // the provider identity a "+ other sources" card opens and plays under
+  const releaseCardArtist = {
+    id: artistProviderIds.spotify ?? artistProviderIds.deezer ?? null,
+    name: artistQuery.data?.name ?? '',
+    imageUrl: artistQuery.data?.image_url ?? '',
+    source: artistProviderIds.spotify ? 'spotify' : artistProviderIds.deezer ? 'deezer' : null,
+  };
+  // a read-only profile cannot fetch the discography into the catalogue, so
+  // it reads the provider's list directly, writing nothing
+  const readOnlyDiscography = useReadOnlyProviderDiscography({
+    enabled: !canWish && releasesMode === 'all',
+    artistName: artistQuery.data?.name ?? '',
+    providerIds: artistProviderIds,
+    catalogueTitles: [
+      ...(artistQuery.data?.albums ?? []),
+      ...(artistQuery.data?.eps ?? []),
+      ...(artistQuery.data?.singles ?? []),
+    ].map((a) => a.title),
   });
   const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('artists', artistId));
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
@@ -7114,8 +7185,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
 
   return (
     <div className={styles.page}>
-      <BackLink onClick={() => void navigate({ search: (p) => ({ ...p, artist: undefined }) })}>
-        ← All artists
+      <BackLink
+        onClick={
+          arrivalBack?.onBack ??
+          (() => void navigate({ search: (p) => ({ ...p, artist: undefined }) }))
+        }
+      >
+        {arrivalBack?.label ?? '← All artists'}
       </BackLink>
       {artistQuery.isError ? (
         // iss29-C04: without this branch `isLoading` false + `artist` undefined
@@ -7129,7 +7205,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
         <div className={styles.loading}>Loading…</div>
       ) : (
         <>
-          {!immersive ? (
+          {
             <div className={styles.pageToolbar}>
               <div className={styles.toolbarGroup}>
                 {/* The primary bar as named actions, so a setting can later
@@ -7218,8 +7294,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 />
               </div>
             </div>
-          ) : null}
+          }
 
+          <OwnedArtistReorganizeQueue artistId={artistId} />
           {grabBanner ? (
             <StatusNotice
               tone={grabBanner.tone}
@@ -7370,6 +7447,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               ).map(([title, entries]) => {
                 const cards = [
                   ...entries.map(catalogueCard),
+                  ...readOnlyDiscography
+                    .releasesFor(
+                      ({ Albums: 'albums', EPs: 'eps', Singles: 'singles' } as const)[title],
+                    )
+                    .map(providerCard),
                   ...otherSources.byBucket(
                     ({ Albums: 'album', EPs: 'ep', Singles: 'single' } as const)[
                       title as GroupLabel
@@ -7396,8 +7478,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                           ? void navigate({
                               search: (p) => ({ ...p, album: card.albumId }),
                             })
-                          : undefined
+                          : card.providerId
+                            ? void openProviderRelease(card, releaseCardArtist)
+                            : undefined
                       }
+                      extras={(card) => (
+                        <ReleaseCardExtras card={card} artist={releaseCardArtist} />
+                      )}
                     />
                   </DiscographySection>
                 );
@@ -7933,6 +8020,7 @@ function AlbumBlock({
             artistName={artistName}
             tracksPresent={album.tracks_present}
           />
+          <AlbumUpgradeButton albumId={album.id} albumTitle={album.title} />
           <IconActionButton
             icon="automatic"
             title="Automatic Search — search missing/upgradable tracks on this album"
@@ -8988,6 +9076,8 @@ export function TrackTableBulkBar({
   } | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
+  // dev's bulk write tags showed the diff first
+  const [showTagPreview, setShowTagPreview] = useState(false);
 
   const trackIds = tracks.filter((t) => t.id != null).map((t) => t.id as number);
   const fileIds = tracks.map((t) => t.file?.file_id).filter((id): id is number => id != null);
@@ -9093,16 +9183,19 @@ export function TrackTableBulkBar({
         className={styles.bulkBarButton}
         data-requires-write=""
         disabled={busy !== null || trackIds.length === 0 || !canWrite}
-        onClick={() =>
-          void run('Write Tags', async () => {
-            const jobId = await writeLibraryV2Tags(trackIds);
-            const jobError = await awaitBulkJob(queryClient, jobId);
-            if (jobError) throw new Error(jobError);
-          })
-        }
+        onClick={() => setShowTagPreview(true)}
       >
-        {busy === 'Write Tags' ? 'Writing…' : 'Write Tags'}
+        Write Tags
       </button>
+      {showTagPreview ? (
+        <RetagModal
+          entity="albums"
+          id={albumId}
+          title={`${trackIds.length} selected track${trackIds.length === 1 ? '' : 's'}`}
+          trackIds={trackIds}
+          onClose={() => setShowTagPreview(false)}
+        />
+      ) : null}
       <button
         type="button"
         className={styles.bulkBarButton}
@@ -10649,6 +10742,12 @@ function TrackRow(props: TrackRowProps) {
           <AddToPlaylistButton
             track={playlistTrack(track, albumTitle)}
             className={styles.iconAction}
+          />
+          <OwnedTrackMoreMenu
+            track={track}
+            albumId={entityBase.albumId}
+            albumTitle={albumTitle}
+            artistName={track.artists.map((a) => a.name).join(', ')}
           />
           {track.id ? (
             <TrackDetailButton

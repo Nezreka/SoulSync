@@ -1721,8 +1721,31 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                           if configured_match_services_getter else None))
         if create and artist_id is None:
             return _fail("Could not materialize this artist")
+        owned = False
+        focus_album_id = None
+        album_provider_id = str(request.args.get("album_provider_id") or "").strip()
+        if artist_id is not None:
+            # owned = a live file in this library. a watchlisted, bookmarked or
+            # discography-only row is catalogued but not owned.
+            from core.library2.sql_util import owned_sql
+            with closing(_conn()) as oconn:
+                owned = oconn.execute(
+                    f"SELECT 1 FROM lib2_artists a WHERE a.id=? AND {owned_sql('artist', 'a')}",
+                    (artist_id,)).fetchone() is not None
+                if album_provider_id and not legacy:
+                    # a provider album link (?album=) focuses that release here too
+                    from core.library2.provider_ids import parse_external_ids
+                    for row in oconn.execute(
+                            "SELECT id, spotify_id, musicbrainz_id, external_ids FROM lib2_albums "
+                            "WHERE primary_artist_id=?", (artist_id,)):
+                        ids = parse_external_ids(row["external_ids"])
+                        if album_provider_id in (row["spotify_id"], row["musicbrainz_id"],
+                                                 ids.get(source)):
+                            focus_album_id = row["id"]
+                            break
         return jsonify({"success": True, "artist_id": artist_id,
-                        "monitored": monitor})
+                        "monitored": monitor, "owned": owned,
+                        "album_id": focus_album_id})
 
     @_route("/api/library/v2/discovery/album", methods=["POST"])
     def lib2_discovery_album():

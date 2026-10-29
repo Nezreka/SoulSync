@@ -263,6 +263,8 @@ export interface LibraryV2AlbumSummary {
    *  bookmarked single track visible under "My Library" (guide §5). */
   monitored_tracks?: number;
   spotify_id: string | null;
+  /** the release card's musicbrainz link. */
+  musicbrainz_id?: string | null;
   /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
   explicit: boolean | null;
   label: string | null;
