@@ -935,6 +935,9 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "album_count": _in_library(albums) + _in_library(eps),
         "single_count": _in_library(singles),
         "discography_count": sum(1 for e in albums + eps + singles if e["origin"] == "discography"),
+        # when the provider discography was last walked: the page re-checks a
+        # stale one for new releases on open
+        "discography_synced_at": a["discography_synced_at"] if "discography_synced_at" in a.keys() else None,
         # I8: sum of each release's own total_size_bytes above — one source
         # of truth, no separate artist-wide aggregate query needed.
         "total_size_bytes": sum(e["total_size_bytes"] for e in albums + eps + singles),

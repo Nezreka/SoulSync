@@ -366,3 +366,47 @@ def test_checkpoint_write_failure_does_not_discard_successful_catalogue_update(
     assert titles(imported_conn, album_id) == ['Saved A', 'Saved B']
     assert result.auto_fixed >= 1
     assert result.errors == 1
+
+
+def test_an_opened_album_gets_its_tracklist_before_the_all_services_enrichment(
+        imported_conn, legacy_db, monkeypatch):
+    """Opening a discography release waited ~10 s for an enrichment walk over
+    every configured source before the one tracklist call. tracklist_first
+    resolves first (the page shows the tracks), then enriches, as before."""
+    from core.library2.completeness import load_album_catalogue
+    from core.library2.provider_adapters import TracklistProviderResult, TracklistTrack
+
+    album_id = release(imported_conn, 'Fresh', cached=False)
+    imported_conn.commit()
+    events = []
+
+    def fetch(title, artist, **kw):
+        events.append('tracklist')
+        return TracklistProviderResult('spotify', 'sp-Fresh', tuple(
+            TracklistTrack(f'Fresh {n}', i, 1, 180000, 'spotify', f'fresh-{i}')
+            for i, n in enumerate(['A', 'B'], 1)))
+
+    def enrich(conn, entity, eid, **kw):
+        # the tracks are already in the catalogue when the walk starts
+        events.append(('enrich', titles(conn, eid)))
+
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_album_tracklist', fetch)
+    monkeypatch.setattr('core.library2.native_enrich.enrich_native_entity_all_services', enrich)
+    load_album_catalogue(legacy_db, Config(), imported_conn, album_id, tracklist_first=True)
+
+    assert events[0] == 'tracklist'
+    assert ('enrich', ['Fresh A', 'Fresh B']) in events
+
+
+def test_tracklist_first_skips_the_enrichment_when_the_snapshot_still_fits(
+        imported_conn, legacy_db, monkeypatch):
+    from core.library2.completeness import load_album_catalogue
+
+    album_id = release(imported_conn, 'Kept', cached=True)
+    imported_conn.commit()
+    load_album_catalogue(legacy_db, Config(), imported_conn, album_id)
+    enriched = []
+    monkeypatch.setattr('core.library2.native_enrich.enrich_native_entity_all_services',
+                        lambda *a, **kw: enriched.append(a[2]))
+    load_album_catalogue(legacy_db, Config(), imported_conn, album_id, tracklist_first=True)
+    assert enriched == []

@@ -3586,7 +3586,8 @@ def test_album_resolve_runs_for_a_bookmarked_release(api, monkeypatch, key, expe
 
     client.get(f"/api/library/v2/albums/{ids[key]}?resolve=1")
 
-    assert _drain(resolved) == [ids[key]]
+    # tracklist first, then once more after the enrichment (cache rebind)
+    assert set(_drain(resolved)) == {ids[key]}
 
 
 def test_album_resolve_leaves_a_complete_tracklist_alone(api, monkeypatch):
@@ -3632,7 +3633,8 @@ def test_album_resolve_refreshes_complete_tracklist_after_parser_upgrade(
 
     client.get(f"/api/library/v2/albums/{ids['views']}?resolve=1")
 
-    assert _drain(resolved) == [ids["views"]]
+    # tracklist first, then once more after the enrichment (cache rebind)
+    assert set(_drain(resolved)) == {ids["views"]}
 
 
 def test_discovery_track_never_monitors_the_whole_album(api, monkeypatch):
@@ -3861,6 +3863,31 @@ def test_album_resolve_answers_immediately_and_reports_pending(api, monkeypatch)
     assert elapsed < 2, f"request waited {elapsed:.1f}s on the provider walk"
     assert body["album"]["tracklist_sync"]["status"] == "pending"
     release.set()
+
+
+def test_a_resolve_in_flight_always_answers_pending(api, monkeypatch):
+    """The page polls only while the answer says pending. A resolve an earlier
+    open started did not flag later answers, so the tracks appeared only after
+    leaving and reopening the album."""
+    client, db, ids = api
+    started, release = threading.Event(), threading.Event()
+    from core.library2 import completeness
+    _record_tracklist_resolves(monkeypatch)
+
+    def _slow(_cfg, _conn, _album_id):
+        started.set()
+        release.wait(timeout=5)
+        return ["t"]
+
+    monkeypatch.setattr(completeness, "resolve_tracklist", _slow)
+    client.get(f"/api/library/v2/albums/{ids['single']}?resolve=1")
+    assert started.wait(timeout=5)
+    with closing(_conn(db)) as conn:
+        conn.execute("UPDATE lib2_albums SET tracklist_status='idle' WHERE id=?", (ids["single"],))
+        conn.commit()
+    body = client.get(f"/api/library/v2/albums/{ids['single']}?resolve=1").get_json()
+    release.set()
+    assert body["album"]["tracklist_sync"]["status"] == "pending"
 
 
 def test_album_resolve_stops_polling_when_no_provider_answers(api, monkeypatch):

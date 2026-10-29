@@ -2139,10 +2139,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 database = get_database()
                 worker_conn = database._get_connection()
                 from core.library2.completeness import load_album_catalogue
+                # the tracklist lands (and the polling page shows it) before
+                # the slow all-services enrichment runs
                 resolved = load_album_catalogue(
                     database, config_manager, worker_conn, album_id,
                     services=(configured_match_services_getter()
-                              if configured_match_services_getter else None))
+                              if configured_match_services_getter else None),
+                    tracklist_first=True)
                 if not resolved:
                     # Nothing came back. Leaving the row 'pending' would make
                     # the client poll forever for a tracklist no provider has.
@@ -2228,6 +2231,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             data = Q.get_album(conn, album_id)
         if data is None:
             return _fail("Album not found", 404)
+        # A resolve already in flight (an earlier open, a poll) did not flag
+        # this response; without "pending" the page stopped polling and showed
+        # the tracks only after leaving and reopening the album.
+        sync = data.get("tracklist_sync") or {}
+        if _tracklist_resolve_pending(album_id) and sync.get("status") != "ready":
+            data["tracklist_sync"] = {**sync, "status": "pending"}
         _apply_artwork_urls(data, "album")
         return jsonify({"success": True, "album": data})
 

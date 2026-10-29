@@ -820,12 +820,19 @@ def resolve_tracklist(config_manager, conn, album_id: int, *,
 
 
 def load_album_catalogue(database, config_manager, conn, album_id, *, services=None,
-                         inherit_monitoring=True, provider_result=None, enrich=True):
+                         inherit_monitoring=True, provider_result=None, enrich=True,
+                         tracklist_first=False):
     """The shared album-page/download loader: enrich, resolve and reconcile.
 
     Existing complete, edition-bound snapshots skip the provider walk. A
     prefetched result enters the same persistence boundary; it is never saved
     by a parallel download-specific catalogue writer.
+
+    ``tracklist_first`` (someone is looking at the album): resolve the
+    tracklist from the ids the release already has -- one provider call --
+    before the all-services enrichment, which walks every configured source
+    and took ~10 s; then enrich and resolve once more, so the cache binds the
+    enriched edition reference just as the default order does.
 
     Commits the caller's connection, including before waiting for a concurrent
     catalogue load. The same transaction contract as ``resolve_tracklist``
@@ -834,19 +841,36 @@ def load_album_catalogue(database, config_manager, conn, album_id, *, services=N
     from core.library2.catalogue_flight import album_catalogue_flight
     conn.commit()
     with album_catalogue_flight(conn, album_id):
+        fetched_first = (tracklist_first and enrich and provider_result is None
+                         and not _reusable_tracklist(conn, album_id)[1])
+        if fetched_first:
+            tracks = _load_album_catalogue(
+                database, config_manager, conn, album_id, services=services,
+                inherit_monitoring=inherit_monitoring, provider_result=None, enrich=False)
+            if not tracks:
+                return tracks
         return _load_album_catalogue(
             database, config_manager, conn, album_id, services=services,
             inherit_monitoring=inherit_monitoring, provider_result=provider_result,
-            enrich=enrich,
+            enrich=enrich, force_enrich=fetched_first,
         )
 
 
-def _load_album_catalogue(database, config_manager, conn, album_id, *, services,
-                          inherit_monitoring, provider_result, enrich):
+def _reusable_tracklist(conn, album_id):
+    """The album's tracklist context, and whether its latest snapshot still
+    fits it (then no provider walk and no enrichment is needed)."""
     from core.library2.provider_snapshots import get_latest_provider_snapshot
     context = _album_tracklist_context(conn, album_id)
     snapshot = get_latest_provider_snapshot(conn, entity_type='album', entity_id=album_id, scope='tracklist')
-    reusable = context and _snapshot_tracks(snapshot, context[1])
+    return context, bool(context and _snapshot_tracks(snapshot, context[1]))
+
+
+def _load_album_catalogue(database, config_manager, conn, album_id, *, services,
+                          inherit_monitoring, provider_result, enrich, force_enrich=False):
+    context, reusable = _reusable_tracklist(conn, album_id)
+    # force_enrich: the tracklist-first pass just bound a snapshot, which must
+    # not count as "already enriched"
+    reusable = reusable and not force_enrich
     if context and enrich and not reusable:
         from core.library2.native_enrich import enrich_native_entity_all_services
         if services is None:

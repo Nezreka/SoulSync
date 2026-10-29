@@ -307,6 +307,8 @@ export interface LibraryV2ArtistDetail {
   single_count: number;
   /** Provider-only releases currently persisted for this artist. */
   discography_count: number;
+  /** UTC "YYYY-MM-DD HH:MM:SS" of the last provider discography walk, or null. */
+  discography_synced_at?: string | null;
   /** I8: sum of every album/EP/single's total_size_bytes, in bytes. */
   total_size_bytes: number;
   user_overrides: Record<string, unknown>;
