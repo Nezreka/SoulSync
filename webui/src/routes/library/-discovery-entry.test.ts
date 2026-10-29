@@ -15,7 +15,8 @@ describe('Discovery artist entry', () => {
     expect(libraryV2SearchSchema.parse({ artist: 7 })).toMatchObject({
       header: 'compact',
       releases: 'library',
-      releaseView: 'table',
+      // the discovery tab opens on cards wherever the visit started
+      releaseView: 'cards',
     });
     expect(libraryV2SearchSchema.parse({ view: 'discovery', releaseView: 'table' })).toMatchObject({
       header: 'rich',

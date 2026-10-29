@@ -6004,7 +6004,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
         ...(switchesArtist
           ? {
               releases: 'library' as const,
-              releaseView: 'table' as const,
+              releaseView: undefined,
               header: 'compact' as const,
             }
           : {}),
@@ -6154,7 +6154,7 @@ function useUrlSyncedFilter(
  *  "All Releases" shows the full provider discography. */
 /** ldp-05: which artist view you land on depends on where you came from.
  *  Opening an artist from inside Library V2 always starts in the V2 shape —
- *  My Library, table, compact header — regardless of what the previous
+ *  My Library, compact header, with discovery back on its cards default, regardless of what the previous
  *  artist's URL happened to carry. Coming from search is the opposite case
  *  and is set by the artist-detail route. */
 function openArtistSearch<T extends Record<string, unknown>>(previous: T, artistId: number) {
@@ -6163,7 +6163,7 @@ function openArtistSearch<T extends Record<string, unknown>>(previous: T, artist
     artist: artistId,
     album: undefined,
     releases: 'library' as const,
-    releaseView: 'table' as const,
+    releaseView: undefined,
     header: 'compact' as const,
   };
 }
@@ -7746,6 +7746,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 <button
                   type="button"
                   className={releaseView === 'table' ? styles.viewActive : ''}
+                  aria-pressed={releaseView === 'table'}
                   onClick={() =>
                     void navigate({
                       search: (p) => ({ ...p, releaseView: 'table' }),
@@ -7757,6 +7758,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 <button
                   type="button"
                   className={releaseView === 'cards' ? styles.viewActive : ''}
+                  aria-pressed={releaseView === 'cards'}
                   onClick={() =>
                     void navigate({
                       search: (p) => ({ ...p, releaseView: 'cards' }),

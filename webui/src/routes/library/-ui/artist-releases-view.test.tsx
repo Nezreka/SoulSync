@@ -277,6 +277,19 @@ describe('Library V2 artist detail — All Releases views', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Discovery/ }));
 
+    // the discovery tab lands on the cards view
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ releases: 'all', releaseView: 'cards' }),
+    );
+    expect(await screen.findByRole('button', { name: 'Discover View' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Table View' }));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ releaseView: 'table' }),
+    );
+
     const legacy = await screen.findByRole('button', { name: 'Discover View' });
     fireEvent.click(legacy);
     await waitFor(() =>
@@ -296,7 +309,7 @@ describe('Library V2 artist detail — All Releases views', () => {
   });
 
   it('applies the discography filters in the table view too (ldp-04)', async () => {
-    renderArtist('/library?artist=1&releases=all');
+    renderArtist('/library?artist=1&releases=all&releaseView=table');
     await screen.findByText('Roseland NYC Live');
 
     fireEvent.click(await screen.findByRole('button', { name: 'Live' }));
@@ -349,7 +362,7 @@ describe('Library V2 artist detail — All Releases views', () => {
       ),
     );
 
-    const { router } = renderArtist('/library?artist=1&releases=all');
+    const { router } = renderArtist('/library?artist=1&releases=all&releaseView=table');
     const dummyTitle = await screen.findByRole('button', { name: 'Dummy' });
     const dummyRow = dummyTitle.parentElement?.parentElement as HTMLElement;
     const now = vi.spyOn(Date, 'now');
@@ -516,7 +529,7 @@ describe('Library V2 artist detail — All Releases views', () => {
       expect(router.state.location.search).toMatchObject({
         artist: 1,
         releases: 'library',
-        releaseView: 'table',
+        releaseView: 'cards',
         header: 'compact',
       }),
     );

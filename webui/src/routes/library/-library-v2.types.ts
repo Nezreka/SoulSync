@@ -129,8 +129,8 @@ export const libraryV2SearchSchema = libraryV2SearchWithLegacy.transform((value)
   header: value.header ?? (value.view === 'discovery' ? ('rich' as const) : ('compact' as const)),
   releases:
     value.releases ?? (value.view === 'discovery' ? ('all' as const) : ('library' as const)),
-  releaseView:
-    value.releaseView ?? (value.view === 'discovery' ? ('cards' as const) : ('table' as const)),
+  // the discovery tab opens on the cards view. table is an explicit choice.
+  releaseView: value.releaseView ?? ('cards' as const),
 }));
 
 export type LibraryV2Search = z.infer<typeof libraryV2SearchSchema>;
