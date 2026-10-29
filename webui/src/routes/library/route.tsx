@@ -85,6 +85,9 @@ export const Route = createFileRoute('/library')({
     discover: search.discover,
     section: search.section,
     wantedKind: search.wantedKind,
+    letter: search.letter,
+    source: search.source,
+    quality: search.quality,
   }),
   loader: async ({ context, deps }) => {
     // Warm the feature-flag check + first page of artists; never block on a
@@ -92,7 +95,9 @@ export const Route = createFileRoute('/library')({
     await context.queryClient
       .ensureQueryData(libraryV2EnabledQueryOptions())
       .catch(() => undefined);
-    if (deps.section === 'wanted') {
+    if (deps.section === 'songs' && !deps.album && !deps.artist) {
+      // the songs tab loads its own list (it is keyed by profile)
+    } else if (deps.section === 'wanted') {
       void context.queryClient.prefetchQuery(
         libraryV2WantedQueryOptions({ q: deps.q, page: deps.page, wantedKind: deps.wantedKind }),
       );
