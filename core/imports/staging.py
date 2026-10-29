@@ -6,6 +6,7 @@ import os
 import threading
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from core.audio_tags import easy_tags
 from core.imports.paths import docker_resolve_path
 from core.imports.filename import (
     extract_explicit_track_number,
@@ -119,8 +120,10 @@ def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -
     try:
         from mutagen import File as MutagenFile
 
-        tags = MutagenFile(file_path, easy=True)
+        audio = MutagenFile(file_path, easy=True)
+        tags = easy_tags(audio)
     except Exception:
+        audio = None
         tags = None
 
     filename = filename or os.path.basename(file_path)
@@ -179,7 +182,7 @@ def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -
     # off audio.info, not the tags. the file is already open, and the inbox
     # shows duration / bitrate / size per file so a 30s clip or a 96k mp3 is
     # visible before it is imported, not after.
-    info = getattr(tags, "info", None)
+    info = getattr(audio, "info", None)
     try:
         duration_ms = int(round(float(getattr(info, "length", 0) or 0) * 1000))
     except (TypeError, ValueError):
@@ -437,7 +440,7 @@ def _read_staging_audio_tags(file_path: str) -> Tuple[Optional[str], Optional[st
     try:
         from mutagen import File as MutagenFile
 
-        tags = MutagenFile(file_path, easy=True)
+        tags = easy_tags(MutagenFile(file_path, easy=True))
         if not tags:
             return None, None
 

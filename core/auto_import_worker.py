@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from core.audio_tags import easy_tags
 from core.imports.folder_artist import resolve_folder_artist
 from core.imports.paths import config_root_path, docker_resolve_path
 from core.imports.pipeline import import_rejection_reason, kept_existing_library_file
@@ -130,7 +131,7 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
     try:
         from mutagen import File as MutagenFile
         audio = MutagenFile(file_path, easy=True)
-        if audio:
+        if audio is not None:
             # Audio length comes off audio.info, not tags. Mutagen returns
             # seconds as a float; convert to int milliseconds to match the
             # metadata-source convention (Spotify/Deezer/iTunes all return
@@ -142,7 +143,7 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
                 pass
 
             if audio.tags:
-                tags = audio.tags
+                tags = easy_tags(audio)
                 result['title'] = (tags.get('title', [''])[0] or '').strip()
                 # Prefer albumartist for album-level identification (per-track
                 # artist often includes features like "Kendrick Lamar, Drake"
