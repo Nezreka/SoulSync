@@ -893,7 +893,12 @@ export function InteractiveSearchModal({
       }}
       className={`${styles.modal} ${styles.modalWide} ${styles.modalFramed}`}
     >
-      <DialogHeader title="Interactive Search" closeLabel="Close interactive search" compact>
+      <DialogHeader
+        title="Interactive Search"
+        closeLabel="Close interactive search"
+        compact
+        className={styles.dialogHead}
+      >
         <span
           className={styles.searchHeaderMeta}
           title={searchedQueries.length > 1 ? searchedQueries.join('\n') : undefined}

@@ -30,34 +30,41 @@
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  margin: 8px 0 12px;
+  margin: 4px 0 18px;
 }
 
 .alphabet button {
-  min-width: 26px;
-  padding: 3px 6px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-xs);
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-pill);
   background: transparent;
-  color: inherit;
+  color: var(--text-3);
   font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   cursor: pointer;
-  opacity: 0.75;
+  transition:
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease;
 }
 
 .alphabet button:hover {
-  opacity: 1;
+  background: var(--white-a06);
+  color: var(--text-1);
 }
 
 .alphabet button.letterActive {
-  border-color: rgba(var(--accent-rgb), 0.6);
-  color: var(--accent);
-  opacity: 1;
-  font-weight: 700;
+  background: var(--white-a14);
+  color: var(--text-1);
+  font-weight: 750;
 }
 
 .toggleActive {
-  border-color: currentcolor;
+  border-color: transparent;
+  background: var(--white-a14);
+  color: var(--text-1);
   font-weight: 700;
 }
 

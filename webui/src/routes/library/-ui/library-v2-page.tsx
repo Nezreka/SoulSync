@@ -431,6 +431,7 @@ const ICON_PATHS = {
   info: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 16v-4M12 8h.01',
   gain: 'M3 12h3l2-7 3 15 3-11 2 5h5',
   play: 'M8 5l11 7-11 7V5z',
+  radio: 'M4 10h16v10H4zM7 10l10-5M8.5 15h.01M13 14h4M13 17h4',
   cover: 'M4 4h16v16H4z M4 16l4-4 3 3 5-6 4 5',
   server:
     'M5 4h14a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M5 13h14a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2z M7 7h.01 M7 16h.01 M11 7h7 M11 16h7',
@@ -884,6 +885,7 @@ export function ActionButton({
   requiresWrite = true,
   requiresWish = false,
   tone = 'default',
+  primary = false,
 }: {
   icon: IconName;
   label: ReactNode;
@@ -895,6 +897,8 @@ export function ActionButton({
   /** E-13: monitor/search -- also a profile in a library of its own */
   requiresWish?: boolean;
   tone?: 'default' | 'danger';
+  /** the one filled action on a toolbar */
+  primary?: boolean;
 }) {
   const canWrite = useLibraryV2CanWrite();
   const canWish = useLibraryV2CanWish();
@@ -902,7 +906,7 @@ export function ActionButton({
   return (
     <button
       type="button"
-      className={`${styles.toolButton} ${tone === 'danger' ? styles.toolDanger : ''}`}
+      className={`${styles.toolButton} ${tone === 'danger' ? styles.toolDanger : ''} ${primary ? styles.toolPrimary : ''}`}
       data-requires-write={requiresWrite && !requiresWish ? '' : undefined}
       data-requires-wish={requiresWish ? '' : undefined}
       disabled={busy || disabled || writeBlocked}
@@ -1095,7 +1099,7 @@ function ModalShell({
       }}
       className={`${styles.modal} ${styles.modalFramed} ${className ?? ''} ${wide ? styles.modalWorkspace : ''} ${detail ? styles.modalDetail : ''} ${match ? styles.modalMatch : ''} ${settings ? styles.modalSettings : ''}`}
     >
-      <DialogHeader title={title} closeLabel="Close" compact>
+      <DialogHeader title={title} closeLabel="Close" compact className={styles.dialogHead}>
         {description ? <span className={styles.toolDescription}>{description}</span> : null}
       </DialogHeader>
       <div className={styles.modalContent}>{children}</div>
@@ -5950,6 +5954,13 @@ function ArtistTable({
 
 // --- artist detail (Lidarr-style: expandable album/single tables) ------------
 
+const RELEASE_KIND_LABELS: Record<string, string> = {
+  album: 'Album',
+  ep: 'EP',
+  single: 'Single',
+  compilation: 'Compilation',
+};
+
 function AlbumDetailView({ albumId }: { albumId: number }) {
   const navigate = useNavigate();
   const canWish = useLibraryV2CanWish();
@@ -6013,14 +6024,14 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
   };
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} ${styles.detailView}`}>
       <BackLink onClick={() => void goBack()}>
         ← {album?.primary_artist ? album.primary_artist.name : 'Library'}
       </BackLink>
       {albumQuery.isError ? (
         <div className={styles.emptyState}>Album not found.</div>
       ) : albumQuery.isLoading || !album ? (
-        <div className={styles.loading}>Loading…</div>
+        <ArtistViewSkeleton />
       ) : (
         <>
           {grabBanner ? (
@@ -6031,8 +6042,19 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
             />
           ) : null}
           <header className={styles.detailHeader}>
+            {album.image_url ? (
+              <div
+                className={styles.heroBackdrop}
+                style={{ backgroundImage: `url("${album.image_url.replace(/"/g, '%22')}")` }}
+                aria-hidden="true"
+              />
+            ) : null}
             <Artwork src={album.image_url ?? ''} alt={album.title} className={styles.detailThumb} />
             <div className={styles.detailMeta}>
+              <p className={styles.heroEyebrow}>
+                <span className={styles.heroEyebrowDot} aria-hidden="true" />
+                {RELEASE_KIND_LABELS[album.album_type] ?? 'Release'}
+              </p>
               <div className={styles.detailTitleRow}>
                 <MonitorToggle
                   entity="albums"
@@ -6966,7 +6988,10 @@ function LegacyArtistHero({
   titleActions,
   titleLeading,
   onPickImage,
+  eyebrow,
 }: {
+  /** the quiet line above the name */
+  eyebrow?: ReactNode;
   name: string;
   imageUrl: string;
   remoteImageUrl?: string | null;
@@ -7035,8 +7060,16 @@ function LegacyArtistHero({
     observer.observe(el);
     return () => observer.disconnect();
   }, [cleanBio]);
+  const backdrop = imageUrl || remoteImageUrl || '';
   return (
-    <div className="artist-hero-section">
+    <div className={`artist-hero-section ${styles.premierHero}`}>
+      {backdrop ? (
+        <div
+          className={styles.heroBackdrop}
+          style={{ backgroundImage: `url("${backdrop.replace(/"/g, '%22')}")` }}
+          aria-hidden="true"
+        />
+      ) : null}
       <div className="artist-hero-content">
         <div
           className={`artist-image-container ${styles.heroImageBox}`}
@@ -7058,17 +7091,23 @@ function LegacyArtistHero({
         </div>
         <div className="artist-info">
           <div className="artist-hero-identity">
+            {eyebrow ? (
+              <p className={styles.heroEyebrow}>
+                <span className={styles.heroEyebrowDot} aria-hidden="true" />
+                {eyebrow}
+              </p>
+            ) : null}
             <div className={styles.detailTitleRow}>
               {titleLeading}
               <h1 className="artist-name">{name}</h1>
               {titleActions}
             </div>
+            {genres.length > 0 ? (
+              <div className="artist-genres-container">{genres.join(' · ')}</div>
+            ) : null}
             {badges ? <div className="artist-hero-badges">{badges}</div> : null}
           </div>
           {actions ? <div className="artist-hero-actions">{actions}</div> : null}
-          {genres.length > 0 ? (
-            <div className="artist-genres-container">{genres.join(', ')}</div>
-          ) : null}
           {cleanBio ? (
             <div ref={bioRef} className={`artist-hero-bio${expandedBio ? ' expanded' : ''}`}>
               <span className="bio-text">{cleanBio}</span>
@@ -7229,6 +7268,7 @@ function CatalogueArtistHero({
       providerId={providerIds.spotify ?? providerIds.deezer ?? null}
       source={source}
       onPickImage={onPickImage}
+      eyebrow={artistEyebrow(artist)}
       titleActions={headerToggle}
       titleLeading={
         <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} prominent />
@@ -7241,13 +7281,14 @@ function CatalogueArtistHero({
       coverage={matchStatus.data?.enrichmentCoverage}
       actions={
         <>
-          <ArtistPlayButton artistId={artist.id} artistName={artist.name} />
+          <ArtistPlayButton artistId={artist.id} artistName={artist.name} primary />
           <button
             type="button"
-            className="library-artist-radio-btn"
+            className={`library-artist-radio-btn ${styles.heroSecondary}`}
             onClick={() => void playLibraryV2ArtistRadio(artist.id, artist.name)}
           >
-            📻 Artist Radio
+            <SvgIcon name="radio" />
+            Artist Radio
           </button>
           <OwnedArtistDiscographyButton
             artistId={artist.id}
@@ -7265,6 +7306,14 @@ function CatalogueArtistHero({
       }
     />
   );
+}
+
+/** the quiet line the hero sets above the artist's name */
+function artistEyebrow(artist: LibraryV2ArtistDetail) {
+  const owned = [...artist.albums, ...(artist.eps ?? []), ...artist.singles].some(
+    (a) => a.tracks_present > 0,
+  );
+  return owned ? 'In your library' : 'Artist';
 }
 
 /** Upstream da5c61779 "Treat as audiobook": file the artist's downloads in the
@@ -7300,6 +7349,49 @@ function AudiobookRouteSetting({ name }: { name: string }) {
   );
 }
 
+/** True once `ref` has scrolled up past the top of the view. Without an
+ *  IntersectionObserver (jsdom) it stays false. */
+function useScrolledPast(ref: { current: HTMLElement | null }, key: unknown) {
+  const [past, setPast] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry) return;
+      setPast(!entry.isIntersecting && entry.boundingClientRect.top < 0);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref, key]);
+  return past;
+}
+
+/** the artist page's shape while it loads, so nothing jumps when it lands */
+function ArtistViewSkeleton() {
+  return (
+    <div className={styles.skeletonArtist} role="status" aria-label="Loading artist">
+      <span className={styles.srOnly}>Loading…</span>
+      <div className={styles.skeletonToolbar}>
+        <span className={styles.skeletonBlock} />
+        <span className={styles.skeletonBlock} />
+        <span className={styles.skeletonBlock} />
+      </div>
+      <div className={styles.skeletonHero}>
+        <span className={`${styles.skeletonBlock} ${styles.skeletonArt}`} />
+        <div className={styles.skeletonLines}>
+          <span className={`${styles.skeletonBlock} ${styles.skeletonEyebrow}`} />
+          <span className={`${styles.skeletonBlock} ${styles.skeletonTitle}`} />
+          <span className={`${styles.skeletonBlock} ${styles.skeletonLine}`} />
+          <span className={`${styles.skeletonBlock} ${styles.skeletonLineShort}`} />
+        </div>
+      </div>
+      {[0, 1, 2].map((row) => (
+        <span key={row} className={`${styles.skeletonBlock} ${styles.skeletonRow}`} />
+      ))}
+    </div>
+  );
+}
+
 function ArtistDetailView({ artistId }: { artistId: number }) {
   const navigate = useNavigate();
   const canWish = useLibraryV2CanWish();
@@ -7311,10 +7403,14 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const releaseView = search.releaseView;
   const headerMode = search.header;
   const arrivalBack = useArrivalBack(search.immersive);
+  // the toolbar picks up a small name tag once the hero scrolls away
+  const artistTopRef = useRef<HTMLDivElement>(null);
+  const heroSentinelRef = useRef<HTMLDivElement>(null);
   // the artist tools stay visible on arrival from an artist page, the way dev
   // showed them. immersive only remembers where the visit started.
   const { filters, setFilters } = useDiscographyFilters();
   const artistQuery = useQuery(libraryV2ArtistQueryOptions(artistId));
+  const toolbarStuck = useScrolledPast(heroSentinelRef, artistQuery.data?.id);
   const artistProviderIds = artistQuery.data?.provider_ids ?? {};
   const otherSources = useOtherSources({
     providerId: artistProviderIds.spotify ?? artistProviderIds.deezer ?? null,
@@ -7535,7 +7631,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   );
 
   return (
-    <div className={styles.page}>
+    <div ref={artistTopRef} className={`${styles.page} ${styles.detailView}`}>
       <BackLink
         onClick={
           arrivalBack?.onBack ??
@@ -7553,22 +7649,41 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           <p>{mutationErrorMessage(artistQuery.error, 'This artist could not be loaded.')}</p>
         </div>
       ) : artistQuery.isLoading || !artist ? (
-        <div className={styles.loading}>Loading…</div>
+        <ArtistViewSkeleton />
       ) : (
         <>
           {
-            <div className={styles.pageToolbar}>
+            <div className={`${styles.pageToolbar} ${toolbarStuck ? styles.pageToolbarStuck : ''}`}>
+              {toolbarStuck ? (
+                <button
+                  type="button"
+                  className={styles.toolbarIdentity}
+                  title="Back to the top"
+                  onClick={() =>
+                    artistTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  }
+                >
+                  <Artwork
+                    src={artist.image_url ?? ''}
+                    remote={artist.remote_image_url}
+                    alt=""
+                    className={styles.toolbarIdentityArt}
+                    thumb
+                  />
+                  <span className={styles.toolbarIdentityName}>{artist.name}</span>
+                </button>
+              ) : null}
               <div className={styles.toolbarGroup}>
                 {/* The primary bar as named actions, so a setting can later
                     pick which of them show. Tools and the rest stay. */}
                 {(
                   [
-                    ['refresh', <ArtistRefreshButton artistId={artistId} />],
                     [
                       'automatic_search',
                       <ActionButton
                         icon="automatic"
                         label="Automatic Search"
+                        primary
                         requiresWish
                         title="Search missing/upgradable tracks for this artist"
                         // dd28-16: a double click double-POSTed; the server answered
@@ -7607,6 +7722,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 ))}
               </div>
               <div className={styles.toolbarGroup}>
+                <ArtistRefreshButton artistId={artistId} />
                 <ActionButton
                   icon="history"
                   label="History"
@@ -7664,6 +7780,15 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             />
           ) : (
             <header className={styles.detailHeader}>
+              {artist.image_url || artist.remote_image_url ? (
+                <div
+                  className={styles.heroBackdrop}
+                  style={{
+                    backgroundImage: `url("${(artist.image_url || artist.remote_image_url || '').replace(/"/g, '%22')}")`,
+                  }}
+                  aria-hidden="true"
+                />
+              ) : null}
               <Artwork
                 src={artist.image_url ?? ''}
                 remote={artist.remote_image_url}
@@ -7671,6 +7796,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 className={styles.detailThumb}
               />
               <div className={styles.detailMeta}>
+                <p className={styles.heroEyebrow}>
+                  <span className={styles.heroEyebrowDot} aria-hidden="true" />
+                  {artistEyebrow(artist)}
+                </p>
                 <div className={styles.detailTitleRow}>
                   <MonitorToggle
                     entity="artists"
@@ -7719,6 +7848,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             </header>
           )}
 
+          <div ref={heroSentinelRef} className={styles.heroSentinel} aria-hidden="true" />
           <div className={styles.releasesBar}>
             <div className={styles.releasesToggle}>
               <button
@@ -11301,14 +11431,17 @@ export function AlbumPlayButton({
 export function ArtistPlayButton({
   artistId,
   artistName,
+  primary = false,
 }: {
   artistId: number;
   artistName: string;
+  primary?: boolean;
 }) {
   const [pending, setPending] = useState(false);
   return (
     <ActionButton
       icon="play"
+      primary={primary}
       label={pending ? 'Loading…' : 'Play'}
       title={`Play everything by ${artistName}`}
       busy={pending}

@@ -29,7 +29,7 @@ export function LibraryToolDialog({
       }}
       className={`${styles.modal} ${styles.modalWorkspace} ${styles.modalFramed} ${styles.toolWorkspace} ${fitContent ? styles.toolFitContent : ''}`}
     >
-      <DialogHeader title={title} closeLabel="Close" compact>
+      <DialogHeader title={title} closeLabel="Close" compact className={styles.dialogHead}>
         <span className={styles.toolDescription}>{description}</span>
       </DialogHeader>
       <div className={styles.toolDialogBody}>{children}</div>
