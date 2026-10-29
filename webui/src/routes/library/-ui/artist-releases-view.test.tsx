@@ -76,8 +76,9 @@ function renderArtist(entry: string) {
 /** ldp-03/ldp-04/ldp-05 on an artist that IS in the catalogue. */
 describe('Library V2 artist detail — All Releases views', () => {
   it.each(['/library?artist=1', '/library?artist=1&header=rich'])(
-    'offers audiobook routing on the native artist header: %s',
+    'files an artist as audiobook from Artist Settings, not from the header: %s',
     async (entry) => {
+      const routed: unknown[] = [];
       server.use(
         http.get('/api/audiobook-routes', () =>
           HttpResponse.json({ success: true, artists: [], audiobook_folder_configured: true }),
@@ -85,11 +86,21 @@ describe('Library V2 artist detail — All Releases views', () => {
         http.post('/api/audiobook-routes/check', () =>
           HttpResponse.json({ success: true, routed: [] }),
         ),
+        http.post('/api/audiobook-routes', async ({ request }) => {
+          routed.push(await request.json());
+          return HttpResponse.json({ success: true });
+        }),
+        http.post('/api/audiobook-routes/Portishead/move', () =>
+          HttpResponse.json({ success: true, albums: [] }),
+        ),
       );
       renderArtist(entry);
-      expect(
-        await screen.findByRole('button', { name: /Treat as audiobook/i }),
-      ).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole('button', { name: 'Artist Settings' }));
+      fireEvent.click(await screen.findByRole('checkbox', { name: /Treat as audiobook/ }));
+      await waitFor(() => expect(routed).toEqual([{ name: 'Portishead' }]));
+      // the header carries neither the routing switch nor a one-off download
+      expect(screen.queryByRole('button', { name: /Treat as audiobook/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Download missing' })).toBeNull();
     },
   );
 
@@ -113,24 +124,6 @@ describe('Library V2 artist detail — All Releases views', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sync from media server' }));
     await waitFor(() => expect(sync).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('Portishead: +2 tracks')).toBeInTheDocument();
-  });
-
-  it('downloads selected missing releases without enabling monitoring', async () => {
-    let requestBody: unknown;
-    server.use(
-      http.post('/api/library/v2/artists/1/search', async ({ request }) => {
-        requestBody = await request.json();
-        return HttpResponse.json({ success: true, job_id: 'missing-1' });
-      }),
-      http.get('/api/library/v2/jobs/status', () =>
-        HttpResponse.json({ running: false, result: { searching: 10 }, error: null }),
-      ),
-    );
-    renderArtist('/library?artist=1&view=discovery&immersive=true');
-    fireEvent.click(await screen.findByRole('button', { name: 'Download missing' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: /Dummy/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Download selected' }));
-    await waitFor(() => expect(requestBody).toEqual({ mode: 'missing', album_ids: [2] }));
   });
 
   beforeEach(() => {

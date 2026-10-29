@@ -1462,16 +1462,14 @@ export async function startLibraryV2ArtistServerSync(id: number): Promise<string
  *  artist/album/track, never the whole wishlist. Replaces the client-side
  *  best-pick heuristic (A4) and the mislabeled album-row global search (A3).
  *  Returns a job id to poll via fetchLibraryV2JobStatus; the job's `result`
- *  carries `{checked, queued, searching, batch_id}`. `mode: missing` instead
- *  selects one-off missing downloads without changing monitoring. */
+ *  carries `{checked, queued, searching, batch_id}`. */
 export async function startLibraryV2ScopedSearch(
   entity: 'artists' | 'albums' | 'tracks',
   id: number,
-  options: { mode?: 'missing'; album_ids?: number[] } = {},
 ): Promise<string> {
   const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
     apiClient.post(`library/v2/${entity}/${id}/search`, {
-      json: options,
+      json: {},
       throwHttpErrors: false,
     }),
   );

@@ -20,7 +20,11 @@ import {
 } from 'react';
 
 import { DialogFrame, DialogHeader } from '@/components/dialog';
-import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-route-toggle';
+import {
+  routedNamesQueryOptions,
+  useAudiobookFolderConfigured,
+  useSetAudiobookRoute,
+} from '@/features/audiobook-routes/audiobook-routes.queries';
 import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
@@ -169,7 +173,6 @@ import { ConcertsSection } from '../../artist-detail/-ui/concerts-section';
 import { ReassignModal } from '../../artist-detail/-ui/reassign-modal';
 import { SimilarArtistsSection } from '../../artist-detail/-ui/similar-artists-section';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
-import { ArtistMissingDownload } from './artist-missing-download';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import {
   classifyReleaseContent,
@@ -2166,6 +2169,7 @@ export function ArtistSettingsModal({
           currentProfileExplicit={artist.quality_profile_explicit}
         />
       </fieldset>
+      <AudiobookRouteSetting name={artist.name} />
     </ModalShell>
   );
 }
@@ -2558,6 +2562,8 @@ function MonitoredArtistSettings({
               </div>
             ) : null}
           </section>
+
+          <AudiobookRouteSetting name={artist.name} />
         </>
       )}
     </ModalShell>
@@ -6978,12 +6984,10 @@ function CatalogueArtistHero({
   artist,
   onPickImage,
   headerToggle,
-  downloadAction,
 }: {
   artist: LibraryV2ArtistDetail;
   onPickImage: () => void;
   headerToggle: ReactNode;
-  downloadAction: ReactNode;
 }) {
   const matchStatus = useQuery(libraryV2ArtistMatchStatusQueryOptions(artist.id));
   const providerIds = artist.provider_ids ?? {};
@@ -7044,8 +7048,6 @@ function CatalogueArtistHero({
           >
             📻 Artist Radio
           </button>
-          {downloadAction}
-          <NativeAudiobookRouteToggle name={artist.name} />
           <ArtistAliases artistId={artist.id} artistName={artist.name} />
         </>
       }
@@ -7053,9 +7055,37 @@ function CatalogueArtistHero({
   );
 }
 
-function NativeAudiobookRouteToggle({ name }: { name: string }) {
+/** Upstream da5c61779 "Treat as audiobook": file the artist's downloads in the
+ *  audiobook library. A setting of the artist, so it lives in Artist Settings,
+ *  not as a button in the header. Applies at once, like the quality profile. */
+function AudiobookRouteSetting({ name }: { name: string }) {
   const canWrite = useLibraryV2CanWrite();
-  return canWrite ? <AudiobookRouteToggle name={name} /> : null;
+  const query = useQuery(routedNamesQueryOptions([name]));
+  const toggle = useSetAudiobookRoute(name);
+  const routed = (query.data ?? []).includes(name);
+  // switching off always works; switching on needs a folder to file into
+  const noFolder = !useAudiobookFolderConfigured() && !routed;
+  return (
+    <section className={styles.artistSettingsSection}>
+      <h4>Audiobook library</h4>
+      <label className={styles.artistSettingsToggle}>
+        <input
+          type="checkbox"
+          checked={routed}
+          disabled={!canWrite || query.isPending || query.isError || noFolder || toggle.isPending}
+          onChange={(event) => toggle.mutate(event.target.checked)}
+        />
+        <span>
+          <strong>Treat as audiobook</strong>
+          <small>
+            {noFolder
+              ? 'Set the audiobook folder first (Settings > Library > Folders).'
+              : 'File downloads by this artist in the audiobook library instead of the music library, for spoken-word releases.'}
+          </small>
+        </span>
+      </label>
+    </section>
+  );
 }
 
 function ArtistDetailView({ artistId }: { artistId: number }) {
@@ -7245,32 +7275,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     });
   }
 
-  async function downloadMissing(albumIds: number[]) {
-    if (!canWish || searchBusy) return;
-    await runBannerTask(async ({ sequence }) => {
-      publishBanner(sequence, { tone: 'busy', text: 'Searching selected missing releases…' });
-      try {
-        const jobId = await startLibraryV2ScopedSearch('artists', artistId, {
-          mode: 'missing',
-          album_ids: albumIds,
-        });
-        const state = await awaitBulkJobState(queryClient, jobId);
-        const stats = state.result as { searching?: number; dispatch_error?: string } | null;
-        if (state.error || stats?.dispatch_error)
-          throw new Error(state.error || stats?.dispatch_error);
-        publishBanner(sequence, {
-          tone: 'ok',
-          text: `Search started for ${stats?.searching ?? 0} missing tracks.`,
-        });
-      } catch (error) {
-        publishBanner(sequence, {
-          tone: 'err',
-          text: mutationErrorMessage(error, 'Download failed'),
-        });
-      }
-    });
-  }
-
   /** ldp-05: one switch, in both header shapes. Compact stays the default;
    *  arriving from a search result preselects the rich hero. */
   const headerToggle = (
@@ -7291,15 +7295,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       }
     />
   );
-
-  const downloadAction = artist ? (
-    <ArtistMissingDownload
-      artistName={artist.name}
-      albums={[...artist.albums, ...(artist.eps ?? []), ...artist.singles]}
-      disabled={!canWish || searchBusy}
-      onDownload={(ids) => void downloadMissing(ids)}
-    />
-  ) : null;
 
   return (
     <div className={styles.page}>
@@ -7379,7 +7374,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 <ActionButton
                   icon="settings"
                   label="Artist Settings"
-                  title="Quality profile, monitoring and future releases"
+                  title="Quality profile, monitoring, future releases and audiobook filing"
                   onClick={() => setShowArtistSettings(true)}
                 />
                 <ArtistToolsMenu
@@ -7422,7 +7417,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               artist={artist}
               onPickImage={() => setShowArtPicker(true)}
               headerToggle={headerToggle}
-              downloadAction={downloadAction}
             />
           ) : (
             <header className={styles.detailHeader}>
@@ -7444,8 +7438,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                     {artist.name}
                   </h1>
                   {headerToggle}
-                  {downloadAction}
-                  <NativeAudiobookRouteToggle name={artist.name} />
                 </div>
                 <p className={styles.subtitle}>
                   {artist.album_count} albums · {artist.single_count} singles

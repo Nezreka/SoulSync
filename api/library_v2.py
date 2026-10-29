@@ -4721,19 +4721,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if not table:
             return _fail("Unknown entity")
         body = request.get_json(silent=True) or {}
-        if not isinstance(body, dict) or body.get('mode', 'automatic') not in ('automatic', 'missing'):
+        if not isinstance(body, dict) or body.get('mode', 'automatic') != 'automatic':
             return _fail('Invalid search mode')
-        missing_only = body.get('mode') == 'missing'
-        selected_albums = body.get('album_ids')
-        if missing_only and (entity.rstrip('s') not in ('artist', 'album') or
-                (selected_albums is not None and (not isinstance(selected_albums, list) or
-                 not selected_albums or any(type(a) is not int or a <= 0 for a in selected_albums)))):
-            return _fail('Select valid artist/album releases')
-        return _start_scoped_search(entity, eid, missing_only=missing_only,
-                                    selected_albums=selected_albums)
+        return _start_scoped_search(entity, eid)
 
-    def _start_scoped_search(entity, eid, *, missing_only=False, selected_albums=None,
-                             only_track_ids=None):
+    def _start_scoped_search(entity, eid, *, only_track_ids=None):
         """The scoped search job; ``only_track_ids`` narrows the scope's wanted
         tracks to exactly these (Enhance Quality's picks)."""
         db = get_database()
@@ -4745,7 +4737,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         active_profile = _intent_profile()
         try:
             # one search per entity AND library: Kim's is not the house's (#1199)
-            job = _job_registry.start(f"search:{entity}:{eid}" + (':missing' if missing_only else '')
+            job = _job_registry.start(f"search:{entity}:{eid}"
                                       + (f":{active_profile}" if active_profile != 1 else ""))
         except JobAlreadyRunning as exc:
             return jsonify({
@@ -4764,14 +4756,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     recompute_wanted_for_entity,
                     track_wanted_states,
                 )
-                if missing_only:
-                    from core.library2.missing_download import selected_track_ids
-                    track_ids = selected_track_ids(db, conn, config_manager, entity, eid, selected_albums)
-                else:
-                    recompute_wanted_for_entity(conn, entity, eid, profile_id=active_profile)
-                    conn.commit()
-                    track_ids = [t for t in entity_track_ids(conn, entity, eid)
-                                 if only_track_ids is None or t in only_track_ids]
+                recompute_wanted_for_entity(conn, entity, eid, profile_id=active_profile)
+                conn.commit()
+                track_ids = [t for t in entity_track_ids(conn, entity, eid)
+                             if only_track_ids is None or t in only_track_ids]
                 _job_registry.update(job_id, total=len(track_ids))
 
                 from core.library2.wishlist_mirror import (
@@ -4779,7 +4767,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     track_direct_download_payload,
                     track_wishlist_payload,
                 )
-                direct_track_search = entity in ("track", "tracks") or missing_only
+                direct_track_search = entity in ("track", "tracks")
                 if direct_track_search:
                     # One-shot intent: never mutate persistent monitoring or
                     # Wishlist state just to feed the shared worker.
@@ -4797,7 +4785,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 for track_id in track_ids:
                     if direct_track_search:
                         direct_payload = track_direct_download_payload(conn, track_id)
-                        if direct_payload and (not missing_only or not direct_payload.get('source_info', {}).get('upgrade_check')):
+                        if direct_payload:
                             direct_payloads.append(direct_payload)
                         continue
                     if not states.get(track_id):
