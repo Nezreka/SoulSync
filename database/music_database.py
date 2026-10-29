@@ -199,7 +199,8 @@ _EXPORT_ARTIST_COLUMNS = (
 _EXPORT_ALBUM_COLUMNS = (
     'id', 'soul_id', 'soul_id_legacy', 'title', 'year', 'release_date', 'track_count',
     'record_type', 'label', 'genres', 'updated_at',
-    'musicbrainz_release_id', 'spotify_album_id', 'itunes_album_id',
+    'musicbrainz_release_id', 'musicbrainz_release_group_id',
+    'spotify_album_id', 'itunes_album_id',
     'deezer_id', 'discogs_id', 'amazon_id', 'tidal_id', 'qobuz_id',
     'audiodb_id', 'jiosaavn_id', 'bandcamp_url', 'upc',
     'canonical_source', 'canonical_album_id', 'canonical_score',

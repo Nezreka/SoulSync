@@ -43,6 +43,7 @@ def create_api_blueprint():
     from .listenbrainz import register_routes as reg_listenbrainz
     from .cache import register_routes as reg_cache
     from .metasync import register_routes as reg_metasync
+    from .metasync_depot import register_routes as reg_metasync_depot
     from .request import register_routes as reg_request
     from .video_v1 import register_routes as reg_video
     from .sample import register_routes as reg_sample
@@ -65,6 +66,7 @@ def create_api_blueprint():
     reg_listenbrainz(bp)
     reg_cache(bp)
     reg_metasync(bp)
+    reg_metasync_depot(bp)
     reg_request(bp)
     reg_video(bp)
     reg_sample(bp)

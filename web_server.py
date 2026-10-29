@@ -24270,6 +24270,10 @@ app.register_blueprint(_bp_upl())
 from api.metasync_charts import configure as _cfg_msc, create_blueprint as _bp_msc
 _cfg_msc(get_database=get_database)
 app.register_blueprint(_bp_msc())
+# MetaSync metadata depot: status + reconcile for the UI (the
+# node-facing push routes live on the v1 blueprint, api/metasync_depot)
+from api.metasync_depot import create_blueprint as _bp_msd
+app.register_blueprint(_bp_msd())
 # your own playlists identify themselves in the background after every edit,
 # so they are always ready to sync (core/playlists/auto_identify)
 from core.playlists import auto_identify as _auto_identify

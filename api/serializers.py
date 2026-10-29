@@ -579,7 +579,8 @@ _METASYNC_ARTIST_IDS = (
 )
 
 _METASYNC_ALBUM_IDS = (
-    "musicbrainz_release_id", "spotify_album_id", "itunes_album_id",
+    "musicbrainz_release_id", "musicbrainz_release_group_id",
+    "spotify_album_id", "itunes_album_id",
     "deezer_id", "discogs_id", "amazon_id", "tidal_id", "qobuz_id",
     "audiodb_id", "jiosaavn_id", "bandcamp_url", "upc",
 )
@@ -596,6 +597,7 @@ _METASYNC_TRACK_IDS = (
 _METASYNC_ID_PROVIDER = {
     "musicbrainz_id": "musicbrainz", "musicbrainz_release_id": "musicbrainz",
     "musicbrainz_recording_id": "musicbrainz",
+    "musicbrainz_release_group_id": "musicbrainz",
     "spotify_artist_id": "spotify", "spotify_album_id": "spotify",
     "spotify_track_id": "spotify",
     "itunes_artist_id": "itunes", "itunes_album_id": "itunes",
