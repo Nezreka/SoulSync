@@ -97,7 +97,12 @@ Keys are generated as `sk_` followed by a random token. Only the SHA-256 hash is
 
 ## Rate Limiting
 
-Requests are rate-limited to **60 per minute** per IP address.
+Requests are rate-limited to **60 per minute** per IP address — unless
+they carry a valid **admin** API key. Admin keys are exempt: paginated
+library walks (MetaSync's weekly report pages `/library/albums` 200 at
+a time) legitimately need hundreds of requests, and an admin key is a
+trusted local credential. Requests with no key, an invalid key, or a
+read-scope key stay capped.
 
 Exceeding the limit returns `429 RATE_LIMITED`.
 
@@ -146,7 +151,7 @@ Both protocol styles work: `2026-07-28` (no handshake) and `2025-03-26` through 
 
 ### What a key can do
 
-Every tool call runs as the matching `/api/v1` request with your key, so the usual rules apply: the same scope checks, the same profile, and the same 60 requests a minute.
+Every tool call runs as the matching `/api/v1` request with your key, so the usual rules apply: the same scope checks, the same profile, and the same rate limit (60 requests a minute without an admin key; admin keys are exempt).
 
 - An **admin** key gets all 35 tools.
 - A **read** key only gets the tools that look things up. A write tool still answers `403` if one is ever called with a read key.
