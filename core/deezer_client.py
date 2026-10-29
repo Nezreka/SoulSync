@@ -948,9 +948,13 @@ class DeezerClient:
         is get_album_raw() (used by deezer_worker.py)."""
         cache = get_metadata_cache()
         cached = cache.get_entity('deezer', 'album', str(album_id))
-        # Only use cache if it has full album data (release_date indicates full API response,
-        # not just a search result which lacks release_date and track details)
-        if cached and cached.get('title') and cached.get('release_date'):
+        # Artist catalogue entries also have release_date, but omit nb_tracks
+        # and may carry an injected Unknown Artist stub. They are not details.
+        cached_artist = cached.get('artist') if isinstance(cached, dict) else None
+        if (cached and cached.get('title') and cached.get('release_date')
+                and isinstance(cached.get('nb_tracks'), int) and cached['nb_tracks'] > 0
+                and isinstance(cached_artist, dict) and cached_artist.get('name')
+                and cached_artist['name'] != 'Unknown Artist'):
             return self._build_album_result(cached, album_id, include_tracks)
 
         data = self._api_get(f'album/{album_id}')

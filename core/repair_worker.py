@@ -126,6 +126,7 @@ FINDING_TYPE_META = {
     'album_mbid_mismatch':      {'label': 'Album MBID Mismatch', 'verb': 'Apply Tags'},
     'album_tag_inconsistency':  {'label': 'Album Tag Drift', 'verb': 'Unify Tags'},
     'incomplete_album':         {'label': 'Incomplete Albums', 'verb': 'Fill Album'},
+    'standard_album_preview':   {'label': 'Standard Album Plans'},
     'path_mismatch':            {'label': 'Path Mismatch', 'verb': 'Reorganize'},
     'missing_lossy_copy':       {'label': 'Missing Lossy Copy', 'verb': 'Convert'},
     'unwanted_content':         {'label': 'Unwanted Content', 'verb': 'Remove'},

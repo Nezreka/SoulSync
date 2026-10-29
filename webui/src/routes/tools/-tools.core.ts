@@ -220,6 +220,7 @@ export const FINDING_TYPE_LABELS: Record<string, string> = {
   fake_lossless: 'Fake Lossless',
   duplicate_tracks: 'Duplicate',
   incomplete_album: 'Incomplete',
+  standard_album_preview: 'Standard album plan',
   path_mismatch: 'Path Mismatch',
   metadata_gap: 'Missing Metadata',
   missing_cover_art: 'Missing Art',
