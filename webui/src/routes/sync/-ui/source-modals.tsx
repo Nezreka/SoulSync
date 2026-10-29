@@ -13,7 +13,7 @@
  * what startYouTubeDownloadMissing 10755-10775 calls.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { FixTrack } from '../-sync.fix';
 import type { SourceVerticalConfig } from '../-sync.sources';
@@ -70,6 +70,12 @@ export interface SourceModalsProps {
   discoveryStartBody?: (state: SourcePlaylistState) => unknown;
 }
 
+interface DownloadOptions {
+  forcePlaylistFolder?: boolean;
+  /** Already asked (or already retried): download what's identified. */
+  skipRetryPrompt?: boolean;
+}
+
 export function SourceModals({
   config,
   vertical,
@@ -80,10 +86,18 @@ export function SourceModals({
   discoveryStartBody,
 }: SourceModalsProps) {
   const [fixRow, setFixRow] = useState<DiscoveryRow | null>(null);
+  // a download waiting for the misses to be identified again (#1912)
+  const downloadAfterRetry = useRef<{
+    id: string;
+    options?: DownloadOptions;
+    sawRetry: boolean;
+  } | null>(null);
 
   const state = openId !== null ? vertical.states[openId] : undefined;
 
   const close = useCallback(() => {
+    // closing the window means never mind, so a waiting download is dropped
+    downloadAfterRetry.current = null;
     if (openId !== null) void vertical.closeModalReset(openId);
     setFixRow(null);
     onClose();
@@ -100,7 +114,7 @@ export function SourceModals({
   }, [onClose]);
 
   const onDownloadMissing = useCallback(
-    async (options?: { forcePlaylistFolder?: boolean }) => {
+    async (options?: DownloadOptions) => {
       if (!state || openId === null) return;
       // The vanilla's two distinct guards (10715-10716, 10755-10757). The
       // FIRST tests ABSENCE (`!discoveryResults`), not emptiness, so an empty
@@ -113,6 +127,26 @@ export function SourceModals({
         return;
       }
       const tracks = buildDownloadTracks(state.rawResults);
+      // a track identification didn't find never reaches the download, and
+      // that used to happen without a word: a lookup that failed once stayed
+      // failed until someone thought to re-identify (#1912). so ask, and
+      // retrying only the misses carries on into the download by itself
+      const misses = state.rawResults.length - tracks.length;
+      if (config.id === 'mirrored' && misses > 0 && !options?.skipRetryPrompt) {
+        const retry = await window.showConfirmDialog?.({
+          title: "Some tracks aren't identified",
+          message: `${misses} of ${state.rawResults.length} tracks aren't identified yet, so a download skips them. Try identifying them again first? The download starts once that's done.`,
+          confirmText: 'Retry, then download',
+          cancelText: 'Download the rest',
+        });
+        if (retry) {
+          downloadAfterRetry.current = { id: openId, options, sawRetry: false };
+          const started = await retryFailedMirroredDiscovery(openId, vertical);
+          if (started) return; // the effect below takes it from here
+          downloadAfterRetry.current = null;
+          if (started === null) return; // couldn't retry; it said why
+        }
+      }
       if (tracks.length === 0) {
         window.showToast?.('No Spotify matches found for download', 'error');
         return;
@@ -163,6 +197,23 @@ export function SourceModals({
     },
     [config, vertical, state, openId, hideWithoutReset, mirroredSource],
   );
+
+  // the retry the download is waiting on: once it has run and finished, carry
+  // on into the download with whatever is identified now
+  useEffect(() => {
+    const pending = downloadAfterRetry.current;
+    if (!pending || pending.id !== openId) return;
+    const phase = vertical.states[pending.id]?.phase;
+    if (phase === 'discovering') {
+      pending.sawRetry = true;
+      return;
+    }
+    if (!pending.sawRetry) return;
+    downloadAfterRetry.current = null;
+    if (phase === 'discovered') {
+      void onDownloadMissing({ ...pending.options, skipRetryPrompt: true });
+    }
+  }, [vertical.states, openId, onDownloadMissing]);
 
   const onUnmatchTrack = useCallback(
     async (row: DiscoveryRow) => {

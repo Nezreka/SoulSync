@@ -270,6 +270,8 @@ For non-Spotify playlists (YouTube, Tidal, Deezer links, files), tracks need to 
 4. **Sync** the playlist — only discovered tracks are included; unmatched tracks are skipped
 :::
 
+A track identification couldn't find is skipped by a download too. **Download Missing Tracks** says so first when some aren't identified: **Retry, then download** tries just those again (a lookup that failed earlier often works the second time) and carries on into the download, and **Download the rest** downloads what's identified now. **Sync & download** retries them on every run by itself.
+
 > [!TIP]
 > Chain automations for hands-free operation: Refresh Playlist → Playlist Changed → Discover → Discovery Complete → Sync.
 `
