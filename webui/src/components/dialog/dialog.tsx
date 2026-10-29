@@ -59,14 +59,17 @@ export function DialogHeader({
   closeLabel = 'Close dialog',
   title,
   compact = false,
+  className,
 }: {
   children?: ReactNode;
   closeLabel?: string;
   title: ReactNode;
   compact?: boolean;
+  /** extra class on the header row, for a family of dialogs with its own look */
+  className?: string;
 }) {
   return (
-    <div className={clsx(styles.header, compact && styles.headerCompact)}>
+    <div className={clsx(styles.header, compact && styles.headerCompact, className)}>
       <div className={styles.headerContent}>
         <Dialog.Title className={styles.title}>{title}</Dialog.Title>
         {children ? <div className={styles.headerMeta}>{children}</div> : null}
