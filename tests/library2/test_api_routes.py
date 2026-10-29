@@ -3464,6 +3464,49 @@ def test_discovery_rejects_an_empty_identity(api):
     assert client.get("/api/library/v2/discovery/artist").status_code == 400
 
 
+def test_discovery_never_resolves_a_same_named_artist_with_another_id(api):
+    """a provider artist that merely shares a name with yours is someone else:
+    its page must not open your library artist."""
+    client, db, _ids = api
+
+    other = client.get("/api/library/v2/discovery/artist",
+                       query_string={"source": "spotify", "provider_id": "sp-other-drake",
+                                     "name": "Drake"}).get_json()
+
+    assert other["artist_id"] is None
+    assert other["owned"] is False
+
+
+def test_discovery_name_match_still_works_when_the_row_has_no_id_there(api):
+    client, db, _ids = api
+
+    hit = client.get("/api/library/v2/discovery/artist",
+                     query_string={"source": "deezer", "provider_id": "dz-1",
+                                   "name": "Drake"}).get_json()
+
+    assert hit["artist_id"] == _ids_artist(db, "Drake")
+
+
+def test_discovery_reports_owned_only_for_live_files(api):
+    """only an artist with files in the library leaves the artist page."""
+    client, db, _ids = api
+    with closing(_conn(db)) as conn:
+        conn.execute("INSERT INTO lib2_artists(name, sort_name, spotify_id, monitored) "
+                     "VALUES('Watched Only','Watched Only','sp-watched',1)")
+        conn.commit()
+
+    owned = client.get("/api/library/v2/discovery/artist",
+                       query_string={"source": "spotify", "provider_id": "sp-drake",
+                                     "name": "Drake"}).get_json()
+    watched = client.get("/api/library/v2/discovery/artist",
+                         query_string={"source": "spotify", "provider_id": "sp-watched",
+                                       "name": "Watched Only"}).get_json()
+
+    assert owned["owned"] is True
+    assert watched["artist_id"] is not None
+    assert watched["owned"] is False
+
+
 def _ids_artist(db, name: str) -> int:
     with closing(_conn(db)) as conn:
         return conn.execute(

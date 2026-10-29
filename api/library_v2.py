@@ -1692,8 +1692,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                           if configured_match_services_getter else None))
         if create and artist_id is None:
             return _fail("Could not materialize this artist")
+        owned = False
+        if artist_id is not None:
+            # owned = a live file in this library. a watchlisted, bookmarked or
+            # discography-only row is catalogued but not owned.
+            from core.library2.sql_util import owned_sql
+            with closing(_conn()) as oconn:
+                owned = oconn.execute(
+                    f"SELECT 1 FROM lib2_artists a WHERE a.id=? AND {owned_sql('artist', 'a')}",
+                    (artist_id,)).fetchone() is not None
         return jsonify({"success": True, "artist_id": artist_id,
-                        "monitored": monitor})
+                        "monitored": monitor, "owned": owned})
 
     @_route("/api/library/v2/discovery/album", methods=["POST"])
     def lib2_discovery_album():

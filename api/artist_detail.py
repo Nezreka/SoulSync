@@ -342,6 +342,35 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
     return jsonify(payload), status
 
 
+@bp.route('/api/artist-detail/library/<int:artist_id>/identity')
+def get_library_artist_identity(artist_id):
+    """A catalogue artist's provider identity, so a profile that may search but
+    may not open the library still gets the provider artist page for it, the
+    way dev let library OR search profiles open artist detail. names and ids
+    only, nothing from the library itself."""
+    try:
+        database = get_database()
+        with database._get_connection() as conn:
+            row = conn.execute(
+                f"SELECT name, {_ARTIST_IDS_SQL} FROM lib2_artists WHERE id = ?",
+                (artist_id,)).fetchone()
+        if row is None:
+            return jsonify({"success": False, "error": "artist not found"}), 404
+        row = dict(row)
+        for source, key in (("spotify", "spotify_artist_id"), ("deezer", "deezer_id"),
+                            ("itunes", "itunes_artist_id"), ("musicbrainz", "musicbrainz_id"),
+                            ("discogs", "discogs_id")):
+            value = str(row.get(key) or "").strip()
+            if value:
+                return jsonify({"success": True, "name": row.get("name") or "",
+                                "source": source, "provider_id": value})
+        return jsonify({"success": True, "name": row.get("name") or "",
+                        "source": None, "provider_id": None})
+    except Exception as e:
+        logger.error(f"Error reading library artist identity: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/artist-detail/<artist_id>')
 def get_artist_detail(artist_id):
     """Artist detail for an artist the catalogue does NOT hold.

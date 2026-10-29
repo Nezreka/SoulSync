@@ -21,6 +21,7 @@ function renderAt(entry: string) {
 
 describe('artist-detail route on a Library v2 catalogue', () => {
   let resolved: number | null;
+  let owned: boolean;
   let resolveFails: boolean;
   let lookups: URL[];
   let detailRequests: URL[];
@@ -32,6 +33,7 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     window.cancelSimilarArtistsLoad = vi.fn();
     window.observeLazyBackgrounds = vi.fn();
     resolved = null;
+    owned = true;
     resolveFails = false;
     lookups = [];
     detailRequests = [];
@@ -39,7 +41,7 @@ describe('artist-detail route on a Library v2 catalogue', () => {
       http.get('/api/library/v2/discovery/artist', ({ request }) => {
         lookups.push(new URL(request.url));
         if (resolveFails) return HttpResponse.json({ success: false }, { status: 500 });
-        return HttpResponse.json({ success: true, artist_id: resolved });
+        return HttpResponse.json({ success: true, artist_id: resolved, owned });
       }),
       http.get('/api/artist-detail/:id', ({ request }) => {
         detailRequests.push(new URL(request.url));
@@ -147,6 +149,47 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     expect(await screen.findByText('Drukqs')).toBeInTheDocument();
     expect(lookups[0]?.searchParams.get('name')).toBe('311');
     expect(detailRequests[0]?.searchParams.get('name')).toBe('311');
+  });
+
+  it('keeps a catalogued but not owned provider artist on the original page', async () => {
+    resolved = 7;
+    owned = false;
+    const { router } = renderAt('/artist-detail/deezer/2481?name=Aphex%20Twin');
+
+    expect(await screen.findByText('Drukqs')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/artist-detail/deezer/2481');
+  });
+
+  it('keeps a search-only profile on the artist page instead of bouncing home', async () => {
+    resolved = 7;
+    window.SoulSyncWebShellBridge = createShellBridge({
+      isPageAllowed: vi.fn((page: string) => page !== 'library'),
+    });
+    const { router } = renderAt('/artist-detail/deezer/2481?name=Aphex%20Twin');
+
+    expect(await screen.findByText('Drukqs')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/artist-detail/deezer/2481');
+    expect(lookups).toHaveLength(0);
+  });
+
+  it('opens a library id as its provider page for a search-only profile', async () => {
+    window.SoulSyncWebShellBridge = createShellBridge({
+      isPageAllowed: vi.fn((page: string) => page !== 'library'),
+    });
+    server.use(
+      http.get('/api/artist-detail/library/:id/identity', () =>
+        HttpResponse.json({
+          success: true,
+          name: 'Aphex Twin',
+          source: 'deezer',
+          provider_id: '2481',
+        }),
+      ),
+    );
+    const { router } = renderAt('/artist-detail/library/42');
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/artist-detail/deezer/2481'));
+    expect(await screen.findByText('Drukqs')).toBeInTheDocument();
   });
 
   it('still shows the provider page when the catalogue lookup fails', async () => {

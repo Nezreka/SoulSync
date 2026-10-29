@@ -1374,3 +1374,24 @@ def test_reimport_onto_an_active_path_leaves_its_state_alone(
         "SELECT file_state, is_primary FROM lib2_track_files WHERE id=?",
         (file_id,)).fetchone()
     assert dict(after) == dict(before)
+
+
+def test_same_named_artist_with_another_provider_id_is_not_yours(
+        lib2_enabled, imported_conn):
+    """a name match is not an identity match when the row already holds a
+    different id for that provider: that is a homonym, not drake."""
+    drake_id = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()["id"]
+
+    looked_up = A._find_or_create_artist(
+        imported_conn, "Drake", spotify_id="sp-other-drake", source="spotify",
+        create=False)
+    created = A._find_or_create_artist(
+        imported_conn, "Drake", spotify_id="sp-other-drake", source="spotify")
+
+    assert looked_up is None
+    assert created != drake_id
+    # drake keeps his own id and the same id still finds him
+    assert A._find_or_create_artist(
+        imported_conn, "Drake", spotify_id="sp1", source="spotify",
+        create=False) == drake_id

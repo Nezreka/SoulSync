@@ -144,3 +144,21 @@ export function watchlistIdentity(
   }
   return identity;
 }
+
+/** a catalogue artist's provider identity (names and ids only). used when the
+ * profile may search but not open the library, so the provider page opens. */
+export async function fetchLibraryArtistIdentity(
+  lib2Id: number,
+): Promise<{ name: string; source: string | null; providerId: string | null }> {
+  const payload = await readJson<{
+    success: boolean;
+    name?: string;
+    source?: string | null;
+    provider_id?: string | null;
+  }>(apiClient.get(`artist-detail/library/${lib2Id}/identity`));
+  return {
+    name: payload.name ?? '',
+    source: payload.source ?? null,
+    providerId: payload.provider_id ?? null,
+  };
+}

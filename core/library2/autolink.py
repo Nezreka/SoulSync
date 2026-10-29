@@ -165,6 +165,22 @@ def _adopt_external_id(conn, table: str, row_id: int, namespace: str,
         (json.dumps(ids, sort_keys=True, separators=(",", ":")), row_id))
 
 
+def _conflicting_provider_id(row, namespace: Optional[str],
+                             provider_id: Optional[str]) -> bool:
+    """True when ``row`` already holds a DIFFERENT id under ``namespace``."""
+    if not namespace or not provider_id:
+        return False
+    if namespace == "spotify":
+        held = _clean_provider_id(row["spotify_id"])
+        # a numeric/uuid value in the spotify column is the old poison, not a
+        # real spotify identity, so it cannot prove a different artist
+        if held and looks_like_foreign_provider_id(held):
+            return False
+    else:
+        held = _clean_provider_id(_row_external_ids(row["external_ids"]).get(namespace))
+    return bool(held) and held != provider_id
+
+
 def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
                            source: Optional[str] = None,
                            create: bool = True) -> Optional[int]:
@@ -218,17 +234,26 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
     # so Cyrillic/Greek/Turkish names missed it and paid a second, Python-side
     # scan of the whole table on top. Measured at 100k artists: ~169 ms per
     # finished download, against ~0.004 ms here.
-    row = conn.execute(
-        "SELECT id FROM lib2_artists WHERE name_key = ? LIMIT 1", (key,)
-    ).fetchone()
+    row = None
+    for candidate in conn.execute(
+            "SELECT id, spotify_id, external_ids FROM lib2_artists WHERE name_key = ? "
+            "ORDER BY id", (key,)):
+        # a same-named row that already carries a different id for this
+        # provider is a different artist, not a spelling of this one
+        if _conflicting_provider_id(candidate, namespace, provider_id):
+            continue
+        row = candidate
+        break
     if row is None:
         # Backstop for rows no keyed write path produced (direct SQL inserts,
         # ad-hoc repair). Scoped to exactly those, so the index answers it as a
         # seek over an empty set on a migrated library — and the startup
         # backfill hands any stragglers a key, keeping it that way.
         for candidate in conn.execute(
-                "SELECT id, name FROM lib2_artists WHERE name_key IS NULL"):
-            if normalize_name(candidate["name"]) == key:
+                "SELECT id, name, spotify_id, external_ids FROM lib2_artists "
+                "WHERE name_key IS NULL"):
+            if normalize_name(candidate["name"]) == key and not \
+                    _conflicting_provider_id(candidate, namespace, provider_id):
                 row = candidate
                 break
     if row is not None:
