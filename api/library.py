@@ -29,8 +29,36 @@ def _parse_instant(value):
     return parsed.astimezone(timezone.utc)
 
 
-def register_routes(bp):
+def _v1_ids(fn):
+    """Run ``fn(conn, v1_ids)`` on one connection."""
+    from contextlib import closing
+    from core.library2 import v1_ids
+    with closing(get_database()._get_connection()) as conn:
+        return fn(conn, v1_ids)
 
+
+def _pub(entity, rows):
+    """v1 rows answering under the ids v1 always showed (core.library2.v1_ids)."""
+    rows = list(rows or [])
+    if not rows:
+        return rows
+    return _v1_ids(lambda conn, ids: ids.publicize(conn, entity, rows))
+
+
+def _resolve(entity, raw):
+    """The catalogue id a v1 id names: an int, or an api_error response when
+    nothing has it (404) or an old id names two rows (409)."""
+    from core.library2.v1_ids import AmbiguousId
+    try:
+        native = _v1_ids(lambda conn, ids: ids.resolve(conn, entity, raw))
+    except AmbiguousId as e:
+        return api_error("AMBIGUOUS_ID", str(e), 409)
+    if native is None:
+        return api_error("NOT_FOUND", f"{entity.capitalize()} {raw} not found.", 404)
+    return native
+
+
+def register_routes(bp):
     @bp.route("/library/artists", methods=["GET"])
     @require_api_key
     def list_artists():
@@ -67,7 +95,7 @@ def register_routes(bp):
                 page, limit, pag.get("total_count", len(artists))
             )
             # Artists from get_library_artists are already dicts with external IDs
-            serialized = [serialize_artist(a, fields) for a in artists]
+            serialized = [serialize_artist(a, fields) for a in _pub("artist", artists)]
             return api_success({"artists": serialized}, pagination=pagination)
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
@@ -79,16 +107,18 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            # IDs are TEXT in the DB: numeric-string IDs from existing clients
-            # and opaque '...::soulsync' IDs both resolve by exact match.
-            artist = db.api_get_artist(artist_id)
+            # the ids a client saved before the upgrade still answer: the
+            # artist's old id, its server's id, or lib2:<n>
+            native = _resolve("artist", artist_id)
+            if not isinstance(native, int):
+                return native
+            artist = db.api_get_artist(native)
             if not artist:
                 return api_error("NOT_FOUND", f"Artist {artist_id} not found.", 404)
-
-            albums = db.api_get_albums_by_artist(artist_id)
+            albums = db.api_get_albums_by_artist(native)
             return api_success({
-                "artist": serialize_artist(artist, fields),
-                "albums": [serialize_album(a, fields) for a in albums],
+                "artist": serialize_artist(_pub("artist", [artist])[0], fields),
+                "albums": [serialize_album(a, fields) for a in _pub("album", albums)],
             })
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
@@ -100,8 +130,11 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            albums = db.api_get_albums_by_artist(artist_id)
-            return api_success({"albums": [serialize_album(a, fields) for a in albums]})
+            native = _resolve("artist", artist_id)
+            if not isinstance(native, int):
+                return native
+            albums = db.api_get_albums_by_artist(native)
+            return api_success({"albums": [serialize_album(a, fields) for a in _pub("album", albums)]})
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -127,6 +160,10 @@ def register_routes(bp):
         except ValueError:
             return api_error("BAD_REQUEST", "year must be an integer.", 400)
 
+        if artist_id is not None:
+            artist_id = _resolve("artist", artist_id)
+            if not isinstance(artist_id, int):
+                return artist_id
         try:
             db = get_database()
             result = db.api_list_albums(
@@ -140,7 +177,7 @@ def register_routes(bp):
             total = result.get("total", 0)
             pagination = build_pagination(page, limit, total)
             return api_success(
-                {"albums": [serialize_album(a, fields) for a in albums]},
+                {"albums": [serialize_album(a, fields) for a in _pub("album", albums)]},
                 pagination=pagination,
             )
         except Exception as e:
@@ -153,14 +190,16 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            album = db.api_get_album(album_id)
+            native = _resolve("album", album_id)
+            if not isinstance(native, int):
+                return native
+            album = db.api_get_album(native)
             if not album:
                 return api_error("NOT_FOUND", f"Album {album_id} not found.", 404)
-
-            tracks = db.api_get_tracks_by_album(album_id)
+            tracks = db.api_get_tracks_by_album(native)
             return api_success({
-                "album": serialize_album(album, fields),
-                "tracks": [serialize_track(t, fields) for t in tracks],
+                "album": serialize_album(_pub("album", [album])[0], fields),
+                "tracks": [serialize_track(t, fields) for t in _pub("track", tracks)],
             })
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
@@ -172,8 +211,11 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            tracks = db.api_get_tracks_by_album(album_id)
-            return api_success({"tracks": [serialize_track(t, fields) for t in tracks]})
+            native = _resolve("album", album_id)
+            if not isinstance(native, int):
+                return native
+            tracks = db.api_get_tracks_by_album(native)
+            return api_success({"tracks": [serialize_track(t, fields) for t in _pub("track", tracks)]})
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -184,11 +226,13 @@ def register_routes(bp):
         fields = parse_fields(request)
         try:
             db = get_database()
-            track = db.api_get_track(track_id)
+            native = _resolve("track", track_id)
+            if not isinstance(native, int):
+                return native
+            track = db.api_get_track(native)
             if not track:
                 return api_error("NOT_FOUND", f"Track {track_id} not found.", 404)
-
-            return api_success({"track": serialize_track(track, fields)})
+            return api_success({"track": serialize_track(_pub("track", [track])[0], fields)})
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -210,7 +254,7 @@ def register_routes(bp):
         try:
             db = get_database()
             tracks = db.api_search_tracks(title=title, artist=artist, limit=limit)
-            return api_success({"tracks": [serialize_track(t, fields) for t in tracks]})
+            return api_success({"tracks": [serialize_track(t, fields) for t in _pub("track", tracks)]})
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -263,7 +307,7 @@ def register_routes(bp):
             }[entity_type]
 
             return api_success({
-                "items": [serializer(item, fields) for item in items],
+                "items": [serializer(item, fields) for item in _pub(entity_type, items)],
                 "type": entity_type,
             })
         except Exception as e:
@@ -328,7 +372,8 @@ def register_routes(bp):
                     "album_id": row[7],
                     "thumb_url": row[8],
                 }
-                tracks.append(serialize_track(track, fields))
+                tracks.append(track)
+            tracks = [serialize_track(t, fields) for t in _pub("track", tracks)]
 
             return api_success({"tracks": tracks})
         except Exception as e:
@@ -468,7 +513,7 @@ def register_routes(bp):
                 "tracks": serialize_track,
             }[table]
 
-            return api_success({entity_type: serializer(result, fields)})
+            return api_success({entity_type: serializer(_pub(entity_type, [result])[0], fields)})
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 

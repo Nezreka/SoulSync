@@ -477,6 +477,12 @@ def _seed(db):
                 " value_json) VALUES ('release_group', 1, 'genres', '[\"Rock\"]')")
     cur.execute("INSERT INTO lib2_metadata_overrides (entity_type, entity_id, field_name,"
                 " value_json) VALUES ('track', 1, 'title', '\"Song One\"')")
+    # migrated rows remember the id they had before the upgrade, which is the
+    # id every v1 client saved: opaque on a standalone install, numeric on plex
+    for table, column, rows in (("lib2_artists", "legacy_artist_id", ((1, "ar1::soulsync"), (42, "42"))),
+                                ("lib2_albums", "legacy_album_id", ((1, "al1::soulsync"), (77, "77"))),
+                                ("lib2_tracks", "legacy_track_id", ((1, "tr1::soulsync"), (99, "99")))):
+        cur.executemany(f"UPDATE {table} SET {column}=? WHERE id=?", [(old, new) for new, old in rows])
     conn.commit()
     conn.close()
 
@@ -500,7 +506,7 @@ def client(db, monkeypatch):
 
 
 def test_artist_detail_carries_the_enriched_fields(client):
-    resp = client.get("/api/v1/library/artists/1")
+    resp = client.get("/api/v1/library/artists/ar1::soulsync")
     assert resp.status_code == 200, resp.get_json()
     data = resp.get_json()["data"]
     assert data["artist"]["discogs_bio"] == "A band from nowhere."
@@ -509,12 +515,12 @@ def test_artist_detail_carries_the_enriched_fields(client):
     assert data["artist"]["genres_locked"] is False
     assert data["artist"]["discogs_id"] == "111"
     assert data["artist"]["jiosaavn_match_status"] == "not_found"
-    assert [a["id"] for a in data["albums"]] == [1]
+    assert [a["id"] for a in data["albums"]] == ["al1::soulsync"]
     assert data["albums"][0]["release_date"] == "1999-05-04"
 
 
 def test_artist_albums_carry_the_enriched_fields(client):
-    resp = client.get("/api/v1/library/artists/1/albums")
+    resp = client.get("/api/v1/library/artists/ar1::soulsync/albums")
     assert resp.status_code == 200, resp.get_json()
     albums = resp.get_json()["data"]["albums"]
     assert len(albums) == 1
@@ -523,7 +529,7 @@ def test_artist_albums_carry_the_enriched_fields(client):
 
 
 def test_album_detail_carries_the_enriched_fields(client):
-    resp = client.get("/api/v1/library/albums/1")
+    resp = client.get("/api/v1/library/albums/al1::soulsync")
     assert resp.status_code == 200, resp.get_json()
     data = resp.get_json()["data"]
     album = data["album"]
@@ -536,12 +542,12 @@ def test_album_detail_carries_the_enriched_fields(client):
     assert album["bandcamp_last_attempted"] == "2026-01-08 00:00:00"
     # the hand-set genres are lib2's lock
     assert album["genres_locked"] is True and album["metadata_locked"] is True
-    assert [t["id"] for t in data["tracks"]] == [1]
+    assert [t["id"] for t in data["tracks"]] == ["tr1::soulsync"]
     assert data["tracks"][0]["server_path"] == "/music/song-one.flac"
 
 
 def test_album_tracks_carry_the_file_facts(client):
-    resp = client.get("/api/v1/library/albums/1/tracks")
+    resp = client.get("/api/v1/library/albums/al1::soulsync/tracks")
     assert resp.status_code == 200, resp.get_json()
     tracks = resp.get_json()["data"]["tracks"]
     assert len(tracks) == 1
@@ -551,7 +557,7 @@ def test_album_tracks_carry_the_file_facts(client):
 
 
 def test_track_detail_carries_the_enriched_fields(client):
-    resp = client.get("/api/v1/library/tracks/1")
+    resp = client.get("/api/v1/library/tracks/tr1::soulsync")
     assert resp.status_code == 200, resp.get_json()
     track = resp.get_json()["data"]["track"]
     assert track["track_artist"] == "The Testers feat. Guest"
@@ -578,22 +584,22 @@ def test_unknown_opaque_id_is_404_not_400(client):
 
 
 def test_albums_artist_id_filter_takes_a_string_id(client):
-    resp = client.get("/api/v1/library/albums?artist_id=1")
+    resp = client.get("/api/v1/library/albums?artist_id=ar1::soulsync")
     assert resp.status_code == 200, resp.get_json()
     albums = resp.get_json()["data"]["albums"]
-    assert [a["id"] for a in albums] == [1]
+    assert [a["id"] for a in albums] == ["al1::soulsync"]
 
     resp = client.get("/api/v1/library/albums?artist_id=42")
     assert resp.status_code == 200, resp.get_json()
     albums = resp.get_json()["data"]["albums"]
-    assert [a["id"] for a in albums] == [77]
+    assert [a["id"] for a in albums] == ["77"]
 
 
 def test_artist_list_carries_new_fields(client):
     resp = client.get("/api/v1/library/artists")
     assert resp.status_code == 200, resp.get_json()
     artists = {a["id"]: a for a in resp.get_json()["data"]["artists"]}
-    artist = artists[1]
+    artist = artists["ar1::soulsync"]
     assert artist["aliases"] == ["The Testers UK", "Testers"]
     assert artist["soul_id_path"] == "canonical"
     assert artist["discogs_bio"] == "A band from nowhere."
@@ -608,16 +614,16 @@ def test_artist_list_carries_new_fields(client):
 
 
 @pytest.mark.parametrize("entity,provider,ext_id,expect_id", [
-    ("artist", "discogs", "111", 1),
-    ("album", "discogs", "222", 1),
-    ("album", "amazon", "amz-al", 1),
-    ("track", "amazon", "amz-tr", 1),
-    ("artist", "jiosaavn", "jio-ar", 1),
-    ("track", "jiosaavn", "jio-tr", 1),
-    ("album", "bandcamp", "bc-al", 1),
-    ("track", "bandcamp", "bc-tr", 1),
+    ("artist", "discogs", "111", "ar1::soulsync"),
+    ("album", "discogs", "222", "al1::soulsync"),
+    ("album", "amazon", "amz-al", "al1::soulsync"),
+    ("track", "amazon", "amz-tr", "tr1::soulsync"),
+    ("artist", "jiosaavn", "jio-ar", "ar1::soulsync"),
+    ("track", "jiosaavn", "jio-tr", "tr1::soulsync"),
+    ("album", "bandcamp", "bc-al", "al1::soulsync"),
+    ("track", "bandcamp", "bc-tr", "tr1::soulsync"),
     # the stored bandcamp provider id is the url; it finds the row too
-    ("album", "bandcamp", "https://testers.bandcamp.com/album/first-record", 1),
+    ("album", "bandcamp", "https://testers.bandcamp.com/album/first-record", "al1::soulsync"),
 ])
 def test_lookup_new_providers(client, entity, provider, ext_id, expect_id):
     resp = client.get(
@@ -652,4 +658,52 @@ def test_albums_artist_id_empty_means_no_filter(client):
         resp = client.get(f"/api/v1/library/albums?artist_id={raw}")
         assert resp.status_code == 200, resp.get_json()
         ids = {a["id"] for a in resp.get_json()["data"]["albums"]}
-        assert ids == {1, 77}
+        assert ids == {"al1::soulsync", "77"}
+
+
+# ── ids across the upgrade ────────────────────────────────────
+#
+# a client that saved an id before the upgrade keeps getting the same row
+# under the same id. rows born after it answer under their server's id, or
+# lib2:<n> when no server knows them yet.
+
+
+def test_ids_are_strings_as_they_always_were(client):
+    artists = client.get("/api/v1/library/artists").get_json()["data"]["artists"]
+    assert all(isinstance(a["id"], str) for a in artists)
+    track = client.get("/api/v1/library/tracks/99").get_json()["data"]["track"]
+    assert track["id"] == "99" and track["album_id"] == "77" and track["artist_id"] == "42"
+
+
+def test_the_lib2_form_names_the_catalogue_row(client):
+    resp = client.get("/api/v1/library/artists/lib2:1")
+    assert resp.status_code == 200
+    assert resp.get_json()["data"]["artist"]["id"] == "ar1::soulsync"
+
+
+def test_a_row_born_after_the_upgrade_answers_under_its_server_id(db, client):
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_artists (id, name) VALUES (500, 'New Band')")
+    conn.execute("INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source,"
+                 " server_id) VALUES ('artist', 500, 'plex', 'rk-500')")
+    conn.execute("INSERT INTO lib2_artists (id, name) VALUES (501, 'Not On A Server')")
+    conn.commit()
+    conn.close()
+    from unittest.mock import patch
+    with patch("core.library2.v1_ids._active_server", lambda: "plex"):
+        by_server = client.get("/api/v1/library/artists/rk-500")
+        assert by_server.status_code == 200
+        assert by_server.get_json()["data"]["artist"]["id"] == "rk-500"
+        native = client.get("/api/v1/library/artists/lib2:501")
+        assert native.get_json()["data"]["artist"]["id"] == "lib2:501"
+
+
+def test_an_old_id_two_rows_answer_to_is_refused_not_guessed(db, client):
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_artists (id, name, legacy_artist_id) VALUES (600, 'Twin A', 'dup')")
+    conn.execute("INSERT INTO lib2_artists (id, name, legacy_artist_id) VALUES (601, 'Twin B', 'dup')")
+    conn.commit()
+    conn.close()
+    resp = client.get("/api/v1/library/artists/dup")
+    assert resp.status_code == 409
+    assert resp.get_json()["error"]["code"] == "AMBIGUOUS_ID"

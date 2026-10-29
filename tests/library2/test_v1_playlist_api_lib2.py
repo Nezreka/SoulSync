@@ -50,7 +50,8 @@ def test_recently_played_links_the_play_to_the_catalogue_track(api):
 
     tracks = _data(client.get("/api/v1/library/recently-played"))["tracks"]
 
-    assert [(t["id"], t["file_path"]) for t in tracks] == [(track_id, "/music/ma/angel.flac")]
+    # no old id and no server id yet: v1 names it lib2:<n>
+    assert [(t["id"], t["file_path"]) for t in tracks] == [(f"lib2:{track_id}", "/music/ma/angel.flac")]
 
 
 def test_curated_playlist_resolves_provider_ids_and_names_to_owned_tracks(api):
