@@ -22,6 +22,16 @@ function policyLabel(p: LibraryV2QualityProfile): string {
   return 'No upgrades once acceptable';
 }
 
+/** The profile's ranked targets in one line, best first: what tells two
+ *  profiles apart when there are many of them. */
+function targetSummary(p: LibraryV2QualityProfile): string {
+  const labels = (p.ranked_targets ?? [])
+    .map((t) => t.label || t.format?.toUpperCase() || '')
+    .filter(Boolean);
+  if (labels.length <= 1) return labels[0] ?? '';
+  return `${labels[0]} … ${labels[labels.length - 1]} · ${labels.length} targets`;
+}
+
 /** Pick + assign a quality profile for an artist/album/track. Pure content —
  *  no modal chrome — so it can be embedded standalone (QualityProfileModal
  *  below) or as a tab inside a bigger modal (the per-track detail modal). */
@@ -98,8 +108,17 @@ export function QualityProfilePicker({
                 <span className={styles.qpName}>
                   {p.name}
                   {active ? <span className={styles.qpCurrent}>current</span> : null}
+                  {p.is_default ? <span className={styles.qpPolicy}>app default</span> : null}
                 </span>
                 {p.description ? <span className={styles.qpDesc}>{p.description}</span> : null}
+                {targetSummary(p) ? (
+                  <span
+                    className={styles.qpTargets}
+                    title={(p.ranked_targets ?? []).map((t) => t.label).join('\n')}
+                  >
+                    {targetSummary(p)}
+                  </span>
+                ) : null}
                 <span className={styles.qpPolicy}>{policyLabel(p)}</span>
               </button>
             );

@@ -20,7 +20,11 @@ import {
 } from 'react';
 
 import { DialogFrame, DialogHeader } from '@/components/dialog';
-import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-route-toggle';
+import {
+  routedNamesQueryOptions,
+  useAudiobookFolderConfigured,
+  useSetAudiobookRoute,
+} from '@/features/audiobook-routes/audiobook-routes.queries';
 import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
@@ -37,6 +41,7 @@ import {
   fetchLibraryV2DiscoveryTrackStatus,
   monitorLibraryV2DiscoveryTrack,
   type ArtistTopTrack,
+  type LibraryV2ArtistSettingsResponse,
   type ProviderRelease,
   bulkMonitorLibraryV2Releases,
   clearLibraryV2EntityMatch,
@@ -169,7 +174,6 @@ import { ConcertsSection } from '../../artist-detail/-ui/concerts-section';
 import { ReassignModal } from '../../artist-detail/-ui/reassign-modal';
 import { SimilarArtistsSection } from '../../artist-detail/-ui/similar-artists-section';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
-import { ArtistMissingDownload } from './artist-missing-download';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import {
   classifyReleaseContent,
@@ -2161,41 +2165,12 @@ export function MonitoringModal({
   );
 }
 
-/** §52.3/§52.4: one Artist Settings surface over the existing Watchlist row.
- * Quality remains the app-wide profile system; release filters, lookback,
- * preferred provider and auto-download are written to `watchlist_artists`;
- * existing release monitoring stays a separate, clearly-labelled action. */
+/** §52.3/§52.4: one Artist Settings surface over the existing Watchlist row,
+ * in the same workspace as the library tools (Retag, Organize). Quality and
+ * audiobook filing apply at once and exist for every artist; the Watchlist's
+ * future-release settings (saved together) and the existing-release actions
+ * only for a monitored one. */
 export function ArtistSettingsModal({
-  artist,
-  onClose,
-}: {
-  artist: LibraryV2ArtistDetail;
-  onClose: () => void;
-}) {
-  const canWrite = useLibraryV2CanWrite();
-  if (artist.monitored) return <MonitoredArtistSettings artist={artist} onClose={onClose} />;
-  return (
-    <ModalShell title="Artist Settings" onClose={onClose}>
-      <h4>{artist.name}</h4>
-      <p>
-        Quality applies to this artist’s downloads and upgrades. Monitor the artist to also
-        configure future releases and the Watchlist.
-      </p>
-      <fieldset className={styles.settingsFieldset} disabled={!canWrite}>
-        <legend>Quality profile</legend>
-        <QualityProfilePicker
-          entity="artists"
-          id={artist.id}
-          currentProfileId={artist.quality_profile?.id ?? 1}
-          currentProfileSource={artist.quality_profile_source}
-          currentProfileExplicit={artist.quality_profile_explicit}
-        />
-      </fieldset>
-    </ModalShell>
-  );
-}
-
-function MonitoredArtistSettings({
   artist,
   onClose,
 }: {
@@ -2207,6 +2182,7 @@ function MonitoredArtistSettings({
   const settingsQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'artist-settings', artist.id],
     queryFn: () => fetchLibraryV2ArtistSettings(artist.id),
+    enabled: artist.monitored,
   });
   const [draft, setDraft] = useState<LibraryV2ArtistSettings | null>(null);
   const [bulkBusy, setBulkBusy] = useState<string | null>(null);
@@ -2258,334 +2234,372 @@ function MonitoredArtistSettings({
   }
 
   const sourceOptions = settingsQuery.data?.metadata_sources ?? [];
-  const providerIds = draft
-    ? Object.entries(draft.provider_ids).filter((entry): entry is [string, string] =>
-        Boolean(entry[1]),
-      )
-    : [];
+  const watchlist = artist.monitored ? draft : null;
 
   return (
-    <ModalShell title="Artist Settings" wide onClose={onClose}>
-      {settingsQuery.isError ? (
-        <div className={styles.mutationError} role="alert">
-          {mutationErrorMessage(settingsQuery.error, 'Artist settings could not be loaded')}
+    <LibraryToolDialog
+      title="Artist Settings"
+      description={
+        artist.monitored
+          ? `${artist.name} · monitored, on the Watchlist`
+          : `${artist.name} · not monitored`
+      }
+      onClose={onClose}
+      footer={
+        <div className={styles.modalActions}>
+          <span className={styles.modalActionsText}>
+            {save.isError ? (
+              <span className={styles.mutationError} role="alert">
+                {mutationErrorMessage(save.error, 'Artist settings could not be saved')}
+              </span>
+            ) : save.isSuccess ? (
+              <span className={styles.mutationSuccess} role="status">
+                Watchlist Artist Settings saved.
+              </span>
+            ) : (
+              <span className={styles.muted}>
+                Quality and audiobook filing apply at once
+                {watchlist ? '; future-release settings when saved.' : '.'}
+              </span>
+            )}
+          </span>
+          <button type="button" className={styles.btnGhost} onClick={onClose}>
+            Close
+          </button>
+          {watchlist ? (
+            <button
+              type="button"
+              className={styles.btnPrimary}
+              data-requires-write=""
+              disabled={save.isPending || !canWrite}
+              onClick={() => {
+                if (canWrite) save.mutate(watchlist);
+              }}
+            >
+              {save.isPending ? 'Saving…' : 'Save future-release settings'}
+            </button>
+          ) : null}
         </div>
-      ) : settingsQuery.isLoading || !draft ? (
-        <div className={styles.inlineLoading}>Loading Watchlist Artist Settings…</div>
-      ) : (
-        <>
-          <section className={styles.artistSettingsSection}>
-            <div>
-              <h4>Watchlist identity</h4>
-              <div className={styles.artistSettingsIdentity}>
-                <Artwork
-                  src={
-                    artist.image_url ||
-                    settingsQuery.data?.artist_stats?.image_url ||
-                    draft.watchlist_image_url ||
-                    ''
-                  }
-                  alt={
-                    settingsQuery.data?.artist_stats?.name || draft.watchlist_name || artist.name
-                  }
-                  className={styles.artistSettingsPhoto}
-                  thumb
-                />
-                <div className={styles.artistSettingsIdentityBody}>
-                  <strong className={styles.artistSettingsIdentityName}>
-                    {settingsQuery.data?.artist_stats?.name || draft.watchlist_name || artist.name}
-                  </strong>
-                  <span className={styles.muted}>
-                    This is the artist currently linked to the admin Watchlist.
-                  </span>
-                  {(settingsQuery.data?.artist_stats?.genres?.length
-                    ? settingsQuery.data.artist_stats.genres
-                    : artist.genres
-                  ).length > 0 ? (
-                    <span className={styles.artistSettingsGenres}>
-                      {(settingsQuery.data?.artist_stats?.genres?.length
-                        ? settingsQuery.data.artist_stats.genres
-                        : artist.genres
-                      ).join(' · ')}
-                    </span>
-                  ) : null}
-                  {settingsQuery.data?.artist_stats &&
-                  formatMatchStat(settingsQuery.data.artist_stats) ? (
-                    <span className={styles.muted}>
-                      {formatMatchStat(settingsQuery.data.artist_stats)}
-                    </span>
-                  ) : null}
-                  {providerIds.length > 0 ? (
-                    <div>
-                      <div className={styles.artistSettingsProviderIds}>
-                        {providerIds.map(([provider, id]) => {
-                          // The catalogue knows the id; until now the only thing
-                          // the page could do with it was copy it. A service with
-                          // no artist page (Amazon) keeps the copy button.
-                          const url = getServiceUrl(provider, 'artist', id);
-                          return url ? (
-                            <a
-                              key={provider}
-                              href={url}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                              title={`Open on ${provider}: ${id}`}
-                            >
-                              <strong>{provider}</strong>
-                              <span>{id}</span>
-                              <small>Open</small>
-                            </a>
-                          ) : (
-                            <button
-                              type="button"
-                              key={provider}
-                              title={`Copy ${provider} ID: ${id}`}
-                              onClick={() => void navigator.clipboard?.writeText(id)}
-                            >
-                              <strong>{provider}</strong>
-                              <span>{id}</span>
-                              <small>Copy</small>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : null}
-                  <ArtistMatchChips artist={artist} watchlistRowId={draft.watchlist_row_id} />
-                  {[...artist.albums, ...(artist.eps ?? []), ...artist.singles].length ? (
-                    <div className={styles.artistSettingsReleaseContext}>
-                      <span>Release context in Library v2</span>
-                      <MatchReleaseStrip
-                        albums={[...artist.albums, ...(artist.eps ?? []), ...artist.singles]
-                          .slice(0, 6)
-                          .map((album) => ({
-                            id: String(album.id),
-                            title: album.title,
-                            image: album.image_url,
-                            release_date: album.release_date,
-                            album_type: album.album_type,
-                            total_tracks: album.track_count,
-                          }))}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </section>
-
+      }
+    >
+      <div className={styles.artistSettingsLayout}>
+        <div className={styles.artistSettingsMain}>
           <section className={styles.artistSettingsSection}>
             <h4>Quality profile</h4>
             <p className={styles.muted}>
-              Quality controls allowed downloads and upgrades. It does not enable monitoring.
+              What this artist’s downloads and upgrades must meet. It does not enable monitoring.
             </p>
-            <QualityProfilePicker
-              entity="artists"
-              id={artist.id}
-              currentProfileId={artist.quality_profile?.id ?? 1}
-              currentProfileSource={artist.quality_profile_source}
-              currentProfileExplicit={artist.quality_profile_explicit}
-            />
+            <fieldset className={styles.settingsPlain} disabled={!canWrite}>
+              <QualityProfilePicker
+                entity="artists"
+                id={artist.id}
+                currentProfileId={artist.quality_profile?.id ?? 1}
+                currentProfileSource={artist.quality_profile_source}
+                currentProfileExplicit={artist.quality_profile_explicit}
+              />
+            </fieldset>
           </section>
 
-          <section className={styles.artistSettingsSection}>
-            <h4>Future releases</h4>
-            <p className={styles.muted}>
-              These are the existing Watchlist scanner settings. They decide what is discovered and
-              whether newly discovered releases enter the download pipeline.
-            </p>
-            <label className={styles.artistSettingsToggle}>
-              <input
-                type="checkbox"
-                checked={draft.auto_download}
-                onChange={(event) => setBoolean('auto_download', event.target.checked)}
-              />
-              <span>
-                <strong>Auto-download new releases</strong>
-                <small>Off means follow/discover only; releases are not added to Wanted.</small>
-              </span>
-            </label>
-            <fieldset className={styles.artistSettingsFieldset}>
-              <legend>Release types</legend>
-              {(
-                [
-                  ['include_albums', 'Albums'],
-                  ['include_eps', 'EPs'],
-                  ['include_singles', 'Singles'],
-                  ['include_live', 'Live'],
-                  ['include_remixes', 'Remixes'],
-                  ['include_acoustic', 'Acoustic'],
-                  ['include_compilations', 'Compilations'],
-                  ['include_instrumentals', 'Instrumentals'],
-                  ['include_other_artists', 'Other artists'],
-                ] as const
-              ).map(([field, label]) => (
-                <label key={field} className={styles.checkOption}>
+          {!artist.monitored ? (
+            <section className={styles.artistSettingsSection}>
+              <h4>Future releases</h4>
+              <p className={styles.muted}>
+                Monitor the artist to put it on the Watchlist: then new releases are discovered
+                here, with release types, lookback and auto-download set in this dialog.
+              </p>
+            </section>
+          ) : settingsQuery.isError ? (
+            <div className={styles.mutationError} role="alert">
+              {mutationErrorMessage(settingsQuery.error, 'Artist settings could not be loaded')}
+            </div>
+          ) : !watchlist ? (
+            <div className={styles.inlineLoading}>Loading Watchlist Artist Settings…</div>
+          ) : (
+            <>
+              <section className={styles.artistSettingsSection}>
+                <h4>Future releases</h4>
+                <p className={styles.muted}>
+                  The Watchlist scanner’s settings: what is discovered, and whether new releases
+                  enter the download pipeline.
+                </p>
+                <label className={styles.artistSettingsToggle}>
                   <input
                     type="checkbox"
-                    checked={draft[field]}
-                    onChange={(event) => setBoolean(field, event.target.checked)}
+                    checked={watchlist.auto_download}
+                    onChange={(event) => setBoolean('auto_download', event.target.checked)}
                   />
-                  {label}
+                  <span>
+                    <strong>Auto-download new releases</strong>
+                    <small>Off means follow/discover only; releases are not added to Wanted.</small>
+                  </span>
                 </label>
-              ))}
-            </fieldset>
-            <div className={styles.artistSettingsGrid}>
-              <label>
-                <span>Discovery lookback</span>
-                <select
-                  className={styles.select}
-                  value={draft.lookback_days == null ? '' : String(draft.lookback_days)}
-                  onChange={(event) =>
-                    setDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            lookback_days:
-                              event.target.value === '' ? null : Number(event.target.value),
-                          }
-                        : current,
-                    )
-                  }
-                >
-                  <option value="">Use global setting</option>
-                  <option value="0">From now on</option>
-                  <option value="7">Last 7 days</option>
-                  <option value="30">Last 30 days</option>
-                  <option value="90">Last 90 days</option>
-                  <option value="365">Last year</option>
-                </select>
-              </label>
-              <label>
-                <span>Preferred metadata provider</span>
-                <select
-                  className={styles.select}
-                  value={draft.preferred_metadata_source ?? ''}
-                  onChange={(event) =>
-                    setDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            preferred_metadata_source: event.target.value || null,
-                          }
-                        : current,
-                    )
-                  }
-                >
-                  <option value="">
-                    App default
-                    {settingsQuery.data?.global_metadata_source
-                      ? ` (${settingsQuery.data.global_metadata_source})`
-                      : ''}
-                  </option>
-                  {sourceOptions.map((source) => (
-                    <option key={source} value={source}>
-                      {source.charAt(0).toUpperCase() + source.slice(1)}
-                    </option>
+                <fieldset className={styles.artistSettingsFieldset}>
+                  <legend>Release types</legend>
+                  {(
+                    [
+                      ['include_albums', 'Albums'],
+                      ['include_eps', 'EPs'],
+                      ['include_singles', 'Singles'],
+                      ['include_live', 'Live'],
+                      ['include_remixes', 'Remixes'],
+                      ['include_acoustic', 'Acoustic'],
+                      ['include_compilations', 'Compilations'],
+                      ['include_instrumentals', 'Instrumentals'],
+                      ['include_other_artists', 'Other artists'],
+                    ] as const
+                  ).map(([field, label]) => (
+                    <label key={field} className={styles.checkOption}>
+                      <input
+                        type="checkbox"
+                        checked={watchlist[field]}
+                        onChange={(event) => setBoolean(field, event.target.checked)}
+                      />
+                      {label}
+                    </label>
                   ))}
-                </select>
-              </label>
-              <label>
-                <span>Library-v2 discography rule</span>
-                <select
-                  className={styles.select}
-                  value={draft.monitor_new_items}
-                  onChange={(event) =>
-                    setDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            monitor_new_items: event.target.value as 'all' | 'new' | 'none',
-                          }
-                        : current,
-                    )
-                  }
-                >
-                  <option value="all">Monitor newly discovered releases</option>
-                  <option value="new">Only releases newer than the last sync</option>
-                  <option value="none">Do not monitor newly discovered releases</option>
-                </select>
-              </label>
-            </div>
-            {save.isError ? (
-              <div className={styles.mutationError} role="alert">
-                {mutationErrorMessage(save.error, 'Artist settings could not be saved')}
-              </div>
-            ) : save.isSuccess ? (
-              <div className={styles.mutationSuccess} role="status">
-                Watchlist Artist Settings saved.
-              </div>
-            ) : null}
-            <div className={styles.modalActions}>
-              <button
-                type="button"
-                className={styles.btnPrimary}
-                data-requires-write=""
-                disabled={save.isPending || !canWrite}
-                onClick={() => {
-                  if (canWrite) save.mutate(draft);
-                }}
-              >
-                {save.isPending ? 'Saving…' : 'Save future-release settings'}
-              </button>
-            </div>
-          </section>
+                </fieldset>
+                <div className={styles.artistSettingsGrid}>
+                  <label>
+                    <span>Discovery lookback</span>
+                    <select
+                      className={styles.select}
+                      value={watchlist.lookback_days == null ? '' : String(watchlist.lookback_days)}
+                      onChange={(event) =>
+                        setDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                lookback_days:
+                                  event.target.value === '' ? null : Number(event.target.value),
+                              }
+                            : current,
+                        )
+                      }
+                    >
+                      <option value="">Use global setting</option>
+                      <option value="0">From now on</option>
+                      <option value="7">Last 7 days</option>
+                      <option value="30">Last 30 days</option>
+                      <option value="90">Last 90 days</option>
+                      <option value="365">Last year</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Preferred metadata provider</span>
+                    <select
+                      className={styles.select}
+                      value={watchlist.preferred_metadata_source ?? ''}
+                      onChange={(event) =>
+                        setDraft((current) =>
+                          current
+                            ? { ...current, preferred_metadata_source: event.target.value || null }
+                            : current,
+                        )
+                      }
+                    >
+                      <option value="">
+                        App default
+                        {settingsQuery.data?.global_metadata_source
+                          ? ` (${settingsQuery.data.global_metadata_source})`
+                          : ''}
+                      </option>
+                      {sourceOptions.map((source) => (
+                        <option key={source} value={source}>
+                          {source.charAt(0).toUpperCase() + source.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Library-v2 discography rule</span>
+                    <select
+                      className={styles.select}
+                      value={watchlist.monitor_new_items}
+                      onChange={(event) =>
+                        setDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                monitor_new_items: event.target.value as 'all' | 'new' | 'none',
+                              }
+                            : current,
+                        )
+                      }
+                    >
+                      <option value="all">Monitor newly discovered releases</option>
+                      <option value="new">Only releases newer than the last sync</option>
+                      <option value="none">Do not monitor newly discovered releases</option>
+                    </select>
+                  </label>
+                </div>
+              </section>
 
-          <section className={styles.artistSettingsSection}>
-            <h4>Existing releases and tracks</h4>
-            <p className={styles.muted}>
-              These actions change Wanted state for items already shown in Library v2. They do not
-              change the Watchlist bookmark or quality profile.
-            </p>
-            <div className={styles.artistSettingsActions}>
-              <button
-                type="button"
-                className={styles.toolButton}
-                data-requires-write=""
-                disabled={bulkBusy !== null || !canWrite}
-                onClick={() =>
-                  void applyExistingReleaseStrategy('all', true, 'Monitor all existing releases')
-                }
-              >
-                {bulkBusy === 'Monitor all existing releases' ? 'Applying…' : 'Monitor all'}
-              </button>
-              <button
-                type="button"
-                className={styles.toolButton}
-                data-requires-write=""
-                disabled={bulkBusy !== null || !canWrite}
-                onClick={() =>
-                  void applyExistingReleaseStrategy('missing', true, 'Monitor missing releases')
-                }
-              >
-                {bulkBusy === 'Monitor missing releases' ? 'Applying…' : 'Monitor missing only'}
-              </button>
-              <button
-                type="button"
-                className={styles.btnDanger}
-                data-requires-write=""
-                disabled={bulkBusy !== null || !canWrite}
-                onClick={() =>
-                  void applyExistingReleaseStrategy('all', false, 'Unmonitor existing releases')
-                }
-              >
-                {bulkBusy === 'Unmonitor existing releases' ? 'Applying…' : 'Unmonitor all'}
-              </button>
-            </div>
-            {bulkMessage ? (
-              <div
-                className={
-                  bulkMessage.tone === 'ok' ? styles.mutationSuccess : styles.mutationError
-                }
-                role={bulkMessage.tone === 'ok' ? 'status' : 'alert'}
-              >
-                {bulkMessage.text}
-              </div>
+              <section className={styles.artistSettingsSection}>
+                <h4>Existing releases and tracks</h4>
+                <p className={styles.muted}>
+                  Change Wanted for what Library v2 already shows. Applies at once; the Watchlist
+                  and the quality profile stay as they are.
+                </p>
+                <div className={styles.artistSettingsActions}>
+                  {(
+                    [
+                      [
+                        'all',
+                        true,
+                        'Monitor all existing releases',
+                        'Monitor all',
+                        styles.toolButton,
+                      ],
+                      [
+                        'missing',
+                        true,
+                        'Monitor missing releases',
+                        'Monitor missing only',
+                        styles.toolButton,
+                      ],
+                      [
+                        'all',
+                        false,
+                        'Unmonitor existing releases',
+                        'Unmonitor all',
+                        styles.btnDanger,
+                      ],
+                    ] as const
+                  ).map(([scope, monitored, label, text, className]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      className={className}
+                      data-requires-write=""
+                      disabled={bulkBusy !== null || !canWrite}
+                      onClick={() => void applyExistingReleaseStrategy(scope, monitored, label)}
+                    >
+                      {bulkBusy === label ? 'Applying…' : text}
+                    </button>
+                  ))}
+                </div>
+                {bulkMessage ? (
+                  <div
+                    className={
+                      bulkMessage.tone === 'ok' ? styles.mutationSuccess : styles.mutationError
+                    }
+                    role={bulkMessage.tone === 'ok' ? 'status' : 'alert'}
+                  >
+                    {bulkMessage.text}
+                  </div>
+                ) : null}
+              </section>
+            </>
+          )}
+        </div>
+
+        <aside className={styles.artistSettingsSide}>
+          <ArtistSettingsIdentity
+            artist={artist}
+            stats={settingsQuery.data?.artist_stats}
+            watchlist={watchlist}
+          />
+          <AudiobookRouteSetting name={artist.name} />
+        </aside>
+      </div>
+    </LibraryToolDialog>
+  );
+}
+
+/** Who these settings are for: the artist as Library v2 and, when monitored,
+ *  the Watchlist know it -- ids, matches and a few of its releases. */
+function ArtistSettingsIdentity({
+  artist,
+  stats,
+  watchlist,
+}: {
+  artist: LibraryV2ArtistDetail;
+  stats?: LibraryV2ArtistSettingsResponse['artist_stats'];
+  watchlist: LibraryV2ArtistSettings | null;
+}) {
+  const name = stats?.name || watchlist?.watchlist_name || artist.name;
+  const genres = stats?.genres?.length ? stats.genres : artist.genres;
+  const providerIds = Object.entries(watchlist?.provider_ids ?? artist.provider_ids ?? {}).filter(
+    (entry): entry is [string, string] => Boolean(entry[1]),
+  );
+  const releases = [...artist.albums, ...(artist.eps ?? []), ...artist.singles];
+  return (
+    <section className={styles.artistSettingsSection}>
+      <h4>{watchlist ? 'Watchlist identity' : 'Artist'}</h4>
+      <div className={styles.artistSettingsIdentity}>
+        <div className={styles.artistSettingsIdentityHead}>
+          <Artwork
+            src={artist.image_url || stats?.image_url || watchlist?.watchlist_image_url || ''}
+            alt={name}
+            className={styles.artistSettingsPhoto}
+            thumb
+          />
+          <div className={styles.artistSettingsIdentityBody}>
+            <strong className={styles.artistSettingsIdentityName}>{name}</strong>
+            {genres.length > 0 ? (
+              <span className={styles.artistSettingsGenres}>{genres.join(' · ')}</span>
             ) : null}
-          </section>
-        </>
-      )}
-    </ModalShell>
+            {stats && formatMatchStat(stats) ? (
+              <span className={styles.muted}>{formatMatchStat(stats)}</span>
+            ) : null}
+            <span className={styles.muted}>
+              {watchlist ? 'Linked to the admin Watchlist.' : 'Not on the Watchlist.'}
+            </span>
+          </div>
+        </div>
+        {providerIds.length > 0 ? (
+          <div className={styles.artistSettingsProviderIds}>
+            {providerIds.map(([provider, id]) => {
+              // A service with no artist page (Amazon) keeps the copy button.
+              const url = getServiceUrl(provider, 'artist', id);
+              return url ? (
+                <a
+                  key={provider}
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  title={`Open on ${provider}: ${id}`}
+                >
+                  <strong>{provider}</strong>
+                  <span>{id}</span>
+                  <small>Open</small>
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  key={provider}
+                  title={`Copy ${provider} ID: ${id}`}
+                  onClick={() => void navigator.clipboard?.writeText(id)}
+                >
+                  <strong>{provider}</strong>
+                  <span>{id}</span>
+                  <small>Copy</small>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        <ArtistMatchChips
+          artist={artist}
+          watchlistRowId={watchlist?.watchlist_row_id ?? undefined}
+        />
+        {releases.length ? (
+          <div className={styles.artistSettingsReleaseContext}>
+            <span>Release context in Library v2</span>
+            <MatchReleaseStrip
+              albums={releases.slice(0, 4).map((album) => ({
+                id: String(album.id),
+                title: album.title,
+                image: album.image_url,
+                release_date: album.release_date,
+                album_type: album.album_type,
+                total_tracks: album.track_count,
+              }))}
+            />
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -7124,12 +7138,10 @@ function CatalogueArtistHero({
   artist,
   onPickImage,
   headerToggle,
-  downloadAction,
 }: {
   artist: LibraryV2ArtistDetail;
   onPickImage: () => void;
   headerToggle: ReactNode;
-  downloadAction: ReactNode;
 }) {
   const matchStatus = useQuery(libraryV2ArtistMatchStatusQueryOptions(artist.id));
   const providerIds = artist.provider_ids ?? {};
@@ -7190,14 +7202,12 @@ function CatalogueArtistHero({
           >
             📻 Artist Radio
           </button>
-          {downloadAction}
           <OwnedArtistDiscographyButton
             artistId={artist.id}
             artistName={artist.name}
             imageUrl={artist.image_url ?? ''}
             providerIds={artist.provider_ids}
           />
-          <NativeAudiobookRouteToggle name={artist.name} />
           <ArtistAliases artistId={artist.id} artistName={artist.name} />
           <OwnedArtistHeroExtras
             artistId={artist.id}
@@ -7210,9 +7220,37 @@ function CatalogueArtistHero({
   );
 }
 
-function NativeAudiobookRouteToggle({ name }: { name: string }) {
+/** Upstream da5c61779 "Treat as audiobook": file the artist's downloads in the
+ *  audiobook library. A setting of the artist, so it lives in Artist Settings,
+ *  not as a button in the header. Applies at once, like the quality profile. */
+function AudiobookRouteSetting({ name }: { name: string }) {
   const canWrite = useLibraryV2CanWrite();
-  return canWrite ? <AudiobookRouteToggle name={name} /> : null;
+  const query = useQuery(routedNamesQueryOptions([name]));
+  const toggle = useSetAudiobookRoute(name);
+  const routed = (query.data ?? []).includes(name);
+  // switching off always works; switching on needs a folder to file into
+  const noFolder = !useAudiobookFolderConfigured() && !routed;
+  return (
+    <section className={styles.artistSettingsSection}>
+      <h4>Audiobook library</h4>
+      <label className={styles.artistSettingsToggle}>
+        <input
+          type="checkbox"
+          checked={routed}
+          disabled={!canWrite || query.isPending || query.isError || noFolder || toggle.isPending}
+          onChange={(event) => toggle.mutate(event.target.checked)}
+        />
+        <span>
+          <strong>Treat as audiobook</strong>
+          <small>
+            {noFolder
+              ? 'Set the audiobook folder first (Settings > Library > Folders).'
+              : 'File downloads by this artist in the audiobook library instead of the music library, for spoken-word releases.'}
+          </small>
+        </span>
+      </label>
+    </section>
+  );
 }
 
 function ArtistDetailView({ artistId }: { artistId: number }) {
@@ -7423,32 +7461,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     });
   }
 
-  async function downloadMissing(albumIds: number[]) {
-    if (!canWish || searchBusy) return;
-    await runBannerTask(async ({ sequence }) => {
-      publishBanner(sequence, { tone: 'busy', text: 'Searching selected missing releases…' });
-      try {
-        const jobId = await startLibraryV2ScopedSearch('artists', artistId, {
-          mode: 'missing',
-          album_ids: albumIds,
-        });
-        const state = await awaitBulkJobState(queryClient, jobId);
-        const stats = state.result as { searching?: number; dispatch_error?: string } | null;
-        if (state.error || stats?.dispatch_error)
-          throw new Error(state.error || stats?.dispatch_error);
-        publishBanner(sequence, {
-          tone: 'ok',
-          text: `Search started for ${stats?.searching ?? 0} missing tracks.`,
-        });
-      } catch (error) {
-        publishBanner(sequence, {
-          tone: 'err',
-          text: mutationErrorMessage(error, 'Download failed'),
-        });
-      }
-    });
-  }
-
   /** ldp-05: one switch, in both header shapes. Compact stays the default;
    *  arriving from a search result preselects the rich hero. */
   const headerToggle = (
@@ -7469,15 +7481,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       }
     />
   );
-
-  const downloadAction = artist ? (
-    <ArtistMissingDownload
-      artistName={artist.name}
-      albums={[...artist.albums, ...(artist.eps ?? []), ...artist.singles]}
-      disabled={!canWish || searchBusy}
-      onDownload={(ids) => void downloadMissing(ids)}
-    />
-  ) : null;
 
   return (
     <div className={styles.page}>
@@ -7562,7 +7565,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 <ActionButton
                   icon="settings"
                   label="Artist Settings"
-                  title="Quality profile, monitoring and future releases"
+                  title="Quality profile, monitoring, future releases and audiobook filing"
                   onClick={() => setShowArtistSettings(true)}
                 />
                 <ArtistToolsMenu
@@ -7606,7 +7609,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               artist={artist}
               onPickImage={() => setShowArtPicker(true)}
               headerToggle={headerToggle}
-              downloadAction={downloadAction}
             />
           ) : (
             <header className={styles.detailHeader}>
@@ -7628,8 +7630,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                     {artist.name}
                   </h1>
                   {headerToggle}
-                  {downloadAction}
-                  <NativeAudiobookRouteToggle name={artist.name} />
                 </div>
                 <p className={styles.subtitle}>
                   {artist.album_count} albums · {artist.single_count} singles
