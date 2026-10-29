@@ -8,7 +8,7 @@ from core.library.reconciliation_plan import audio_contradicts_local_title, vers
 from core.library_reorganize import _rename_track_in_place, _display_relative_to_root, _plan_from_tags
 from core.library import playlist_membership
 from core.repair_review_queue import list_cases
-from tests.library.test_review_acceptance import build_album, scan_case, ARTIST
+from tests.reconciliation.support.acceptance import build_album, scan_case, ARTIST
 
 
 def test_alias_rename_is_noop_but_distinct_collision_is_preserved(tmp_path):
@@ -176,7 +176,7 @@ def test_queue_summary_preserves_current_album_title(tmp_path, monkeypatch):
 
 def test_mixed_release_ids_are_ready_when_one_edition_clearly_fits_every_file(tmp_path, monkeypatch):
     from mutagen.flac import FLAC
-    from tests.library.test_review_acceptance import OTHER_RELEASE
+    from tests.reconciliation.support.acceptance import OTHER_RELEASE
     album = build_album(tmp_path, monkeypatch, 'supported')
     tags = FLAC(str(album.paths[1]))
     tags['musicbrainz_albumid'] = OTHER_RELEASE

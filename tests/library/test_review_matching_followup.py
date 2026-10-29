@@ -7,7 +7,7 @@ from core.library.reconciliation_plan import reconcile_folder
 from core.repair_jobs.library_reconciliation import (
     _release_display_metadata, _supported_current_edition, ScoredCandidate,
 )
-from tests.library.test_review_acceptance import build_album, scan_case
+from tests.reconciliation.support.acceptance import build_album, scan_case
 
 
 def version_pair():

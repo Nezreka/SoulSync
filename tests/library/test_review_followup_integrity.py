@@ -9,7 +9,7 @@ from core.library.reconciliation_fulfillment import (
 )
 from core.library.reconciliation_migration import migrate_album
 from core.library.reconciliation_organization import organization_context
-from tests.library.test_reconciliation_fulfillment import Database
+from tests.reconciliation.support.acquisition import Database
 
 
 @pytest.mark.parametrize('case', ['album:1:old', 'folder:1:old:abcdef', 'legacy-stable-key'])
@@ -87,7 +87,7 @@ def test_artist_rewrite_removes_stale_separate_list(tmp_path):
     from mutagen.flac import FLAC
     from core.tag_writer import write_tags_to_file
     from core.library.release_identity import read_release_evidence
-    from tests.library.test_reconciliation_end_to_end import _minimal_flac
+    from tests.reconciliation.support.audio import _minimal_flac
     path=tmp_path/'song.flac'; _minimal_flac(path, {})
     tags=FLAC(path);tags['artist']='No Doubt';tags['artists']=['Fred the Godson','KIDD'];tags.save()
     assert read_release_evidence(str(path))['artists_list'] == ['Fred the Godson','KIDD']
@@ -148,7 +148,7 @@ def test_legacy_album_and_track_id_changes_require_same_physical_file_and_profil
 def test_missed_publication_requires_matching_delivery_profile_and_embedded_identity(tmp_path,profile,release,reason,receipt_date,expected):
     from core.library.reconciliation_fulfillment import recover_published_requests, settle_assignments
     from core.repair_review_identity import review_case_key
-    from tests.library.test_reconciliation_end_to_end import _minimal_flac
+    from tests.reconciliation.support.audio import _minimal_flac
     db=Database(tmp_path/'receipt.db');path=tmp_path/'published.flac'
     _minimal_flac(path,{'musicbrainz_albumid':release,'musicbrainz_trackid':'recording'})
     details={'album_id':'album','profile_id':1,'source':'musicbrainz','release_id':'release','replacement_request':True}
@@ -169,7 +169,7 @@ def test_missed_publication_requires_matching_delivery_profile_and_embedded_iden
 def test_retagged_delivery_requires_unique_request_and_same_file_in_exact_album_plan(tmp_path,other_request,same_path,expected):
     from core.library.reconciliation_fulfillment import recover_published_requests
     from core.repair_review_identity import review_case_key
-    from tests.library.test_reconciliation_end_to_end import _minimal_flac
+    from tests.reconciliation.support.audio import _minimal_flac
     db=Database(tmp_path/'retagged.db');path=tmp_path/'published.flac'
     _minimal_flac(path,{'musicbrainz_albumid':'another-pressing','musicbrainz_trackid':'recording'})
     details={'album_id':'album','profile_id':1,'source':'musicbrainz','release_id':'requested-release','replacement_request':True}

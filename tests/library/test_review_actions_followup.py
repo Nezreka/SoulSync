@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 import pytest
-from tests.library.test_review_acceptance import build_album, scan_case, RELEASE
+from tests.reconciliation.support.acceptance import build_album, scan_case, RELEASE
 from core.library.reconciliation_fulfillment import record_request_on_connection
 from core.repair_jobs.library_reconciliation import LibraryReconciliationJob
 
@@ -67,7 +67,7 @@ def test_requested_replacement_stays_visible_when_the_old_file_is_already_matche
 @pytest.mark.parametrize('mode', ['keep', 'quarantine'])
 def test_existing_file_choice_is_staged_then_applied_with_both_files_guarded(tmp_path, monkeypatch, mode):
     album = build_album(tmp_path, monkeypatch, 'supported')
-    from tests.library.test_reconciliation_end_to_end import _minimal_flac
+    from tests.reconciliation.support.audio import _minimal_flac
     path = album.folder / 'unidentified.flac'
     _minimal_flac(path, {'title': 'Unidentified', 'artist': 'Unknown', 'album': 'Northbound'})
     album.durations[str(path)] = 200000
@@ -111,7 +111,7 @@ def test_exact_target_allows_small_duration_conflict_replacement(tmp_path, monke
 
 def test_tag_writer_reuses_the_open_file_for_placeholder_guards(tmp_path, monkeypatch):
     import core.tag_writer as writer
-    from tests.library.test_reconciliation_end_to_end import _minimal_flac
+    from tests.reconciliation.support.audio import _minimal_flac
     path = tmp_path / 'song.flac'
     _minimal_flac(path, {'title': 'Song', 'artist': 'Artist', 'album': 'Album'})
     original, opens = writer.MutagenFile, []

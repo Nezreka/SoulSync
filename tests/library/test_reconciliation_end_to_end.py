@@ -7,6 +7,8 @@ SoulSync SQLite schema. Only remote AcoustID/tracklist responses are stubbed.
 
 from __future__ import annotations
 
+from tests.reconciliation.support.audio import _Acoustid, _minimal_flac
+
 import json
 import struct
 
@@ -51,24 +53,6 @@ def test_distinctive_version_position_blocks_shorter_release_retag():
     assert _distinctive_position_conflict(files, selected, [alternate])
 
 
-class _Acoustid:
-    def __init__(self, matches):
-        self.matches = matches
-        self.fingerprints = 0
-        self.lookups = 0
-
-    def is_available(self):
-        return True, ''
-
-    def fingerprint_audio_file(self, path):
-        self.fingerprints += 1
-        return {'status': 'ok', 'duration_s': 200,
-                'fingerprint': path.rsplit('/', 1)[-1]}
-
-    def lookup_fingerprint_with_status(self, fingerprint, duration):
-        self.lookups += 1
-        match = self.matches[fingerprint]
-        return {'status': 'ok', 'recordings': match if isinstance(match, list) else [match]}
 
 
 def test_album_title_keeps_clean_local_name_when_source_repeats_its_qualifier():
@@ -467,17 +451,6 @@ def test_manual_assignment_is_saved_only_for_current_release_and_file(tmp_path):
     assert not worker._fix_reconciliation_assignment('track', '1', str(path), details)['success']
 
 
-def _minimal_flac(path, tags):
-    streaminfo = bytearray(34)
-    streaminfo[0:2] = struct.pack('>H', 4096)
-    streaminfo[2:4] = struct.pack('>H', 4096)
-    streaminfo[10] = 0x0A
-    streaminfo[12] = 0x70
-    path.write_bytes(b'fLaC' + bytes([0x80, 0, 0, 34]) + bytes(streaminfo))
-    audio = FLAC(str(path))
-    for key, value in tags.items():
-        audio[key] = [value]
-    audio.save()
 
 
 def _metadata_recommendation_album(tmp_path, monkeypatch, *, mixed=False, recordings=None):

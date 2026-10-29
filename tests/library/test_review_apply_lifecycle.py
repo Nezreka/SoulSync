@@ -10,7 +10,7 @@ from core.library.reconciliation_evidence import file_identity
 from core.repair_jobs.library_reconciliation import LibraryReconciliationJob, _suggest_filename
 from core.repair_worker import RepairWorker
 from core.reorganize_queue import ReorganizeQueue
-from tests.library.test_review_acceptance import build_album, scan_case
+from tests.reconciliation.support.acceptance import build_album, scan_case
 
 
 def test_reviewed_audio_is_reused_through_tag_write_and_followup_scan(tmp_path, monkeypatch):

@@ -10,9 +10,9 @@ from core.library.reconciliation_fulfillment import record_request, published_wi
 from core.library.reconciliation_organization import approve_organization, approved_organization, organization_context
 from core.repair_review_queue import classify_case, list_cases
 from core.repair_worker import RepairWorker
-from tests.library.test_reconciliation_fulfillment import Database
-from tests.library.test_review_acceptance import build_album, scan_case
-from tests.test_repair_review_queue import _Database
+from tests.reconciliation.support.acquisition import Database
+from tests.reconciliation.support.acceptance import build_album, scan_case
+from tests.reconciliation.support.queue import _Database
 
 
 def test_blocked_apply_distinguishes_blocker_from_unattempted_dependent_actions(tmp_path, monkeypatch):

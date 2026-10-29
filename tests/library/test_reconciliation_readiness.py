@@ -102,7 +102,7 @@ def test_release_shortlist_includes_conflict_beyond_six_equivalent_editions():
 
 
 def test_inferred_partial_can_be_reopened_without_losing_playlist_evidence(tmp_path, monkeypatch):
-    from tests.library.test_review_acceptance import build_album, scan_case
+    from tests.reconciliation.support.acceptance import build_album, scan_case
     album = build_album(tmp_path, monkeypatch, 'partial')
     album.context.playlist_membership = lambda: {'1': ['Playlist']}
     case = scan_case(album)
@@ -115,7 +115,7 @@ def test_inferred_partial_can_be_reopened_without_losing_playlist_evidence(tmp_p
 
 
 def test_filename_collision_blocks_the_entire_album(tmp_path, monkeypatch):
-    from tests.library.test_review_acceptance import build_album, scan_case
+    from tests.reconciliation.support.acceptance import build_album, scan_case
     import core.repair_jobs.library_reconciliation as job
     album = build_album(tmp_path, monkeypatch, 'supported')
     monkeypatch.setattr(job, '_suggest_filename',
@@ -129,7 +129,7 @@ def test_filename_collision_blocks_the_entire_album(tmp_path, monkeypatch):
 
 
 def test_complete_single_is_not_labelled_as_an_incomplete_playlist_acquisition(tmp_path, monkeypatch):
-    from tests.library.test_review_acceptance import build_album, scan_case
+    from tests.reconciliation.support.acceptance import build_album, scan_case
     album = build_album(tmp_path, monkeypatch, 'partial')
     album.slots[:] = album.slots[:1]
     album.context.playlist_membership = lambda: {'1': ['Playlist']}
@@ -141,7 +141,7 @@ def test_complete_single_is_not_labelled_as_an_incomplete_playlist_acquisition(t
 
 def test_numbering_recovery_survives_reindexing_but_not_replacement(tmp_path):
     from core.library.reconciliation_choices import flattened_numbering_history, recovers_flattened_numbering
-    from tests.library.test_review_acceptance import MusicDatabase, RepairWorker
+    from tests.reconciliation.support.acceptance import MusicDatabase, RepairWorker
     db = MusicDatabase(str(tmp_path / 'music.db'))
     worker = RepairWorker(database=db)
     details = {'numbering_mode': 'digital', 'release_disc_count': 2,

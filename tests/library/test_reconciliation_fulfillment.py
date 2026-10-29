@@ -1,3 +1,5 @@
+from tests.reconciliation.support.acquisition import Database
+
 import json
 import sqlite3
 
@@ -8,14 +10,6 @@ from core.repair_review_identity import review_case_key
 from core.repair_worker import RepairWorker
 
 
-class Database:
-    def __init__(self, path):
-        self.path = str(path)
-        with self._get_connection() as conn:
-            conn.execute('CREATE TABLE wishlist_tracks(profile_id INTEGER, spotify_track_id TEXT, spotify_data TEXT)')
-
-    def _get_connection(self):
-        return sqlite3.connect(self.path)
 
 
 def test_published_request_survives_wishlist_removal_until_correct_assignment(tmp_path):
