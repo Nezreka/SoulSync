@@ -210,12 +210,15 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
   });
 
-  it('uses the existing rich header for immersive arrivals and restores tools after My Library', async () => {
+  it('uses the existing rich header for immersive arrivals and keeps the artist tools on show', async () => {
     const { router } = renderArtist('/library?artist=1&view=discovery&immersive=true');
     await screen.findByRole('heading', { name: 'Portishead' });
     expect(router.state.location.search).toMatchObject({ header: 'rich', releaseView: 'cards' });
-    expect(screen.queryByRole('button', { name: 'Artist Settings' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Automatic Search' })).not.toBeInTheDocument();
+    // dev showed the artist tools the moment the page opened
+    expect(screen.getByRole('button', { name: 'Artist Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Automatic Search' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Interactive Search' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'History' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Table View' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'My Library' }));
     await screen.findByRole('button', { name: 'Artist Settings' });

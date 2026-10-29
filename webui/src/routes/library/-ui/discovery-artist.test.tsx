@@ -44,7 +44,7 @@ describe('an artist the catalogue does not hold', () => {
         HttpResponse.json({ success: true, pending: 0, failed: 0 }),
       ),
       http.get('/api/library/v2/discovery/artist', () =>
-        HttpResponse.json({ success: true, artist_id: resolveResponse }),
+        HttpResponse.json({ success: true, artist_id: resolveResponse, owned: true }),
       ),
       http.post('/api/library/v2/discovery/artist', async ({ request }) => {
         materializeCalls.push(await request.json());

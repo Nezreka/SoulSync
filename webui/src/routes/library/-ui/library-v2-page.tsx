@@ -6796,7 +6796,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   // like every other Library V2 view setting.
   const releaseView = search.releaseView;
   const headerMode = search.header;
-  const immersive = search.immersive && releasesMode === 'all';
+  // the artist tools stay visible on arrival from an artist page, the way dev
+  // showed them. immersive only remembers where the visit started.
   const { filters, setFilters } = useDiscographyFilters();
   const artistQuery = useQuery(libraryV2ArtistQueryOptions(artistId));
   const artistProviderIds = artistQuery.data?.provider_ids ?? {};
@@ -7046,7 +7047,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
         <div className={styles.loading}>Loading…</div>
       ) : (
         <>
-          {!immersive ? (
+          {(
             <div className={styles.pageToolbar}>
               <div className={styles.toolbarGroup}>
                 {/* The primary bar as named actions, so a setting can later
@@ -7135,7 +7136,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 />
               </div>
             </div>
-          ) : null}
+          )}
 
           {grabBanner ? (
             <StatusNotice

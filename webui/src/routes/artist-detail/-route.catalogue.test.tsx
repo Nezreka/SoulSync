@@ -192,6 +192,29 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     expect(await screen.findByText('Drukqs')).toBeInTheDocument();
   });
 
+  it('sends an in-app link to a catalogued but unowned artist to the artist page', async () => {
+    resolved = 7;
+    owned = false;
+    const { router } = renderAt(
+      '/library?view=discovery&immersive=true&discover=deezer%3A2481&discoverName=Aphex%20Twin',
+    );
+
+    expect(await screen.findByText('Drukqs')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/artist-detail/deezer/2481');
+  });
+
+  it('sends an in-app artist link from a search-only profile to the artist page', async () => {
+    window.SoulSyncWebShellBridge = createShellBridge({
+      isPageAllowed: vi.fn((page: string) => page !== 'library'),
+    });
+    const { router } = renderAt(
+      '/library?view=discovery&immersive=true&discover=deezer%3A2481&discoverName=Aphex%20Twin',
+    );
+
+    expect(await screen.findByText('Drukqs')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/artist-detail/deezer/2481');
+  });
+
   it('still shows the provider page when the catalogue lookup fails', async () => {
     resolveFails = true;
     renderAt('/artist-detail/spotify/sp-1?name=Aphex%20Twin');
