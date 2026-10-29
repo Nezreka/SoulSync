@@ -2,10 +2,10 @@ import json
 import sqlite3
 from types import SimpleNamespace
 
-from core import repair_review_search as search
-from core.library.reconciliation_evidence import file_identity
-from core.library.reconciliation_fulfillment import record_request, published_wishlist_track, recover_published_requests
-from core.repair_review_identity import review_case_key
+from core.reconciliation import search as search
+from core.reconciliation.evidence import file_identity
+from core.reconciliation.fulfillment import record_request, published_wishlist_track, recover_published_requests
+from core.reconciliation.identity import review_case_key
 from core.repair_worker import RepairWorker
 
 
@@ -90,7 +90,7 @@ def test_legacy_cross_provider_recovery_needs_exact_verified_assignment(tmp_path
 def test_disc_totals_write_all_containers_and_keep_matching_cache_reusable():
     from mutagen.id3 import ID3
     from core.tag_writer import _write_id3, _write_vorbis, _write_mp4
-    from core.library.reconciliation_match_cache import input_key
+    from core.reconciliation.match_cache import input_key
     arguments = [None] * 8 + [1, None]
     id3 = SimpleNamespace(tags=ID3())
     vorbis, mp4 = {}, {}
@@ -109,7 +109,7 @@ def test_disc_totals_write_all_containers_and_keep_matching_cache_reusable():
 
 
 def test_audio_copy_choice_is_scoped_and_automatic_video_exclusion_remains(tmp_path, monkeypatch):
-    from core.library.reconciliation_audio_copy import save_choice, load_choices
+    from core.reconciliation.audio_copy import save_choice, load_choices
     from core.repair_jobs import library_reconciliation as job
     db = SimpleNamespace(_get_connection=lambda: sqlite3.connect(str(tmp_path / 'video.db')))
     save_choice(db, 'album', 'musicbrainz', 'video-release', True)
@@ -141,7 +141,7 @@ def test_folder_preview_uses_planned_total_and_preserves_audio_disc_two():
 
 
 def test_new_disc_evidence_retains_choices_only_when_the_proposed_effects_match():
-    from core.library.reconciliation_choices import same_annotated_evidence
+    from core.reconciliation.choices import same_annotated_evidence
     original = {'current_tags': {'title': 'Song'}, 'changes': {'title': {'old': 'Song', 'new': 'Song!'}}}
     enriched = {**original, 'current_tags': {'title': 'Song', 'total_discs': 2}}
     assert same_annotated_evidence(original, enriched)
@@ -150,7 +150,7 @@ def test_new_disc_evidence_retains_choices_only_when_the_proposed_effects_match(
 
 
 def test_scan_refreshes_legacy_tag_cache_without_repeating_audio_lookup(tmp_path, monkeypatch):
-    from core.library.reconciliation_evidence import ReconciliationEvidence
+    from core.reconciliation.evidence import ReconciliationEvidence
     from core.repair_jobs import library_reconciliation as job
     from core.library import release_identity
     db = SimpleNamespace(_get_connection=lambda: sqlite3.connect(str(tmp_path / 'evidence.db')))

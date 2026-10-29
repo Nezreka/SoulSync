@@ -299,7 +299,7 @@ def catalogue_scan(fn):
         force = kwargs.pop('refresh_catalogue', False)
         settings = self._get_settings(context)
         session = CatalogueSession(context.db, force=force, enabled=settings.get('catalogue_cache_enabled', True))
-        from core.library.reconciliation_match_cache import MatchingCache
+        from core.reconciliation.match_cache import MatchingCache
         session.matching = MatchingCache(context.db, settings.get('matching_cache_mode', 'off'))
         token = current.set(session)
         start = time.perf_counter()
@@ -335,7 +335,7 @@ def deferred(kind):
                 session.pending.append((kind, lambda: fn(*args, **kwargs)))
                 if kind == 'finding':
                     return False
-                from core.repair_review_identity import review_case_key
+                from core.reconciliation.identity import review_case_key
                 return review_case_key(args[1], None)
             return fn(*args, **kwargs)
         return run

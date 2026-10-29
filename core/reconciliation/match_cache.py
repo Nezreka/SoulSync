@@ -14,7 +14,7 @@ import time
 import unicodedata
 import zlib
 
-from core.library.reconciliation_catalogue import current, stage
+from core.reconciliation.catalogue import current, stage
 
 MAX_ROWS = 25_000
 MAX_BYTES = 128 * 1024 * 1024
@@ -89,7 +89,7 @@ def policy_identity():
     # Include transitive semantic helpers, not the application commit: a docs
     # deployment should hit, a normalization/solver/runtime change must miss.
     root = Path(__file__).resolve().parents[2]
-    paths = ('core/library/reconciliation_plan.py', 'core/matching/assignment.py',
+    paths = ('core/reconciliation/plan.py', 'core/matching/assignment.py',
              'core/matching/audio_verification.py', 'core/matching/artist_aliases.py', 'core/text/fold.py',
              'core/text/title_match.py')
     sources = [hashlib.sha256((root / path).read_bytes()).hexdigest() for path in paths]
@@ -377,7 +377,7 @@ class MatchingCache:
 
 
 def cached_match(files, slots, *, source='', release_id='', forced_pairs=None, compute=None):
-    from core.library.reconciliation_plan import reconcile_folder
+    from core.reconciliation.plan import reconcile_folder
     compute = compute or reconcile_folder
     session = current.get()
     cache = getattr(session, 'matching', None)

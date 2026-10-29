@@ -319,7 +319,7 @@ def test_changed_ready_proposal_blocks_entire_album_after_scan_wait(tmp_path):
 
 
 def test_confirmed_batch_snapshot_survives_startup_race(tmp_path):
-    from core.repair_review_queue import ready_batch_preview
+    from core.reconciliation.queue import ready_batch_preview
     db = MusicDatabase(str(tmp_path / 'm.db'))
     worker = _worker(db, tmp_path)
     for index in (1, 2):

@@ -32,7 +32,7 @@ class CacheEvictorJob(RepairJob):
         result = JobResult()
 
         try:
-            from core.library.reconciliation_catalogue import ensure_schema, evict, connection
+            from core.reconciliation.catalogue import ensure_schema, evict, connection
             with connection(context.db) as conn:
                 ensure_schema(conn)
                 removed = evict(conn)
@@ -43,8 +43,8 @@ class CacheEvictorJob(RepairJob):
             result.errors += 1
 
         try:
-            from core.library.reconciliation_catalogue import connection
-            from core.library.reconciliation_match_cache import ensure_schema as ensure_matches, evict as evict_matches
+            from core.reconciliation.catalogue import connection
+            from core.reconciliation.match_cache import ensure_schema as ensure_matches, evict as evict_matches
             with connection(context.db) as conn:
                 ensure_matches(conn)
                 removed = evict_matches(conn)

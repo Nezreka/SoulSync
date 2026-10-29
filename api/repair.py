@@ -345,7 +345,7 @@ def repair_review_queue_apply_ready():
         return jsonify({'error': 'Repair worker not initialized'}), 503
     data = request.get_json(silent=True) or {}
     try:
-        from core.repair_review_queue import ready_batch_preview
+        from core.reconciliation.queue import ready_batch_preview
         case_id = str(request.args.get('case_id') or data.get('case_id') or '')
         if request.method == 'GET':
             return jsonify(ready_batch_preview(worker.db, case_id=case_id))

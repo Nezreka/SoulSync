@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import requests
 
-from core.library import reconciliation_catalogue as catalogue
+from core.reconciliation import catalogue as catalogue
 
 
 class DB:

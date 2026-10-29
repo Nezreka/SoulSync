@@ -35,7 +35,7 @@ def _scope(db, album_id):
 def approve_organization(db, album_id, context):
     """Internal handoff after reviewed actions finish, never accepted from an API."""
     scope = _scope(db, album_id)
-    from core.repair_review_policy import effective_case_modes, finding_category
+    from core.reconciliation.policy import effective_case_modes, finding_category
     conn = db._get_connection()
     try:
         for case_id, _ in scope['plans']:

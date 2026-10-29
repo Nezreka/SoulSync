@@ -24,7 +24,7 @@ from mutagen.easyid3 import EasyID3
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import LibraryReconciliationJob
 from core.repair_worker import RepairWorker
-from core.repair_review_queue import ready_batch_preview
+from core.reconciliation.queue import ready_batch_preview
 from database.music_database import MusicDatabase
 from tests.reconciliation.support.audio import _Acoustid, _minimal_flac
 

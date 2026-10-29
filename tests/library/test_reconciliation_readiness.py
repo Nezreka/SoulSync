@@ -1,8 +1,8 @@
 """Boundaries for reducing unnecessary queue decisions without partial apply."""
 import pytest
 
-from core.library.reconciliation_metadata import credit_preserves_artists
-from core.repair_review_policy import _finding_tier, finding_category
+from core.reconciliation.metadata import credit_preserves_artists
+from core.reconciliation.policy import _finding_tier, finding_category
 
 
 @pytest.mark.parametrize(('old', 'new', 'names', 'aliases', 'supported'), [
@@ -64,7 +64,7 @@ def test_routine_numbering_still_exposes_independent_metadata_and_recovery():
 
 
 def candidate(release, extra_title='Bonus', *, position=1, recording='home'):
-    from core.library.reconciliation_candidates import ScoredCandidate
+    from core.reconciliation.candidates import ScoredCandidate
     slots = [{'title': 'Home', 'recording_mbid': recording, 'disc_number': 1, 'track_number': position},
              {'title': extra_title, 'recording_mbid': extra_title, 'disc_number': 1, 'track_number': 2}]
     return ScoredCandidate(1, 1, 0, 'musicbrainz', release, slots,
@@ -140,7 +140,7 @@ def test_complete_single_is_not_labelled_as_an_incomplete_playlist_acquisition(t
 
 
 def test_numbering_recovery_survives_reindexing_but_not_replacement(tmp_path):
-    from core.library.reconciliation_choices import flattened_numbering_history, recovers_flattened_numbering
+    from core.reconciliation.choices import flattened_numbering_history, recovers_flattened_numbering
     from tests.reconciliation.support.acceptance import MusicDatabase, RepairWorker
     db = MusicDatabase(str(tmp_path / 'music.db'))
     worker = RepairWorker(database=db)
@@ -215,8 +215,8 @@ def test_filename_cleanup_is_not_a_title_tag_convention():
 
 
 def test_requested_downloads_hold_only_their_slots_until_assignment():
-    from core.repair_review_policy import case_mode
-    from core.repair_review_queue import classify_case
+    from core.reconciliation.policy import case_mode
+    from core.reconciliation.queue import classify_case
     ready = {'finding_type': 'reconciliation_metadata', 'details': {
         'confidence': 'clear', 'changes': {'musicbrainz_recording_id': {'old': '', 'new': 'id'}}}}
     waiting = {'finding_type': 'reconciliation_missing', 'details': {'fulfillment_state': 'wishlisted'}}

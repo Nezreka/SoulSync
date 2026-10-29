@@ -6,9 +6,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from core.library import reconciliation_match_cache as cache
-from core.library.reconciliation_catalogue import current
-from core.library.reconciliation_plan import reconcile_folder
+from core.reconciliation import match_cache as cache
+from core.reconciliation.catalogue import current
+from core.reconciliation.plan import reconcile_folder
 
 
 class DB:

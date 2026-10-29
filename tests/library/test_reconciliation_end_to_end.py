@@ -15,7 +15,7 @@ import struct
 import pytest
 from mutagen.flac import FLAC
 
-from core.library.reconciliation_evidence import ReconciliationEvidence
+from core.reconciliation.evidence import ReconciliationEvidence
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import (
     LibraryReconciliationJob, _album_titles_compatible, _candidate_evidence,
@@ -589,7 +589,7 @@ def test_lone_track_keeps_album_context_ahead_of_format_and_country(tmp_path, mo
 @pytest.mark.parametrize(('multidisc', 'reversed_source'), [(True, False), (True, True), (False, False)])
 def test_completed_flattening_is_recovered_and_apply_rescan_is_stable(tmp_path, monkeypatch, multidisc, reversed_source):
     import core.repair_jobs.library_reconciliation as module
-    from core.library import reconciliation_choices as choices
+    from core.reconciliation import choices as choices
     db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
     monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args, **_kwargs: [
         {'id': str(index + 1), 'name': title, 'artists': [{'name': 'Lamb of God'}],
@@ -655,7 +655,7 @@ def test_completed_flattening_is_recovered_and_apply_rescan_is_stable(tmp_path, 
 
 
 def test_mixed_album_metadata_requires_review_and_can_clear_only_release_ids(tmp_path, monkeypatch):
-    from core.repair_review_policy import _finding_tier
+    from core.reconciliation.policy import _finding_tier
     db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch, mixed=True)
     result = LibraryReconciliationJob().scan(context)
     assert not result.errors
@@ -772,7 +772,7 @@ def test_missing_album_title_does_not_disable_preservation_of_useful_title(tmp_p
 
 
 def test_album_consistency_distinguishes_missing_values_from_conflicts():
-    from core.library.reconciliation_metadata import album_consistency
+    from core.reconciliation.metadata import album_consistency
     files = [{'tags': {'album': 'Album', 'musicbrainz_release_id': 'first'}},
              {'tags': {'album': '  Album  ', 'musicbrainz_release_id': ''}},
              {'tags': {}}]
@@ -896,7 +896,7 @@ def test_stored_artist_aliases_support_cross_script_audio_identity(tmp_path, mon
 
 
 def test_provider_independent_recording_identity_requires_unique_corroboration():
-    from core.library.reconciliation_metadata import confirmed_recording
+    from core.reconciliation.metadata import confirmed_recording
     slot = {'title': 'Home', 'artist': 'Artist', 'duration_ms': 200000}
     recording = {'mbid': '80951433-fbbf-45e8-b906-e820652b9ca5', 'title': 'Home', 'artist': 'Artist', 'score': .99}
     file = {'tags': {'duration_ms': 200000}, 'acoustid': {'status': 'ok', 'recordings': [recording]}}
@@ -919,7 +919,7 @@ def test_provider_independent_recording_identity_requires_unique_corroboration()
 ])
 def test_recording_id_removal_preserves_composer_credits_and_catalogue_aliases(local_title, catalogue_title):
     from types import SimpleNamespace
-    from core.library.reconciliation_metadata import recording_id_conflict
+    from core.reconciliation.metadata import recording_id_conflict
     mbid = '61a45c1a-a717-4c58-abba-0563000f8a1d'
     file = {'tags': {'mbid': mbid}, 'acoustid': {'status': 'no_match'}}
     slot = {'title': local_title, 'artist': 'Alexandre Tharaud'}
@@ -935,7 +935,7 @@ def test_recording_id_removal_preserves_composer_credits_and_catalogue_aliases(l
 
 def test_ambiguous_replacement_ids_offer_reviewed_removal_after_catalogue_check(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    from core.repair_review_policy import _finding_tier
+    from core.reconciliation.policy import _finding_tier
     db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
     first = context.acoustid_client.matches[paths[0].name]
     context.acoustid_client.matches[paths[0].name] = [first, {**first, 'mbid': '9a43591f-aa6c-45a1-b7fd-b85e79a1f2d3'}]
@@ -1014,7 +1014,7 @@ def test_explanatory_annotations_keep_saved_choice_but_new_conflict_reopens_it(t
 @pytest.mark.parametrize('substantive_change', [None, 'assignment', 'target', 'numbering', 'recording'])
 def test_new_display_labels_do_not_hide_changed_saved_choice_targets(substantive_change):
     from copy import deepcopy
-    from core.library.reconciliation_choices import same_annotated_evidence
+    from core.reconciliation.choices import same_annotated_evidence
     previous = {
         'recording_mbid': 'recording-a',
         'assignment_options': [{'key': 'slot-a', 'title': 'Song', 'track_number': 1}],
@@ -1551,7 +1551,7 @@ def test_tag_cache_reuses_unchanged_file_and_invalidates_on_write(tmp_path):
 
 
 def test_audio_lookup_error_is_retried_after_cache_reopen(tmp_path, monkeypatch):
-    monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
+    monkeypatch.setattr('core.reconciliation.evidence.time.sleep', lambda _delay: None)
     db = MusicDatabase(str(tmp_path / 'music.db'))
     path = tmp_path / 'Southbound.flac'
     path.write_bytes(b'fixture')
@@ -1574,7 +1574,7 @@ def test_audio_lookup_error_is_retried_after_cache_reopen(tmp_path, monkeypatch)
 
 
 def test_transient_audio_lookup_error_recovers_in_same_scan(tmp_path, monkeypatch):
-    monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
+    monkeypatch.setattr('core.reconciliation.evidence.time.sleep', lambda _delay: None)
     db = MusicDatabase(str(tmp_path / 'music.db'))
     path = tmp_path / 'Lucky.flac'
     path.write_bytes(b'fixture')
@@ -1600,7 +1600,7 @@ def test_transient_audio_lookup_error_recovers_in_same_scan(tmp_path, monkeypatc
 
 def test_exhausted_audio_lookup_opens_circuit_but_cached_evidence_remains_available(
         tmp_path, monkeypatch):
-    monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
+    monkeypatch.setattr('core.reconciliation.evidence.time.sleep', lambda _delay: None)
     db = MusicDatabase(str(tmp_path / 'music.db'))
     failed = [tmp_path / f'Failed {index}.flac' for index in range(3)]
     deferred = tmp_path / 'Deferred.flac'
@@ -1636,7 +1636,7 @@ def test_exhausted_audio_lookup_opens_circuit_but_cached_evidence_remains_availa
 
 def test_isolated_api_errors_are_scoped_to_files_until_circuit_opens(tmp_path, monkeypatch):
     import core.repair_jobs.library_reconciliation as module
-    monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
+    monkeypatch.setattr('core.reconciliation.evidence.time.sleep', lambda _delay: None)
 
     root = tmp_path / 'music'
     root.mkdir()
@@ -1719,7 +1719,7 @@ def test_file_fingerprint_error_does_not_hide_the_rest_of_its_album(tmp_path, mo
 def test_api_error_preserves_affected_folder_but_retires_other_stale_findings(
         tmp_path, monkeypatch):
     import core.repair_jobs.library_reconciliation as module
-    monkeypatch.setattr('core.library.reconciliation_evidence.time.sleep', lambda _delay: None)
+    monkeypatch.setattr('core.reconciliation.evidence.time.sleep', lambda _delay: None)
 
     root = tmp_path / 'music'
     failed = root / 'A failed'
@@ -3111,7 +3111,7 @@ def test_targeted_reanalysis_follows_organized_album_and_retires_old_case(tmp_pa
 def test_failed_catalogue_reanalysis_preserves_plan_and_findings(tmp_path, monkeypatch):
     import requests
     import core.repair_jobs.library_reconciliation as module
-    from core.library.reconciliation_catalogue import current
+    from core.reconciliation.catalogue import current
 
     root = tmp_path / 'music'
     root.mkdir()

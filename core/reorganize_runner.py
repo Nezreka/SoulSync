@@ -145,7 +145,7 @@ def build_runner(
             ).fetchone()
             old_path = row[0] if row else None
             if audio_source_path and os.path.isfile(new_path):
-                from core.library.reconciliation_evidence import preserve_audio_evidence
+                from core.reconciliation.evidence import preserve_audio_evidence
                 # Rename-only organization preserves both bytes and mtime.
                 # Match the old cached stat to the moved file before reusing it.
                 stat = os.stat(new_path)
@@ -215,7 +215,7 @@ def build_runner(
                 if getattr(item, 'review_context', None):
                     kwargs['review_context'] = item.review_context
                 preview = preview_album_reorganize(**kwargs)
-                from core.library.reconciliation_evidence import evidence_path_before_move
+                from core.reconciliation.evidence import evidence_path_before_move
                 with get_database()._get_connection() as conn:
                     for track in preview.get('tracks') or []:
                         if track.get('current_path_abs'):
@@ -271,8 +271,8 @@ def build_runner(
 
     @album_maintenance_mutation
     def notifying_runner(item):
-        from core.library.reconciliation_authority import conflict
-        from core.library.reconciliation_organization import approved_organization
+        from core.reconciliation.authority import conflict
+        from core.reconciliation.organization import approved_organization
         db = get_database()
         approved = approved_organization(db, item)
         protected = None if approved else conflict(db, 'path_mismatch', entity_type='album', entity_id=item.album_id)

@@ -4,7 +4,7 @@ import threading
 
 from core.library.maintenance_lock import mutation_lock
 from core.repair_jobs.library_reconciliation import LibraryReconciliationJob
-from core.repair_review_queue import ready_batch_preview
+from core.reconciliation.queue import ready_batch_preview
 from tests.reconciliation.support.acceptance import build_album, scan_case, recording_id
 
 

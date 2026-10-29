@@ -29,10 +29,10 @@ from core.metadata_service import (
     get_primary_source,
 )
 from core.library.path_resolver import resolve_library_file_path
-from core.library.reconciliation_inventory import refresh_scope_for_finding
-from core.repair_review_identity import missing_slot_key, review_case_key
-from core.library import reconciliation_choices as review_choices
-from core import repair_review_queue
+from core.reconciliation.inventory import refresh_scope_for_finding
+from core.reconciliation.identity import missing_slot_key, review_case_key
+from core.reconciliation import choices as review_choices
+from core.reconciliation import queue as repair_review_queue
 from core.repair_jobs import get_all_jobs
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -1128,7 +1128,7 @@ class RepairWorker:
                 self._refresh_published_review_albums()
                 if time.monotonic() - getattr(self, '_replacement_checked_at', 0) >= 30:
                     self._replacement_checked_at = time.monotonic()
-                    from core.library.reconciliation_replacement import advance
+                    from core.reconciliation.replacement import advance
                     with self._review_apply_lock:
                         advance(self)
                 # Check force-run queue even when disabled (user explicitly requested)
@@ -1162,7 +1162,7 @@ class RepairWorker:
 
     def _refresh_published_review_albums(self):
         """Coalesce published downloads into one discovery refresh per album."""
-        from core.library.reconciliation_fulfillment import ensure_schema
+        from core.reconciliation.fulfillment import ensure_schema
         conn = self.db._get_connection()
         try:
             ensure_schema(conn)
@@ -1536,7 +1536,7 @@ class RepairWorker:
             if existing:
                 existing_id, existing_status, resolved_at = existing[0], existing[1], existing[2]
                 if job_id == 'library_reconciliation':
-                    from core.library.reconciliation_choices import same_relocated_evidence, same_annotated_evidence
+                    from core.reconciliation.choices import same_relocated_evidence, same_annotated_evidence
                     try:
                         prior_details = json.loads(existing[3] or '{}')
                     except (TypeError, ValueError):
@@ -1924,7 +1924,7 @@ class RepairWorker:
 
     def get_review_case(self, case_id: str, *, status: str = 'pending',
                         job_id: str = '') -> Optional[dict]:
-        from core.library.reconciliation_redirects import resolve_case
+        from core.reconciliation.redirects import resolve_case
         case_id = resolve_case(self.db, case_id)
         bulk = getattr(self, '_bulk_fix_state', {})
         snapshot = getattr(self, '_review_operation_snapshots', {}).get(case_id)
@@ -1983,7 +1983,7 @@ class RepairWorker:
                 case['last_operation'] = {key: report.get(key) for key in (
                     'operation_id', 'fixed', 'failed', 'organize_failed', 'error')}
                 if report.get('organize_failed'):
-                    from core.library.reconciliation_organization import approve_organization, retry_organization_context
+                    from core.reconciliation.organization import approve_organization, retry_organization_context
                     try:
                         approval = approve_organization(self.db, case['album_id'], retry_organization_context(self.db, case['album_id'], report))
                         case['organization_retry_signature'] = approval['review_signature']
@@ -2091,7 +2091,7 @@ class RepairWorker:
 
     def _schedule_album_refresh(self, case_id: str, folder: str, *, scope: str = 'album', refresh_catalogue: bool = False) -> bool:
         """Replan only the changed logical album after a review action."""
-        from core.library.reconciliation_inventory import ScanScope
+        from core.reconciliation.inventory import ScanScope
         scope = ScanScope(scope).value
         snapshot = getattr(self, '_review_refresh_snapshots', {}).pop(case_id, None)
         if not folder:
@@ -2292,7 +2292,7 @@ class RepairWorker:
                 from core.repair_jobs.library_reconciliation import (
                     candidate_preview, _score_release_candidates, _read_file_tags, _mark_lossy_companions,
                 )
-                from core.library.reconciliation_evidence import ReconciliationEvidence
+                from core.reconciliation.evidence import ReconciliationEvidence
                 paths = list(dict.fromkeys(row['file_path'] for row in plan.get('assignments') or []
                                            if row.get('file_path')))
                 if not paths:
@@ -2326,7 +2326,7 @@ class RepairWorker:
                                            score=score, locked=True):
             return {'success': False, 'error': 'Could not pin that album release'}
         review_choices.remember_release_choice(self.db, album_id, source, release_id)
-        from core.library.reconciliation_audio_copy import save_choice
+        from core.reconciliation.audio_copy import save_choice
         save_choice(self.db, album_id, source, release_id, bool(audio_copy and (video_only or candidate.get('audio_copy_of_video'))))
         queued = self._schedule_review_refresh(
             case_id, case.get('folder') or '', case, scope='discovery')
@@ -2605,7 +2605,7 @@ class RepairWorker:
                          (str(case['album_id']), plan.get('source') or '', plan.get('release_id') or ''))
             conn.execute('DELETE FROM reconcile_wanted_slots WHERE album_id=?', (str(case['album_id']),))
             # Only this profile's requests for this exact reviewed release are withdrawn.
-            from core.library.reconciliation_fulfillment import ensure_schema
+            from core.reconciliation.fulfillment import ensure_schema
             ensure_schema(conn)
             requests = conn.execute('SELECT profile_id,source,release_id,source_track_id FROM reconcile_fulfillment WHERE case_id=? AND state IN (\'requested\',\'published\')', (case_id,)).fetchall()
             for profile, source, release, track in requests:
@@ -3608,7 +3608,7 @@ class RepairWorker:
     def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
                      file_path: str, details: dict) -> dict:
         """Route a fix to the correct handler based on finding_type."""
-        from core.library.reconciliation_authority import conflict
+        from core.reconciliation.authority import conflict
         blocked = conflict(self.db, finding_type, entity_type=entity_type,
                            entity_id=entity_id, file_path=file_path, details=details)
         if blocked:
@@ -5250,7 +5250,7 @@ class RepairWorker:
             data['track_number'] = details['track_number']
         if not data:
             return {'success': False, 'error': 'The download record has nothing to write'}
-        from core.library.reconciliation_authority import conflict
+        from core.reconciliation.authority import conflict
         blocked = conflict(self.db, 'library_retag', file_path=resolved,
                            details={'db_data': data})
         if blocked:
@@ -5307,7 +5307,7 @@ class RepairWorker:
             return 'The reviewed file is no longer at this path'
         try:
             stat = os.stat(file_path)
-            from core.library.reconciliation_evidence import file_identity
+            from core.reconciliation.evidence import file_identity
             identity = details.get('file_identity')
             changed = []
             if stat.st_size != details.get('size_bytes'):
@@ -5378,7 +5378,7 @@ class RepairWorker:
 
     @staticmethod
     def _refresh_reconciliation_assignment(cursor, file_path, final_path, details):
-        from core.library.reconciliation_evidence import preserve_audio_evidence
+        from core.reconciliation.evidence import preserve_audio_evidence
         preserve_audio_evidence(cursor, file_path, final_path,
             size_bytes=details.get('size_bytes'), mtime_ns=details.get('mtime_ns'),
             fingerprint_key=details.get('fingerprint_key'))
@@ -5617,7 +5617,7 @@ class RepairWorker:
             return {'success': False, 'error': str(exc)}
         finally:
             conn.close()
-        from core.library.reconciliation_store import persist_album_plan
+        from core.reconciliation.store import persist_album_plan
         conn = self.db._get_connection()
         try:
             saved = conn.execute('SELECT plan_json FROM reconcile_album_plans WHERE album_id=? AND source=? AND release_id=?',
@@ -5792,7 +5792,7 @@ class RepairWorker:
             conn.close()
         active_scope = (row[0] if row and row[1] == details.get('source') and
                         row[2] == details.get('release_id') else '')
-        from core.library.reconciliation_evidence import (
+        from core.reconciliation.evidence import (
             album_folders_audio_path_digest, folder_audio_path_digest,
         )
         folder = details.get('album_folder')
@@ -6001,7 +6001,7 @@ class RepairWorker:
                 return {'success': True, 'action': 'version_requested',
                         'message': f'{replacement_name} requested; the local version was kept'}
         if action == 'replace':
-            from core.library.reconciliation_replacement import approve
+            from core.reconciliation.replacement import approve
             approve(self.db, file_path, {**details, 'old_stored_path': stored_path if track_id else file_path})
             return {'success': True, 'action': 'replacement_requested',
                     'message': 'Replacement scheduled. The current copy stays playable until the new copy and its playlist references are verified.'}
@@ -8625,18 +8625,18 @@ class RepairWorker:
             # could make that copy raise mid-iteration.
             self._review_operation_snapshots = {key: self.get_review_case(key)
                 for key, _ in review_case_folders or []}
-            from core.library.reconciliation_organization import organization_context
+            from core.reconciliation.organization import organization_context
             self._review_organization_contexts = {str(album_id): organization_context(
                 self.db, album_id, [json.loads(raw) for raw in (reviewed_details or {}).values()
                                    if str(json.loads(raw).get('album_id')) == str(album_id)])
                 for album_id in organize_album_ids or []}
             if organization_retry:
-                from core.library.reconciliation_organization import retry_organization_context
+                from core.reconciliation.organization import retry_organization_context
                 from core.repair_operation_reports import latest_case_report
                 report = latest_case_report(self.db, review_case_id) or {}
                 self._review_organization_contexts = {str(album_id): retry_organization_context(
                     self.db, album_id, report) for album_id in organize_album_ids or []}
-            from core.library.reconciliation_organization import _scope
+            from core.reconciliation.organization import _scope
             retry_scopes = ({str(album_id): _scope(self.db, album_id) for album_id in organize_album_ids or []}
                             if organization_retry else {})
             self._bulk_fix_state = {
@@ -8950,13 +8950,13 @@ class RepairWorker:
                 state['phase'] = 'queueing_organization'
                 state['organizing_album_ids'] = list(dict.fromkeys(str(a) for a in organize_album_ids))
                 from core.reorganize_queue import get_queue
-                from core.library.reconciliation_organization import approve_organization
+                from core.reconciliation.organization import approve_organization
                 queue = get_queue()
                 organization_ids = []
                 for album_id in dict.fromkeys(organize_album_ids):
                     expected = state.get('organization_retry_scopes', {}).get(str(album_id))
                     if expected is not None:
-                        from core.library.reconciliation_organization import _scope
+                        from core.reconciliation.organization import _scope
                         if _scope(self.db, album_id) != expected:
                             state['organize_failed'] += 1
                             raise ValueError('The album files changed after the folder preview; review it again before retrying')
@@ -9348,7 +9348,7 @@ class RepairWorker:
                 """, (duration, result.scanned, result.findings_created,
                       result.auto_fixed, result.errors, status, run_id))
             if getattr(result, 'metrics', None):
-                from core.library.reconciliation_catalogue import ensure_schema
+                from core.reconciliation.catalogue import ensure_schema
                 ensure_schema(conn)
                 conn.execute('INSERT OR REPLACE INTO reconcile_scan_metrics VALUES (?,?)',
                              (run_id, json.dumps(result.metrics)))
@@ -9504,7 +9504,7 @@ class RepairWorker:
             self._batch_folders.setdefault(batch_id, set()).add(folder_path)
 
     def _refresh_downloaded_review_albums(self, folders):
-        from core.library.reconciliation_inventory import affected_download_cases
+        from core.reconciliation.inventory import affected_download_cases
         for case_id, folder in affected_download_cases(self.db, folders):
             self._schedule_album_refresh(case_id, folder, scope='discovery')
 

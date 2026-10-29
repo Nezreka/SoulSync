@@ -137,7 +137,7 @@ def test_malformed_related_album_groups_are_rejected():
 @pytest.mark.parametrize("protected_album", [42, 43, 44])
 @pytest.mark.parametrize("decision", ["pending", "partial", "complete"])
 def test_completion_respects_review_choices_on_every_related_album(tmp_path, protected_album, decision):
-    from core.library.reconciliation_choices import ensure_schema
+    from core.reconciliation.choices import ensure_schema
 
     path = tmp_path / "library.db"
     with sqlite3.connect(path) as conn:

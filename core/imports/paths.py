@@ -1652,7 +1652,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         reuse_folder = None
         if filename_base and not context.get('_no_album_folder_reuse'):
             try:
-                from core.library.reconciliation_fulfillment import requested_folder
+                from core.reconciliation.fulfillment import requested_folder
                 from core.imports.context import get_import_source_ids
                 from database.music_database import get_database
                 identities = get_import_source_ids(context)

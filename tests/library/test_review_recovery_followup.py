@@ -6,9 +6,9 @@ from types import SimpleNamespace
 import pytest
 
 from core.library import playlist_membership
-from core.library.reconciliation_fulfillment import record_request, published_wishlist_track
-from core.library.reconciliation_organization import approve_organization, approved_organization, organization_context
-from core.repair_review_queue import classify_case, list_cases
+from core.reconciliation.fulfillment import record_request, published_wishlist_track
+from core.reconciliation.organization import approve_organization, approved_organization, organization_context
+from core.reconciliation.queue import classify_case, list_cases
 from core.repair_worker import RepairWorker
 from tests.reconciliation.support.acquisition import Database
 from tests.reconciliation.support.acceptance import build_album, scan_case
@@ -76,7 +76,7 @@ def test_review_organization_handoff_is_bound_to_completed_actions_and_current_i
         severity='info', entity_type='album_slot', entity_id='wanted', file_path=None,
         title='Waiting for a bonus track', description='Requested',
         details={**case['items'][0]['details'], 'fulfillment_state': 'wishlisted', 'missing_tracks': []})
-    from core.library.reconciliation_authority import conflict
+    from core.reconciliation.authority import conflict
     assert conflict(album.db, 'path_mismatch', entity_type='album', entity_id='10')
     context = approve_organization(album.db, '10', context)
     item = SimpleNamespace(album_id='10', rename_only=True, metadata_source='tags', review_context=context)
@@ -98,7 +98,7 @@ def test_completed_case_does_not_restore_historical_request_state(tmp_path, monk
     case = scan_case(album)
     for row in case['items']:
         assert album.worker._apply_reviewed_finding(row['id'])['success']
-    import core.repair_review_queue as queue
+    import core.reconciliation.queue as queue
     original = queue.get_case
     def history(*args, **kwargs):
         result = original(*args, **kwargs)

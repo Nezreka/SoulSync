@@ -147,7 +147,7 @@ def _run_full_enrich(file_path, full_meta, runtime=None, db=None) -> bool:
             return False
         if getattr(audio, 'tags', None) is None and hasattr(audio, 'add_tags'):
             audio.add_tags()
-        from core.library.reconciliation_authority import enrichment_tag_guard
+        from core.reconciliation.authority import enrichment_tag_guard
         options = {'tag_guard': enrichment_tag_guard(db, file_path)} if db is not None else {}
         embed_source_ids(audio, meta, context=None, runtime=runtime, **options)
         audio.save()
@@ -171,7 +171,7 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
     pipeline uses (fetch if missing, re-embed if a sidecar already exists)."""
     import os as _os
     result = {'written': 0, 'failed': 0, 'skipped': 0, 'cover_written': False, 'lyrics_written': 0}
-    from core.library.reconciliation_authority import conflict
+    from core.reconciliation.authority import conflict
     protected = conflict(db, 'library_retag', details={'tracks': track_plans})
     if protected:
         return {**result, 'failed': len(track_plans), **protected}
@@ -631,7 +631,7 @@ class LibraryRetagJob(RepairJob):
 
         # Not dry-run: apply the tags in place now (the track paths were already
         # isfile-checked above) and count it as an auto-fix — no finding.
-        from core.library.reconciliation_authority import conflict
+        from core.reconciliation.authority import conflict
         protected = conflict(context.db, 'library_retag', entity_type='album', entity_id=album_id,
                              details={'album_id': album_id, 'tracks': track_plans}) if not dry_run else None
         if not dry_run and not protected:

@@ -4,11 +4,11 @@ import sqlite3
 
 import pytest
 
-from core.library.reconciliation_fulfillment import (
+from core.reconciliation.fulfillment import (
     record_request, retain_request_context, requested_folder,
 )
-from core.library.reconciliation_migration import migrate_album
-from core.library.reconciliation_organization import organization_context
+from core.reconciliation.migration import migrate_album
+from core.reconciliation.organization import organization_context
 from tests.reconciliation.support.acquisition import Database
 
 
@@ -119,7 +119,7 @@ def test_review_organization_preview_uses_final_folder_and_preserves_filenames(t
 
 @pytest.mark.parametrize('owner,expected', [(1,'new'),(2,'old')])
 def test_legacy_album_and_track_id_changes_require_same_physical_file_and_profile(tmp_path, owner, expected):
-    from core.library.reconciliation_migration import repair_legacy_ids
+    from core.reconciliation.migration import repair_legacy_ids
     db=Database(tmp_path/'legacy.db')
     path=tmp_path/'01 - 100%_Rolling.flac';path.write_bytes(b'audio')
     alias=tmp_path/'alias';alias.symlink_to(tmp_path,target_is_directory=True)
@@ -146,8 +146,8 @@ def test_legacy_album_and_track_id_changes_require_same_physical_file_and_profil
     (1,'release','removed_by_user','2099-01-01','requested'),
     (1,'release','download_complete','2000-01-01','requested')])
 def test_missed_publication_requires_matching_delivery_profile_and_embedded_identity(tmp_path,profile,release,reason,receipt_date,expected):
-    from core.library.reconciliation_fulfillment import recover_published_requests, settle_assignments
-    from core.repair_review_identity import review_case_key
+    from core.reconciliation.fulfillment import recover_published_requests, settle_assignments
+    from core.reconciliation.identity import review_case_key
     from tests.reconciliation.support.audio import _minimal_flac
     db=Database(tmp_path/'receipt.db');path=tmp_path/'published.flac'
     _minimal_flac(path,{'musicbrainz_albumid':release,'musicbrainz_trackid':'recording'})
@@ -167,8 +167,8 @@ def test_missed_publication_requires_matching_delivery_profile_and_embedded_iden
 
 @pytest.mark.parametrize('other_request,same_path,expected', [(False,True,'published'),(True,True,'requested'),(False,False,'requested')])
 def test_retagged_delivery_requires_unique_request_and_same_file_in_exact_album_plan(tmp_path,other_request,same_path,expected):
-    from core.library.reconciliation_fulfillment import recover_published_requests
-    from core.repair_review_identity import review_case_key
+    from core.reconciliation.fulfillment import recover_published_requests
+    from core.reconciliation.identity import review_case_key
     from tests.reconciliation.support.audio import _minimal_flac
     db=Database(tmp_path/'retagged.db');path=tmp_path/'published.flac'
     _minimal_flac(path,{'musicbrainz_albumid':'another-pressing','musicbrainz_trackid':'recording'})
@@ -190,7 +190,7 @@ def test_retagged_delivery_requires_unique_request_and_same_file_in_exact_album_
 
 @pytest.mark.parametrize('new_scope,expected', [(None,'partial'),('complete','complete')])
 def test_album_id_migration_retains_inferred_scope_without_overriding_new_choice(tmp_path,new_scope,expected):
-    from core.library.reconciliation_migration import migrate_album
+    from core.reconciliation.migration import migrate_album
     db=Database(tmp_path/'scope.db')
     with db._get_connection() as conn:
         conn.execute('CREATE TABLE reconcile_album_plans(case_id TEXT PRIMARY KEY,album_id TEXT,plan_json TEXT)')
@@ -206,7 +206,7 @@ def test_album_id_migration_retains_inferred_scope_without_overriding_new_choice
 @pytest.mark.parametrize('profile,indexed_elsewhere,ambiguous,merged',[
     (1,False,False,True),(2,False,False,False),(1,True,False,False),(1,False,True,False)])
 def test_delivered_disc_fragment_joins_only_its_requested_album(tmp_path,profile,indexed_elsewhere,ambiguous,merged):
-    from core.library.reconciliation_fulfillment import group_delivered_files
+    from core.reconciliation.fulfillment import group_delivered_files
     db=Database(tmp_path/'fragment.db')
     old=str(tmp_path/'Original album'/'01.flac');new=str(tmp_path/'New pressing'/'Disc 2'/'07.flac')
     details={'album_id':'album','profile_id':profile,'source':'musicbrainz','release_id':'release'}

@@ -20,32 +20,32 @@ from core.imports.staging import AUDIO_EXTENSIONS
 from core.library.path_resolver import resolve_library_file_path
 from core.library.duplicate_keep import pick_duplicate_to_keep
 from core.library.duplicate_rules import is_lossy_companion_file, is_lossy_companion_pair, lossy_companion_exts
-from core.library.reconciliation_candidates import ScoredCandidate, assignment_evidence, pair_display_fields
+from core.reconciliation.candidates import ScoredCandidate, assignment_evidence, pair_display_fields
 from core.library_reorganize import _safe_filename
-from core.library.reconciliation_inventory import (
+from core.reconciliation.inventory import (
     ScanScope, InventoryRequest, load_inventory_request, track_selection,
     known_membership_agrees, discovery_roots, inventory_record, directory_observations,
 )
-from core.library.reconciliation_evidence import (
+from core.reconciliation.evidence import (
     ReconciliationEvidence, album_folders_audio_path_digest, file_identity,
 )
-from core.library.reconciliation_plan import (
+from core.reconciliation.plan import (
     audio_contradicts_local_title, reconcile_folder, _title_score,
     display_title_compatible, file_version_markers, semantic_title_key,
     title_difference_kind, slot_version_markers, _version_markers,
     recording_supports_file_slot,
 )
-from core.library.reconciliation_catalogue import catalogue_scan, current as catalogue_current, deferred, timed, stage
-from core.library.reconciliation_match_cache import cached_match
-from core.library.reconciliation_metadata import album_consistency, confirmed_recording, recording_id_conflict
-from core.library.reconciliation_tools import ToolEvidence
-from core.library.reconciliation_store import persist_album_plan, retire_unseen_plans
+from core.reconciliation.catalogue import catalogue_scan, current as catalogue_current, deferred, timed, stage
+from core.reconciliation.match_cache import cached_match
+from core.reconciliation.metadata import album_consistency, confirmed_recording, recording_id_conflict
+from core.reconciliation.tools import ToolEvidence
+from core.reconciliation.store import persist_album_plan, retire_unseen_plans
 from core.library.retag_planner import plan_track, _artist_credit_includes
 from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
 from core.metadata.album_tracks import get_album_for_source, get_album_tracks_for_source
 from core.repair_jobs import register_job
 from core.repair_jobs.base import RepairJob, JobContext, JobResult, all_library_roots, walk_library, watchlist_artist_names
-from core.repair_review_identity import missing_slot_key, review_case_key
+from core.reconciliation.identity import missing_slot_key, review_case_key
 from core.text.fold import fold_title
 from utils.logging_config import get_logger
 
@@ -1499,7 +1499,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                             | {'difference_summary': (candidate_differences or {}).get((row[3], row[4]), '')}
                             for row in candidate_rows[:6]],
         }
-        from core.library.reconciliation_fulfillment import settle_assignments
+        from core.reconciliation.fulfillment import settle_assignments
         with stage('plan_persistence'):
             case_id = persist_album_plan(db, common, payload)
             settle_assignments(db, case_id, assignments, common.get('exact_release_id') or release_id, source)
@@ -2083,7 +2083,7 @@ class LibraryReconciliationJob(RepairJob):
         """Read exact requested tracks once for the current scan."""
         conn = context.db._get_connection()
         try:
-            from core.library.reconciliation_fulfillment import backfill_requests, outstanding
+            from core.reconciliation.fulfillment import backfill_requests, outstanding
             backfill_requests(conn)
             durable = outstanding(conn)
             replacements = conn.execute('''SELECT case_id, source, release_id, source_track_id, state, published_path
@@ -2151,7 +2151,7 @@ class LibraryReconciliationJob(RepairJob):
         if not roots or any(not os.path.isdir(root) for root in roots):
             result.stopped_early = 'A configured library root is unavailable'
             return result
-        from core.library.reconciliation_migration import repair_legacy_ids
+        from core.reconciliation.migration import repair_legacy_ids
         if not plan_only:
             repair_legacy_ids(context.db)
         def selection_for(request):
@@ -2184,12 +2184,12 @@ class LibraryReconciliationJob(RepairJob):
             watched_artists = watchlist_artist_names(conn.cursor())
         wishlisted_by_profile = self._wishlisted_slots(context)
         assignment_overrides = self._assignment_overrides(context)
-        from core.library import reconciliation_choices as review_choices
+        from core.reconciliation import choices as review_choices
         kept_numbering = review_choices.applied_numbering_choices(context.db)
         if not plan_only:
             review_choices.backfill_applied_releases(context.db)
         reviewed_releases = review_choices.load_release_choices(context.db)
-        from core.library.reconciliation_audio_copy import load_choices as audio_copy_choices
+        from core.reconciliation.audio_copy import load_choices as audio_copy_choices
         audio_copies = audio_copy_choices(context.db)
         numbering_history = review_choices.flattened_numbering_history(context.db)
         playlist_membership = {}
@@ -2219,7 +2219,7 @@ class LibraryReconciliationJob(RepairJob):
                             folders[dirpath].append(os.path.join(dirpath, name))
             folders = _group_disc_folders(folders, tracks, roots)
             folders, trusted_logical_groups = _group_logical_albums(folders, tracks, albums)
-            from core.library.reconciliation_fulfillment import group_delivered_files
+            from core.reconciliation.fulfillment import group_delivered_files
             folders = group_delivered_files(context.db, folders, tracks, albums, trusted_logical_groups)
             discovery_cache = ReconciliationEvidence(context.db, client)
             try:
@@ -2764,7 +2764,7 @@ class LibraryReconciliationJob(RepairJob):
                         continue
                     forced_pairs = {}
                     for file_index, file in enumerate(files):
-                        from core.library.reconciliation_choices import assignment_for_file
+                        from core.reconciliation.choices import assignment_for_file
                         override = assignment_for_file(assignment_overrides, album_id, source, release_id, file, files, db=context.db)
                         if not override:
                             continue
@@ -3242,7 +3242,7 @@ class LibraryReconciliationJob(RepairJob):
                     # Kept files still occupy their release slots while another
                     # copy is requested. Preserve that acquisition without
                     # presenting those occupied slots as missing from coverage.
-                    from core.library.reconciliation_fulfillment import assignment_fulfills_request
+                    from core.reconciliation.fulfillment import assignment_fulfills_request
                     replacement_requests = getattr(self, '_replacement_requests', {}).get(
                         (review_case_key(common, None), source, str(exact_release_id)), [])
                     replacement_by_id = {request['source_track_id']: request for request in replacement_requests}
@@ -3475,13 +3475,13 @@ class LibraryReconciliationJob(RepairJob):
             if completed and not catalogue_current.get().failed and not context.check_stop() and context.create_finding:
                 tool_evidence.finish()
                 if relocated_from and plans_complete and len(observed_plans) == 1:
-                    from core.library.reconciliation_redirects import record_relocation
+                    from core.reconciliation.redirects import record_relocation
                     record_relocation(context.db, relocated_from, next(iter(observed_plans)))
                 cache.checkpoint()
                 if target_folder is None:
                     _retire_stale_findings(context.db, observed)
                     if plans_complete:
-                        from core.library.reconciliation_redirects import record_observed_relocations
+                        from core.reconciliation.redirects import record_observed_relocations
                         record_observed_relocations(context.db, observed_plans)
                         retire_unseen_plans(context.db, observed_plans)
                 else:

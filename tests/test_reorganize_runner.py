@@ -508,7 +508,7 @@ def test_a_successful_update_still_does_not_raise(repoint):
 
 def test_api_organization_cannot_overwrite_accepted_tags(monkeypatch, tmp_path):
     calls = []
-    monkeypatch.setattr('core.library.reconciliation_authority.conflict',
+    monkeypatch.setattr('core.reconciliation.authority.conflict',
         lambda db, kind, **kwargs: {'success':False,'review_conflict':True,
             'review_case_key':'case','error':'Accepted title'} if kind == 'library_retag' else None)
     runner = _build(monkeypatch, download_path_fn=lambda:str(tmp_path),

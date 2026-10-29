@@ -11,9 +11,9 @@ import threading
 
 from flask import Flask
 
-from core.repair_review_identity import missing_slot_key, review_case_key
-from core.repair_review_queue import classify_case, get_case, list_cases, ready_batch_preview
-from core.library.reconciliation_store import ensure_schema, persist_album_plan, retire_unseen_plans
+from core.reconciliation.identity import missing_slot_key, review_case_key
+from core.reconciliation.queue import classify_case, get_case, list_cases, ready_batch_preview
+from core.reconciliation.store import ensure_schema, persist_album_plan, retire_unseen_plans
 from core.repair_worker import RepairWorker, _same_reviewed_file
 from database.music_database import MusicDatabase
 
@@ -110,7 +110,7 @@ def test_release_candidate_can_be_pinned_without_release_finding():
 
     assert result['success'] and result['refresh_queued']
     assert worker.db.selected == (7, 'musicbrainz', 'new', True)
-    from core.library.reconciliation_choices import load_release_choices
+    from core.reconciliation.choices import load_release_choices
     assert load_release_choices(worker.db) == {'7': ('musicbrainz', 'new')}
     stale = worker.pin_review_release(
         'case', source='musicbrainz', release_id='new',
@@ -141,7 +141,7 @@ def test_manual_musicbrainz_release_is_previewed_before_pinning(monkeypatch, tmp
     worker._schedule_album_refresh = lambda *_args, **_kwargs: True
     args = {'case_id': 'case', 'source': 'musicbrainz', 'release_id': release_id,
             'expected_source': 'itunes', 'expected_release_id': 'old'}
-    from core.library.reconciliation_evidence import ReconciliationEvidence
+    from core.reconciliation.evidence import ReconciliationEvidence
     from core.repair_jobs import library_reconciliation as job
     path = tmp_path / 'Song one.flac'
     path.write_bytes(b'audio')
@@ -1189,8 +1189,8 @@ def test_stale_duplicate_library_id_refreshes_without_removing_a_file(tmp_path):
 
 
 def test_summary_matches_paginated_modes_without_loading_plans(monkeypatch):
-    from core.repair_review_queue import queue_summary
-    import core.repair_review_queue as queue
+    from core.reconciliation.queue import queue_summary
+    import core.reconciliation.queue as queue
     db = _Database()
     for index, (kind, changes, confidence) in enumerate([
         ('reconciliation_metadata', {}, 'clear'),
@@ -1429,8 +1429,8 @@ def test_saved_file_choice_is_automatically_ready_and_revalidates_evidence():
 
 
 def test_whole_album_readiness_counts_choices_and_waiting_consistently():
-    from core.repair_review_queue import queue_summary
-    from core.library import reconciliation_choices as choices
+    from core.reconciliation.queue import queue_summary
+    from core.reconciliation import choices as choices
     db = _Database()
     for fid, folder, kind, details in [
         (1, 'mixed', 'reconciliation_metadata', {'changes': {'title': {'new': 'One'}}}),
@@ -1475,7 +1475,7 @@ def test_only_exact_audio_supported_version_metadata_is_ready():
 
 
 def test_verified_case_redirect_follows_new_case_without_title_guessing():
-    from core.library.reconciliation_redirects import record_relocation, resolve_case
+    from core.reconciliation.redirects import record_relocation, resolve_case
     db = _Database()
     old = persist_album_plan(db, {'album_id': 10, 'album_folder': '/music/old'}, {'assignments': []})
     new = persist_album_plan(db, {'album_id': 10, 'album_folder': '/music/new'}, {'assignments': []})
@@ -1531,7 +1531,7 @@ def test_decode_error_requires_review_for_file_edits_but_not_album_display_clean
 
 
 def test_version_metadata_does_not_hide_explicit_competing_version():
-    from core.repair_review_policy import supported_version_metadata
+    from core.reconciliation.policy import supported_version_metadata
     details = {'title_difference_kind': 'version', 'confidence': 'clear',
                'recording_mbid': 'live', 'expected_title': 'Song (live)',
                'current_tags': {'duration_ms': 200000}, 'expected_duration_ms': 200000,
@@ -1543,7 +1543,7 @@ def test_version_metadata_does_not_hide_explicit_competing_version():
 
 
 def test_compact_queue_policy_agrees_with_full_execution_evidence():
-    from core.repair_review_policy import effective_case_modes
+    from core.reconciliation.policy import effective_case_modes
     db = _Database()
     db.add(1, '/music/album/one.flac', {'confidence': 'clear', 'title_difference_kind': 'version',
            'recording_mbid': 'demo', 'expected_title': 'Song (demo)', 'current_tags': {'duration_ms': 100000},
@@ -1572,7 +1572,7 @@ def test_compact_queue_policy_agrees_with_full_execution_evidence():
 
 
 def test_saved_choice_survives_only_a_verified_relocation(tmp_path):
-    from core.library.reconciliation_choices import ensure_schema as ensure_choices
+    from core.reconciliation.choices import ensure_schema as ensure_choices
     db = MusicDatabase(str(tmp_path / 'music.db'))
     worker = RepairWorker(database=db)
     details = {'album_id': 'album', 'album_folder': '/old', 'fingerprint_key': 'audio',
@@ -1661,7 +1661,7 @@ def test_queue_navigation_spans_pages_in_the_same_filtered_order():
 
 
 def test_pending_download_does_not_block_independent_ready_metadata():
-    from core.repair_review_queue import queue_summary
+    from core.reconciliation.queue import queue_summary
     db = _Database()
     common = {'album_folder': '/music/Waiting'}
     db.add(1, '/music/Waiting/01.flac', {**common, 'changes': {'title': {'old': 'one', 'new': 'One'}}},

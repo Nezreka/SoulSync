@@ -142,7 +142,7 @@ def delete_origin_download(db, entry, config_manager, transfer_folder=None) -> d
     the shared resolver), its library track row, and the history entry. A file
     that refuses deletion keeps its history row and reports the error. Returns
     {removed, file_deleted, error}."""
-    from core.library.reconciliation_authority import conflict
+    from core.reconciliation.authority import conflict
     protected = conflict(db, 'expired_download', file_path=entry.get('file_path'))
     if protected:
         return {'removed': False, 'file_deleted': False, **protected}
@@ -560,7 +560,7 @@ class ExpiredDownloadCleanerJob(RepairJob):
         for i, entry in enumerate(expired):
             if context.check_stop():
                 return result
-            from core.library.reconciliation_authority import conflict
+            from core.reconciliation.authority import conflict
             protected = conflict(context.db, 'expired_download', file_path=entry.get('file_path')) if not dry_run else None
             if not dry_run and not protected:
                 try:

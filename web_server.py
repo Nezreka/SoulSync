@@ -10653,7 +10653,7 @@ def reorganize_album_preview(album_id):
         )
         review_inputs = {}
         if data.get('review_case_id'):
-            from core.repair_review_queue import ready_batch_preview
+            from core.reconciliation.queue import ready_batch_preview
             case = repair_worker.get_review_case(data['review_case_id']) if repair_worker else None
             retry = bool(case and data.get('organization_retry_signature') and
                          data['organization_retry_signature'] == case.get('organization_retry_signature'))
@@ -10677,11 +10677,11 @@ def reorganize_album_preview(album_id):
                             updates[f"track:{details['track_id']}"] = details['db_data']
                     excluded.update((action.get('file_decision') or {}).get('quarantine') or [])
             metadata_source = 'tags'
-            from core.library.reconciliation_organization import organization_context
+            from core.reconciliation.organization import organization_context
             review_inputs = {'planned_tag_updates': updates, 'excluded_paths': excluded,
                              'review_context': organization_context(db, album_id, action_details)}
             if retry:
-                from core.library.reconciliation_organization import retry_organization_context
+                from core.reconciliation.organization import retry_organization_context
                 from core.repair_operation_reports import latest_case_report
                 review_inputs = {'review_context': retry_organization_context(
                     db, album_id, latest_case_report(db, case['case_id']) or {})}

@@ -9559,7 +9559,7 @@ class MusicDatabase:
 
             # One-time, resumable backfill for findings created before the review
             # queue. Use exact album row/folder identity, never artist/title text.
-            from core.repair_review_identity import review_case_key
+            from core.reconciliation.identity import review_case_key
             cursor.execute(
                 "SELECT id, details_json, file_path FROM repair_findings "
                 "WHERE review_case_key IS NULL LIMIT 500"
@@ -9605,11 +9605,11 @@ class MusicDatabase:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rf_review_job_case "
                 "ON repair_findings (job_id, status, review_case_key)")
-            from core.library.reconciliation_catalogue import ensure_schema as ensure_catalogue_schema
+            from core.reconciliation.catalogue import ensure_schema as ensure_catalogue_schema
             ensure_catalogue_schema(cursor.connection)
-            from core.library.reconciliation_match_cache import ensure_schema as ensure_match_schema
+            from core.reconciliation.match_cache import ensure_schema as ensure_match_schema
             ensure_match_schema(cursor.connection)
-            from core.library.reconciliation_store import ensure_schema
+            from core.reconciliation.store import ensure_schema
             ensure_schema(cursor.connection)
         except Exception as e:
             logger.error(f"Error migrating repair worker columns: {e}")
@@ -11693,7 +11693,7 @@ class MusicDatabase:
                     cursor.execute("UPDATE tracks SET album_id = ? WHERE album_id = ?", (album_id, old_id))
                     migrated_tracks = cursor.rowcount
 
-                    from core.library.reconciliation_migration import migrate_album
+                    from core.reconciliation.migration import migrate_album
                     migrate_album(conn, old_id, album_id)
 
                     # Safely delete old album (verify no remaining references first)
@@ -16369,13 +16369,13 @@ class MusicDatabase:
 
                 def commit_request():
                     if reconciliation_request:
-                        from core.library.reconciliation_fulfillment import record_request_on_connection
+                        from core.reconciliation.fulfillment import record_request_on_connection
                         record_request_on_connection(conn, reconciliation_request['details'],
                                                      reconciliation_request['slot'])
                     conn.commit()
 
                 if reconciliation_request:
-                    from core.library.reconciliation_fulfillment import request_identity
+                    from core.reconciliation.fulfillment import request_identity
                     source_info = {**(source_info or {}), 'review_request': request_identity(
                         reconciliation_request['details'], reconciliation_request['slot'])}
 
@@ -16481,7 +16481,7 @@ class MusicDatabase:
 
                 # Convert data once; existing rows and inserts use the same
                 # newest payload/context.
-                from core.library.reconciliation_fulfillment import retain_request_context
+                from core.reconciliation.fulfillment import retain_request_context
                 spotify_track_data, source_info = retain_request_context(
                     conn, spotify_track_data, source_info, profile_id)
                 spotify_json = json.dumps(spotify_track_data)
@@ -17805,7 +17805,7 @@ class MusicDatabase:
                     except (json.JSONDecodeError, TypeError):
                         spotify_data = {}
                     name, artist = extract_display(spotify_data)
-                    from core.library.reconciliation_fulfillment import cancel_request
+                    from core.reconciliation.fulfillment import cancel_request
                     cancel_request(conn, profile_id, spotify_data)
                     key = normalize_ignore_id(row['spotify_track_id'])
                     if not key:

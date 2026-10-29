@@ -10,8 +10,8 @@ from collections import defaultdict
 import json
 import os
 
-from core.library.reconciliation_metadata import confirmed_recording
-from core.library.reconciliation_plan import _recording_supports_slot, versions_compatible
+from core.reconciliation.metadata import confirmed_recording
+from core.reconciliation.plan import _recording_supports_slot, versions_compatible
 
 
 def _file_key(path):

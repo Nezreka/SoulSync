@@ -334,7 +334,7 @@ def backfill_applied_releases(db):
                     or report.get('error') or report.get('stopped') or not report.get('fixed')):
                 continue
             for key in report.get('review_case_ids') or []:
-                from core.library.reconciliation_redirects import resolve_case
+                from core.reconciliation.redirects import resolve_case
                 key = resolve_case(db, key)
                 rows = conn.execute("SELECT details_json FROM repair_findings WHERE review_case_key=? "
                     "AND status='resolved' AND user_action IN ('reconciliation_metadata', 'replacement_requested', 'wishlisted') "

@@ -448,7 +448,7 @@ def resolve_and_store_canonical_for_album(
             result['artist_thumb_url'] = artist_thumb
         if store:
             from core.library.maintenance_lock import mutation_lock
-            from core.library.reconciliation_authority import conflict
+            from core.reconciliation.authority import conflict
             with mutation_lock:
                 protected = conflict(db, 'canonical_version', entity_type='album', entity_id=album_id, details=result)
                 if protected:

@@ -1,7 +1,7 @@
 """Minimal queue persistence for projection and policy tests."""
 import json
 import sqlite3
-from core.repair_review_identity import review_case_key
+from core.reconciliation.identity import review_case_key
 
 class _Connection(sqlite3.Connection):
     def close(self):

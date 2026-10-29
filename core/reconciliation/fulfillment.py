@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 
-from core.repair_review_identity import review_case_key
+from core.reconciliation.identity import review_case_key
 
 
 def ensure_schema(conn):

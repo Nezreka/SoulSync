@@ -259,7 +259,7 @@ class UnknownArtistFixerJob(RepairJob):
                     fname_base = f"{fname_base} [{quality}]"
                 expected_rel = os.path.join(folder, fname_base + file_ext)
 
-            from core.library.reconciliation_authority import conflict
+            from core.reconciliation.authority import conflict
             protected = conflict(context.db, 'unknown_artist', entity_type='track',
                                  entity_id=track.get('id'), file_path=resolved, details={'db_data': corrected}) if not dry_run else None
             if dry_run or protected:
@@ -521,7 +521,7 @@ class UnknownArtistFixerJob(RepairJob):
     def _apply_fix(self, context, track, corrected, resolved_path,
                    expected_rel, transfer, fix_tags, reorganize_files):
         """Apply the fix: re-tag file, move to correct path, update DB."""
-        from core.library.reconciliation_authority import conflict
+        from core.reconciliation.authority import conflict
         if conflict(context.db, 'unknown_artist', entity_type='track', entity_id=track['id'], file_path=resolved_path):
             return False
         track_id = track['id']

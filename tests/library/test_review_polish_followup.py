@@ -3,11 +3,11 @@ import json
 import os
 
 from core.library.file_identity import same_file, planned_metadata
-from core.library.reconciliation_organization import organization_context
-from core.library.reconciliation_plan import audio_contradicts_local_title, versions_compatible, _same_base_recording_title, reconcile_folder
+from core.reconciliation.organization import organization_context
+from core.reconciliation.plan import audio_contradicts_local_title, versions_compatible, _same_base_recording_title, reconcile_folder
 from core.library_reorganize import _rename_track_in_place, _display_relative_to_root, _plan_from_tags
 from core.library import playlist_membership
-from core.repair_review_queue import list_cases
+from core.reconciliation.queue import list_cases
 from tests.reconciliation.support.acceptance import build_album, scan_case, ARTIST
 
 
@@ -122,7 +122,7 @@ def test_failed_organization_report_survives_relocation_and_allows_only_folder_r
 
 
 def test_folder_retry_preserves_approved_title_and_current_filenames(tmp_path, monkeypatch):
-    from core.library.reconciliation_organization import retry_organization_context
+    from core.reconciliation.organization import retry_organization_context
     album = build_album(tmp_path, monkeypatch, 'supported')
     case = scan_case(album)
     finding = case['items'][0]

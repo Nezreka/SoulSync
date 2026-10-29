@@ -1,7 +1,7 @@
 """Read-only, profile-scoped verification of missing album tracks."""
 
 from core.library_scope import library_scope_for_profile
-from core.library.reconciliation_authority import conflict
+from core.reconciliation.authority import conflict
 
 
 def filter_still_missing(

@@ -107,7 +107,7 @@ def load_inventory_request(db, folder: str | None, scope: ScanScope, *,
             # Draft choices reuse the evidence the user reviewed. Changed files
             # require a real album refresh; unrelated downloads do not.
             try:
-                from core.library.reconciliation_evidence import file_identity
+                from core.reconciliation.evidence import file_identity
                 if not planning or not planning.get('files') or any(
                         os.stat(file['path']).st_size != file['size_bytes'] or
                         os.stat(file['path']).st_mtime_ns != file['mtime_ns'] or

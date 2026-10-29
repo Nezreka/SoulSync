@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from core.repair_review_identity import review_case_key
+from core.reconciliation.identity import review_case_key
 
 
 CREATE_TABLE = '''
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS reconcile_album_plans (
 def ensure_schema(conn) -> None:
     # Keep this safe inside the database bootstrap transaction. executescript
     # commits implicitly in sqlite3, which would split unrelated migrations.
-    from core.library.reconciliation_choices import ensure_schema as ensure_choices
+    from core.reconciliation.choices import ensure_schema as ensure_choices
     ensure_choices(conn)
     conn.execute(CREATE_TABLE)
     conn.execute('''CREATE INDEX IF NOT EXISTS idx_reconcile_plans_state

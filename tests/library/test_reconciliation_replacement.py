@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.library import reconciliation_replacement as replacement
-from core.library.reconciliation_fulfillment import record_request, settle_assignments
-from core.library.reconciliation_evidence import file_identity
-from core.repair_review_identity import review_case_key
+from core.reconciliation import replacement as replacement
+from core.reconciliation.fulfillment import record_request, settle_assignments
+from core.reconciliation.evidence import file_identity
+from core.reconciliation.identity import review_case_key
 from core.repair_worker import RepairWorker
 
 

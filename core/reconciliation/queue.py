@@ -12,10 +12,10 @@ import hashlib
 import os
 from typing import Any
 
-from core.library.reconciliation_store import load_album_plan
-from core.library import reconciliation_choices as choices
+from core.reconciliation.store import load_album_plan
+from core.reconciliation import choices as choices
 from core.text.fold import fold_title
-from core.repair_review_policy import (
+from core.reconciliation.policy import (
     _DETAILS, _GLOBAL_BLOCKER_TYPES, _TRACK_ARTIST_CHANGE_KEYS,
     _RECORDING_ID_CHANGE_KEYS, _POSITION_CHANGE_KEYS, _change_value, _finding_tier,
     finding_category, queue_filter, count_ready_findings, effective_case_modes, case_mode,
@@ -403,7 +403,7 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
     conn = db._get_connection()
     choices.ensure_schema(conn)
     if q.strip():
-        from core.repair_review_search import prepare
+        from core.reconciliation.search import prepare
         prepare(conn, status=status, job_id=job_id)
     try:
         modes = effective_case_modes(conn, status=status, job_id=job_id, compact=True)
@@ -439,7 +439,7 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
         # The small ordered ID list keeps album navigation independent of the
         # visible page. Hydrate evidence only for the requested page below.
         if q.strip():
-            from core.repair_review_search import rank
+            from core.reconciliation.search import rank
             rows.sort(key=lambda row: rank(row[3], row[4], q))
         ordered_case_ids = [row[0] for row in rows]
         page = min(page, max(0, (len(rows) - 1) // limit))
@@ -500,7 +500,7 @@ def matching_case_ids(db, case_ids, **filters) -> set[str]:
         return set()
     conn = db._get_connection()
     if (filters.get('q') or '').strip():
-        from core.repair_review_search import prepare
+        from core.reconciliation.search import prepare
         prepare(conn, status=filters.get('status', 'pending'), job_id=filters.get('job_id', ''))
     where, params = queue_filter(conn=conn, **filters)
     choices.ensure_schema(conn)
@@ -523,7 +523,7 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
     conn = db._get_connection()
     choices.ensure_schema(conn)
     if q.strip():
-        from core.repair_review_search import prepare, matching_cases
+        from core.reconciliation.search import prepare, matching_cases
         prepare(conn, status=status, job_id=job_id)
     try:
         conn.execute('BEGIN')

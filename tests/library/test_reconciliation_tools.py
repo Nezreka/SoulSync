@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.library.reconciliation_tools import ToolEvidence
+from core.reconciliation.tools import ToolEvidence
 
 
 @pytest.fixture

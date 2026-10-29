@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from core.library.reconciliation_evidence import file_identity
+from core.reconciliation.evidence import file_identity
 from core.repair_jobs.library_reconciliation import LibraryReconciliationJob, _suggest_filename
 from core.repair_worker import RepairWorker
 from core.reorganize_queue import ReorganizeQueue
@@ -47,7 +47,7 @@ def test_same_size_and_mtime_cannot_hide_a_replaced_file(tmp_path):
 def test_organization_reuses_audio_when_database_and_scan_use_different_mount_paths(tmp_path, monkeypatch, live_alias):
     from types import SimpleNamespace
     from core.reorganize_runner import build_runner
-    from core.library.reconciliation_evidence import ReconciliationEvidence
+    from core.reconciliation.evidence import ReconciliationEvidence
     album = build_album(tmp_path, monkeypatch, 'supported')
     case = scan_case(album)
     for item in case['items']:
@@ -255,7 +255,7 @@ def test_apply_waits_for_all_moves_then_publishes_one_complete_scan(tmp_path, mo
     target = album.root / 'Acceptance Artist' / 'Reorganized'
     target.mkdir()
     def move(item):
-        from core.library.reconciliation_evidence import preserve_audio_evidence
+        from core.reconciliation.evidence import preserve_audio_evidence
         for i, old in enumerate(album.paths, 1):
             stat = old.stat()
             new = target / old.name

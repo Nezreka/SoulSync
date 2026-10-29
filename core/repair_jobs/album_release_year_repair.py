@@ -412,7 +412,7 @@ def apply_album_year_fix(
     new_folder_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute the full year alignment: retag audio files, update DB, and rename folder."""
-    from core.library.reconciliation_authority import conflict
+    from core.reconciliation.authority import conflict
     protected = conflict(db, 'album_release_year_mismatch', entity_type='album', entity_id=album_id)
     if protected:
         return {'fixed_files': 0, 'errors': 1, 'changes': [], 'renamed_folder': None, **protected}
@@ -900,7 +900,7 @@ class AlbumReleaseYearRepairJob(RepairJob):
 
                 track_items = [{'id': t['id'], 'file_path': t['file_path']} for t in eligible_tracks]
 
-                from core.library.reconciliation_authority import conflict
+                from core.reconciliation.authority import conflict
                 protected = conflict(context.db, 'album_release_year_mismatch', entity_type='album', entity_id=album_id) if not dry_run else None
                 if dry_run or protected:
                     if context.create_finding:

@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import Counter
 from uuid import UUID
 
-from core.library.reconciliation_plan import _recording_supports_slot, _title_score
+from core.reconciliation.plan import _recording_supports_slot, _title_score
 from core.matching.artist_aliases import split_artist_credit
 from core.text.fold import fold_title
 

@@ -261,7 +261,7 @@ correctness commit above.
 ### 1. Attribute scan time and establish a reproducible baseline
 
 **Locations:** `core/repair_jobs/library_reconciliation.py`,
-`core/library/reconciliation_evidence.py`, `core/musicbrainz_client.py`, and the
+`core/reconciliation/evidence.py`, `core/musicbrainz_client.py`, and the
 existing repair run/progress reporting contract.
 
 - Add a run-scoped metrics collector for catalogue lookup, rate-limit waits,

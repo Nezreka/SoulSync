@@ -287,7 +287,7 @@ class MusicBrainzClient:
         logger.info(f"MusicBrainz client initialized with user agent: {self.user_agent}")
 
     def _get(self, path: str, *, params: Optional[Dict[str, Any]] = None) -> requests.Response:
-        from core.library.reconciliation_catalogue import current, stage
+        from core.reconciliation.catalogue import current, stage
         session = current.get()
         if session is not None:
             with stage('catalogue_inclusive'):
@@ -315,7 +315,7 @@ class MusicBrainzClient:
                 request_params = params
                 for redirect_count in range(MAX_REDIRECTS + 1):
                     with _adaptive_inflight if interval == 0 else nullcontext():
-                        from core.library.reconciliation_catalogue import stage
+                        from core.reconciliation.catalogue import stage
                         with stage('rate_limit_wait'):
                             _wait_for_musicbrainz_slot(interval, base_url)
                         started = time.monotonic()
@@ -380,7 +380,7 @@ class MusicBrainzClient:
                     attempts,
                     exc,
                 )
-                from core.library.reconciliation_catalogue import stage
+                from core.reconciliation.catalogue import stage
                 with stage('retry_backoff'):
                     time.sleep(backoff)
 

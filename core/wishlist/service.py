@@ -421,7 +421,7 @@ class WishlistService:
         """
         if success and audit and audit.get('final_path'):
             try:
-                from core.library.reconciliation_fulfillment import published_wishlist_track
+                from core.reconciliation.fulfillment import published_wishlist_track
                 published_wishlist_track(self.database, spotify_track_id, profile_ids,
                                          audit['final_path'])
             except Exception:

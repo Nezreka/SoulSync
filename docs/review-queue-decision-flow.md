@@ -336,13 +336,13 @@ Additional application constraints:
 | Stage | Main implementation |
 | --- | --- |
 | Inventory, grouping, release discovery/rank, finding generation | [`core/repair_jobs/library_reconciliation.py`](../core/repair_jobs/library_reconciliation.py): `LibraryReconciliationJob.scan`, `_group_disc_folders`, `_group_logical_albums`, `_release_candidates`, `_candidate_rank`, `_same_recording_copies` |
-| Cached tag/fingerprint/lookup evidence | [`core/library/reconciliation_evidence.py`](../core/library/reconciliation_evidence.py): `ReconciliationEvidence` |
-| Pair eligibility, weights, confidence, competing files and boundary checks | [`core/library/reconciliation_plan.py`](../core/library/reconciliation_plan.py): `_pair_weight`, `reconcile_folder` |
+| Cached tag/fingerprint/lookup evidence | [`core/reconciliation/evidence.py`](../core/reconciliation/evidence.py): `ReconciliationEvidence` |
+| Pair eligibility, weights, confidence, competing files and boundary checks | [`core/reconciliation/plan.py`](../core/reconciliation/plan.py): `_pair_weight`, `reconcile_folder` |
 | Whole-album one-to-one optimization | [`core/matching/assignment.py`](../core/matching/assignment.py): `assign_max_weight` |
-| Shared category/tier policy and SQL filters | [`core/repair_review_policy.py`](../core/repair_review_policy.py) |
-| Scoped inventory and download-driven discovery | [`core/library/reconciliation_inventory.py`](../core/library/reconciliation_inventory.py) |
-| Typed candidates and common pair display facts | [`core/library/reconciliation_candidates.py`](../core/library/reconciliation_candidates.py) |
-| Risk tiers, decision grouping and queue projection | [`core/repair_review_queue.py`](../core/repair_review_queue.py): `_finding_tier`, `build_decisions`, `classify_case`, `get_case` |
+| Shared category/tier policy and SQL filters | [`core/reconciliation/policy.py`](../core/reconciliation/policy.py) |
+| Scoped inventory and download-driven discovery | [`core/reconciliation/inventory.py`](../core/reconciliation/inventory.py) |
+| Typed candidates and common pair display facts | [`core/reconciliation/candidates.py`](../core/reconciliation/candidates.py) |
+| Risk tiers, decision grouping and queue projection | [`core/reconciliation/queue.py`](../core/reconciliation/queue.py): `_finding_tier`, `build_decisions`, `classify_case`, `get_case` |
 | Apply guards, pin/preview, reanalysis and operation lifecycle | [`core/repair_worker.py`](../core/repair_worker.py): review methods and `_fix_reconciliation_*` handlers |
 | Memoized assignment groups and selection indexes | [`review-album-model.ts`](../webui/src/routes/review/-ui/review-album-model.ts) |
 | Page state, navigation, polling, plan and workspace | [`webui/src/routes/review/-ui/review-page.tsx`](../webui/src/routes/review/-ui/review-page.tsx) |

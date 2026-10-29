@@ -253,7 +253,7 @@ class TrackNumberRepairJob(RepairJob):
 
             result.scanned += 1
             try:
-                from core.library.reconciliation_authority import conflict
+                from core.reconciliation.authority import conflict
                 protected = conflict(context.db, 'track_number_mismatch', file_path=fpath) if not dry_run else None
                 if dry_run or protected:
                     finding = _check_single_track(fpath, fname, api_tracks, title_sim)
@@ -1319,7 +1319,7 @@ def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
     if not plan:
         return False
 
-    from core.library.reconciliation_authority import conflict
+    from core.reconciliation.authority import conflict
     if conflict(context.db, 'track_number_mismatch', file_path=file_path, details={
             'track_number': plan['correct_num'], 'disc_number': plan['correct_disc'],
             'new_filename': plan['new_basename']}):

@@ -26,7 +26,7 @@ def record_relocation(db, old_folder: str, new_case: str) -> None:
             return
         conn.execute('INSERT OR REPLACE INTO reconcile_case_redirects SELECT case_id, ? FROM reconcile_album_plans WHERE album_folder = ? AND case_id != ? AND profile_id=?', (new_case, old_folder, new_case, target[4]))
         if target and conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_fulfillment'").fetchone():
-            from core.library.reconciliation_fulfillment import ensure_schema
+            from core.reconciliation.fulfillment import ensure_schema
             ensure_schema(conn)
             # Rebind exact acquisition targets only when the selected release
             # survives the move. A link redirect alone cannot settle a download.

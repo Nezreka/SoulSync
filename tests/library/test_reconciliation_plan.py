@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.library.reconciliation_match_cache import MatchingCache
-from core.library.reconciliation_plan import (
+from core.reconciliation.match_cache import MatchingCache
+from core.reconciliation.plan import (
     audio_contradicts_local_title, reconcile_folder, title_difference_kind,
     file_version_markers, slot_version_markers,
 )
@@ -144,7 +144,7 @@ def test_artist_spelling_and_collaboration_are_preserved(credit):
     ('Home (radio edit)', 'Home (album version)'),
 ])
 def test_named_versions_cannot_fill_each_others_release_slots(local, remote):
-    from core.library.reconciliation_plan import display_title_compatible
+    from core.reconciliation.plan import display_title_compatible
     file = _file(local, f'/album/01 - {local}.flac', 200000,
                  {'mbid': 'local-id', 'title': local, 'artist': 'Artist', 'score': .99})
     slot = {'title': remote, 'artist': 'Artist', 'recording_mbid': 'remote-id', 'duration_ms': 200000}
@@ -215,7 +215,7 @@ def test_filename_version_still_blocks_a_different_named_mix_when_tags_omit_it()
     ('Song (live at the Paradise, June 1980)', 'Song (live at the Paradise) (June 1980)'),
 ])
 def test_named_performance_detail_allows_catalogue_spelling_and_date_precision(local, remote):
-    from core.library.reconciliation_plan import versions_compatible
+    from core.reconciliation.plan import versions_compatible
     file = _file(local, f'/album/01 - {local}.flac', 200000)
     assert versions_compatible(file, {'title': remote})
 
@@ -227,7 +227,7 @@ def test_named_performance_detail_allows_catalogue_spelling_and_date_precision(l
     ('Song (live at Paris 2004)', 'Song (live at London 20/9/04)'),
 ])
 def test_named_performance_dates_cannot_disagree(local, remote):
-    from core.library.reconciliation_plan import versions_compatible
+    from core.reconciliation.plan import versions_compatible
     assert not versions_compatible(_file(local, '/album/song.flac', 200000), {'title': remote})
 
 
@@ -252,7 +252,7 @@ def test_named_performance_dates_cannot_disagree(local, remote):
 @pytest.mark.parametrize('reverse', [False, True])
 @pytest.mark.parametrize('with_audio', [False, True])
 def test_compatible_performance_detail_preserves_assignment_and_local_title(local, remote, reverse, with_audio):
-    from core.library.reconciliation_plan import display_title_compatible
+    from core.reconciliation.plan import display_title_compatible
     if reverse:
         local, remote = remote, local
     # Use a real filename-safe date; tags and filename are independent layers.
@@ -291,7 +291,7 @@ def test_conflicting_performance_facts_are_not_overridden_by_same_recording_id(l
 
 
 def test_date_normalization_does_not_hide_song_numbers():
-    from core.library.reconciliation_plan import display_title_compatible, _title_score
+    from core.reconciliation.plan import display_title_compatible, _title_score
     local = 'Song 1986 (live at Wembley, July 12, 1986)'
     remote = 'Song 1987 (live at Wembley, 1986-07-12)'
     assert _title_score(local, remote) == 0
@@ -336,7 +336,7 @@ def test_recording_comments_allow_compatible_performance_details():
 ])
 @pytest.mark.parametrize('comment_layer', ['local', 'remote', 'both'])
 def test_live_catalogue_comments_preserve_compatible_assignments(local, remote, comment, comment_layer):
-    from core.library.reconciliation_plan import display_title_compatible
+    from core.reconciliation.plan import display_title_compatible
     file = _file(local, f"/album/01 - {local.replace('/', '_')}.flac", 200000,
                  {'mbid': 'recording', 'title': local, 'artist': 'Artist', 'score': .99})
     file['tags'].update(artist='Artist', mbid='recording')
@@ -413,7 +413,7 @@ def test_named_mix_audio_supports_the_same_remix_on_another_provider():
 
 @pytest.mark.parametrize('qualifier', ['stereo mix', '2009 remastered stereo mix', 'original album mix'])
 def test_generic_mix_labels_do_not_become_named_remixes(qualifier):
-    from core.library.reconciliation_plan import _version_markers
+    from core.reconciliation.plan import _version_markers
     assert 'remix' not in _version_markers(f'Song ({qualifier})')
 
 
@@ -1107,7 +1107,7 @@ def test_alternate_extended_exact_identity_pairs_but_requires_version_review():
 
 def test_exact_session_title_and_fingerprint_can_supply_live_comment():
     from copy import deepcopy
-    from core.library.reconciliation_plan import versions_compatible
+    from core.reconciliation.plan import versions_compatible
     file = {'path': '/17 - Laura Palmer (Abbey Road Sessions).flac',
             'tags': {'title': 'Laura Palmer (Abbey Road Sessions)',
                      'artist': 'Bastille', 'duration_ms': 182440},

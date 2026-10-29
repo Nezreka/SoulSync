@@ -5,11 +5,11 @@ import threading
 import pytest
 from pathlib import Path
 
-from core.library.reconciliation_choices import assignment_for_file
+from core.reconciliation.choices import assignment_for_file
 from core.repair_worker import RepairWorker
 
-from core.library.reconciliation_authority import conflict
-from core.library.reconciliation_choices import ensure_schema
+from core.reconciliation.authority import conflict
+from core.reconciliation.choices import ensure_schema
 
 
 class Database:
@@ -109,7 +109,7 @@ def test_track_decision_does_not_govern_other_tracks(tmp_path):
 
 
 def test_unique_relocated_assignment_preserves_audio_identity(tmp_path):
-    from core.library.reconciliation_choices import assignment_for_file
+    from core.reconciliation.choices import assignment_for_file
     old = str(tmp_path / 'old.flac')
     file = {'path': str(tmp_path / 'new.flac'), 'size_bytes': 100, 'mtime_ns': 2,
             'acoustid': {'fingerprint_key': 'audio'}}
@@ -273,8 +273,8 @@ def test_review_pin_waits_for_legacy_mutation(tmp_path):
 ])
 def test_relocation_merges_fulfillment_state(tmp_path, old_state, new_state,
                                              old_time, new_time, expected):
-    from core.library.reconciliation_fulfillment import ensure_schema
-    from core.library.reconciliation_redirects import record_relocation
+    from core.reconciliation.fulfillment import ensure_schema
+    from core.reconciliation.redirects import record_relocation
     db = Database(tmp_path / 'db')
     with db._get_connection() as conn:
         conn.execute('DROP TABLE reconcile_album_plans')

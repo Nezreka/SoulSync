@@ -138,7 +138,7 @@ def test_fix_keeps_tags_fixed_by_hand_since_the_scan(tmp_path):
 @pytest.mark.parametrize("field", ["title", "artist", "album", "track_number"])
 @pytest.mark.parametrize("compatible", [False, True])
 def test_fix_respects_reviewed_values_before_writing(tmp_path, field, compatible):
-    from core.library.reconciliation_choices import ensure_schema
+    from core.reconciliation.choices import ensure_schema
 
     path = _flac(tmp_path / "01 - Song.flac")
     before = path.read_bytes()

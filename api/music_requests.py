@@ -328,7 +328,7 @@ def _remove_rows(db, owner, group, why):
     for t in group["tracks"]:
         # Capture exact provider/release identity before removing the request.
         if callable(getattr(db, '_get_connection', None)):
-            from core.library.reconciliation_fulfillment import cancel_request
+            from core.reconciliation.fulfillment import cancel_request
             with db._get_connection() as conn:
                 row = conn.execute('SELECT spotify_data FROM wishlist_tracks WHERE spotify_track_id=? AND profile_id=?', (t['id'], owner)).fetchone()
                 if row:

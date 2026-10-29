@@ -3,10 +3,10 @@ from tests.reconciliation.support.acquisition import Database
 import json
 import sqlite3
 
-from core.library.reconciliation_fulfillment import (
+from core.reconciliation.fulfillment import (
     outstanding, published_wishlist_track, record_request, settle_assignments,
 )
-from core.repair_review_identity import review_case_key
+from core.reconciliation.identity import review_case_key
 from core.repair_worker import RepairWorker
 
 
@@ -101,7 +101,7 @@ def test_replacement_requires_the_published_copy_to_be_assigned(tmp_path):
 
 
 def test_migration_preserves_an_active_legacy_replacement_request(tmp_path):
-    from core.library.reconciliation_fulfillment import ensure_schema
+    from core.reconciliation.fulfillment import ensure_schema
     db = Database(tmp_path / 'migration.db')
     details = {'album_id': 2, 'profile_id': 1, 'album_folder': str(tmp_path),
                'source': 'musicbrainz', 'release_id': 'release'}
@@ -118,7 +118,7 @@ def test_migration_preserves_an_active_legacy_replacement_request(tmp_path):
 
 
 def test_legacy_wishlist_history_does_not_resurrect_completed_or_cancelled_requests(tmp_path):
-    from core.library.reconciliation_fulfillment import backfill_requests
+    from core.reconciliation.fulfillment import backfill_requests
 
     db = Database(tmp_path / 'legacy.db')
     details = {'album_id': 2, 'profile_id': 1, 'album_folder': str(tmp_path),
@@ -144,7 +144,7 @@ def test_legacy_wishlist_history_does_not_resurrect_completed_or_cancelled_reque
 
 
 def test_cancel_preserves_intent_and_cannot_be_confused_with_publication(tmp_path):
-    from core.library.reconciliation_fulfillment import cancel_request
+    from core.reconciliation.fulfillment import cancel_request
     db = Database(tmp_path / 'cancel.db')
     details = {'album_id': 2, 'profile_id': 1, 'album_folder': str(tmp_path),
                'source': 'deezer', 'release_id': 'release'}
@@ -171,7 +171,7 @@ def test_cancel_preserves_intent_and_cannot_be_confused_with_publication(tmp_pat
 
 
 def test_relocated_acquisition_settles_against_new_case(tmp_path):
-    from core.library.reconciliation_redirects import record_relocation
+    from core.reconciliation.redirects import record_relocation
     db = Database(tmp_path / 'move.db')
     details = {'album_id': 'album', 'profile_id': 1, 'album_folder': '/old',
                'source': 'musicbrainz', 'release_id': 'release'}

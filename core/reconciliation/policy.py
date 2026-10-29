@@ -30,7 +30,7 @@ def _replaces_artist_credit(changes: dict[str, Any], details: dict | None = None
         change = changes.get(field)
         old, new = _change_value(change, 'old'), _change_value(change, 'new')
         if old and new and old.casefold() != new.casefold():
-            from core.library.reconciliation_metadata import credit_preserves_artists
+            from core.reconciliation.metadata import credit_preserves_artists
             evidence = details or {}
             # `artist` is the album-artist tag, not the performer credit. A
             # generic compilation label can be corrected on a supported
@@ -247,7 +247,7 @@ def queue_filter(*, conn, case_modes=None, search_case_ids=None, status: str, jo
     search = ''
     if q.strip():
         import json
-        from core.repair_review_search import matching_cases
+        from core.reconciliation.search import matching_cases
         search = 'AND review_case_key IN (SELECT value FROM json_each(?))'
         params.append(json.dumps(search_case_ids if search_case_ids is not None else
                                  matching_cases(conn, status=status, job_id=job_id, query=q)))
@@ -280,7 +280,7 @@ def case_mode(items: list[dict]) -> str:
 def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', case_id: str = '', compact: bool = False) -> dict:
     """One classification for counts, filtering and execution, including draft choices."""
     import json
-    from core.library import reconciliation_choices as choices
+    from core.reconciliation import choices as choices
     choices.ensure_schema(conn)
     saved = {} if compact else choices.load_choices(conn)
     grouped = {}

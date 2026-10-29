@@ -3,7 +3,7 @@ from copy import deepcopy
 
 import pytest
 
-from core.library.reconciliation_plan import reconcile_folder
+from core.reconciliation.plan import reconcile_folder
 from core.repair_jobs.library_reconciliation import (
     _release_display_metadata, _supported_current_edition, ScoredCandidate,
 )

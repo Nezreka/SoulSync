@@ -1,6 +1,6 @@
 """Explicit album-scoped permission to use a video recording's audio identity."""
 
-from core.library.reconciliation_catalogue import connection
+from core.reconciliation.catalogue import connection
 
 
 def save_choice(db, album_id, source, release_id, allowed):

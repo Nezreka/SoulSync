@@ -2,7 +2,7 @@
 import json
 import sqlite3
 
-from core.library.reconciliation_inventory import (
+from core.reconciliation.inventory import (
     InventoryRequest, ScanScope, directory_observations, discovery_roots,
     inventory_record, known_membership_agrees, load_inventory_request, track_selection,
 )
@@ -108,7 +108,7 @@ def test_cross_parent_discovery_escalates_to_preserve_grouping_order(tmp_path):
 
 
 def test_download_only_refreshes_its_album_and_pending_sibling_requests(tmp_path):
-    from core.library.reconciliation_inventory import affected_download_cases
+    from core.reconciliation.inventory import affected_download_cases
     db, root, folder, path, row, record = saved_album(tmp_path)
     sibling = folder.parent / 'Album deluxe'
     sibling.mkdir()
@@ -128,7 +128,7 @@ def test_download_only_refreshes_its_album_and_pending_sibling_requests(tmp_path
 
 
 def test_refresh_scope_accounts_for_grouping_metadata():
-    from core.library.reconciliation_inventory import refresh_scope_for_finding
+    from core.reconciliation.inventory import refresh_scope_for_finding
     base = {'finding_type': 'reconciliation_metadata'}
     assert refresh_scope_for_finding({**base, 'details': {
         'db_track_updates': {'title': 'Song', 'recording_disambiguation': 'live'},

@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import pytest
 from tests.reconciliation.support.acceptance import build_album, scan_case, RELEASE
-from core.library.reconciliation_fulfillment import record_request_on_connection
+from core.reconciliation.fulfillment import record_request_on_connection
 from core.repair_jobs.library_reconciliation import LibraryReconciliationJob
 
 
@@ -38,7 +38,7 @@ def test_failed_intent_write_rolls_back_wishlist(tmp_path, monkeypatch):
     album = build_album(tmp_path, monkeypatch, 'supported')
     def fail(*args):
         raise RuntimeError('intent write failed')
-    monkeypatch.setattr('core.library.reconciliation_fulfillment.record_request_on_connection', fail)
+    monkeypatch.setattr('core.reconciliation.fulfillment.record_request_on_connection', fail)
     result = album.db.add_to_wishlist_detailed({'id': 'wanted', 'name': 'New', 'artists': [{'name': 'Artist'}],
         'album': {'id': RELEASE, 'name': 'Northbound'}}, user_initiated=True,
         reconciliation_request={'details': {}, 'slot': {}})
@@ -126,7 +126,7 @@ def test_tag_writer_reuses_the_open_file_for_placeholder_guards(tmp_path, monkey
 
 
 def test_byte_preserving_move_retains_tag_cache_but_tag_writes_invalidate_it(tmp_path, monkeypatch):
-    from core.library.reconciliation_evidence import ReconciliationEvidence, evidence_path_before_move, preserve_audio_evidence
+    from core.reconciliation.evidence import ReconciliationEvidence, evidence_path_before_move, preserve_audio_evidence
     album = build_album(tmp_path, monkeypatch, 'supported')
     scan_case(album)
     old = album.paths[0]

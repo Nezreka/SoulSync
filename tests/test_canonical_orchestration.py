@@ -264,7 +264,7 @@ def test_default_fetcher_handles_failure(monkeypatch):
 
 
 def test_auto_resolver_respects_an_accepted_queue_release(tmp_path):
-    from core.library.reconciliation_store import persist_album_plan
+    from core.reconciliation.store import persist_album_plan
     from core.repair_worker import RepairWorker
     db = MusicDatabase(str(tmp_path / 'accepted.db'))
     album_id = _seed(db, spotify='sp_std')

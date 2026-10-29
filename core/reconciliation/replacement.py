@@ -10,8 +10,8 @@ import json
 import os
 from pathlib import Path
 
-from core.library.reconciliation_catalogue import connection
-from core.library.reconciliation_fulfillment import request_identity
+from core.reconciliation.catalogue import connection
+from core.reconciliation.fulfillment import request_identity
 
 
 def ensure_schema(conn):
@@ -126,7 +126,7 @@ def _delivery(conn, identity, details, resolve):
                    and os.path.samefile(row['file_path'], receipt[0])]
     if len(assignments) != 1:
         return None
-    from core.library.reconciliation_evidence import file_identity
+    from core.reconciliation.evidence import file_identity
     evidence = next((row for row in (plan.get('_planning') or {}).get('files') or []
                      if row.get('path') == assignments[0]['file_path']), None)
     stat = os.stat(receipt[0])
