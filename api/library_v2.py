@@ -1631,6 +1631,26 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             },
         })
 
+    @_route("/api/library/v2/artists/upgradable-counts")
+    def lib2_artist_upgradable_counts():
+        """Each listed artist's "could be better" count, apart from the list
+        so the cards draw first and the live evaluator runs after."""
+        from core.library2.artist_reader import upgradable_track_counts
+        try:
+            ids = [int(token) for token in request.args.get("ids", "").split(",")
+                   if token.strip()]
+        except ValueError:
+            return _fail("ids must be integers")
+        ids = ids[:500]
+        if not ids:
+            return jsonify({"success": True, "counts": {}})
+        with closing(_conn()) as conn:
+            counts = upgradable_track_counts(
+                conn, "a.id IN (SELECT value FROM json_each(:ids))",
+                {"ids": json.dumps(ids)})
+        return jsonify({"success": True,
+                        "counts": {str(i): counts.get(i, 0) for i in ids}})
+
     @_route("/api/library/v2/discovery/artist", methods=["GET", "POST"])
     def lib2_discovery_artist():
         """ldp-01/ldp-02: bridge a provider artist identity into the catalogue.

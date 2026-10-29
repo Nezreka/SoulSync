@@ -66,3 +66,11 @@ def test_each_card_counts_its_upgradable_tracks(catalogue):  # noqa: F811
     # only asked for, so a plain page doesn't pay for the evaluator
     plain, _ = queries.list_artists(conn)
     assert all("upgradable_count" not in a for a in plain)
+
+
+def test_upgradable_counts_route_answers_for_the_listed_ids(api):  # noqa: F811
+    client, _db, ids = api
+    payload = client.get(f"/api/library/v2/artists/upgradable-counts?ids={ids['artist']},999").get_json()
+    assert payload == {"success": True, "counts": {str(ids["artist"]): 0, "999": 0}}
+    assert client.get("/api/library/v2/artists/upgradable-counts?ids=x").status_code == 400
+    assert client.get("/api/library/v2/artists/upgradable-counts").get_json()["counts"] == {}
