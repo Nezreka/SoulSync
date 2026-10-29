@@ -351,7 +351,8 @@ class TestMigrationPauseSupervisor:
         assert all(w.paused for w in workers)
         assert engine.migration_paused is True
 
-    def test_resumes_them_when_it_finishes(self):
+    def test_resumes_them_when_it_finishes(self, monkeypatch):
+        monkeypatch.setattr(migration_gate, "WORKER_STAGGER_SECONDS", 0)
         workers = [_FakeWorker(), _FakeWorker()]
         engine = _FakeEngine()
         active = {"on": True}
@@ -363,6 +364,21 @@ class TestMigrationPauseSupervisor:
 
         assert not any(w.paused for w in workers)
         assert engine.migration_paused is False
+
+    def test_released_workers_come_back_one_at_a_time(self, monkeypatch):
+        """fourteen workers let go at once after the upgrade queued on sqlite's
+        one writer together; the first resumes now, the rest a gap apart."""
+        import threading
+        monkeypatch.setattr(migration_gate, "WORKER_STAGGER_SECONDS", 0.2)
+        workers = [_FakeWorker(), _FakeWorker()]
+        active = {"on": True}
+        supervisor = self._supervisor(workers, _FakeEngine(), active)
+        supervisor.tick()
+        active["on"] = False
+        supervisor.tick()
+        assert [w.paused for w in workers] == [False, True]
+        threading.Event().wait(0.6)
+        assert [w.paused for w in workers] == [False, False]
 
     def test_leaves_a_manually_paused_worker_paused(self):
         manual = _FakeWorker(paused=True)

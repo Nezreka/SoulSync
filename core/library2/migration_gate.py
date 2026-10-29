@@ -29,8 +29,9 @@ silently missing out. They already expose ``pause()``/``resume()``.
 from __future__ import annotations
 
 import threading
+import time
 from contextlib import contextmanager
-from typing import Any, Callable, Iterable, Iterator, Optional
+from typing import Any, Callable, Iterable, Iterator, List, Optional
 
 from utils.logging_config import get_logger
 
@@ -150,19 +151,47 @@ def defer_or_call(callback: Callable[[], Any], database: Any, label: str) -> boo
     return False
 
 
+#: seconds between one released worker and the next. fourteen enrichment
+#: workers let go at the same instant after an upgrade all queue on sqlite's
+#: one writer at once, and every page waits behind them for the first minutes
+WORKER_STAGGER_SECONDS = 15.0
+
+
+def _staggered(items: List[Any], act: Callable[[Any], None], label: Callable[[Any], str]) -> int:
+    """Run ``act`` on the first item now and on each next one
+    WORKER_STAGGER_SECONDS later, in the background. Returns how many were
+    scheduled."""
+    if not items:
+        return 0
+
+    def run_one(item):
+        try:
+            act(item)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("could not start deferred %s: %s", label(item), exc)
+
+    if WORKER_STAGGER_SECONDS <= 0:
+        for item in items:
+            run_one(item)
+        return len(items)
+    run_one(items[0])
+    rest = items[1:]
+    if rest:
+        def later():
+            for item in rest:
+                time.sleep(WORKER_STAGGER_SECONDS)
+                run_one(item)
+        threading.Thread(target=later, name="Lib2WorkerStagger", daemon=True).start()
+    return len(items)
+
+
 def start_deferred_workers(database: Any) -> int:
     if migration_required(database):
         return 0
     with _deferred_lock:
         workers, _deferred_workers[:] = list(_deferred_workers), []
         callbacks, _deferred_callbacks[:] = list(_deferred_callbacks), []
-    started = 0
-    for worker in workers:
-        try:
-            worker.start()
-            started += 1
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("could not start deferred %s: %s", _worker_name(worker), exc)
+    started = _staggered(workers, lambda worker: worker.start(), _worker_name)
     for label, callback in callbacks:
         try:
             callback()
@@ -284,13 +313,7 @@ class MigrationPauseSupervisor:
             start_deferred_workers(self._database)
         if not self._paused_by_us and not self._engine_paused:
             return
-        resumed = 0
-        for worker in self._paused_by_us:
-            try:
-                worker.resume()
-                resumed += 1
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("could not resume %s: %s", _worker_name(worker), exc)
+        resumed = _staggered(list(self._paused_by_us), lambda worker: worker.resume(), _worker_name)
         self._paused_by_us = []
         if self._engine is not None and self._engine_paused:
             try:
