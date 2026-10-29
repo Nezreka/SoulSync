@@ -132,6 +132,47 @@ describe('library v2 interactive grab', () => {
     );
   });
 
+  it('plays a track hit before it is taken, and offers no play for a release (#1911)', async () => {
+    const startStream = vi.fn(async (_result: Record<string, unknown>) => {});
+    window.startStream = startStream as unknown as typeof window.startStream;
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({ mode: 'soulseek', sources: [{ name: 'soulseek' }] }),
+      ),
+      http.post('/api/search', () =>
+        HttpResponse.json({
+          results: [
+            {
+              result_type: 'track',
+              username: 'peer1',
+              filename: 'Music/Artist - Song.flac',
+              title: 'Song',
+              artist: 'Artist',
+              size: 30_000_000,
+            },
+            { result_type: 'track', username: 'usenet', filename: 'Release', size: 10 },
+          ],
+        }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <InteractiveSearchModal canWrite initialQuery="Artist Song" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    const listen = await screen.findAllByRole('button', { name: /^Listen to/ });
+    // the usenet hit is a whole release: one play button, the peer's
+    expect(listen).toHaveLength(1);
+    fireEvent.click(listen[0]);
+    await waitFor(() =>
+      expect(startStream).toHaveBeenCalledWith(
+        expect.objectContaining({ username: 'peer1', filename: 'Music/Artist - Song.flac' }),
+      ),
+    );
+    Reflect.deleteProperty(window, 'startStream');
+  });
+
   it('keeps unknown publish dates behind known releases in both age directions', () => {
     const result = (title: string, publishDate?: string): SourceSearchResult => ({
       result_type: 'track',

@@ -1,8 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import type { InspectorCandidate } from '@/features/downloads/inspector';
+
 import { DialogFrame, DialogHeader } from '@/components/dialog';
 import { decisionLabel, decisionPill } from '@/features/downloads/decisions';
+import { canListen, listenToCandidate } from '@/features/downloads/inspector-listen';
 
 import type {
   LibraryV2QualityProfile,
@@ -143,6 +146,24 @@ function fmtBytes(n?: number | null): string {
 
 function baseName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
+}
+
+/** A track hit as upstream's listen helper reads it (#1911); a release-level
+ *  hit (album, torrent, usenet, lidarr) has no one song to play. */
+function listenRow(r: SourceSearchResult): InspectorCandidate | null {
+  if (r.result_type === 'album') return null;
+  const row: InspectorCandidate = {
+    username: r.username,
+    filename: r.filename,
+    size: r.size,
+    bitrate: r.bitrate ?? undefined,
+    duration: r.duration ?? undefined,
+    quality: r.quality ?? undefined,
+    title: r.title ?? undefined,
+    artist: r.artist ?? undefined,
+    _globalIdx: 0,
+  };
+  return canListen(row) ? row : null;
 }
 
 function resultTitle(r: SourceSearchResult): string {
@@ -1171,6 +1192,7 @@ export function InteractiveSearchModal({
     const isAlbum = r.result_type === 'album';
     const wrongScope = Boolean(entity?.trackId && isAlbum);
     const passedOver = r.decision?.accepted === false;
+    const listen = listenRow(r);
     return (
       <tr key={`${key}-${i}`} className={passedOver ? styles.filteredRow : undefined}>
         <td>
@@ -1230,6 +1252,17 @@ export function InteractiveSearchModal({
         ) : null}
         <td>
           <span className={styles.grabAction}>
+            {listen ? (
+              <button
+                type="button"
+                className={styles.toolButton}
+                title="Listen before you pick"
+                aria-label={`Listen to ${resultTitle(r)}`}
+                onClick={() => void listenToCandidate(listen, { album: r.album ?? undefined })}
+              >
+                ▶
+              </button>
+            ) : null}
             <button
               type="button"
               className={styles.toolButton}
