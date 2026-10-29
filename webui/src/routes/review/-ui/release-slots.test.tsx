@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { expect, it } from 'vitest';
 
 import { AssignmentEvidence, ReleaseComparison } from './reconciliation-evidence';
+
 it('renders a missing repeated title at its release position without a duplicate footer list', () => {
   render(
     <ReleaseComparison

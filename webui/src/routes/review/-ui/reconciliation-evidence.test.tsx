@@ -1,13 +1,13 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 
-import type { AlbumAssignment, ReviewCase, ReviewFinding } from '../-review.api';
+import type { ReviewFinding, AlbumAssignment, ReviewCase } from '../-review.api';
+import type { ReleaseEvidence } from './reconciliation-evidence';
 
 import {
-  AssignmentEvidence,
   ReconciliationEvidence,
   ReleaseComparison,
-  type ReleaseEvidence,
+  AssignmentEvidence,
 } from './reconciliation-evidence';
 
 afterEach(() => {
@@ -48,6 +48,7 @@ const release: ReleaseEvidence = {
   total_slots: 1,
   continuous_numbering: false,
 };
+
 const finding = {
   id: 1,
   file_path: '/music/Local album/Song.flac',
@@ -264,4 +265,156 @@ it('shows duplicate copy evidence and keeper choices before the generic fallback
   ).toBeTruthy();
   fireEvent.click(choice);
   expect(keep).toHaveBeenCalledWith('copy-2');
+});
+
+it('keeps the selected recording within five groups and expands the remaining evidence', async () => {
+  const recordings = Array.from({ length: 8 }, (_, index) => ({
+    title: `Recording ${index}`,
+    artist: 'Artist',
+    score: 0.99,
+    mbid: `id-${index}`,
+  }));
+  render(
+    <ReconciliationEvidence
+      finding={
+        {
+          id: 1,
+          file_path: '/music/song.flac',
+          details: {
+            expected_title: 'Recording 7',
+            recording_mbid: 'id-7',
+            acoustid: { status: 'ok', recordings },
+            ambiguity_reasons: ['Another local file fits this release track'],
+            competitors: [
+              {
+                kind: 'local_file',
+                file_path: '/music/15 - Song [DLX].flac',
+                assigned_title: 'Song [DLX]',
+              },
+            ],
+          },
+        } as unknown as ReviewFinding
+      }
+      prominent
+    />,
+  );
+  const identity = screen.getByRole('region', { name: 'Audio identity' });
+  expect(within(identity).getAllByRole('link', { name: /recording/i })).toHaveLength(5);
+  expect(within(identity).getByRole('link', { name: /Selected recording/ })).toHaveAttribute(
+    'href',
+    expect.stringContaining('id-7'),
+  );
+  expect(within(identity).getByText('15 - Song [DLX].flac')).toBeVisible();
+  fireEvent.click(within(identity).getByRole('button', { name: 'Show 3 more recordings' }));
+  expect(within(identity).getAllByRole('link', { name: /recording/i })).toHaveLength(8);
+  fireEvent.click(within(identity).getByRole('button', { name: 'Show fewer recordings' }));
+  expect(within(identity).getAllByRole('link', { name: /recording/i })).toHaveLength(5);
+  fireEvent.click(screen.getByRole('button', { name: 'About AcoustID audio evidence' }));
+  expect(
+    await screen.findByRole('dialog', { name: 'About AcoustID audio evidence' }),
+  ).toHaveTextContent('equal scores do not rank them');
+});
+
+it('names release artists and distinguishes the current edition from the planned one', () => {
+  render(
+    <ReleaseComparison
+      candidates={[
+        {
+          source: 'musicbrainz',
+          release_id: 'cd',
+          release_title: 'Album',
+          release_artist: 'Artist & Guest',
+          format: 'CD',
+        },
+        {
+          source: 'musicbrainz',
+          release_id: 'digital',
+          release_title: 'Album',
+          release_artist: 'Artist & Guest',
+          format: 'Digital Media',
+        },
+      ]}
+      selected={1}
+      onSelect={vi.fn()}
+      currentRelease={{ source: 'musicbrainz', release_id: 'digital' }}
+      libraryRelease={{ source: 'musicbrainz', release_id: 'cd' }}
+    />,
+  );
+  expect(screen.getAllByText('Artist & Guest')).toHaveLength(3);
+  expect(screen.getByLabelText('Current and planned editions')).toHaveTextContent(
+    'Current library edition',
+  );
+  expect(screen.getByLabelText('Current and planned editions')).toHaveTextContent(
+    'Selected for this plan',
+  );
+});
+
+it('marks a large length mismatch red even when the fingerprint identifies the selected recording', () => {
+  render(
+    <ReconciliationEvidence
+      prominent
+      finding={
+        {
+          id: 1,
+          finding_type: 'reconciliation_unresolved',
+          file_path: '/music/Lotus.flac',
+          details: {
+            expected_title: 'Lotus',
+            file_duration_ms: 300910,
+            expected_duration_ms: 104850,
+            recording_mbid: 'lotus',
+            acoustid: {
+              status: 'ok',
+              recordings: [{ mbid: 'lotus', title: 'Lotus', artist: 'YIN YIN', score: 0.97 }],
+            },
+          },
+        } as unknown as ReviewFinding
+      }
+    />,
+  );
+  expect(screen.getByRole('region', { name: 'Audio identity' })).toHaveAttribute(
+    'data-tone',
+    'danger',
+  );
+  expect(screen.getByText('Length differs by 196.1 seconds')).toBeVisible();
+  expect(screen.getByText(/incorrect catalogue length/)).toBeVisible();
+});
+
+it('requires an explicit audio-copy choice for a video-only MusicBrainz release', () => {
+  const onPin = vi.fn();
+  render(
+    <ReleaseComparison
+      candidates={[
+        {
+          source: 'musicbrainz',
+          release_id: 'video',
+          release_title: 'Present Tense',
+          audio_copy_of_video: true,
+        },
+      ]}
+      selected={0}
+      onSelect={vi.fn()}
+      onPin={onPin}
+    />,
+  );
+  expect(screen.getByText(/MusicBrainz lists this as a video recording/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Use for this audio copy' }));
+  expect(onPin).toHaveBeenCalledWith(0);
+});
+
+it('shows the exact library-only change instead of an empty approval table', () => {
+  render(
+    <ReconciliationEvidence
+      finding={
+        {
+          id: 1,
+          details: { changes: { library_album_title: { old: 'Album (pressing)', new: 'Album' } } },
+        } as unknown as ReviewFinding
+      }
+    />,
+  );
+  const table = screen.getByRole('table');
+  expect(within(table).getByText('Album (pressing)')).toBeVisible();
+  expect(within(table).getByText('Album')).toBeVisible();
+  expect(within(table).getByText(/Album title.*library/)).toBeVisible();
 });

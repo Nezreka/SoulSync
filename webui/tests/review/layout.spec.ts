@@ -1,10 +1,10 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './harness';
 import { http, HttpResponse } from 'msw';
 
 import type { ReviewCase } from '../../src/routes/review/-review.api';
 
 import { ambiguousReview, reviewFixture } from '../fixtures/review';
-import { installShell, ORIGIN } from '../visual/harness';
+import { installShell, ORIGIN } from './harness';
 
 for (const width of [1800, 1280, 768, 390, 320]) {
   test(`${width}px uncertainty, comparisons and catalogue provenance`, async ({ page }, info) => {
@@ -151,7 +151,7 @@ test('plans awaiting acquisition still allow independent approved edits', async 
       });
       review.album_plan!.assignments.push({
         status: 'missing',
-        finding_id: null,
+        finding_id: undefined,
         slot_title: 'Bonus track',
         slot_track_number: 2,
         slot_disc_number: 1,

@@ -1,8 +1,9 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import { expect, test } from '../review/harness';
 import { http, HttpResponse, type RequestHandler } from 'msw';
 
 import { acceptanceApi, acceptanceSnapshot } from '../fixtures/review-acceptance';
-import { installShell, ORIGIN } from './harness';
+import { installShell, ORIGIN } from '../review/harness';
 
 // These are independent product expectations, not assertions derived from the
 // current UI or regenerated Python output. The backend verifies exact edits.

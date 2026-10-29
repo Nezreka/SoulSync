@@ -90,7 +90,7 @@ export function renderIndex() {
  * dist/shell.js after a bare `vite build`) still boots a page that looks
  * nearly right, so the spec fails on any of these rather than on a pixel diff.
  */
-export async function installShell(page: Page, handlers: RequestHandler[] = []): Promise<string[]> {
+export async function installShell(page: Page, handlers: RequestHandler[] = [], options: { strictApi?: boolean } = {}): Promise<string[]> {
   const missing: string[] = [];
   const index = renderIndex();
   await page.route(/.*/, async (route) => {
@@ -131,6 +131,8 @@ export async function installShell(page: Page, handlers: RequestHandler[] = []):
       });
     }
     if (request.resourceType() === 'image') return route.fulfill({ status: 404, body: '' });
+    if (options.strictApi && path.startsWith('/api/'))
+      return route.fulfill({ status: 501, json: { error: `Unexpected API request: ${request.method()} ${path}` } });
     return route.fulfill({ json: {} });
   });
   return missing;

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { PlaylistReferences } from './playlist-references';
@@ -65,4 +65,38 @@ it('does not clear playlist warnings when a recheck fails', async () => {
   expect(await screen.findByText('Server offline')).toBeVisible();
   expect(screen.getByText('88 Keys')).toBeVisible();
   expect(refresh).not.toHaveBeenCalled();
+});
+
+it('requires explicit playlist acknowledgement and sends only displayed references', async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ playlists: [{ id: 'p', title: 'Favorites' }] }),
+    })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true }) });
+  vi.stubGlobal('fetch', fetch);
+  const refresh = vi.fn();
+  render(
+    <PlaylistReferences
+      caseId="case"
+      findingId={5}
+      evidenceToken="token"
+      path="/music/song.flac"
+      removal
+      onRecheck={refresh}
+    />,
+  );
+  await screen.findByText('Favorites');
+  fireEvent.click(screen.getByRole('button', { name: 'Remove anyway…' }));
+  expect(fetch).toHaveBeenCalledTimes(1);
+  const dialog = screen.getByRole('dialog');
+  expect(within(dialog).getByText('Favorites')).toBeVisible();
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save removal override' }));
+  await waitFor(() => expect(refresh).toHaveBeenCalledWith(true));
+  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+    evidence_token: 'token',
+    acknowledge_broken_references: true,
+    playlist_ids: ['p'],
+  });
 });

@@ -8,6 +8,7 @@ import { ReconciliationEvidence } from './reconciliation-evidence';
 import { SelectedActionDetail } from './selected-action-detail';
 
 afterEach(cleanup);
+
 const finding = {
   id: 7,
   finding_type: 'reconciliation_metadata',
@@ -356,4 +357,38 @@ it('distinguishes a confirmed match from approval of its remaining metadata edit
   expect(screen.getByText('Match confirmed')).toBeVisible();
   expect(screen.queryByText('Changes planned')).toBeNull();
   expect(screen.getByRole('button', { name: 'Accept changes' })).toBeVisible();
+});
+
+it('confirms a proposed version directly without searching for the same slot again', () => {
+  const onAct = vi.fn();
+  render(
+    <SelectedActionDetail
+      finding={
+        {
+          id: 1,
+          finding_type: 'reconciliation_extra',
+          title: 'Song (instrumental)',
+          file_path: '/music/song.flac',
+          details: {
+            version_conflict: true,
+            replacement_track: {
+              source_track_id: 'song',
+              name: 'Song',
+              disc_number: 2,
+              track_number: 11,
+            },
+            assignment_options: [{ key: 'id:song:2:11', title: 'Song' }],
+          },
+        } as unknown as ReviewFinding
+      }
+      itemIndex={0}
+      itemCount={1}
+      busy={false}
+      onAct={onAct}
+      onSelect={vi.fn()}
+      typeInfo={{ fixable: true } as FindingTypeInfo}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'This is the correct track' }));
+  expect(onAct).toHaveBeenCalledWith('fix', 'assign:id:song:2:11');
 });

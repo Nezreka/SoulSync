@@ -4,7 +4,9 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { ReviewFinding } from '../-review.api';
 
 import { MissingTracksChoice } from './missing-tracks-choice';
+
 afterEach(cleanup);
+
 it('requests only selected, currently actionable missing tracks and permits changing completeness', () => {
   const onRequest = vi.fn(),
     onChangeScope = vi.fn();

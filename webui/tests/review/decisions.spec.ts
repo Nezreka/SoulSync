@@ -1,9 +1,9 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './harness';
 import { http, HttpResponse } from 'msw';
 
 import { ambiguousReview, reviewFixture } from '../fixtures/review';
 import { acceptanceApi } from '../fixtures/review-acceptance';
-import { installShell, ORIGIN } from '../visual/harness';
+import { installShell, ORIGIN } from './harness';
 
 for (const width of [1800, 390]) {
   test(`${width}px grouped apply preview and quarantine details`, async ({ page }, info) => {
@@ -284,3 +284,39 @@ test('tablet sidebar leaves enough room for a long album title and its navigatio
   expect(navBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
   expect(titleBox.width).toBeGreaterThan(240);
 });
+
+for (const width of [1800, 390]) {
+  test(`${width}px file decision disclosure stays inside its card at 200% zoom`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await installShell(page, reviewFixture(true, (review) => {
+      review.items = Array.from({ length: 7 }, (_, index) => ({
+        ...review.items[0], id: index + 1,
+        file_decision: {
+          title: `Song ${index}`, keep: [`/music/Album/${index}.flac`],
+          quarantine: [`/music/Album/${index}.mp3`], request: '',
+        },
+      }));
+    }));
+    await page.goto(`${ORIGIN}/review?mode=all`);
+    const card = page.getByRole('region', { name: 'File decisions included' });
+    const button = card.getByRole('button', { name: 'Show 2 more file decisions' });
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+    for (const zoom of ['1', '2']) {
+      await page.evaluate((value) => { document.body.style.zoom = value; }, zoom);
+      await button.scrollIntoViewIfNeeded();
+      const outer = (await card.boundingBox())!;
+      const inner = (await button.boundingBox())!;
+      expect(inner.y + inner.height + 4).toBeLessThanOrEqual(outer.y + outer.height);
+      expect(inner.x).toBeGreaterThanOrEqual(outer.x);
+      expect(inner.x + inner.width).toBeLessThanOrEqual(outer.x + outer.width);
+      await button.focus();
+      await page.keyboard.press('Enter');
+      await expect(card.getByText('FLAC', { exact: true })).toHaveCount(7);
+      const fewer = card.getByRole('button', { name: 'Show fewer file decisions' });
+      await expect(fewer).toHaveAttribute('aria-expanded', 'true');
+      await fewer.focus();
+      await page.keyboard.press('Space');
+      await expect(card.getByText('FLAC', { exact: true })).toHaveCount(5);
+    }
+  });
+}

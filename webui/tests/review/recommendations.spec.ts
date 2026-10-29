@@ -1,7 +1,7 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './harness';
 
 import { reviewFixture } from '../fixtures/review';
-import { installShell, ORIGIN } from '../visual/harness';
+import { installShell, ORIGIN } from './harness';
 
 for (const width of [1800, 1280, 390]) {
   for (const ready of [false, true]) {

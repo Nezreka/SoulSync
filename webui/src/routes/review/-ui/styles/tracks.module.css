@@ -1,0 +1,586 @@
+/* Review tracks styles. Classes share the review-page CSS module namespace. */
+.trackMatrix {
+  background: var(--surface-1);
+}
+.trackViewSwitch {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+.trackViewSwitch button {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+}
+.trackViewSwitch button[aria-pressed='true'] {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+.trackFilters label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.trackFilters select {
+  padding: 7px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+.versionExplanation {
+  margin: 0 0 12px;
+  color: var(--warning);
+  font-size: 13px;
+}
+.assignmentGroup {
+  min-width: 0;
+}
+.assignmentGroup > button {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-top: 1px solid var(--line-strong);
+  color: var(--info);
+  background: rgba(var(--info-rgb), 0.08);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.assignmentGroup[data-tone='danger'] > button {
+  color: var(--danger);
+  background: var(--surface-2);
+}
+.assignmentGroup[data-tone='good'] > button {
+  color: var(--success);
+  background: rgba(var(--success-rgb), 0.08);
+}
+.assignmentGroup > p {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.matrixCounts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.releaseContext {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -3px 0 12px;
+}
+.releaseContext > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  color: var(--text-2);
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.releaseContext code {
+  color: var(--accent);
+  font-size: 11px;
+}
+.releaseContext a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.trackTable {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.trackWorkspace > .trackMatrix {
+  min-width: 0;
+  margin-top: 0;
+}
+.trackInspector {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.trackInspector > p {
+  padding: 16px;
+  color: var(--text-2);
+}
+.inspectorClose {
+  display: none;
+}
+.trackTableHead,
+.matrixRow {
+  align-items: center;
+  min-width: 0;
+}
+.trackTableHead {
+  padding: 9px 12px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.matrixRow:not(:disabled) {
+  cursor: pointer;
+}
+.matrixRow[data-status='uncertain'] {
+  box-shadow: inset 3px 0 rgba(var(--warning-rgb), 0.45);
+  background: rgba(var(--warning-rgb), 0.08);
+}
+.matrixRow[data-status='extra'],
+.matrixRow[data-status='missing'] {
+  background: rgba(var(--danger-rgb), 0.09);
+  box-shadow: inset 3px 0 rgba(var(--danger-rgb), 0.55);
+}
+.matrixRow[data-status='not_owned'] {
+  background: var(--surface-2);
+}
+.matrixRow span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.matrixRow strong {
+  display: block;
+  color: var(--text-1);
+  font-size: 13px;
+}
+.matrixRow small {
+  display: block;
+  color: var(--text-2);
+  margin-top: 2px;
+}
+.matrixRow i {
+  display: inline-block;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  padding: 3px 7px;
+  font-style: normal;
+  font-size: 11px;
+}
+.decisionHeader {
+  margin-top: 26px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.severity {
+  font-size: 12px;
+  border: 1px solid var(--line-strong);
+  padding: 4px 9px;
+  border-radius: var(--radius-xl);
+}
+.description {
+  line-height: 1.5;
+}
+.suggestion {
+  margin: 22px 0;
+  padding: 14px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+.suggestion[data-tone='good'] {
+  border-color: rgba(var(--success-rgb), 0.45);
+  background: rgba(var(--success-rgb), 0.08);
+}
+.suggestionIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--warning-rgb), 0.08);
+  color: var(--warning);
+  font-size: 19px;
+  font-weight: 800;
+}
+.suggestion[data-tone='good'] .suggestionIcon {
+  background: rgba(var(--success-rgb), 0.08);
+  color: var(--success);
+}
+.suggestion strong {
+  display: block;
+  font-size: 17px;
+  margin: 3px 0;
+}
+.waitingNotice {
+  padding: 12px;
+}
+
+@media (max-width: 900px) {
+  .trackWorkspace {
+    grid-template-columns: 1fr;
+  }
+  .trackInspector {
+    position: static;
+    max-height: none;
+  }
+  .trackTableHead {
+    display: none;
+  }
+  .matrixRow {
+    grid-template-columns: minmax(98px, auto) minmax(0, 1fr);
+    gap: 8px 12px;
+    padding: 13px;
+  }
+  .rowStatus {
+    grid-column: 1;
+  }
+  .rowPosition {
+    grid-column: 2;
+    justify-self: end;
+  }
+  .releaseContext {
+    display: grid;
+  }
+  .releaseContext > span {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 560px) {
+  .matrixCounts {
+    justify-content: flex-start;
+  }
+}
+
+@container album-review (max-width: 900px) {
+  .trackWorkspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .trackWorkspace[data-detail] > section {
+    display: none;
+  }
+  .trackInspector[data-open] {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    background: var(--surface-overlay);
+    scroll-margin-top: 70px;
+  }
+  .trackInspector:not([data-open]) {
+    display: none;
+  }
+  .inspectorClose {
+    display: block;
+    margin: 8px;
+  }
+}
+.trackFilters {
+  display: flex;
+  gap: 9px;
+  align-items: end;
+  margin: 0 0 12px;
+  flex-wrap: wrap;
+}
+.trackFilters > *,
+.trackFilters select {
+  min-width: 0;
+  max-width: 100%;
+}
+.matrixRow[data-status='settled'] {
+  background: var(--surface-2);
+  border-left: 4px solid var(--line-strong);
+}
+.rowStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.trackWorkspace .trackTableHead,
+.trackTableHead,
+.trackWorkspace .matrixRow,
+.matrixRow {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) minmax(0, 1fr) minmax(100px, 0.5fr);
+  gap: 12px;
+}
+.trackWorkspace .rowPosition,
+.rowPosition {
+  grid-column: auto;
+  justify-self: start;
+}
+.matrixRow .rowStatus {
+  grid-column: auto;
+}
+.matrixRow {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--line-strong);
+  background: var(--surface-1);
+  color: var(--text-1);
+  text-align: left;
+  padding: 12px;
+}
+.compactLocal,
+.compactRelease {
+  min-width: 0;
+}
+@media (max-width: 700px) {
+  .trackWorkspace .trackTableHead,
+  .trackTableHead {
+    display: none;
+  }
+  .trackWorkspace .matrixRow,
+  .matrixRow {
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 8px;
+  }
+  .matrixRow .rowPosition {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .matrixRow .rowStatus {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .compactLocal,
+  .compactRelease {
+    grid-column: 2;
+  }
+  .compactLocal::before {
+    content: 'Local file';
+    color: var(--text-2);
+    font-size: 11px;
+  }
+  .compactRelease::before {
+    content: 'Selected release track';
+    color: var(--text-2);
+    font-size: 11px;
+  }
+}
+
+.matrixRow[data-status='duplicate'] {
+  background: rgba(var(--warning-rgb), 0.08);
+  box-shadow: inset 3px 0 rgba(var(--warning-rgb), 0.45);
+}
+.matrixRow[data-status='confirmed'] {
+  border-left: 4px solid var(--success);
+  background: rgba(var(--success-rgb), 0.08);
+}
+.matrixRow[data-status='change'] {
+  border-left: 4px solid var(--info);
+  background: rgba(var(--info-rgb), 0.1);
+  box-shadow: inset 3px 0 rgba(var(--info-rgb), 0.45);
+}
+.matrixRow[data-selected='true'] {
+  outline: 2px solid var(--text-1);
+  outline-offset: -2px;
+}
+.page .assignmentGroup > button[data-slot='control'] {
+  width: 100%;
+  text-align: left;
+  justify-content: flex-start;
+  border: 0;
+  border-radius: 0;
+}
+.page .trackViewSwitch {
+  gap: 4px;
+}
+.page .trackViewSwitch button {
+  min-height: 32px;
+}
+.page .trackInspector {
+  padding-bottom: 16px;
+}
+.page .assignmentGroup[data-tone='danger'] > button {
+  color: var(--danger-light);
+  background: rgba(var(--danger-rgb), 0.1);
+}
+.page .assignmentGroup[data-tone='warning'] > button {
+  color: var(--warning);
+  background: rgba(var(--warning-rgb), 0.1);
+}
+.page .assignmentGroup[data-tone='good'] > button {
+  color: var(--success);
+  background: rgba(var(--success-rgb), 0.09);
+}
+.page .assignmentGroup:not([data-tone]) > button {
+  color: var(--info);
+  background: rgba(var(--info-rgb), 0.09);
+}
+.matrixRow[data-status='missing'] .rowStatus i,
+.matrixRow[data-status='extra'] .rowStatus i {
+  color: var(--danger-light);
+  border-color: rgba(var(--danger-rgb), 0.4);
+}
+.matrixRow[data-status='change'] .rowStatus i {
+  color: var(--info);
+  border-color: rgba(var(--info-rgb), 0.4);
+}
+.matrixRow[data-status='uncertain'] .rowStatus i {
+  color: var(--warning);
+  border-color: rgba(var(--warning-rgb), 0.4);
+}
+.matrixRow[data-status='confirmed'] .rowStatus i {
+  color: var(--success);
+  border-color: rgba(var(--success-rgb), 0.4);
+}
+.decisionNavigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block: 12px;
+}
+
+@container (max-width: 400px) {
+  .decisionNavigation {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .decisionNavigation button {
+    padding: 8px;
+    white-space: normal;
+  }
+}
+.decisionNavigation button[data-slot='control'] {
+  font-size: 12px;
+  min-height: 32px;
+}
+.missingRequests {
+  margin-bottom: 16px;
+  border: 1px solid rgba(var(--warning-rgb), 0.4);
+  border-radius: var(--radius-md);
+  background: rgba(var(--warning-rgb), 0.04);
+}
+.missingRequests > summary {
+  padding: 12px;
+  cursor: pointer;
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 600;
+}
+.missingRequests > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.assignmentChoices > button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+.assignmentChoices small {
+  display: block;
+  color: var(--text-2);
+  font-weight: 400;
+}
+.assignmentPosition {
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.assignmentChoices {
+  display: grid;
+  gap: 6px;
+  margin-block: 12px;
+  max-height: min(360px, 45dvh);
+  overflow-y: auto;
+  grid-auto-rows: max-content;
+}
+.assignmentChoices > button {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 10px;
+  text-align: left;
+  white-space: normal;
+  padding: 10px;
+  min-height: 58px;
+  height: auto;
+  align-items: center;
+}
+.assignmentChoices > button > span:nth-child(2) {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.assignmentChoices strong,
+.assignmentChoices small {
+  line-height: 1.4;
+}
+.remediationChoices {
+  border: 0;
+  padding: 0;
+  margin: 12px 0 20px;
+  display: grid;
+  gap: 8px;
+}
+.remediationChoices legend {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.remediationChoices label {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 5px 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.remediationChoices small {
+  grid-column: 2;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.remediationChoices label:has(input:checked) {
+  border-color: var(--success);
+  background: rgba(var(--success-rgb), 0.05);
+}
+.remediationSummary {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.plannedStatus {
+  display: grid;
+  gap: 8px;
+}
+.matrixRow[data-status='audio_conflict'] {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface-1));
+  border-inline-start: 4px solid var(--danger);
+}
+.matrixRow[data-status='audio_conflict'] .rowStatus i {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.trackInspector > .decisionNavigation {
+  margin: 0;
+  padding: 8px 18px 16px;
+}
+
+.confirmedStatus {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: rgba(var(--success-rgb), 0.08);
+  padding: 14px;
+  margin-bottom: 16px;
+}
+.confirmedStatus strong {
+  color: var(--success);
+}

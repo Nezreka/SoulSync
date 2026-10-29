@@ -1,7 +1,7 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './harness';
 import { http, HttpResponse } from 'msw';
 import { reviewFixture } from '../fixtures/review';
-import { installShell, ORIGIN } from '../visual/harness';
+import { installShell, ORIGIN } from './harness';
 
 for (const width of [390, 1800]) {
   test(`${width}px unidentified album uses local file inventory`, async ({page}, info) => {

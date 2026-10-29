@@ -1,9 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import { reviewCaseFixture } from '../-test/fixtures';
 import { ReviewPage } from './review-page';
+import { unexpectedRequest } from './support/requests';
 
-const album = {
+const album = reviewCaseFixture(false, {
   case_id: 'album:1:first',
   album: 'First album',
   artist: 'Artist',
@@ -23,6 +25,8 @@ const album = {
     can_organize: false,
   },
   album_plan: {
+    state: 'review',
+    categories: [],
     source: 'musicbrainz',
     release_id: 'current',
     counts: { confirmed: 1, changed: 0, uncertain: 0, missing: 0, extra: 0 },
@@ -44,6 +48,7 @@ const album = {
         source: 'musicbrainz',
         release_id: 'current',
         release_title: 'Current edition',
+        continuous_numbering: false,
         clear: 1,
         matched: 1,
         total_slots: 1,
@@ -52,15 +57,19 @@ const album = {
       },
     ],
   },
-};
+});
 const next = { ...album, case_id: 'album:1:next', album: 'Another album' };
+
 const fetchMock = vi.fn();
+
 function reply(body: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => body };
 }
+
 function setup(current: unknown = album, status = 200) {
   fetchMock.mockImplementation(async (input: string) => {
     const url = new URL(input, 'http://localhost');
+    if (url.pathname.endsWith('/playlist-references')) return reply({ playlists: [] });
     if (url.pathname === '/api/repair/review-queue/summary')
       return reply({ all: 1, review: 1, ready: 0, files: 0, ready_total: 0 });
     if (url.pathname === '/api/repair/review-queue')
@@ -72,14 +81,16 @@ function setup(current: unknown = album, status = 200) {
     if (url.pathname === '/api/repair/history') return reply({ runs: [] });
     if (url.pathname === '/api/repair/status') return reply({ current_job: null });
     if (url.pathname === '/api/repair/bulk-fix/status') return reply({ running: false });
-    throw new Error(`Unexpected request: ${input}`);
+    return unexpectedRequest(input);
   });
 }
+
 beforeEach(() => {
   window.sessionStorage.clear();
   window.history.replaceState(null, '', '/review?case=album%3A1%3Afirst');
   vi.stubGlobal('fetch', fetchMock);
 });
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -92,12 +103,14 @@ it('advances only for an explicit completed album outcome', async () => {
   await screen.findByRole('heading', { name: 'Another album' });
   expect(screen.queryByText('Review case not found')).toBeNull();
 });
+
 it('keeps a still-pending album open even when it leaves the current queue filter', async () => {
   setup();
   render(<ReviewPage />);
   await screen.findByRole('heading', { name: 'First album' });
   expect(screen.queryByRole('heading', { name: 'Another album' })).toBeNull();
 });
+
 it('does not report completion or advance on a failed album request', async () => {
   setup({ error: 'Temporary connection failure' }, 503);
   render(<ReviewPage />);
@@ -105,6 +118,7 @@ it('does not report completion or advance on a failed album request', async () =
   expect(screen.queryByRole('heading', { name: 'Another album' })).toBeNull();
   expect(screen.queryByText('Album review completed.')).toBeNull();
 });
+
 it('opens evidence for confirmed rows without manufacturing a pending action', async () => {
   setup();
   render(<ReviewPage />);
@@ -118,6 +132,7 @@ it('opens evidence for confirmed rows without manufacturing a pending action', a
   expect(screen.getByText('Recording identity agrees')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Apply this change' })).toBeNull();
 });
+
 it('puts a loaded manual release into the same candidate comparison before pinning', async () => {
   setup();
   const read = fetchMock.getMockImplementation()!;
@@ -157,6 +172,7 @@ it('puts a loaded manual release into the same candidate comparison before pinni
   expect(within(screen.getByLabelText('release context')).getByText('Bonus song')).toBeTruthy();
   expect(screen.getAllByRole('button', { name: 'Use this release' })).toHaveLength(1);
 });
+
 it('restores an operation after returning and reports its terminal result', async () => {
   setup();
   const read = fetchMock.getMockImplementation()!;

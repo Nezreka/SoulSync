@@ -1,0 +1,711 @@
+/* Review base styles. Classes share the review-page CSS module namespace. */
+.albumHeader,
+.decisionHeader,
+.actions,
+.pagination,
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.albumHeader p,
+.description,
+.suggestion p {
+  color: var(--text-2);
+  margin: 0;
+}
+.queueEmpty {
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  color: var(--text-2);
+  font-size: 12px;
+}
+.queueEmpty strong {
+  color: var(--text-1);
+}
+.queueEmpty button {
+  margin: 4px 6px 0 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.pagination button:disabled,
+.nav button:disabled,
+.actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.decisionBoard,
+.trackMatrix,
+.findingDetail,
+.evidenceView {
+  margin-top: 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  padding: 18px;
+}
+.loadingSpinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  margin-right: 7px;
+  border: 2px solid rgba(var(--warning-rgb), 0.45);
+  border-top-color: var(--warning);
+  border-radius: var(--radius-circle);
+  vertical-align: -2px;
+  animation: reviewSpin 0.8s linear infinite;
+}
+.applyBanner .loadingSpinner {
+  border-color: var(--success);
+  border-top-color: transparent;
+}
+@keyframes reviewSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loadingSpinner {
+    animation: none;
+  }
+}
+.review[data-refresh='running'] .decisionActions button,
+.review[data-refresh='running'] .actions button,
+.review[data-refresh='running'] .assignmentCorrection button {
+  pointer-events: none;
+  opacity: 0.55;
+}
+.sectionHeading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 14px;
+  color: var(--text-2);
+}
+.sectionHeading h3 {
+  color: var(--text-1);
+  margin: 3px 0 0;
+  font-size: 19px;
+}
+.sectionHeading p {
+  max-width: 680px;
+  margin: 6px 0 0;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+.assignmentCorrection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.assignmentCorrection label {
+  display: grid;
+  flex: 1 1 280px;
+  gap: 6px;
+  font-size: 13px;
+}
+.assignmentCorrection select {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-1);
+}
+.assignmentCorrection small {
+  flex-basis: 100%;
+  color: var(--text-2);
+}
+.assignmentCorrection button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.identityWarning {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  margin: 12px 0;
+  border: 1px solid rgba(var(--danger-rgb), 0.45);
+  border-radius: var(--radius-md);
+  background: rgba(var(--danger-rgb), 0.08);
+  color: var(--danger);
+}
+.identityWarning span {
+  color: var(--danger);
+  font-size: 12px;
+}
+.competingIdentities {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+}
+.competingIdentities small {
+  display: block;
+  color: var(--warning);
+}
+.assignmentGroup > .findingDetail {
+  margin: 0;
+  border-radius: 0;
+}
+.trackWorkspace,
+.tabWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(330px, 0.9fr);
+  gap: 14px;
+  align-items: start;
+}
+.secondaryButton {
+  padding: 7px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  cursor: pointer;
+}
+.secondaryButton:hover {
+  border-color: var(--accent);
+  background: var(--line-strong);
+}
+.trackInspector .findingDetail {
+  margin: 0;
+  padding: 14px;
+  border: 0;
+}
+.trackInspector .evidenceColumns,
+.trackInspector .technicalGrid {
+  grid-template-columns: 1fr;
+}
+.trackInspector .actions {
+  position: static;
+}
+.trackTable > .findingDetail {
+  min-width: 0;
+  margin: 0;
+  border-width: 2px 0 1px;
+  border-color: var(--line-strong) var(--line-strong) var(--line-strong);
+  border-radius: 0;
+}
+.decisionGrid > .findingDetail {
+  grid-column: 1 / -1;
+  margin: 0;
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+.findingDetail > .decisionHeader:first-child {
+  margin-top: 0;
+}
+.findingDetail[data-compact='true'] {
+  padding: 16px 18px 18px;
+  background: var(--surface-1);
+}
+.findingDetail[data-compact='true'] h3 {
+  margin: 10px 0 4px;
+  font-size: 21px;
+}
+.findingDetail[data-compact='true'] .description {
+  margin: 0;
+  color: var(--text-2);
+}
+.findingDetail[data-compact='true'] .reconciliationEvidence {
+  margin-top: 14px;
+}
+.findingDetail[data-compact='true'] .actions {
+  position: static;
+  margin-top: 14px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.albumApplyAll > .actions button {
+  white-space: nowrap;
+}
+.review .findingDetail h3 {
+  font-size: 20px;
+  line-height: 1.3;
+  margin: 12px 0 6px;
+}
+.readyChanges .readySummaryList {
+  margin-bottom: 0;
+}
+.sectionHeading h4,
+.changesCard h4,
+.problemCard h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 17px;
+}
+.sectionHeading > span {
+  color: var(--text-2);
+  font-size: 12px;
+}
+.factList dt,
+.technicalCard small,
+.muted {
+  color: var(--text-2);
+}
+.findingDetail .actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  margin-top: 24px;
+  padding: 12px;
+  background: var(--surface-1);
+  box-shadow: 0 -10px 28px var(--black-a35);
+  backdrop-filter: blur(10px);
+}
+.extraAction {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 13px;
+  border: 1px solid rgba(var(--danger-rgb), 0.45);
+  border-radius: var(--radius-lg);
+  background: rgba(var(--danger-rgb), 0.08);
+  color: var(--danger);
+}
+.extraAction span {
+  color: var(--danger);
+  font-size: 13px;
+}
+.extraAction button {
+  justify-self: start;
+  margin-top: 5px;
+  padding: 8px 11px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  background: rgba(var(--danger-rgb), 0.45);
+  color: var(--text-1);
+  cursor: pointer;
+}
+.error {
+  background: rgba(var(--danger-rgb), 0.08);
+  border: 1px solid rgba(var(--danger-rgb), 0.45);
+  color: var(--text-1);
+}
+.pendingFulfillment,
+.waitingNotice {
+  border: 1px solid rgba(var(--info-rgb), 0.45);
+  border-radius: var(--radius-lg);
+  background: rgba(var(--info-rgb), 0.08);
+  color: var(--info);
+}
+.pendingFulfillment p,
+.waitingNotice {
+  margin: 5px 0 0;
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .albumHeader,
+  .planSummary {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 560px) {
+  .page {
+    padding-inline: 10px;
+    margin: 6px;
+  }
+  .decisionBoard,
+  .trackMatrix,
+  .findingDetail,
+  .evidenceView,
+  .albumPlan {
+    padding: 14px;
+  }
+  .sectionHeading {
+    flex-wrap: wrap;
+  }
+  .actions {
+    position: static;
+  }
+}
+
+@media (max-width: 700px) {
+  .headerCount,
+  .headerTools > .inlineActions {
+    grid-column: 1 / -1;
+  }
+  .headerTools > .inlineActions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 1150px) {
+  .headerTools,
+  .nav {
+    justify-content: flex-start;
+  }
+}
+.tabMain,
+.tabContext,
+.trackInspector {
+  min-width: 0;
+}
+.inlineActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+@media (max-width: 700px) {
+  .inlineActions {
+    justify-content: flex-start;
+  }
+}
+.findingDetail {
+  container-type: inline-size;
+}
+@container (max-width: 650px) {
+  .assignmentCorrection button {
+    white-space: normal;
+  }
+  .assignmentCorrection {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.editPlan .inlineActions {
+  margin-top: 4px;
+}
+.page {
+  width: auto;
+  max-width: none;
+  margin: 12px;
+  padding: 20px clamp(12px, 1.5vw, 24px) 64px;
+  color: var(--text-1);
+  font-family: var(--font-sans);
+  padding-bottom: 140px;
+}
+.page a {
+  text-underline-offset: 3px;
+}
+.page :is(button, a, input, select, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.page :is(button, input, select)[data-slot='control'] {
+  font-family: inherit;
+}
+.technicalCard,
+.findingDetail {
+  border-radius: var(--radius-lg);
+}
+.albumApplyAll .actions {
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page *,
+  .page *::before,
+  .page *::after {
+    scroll-behavior: auto;
+    transition: none;
+    animation: none;
+  }
+}
+.page .queueModes button[aria-current='page'],
+.page .trackViewSwitch button[aria-pressed='true'] {
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: var(--accent);
+}
+.page .decisionSelect,
+.page .caseButton,
+.page .selectedCase {
+  text-align: left;
+}
+.page button.caseButton[data-slot='control'],
+.page button.selectedCase[data-slot='control'],
+.page button.decisionSelect[data-slot='control'] {
+  background: transparent;
+  border: 0;
+  font-weight: 400;
+}
+.page .decisionSelect small,
+.page .caseCopy small {
+  font-weight: 400;
+}
+.tabContext,
+.tabContext p,
+.reviewAudioChoices small,
+.albumApplyAll p,
+.playlistLine,
+.duplicateList span {
+  color: var(--text-2);
+}
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.plannedFileActions {
+  margin-top: var(--space-3);
+  overflow-wrap: anywhere;
+}
+.plannedFileActions h4 {
+  font-size: 14px;
+  margin-bottom: var(--space-2);
+}
+.plannedFileActions ul {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+.plannedFileActions li + li {
+  margin-top: var(--space-3);
+}
+.plannedFileActions p {
+  margin-bottom: var(--space-2);
+  color: var(--text-1);
+}
+.reconciliationEvidence > .assignmentCorrection,
+.reconciliationEvidence > .reviewAudio,
+.reconciliationEvidence > .extraAction,
+.reconciliationEvidence > .actions {
+  margin: 0;
+}
+.reconciliationEvidence > .actions:empty {
+  display: none;
+}
+
+.missingChoices {
+  padding: 14px;
+  margin-bottom: 18px;
+  border: 1px solid rgba(var(--warning-rgb), 0.4);
+  border-radius: var(--radius-md);
+  background: rgba(var(--warning-rgb), 0.05);
+}
+.missingChoices h4 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+.missingChoices p {
+  margin: 6px 0 12px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.missingChoices .inlineActions {
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.missingChoices .completenessChoice {
+  padding: 0;
+}
+.missingChoices .decisionActions {
+  padding: 0;
+}
+.actionDisclosure .assignmentCorrection {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+}
+.releaseReference {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+@container (max-width: 400px) {
+  .findingDetail .problemCard,
+  .findingDetail .changesCard {
+    padding: 12px;
+  }
+}
+.trackMatrix > .sectionHeading {
+  display: block;
+}
+.trackMatrix > .sectionHeading h3 {
+  font-size: 24px;
+  margin-block: 4px 8px;
+}
+.trackMatrix > .sectionHeading .matrixCounts {
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+.missingRequests .missingChoices {
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+.planContext .releaseReference {
+  margin-top: 8px;
+}
+.releaseArtist {
+  display: block;
+  color: var(--text-2);
+  margin-block: 4px;
+  font-size: 13px;
+}
+.organizationPreview {
+  padding: 12px;
+  background: var(--surface-1);
+  border-radius: var(--radius-md);
+}
+.organizationPreview code,
+.commonFolder code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.commonFolder {
+  display: grid;
+  gap: 3px;
+}
+.filePaths {
+  border-bottom: 1px solid var(--line);
+  padding-block: 2px 8px;
+}
+.filePaths summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 11px;
+}
+.filePaths ul {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+.filePaths li {
+  display: grid;
+  gap: 3px;
+  padding: 5px 0;
+}
+.filePaths code {
+  overflow-wrap: anywhere;
+}
+
+.evidenceTable {
+  overflow-x: auto;
+  container-type: inline-size;
+}
+.evidenceTable table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.45;
+  table-layout: fixed;
+}
+.evidenceTable th,
+.evidenceTable td {
+  text-align: left;
+  vertical-align: top;
+  padding: 9px 7px;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.evidenceTable th:first-child {
+  width: 20%;
+}
+.evidenceTable small {
+  display: block;
+  color: var(--text-2);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.evidenceTable tr[data-result='agrees'] td:last-child strong {
+  color: var(--success);
+}
+.evidenceTable tr[data-result='conflicts'] td:last-child strong {
+  color: var(--warning);
+}
+.evidenceTable tr[data-result='resolved'] td:last-child strong,
+.evidenceTable tr[data-result='manual'] td:last-child strong {
+  color: var(--info);
+}
+.evidenceTable tr[data-result='unavailable'] {
+  color: var(--text-2);
+}
+
+@container (max-width: 560px) {
+  .evidenceTable thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .evidenceTable table,
+  .evidenceTable tbody {
+    display: block;
+  }
+  .evidenceTable tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .evidenceTable th,
+  .evidenceTable td {
+    padding: 0;
+    border: 0;
+  }
+  .evidenceTable th:first-child {
+    grid-column: 1 / -1;
+    width: auto;
+    font-size: 14px;
+  }
+  .evidenceTable td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--text-2);
+    font-size: 11px;
+    margin-bottom: 3px;
+  }
+  .evidenceTable td:last-child {
+    grid-column: 1 / -1;
+    margin-top: 2px;
+  }
+}
+
+.actionNote {
+  color: var(--text-2);
+  font-size: 12px;
+  margin: 0 0 12px;
+}
+.plannedStatus,
+.assignmentStatus[data-tone='success'] {
+  border: 1px solid color-mix(in srgb, var(--success) 45%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--success) 9%, var(--surface-1));
+  padding: 12px 14px;
+  margin-block: 12px;
+}
+.plannedStatus > strong,
+.assignmentStatus[data-tone='success'] {
+  color: var(--success);
+}
+.tabWorkspace[data-unidentified='true'] > .tabContext {
+  display: none;
+}

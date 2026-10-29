@@ -334,11 +334,11 @@ export async function applyReviewDecisionGroup(
   };
 }
 
-export async function fetchReviewCase(caseId: string): Promise<ReviewCase> {
+export async function fetchReviewCase(caseId: string, signal?: AbortSignal): Promise<ReviewCase> {
   return readJson<ReviewCase>(
     await fetch(
       `/api/repair/review-queue/${encodeURIComponent(caseId)}?job_id=library_reconciliation`,
-      { cache: 'no-store' },
+      { cache: 'no-store', signal },
     ),
   );
 }

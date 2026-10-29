@@ -1,0 +1,565 @@
+/* Review album styles. Classes share the review-page CSS module namespace. */
+.decisionBoard {
+  border-color: var(--line-strong);
+  background: var(--surface-1);
+  box-shadow: 0 12px 32px var(--black-a15);
+}
+.decisionProgress {
+  margin: 0 14px 14px 52px;
+  color: var(--success);
+  font-size: 12px;
+}
+.decisionGrid[data-single='true'] {
+  display: block;
+}
+.decisionGrid article {
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  overflow: hidden;
+}
+.decisionGrid article[data-risk='manual'],
+.decisionGrid article[data-risk='blocked'] {
+  border-color: rgba(var(--warning-rgb), 0.45);
+  background: var(--surface-1);
+}
+.decisionGrid article[data-risk='destructive'] {
+  border-color: rgba(var(--danger-rgb), 0.45);
+  background: var(--surface-1);
+  box-shadow: inset 3px 0 rgba(var(--danger-rgb), 0.45);
+}
+.decisionGrid article[data-risk='ready'] {
+  border-color: rgba(var(--success-rgb), 0.45);
+  background: var(--surface-1);
+}
+.decisionGrid[data-single='true'] article {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.decisionGrid[data-single='true'] .decisionSelect {
+  width: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  padding: 9px 12px;
+}
+.decisionSelect {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  text-align: left;
+  padding: 14px;
+  cursor: pointer;
+}
+.decisionSelect > span:nth-child(2) {
+  display: grid;
+  gap: 3px;
+}
+.decisionSelect > span:nth-child(2) > small:first-child {
+  color: var(--warning);
+  font-weight: 650;
+}
+.decisionSelect > span:nth-child(2) > strong {
+  font-size: 16px;
+}
+.decisionSelect small {
+  display: block;
+  color: var(--text-2);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.decisionSelect b {
+  min-width: 28px;
+  padding: 3px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--line-strong);
+  text-align: center;
+}
+.decisionStep {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--warning-rgb), 0.08);
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 750;
+}
+.decisionActions {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 14px 52px;
+  flex-wrap: wrap;
+}
+.decisionGrid[data-single='true'] .decisionActions {
+  padding: 0;
+}
+.decisionActions button {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+.completenessChoice {
+  padding: 0 16px 16px 52px;
+}
+.completenessChoice p {
+  margin: 0 0 10px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.wantedTracks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 7px;
+  margin-bottom: 12px;
+}
+.wantedTracks label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-1);
+  font-size: 13px;
+}
+.completenessChoice .decisionActions {
+  padding: 0;
+}
+.tabContext {
+  position: sticky;
+  top: 16px;
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.tabContext h3 {
+  margin: 10px 0 16px;
+  font-size: 19px;
+}
+.tabContext p {
+  font-size: 13px;
+  line-height: 1.45;
+}
+.releaseStepLink {
+  padding: 12px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+}
+.releaseStepLink p {
+  margin: 0 0 10px;
+}
+.releaseStepLink button {
+  cursor: pointer;
+}
+.albumHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 20px;
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: 14px;
+  align-items: flex-start;
+}
+.albumIdentity {
+  flex: 1 1 400px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  min-width: 0;
+}
+.albumIdentity > div {
+  min-width: 0;
+}
+.albumHeader .nav {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.albumHeader .nav button {
+  white-space: nowrap;
+}
+.readySummaryList button {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 11px 12px;
+  border: 1px solid rgba(var(--success-rgb), 0.45);
+  border-radius: var(--radius-md);
+  background: rgba(var(--success-rgb), 0.08);
+  color: var(--success);
+  text-align: left;
+  cursor: pointer;
+}
+.readySummaryList button > span {
+  display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  gap: 3px;
+}
+.readySummaryList small {
+  color: var(--text-2);
+}
+.readySummaryList b {
+  color: var(--success);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.planContext {
+  margin-top: 14px;
+  padding: 15px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.planContext h4 {
+  margin: 4px 0 12px;
+  font-size: 18px;
+}
+.planContext dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.planContext dl > div {
+  min-width: 0;
+  padding: 10px 12px;
+  border-right: 1px solid var(--line-strong);
+}
+.planContext dl > div:last-child {
+  border-right: 0;
+}
+.planContext dt {
+  color: var(--text-2);
+  font-size: 11px;
+}
+.planContext dd {
+  margin: 4px 0 0;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+.planContext a {
+  color: var(--accent);
+}
+.planContextActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 11px;
+}
+.albumHeader h2 {
+  font-size: clamp(24px, 2vw, 32px);
+  margin: 5px 0;
+}
+
+@media (max-width: 900px) {
+  .decisionSelect {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .decisionSelect > b {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .decisionActions {
+    padding-left: 52px;
+  }
+  .planContext dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .planContext dl > div:nth-child(2) {
+    border-right: 0;
+  }
+  .planContext dl > div:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line-strong);
+  }
+}
+
+@media (max-width: 560px) {
+  .decisionActions {
+    padding: 0 12px 13px;
+  }
+  .planContext dl {
+    grid-template-columns: 1fr;
+  }
+  .planContext dl > div,
+  .planContext dl > div:nth-child(2) {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-strong);
+  }
+  .planContext dl > div:last-child {
+    border-bottom: 0;
+  }
+  .planContextActions {
+    display: grid;
+  }
+}
+
+@container album-review (max-width: 900px) {
+  .albumHeader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .albumHeader .nav {
+    justify-content: space-between;
+  }
+  .tabContext {
+    position: static;
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 1150px) {
+  .albumHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+.tabContext > .planContext {
+  margin-top: 0;
+  margin-bottom: 14px;
+}
+.tabContext .planContext dl {
+  grid-template-columns: 1fr;
+}
+.tabContext .planContext dl > div {
+  border-right: 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+.tabContext .planContext dl > div:last-child {
+  border-bottom: 0;
+}
+.tabContext .readySummaryList {
+  grid-template-columns: 1fr;
+}
+.tabContext a {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+.decisionGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  padding-left: 34px;
+  gap: 8px;
+}
+.decisionGrid > article {
+  overflow: visible;
+  position: relative;
+}
+.decisionGrid > article::before {
+  content: '';
+  position: absolute;
+  left: -25px;
+  top: 0;
+  bottom: -9px;
+  width: 2px;
+  background: var(--line-strong);
+}
+.decisionGrid > article:first-child::before {
+  top: 27px;
+}
+.decisionGrid > article:last-child::before {
+  bottom: auto;
+  height: 27px;
+}
+.decisionGrid > article:only-child::before {
+  display: none;
+}
+.decisionGrid .decisionStep {
+  position: absolute;
+  left: -36px;
+  top: 16px;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  box-sizing: border-box;
+  border: 2px solid var(--warning);
+  background: rgba(var(--warning-rgb), 0.08);
+}
+.decisionGrid .decisionSelect {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.decisionGrid article[data-state='pending'] {
+  border-color: var(--line-strong);
+  background: var(--surface-1);
+  color: var(--text-2);
+}
+.decisionGrid article[data-state='pending'] .decisionStep {
+  border-color: var(--text-2);
+  background: var(--surface-1);
+}
+@media (max-width: 600px) {
+  .decisionGrid .decisionSelect {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .decisionGrid .decisionSelect > b {
+    grid-column: 1;
+  }
+}
+.readySummaryList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.folderContext {
+  margin: 16px 0;
+  padding: 14px 0;
+  border-top: 1px solid var(--line-strong);
+}
+.folderContext h4 {
+  margin: 0 0 8px;
+}
+.folderContext p {
+  color: var(--text-2);
+}
+.folderContext ul {
+  padding-left: 20px;
+}
+.folderContext li {
+  padding: 6px 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1150px) {
+  .albumIdentity {
+    flex-basis: auto;
+  }
+}
+.page .decisionActions {
+  gap: 12px;
+}
+.tabContext h4 {
+  color: var(--text-1);
+}
+.decisionGrid .decisionSelect > span > small:first-child {
+  color: var(--text-2);
+}
+.decisionGrid .decisionActions {
+  margin-left: 0;
+  padding: 12px 14px 14px;
+}
+.albumMaintenance {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.albumHeader p.plannedAlbumTitle {
+  margin-top: 6px;
+  color: var(--accent);
+  font-size: 13px;
+}
+@media (max-width: 560px) {
+  .albumHeader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .albumHeader .nav {
+    justify-content: space-between;
+  }
+  .albumMaintenance {
+    gap: 6px;
+  }
+}
+.numberingExamples {
+  width: 100%;
+  border-collapse: collapse;
+  margin-block: 16px;
+  font-size: 13px;
+  text-align: left;
+}
+.numberingExamples th,
+.numberingExamples td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.numberingSummary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.decisionGrid article[data-risk='destructive'] .decisionStep {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: rgba(var(--danger-rgb), 0.08);
+}
+
+.unidentifiedAlbum {
+  padding: 20px;
+  border: 1px solid rgba(var(--warning-rgb), 0.5);
+  border-radius: var(--radius-lg);
+  background: rgba(var(--warning-rgb), 0.04);
+}
+.unidentifiedAlbum h3 {
+  margin: 0 0 12px;
+}
+.unidentifiedFiles {
+  list-style: none;
+  padding: 0;
+  margin: 20px 0 0;
+}
+.unidentifiedFiles li {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line-strong);
+}
+.unidentifiedFiles small {
+  overflow-wrap: anywhere;
+}
+.requestStep {
+  display: grid;
+  gap: 12px;
+}
+.page .requestStep .decisionActions {
+  align-items: center;
+  padding: 0;
+}
+.page .requestStep {
+  padding: 0 14px 16px;
+  min-width: 0;
+}
+.page .completenessChoice {
+  padding: 0 14px 16px;
+}
+.page .completenessChoice .decisionActions {
+  padding: 12px 0 0;
+}
+.page .unidentifiedAlbum > .decisionActions {
+  padding: 0;
+  margin: 16px 0 24px;
+}
+.missingDisclosure {
+  margin-block: 12px;
+}
+.missingDisclosure summary {
+  cursor: pointer;
+  padding: 10px 0;
+  color: var(--text-1);
+}
+.missingScroll {
+  max-height: 340px;
+  overflow: auto;
+  padding: 8px 4px;
+  margin-block: 8px;
+}
+.missingDisc {
+  margin-block: 12px;
+}
+.missingDisc > h5 {
+  margin: 0 0 10px;
+}

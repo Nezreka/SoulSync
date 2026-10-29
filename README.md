@@ -594,3 +594,9 @@ Ruff config lives in `pyproject.toml`. It's intentionally lenient: it catches re
 MIT. See [license.txt](license.txt).
 
 If SoulSync saves you time, consider [supporting it on Ko-fi](https://ko-fi.com/boulderbadgedad).
+
+## Review Queue development
+
+- [Architecture and decision ownership](docs/reconciliation/architecture.md)
+- [Regression catalogue](docs/reconciliation/edge-cases.md)
+- [Tests, migrations, and live validation](docs/reconciliation/testing.md)

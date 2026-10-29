@@ -1,0 +1,162 @@
+/* Review dialogs styles. Classes share the review-page CSS module namespace. */
+.applyPreview {
+  display: grid;
+  gap: var(--space-3);
+  line-height: 1.5;
+}
+.applyPreview p {
+  margin: 0;
+}
+.applyPreview details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--white-a03);
+}
+.applyPreview summary {
+  cursor: pointer;
+  padding: var(--space-3) var(--space-4);
+  min-height: 44px;
+}
+.applyPreview summary:focus-visible {
+  outline: 2px solid rgb(var(--accent-rgb));
+  box-shadow: var(--focus-ring);
+  outline-offset: 2px;
+}
+.applyPreview ul {
+  margin: 0;
+  padding: 0 var(--space-5) var(--space-4) var(--space-6);
+}
+.applyPreview li + li {
+  margin-top: var(--space-2);
+}
+.applyTotals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  align-items: baseline;
+  padding-block: 4px 12px;
+}
+.applyTotals strong {
+  font-size: 20px;
+}
+.applyTotals span,
+.commonFolder span {
+  color: var(--text-2);
+}
+.applyAlbum,
+.applyCategory {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  margin-block: 10px;
+  padding: 12px;
+}
+.applyAlbum > summary,
+.applyCategory > summary {
+  cursor: pointer;
+}
+.applyAlbum > summary > span,
+.applyCategory > summary > span {
+  margin-inline-start: 12px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.applyCategory {
+  border-inline-start: 3px solid var(--info);
+}
+.applyCategory[data-kind='fills'] {
+  border-inline-start-color: var(--success);
+}
+.applyCategory[data-kind='corrections'] {
+  border-inline-start-color: var(--warning);
+}
+.applyCategory[data-kind='filenames'] {
+  border-inline-start-color: var(--wanted);
+}
+.applyCategory[data-kind='album'] {
+  border-inline-start-color: var(--info);
+}
+.applyCategory > ul {
+  padding: 0;
+  list-style: none;
+}
+.applyCategory li {
+  padding-block: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.applyCategory table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.applyCategory th,
+.applyCategory td {
+  padding: 6px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  text-align: left;
+}
+.applyCategory td:last-child {
+  color: var(--success);
+}
+.applyCategory th {
+  color: var(--text-2);
+}
+.applyAlbum > h3 {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  margin: 0 0 12px;
+}
+.applyAlbum > h3 > span {
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: normal;
+}
+.applyCategory[data-kind='organization'] {
+  border-left-color: var(--info);
+}
+.applyCategory > code {
+  display: block;
+  margin: 10px 4px;
+  overflow-wrap: anywhere;
+}
+.applyCategory[data-kind='numbering'] {
+  border-inline-start-color: var(--info);
+}
+
+.batchSearch {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: var(--surface-2);
+  border-radius: var(--radius-control);
+}
+.batchSearch > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.batchAlbum {
+  margin: 18px 0;
+}
+.batchSelection {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px;
+}
+.batchFolders {
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  margin-top: 12px;
+}
+.batchFolders td {
+  overflow-wrap: anywhere;
+}
+.batchFolders table {
+  width: 100%;
+  table-layout: fixed;
+}
