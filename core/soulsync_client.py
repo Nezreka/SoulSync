@@ -33,6 +33,7 @@ def _read_tags(file_path: str) -> Dict[str, Any]:
         'track_number': 0, 'disc_number': 1, 'year': '',
         'genre': '', 'duration_ms': 0, 'bitrate': 0,
         'musicbrainz_albumid': '', 'musicbrainz_albumcomment': '',
+        'isrc': '',
     }
     try:
         from mutagen import File as MutagenFile
@@ -76,6 +77,10 @@ def _read_tags(file_path: str) -> Dict[str, Any]:
                 kbps = _kbps_from_stream_info(audio.info, file_path)
                 if kbps:
                     result['bitrate'] = int(kbps)
+        # Reuse the existing probe for both easy keys and raw ID3 frames.
+        if audio is not None:
+            from core.metadata.source import _isrc_tag_value
+            result['isrc'] = (_isrc_tag_value(audio) or '').upper()
     except Exception as e:
         logger.debug(f"Could not read tags from {os.path.basename(file_path)}: {e}")
 

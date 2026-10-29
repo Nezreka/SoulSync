@@ -481,8 +481,8 @@ def _run_soulsync_full_refresh():
         """
         _TRACK_SQL = """
             INSERT OR IGNORE INTO tracks (id, album_id, artist_id, title, track_number, disc_number,
-                duration, file_path, bitrate, year, server_source, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                duration, file_path, bitrate, year, isrc, server_source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """
 
         try:
@@ -632,7 +632,7 @@ def _run_soulsync_full_refresh():
                                 try:
                                     cursor.execute(_TRACK_SQL, (track_id, album_id, artist_id, tags['title'], tags['track_number'],
                                           tags['disc_number'], tags['duration_ms'], file_path,
-                                          tags['bitrate'], tags.get('year', '')))
+                                          tags['bitrate'], tags.get('year', ''), tags.get('isrc') or None))
                                     ignored = cursor.rowcount == 0
                                     attempt = 0
                                     while ignored:
@@ -652,7 +652,7 @@ def _run_soulsync_full_refresh():
                                         track_id = new_id
                                         cursor.execute(_TRACK_SQL, (track_id, album_id, artist_id, tags['title'], tags['track_number'],
                                               tags['disc_number'], tags['duration_ms'], file_path,
-                                              tags['bitrate'], tags.get('year', '')))
+                                              tags['bitrate'], tags.get('year', ''), tags.get('isrc') or None))
                                         ignored = cursor.rowcount == 0
                                 except Exception as e:
                                     track_state = 'error'
