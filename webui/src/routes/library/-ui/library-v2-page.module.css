@@ -8630,3 +8630,26 @@ textarea.searchInput {
     align-items: center;
   }
 }
+
+/* artist settings: the toggle, release types and selects had no size of their
+   own and fell back to the browser's 16px, louder than everything around them */
+.artistSettingsToggle {
+  font-size: 13.5px;
+}
+
+.artistSettingsToggle strong {
+  font-weight: 600;
+}
+
+.artistSettingsToggle small {
+  font-size: 12px;
+}
+
+.artistSettingsFieldset .checkOption {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.artistSettingsGrid .select {
+  font-size: 13px;
+}
