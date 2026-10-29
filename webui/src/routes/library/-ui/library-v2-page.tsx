@@ -5246,25 +5246,25 @@ function SongIndexView() {
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          className={styles.btnGhost}
-          disabled={queueing || songs.length === 0}
-          title={`Play these songs in order (up to ${PLAY_ALL_LIMIT})`}
-          onClick={() => void playSongs(false)}
-        >
-          <span aria-hidden="true">▶ </span>
-          <span>Play all</span>
-        </button>
-        <button
-          type="button"
-          className={styles.btnGhost}
-          disabled={queueing || songs.length === 0}
-          title={`Shuffle these songs (up to ${PLAY_ALL_LIMIT})`}
-          onClick={() => void playSongs(true)}
-        >
-          Shuffle
-        </button>
+        <div className={styles.viewToggle} role="group" aria-label="Play songs">
+          <button
+            type="button"
+            disabled={queueing || songs.length === 0}
+            title={`Play these songs in order (up to ${PLAY_ALL_LIMIT})`}
+            onClick={() => void playSongs(false)}
+          >
+            <span aria-hidden="true">▶ </span>
+            <span>Play all</span>
+          </button>
+          <button
+            type="button"
+            disabled={queueing || songs.length === 0}
+            title={`Shuffle these songs (up to ${PLAY_ALL_LIMIT})`}
+            onClick={() => void playSongs(true)}
+          >
+            Shuffle
+          </button>
+        </div>
       </div>
 
       {songsQuery.isPending ? (
