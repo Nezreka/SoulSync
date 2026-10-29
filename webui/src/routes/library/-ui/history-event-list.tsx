@@ -15,6 +15,16 @@ function eventDate(value: string | null, timeOnly = false): string {
   }).format(date);
 }
 
+/** a quiet colour for one outcome: done, failed or in between */
+function historyTone(status: string | null | undefined) {
+  const value = (status ?? '').toLowerCase();
+  if (!value) return undefined;
+  if (/(fail|error|reject|quarantin|block|mismatch)/.test(value)) return 'err';
+  if (/^(not|no|missing|skip)/.test(value)) return 'neutral';
+  if (/(complete|success|import|done|grabbed|verified|\bok\b)/.test(value)) return 'ok';
+  return 'neutral';
+}
+
 export function HistoryEventList({
   groups,
 }: {
@@ -48,7 +58,10 @@ export function HistoryEventList({
                 </span>
               </span>
               <span className={styles.historyEvent}>
-                <span>
+                <span
+                  className={styles.historyOutcome}
+                  data-tone={multiple ? undefined : historyTone(first.status)}
+                >
                   {multiple
                     ? historyOutcomeSummary(group.entries)
                     : first.status?.replaceAll('_', ' ') || first.detail || 'Result not recorded'}

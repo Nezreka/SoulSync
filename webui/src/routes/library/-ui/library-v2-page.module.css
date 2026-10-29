@@ -7220,6 +7220,8 @@ textarea.searchInput {
 .premierHero :global(.collection-category .completion-bar) {
   grid-row: 2;
   grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
   height: 3px;
   background: var(--white-a10);
 }
@@ -7792,10 +7794,12 @@ textarea.searchInput {
   font-size: 12px;
 }
 
-.detailView .albumHeadFacts > span + span::before {
-  content: '·';
-  margin-right: 10px;
-  color: var(--white-a25);
+@media (min-width: 701px) {
+  .detailView .albumHeadFacts > span + span::before {
+    content: '·';
+    margin-right: 10px;
+    color: var(--white-a25);
+  }
 }
 
 .detailView .albumHeadFacts svg {
@@ -7859,7 +7863,7 @@ textarea.searchInput {
   color: var(--white-a40);
   font-size: 10.5px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   border-bottom-color: var(--white-a06);
 }
@@ -8255,6 +8259,68 @@ textarea.searchInput {
 .modalHeader h3 {
   font-size: 18px;
   font-weight: 750;
+}
+
+/* history: micro-label columns, outcomes as quiet status pills */
+.modal .historyColumns {
+  background: rgba(16, 18, 25, 0.98);
+  color: var(--white-a40);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border-bottom-color: var(--white-a06);
+}
+
+.modal .historyRow {
+  border-bottom-color: var(--white-a04);
+  transition: background var(--dur-fast) ease;
+}
+
+.modal .historyRow:hover,
+.modal .historyGroup[open] > .historyRow {
+  background: var(--white-a03);
+}
+
+.historyOutcome[data-tone] {
+  display: inline-flex;
+  align-self: flex-start;
+  justify-self: start;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 9px 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--white-a06);
+  color: var(--text-2);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.historyOutcome[data-tone]::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-circle);
+  background: var(--white-a40);
+}
+
+.historyOutcome[data-tone='ok'] {
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--accent-light);
+}
+
+.historyOutcome[data-tone='ok']::before {
+  background: var(--accent);
+}
+
+.historyOutcome[data-tone='err'] {
+  background: rgba(var(--danger-rgb), 0.1);
+  color: var(--danger-light);
+}
+
+.historyOutcome[data-tone='err']::before {
+  background: var(--danger);
 }
 
 /* ── menus: tools and the release overflow ─────────────────────────────── */
