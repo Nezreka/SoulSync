@@ -11624,7 +11624,8 @@ class MusicDatabase:
         marks = ",".join("?" * len(ids))
         cursor.execute(f"""
             SELECT t.id, t.title, t.track_number, t.disc_number, t.duration, t.play_count,
-                   t.track_artist, t.album_id, al.primary_artist_id AS artist_id,
+                   t.track_artist, t.album_id, t.legacy_track_id,
+                   al.primary_artist_id AS artist_id,
                    a.name AS artist_name, al.title AS album_title, al.year AS album_year,
                    al.image_url AS album_thumb_url,
                    f.path AS file_path, f.size AS file_size, f.bitrate, f.format
@@ -11655,6 +11656,11 @@ class MusicDatabase:
                 ext = os.path.splitext(path)[1].lstrip('.').upper()
             songs.append({
                 'id': r['id'],
+                # the player's typed ids: `id` is the catalogue's, and the
+                # legacy id is the only one a media server can stream by
+                'lib2_track_id': r['id'],
+                'legacy_track_id': r.get('legacy_track_id'),
+                'server_track_id': r.get('legacy_track_id'),
                 'title': r['title'] or '',
                 # a compilation's row names its own artist; the album artist is the fallback
                 'artist_name': r.get('track_artist') or r.get('artist_name') or '',

@@ -1562,7 +1562,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             albums, total = Q.list_albums(
                 conn, search=request.args.get("search", ""),
                 sort=request.args.get("sort", "title"),
-                monitored=request.args.get("monitored", "all"), page=page, limit=limit)
+                monitored=request.args.get("monitored", "all"), page=page, limit=limit,
+                letter=(request.args.get("letter") or "all").lower(),
+                source_filter=request.args.get("source", ""))
         for album in albums:
             _apply_artwork_urls(album, "album")
         total_pages = (total + limit - 1) // limit
@@ -1601,14 +1603,21 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # unrelated refetch happened to land.  An explicit parameter, set
             # by the component that actually renders the column, fixes both:
             # it's requestable by anyone, and it's part of the cache key.
-            include_size = "size" in {
+            include = {
                 token.strip()
                 for token in request.args.get("include", "").split(",")
                 if token.strip()
             }
+            # the old library page's filters: alphabet bar, has/no provider
+            # id, and "could be better" (the live quality evaluator)
+            quality = request.args.get("quality", "")
             artists, total = Q.list_artists(conn, search=search, sort=sort,
                                             monitored=monitored, page=page, limit=limit,
-                                            include_size=include_size)
+                                            include_size="size" in include,
+                                            letter=(request.args.get("letter") or "all").lower(),
+                                            source_filter=request.args.get("source", ""),
+                                            quality_filter=quality if quality == "upgradable" else "",
+                                            include_upgradable="upgradable" in include)
         for a in artists:
             _apply_artwork_urls(a, "artist")
         total_pages = (total + limit - 1) // limit if limit else 0

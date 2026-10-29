@@ -19,7 +19,14 @@ def artist_pagination(page: int, limit: int, total: int) -> Dict[str, Any]:
 
 
 def _upgradable_artist_ids(conn, predicate: str, params: Dict[str, Any]) -> set[int]:
-    """Evaluate each candidate's scoped primary active file with the live kernel.
+    """The artists matching ``predicate`` with at least one upgradable track."""
+    return set(upgradable_track_counts(conn, predicate, params))
+
+
+def upgradable_track_counts(conn, predicate: str, params: Dict[str, Any]) -> Dict[int, int]:
+    """How many of each matching artist's tracks could be better.
+
+    Evaluate each candidate's scoped primary active file with the live kernel.
 
     A manual primary choice still wins within the selected library. Historical,
     missing and fileless rows are not evidence of an owned upgrade candidate.
@@ -66,7 +73,7 @@ def _upgradable_artist_ids(conn, predicate: str, params: Dict[str, Any]) -> set[
     profiles = {int(row['id']): dict(row) for row in conn.execute("SELECT * FROM quality_profiles")}
     settings = {}
     verdicts = {}
-    result = set()
+    result: Dict[int, int] = {}
     for row in rows:
         tid = int(row['track_id'])
         if tid not in verdicts:
@@ -81,7 +88,8 @@ def _upgradable_artist_ids(conn, predicate: str, params: Dict[str, Any]) -> set[
             targets, policy, cutoff = settings[pid]
             verdicts[tid] = evaluate_file(dict(row), targets, policy, cutoff)['upgrade_candidate'] is True
         if verdicts[tid]:
-            result.add(int(row['artist_id']))
+            aid = int(row['artist_id'])
+            result[aid] = result.get(aid, 0) + 1
     return result
 
 
