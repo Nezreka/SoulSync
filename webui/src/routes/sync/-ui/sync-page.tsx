@@ -47,7 +47,6 @@ import { ServerPlaylistList } from './server-playlist-list';
 import { SoulsyncDiscoveryTab } from './soulsync-discovery-tab';
 import { SyncModals } from './sync-modals';
 import { SyncShell } from './sync-shell';
-import { SyncSidebar } from './sync-sidebar';
 import { DeezerLinkTab, ITunesLinkTab, SpotifyPublicTab, YouTubeTab } from './url-import-tab';
 import { type ImportLanding, ImportLandingProvider } from './use-importer';
 
@@ -129,6 +128,23 @@ export function SyncPage() {
   const openMirroredDetail = useRef<((playlistId: number) => void) | undefined>(undefined);
   const registerOpenDetail = useCallback((open: (playlistId: number) => void) => {
     openMirroredDetail.current = open;
+  }, []);
+  // My Playlists opens its window the same way. That tab mounts the first
+  // time it's shown, so a copy landing there (#1913) can arrive before its
+  // opener does: the id waits and opens on registration.
+  const openMineDetail = useRef<((playlistId: number) => void) | undefined>(undefined);
+  const pendingMine = useRef<number | null>(null);
+  const registerOpenMineDetail = useCallback((open: (playlistId: number) => void) => {
+    openMineDetail.current = open;
+    if (pendingMine.current !== null) {
+      const id = pendingMine.current;
+      pendingMine.current = null;
+      open(id);
+    }
+  }, []);
+  const showMineDetail = useCallback((playlistId: number) => {
+    if (openMineDetail.current) openMineDetail.current(playlistId);
+    else pendingMine.current = playlistId;
   }, []);
   const showMirroredDetail = useCallback((playlistId: number) => {
     // Mirrored is the default tab, so the opener is registered before anything
@@ -221,8 +237,17 @@ export function SyncPage() {
         openTab.current?.('mirrored');
         page.reloadMirrored();
       },
+      landMine: (playlistId, name) => {
+        openTab.current?.('my-playlists');
+        page.reloadMirrored();
+        showMineDetail(playlistId);
+        window.showToast?.(
+          `${name} is in My Playlists. It's yours to edit, and it won't change with the source`,
+          'success',
+        );
+      },
     }),
-    [page, showMirroredDetail],
+    [page, showMirroredDetail, showMineDetail],
   );
 
   const onImported = useCallback(() => {
@@ -245,7 +270,7 @@ export function SyncPage() {
     ),
     // the source tabs find playlists and import them (use-importer); the
     // imported playlist is managed under Mirrored
-    spotify: <SpotifyTab registerRows={page.registerSpotifyRows} />,
+    spotify: <SpotifyTab />,
     'spotify-public': (
       <SpotifyPublicTab
         pendingUrl={pendingFor('spotify-public')}
@@ -272,7 +297,7 @@ export function SyncPage() {
     'import-file': <ImportFileTab onImported={onImported} />,
     mirrored: (
       <MirroredTab
-        vertical={page.verticals.mirrored}
+        vertical={page.mirrored}
         onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
         sourceName={sourceName}
         pipeline={page.pipeline}
@@ -284,17 +309,18 @@ export function SyncPage() {
     'my-playlists': (
       <MirroredTab
         scope="user"
-        vertical={page.verticals.mirrored}
+        vertical={page.mirrored}
         onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
         sourceName={sourceName}
         pipeline={page.pipeline}
         registerReload={page.registerMirroredReload}
+        registerOpenDetail={registerOpenMineDetail}
       />
     ),
     'request-lists': (
       <MirroredTab
         scope="requests"
-        vertical={page.verticals.mirrored}
+        vertical={page.mirrored}
         onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
         sourceName={sourceName}
         pipeline={page.pipeline}
@@ -319,20 +345,11 @@ export function SyncPage() {
         onAddPlaylist={(next) => setAddAnchor((prev) => (prev ? null : next))}
         onAutoSync={() => setAutoSyncOpen(true)}
         onActivity={() => setActivityOpen(true)}
-        sidebar={
-          <SyncSidebar
-            state={page.actions}
-            onStartSync={page.onStartSync}
-            visible={page.sidebarVisible}
-          />
-        }
-        sidebarVisible={page.sidebarVisible}
-        onTabChange={page.onTabChange}
         registerOpenTab={registerOpenTab}
       />
 
       <SyncModals
-        verticals={page.verticals}
+        vertical={page.mirrored}
         modals={page.modals}
         standalone={page.standalone}
         mirroredSource={sourceName}

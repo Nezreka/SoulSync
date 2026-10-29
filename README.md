@@ -160,6 +160,8 @@ A personal front page shaped by your library, your listening and your watchlist.
 ## Library & artist pages
 
 - **Library**: every artist, filterable by letter, watch state, and which metadata sources each one is (or isn't) matched to. Export as JSON / CSV / text / M3U.
+- **Songs**: every song you own, searchable by title from any library view. Each one shows its album and file quality so copies are easy to tell apart; play it, add it to a playlist, and (admins) delete it.
+- **Fix a wrong match** by pasting the artist's link or ID from Spotify, Apple Music, Deezer, Discogs, Tidal, Qobuz and more. The watchlist follows the fix.
 - **Artist pages**: full discography with ownership, live completion bars for albums / EPs / singles, top tracks, similar artists, a **music video player**, and **concerts** (Ticketmaster dates and Setlist.fm setlists you can play from your own library).
   - **Gap-fill** pulls in releases your other metadata sources know about.
   - **Enhanced view** (admins): inline tag editing, bulk BPM / mood / style edits, write tags to files with a diff preview, ReplayGain, reorganize with a path preview, move an album to another artist, re-identify a track, redownload with source picking, and delete (database only, or files too).
@@ -207,7 +209,7 @@ A full web player built into the sidebar.
 ## Podcasts & audiobooks
 
 - **Podcasts**: discover via Apple Podcasts search or add any RSS feed (private and Patreon feeds included), OPML import/export, show notes and transcripts, and a watchlist that auto-downloads new episodes and cleans up old ones.
-- **Audiobooks**: browse Audible's catalogue by genre, series, author and narrator, follow authors for new books, and fetch releases from Soulseek, torrent or usenet. SoulSync looks inside each release before downloading, matches your existing books to catalogue editions, and keeps its own wishlist, blocklist and recycle bin.
+- **Audiobooks**: browse Audible's catalogue by genre, series, author and narrator, follow authors for new books, and fetch releases from Soulseek, torrent or usenet. SoulSync looks inside each release before downloading, matches your existing books to catalogue editions (across extra folders on other drives too), and keeps its own wishlist, blocklist and recycle bin.
 
 ---
 
@@ -262,6 +264,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 - **Quality profiles**:
   - A 16-tier ladder with upgrade-until-cutoff and Sonarr-style **custom formats**.
   - Codec, HDR and audio preferences, **audio language** (prefer or require a dubbed / MULTI release), size limits and minimum seeders.
+  - **Optional 4K libraries**: a separate Movies 4K and TV 4K folder, off until you switch them on. A profile set to save to the 4K library files new titles there.
   - A separate YouTube profile.
 - **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames, NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
 - **Downloads page**: Downloads / Review / Clients views with live batches, a review queue and download-client management — the same setup as the music side.
@@ -524,7 +527,7 @@ Behind Docker or a remote host? See [Support/DOCKER-OAUTH-FIX.md](Support/DOCKER
 
 ### 3. Configure SoulSync
 
-Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and download clients on its own, signs in to Plex, Tidal and Qobuz, checks every folder and connection for real, and leaves a **Finish setting up** checklist on the dashboard for anything you skip. Everything else lives in **Settings**:
+Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and download clients on its own, signs in to Plex, Tidal and Qobuz, checks every folder and connection for real (Settings > Folders keeps checking each folder as you type: free space, write access, nesting, unmapped Docker volumes), and leaves a **Finish setting up** checklist on the dashboard for anything you skip. Everything else lives in **Settings**:
 
 - **Sources / Downloads**: pick a source or build your hybrid chain.
 - **Quality**: pick a preset or build a quality profile.
@@ -544,6 +547,7 @@ Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and
 | Music videos | `/app/MusicVideos` | Optional |
 | Podcasts / audiobooks | `/app/podcasts`, `/app/audiobooks` | Optional |
 | Video | `/media/movies`, `/media/tv`, `/media/youtube` | Optional, for the video side |
+| Video extras | `/media/anime`, `/media/movies-4k`, `/media/tv-4k` | Optional: the anime and 4K libraries, commented out in the compose file |
 
 Useful environment variables: `PUID`, `PGID`, `UMASK`, `TZ`, `SOULSYNC_URL_BASE` (serve under a sub-path, see [docs/REVERSE_PROXY_SUBPATH.md](docs/REVERSE_PROXY_SUBPATH.md)), and `SOULSYNC_LOG_LEVEL`.
 

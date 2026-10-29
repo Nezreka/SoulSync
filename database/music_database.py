@@ -11884,7 +11884,7 @@ class MusicDatabase:
             logger.debug(f"artist presence probe failed for {forms}: {e}")
             return forms
 
-    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False, include_downloads: bool = False) -> Tuple[Optional[DatabaseTrack], float]:
+    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False, include_downloads: bool = False, prefer_album: Optional[str] = None) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
 
@@ -11902,11 +11902,25 @@ class MusicDatabase:
                               merely because a pool lookup came back empty (no information)
                               must leave this False so the legacy path runs (#1621).
 
+            prefer_album: Optional album the caller is asking about. It never changes
+                              WHICH tracks match, only which one wins when several score
+                              identically: an intro jingle or theme song shares its title
+                              across every album of a series, and without a preference the
+                              first row won, which sent a caller that compares albums
+                              (watchlist, allow-duplicates) to a copy on the wrong album.
+
         Returns (track, confidence) tuple where confidence is 0.0-1.0
         """
         try:
             best_match = None
             best_confidence = 0.0
+            _want_album = self._normalize_for_comparison(prefer_album) if prefer_album else ''
+
+            def _better(conf, trk):
+                if conf > best_confidence:
+                    return True
+                return bool(_want_album) and conf == best_confidence and best_match is not None \
+                    and self._on_album(trk, _want_album) and not self._on_album(best_match, _want_album)
 
             if candidate_tracks:
                 # BATCHED PATH — score every pre-fetched track in-memory.
@@ -11915,7 +11929,7 @@ class MusicDatabase:
                 logger.debug(f"Enhanced track matching for '{title}' by '{artist}': batched against {len(candidate_tracks)} candidates")
                 for track in candidate_tracks:
                     confidence = self._calculate_track_confidence(title, artist, track)
-                    if confidence > best_confidence:
+                    if _better(confidence, track):
                         best_confidence = confidence
                         best_match = track
             elif candidate_tracks is not None and candidate_tracks_exhaustive:
@@ -11966,7 +11980,7 @@ class MusicDatabase:
                         confidence = self._calculate_track_confidence(title, artist, track)
                         logger.debug(f"  '{track.title}' confidence: {confidence:.3f}")
 
-                        if confidence > best_confidence:
+                        if _better(confidence, track):
                             best_confidence = confidence
                             best_match = track
 
@@ -12173,10 +12187,10 @@ class MusicDatabase:
             # Only callers that ask "do we already have this file" opt in. A sync
             # asks "is it on the media server", and a ``routed:`` id means nothing there.
             if include_downloads:
-                routed = self._routed_download_match(title, artist, confidence_threshold)
+                routed = self._routed_download_match(title, artist, confidence_threshold, prefer_album)
                 if routed is not None:
                     return routed
-                downloaded = self._downloaded_file_match(title, artist, confidence_threshold)
+                downloaded = self._downloaded_file_match(title, artist, confidence_threshold, prefer_album)
                 if downloaded is not None:
                     return downloaded
 
@@ -12187,7 +12201,12 @@ class MusicDatabase:
             logger.error(f"Error checking track existence for '{title}' by '{artist}': {e}")
             return None, 0.0
 
-    def _routed_download_match(self, title: str, artist: str, confidence_threshold: float):
+    def _on_album(self, track, wanted_key: str) -> bool:
+        """Whether ``track`` sits on the album whose normalized name is ``wanted_key``."""
+        return self._normalize_for_comparison(getattr(track, 'album_title', '') or '') == wanted_key
+
+    def _routed_download_match(self, title: str, artist: str, confidence_threshold: float,
+                               prefer_album: Optional[str] = None):
         """Ownership for artists routed to the audiobook library.
 
         Their files never reach the media server's library, so the ``tracks``
@@ -12209,6 +12228,7 @@ class MusicDatabase:
                 "AND d.track_artist IS NOT NULL "
                 "AND (f.id IS NULL OR COALESCE(f.file_state,'active')<>'deleted')"
                 + ownership).fetchall()
+        want = self._normalize_for_comparison(prefer_album) if prefer_album else ''
         best, best_confidence = None, 0.0
         for row in rows:
             if route_key(row['track_artist']) != key:
@@ -12219,7 +12239,13 @@ class MusicDatabase:
             candidate.artist_name = row['track_artist']
             candidate.album_title = row['track_album'] or ''
             confidence = self._calculate_track_confidence(title, artist, candidate)
-            if confidence <= best_confidence or confidence < confidence_threshold:
+            if confidence < confidence_threshold or confidence < best_confidence:
+                continue
+            # A tie goes to the album asked about (a theme song shares its title across every
+            # book of a series); otherwise the first one found stays.
+            if confidence == best_confidence and not (
+                    want and best is not None and self._on_album(candidate, want)
+                    and not self._on_album(best, want)):
                 continue
             found = existing_download_path(row['file_path'])
             if found:
@@ -12227,7 +12253,8 @@ class MusicDatabase:
                 best, best_confidence = candidate, confidence
         return (best, best_confidence) if best else None
 
-    def _downloaded_file_match(self, title: str, artist: str, confidence_threshold: float):
+    def _downloaded_file_match(self, title: str, artist: str, confidence_threshold: float,
+                               prefer_album: Optional[str] = None):
         """Ownership for a file SoulSync downloaded that the media server hasn't
         scanned in yet.
 
@@ -12256,6 +12283,7 @@ class MusicDatabase:
                 f"AND d.track_artist IS NOT NULL AND LOWER(TRIM(d.track_title)) IN ({marks}) "
                 "AND (f.id IS NULL OR COALESCE(f.file_state, 'active') <> 'deleted')"
                 f"{ownership} ORDER BY d.id DESC", tuple(variations)).fetchall()
+        want = self._normalize_for_comparison(prefer_album) if prefer_album else ''
         best, best_confidence = None, 0.0
         for row in rows:
             candidate = DatabaseTrack(
@@ -12264,7 +12292,11 @@ class MusicDatabase:
             candidate.artist_name = row['track_artist']
             candidate.album_title = row['track_album'] or ''
             confidence = self._calculate_track_confidence(title, artist, candidate)
-            if confidence <= best_confidence or confidence < confidence_threshold:
+            if confidence < confidence_threshold or confidence < best_confidence:
+                continue
+            if confidence == best_confidence and not (
+                    want and best is not None and self._on_album(candidate, want)
+                    and not self._on_album(best, want)):
                 continue
             if os.path.isfile(row['file_path']):
                 best, best_confidence = candidate, confidence

@@ -149,20 +149,24 @@ def test_core_js_rebroadcasts_it_for_react():
 
 def test_the_card_listens_only_while_its_fetch_is_running():
     """A listener left attached would repaint the overlay for a load that has
-    already finished."""
-    tsx = read('webui/src/routes/sync/-ui/account-tabs.tsx')
+    already finished. The account and link cards import through one
+    importer now, so the listener lives in its overlay."""
+    tsx = read('webui/src/routes/sync/-ui/use-importer.tsx')
     assert 'addEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT' in tsx
-    assert 'removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT' in tsx
-    finally_block = tsx[tsx.index('removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT') - 200:]
-    assert 'finally' in tsx[:tsx.index('removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT')][-400:], \
+    removal = tsx.index('removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT')
+    assert 'finally' in tsx[:removal][-400:], \
         "removal has to be in the finally, or an error leaves it attached"
-    assert 'hideLoadingOverlay' in finally_block[:400]
+    assert 'hideLoadingOverlay' in tsx[removal:removal + 400]
 
 
 def test_the_card_ignores_frames_for_other_playlists():
-    """The emit is unroomed, so every card hears every frame."""
-    tsx = read('webui/src/routes/sync/-ui/account-tabs.tsx')
-    assert 'frame.playlist_id) !== String(row.id)' in tsx
+    """The emit is unroomed, so every card hears every frame. The label helper
+    drops a frame for any other playlist, and the importer hands it the id of
+    the one it is importing."""
+    events = read('webui/src/routes/sync/-sync.events.ts')
+    assert 'String(frame.playlist_id) !== String(playlistId)' in events
+    tsx = read('webui/src/routes/sync/-ui/use-importer.tsx')
+    assert 'String(spec.sourceId)' in tsx[tsx.index('deezerProgressLabel('):][:300]
 
 
 def test_the_event_name_matches_on_both_sides():
@@ -183,7 +187,9 @@ def test_the_paste_a_link_tab_listens_too():
     tsx = read('webui/src/routes/sync/-ui/url-import-tab.tsx')
     assert 'addEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT' in tsx
     assert 'removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT' in tsx
-    before_removal = tsx[:tsx.index('removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT')]
+    # the last removal is the one that must sit in the finally: an earlier one
+    # hands the overlay to the importer once the playlist has loaded
+    before_removal = tsx[:tsx.rindex('removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT')]
     assert 'finally' in before_removal[-400:], \
         "removal has to be in the finally, or an error leaves it attached"
 

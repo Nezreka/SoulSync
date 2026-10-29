@@ -4,6 +4,7 @@ import type { EnhancedData } from './-artist-detail.enhanced';
 
 import {
   _resetEnrichmentLock,
+  announceWatchlistFollow,
   applyManualMatchRequest,
   clearMatchRequest,
   foldUpdatedData,
@@ -11,6 +12,7 @@ import {
   matchServiceLabel,
   runEnrichmentRequest,
   searchServiceRequest,
+  matchSearchPlaceholder,
 } from './-artist-detail.enrich-match';
 
 /**
@@ -156,5 +158,73 @@ describe('foldUpdatedData', () => {
     expect(current.albums).toBe(updated.albums);
     // No album asked for → payload still folds, nothing returned.
     expect(foldUpdatedData(current, updated)).toBeNull();
+  });
+});
+
+describe('matchSearchPlaceholder (#1901)', () => {
+  it('says what each service takes besides a name', () => {
+    expect(matchSearchPlaceholder('spotify', 'Spotify')).toBe(
+      'Search Spotify, or paste a Spotify link or id',
+    );
+    // genius links name the page, not the id
+    expect(matchSearchPlaceholder('genius', 'Genius')).toBe('Search Genius, or paste a Genius id');
+    // last.fm is addressed by url
+    expect(matchSearchPlaceholder('lastfm', 'Last.fm')).toBe(
+      'Search Last.fm, or paste a Last.fm link',
+    );
+  });
+
+  it('promises nothing for a service with no paste support', () => {
+    expect(matchSearchPlaceholder('hydrabase', 'Hydrabase')).toBe('Search Hydrabase…');
+  });
+});
+
+describe('the watchlist follows an artist match (#1901)', () => {
+  it('apply carries what the watchlist did', async () => {
+    stubFetch({ success: true, watchlist_updated: ['1905'], watchlist_skipped: [] });
+    const outcome = await applyManualMatchRequest({
+      entityType: 'artist',
+      entityId: 7,
+      service: 'spotify',
+      serviceId: '66oNCpEovvkyBASCRLaI93',
+      artistId: 7,
+    });
+    expect(outcome.watchlistUpdated).toEqual(['1905']);
+    expect(outcome.watchlistSkipped).toEqual([]);
+  });
+
+  it("an older server that doesn't say reads as nothing followed", async () => {
+    stubFetch({ success: true });
+    const outcome = await applyManualMatchRequest({
+      entityType: 'artist',
+      entityId: 7,
+      service: 'spotify',
+      serviceId: 'x',
+      artistId: 7,
+    });
+    expect(outcome.watchlistUpdated).toEqual([]);
+    expect(announceWatchlistFollow(outcome, 'Spotify')).toBe('');
+  });
+
+  it('says it followed, and warns when another watched artist holds the id', () => {
+    const toast = vi.fn();
+    window.showToast = toast;
+    expect(
+      announceWatchlistFollow(
+        { updatedData: null, watchlistUpdated: ['1905'], watchlistSkipped: [] },
+        'Spotify',
+      ),
+    ).toBe('. Your watchlist follows it too');
+    expect(toast).not.toHaveBeenCalled();
+
+    announceWatchlistFollow(
+      { updatedData: null, watchlistUpdated: [], watchlistSkipped: ['1905'] },
+      'Spotify',
+    );
+    expect(toast).toHaveBeenCalledWith(
+      'Your watchlist still has the old Spotify match for 1905: another watched artist already uses this one',
+      'warning',
+    );
+    delete window.showToast;
   });
 });

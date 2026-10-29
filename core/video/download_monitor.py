@@ -212,10 +212,16 @@ def _protected_roots() -> set:
     try:
         from api.video import get_video_db
         db = get_video_db()
-        for key in ("movies_path", "tv_path", "youtube_path", "transfer_path"):
+        # anime too: an emptied anime folder is a library root, not a leftover
+        for key in ("movies_path", "tv_path", "anime_path", "youtube_path", "transfer_path"):
             v = db.get_setting(key)
             if v:
                 roots.add(os.path.abspath(str(v)))
+        from core.video.library_roots import four_k_path
+        for kind in ("movie", "episode"):
+            v = four_k_path(db, kind)
+            if v:
+                roots.add(os.path.abspath(v))
     except Exception:   # noqa: BLE001
         pass
     return roots
@@ -246,6 +252,14 @@ def _sweep_import_temps(db) -> int:
             v = None
         if v:
             roots.add(os.path.abspath(str(v)))
+    try:
+        from core.video.library_roots import four_k_path
+        for kind in ("movie", "episode"):
+            v = four_k_path(db, kind)
+            if v:
+                roots.add(os.path.abspath(v))
+    except Exception:   # noqa: BLE001 - the sweep is best-effort
+        pass
     try:
         from core.settings import config_manager
         dl_dir = str(config_manager.get("soulseek.download_path", "") or "")

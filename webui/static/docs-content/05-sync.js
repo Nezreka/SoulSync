@@ -39,6 +39,7 @@ If Spotify is connected, opening the Spotify panel from **+ Add playlist** lists
 - A playlist that's already in says **In SoulSync**; clicking it opens it
 - **Import all** brings in every playlist that isn't in yet
 - Nothing is imported until you ask: loading the list doesn't create any mirrors
+- **Keep your own copy** (the button on a playlist's cover) puts it in **My Playlists** instead of Mirrored: an editable playlist that never refreshes from the source, so **Sync & download** leaves its songs as they are. Good as a base to build on. The songs remember where they came from, so identifying them stays exact. Offered on the account, link, ListenBrainz and Last.fm tabs; Beatport has its own frozen copy, **Save snapshot**
 
 ![Spotify playlists loaded](sync-spotify.jpg)
 
@@ -269,6 +270,8 @@ For non-Spotify playlists (YouTube, Tidal, Deezer links, files), tracks need to 
 3. SoulSync matches each track to official metadata — results are cached globally, so a track discovered once never needs re-matching
 4. **Sync** the playlist — only discovered tracks are included; unmatched tracks are skipped
 :::
+
+A track identification couldn't find is skipped by a download too. **Download Missing Tracks** says so first when some aren't identified: **Retry, then download** tries just those again (a lookup that failed earlier often works the second time) and carries on into the download, and **Download the rest** downloads what's identified now. **Sync & download** retries them on every run by itself.
 
 > [!TIP]
 > Chain automations for hands-free operation: Refresh Playlist → Playlist Changed → Discover → Discovery Complete → Sync.

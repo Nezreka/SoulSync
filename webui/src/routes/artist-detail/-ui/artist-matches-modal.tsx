@@ -5,8 +5,10 @@ import type { MatchRow } from '../-artist-detail.matches';
 import type { ArtistInfo } from '../-artist-detail.types';
 
 import {
+  announceWatchlistFollow,
   applyManualMatchRequest,
   clearMatchRequest,
+  matchSearchPlaceholder,
   runEnrichmentRequest,
   searchServiceRequest,
 } from '../-artist-detail.enrich-match';
@@ -150,7 +152,7 @@ export function ArtistMatchesModal({ artistId, artistName, onChanged, onClose }:
   const pick = async (row: MatchRow, result: MatchSearchResult) => {
     setBusy(row.svc);
     try {
-      await applyManualMatchRequest({
+      const outcome = await applyManualMatchRequest({
         entityType: 'artist',
         entityId: artistId,
         // A proxied result matches through its real provider.
@@ -158,7 +160,11 @@ export function ArtistMatchesModal({ artistId, artistName, onChanged, onClose }:
         serviceId: result.id,
         artistId,
       });
-      window.showToast?.(`${row.label} now points at ${result.name || result.id}`, 'success');
+      const followed = announceWatchlistFollow(outcome, row.label);
+      window.showToast?.(
+        `${row.label} now points at ${result.name || result.id}${followed}`,
+        'success',
+      );
       setEditing(null);
       await afterChange();
     } catch (err) {
@@ -434,13 +440,7 @@ function MatchSearch({
         <input
           type="text"
           className="amx-search-input"
-          placeholder={
-            row.svc === 'musicbrainz'
-              ? `Search ${row.label}, or paste a MusicBrainz id or url`
-              : row.svc === 'deezer'
-                ? `Search ${row.label}… or paste a Deezer URL`
-                : `Search ${row.label}…`
-          }
+          placeholder={matchSearchPlaceholder(row.svc, row.label)}
           value={query}
           autoFocus
           onChange={(e) => setQuery(e.target.value)}

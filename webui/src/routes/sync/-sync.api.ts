@@ -924,22 +924,6 @@ export async function patchMirroredPreferences(
 }
 
 /**
- * GET /api/logs — the sidebar log area's HTTP half (`loadLogs`, api-monitor.js
- * 1114-1127). Returns null on any failure so the caller keeps the text it has,
- * matching the vanilla, which only overwrites the textarea on error when it is
- * still showing its own placeholder.
- */
-export async function fetchSyncLogs(): Promise<{ logs?: unknown } | null> {
-  try {
-    const response = await fetch('/api/logs');
-    if (!response.ok) return null;
-    return (await response.json()) as { logs?: unknown };
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Sync history — the endpoints behind the Activity modal's first tab.
  *
  * `/api/sync/start` and `/api/sync/cancel` are the SAME engine

@@ -7,6 +7,8 @@ import { z } from 'zod';
 // Keeping it to one route (vs nested file routes) keeps the TanStack route tree
 // small and avoids codegen surprises while still giving the full drill-down UX.
 export const LIBRARY_V2_SORTS = ['name', 'added', 'albums', 'tracks'] as const;
+export const LIBRARY_V2_SONG_SORTS = ['title', 'artist', 'album', 'year', 'recent'] as const;
+export type LibraryV2SongSort = (typeof LIBRARY_V2_SONG_SORTS)[number];
 export type LibraryV2Sort = (typeof LIBRARY_V2_SORTS)[number];
 
 /** The album browse's orders (upstream's album view, A07). */
@@ -30,7 +32,7 @@ const coercedString = z.preprocess(
 );
 
 const libraryV2SearchObject = z.object({
-  section: z.enum(['artists', 'albums', 'wanted']).default('artists').catch('artists'),
+  section: z.enum(['artists', 'albums', 'songs', 'wanted']).default('artists').catch('artists'),
   // Same trap as `discover`/`discoverName` below, and it bit here too: a filter
   // of "123" or "702" arrives as a NUMBER, a bare z.string() rejects it and
   // `.catch('')` silently swallows the filter — the URL said one thing and the
@@ -38,6 +40,10 @@ const libraryV2SearchObject = z.object({
   q: coercedString.default('').catch(''),
   sort: z.enum(LIBRARY_V2_SORTS).default('name').catch('name'),
   albumSort: z.enum(LIBRARY_V2_ALBUM_SORTS).default('title').catch('title'),
+  /** Songs (upstream #1906): sort, "Duplicates" and the lossless / could-be-better toggles. */
+  songSort: z.enum(LIBRARY_V2_SONG_SORTS).default('title').catch('title'),
+  dupes: z.boolean().default(false).catch(false),
+  quality: z.enum(['', 'lossless', 'upgradable']).default('').catch(''),
   view: z.enum(['table', 'cards', 'discovery']).default('cards').catch('cards'),
   monitored: z.enum(LIBRARY_V2_MONITOR_FILTERS).default('all').catch('all'),
   page: z.coerce.number().int().positive().default(1).catch(1),

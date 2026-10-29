@@ -92,6 +92,9 @@ export const Route = createFileRoute('/library')({
     await context.queryClient
       .ensureQueryData(libraryV2EnabledQueryOptions())
       .catch(() => undefined);
+    // the songs view asks for its own page; an artists prefetch here would be
+    // a request nothing on screen reads (upstream #1906)
+    if (deps.section === 'songs' && !deps.album && !deps.artist) return;
     if (deps.section === 'wanted') {
       void context.queryClient.prefetchQuery(
         libraryV2WantedQueryOptions({ q: deps.q, page: deps.page, wantedKind: deps.wantedKind }),

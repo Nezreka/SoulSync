@@ -475,11 +475,9 @@ export function useSourceVertical(
   }, []);
 
   /**
-   * Memoised because the PAGE builds nine of these (-sync.verticals.ts) and
-   * hands each one down as a prop. A fresh object literal per render would
-   * give every tab a new `vertical` prop on every page re-render — and the
-   * page re-renders on each selection toggle, tab switch, sequential-sync
-   * progress step and log frame — re-running any consumer effect or callback
+   * Memoised because the page hands it down as a prop, to three tabs. A
+   * fresh object literal per render would give every tab a new `vertical`
+   * prop on every page re-render, re-running any consumer effect or callback
    * keyed on it. Every member below is already stable (all useCallback), so
    * the identity now changes only when `states` actually changes.
    */

@@ -12,7 +12,7 @@ per-album quality badges. Read-only; never raises.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterator, List, Tuple
 
 from core.library2 import ADMIN_PROFILE_ID
 
@@ -161,6 +161,16 @@ def list_cutoff_unmet(conn: Any, *, search: str = "", page: int = 1, limit: int 
     """
     page = max(1, int(page))
     limit = max(1, min(int(limit), 500))
+    unmet = list(iter_cutoff_unmet(conn, search=search, profile_id=profile_id))
+    total = len(unmet)
+    offset = (page - 1) * limit
+    return unmet[offset:offset + limit], total
+
+
+def iter_cutoff_unmet(conn: Any, *, search: str = "",
+                      profile_id: int = ADMIN_PROFILE_ID) -> Iterator[Dict[str, Any]]:
+    """The Cutoff Unmet rows in list order (also the Songs view's "Could be
+    better" filter, upstream #1906)."""
     like_sql, like_params = _search_clause(search)
     where = (
         "WHERE w.profile_id = :profile_id AND w.wanted = 1 "
@@ -202,7 +212,6 @@ def list_cutoff_unmet(conn: Any, *, search: str = "", page: int = 1, limit: int 
             targets_cache[pid] = profile_targets(profile_rows.get(pid))
         return targets_cache[pid]
 
-    unmet: List[Dict[str, Any]] = []
     while True:
         chunk = cursor.fetchmany(_EVALUATION_CHUNK)
         if not chunk:
@@ -225,11 +234,7 @@ def list_cutoff_unmet(conn: Any, *, search: str = "", page: int = 1, limit: int 
                 "bit_depth": file_row.get("bit_depth") if file_row else None,
                 "quality_tier": file_row.get("quality_tier") if file_row else None,
             }
-            unmet.append(entry)
-
-    total = len(unmet)
-    offset = (page - 1) * limit
-    return unmet[offset:offset + limit], total
+            yield entry
 
 
-__all__ = ["list_missing", "list_cutoff_unmet"]
+__all__ = ["iter_cutoff_unmet", "list_missing", "list_cutoff_unmet"]

@@ -112,6 +112,11 @@ Downloads can be started from many places: Enhanced Search results, artist disco
 
 If a download fails — or no suitable file is found — you can open the cached search candidates and **manually pick an alternative file** from a different user. This recovers failed downloads without restarting the entire search.
 
+**Interactive Search** (on a failed download in Active Downloads, or a wishlist item) shows every source's hits side by side, by song name, with why each one was or wasn't taken:
+
+- **▶** on a hit plays it in the media player first, so you can hear what you'd be getting. It doesn't pick it. Torrent and Usenet hits are whole releases, so they have nothing to play
+- **Edit search** (wishlist) retypes the title or artist and searches again, for when the wishlist row itself is wrong
+
 ![Download candidate selection](dl-candidates.jpg)
 
 > [!TIP]

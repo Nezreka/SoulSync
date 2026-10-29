@@ -10,13 +10,22 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import { DEEZER_PLAYLIST_PROGRESS_EVENT, deezerProgressLabel } from '../-sync.events';
-import { fetchMirrorIndex, importPlaylist, mirrorKey, type ImportSpec } from '../-sync.importer';
+import {
+  canCopyAsMine,
+  copyPlaylistAsMine,
+  fetchMirrorIndex,
+  importPlaylist,
+  mirrorKey,
+  type ImportSpec,
+} from '../-sync.importer';
 
 export interface ImportLanding {
   /** Show one imported playlist: the Mirrored tab, its window open. */
   land: (mirrorId: number, name: string, already: boolean) => void;
   /** After a batch: the Mirrored tab, reloaded, nothing opened. */
   showList: () => void;
+  /** A copy kept as your own (#1913): My Playlists, its window open. */
+  landMine?: (playlistId: number, name: string) => void;
 }
 
 const NO_LANDING: ImportLanding = { land: () => {}, showList: () => {} };
@@ -36,6 +45,11 @@ export interface Importer {
   /** A tab that mirrored a playlist itself (a pasted link) records it here. */
   markImported: (source: string, sourceId: string | number, mirrorId: number) => void;
   mirrorIdOf: (source: string, sourceId: string | number) => number | undefined;
+  /** Keep it as your own copy in My Playlists instead (#1913); undefined when
+   *  the playlist can't be copied (it saves server-side). */
+  copyAsMineFor: (spec: ImportSpec) => (() => void) | undefined;
+  /** A copy of this one is being made. */
+  copyingOf: (source: string, sourceId: string | number) => boolean;
   landing: ImportLanding;
 }
 
@@ -187,5 +201,44 @@ export function useImporter(): Importer {
     [landing, markImported, setBusyKey],
   );
 
-  return { statusOf, importOrOpen, importAll, markImported, mirrorIdOf, landing };
+  const copyAsMine = useCallback(
+    async (spec: ImportSpec) => {
+      const key = `mine:${mirrorKey(spec.source, spec.sourceId)}`;
+      setBusyKey(key, true);
+      try {
+        const playlistId = await withOverlay(spec, () => copyPlaylistAsMine(spec));
+        if (landing.landMine) landing.landMine(playlistId, spec.name);
+        else window.showToast?.(`${spec.name} is in My Playlists`, 'success');
+      } catch (error) {
+        window.showToast?.(
+          error instanceof Error ? error.message : `Couldn't copy ${spec.name}`,
+          'error',
+        );
+      } finally {
+        setBusyKey(key, false);
+      }
+    },
+    [landing, setBusyKey, withOverlay],
+  );
+
+  const copyAsMineFor = useCallback(
+    (spec: ImportSpec) => (canCopyAsMine(spec) ? () => void copyAsMine(spec) : undefined),
+    [copyAsMine],
+  );
+
+  const copyingOf = useCallback(
+    (source: string, sourceId: string | number) => busy.has(`mine:${mirrorKey(source, sourceId)}`),
+    [busy],
+  );
+
+  return {
+    statusOf,
+    importOrOpen,
+    importAll,
+    markImported,
+    mirrorIdOf,
+    copyAsMineFor,
+    copyingOf,
+    landing,
+  };
 }

@@ -75,14 +75,14 @@ _DEFAULT_LIMIT = 25
 
 
 def _library_cover(row):
-    """Only serve known image names inside the configured, indexed book folder."""
+    """Only serve known image names inside a configured, indexed book folder."""
     from pathlib import Path
-    from core.audiobook_organizer import library_root
+    from core.audiobook_organizer import root_for
     try:
-        root = Path(library_root()).resolve()
-        path = Path(row.get("path") or "").resolve()
-        if path == root or not path.is_relative_to(root):
+        root = root_for(row.get("path"))
+        if root is None:
             return None
+        path = Path(row.get("path") or "").resolve()
         candidates = [path / name for name in ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp", "folder.jpg")]
         if path.is_file():
             candidates = [path.with_suffix(ext) for ext in (".jpg", ".png", ".webp")]
@@ -1040,11 +1040,10 @@ def create_audiobooks_blueprint() -> Blueprint:
         if row:
             from io import BytesIO
             from pathlib import Path
-            from core.audiobook_organizer import library_root
+            from core.audiobook_organizer import root_for
             from core.audiobook_library_metadata import embedded_cover
-            root = Path(library_root()).resolve()
             path = Path(row.get("path") or "").resolve()
-            if path != root and path.is_relative_to(root):
+            if root_for(path) is not None:
                 art = embedded_cover(path)
                 if art:
                     return send_file(BytesIO(art[0]), mimetype=art[1], max_age=3600)
@@ -1066,11 +1065,11 @@ def create_audiobooks_blueprint() -> Blueprint:
         from core.audiobook_recycle import discard
 
         from pathlib import Path
-        from core.audiobook_organizer import library_root
-        root = Path(library_root()).resolve()
+        from core.audiobook_organizer import root_for
         path = Path(str(row.get("path") or "")).resolve()
-        if path == root or not path.is_relative_to(root):
-            return jsonify({"success": False, "error": "This book is outside the configured audiobook folder."}), 400
+        root = root_for(path)
+        if root is None:
+            return jsonify({"success": False, "error": "This book is outside your audiobook folders."}), 400
         targets = [path]
         if row.get("file_scope") == "files":
             targets = [Path(p).resolve() for p in row.get("file_paths") or [str(path)]]

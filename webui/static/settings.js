@@ -3747,6 +3747,7 @@ async function loadSettingsData() {
         // Populate Music Library Paths
         const _musicPaths = settings.library?.music_paths || [];
         renderMusicPaths(_musicPaths);
+        renderAudiobookExtraPaths(settings.library?.audiobooks_additional_paths || []);
 
         // Populate Sample Studio folders (first = default destination).
         // Configs predating the key get the Docker-aware default row.
@@ -5838,15 +5839,15 @@ function renderMusicPaths(paths) {
         return;
     }
     container.innerHTML = paths.map((p, i) => `
-        <div class="form-group music-path-row" style="margin-bottom: 4px;">
-            <input type="text" class="music-path-input" value="${escapeHtml(p)}" placeholder="/music or C:\\Music" style="flex:1;">
+        <div class="form-group music-path-row" data-folder-row style="margin-bottom: 4px;">
+            <input type="text" class="music-path-input" value="${escapeHtml(p)}" placeholder="/music or C:\\Music" style="flex:1;" data-folder-check="music" data-folder-role="existing" data-folder-label="Extra music folder">
             <button class="test-button" onclick="_removeMusicPathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
         </div>
     `).join('');
     // Attach auto-save to dynamically rendered inputs
     container.querySelectorAll('.music-path-input').forEach(input => {
         input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
-    });
+    });    if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('music');
 }
 
 function addMusicPathRow() {
@@ -5857,9 +5858,10 @@ function addMusicPathRow() {
     if (placeholder && !container.querySelector('.music-path-row')) placeholder.remove();
     const row = document.createElement('div');
     row.className = 'form-group music-path-row';
+    row.setAttribute('data-folder-row', '');
     row.style.marginBottom = '4px';
     row.innerHTML = `
-        <input type="text" class="music-path-input" value="" placeholder="/music or C:\\Music" style="flex:1;">
+        <input type="text" class="music-path-input" value="" placeholder="/music or C:\\Music" style="flex:1;" data-folder-check="music" data-folder-role="existing" data-folder-label="Extra music folder">
         <button class="test-button" onclick="_removeMusicPathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
     `;
     container.appendChild(row);
@@ -5870,9 +5872,69 @@ function addMusicPathRow() {
 }
 
 function _removeMusicPathRow(btn) {
-    btn.closest('.music-path-row').remove();
+    const row = btn.closest('.music-path-row');
+    const status = row.nextElementSibling;
+    if (status && status.classList.contains('folder-check')) status.remove();
+    row.remove();
+    if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('music');
     // Auto-save after removing a path
     if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
+}
+
+// ── Extra audiobook folders: an existing collection on another drive ──
+function addAudiobookExtraPathRow(value) {
+    const container = document.getElementById('audiobooks-extra-paths');
+    if (!container) return null;
+    const row = document.createElement('div');
+    row.className = 'audiobook-extra-row';
+    row.setAttribute('data-folder-row', '');
+    row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'audiobook-extra-input';
+    input.value = value || '';
+    input.placeholder = '/app/audiobooks2';
+    input.style.cssText = 'flex:1;min-width:0';
+    input.setAttribute('aria-label', 'Extra audiobook folder');
+    input.setAttribute('data-folder-check', 'audiobooks');
+    input.setAttribute('data-folder-label', 'Extra audiobook folder');
+    input.setAttribute('data-folder-role', 'existing');
+    input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'test-button';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', 'Remove this folder');
+    remove.addEventListener('click', () => {
+        const status = row.nextElementSibling;
+        if (status && status.classList.contains('folder-check')) status.remove();
+        row.remove();
+        if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
+        if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('audiobooks');
+    });
+    row.append(input, remove);
+    container.appendChild(row);
+    if (value === undefined) input.focus();
+    if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('audiobooks');
+    return input;
+}
+
+function renderAudiobookExtraPaths(paths) {
+    const container = document.getElementById('audiobooks-extra-paths');
+    if (!container) return;
+    container.replaceChildren();
+    (Array.isArray(paths) ? paths : []).forEach(path => addAudiobookExtraPathRow(String(path || '')));
+    container.dataset.loaded = 'true';
+}
+
+function collectAudiobookExtraPaths() {
+    // never loaded (settings failed to load): leave the key out so a save
+    // can't wipe the saved list
+    const container = document.getElementById('audiobooks-extra-paths');
+    if (!container || container.dataset.loaded !== 'true') return undefined;
+    return Array.from(document.querySelectorAll('.audiobook-extra-input'))
+        .map(input => input.value.trim())
+        .filter(Boolean);
 }
 
 function collectMusicPaths() {
@@ -7021,6 +7083,7 @@ async function saveSettings(quiet = false) {
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos',
             podcasts_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
             audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
+            audiobooks_additional_paths: collectAudiobookExtraPaths(),
             reorganize_preserve_casing: _cfgBool('reorganize-preserve-casing'),
             write_artist_nfo: _cfgBool('write-artist-nfo'),
             redownload_externally_deleted: _cfgBool('redownload-externally-deleted')
@@ -8738,6 +8801,7 @@ async function logoutQobuz() {
 
 const PATH_INPUT_IDS = {
     download: 'download-path',
+    'video-download': 'video-download-path',   // the same setting, from the Video folders tab
     transfer: 'transfer-path',
     podcasts: 'podcasts-path',
     audiobooks: 'audiobooks-path',
@@ -8762,6 +8826,10 @@ function applyPathsEnvironment(settings) {
         const out = (settings.soulseek?.transfer_path || './Transfer').trim();
         const isDefault = out === '' || out === '.' || out.startsWith('./') || out.startsWith('.\\');
         warn.classList.toggle('hidden', docker || !isDefault);
+    }
+    // the folder values are in now, so the live checks can run
+    if (window.SoulSyncFolderCheck) {
+        ['music', 'audiobooks', 'podcasts'].forEach(group => window.SoulSyncFolderCheck.refresh(group));
     }
 }
 

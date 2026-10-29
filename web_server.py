@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.6.0"
+_SOULSYNC_BASE_VERSION = "3.6.1"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -11122,9 +11122,10 @@ def _library_match_request(clear: bool):
     database = get_database()
     conn = database._get_connection()
     try:
-        apply_manual_match(conn, entity_type, int(entity_id), str(service).lower(), service_id,
-                           actor=f"profile:{get_current_profile_id()}",
-                           watchlist_row_id=data.get('watchlist_row_id'))
+        followed = apply_manual_match(conn, entity_type, int(entity_id), str(service).lower(),
+                                      service_id, actor=f"profile:{get_current_profile_id()}",
+                                      watchlist_row_id=data.get('watchlist_row_id'),
+                                      profile_id=get_current_profile_id())
         conn.commit()
     except WatchlistMismatch as e:
         conn.rollback()
@@ -11152,6 +11153,8 @@ def _library_match_request(clear: bool):
         "message": (f"Cleared {service} match for {entity_type}" if clear
                     else f"Manually matched {entity_type} to {service} ID: {service_id}"),
         "updated_data": updated if updated.get('success') else None,
+        "watchlist_updated": followed['updated'],
+        "watchlist_skipped": followed['skipped'],
     })
 
 

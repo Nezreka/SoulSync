@@ -381,12 +381,10 @@ describe('SoulsyncDiscoveryTab', () => {
 });
 
 describe('SourceModals', () => {
-  it('renders NOTHING while closed, and mounts no effects', () => {
-    // The page keeps one host per vertical permanently mounted
-    // (-ui/sync-modals.tsx), so nine of these exist at all times with only one
-    // open. That is only free because a closed host returns null and the file
-    // has no effects at all — if either changed, the page would pay nine
-    // times over on every render.
+  it('renders NOTHING while closed', () => {
+    // The page keeps the mirrored host permanently mounted
+    // (-ui/sync-modals.tsx). A closed host returns null; its one effect (a
+    // download waiting on a retry, #1912) returns at once with nothing pending.
     const { container } = render(
       <SourceModals
         config={SYNC_SOURCES.tidal}

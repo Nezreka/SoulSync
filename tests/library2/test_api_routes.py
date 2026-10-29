@@ -4382,6 +4382,22 @@ def test_the_library_can_be_browsed_by_album(api):
     assert client.get("/api/library/v2/albums?limit=0").status_code == 400
 
 
+def test_the_songs_section_lists_owned_songs_with_catalogue_ids(api):
+    """Upstream #1906 on Library v2: a song is a catalogue track with a live
+    file; its cover comes through the artwork endpoint and its copies are its
+    files, one row each."""
+    client, _db, ids = api
+    body = client.get("/api/library/v2/songs?search=one").get_json()
+    assert body["success"] and [s["id"] for s in body["songs"]] == [ids["album_track"]]
+    song = body["songs"][0]
+    assert song["album_id"] == ids["views"] and song["format"] == "FLAC"
+    assert song["album_thumb_url"].startswith("/api/library/v2/artwork/album/")
+    assert song["liked"] is False and song["copies"] == 1
+    copies = client.get(f"/api/library/v2/songs/{ids['album_track']}/copies").get_json()
+    assert [c["file_path"] for c in copies["copies"]] == ["/m/one-dance.flac"]
+    assert client.get("/api/library/v2/songs?limit=501").status_code == 400
+
+
 def test_the_artist_detail_match_writes_the_library_v2_row(api):
     """H4: the artist-detail views hand Library v2 ids to /api/library/manual-match;
     writing them into the frozen legacy tables matched a stranger's row."""
@@ -4398,6 +4414,32 @@ def test_the_artist_detail_match_writes_the_library_v2_row(api):
         "SELECT external_ids FROM lib2_albums WHERE id=?", (ids["views"],)).fetchone()[0])
     conn.close()
     assert stored["deezer"] == "dz-album" and "deezer" not in cleared
+
+
+def test_a_fixed_artist_match_moves_the_profiles_watchlist_entry(api):
+    """Upstream #1901 on Library v2: the watchlist row that shares one of the
+    artist's ids from before the fix follows the new id; another profile's
+    row and a row tied to nothing stay as they were."""
+    client, db, ids = api
+    conn = _conn(db)
+    conn.execute("CREATE TABLE IF NOT EXISTS watchlist_artists (id INTEGER PRIMARY KEY, "
+                 "artist_name TEXT, spotify_artist_id TEXT, itunes_artist_id TEXT, "
+                 "deezer_artist_id TEXT, discogs_artist_id TEXT, musicbrainz_artist_id TEXT, "
+                 "amazon_artist_id TEXT, profile_id INTEGER DEFAULT 1, updated_at TIMESTAMP)")
+    conn.executemany("INSERT INTO watchlist_artists (id, artist_name, spotify_artist_id, profile_id) "
+                     "VALUES (?, 'Drake', ?, ?)", [(1, "sp-drake", 1), (2, "sp-drake", 2),
+                                                   (3, "sp-other", 1)])
+    conn.commit()
+    conn.close()
+
+    body = client.put(f"/api/library/v2/artists/{ids['artist']}/manual-match",
+                      json={"service": "spotify", "service_id": "sp-right"}).get_json()
+
+    conn = _conn(db)
+    rows = dict(conn.execute("SELECT id, spotify_artist_id FROM watchlist_artists").fetchall())
+    conn.close()
+    assert body["success"] and body["watchlist_updated"] == ["Drake"]
+    assert rows == {1: "sp-right", 2: "sp-drake", 3: "sp-other"}
 
 
 @pytest.mark.parametrize('scope', ['release_group', 'recording'])

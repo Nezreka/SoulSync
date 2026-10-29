@@ -1576,6 +1576,55 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             },
         })
 
+    def _song_payload(songs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Covers through the artwork endpoint, and the profile's Liked Songs
+        hearts keyed the way user playlists key a song (upstream #1906)."""
+        try:
+            from core.playlists.user_playlists import _stored_tracks, liked_playlist, track_key
+            playlist = liked_playlist(get_database(), _profile())
+            liked = ({track_key(t) for t in _stored_tracks(get_database(), playlist["id"])}
+                     if playlist else set())
+        except Exception as exc:  # noqa: BLE001 - hearts are a nicety
+            logger.debug("liked songs unavailable for the songs view: %s", exc)
+            track_key, liked = None, set()
+        for song in songs:
+            song["album_thumb_url"] = _apply_artwork_urls(
+                {"id": song["album_id"], "image_url": song["album_thumb_url"]}, "album")["image_url"]
+            song["liked"] = bool(track_key) and track_key(
+                {"track_name": song["title"], "artist_name": song["artist_name"]}) in liked
+        return songs
+
+    @_route("/api/library/v2/songs")
+    def lib2_list_songs():
+        """The library's songs (upstream #1906), paged; limit up to 500 so Play
+        all can queue a whole search in one call."""
+        from core.library2 import queries as Q
+        try:
+            page = int(request.args.get("page", 1))
+            limit = int(request.args.get("limit", 75))
+        except (TypeError, ValueError):
+            return _fail("page/limit must be integers")
+        if page < 1 or not 1 <= limit <= 500:
+            return _fail("page must be positive and limit must be between 1 and 500")
+        quality = request.args.get("quality", "")
+        with closing(_conn()) as conn:
+            result = Q.list_songs(
+                conn, search=request.args.get("search", ""),
+                letter=request.args.get("letter", "all"), sort=request.args.get("sort", "title"),
+                dupes=request.args.get("dupes") == "1",
+                quality=quality if quality in ("lossless", "upgradable") else "",
+                page=page, limit=limit, profile_id=_intent_profile())
+        _song_payload(result["songs"])
+        return jsonify({"success": True, **result})
+
+    @_route("/api/library/v2/songs/<int:track_id>/copies")
+    def lib2_song_copies(track_id):
+        """Every copy of one song, best file first (the "N copies" comparison)."""
+        from core.library2 import queries as Q
+        with closing(_conn()) as conn:
+            copies = Q.song_copies(conn, track_id)
+        return jsonify({"success": True, "copies": _song_payload(copies)})
+
     @_route("/api/library/v2/artists")
     def lib2_list_artists():
         from core.library2 import queries as Q
@@ -2268,10 +2317,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         conn = _conn()
         try:
             from core.library2.match_status import WatchlistMismatch, apply_manual_match
-            apply_manual_match(conn, entity_type, entity_id, service,
-                               service_id if request.method == "PUT" else None,
-                               actor=f"profile:{_profile()}",
-                               watchlist_row_id=body.get("watchlist_row_id"))
+            followed = apply_manual_match(conn, entity_type, entity_id, service,
+                                          service_id if request.method == "PUT" else None,
+                                          actor=f"profile:{_profile()}",
+                                          watchlist_row_id=body.get("watchlist_row_id"),
+                                          profile_id=_profile())
             conn.commit()
         except WatchlistMismatch as exc:
             conn.rollback()
@@ -2301,7 +2351,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             except Exception as exc:  # noqa: BLE001
                 logger.debug("native artist artwork scheduling failed (%s): %s",
                              entity_id, exc)
-        return jsonify({"success": True})
+        return jsonify({"success": True, "watchlist_updated": followed["updated"],
+                        "watchlist_skipped": followed["skipped"]})
 
     @_route(
         "/api/library/v2/albums/<int:album_id>/missing-tracks/materialize",
