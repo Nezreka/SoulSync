@@ -57,8 +57,11 @@ def _prepare_imported_artists(database, config_manager=None, *, progress=None):
                 progress('artists', current, total)
         if progress:
             progress('artists', 0, 0)
+        # after the upgrade only the combined credits wait on this pass; the
+        # enrichment workers identify single names themselves
         stats = reconcile_unmapped_native_artists(conn, progress=report,
-                                                  cooldown_hours=cooldown)
+                                                  cooldown_hours=cooldown,
+                                                  combined_only=True)
         conn.commit()
     invalidate_pending_cache()
     logger.info('Pre-enrichment artist reconciliation: %s', stats)
@@ -140,12 +143,25 @@ def start_background_preparation(database: Any, config_manager: Any, *, full: bo
     """
     global _background_thread
 
+    import time
+    last = [0.0]
+
+    def progress(stage, current=0, total=0, *_rest):
+        # one line every 30 s, so the log shows it moving without flooding
+        now = time.monotonic()
+        if total and current < total and now - last[0] < 30:
+            return
+        last[0] = now
+        if total:
+            logger.info("Library v2 preparation: %s %s/%s (%d%%)", stage, f"{current:,}",
+                        f"{total:,}", int(current * 100 / total))
+
     def run():
         try:
             if full:
-                run_post_import_precache(database, config_manager)
+                run_post_import_precache(database, config_manager, progress=progress)
             else:
-                prepare_imported_artists(database, config_manager)
+                prepare_imported_artists(database, config_manager, progress=progress)
         except Exception as exc:  # noqa: BLE001 - best effort, the next start retries
             logger.warning("Library v2 background preparation stopped: %s", exc)
         if after is not None:

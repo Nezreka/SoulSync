@@ -196,6 +196,7 @@ def _credit_names_for_import(
     known_name: Callable[[str], bool],
     *,
     split_with_known_anchor: bool = False,
+    album_artist: Optional[str] = None,
 ) -> List[str]:
     """Resolve a flat legacy credit without inventing provider identities.
 
@@ -226,6 +227,16 @@ def _credit_names_for_import(
         return pieces
     if split_with_known_anchor and any(known_name(piece) for piece in pieces):
         return pieces
+    # "1788-L, Deathpact" on a 1788-L album is a list with the album's own
+    # artist in it, not a band called that. A real band name never carries
+    # the album artist as one of its parts, so this one anchor is safe where
+    # "any part is known" would not be. Most of a big library's guest
+    # credits look like this; keeping them whole made ~18k ghost artists
+    # out of 300k tracks, each one later looked up online one by one.
+    if album_artist:
+        anchor = normalize_name(album_artist)
+        if anchor and any(normalize_name(piece) == anchor for piece in pieces):
+            return pieces
     return [display]
 
 
@@ -2069,6 +2080,19 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 *_provider_id_columns("track"),
             ),
         )
+        album_artist_names: Dict[int, Optional[str]] = {}
+
+        def _album_artist_name(artist_id: Optional[int]) -> Optional[str]:
+            """The album artist's name, for the guest-credit anchor. Cached:
+            a library has thousands of albums and 300k tracks."""
+            if artist_id is None:
+                return None
+            if artist_id not in album_artist_names:
+                found = cursor.execute("SELECT name FROM lib2_artists WHERE id=?",
+                                       (artist_id,)).fetchone()
+                album_artist_names[artist_id] = found[0] if found else None
+            return album_artist_names[artist_id]
+
         track_total = int(cursor.execute("SELECT COUNT(*) FROM tracks").fetchone()[0])
         track_from = walk_from("tracks")
         track_done = walked_before("tracks", track_from or 0)
@@ -2263,7 +2287,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             if primary_lib2 is not None:
                 credits.append((primary_lib2, "primary", 0))
             raw_credit = _pick(row, "track_artist") or ""
-            extra_names = _credit_names_for_import(raw_credit, resolver.known_name)
+            extra_names = _credit_names_for_import(
+                raw_credit, resolver.known_name,
+                album_artist=_album_artist_name(primary_lib2))
             planned_names = {normalize_name(name) for name in extra_names}
 
             def _known_or_planned(

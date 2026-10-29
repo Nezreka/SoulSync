@@ -1220,6 +1220,7 @@ def _mark_reconcile_attempted(conn, artist_id: int) -> None:
 
 def _pending_unmapped_artists(
     conn, limit: Optional[int], *, cooldown_hours: Optional[float] = None,
+    combined_only: bool = False,
 ) -> List[Dict[str, Any]]:
     """Artists (both native and legacy) that still carry no catalog provider id.
 
@@ -1242,6 +1243,11 @@ def _pending_unmapped_artists(
             "       OR unmapped_last_attempted_at < datetime('now', ?)) "
         )
         params.append(f"-{float(cooldown_hours)} hours")
+    if combined_only:
+        # only the names the enrichment workers won't take. a plain single
+        # name is theirs: every worker matches it by name on its own cadence
+        from core.library2.artist_credit_gate import unresolved_credit_sql
+        sql += f"  AND {unresolved_credit_sql('lib2_artists')} "
     sql += "ORDER BY id"
     rows = conn.execute(sql, params).fetchall()
 
@@ -1481,6 +1487,99 @@ def prune_browse_only_artists(conn) -> Dict[str, Any]:
     return {"pruned": len(artist_ids), "artist_ids": artist_ids}
 
 
+_IDENTIFIED_SQL = ("(COALESCE(a.spotify_id,'')<>'' OR COALESCE(a.musicbrainz_id,'')<>'' "
+                   "OR COALESCE(a.external_ids,'{}') NOT IN ('','{}'))")
+
+
+def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, int], None]] = None,
+                                   batch: int = 500) -> Dict[str, int]:
+    """Clear guest-credit ghosts from the library's own knowledge, no network.
+
+    An imported credit like "1788-L, Deathpact" became one artist with no
+    provider id, and the healer below looked each of them up online, one by
+    one: on a 300k-track library ~26k of them at about a minute each. Most
+    need no lookup at all:
+
+    - the whole name is already an identified artist: the ghost merges in
+    - a part is the album artist of a track it's credited on, or every part
+      is an identified artist: it splits. a known part keeps its artist, an
+      unknown one becomes a plain single-name artist the enrichment workers
+      identify the normal way
+
+    A real band name ("Earth, Wind & Fire") never has the album artist as one
+    of its parts, so it is never split here. A ghost that owns an album, or
+    that no rule covers, is left for the online pass. Commits per batch.
+    """
+    from core.library2.importer import normalize_name, split_artist_credits
+
+    identified: Dict[str, int] = {}
+    anyone: Dict[str, int] = {}
+    for aid, name, has_id in conn.execute(
+            f"SELECT a.id, a.name, {_IDENTIFIED_SQL} FROM lib2_artists a "
+            "WHERE a.canonical_artist_id IS NULL ORDER BY a.id"):
+        key = normalize_name(name or "")
+        if not key:
+            continue
+        anyone.setdefault(key, int(aid))
+        if has_id:
+            identified.setdefault(key, int(aid))
+
+    ghosts = conn.execute(
+        f"SELECT a.id, a.name, a.monitored FROM lib2_artists a "
+        f"WHERE a.canonical_artist_id IS NULL AND a.legacy_artist_id IS NULL AND NOT {_IDENTIFIED_SQL} "
+        "AND NOT EXISTS (SELECT 1 FROM lib2_albums al WHERE al.primary_artist_id=a.id) "
+        "ORDER BY a.id").fetchall()
+    stats = {"considered": len(ghosts), "merged": 0, "split": 0, "left": 0, "created": 0}
+    total = len(ghosts)
+    for index, (gid, name, monitored) in enumerate(ghosts, start=1):
+        gid = int(gid)
+        key = normalize_name(name or "")
+        target = identified.get(key)
+        if target and target != gid:
+            _rehome_and_delete_combined(conn, gid, target, [target])
+            stats["merged"] += 1
+        else:
+            pieces = split_artist_credits(name or "")
+            keys = [normalize_name(piece) for piece in pieces]
+            anchors = {normalize_name(r[0] or "") for r in conn.execute(
+                "SELECT DISTINCT pa.name FROM lib2_track_artists ta "
+                "JOIN lib2_tracks t ON t.id=ta.track_id "
+                "JOIN lib2_albums al ON al.id=t.album_id "
+                "JOIN lib2_artists pa ON pa.id=al.primary_artist_id "
+                "WHERE ta.artist_id=?", (gid,))}
+            if len(pieces) < 2 or not (
+                    any(k in anchors for k in keys) or all(k in identified for k in keys)):
+                stats["left"] += 1
+            else:
+                components: List[int] = []
+                lead: Optional[int] = None
+                for piece, pkey in zip(pieces, keys, strict=True):
+                    cid = identified.get(pkey) or anyone.get(pkey)
+                    if cid is None or cid == gid:
+                        cid = int(conn.execute(
+                            "INSERT INTO lib2_artists(name, name_key, sort_name, monitored) "
+                            "VALUES(?, ?, ?, ?)",
+                            (piece, pkey, piece, int(monitored or 0))).lastrowid)
+                        anyone[pkey] = cid
+                        stats["created"] += 1
+                    if cid not in components:
+                        components.append(cid)
+                    # the album's own artist leads, the guests follow
+                    if lead is None and pkey in anchors:
+                        lead = cid
+                _rehome_and_delete_combined(conn, gid, lead or components[0], components)
+                stats["split"] += 1
+        if index % batch == 0:
+            conn.commit()
+            if progress is not None:
+                progress(index, total)
+    conn.commit()
+    if progress is not None:
+        progress(total, total)
+    logger.info("Local credit split: %s", stats)
+    return stats
+
+
 def reconcile_unmapped_native_artists(
     conn,
     *,
@@ -1488,6 +1587,7 @@ def reconcile_unmapped_native_artists(
     limit: Optional[int] = None,
     progress: Optional[Callable[[int, int], None]] = None,
     cooldown_hours: Optional[float] = None,
+    combined_only: bool = False,
 ) -> Dict[str, Any]:
     """Resolve every still-unmapped artist by name (the backlog healer).
 
@@ -1511,8 +1611,12 @@ def reconcile_unmapped_native_artists(
     pruned = prune_browse_only_artists(conn)
     placeholders = clear_placeholder_artist_images(conn)
     conn.commit()
+    # what the library already knows settles most guest credits in seconds;
+    # only what it can't goes to the providers below
+    local = split_combined_credits_locally(conn)
 
-    artists = _pending_unmapped_artists(conn, limit, cooldown_hours=cooldown_hours)
+    artists = _pending_unmapped_artists(conn, limit, cooldown_hours=cooldown_hours,
+                                        combined_only=combined_only)
     total = len(artists)
     stats = {
         "scanned": 0, "matched": 0, "split": 0, "unmatched": 0, "errors": 0,
@@ -1521,6 +1625,8 @@ def reconcile_unmapped_native_artists(
         "released_artist_ids": released["artist_ids"] + placeholders["artist_ids"],
         "browse_only_pruned": pruned["pruned"],
         "placeholder_images_cleared": placeholders["cleared"],
+        "local_merged": local["merged"],
+        "local_split": local["split"],
     }
     for index, art in enumerate(artists):
         artist_id = art["id"]

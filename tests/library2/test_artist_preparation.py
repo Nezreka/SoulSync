@@ -12,7 +12,7 @@ def test_artist_reconcile_finishes_before_post_import_caches(monkeypatch):
         def close(self):
             pass
     db = SimpleNamespace(_get_connection=lambda: Connection())
-    def reconcile(conn, *, progress, cooldown_hours):
+    def reconcile(conn, *, progress, cooldown_hours, combined_only=False):
         calls.append('reconcile')
         progress(1, 1)
         return {'split': 1}
