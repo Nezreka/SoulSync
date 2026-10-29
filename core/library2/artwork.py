@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import socket
 import threading
 import time
@@ -485,6 +486,128 @@ def _embedded_art_for_album(conn, config_manager, album_id: int) -> Optional[byt
     return None
 
 
+# what a folder's own cover is called, in the order Plex, Jellyfin and
+# Navidrome look for one
+_ALBUM_FOLDER_STEMS = ("cover", "folder", "front", "album", "albumart")
+_ARTIST_FOLDER_STEMS = ("artist", "folder", "poster")
+_FOLDER_IMAGE_EXTS = ("jpg", "jpeg", "png", "webp")
+_DISC_FOLDER = re.compile(r"^(cd|disc|disk)\s*\d+$", re.I)
+
+
+def _folder_image(directory: Optional[str], stems: tuple) -> Optional[bytes]:
+    """A cover image sitting in ``directory`` under one of ``stems``, read once."""
+    if not directory:
+        return None
+    try:
+        names = {name.lower(): name for name in os.listdir(directory)}
+    except OSError:
+        return None
+    for stem in stems:
+        for ext in _FOLDER_IMAGE_EXTS:
+            found = names.get(f"{stem}.{ext}")
+            if not found:
+                continue
+            path = os.path.join(directory, found)
+            try:
+                if os.path.getsize(path) > MAX_REMOTE_ARTWORK_BYTES:
+                    continue
+                with open(path, "rb") as handle:
+                    return handle.read()
+            except OSError:
+                continue
+    return None
+
+
+def _album_folders(conn, config_manager, album_id: int) -> list:
+    """The folders an album's files live in; a Disc 1/CD2 folder stands in
+    for the release folder above it too."""
+    from core.library2.track_files import primary_order
+    folders: list = []
+    for row in conn.execute(
+            f"""SELECT tf.path FROM lib2_track_files tf JOIN lib2_tracks t ON t.id = tf.track_id
+                WHERE t.album_id = ? AND tf.path IS NOT NULL
+                  AND COALESCE(tf.file_state,'active') NOT IN ('missing_confirmed','deleted')
+                ORDER BY t.track_number, t.id, {primary_order('tf')} LIMIT 5""",
+            (album_id,)):
+        abs_path = _resolve_abs(row["path"], config_manager)
+        if not abs_path:
+            continue
+        folder = os.path.dirname(abs_path)
+        for candidate in ((folder, os.path.dirname(folder))
+                          if _DISC_FOLDER.match(os.path.basename(folder)) else (folder,)):
+            if candidate and candidate not in folders:
+                folders.append(candidate)
+    return folders
+
+
+def _folder_art_for_album(conn, config_manager, album_id: int) -> Optional[bytes]:
+    for folder in _album_folders(conn, config_manager, album_id):
+        data = _folder_image(folder, _ALBUM_FOLDER_STEMS)
+        if data:
+            return data
+    return None
+
+
+def _folder_art_for_artist(conn, config_manager, artist_id: int) -> Optional[bytes]:
+    """artist.jpg (or folder.jpg) in the artist's own folder: the folder above
+    a release it fronts, and only when that folder carries the artist's name,
+    so a shared Music root's folder.jpg never becomes everyone's portrait."""
+    from core.library2.importer import normalize_name
+    row = conn.execute("SELECT name FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
+    if not row or not row["name"]:
+        return None
+    key = normalize_name(row["name"])
+    for album in conn.execute("SELECT id FROM lib2_albums WHERE primary_artist_id=? LIMIT 5",
+                              (artist_id,)):
+        for folder in _album_folders(conn, config_manager, album["id"]):
+            parent = os.path.dirname(folder)
+            if parent and normalize_name(os.path.basename(parent)) == key:
+                data = _folder_image(parent, _ARTIST_FOLDER_STEMS)
+                if data:
+                    return data
+    return None
+
+
+def _stored_image(conn, kind: str, entity_id: int) -> Optional[bytes]:
+    """The picture the library already had for this row: a media server's own
+    image (fetched through the configured server, token and all) or a
+    provider image an enrichment worker picked. It is what the page showed
+    before the upgrade, so an artist keeps the photo you knew."""
+    table = {"artist": "lib2_artists", "album": "lib2_albums"}.get(kind)
+    if not table:
+        return None
+    row = conn.execute(f"SELECT image_url FROM {table} WHERE id=?", (entity_id,)).fetchone()
+    url = str((row["image_url"] if row else "") or "").strip()
+    if not url:
+        return None
+    if url.startswith("http") and _public_remote_artwork_url(url):
+        try:
+            return _download_remote_artwork(url)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("stored image download failed (%s %s): %s", kind, entity_id, e)
+            return None
+    try:
+        from core.media_server.engine import get_media_server_engine
+        client = get_media_server_engine().active_client()
+        hook = getattr(client, "image_url", None)
+        absolute = hook(url) if callable(hook) else None
+    except Exception as e:  # noqa: BLE001
+        logger.debug("media-server image url failed (%s %s): %s", kind, entity_id, e)
+        return None
+    if not absolute or not absolute.startswith(("http://", "https://")):
+        return None
+    try:
+        import requests
+        response = requests.get(absolute, timeout=10, stream=True)
+        if response.status_code != 200:
+            return None
+        data = response.raw.read(MAX_REMOTE_ARTWORK_BYTES + 1, decode_content=True)
+        return data if data and len(data) <= MAX_REMOTE_ARTWORK_BYTES else None
+    except Exception as e:  # noqa: BLE001
+        logger.debug("media-server image fetch failed (%s %s): %s", kind, entity_id, e)
+        return None
+
+
 def _provider_art_url(
     conn, kind: str, entity_id: int, *, deadline: Optional[float] = None
 ) -> Optional[str]:
@@ -677,8 +800,17 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
 
     provider_attempted = False
     if not data and kind == "album":
-        data = _embedded_art_for_album(conn, config_manager, entity_id)
+        # the files' own cover, then the folder's, then the cover the library
+        # already showed. only then a provider
+        data = (_embedded_art_for_album(conn, config_manager, entity_id)
+                or _folder_art_for_album(conn, config_manager, entity_id)
+                or _stored_image(conn, kind, entity_id))
     elif not data and kind == "artist":
+        # the photo the library already showed, then artist.jpg in the
+        # artist's folder, before asking any provider
+        data = (_stored_image(conn, kind, entity_id)
+                or _folder_art_for_artist(conn, config_manager, entity_id))
+    if not data and kind == "artist":
         # §52.5: an artist photo is semantically different from an album
         # cover. Prefer the provider's artist image; embedded album art is the
         # resilient fallback for providers/artists without one.
