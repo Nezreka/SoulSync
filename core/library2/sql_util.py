@@ -249,18 +249,28 @@ def entity_visible(conn: Any, entity_type: str, entity_id: int, *, scope=_AMBIEN
 
 
 def library_artist_sql(alias: str) -> str:
-    """Library membership: live files or monitoring intent, across alias groups and credits."""
+    """Library membership: live files or monitoring intent, across alias groups and credits.
+
+    The wanted arms are correlated EXISTS, asked only of an artist the owned
+    and monitored arms didn't already admit. They used to be one IN list of
+    every wanted track; once the upgrade marks every imported file wanted
+    that list is the whole library (310k rows), built on every page load, and
+    the artist index took 11-17 s on a busy server for the same answer.
+    """
     if not _VALID_IDENTIFIER.match(alias):
         raise ValueError(f'Invalid alias: {alias!r}')
     intent = intent_profile_id()
     wanted = f"COALESCE(w.wanted, {monitored_sql('track', 't')})=1"
-    tracks = f"SELECT t.id FROM lib2_tracks t LEFT JOIN lib2_wanted_tracks w ON w.track_id=t.id AND w.profile_id={intent} WHERE {wanted}"
+    wanted_join = f"LEFT JOIN lib2_wanted_tracks w ON w.track_id=t.id AND w.profile_id={intent}"
     return (f"{alias}.id IN (SELECT COALESCE(va.canonical_artist_id,va.id) FROM lib2_artists va WHERE "
-            f"{owned_sql('artist', 'va')} OR {monitored_sql('artist', 'va')}=1 OR va.id IN ("
-            f"SELECT al.primary_artist_id FROM lib2_albums al JOIN lib2_tracks t ON t.album_id=al.id WHERE t.id IN ({tracks}) "
-            f"UNION SELECT ta.artist_id FROM lib2_track_artists ta WHERE ta.track_id IN ({tracks}) "
-            f"UNION SELECT al.primary_artist_id FROM lib2_albums al JOIN lib2_monitor_rules r ON r.entity_type='album' "
-            f"AND r.entity_id=al.id AND r.profile_id={intent} AND r.monitored=1))")
+            f"{owned_sql('artist', 'va')} OR {monitored_sql('artist', 'va')}=1 "
+            f"OR EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t ON t.album_id=al.id "
+            f"{wanted_join} WHERE al.primary_artist_id=va.id AND {wanted}) "
+            f"OR EXISTS (SELECT 1 FROM lib2_track_artists ta JOIN lib2_tracks t ON t.id=ta.track_id "
+            f"{wanted_join} WHERE ta.artist_id=va.id AND {wanted}) "
+            f"OR EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_monitor_rules r ON r.entity_type='album' "
+            f"AND r.entity_id=al.id AND r.profile_id={intent} AND r.monitored=1 "
+            f"WHERE al.primary_artist_id=va.id))")
 
 
 def intent_profile_id(scope=_AMBIENT) -> int:
