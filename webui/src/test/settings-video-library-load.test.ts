@@ -20,6 +20,10 @@ function setup() {
                 movies_additional_paths: ['/movies2'],
                 tv_additional_paths: ['/tv2'],
                 youtube_path: '/youtube',
+                movies_4k_enabled: true,
+                movies_4k_path: '/movies-4k',
+                tv_4k_enabled: false,
+                tv_4k_path: '/tv-4k',
               },
         ),
       ),
@@ -103,4 +107,46 @@ it('loads the optional anime folder and saves it on change', async () => {
   const body = JSON.parse(calls.at(-1)![1].body as string);
   expect(body.anime_path).toBe('/media/anime');
   expect(body.tv_path).toBe('/tv');
+});
+
+it('shows a 4K folder only while its switch is on and saves both', async () => {
+  const { doc, fetcher, show } = setup();
+  show();
+  const movies4k = doc.getElementById('video-movies-4k-path') as HTMLInputElement;
+  await waitFor(() => expect(movies4k.value).toBe('/movies-4k'));
+  const moviesRow = doc.querySelector('[data-video-4k-row="movies"]') as HTMLElement;
+  const tvRow = doc.querySelector('[data-video-4k-row="tv"]') as HTMLElement;
+  expect(moviesRow.hidden).toBe(false);
+  expect(tvRow.hidden).toBe(true);
+  const tvBox = doc.getElementById('video-tv-4k-enabled') as HTMLInputElement;
+  await waitFor(() => expect(tvBox.disabled).toBe(false));
+  tvBox.checked = true;
+  tvBox.dispatchEvent(new Event('change'));
+  expect(tvRow.hidden).toBe(false);
+  const calls = fetcher.mock.calls as unknown as [string, RequestInit][];
+  let body = JSON.parse(calls.at(-1)![1].body as string);
+  expect(body.tv_4k_enabled).toBe(true);
+  expect(body.movies_4k_enabled).toBe(true);
+  expect(body.movies_4k_path).toBe('/movies-4k');
+  // switching off hides the folder but keeps its path for next time
+  const moviesBox = doc.getElementById('video-movies-4k-enabled') as HTMLInputElement;
+  moviesBox.checked = false;
+  moviesBox.dispatchEvent(new Event('change'));
+  expect(moviesRow.hidden).toBe(true);
+  body = JSON.parse(calls.at(-1)![1].body as string);
+  expect(body.movies_4k_enabled).toBe(false);
+  expect(body.movies_4k_path).toBe('/movies-4k');
+});
+
+it('lists a compose volume line for each folder that is set', async () => {
+  const { doc, show } = setup();
+  show();
+  const pre = doc.getElementById('video-compose-lines') as HTMLElement;
+  await waitFor(() => expect(pre.textContent).toContain('/movies-4k'));
+  const text = pre.textContent ?? '';
+  expect(text).toContain('      - /path/on/your/machine/movies:/movies');
+  expect(text).toContain('/path/on/your/machine/downloads:/downloads');
+  expect(text).toContain('/path/on/your/machine/movies2:/movies2');
+  // the TV 4K folder is off, so it has no line
+  expect(text).not.toContain('tv-4k');
 });

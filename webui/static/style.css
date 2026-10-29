@@ -75421,6 +75421,44 @@ body.src-modal-open { overflow: hidden; }
 }
 #settings-page .stg-media-panel > .settings-group:last-child { margin-bottom: 0 !important; }
 
+/* live folder checks (folder-check.js): one quiet line under each folder */
+#settings-page .folder-check {
+    margin-top: 6px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--white-a50);
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+}
+#settings-page .folder-check[hidden] { display: none; }
+#settings-page .folder-check::before { flex: 0 0 auto; font-weight: 700; }
+#settings-page .folder-check[data-tone="ok"] { color: var(--success); }
+#settings-page .folder-check[data-tone="ok"]::before { content: "\2713"; }
+#settings-page .folder-check[data-tone="info"] { color: var(--white-a50); }
+#settings-page .folder-check[data-tone="info"]::before { content: "+"; }
+#settings-page .folder-check[data-tone="warn"] { color: var(--warning); }
+#settings-page .folder-check[data-tone="warn"]::before { content: "!"; }
+#settings-page .folder-check[data-tone="bad"] { color: var(--danger-light); }
+#settings-page .folder-check[data-tone="bad"]::before { content: "\2715"; }
+#settings-page .video-4k-path { margin: 8px 0 0 26px; }
+#settings-page .video-4k-path[hidden] { display: none; }
+#settings-page .video-4k-path input { width: 100%; }
+#settings-page .video-compose-lines {
+    margin: 10px 0;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--white-a08);
+    background: var(--black-a70);
+    color: var(--text-primary);
+    font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre;
+    overflow-x: auto;
+}
+@media (max-width: 600px) {
+    #settings-page .video-4k-path { margin-left: 0; }
+}
+
 
 /* ════════════════════════════════════════════════════════════════════════
    The dashboard (Sept 2026 redesign). Music first, the system beside it.

@@ -97,8 +97,20 @@ The video side keeps its own library paths, migrated from the legacy single vide
 - \`tv_path\` — where finished TV downloads are organized
 - \`anime_path\` — optional: where finished episodes of anime-type shows are organized instead of \`tv_path\` (empty = anime goes to \`tv_path\`)
 - \`youtube_path\` — where YouTube channel downloads land
+- \`movies_4k_path\` / \`tv_4k_path\` — optional 4K libraries, each off until its switch is on (\`movies_4k_enabled\` / \`tv_4k_enabled\`)
 
-The engine routes each finished download to the library path matching its type. See [Video: Downloads](#video-downloads) for the full pipeline.
+The engine routes each finished download to the library path matching its type.
+
+## 4K libraries
+
+To keep 4K copies apart, like a separate **Movies 4K** library in Plex, switch on **Separate 4K movies folder** and / or **Separate 4K TV folder** under Settings > Folders > Video > 4K libraries and give each a folder. Then set **Save to: 4K library** on the [quality profile](#vdl-quality) those titles use.
+
+- New grabs of a title on that profile file into the 4K folder, from the wishlist, RSS sync, a manual grab or a manual import.
+- Titles you already have stay where they are, and their upgrades land beside the copy you have, so changing a profile never duplicates a title.
+- Anime keeps its own folder when one is set, whatever the profile: that one is by type, the 4K one by quality.
+- Switch a 4K folder off and it's ignored everywhere (routing, scans, health checks). Its path is kept for next time.
+
+In Docker, map each 4K folder in your compose file (the default compose has commented \`/media/movies-4k\` and \`/media/tv-4k\` lines) and add it to a library on your media server. See [Video: Downloads](#video-downloads) for the full pipeline.
 `
         },
         {
@@ -644,6 +656,10 @@ For dubbed or MULTI copies, pick one or more **audio languages** on the profile 
 - **Require**: anything without one of those tags is skipped.
 
 A release with no language tag is the original audio, so Require skips it. Subtitle-only tags like VOSTFR or SUBFRENCH never count as audio.
+
+## Save to
+
+**Save to** picks the library new titles on the profile are filed in: **Main library**, or **4K library** once that folder is switched on in Settings > Folders. Until then a 4K profile files into the main folder. See [4K libraries](#vid-sources).
 
 ## Custom formats
 

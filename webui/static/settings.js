@@ -8750,6 +8750,10 @@ function applyPathsEnvironment(settings) {
         const isDefault = out === '' || out === '.' || out.startsWith('./') || out.startsWith('.\\');
         warn.classList.toggle('hidden', docker || !isDefault);
     }
+    // the folder values are in now, so the live checks can run
+    if (window.SoulSyncFolderCheck) {
+        ['music', 'audiobooks', 'podcasts'].forEach(group => window.SoulSyncFolderCheck.refresh(group));
+    }
 }
 
 function togglePathLock(pathType, btn) {

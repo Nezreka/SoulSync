@@ -264,6 +264,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 - **Quality profiles**:
   - A 16-tier ladder with upgrade-until-cutoff and Sonarr-style **custom formats**.
   - Codec, HDR and audio preferences, **audio language** (prefer or require a dubbed / MULTI release), size limits and minimum seeders.
+  - **Optional 4K libraries**: a separate Movies 4K and TV 4K folder, off until you switch them on. A profile set to save to the 4K library files new titles there.
   - A separate YouTube profile.
 - **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames, NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
 - **Downloads page**: Downloads / Review / Clients views with live batches, a review queue and download-client management — the same setup as the music side.
@@ -526,7 +527,7 @@ Behind Docker or a remote host? See [Support/DOCKER-OAUTH-FIX.md](Support/DOCKER
 
 ### 3. Configure SoulSync
 
-Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and download clients on its own, signs in to Plex, Tidal and Qobuz, checks every folder and connection for real, and leaves a **Finish setting up** checklist on the dashboard for anything you skip. Everything else lives in **Settings**:
+Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and download clients on its own, signs in to Plex, Tidal and Qobuz, checks every folder and connection for real (Settings > Folders keeps checking each folder as you type: free space, write access, nesting, unmapped Docker volumes), and leaves a **Finish setting up** checklist on the dashboard for anything you skip. Everything else lives in **Settings**:
 
 - **Sources / Downloads**: pick a source or build your hybrid chain.
 - **Quality**: pick a preset or build a quality profile.
@@ -546,6 +547,7 @@ Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and
 | Music videos | `/app/MusicVideos` | Optional |
 | Podcasts / audiobooks | `/app/podcasts`, `/app/audiobooks` | Optional |
 | Video | `/media/movies`, `/media/tv`, `/media/youtube` | Optional, for the video side |
+| Video extras | `/media/anime`, `/media/movies-4k`, `/media/tv-4k` | Optional: the anime and 4K libraries, commented out in the compose file |
 
 Useful environment variables: `PUID`, `PGID`, `UMASK`, `TZ`, `SOULSYNC_URL_BASE` (serve under a sub-path, see [docs/REVERSE_PROXY_SUBPATH.md](docs/REVERSE_PROXY_SUBPATH.md)), and `SOULSYNC_LOG_LEVEL`.
 
