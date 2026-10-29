@@ -126,6 +126,7 @@ function AccountImportTab({ chrome }: { chrome: AccountTabChrome }) {
         ) : (
           <>
             <ImportIntro
+              canCopy
               remaining={remaining.length}
               onImportAll={() =>
                 void importer.importAll(remaining.map((p) => accountImportSpec(chrome.base, p)))
@@ -145,6 +146,8 @@ function AccountImportTab({ chrome }: { chrome: AccountTabChrome }) {
                     artUrl={playlistArtUrl(p)}
                     status={importer.statusOf(chrome.base, sourceId)}
                     onAction={() => void importer.importOrOpen(accountImportSpec(chrome.base, p))}
+                    onCopy={importer.copyAsMineFor(accountImportSpec(chrome.base, p))}
+                    copying={importer.copyingOf(chrome.base, sourceId)}
                   />
                 );
               })}

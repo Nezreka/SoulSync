@@ -129,6 +129,23 @@ export function SyncPage() {
   const registerOpenDetail = useCallback((open: (playlistId: number) => void) => {
     openMirroredDetail.current = open;
   }, []);
+  // My Playlists opens its window the same way. That tab mounts the first
+  // time it's shown, so a copy landing there (#1913) can arrive before its
+  // opener does: the id waits and opens on registration.
+  const openMineDetail = useRef<((playlistId: number) => void) | undefined>(undefined);
+  const pendingMine = useRef<number | null>(null);
+  const registerOpenMineDetail = useCallback((open: (playlistId: number) => void) => {
+    openMineDetail.current = open;
+    if (pendingMine.current !== null) {
+      const id = pendingMine.current;
+      pendingMine.current = null;
+      open(id);
+    }
+  }, []);
+  const showMineDetail = useCallback((playlistId: number) => {
+    if (openMineDetail.current) openMineDetail.current(playlistId);
+    else pendingMine.current = playlistId;
+  }, []);
   const showMirroredDetail = useCallback((playlistId: number) => {
     // Mirrored is the default tab, so the opener is registered before anything
     // can ask for it. The fallback covers a future where it is not.
@@ -220,8 +237,17 @@ export function SyncPage() {
         openTab.current?.('mirrored');
         page.reloadMirrored();
       },
+      landMine: (playlistId, name) => {
+        openTab.current?.('my-playlists');
+        page.reloadMirrored();
+        showMineDetail(playlistId);
+        window.showToast?.(
+          `${name} is in My Playlists. It's yours to edit, and it won't change with the source`,
+          'success',
+        );
+      },
     }),
-    [page, showMirroredDetail],
+    [page, showMirroredDetail, showMineDetail],
   );
 
   const onImported = useCallback(() => {
@@ -288,6 +314,7 @@ export function SyncPage() {
         sourceName={sourceName}
         pipeline={page.pipeline}
         registerReload={page.registerMirroredReload}
+        registerOpenDetail={registerOpenMineDetail}
       />
     ),
     'request-lists': (

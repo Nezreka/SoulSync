@@ -205,3 +205,82 @@ describe('DeezerArlTab', () => {
     expect(land).not.toHaveBeenCalled();
   });
 });
+
+describe('keep your own copy (#1913)', () => {
+  const copyResponder = (url: string) =>
+    url === '/api/spotify/playlists'
+      ? SPOTIFY_ROWS
+      : url === '/api/spotify/playlist/sp1'
+        ? { name: 'Late Night Drive', tracks: [SPOTIFY_TRACK] }
+        : url === '/api/user-playlists'
+          ? { success: true, id: 88, added: 1 }
+          : url === '/api/user-playlists/88/cover'
+            ? { image_url: '/cover/88' }
+            : {};
+
+  function renderWithMine() {
+    const land = vi.fn<ImportLanding['land']>();
+    const landMine = vi.fn();
+    render(
+      <ImportLandingProvider value={{ land, showList: vi.fn(), landMine }}>
+        <SpotifyTab />
+      </ImportLandingProvider>,
+    );
+    return { land, landMine };
+  }
+
+  it('makes a My Playlists playlist from the songs, not a mirror, and lands on it', async () => {
+    stubFetch();
+    responder = copyResponder;
+    const { land, landMine } = renderWithMine();
+    await waitFor(() => expect(screen.getByText('Late Night Drive')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Keep Late Night Drive as your own playlist'));
+    await waitFor(() => expect(landMine).toHaveBeenCalledWith(88, 'Late Night Drive'));
+    // the card's own action didn't run: nothing was mirrored, nothing landed there
+    expect(mirrorBody()).toBeUndefined();
+    expect(land).not.toHaveBeenCalled();
+    const create = calls.find((c) => c.url === '/api/user-playlists' && c.method === 'POST');
+    expect(create?.body).toMatchObject({
+      name: 'Late Night Drive',
+      tracks: [
+        {
+          track_name: 'Nightcall',
+          artist_name: 'Kavinsky',
+          album_name: 'OutRun',
+          duration_ms: 258000,
+          // where it came from, so identifying it fetches it directly
+          source: 'spotify',
+          source_id: 'trk1',
+        },
+      ],
+    });
+    // the playlist's own cover comes along
+    expect(calls.find((c) => c.url === '/api/user-playlists/88/cover')).toMatchObject({
+      method: 'PUT',
+      body: { image_url: 'http://c/1' },
+    });
+  });
+
+  it('a copy is offered even once the playlist is imported', async () => {
+    stubFetch();
+    responder = copyResponder;
+    mirrors = [{ id: 4, source: 'spotify', source_playlist_id: 'sp1' }];
+    renderWithMine();
+    await waitFor(() => expect(screen.getByText('In SoulSync')).toBeInTheDocument());
+    expect(screen.getByLabelText('Keep Late Night Drive as your own playlist')).toBeInTheDocument();
+  });
+
+  it('a failed copy says why and lands nowhere', async () => {
+    stubFetch();
+    responder = (url) =>
+      url === '/api/user-playlists' ? { error: 'Playlist name taken' } : copyResponder(url);
+    window.showToast = vi.fn();
+    const { landMine } = renderWithMine();
+    await waitFor(() => expect(screen.getByText('Late Night Drive')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText('Keep Late Night Drive as your own playlist'));
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('Playlist name taken', 'error'),
+    );
+    expect(landMine).not.toHaveBeenCalled();
+  });
+});

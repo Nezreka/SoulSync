@@ -143,6 +143,7 @@ function AccountRowsTab({
         ) : (
           <>
             <ImportIntro
+              canCopy
               remaining={remaining.length}
               onImportAll={() => void importer.importAll(remaining.map(spec))}
             />
@@ -159,6 +160,8 @@ function AccountRowsTab({
                     artUrl={row.image_url}
                     status={importer.statusOf(source, id)}
                     onAction={() => void importer.importOrOpen(spec(row))}
+                    onCopy={importer.copyAsMineFor(spec(row))}
+                    copying={importer.copyingOf(source, id)}
                   />
                 );
               })}

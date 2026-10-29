@@ -139,6 +139,7 @@ export function LbImportList({
   return (
     <>
       <ImportIntro
+        canCopy
         remaining={remaining.length}
         onImportAll={() => void importer.importAll(remaining)}
       />
@@ -156,6 +157,8 @@ export function LbImportList({
               onAction={() => {
                 if (target) void importer.importOrOpen(lbImportSpec(card, target));
               }}
+              onCopy={target ? importer.copyAsMineFor(lbImportSpec(card, target)) : undefined}
+              copying={target ? importer.copyingOf(target.source, target.sourcePlaylistId) : false}
             />
           );
         })}

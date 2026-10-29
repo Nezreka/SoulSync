@@ -815,10 +815,11 @@ export function MirroredTab({
   const registerOpenDetailRef = useRef(registerOpenDetail);
   registerOpenDetailRef.current = registerOpenDetail;
   useEffect(() => {
-    // the page has one opener; Mirrored owns it, My Playlists opens its own
-    if (scope !== 'all') return;
+    // each tab instance gets its own opener prop (Mirrored's, and My
+    // Playlists' for a copy landing there, #1913), so no instance can take
+    // another's; Request Lists isn't handed one
     registerOpenDetailRef.current?.((playlistId) => void openDetail(playlistId));
-  }, [openDetail, scope]);
+  }, [openDetail]);
 
   const commitSourceRef = useCallback(
     async (row: MirroredPlaylistRow, sourceRef: string, fromDetail: boolean) => {

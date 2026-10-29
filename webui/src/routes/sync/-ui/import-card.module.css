@@ -57,6 +57,7 @@
 }
 
 .art {
+  position: relative;
   display: grid;
   overflow: hidden;
   width: 64px;
@@ -168,6 +169,68 @@
 
 .card[data-status='importing'] .action,
 .card[data-status='checking'] .action {
+  opacity: 0.7;
+}
+
+/* keep your own copy (#1913): on the cover's corner. it shows with the
+   card's hover or keyboard focus, and always on a touch screen, which has no
+   hover to find it with. (.art is position: relative above.) */
+.art > .copy {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--white-a25);
+  border-radius: var(--radius-pill);
+  background: var(--black-a55);
+  color: var(--text-1);
+  cursor: pointer;
+  opacity: 0;
+  place-items: center;
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    background var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out);
+}
+
+.card:hover .copy,
+.card:focus-within .copy,
+.art > .copy:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .art > .copy {
+    opacity: 1;
+  }
+}
+
+/* phones give every button a 38px touch height; match it so it stays round */
+@media (max-width: 768px) {
+  .art > .copy {
+    right: 3px;
+    bottom: 3px;
+    width: 38px;
+    height: 38px;
+  }
+}
+
+.art > .copy:hover,
+.art > .copy:focus-visible {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  background: rgba(var(--accent-rgb), 0.55);
+}
+
+.art > .copy:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+}
+
+.art > .copy:disabled {
+  cursor: default;
   opacity: 0.7;
 }
 

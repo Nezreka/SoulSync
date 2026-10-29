@@ -39,6 +39,7 @@ If Spotify is connected, opening the Spotify panel from **+ Add playlist** lists
 - A playlist that's already in says **In SoulSync**; clicking it opens it
 - **Import all** brings in every playlist that isn't in yet
 - Nothing is imported until you ask: loading the list doesn't create any mirrors
+- **Keep your own copy** (the button on a playlist's cover) puts it in **My Playlists** instead of Mirrored: an editable playlist that never refreshes from the source, so **Sync & download** leaves its songs as they are. Good as a base to build on. The songs remember where they came from, so identifying them stays exact. Offered on the account, link, ListenBrainz and Last.fm tabs; Beatport has its own frozen copy, **Save snapshot**
 
 ![Spotify playlists loaded](sync-spotify.jpg)
 
