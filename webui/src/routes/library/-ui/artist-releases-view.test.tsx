@@ -693,4 +693,36 @@ describe('Library V2 artist detail — All Releases views', () => {
     const monitor = screen.getByLabelText(/^(Start|Stop) monitoring$/).querySelector('svg path');
     expect(bookmark.querySelector('svg path')?.getAttribute('d')).toBe(monitor?.getAttribute('d'));
   });
+
+  it('lets a read-only profile browse the full provider discography without writing', async () => {
+    const writes: string[] = [];
+    server.use(
+      http.get('/api/library/v2/enabled', () =>
+        HttpResponse.json({ success: true, enabled: true, can_write: false, can_wish: false }),
+      ),
+      http.post('/api/library/v2/*', ({ request }) => {
+        writes.push(new URL(request.url).pathname);
+        return HttpResponse.json({ success: true, job_id: 'x' });
+      }),
+      http.get('/api/artist-detail/:id', () =>
+        HttpResponse.json({
+          success: true,
+          artist: { id: 'sp-1', name: 'Portishead' },
+          discography: {
+            source: 'spotify',
+            albums: [
+              { id: 'al-dummy', title: 'Dummy', album_type: 'album', track_count: 11 },
+              { id: 'al-third', title: 'Third', album_type: 'album', track_count: 11 },
+            ],
+          },
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&view=discovery&immersive=true');
+
+    expect(await screen.findByText('Third')).toBeInTheDocument();
+    // the catalogue's own dummy is not listed twice
+    expect(screen.getAllByText('Dummy')).toHaveLength(1);
+    expect(writes).toEqual([]);
+  });
 });

@@ -172,7 +172,10 @@ import { HistoryEventList } from './history-event-list';
 import { groupHistoryEvents, summarizeRecentHistory } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
-import { OwnedArtistDiscographyButton } from './owned-artist-discography';
+import {
+  OwnedArtistDiscographyButton,
+  useReadOnlyProviderDiscography,
+} from './owned-artist-discography';
 import { OwnedArtistHeroExtras } from './owned-artist-hero-extras';
 import { openProviderRelease, ReleaseCardExtras } from './owned-artist-release-cards';
 import { OwnedTopTrackActions, OwnedTopTracksDownloadAll } from './owned-artist-top-tracks';
@@ -6856,6 +6859,18 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     imageUrl: artistQuery.data?.image_url ?? '',
     source: artistProviderIds.spotify ? 'spotify' : artistProviderIds.deezer ? 'deezer' : null,
   };
+  // a read-only profile cannot fetch the discography into the catalogue, so
+  // it reads the provider's list directly, writing nothing
+  const readOnlyDiscography = useReadOnlyProviderDiscography({
+    enabled: !canWish && releasesMode === 'all',
+    artistName: artistQuery.data?.name ?? '',
+    providerIds: artistProviderIds,
+    catalogueTitles: [
+      ...(artistQuery.data?.albums ?? []),
+      ...(artistQuery.data?.eps ?? []),
+      ...(artistQuery.data?.singles ?? []),
+    ].map((a) => a.title),
+  });
   const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('artists', artistId));
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const artist = artistQuery.data;
@@ -7339,6 +7354,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               ).map(([title, entries]) => {
                 const cards = [
                   ...entries.map(catalogueCard),
+                  ...readOnlyDiscography
+                    .releasesFor(
+                      ({ Albums: 'albums', EPs: 'eps', Singles: 'singles' } as const)[title],
+                    )
+                    .map(providerCard),
                   ...otherSources.byBucket(
                     ({ Albums: 'album', EPs: 'ep', Singles: 'single' } as const)[
                       title as GroupLabel
