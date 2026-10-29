@@ -3792,9 +3792,11 @@ button.statusWarn:disabled {
   color: rgba(255, 255, 255, 0.5) !important;
 }
 
+/* Profiles as a grid of cards: five or ten of them stay one glance, not a
+   scroll through full-width rows. A narrow host (a track's tab) gets one column. */
 .qpList {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 8px;
 }
 
@@ -3841,6 +3843,18 @@ button.statusWarn:disabled {
 .qpDesc {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.55);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.qpTargets {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .maintenanceGrid {
@@ -6636,4 +6650,76 @@ textarea.searchInput {
 .fileMakePrimary:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Artist Settings in the library tool workspace: settings on the left, who
+   they are for (and the audiobook switch) beside them. */
+.artistSettingsLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 24px;
+  align-items: start;
+}
+
+.artistSettingsMain,
+.artistSettingsSide {
+  min-width: 0;
+}
+
+.artistSettingsSide {
+  position: sticky;
+  top: 0;
+}
+
+.artistSettingsSide .artistSettingsSection:first-child {
+  padding-top: 0;
+}
+
+.artistSettingsLayout .artistSettingsIdentity {
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.artistSettingsIdentityHead {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.artistSettingsLayout .artistSettingsPhoto {
+  width: 72px;
+  height: 72px;
+  flex: 0 0 72px;
+}
+
+.artistSettingsLayout .artistSettingsIdentityName {
+  font-size: 18px;
+}
+
+.artistSettingsLayout .artistSettingsSection h4 {
+  font-size: 15px;
+}
+
+.artistSettingsLayout .artistSettingsSection > .muted {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  font-style: normal;
+}
+
+.settingsPlain {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+@media (max-width: 860px) {
+  .artistSettingsLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .artistSettingsSide {
+    position: static;
+  }
 }
