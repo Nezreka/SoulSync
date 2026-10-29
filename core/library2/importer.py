@@ -46,6 +46,8 @@ WALK_STAGES: Tuple[str, ...] = ("artists", "albums", "tracks")
 # stage means every walk finished, so only these idempotent steps are left.
 FINALIZE_STAGE = "finalizing"
 _FINALIZE_STEPS = 7
+#: below this many stale tracks the snapshot pass trusts the source as is
+_RECONCILE_GUARD_MIN_STALE = 100
 
 
 class ResumePoint(NamedTuple):
@@ -1340,6 +1342,23 @@ def _reconcile_legacy_snapshot(cursor, run_id: str) -> Dict[str, int]:
     # default source on a large share of installs.
     from core.library2.provider_ids import external_provider_identity_sql
     has_external_id = external_provider_identity_sql
+
+    # a snapshot that saw less than half of what it already imported is not a
+    # library that shrank, it's a broken source (an older build's empty stub
+    # tables, the wrong db). reconciling against it erased a whole catalogue
+    # once. leaving stale rows behind is the safe failure.
+    observed, stale = cursor.execute(
+        """SELECT COALESCE(SUM(legacy_import_run_id=?), 0),
+                  COALESCE(SUM(legacy_import_run_id IS NULL OR legacy_import_run_id<>?), 0)
+             FROM lib2_tracks WHERE legacy_track_id IS NOT NULL""",
+        (run_id, run_id),
+    ).fetchone()
+    if stale >= _RECONCILE_GUARD_MIN_STALE and stale > observed:
+        logger.warning(
+            "Library v2 import: skipped removing %s tracks the source no longer "
+            "lists; it only listed %s. The source looks incomplete.", stale, observed)
+        stats["reconcile_skipped"] = int(stale)
+        return stats
 
     cursor.execute(
         """DELETE FROM lib2_track_files

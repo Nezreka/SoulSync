@@ -61,6 +61,42 @@ def retire_legacy_tables(conn) -> list:
         return []
 
 
+def drop_empty_shadow_tables(conn) -> list:
+    """Drop an empty legacy table an older build recreated beside its retired copy.
+
+    a pre-v2 build booting on an upgraded database recreates ``artists``,
+    ``albums`` and ``tracks`` empty. the plain name wins in ``source_table``, so
+    the next v2 boot read a changed, empty source, re-ran the import and its
+    snapshot pass erased the catalogue. only after a finished upgrade, only
+    tables with no rows: a downgraded build that really scanned keeps its data.
+    returns the dropped tables; never raises.
+    """
+    try:
+        tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        state = conn.execute("SELECT status FROM lib2_bootstrap_state WHERE id=1").fetchone() \
+            if "lib2_bootstrap_state" in tables else None
+        if not state or state[0] != "done":
+            return []
+        shadows = [t for t in SOURCE_TABLES
+                   if t in tables and RETIRED_TABLES[t] in tables
+                   and conn.execute(f'SELECT 1 FROM "{t}" LIMIT 1').fetchone() is None]
+        if not shadows:
+            return []
+        conn.execute("BEGIN IMMEDIATE")
+        for table in shadows:
+            conn.execute(f'DROP TABLE "{table}"')
+        conn.commit()
+        logger.warning("Dropped empty legacy tables an older build recreated: %s",
+                       ", ".join(shadows))
+        return shadows
+    except Exception as exc:  # noqa: BLE001 - the skip below still holds
+        if conn.in_transaction:
+            conn.rollback()
+        logger.warning("Could not drop the empty legacy tables: %s", exc)
+        return []
+
+
 def expose_retired_tables(conn) -> None:
     """Give one connection -- the importer's -- the legacy names back as
     temporary views, so an explicit rebuild reads the frozen catalogue while

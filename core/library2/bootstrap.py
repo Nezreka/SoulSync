@@ -767,8 +767,14 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     # while the warning is not. Called for the side effect, deliberately.
     library_v2_enabled(config_get=config_get)
 
-    current_watermark = source_watermark(database)
     state = get_state(database)
+    if state.get("status") == "done":
+        # an older build's empty stubs would change the watermark and look
+        # like a new, empty library to import
+        from core.library2.source_snapshot import drop_empty_shadow_tables
+        with closing(database._get_connection()) as conn:
+            drop_empty_shadow_tables(conn)
+    current_watermark = source_watermark(database)
     if state.get("status") in {"done", "waiting_for_source"}:
         # an empty catalogue with wishes behind it still has something to
         # import (F07): earlier builds parked exactly that as waiting
