@@ -75,4 +75,50 @@ describe('TrackTableBulkBar', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     expect(calls).toEqual(['1', '2', '2']);
   });
+
+  it('previews the tag diff for just the selected tracks before writing', async () => {
+    const writes: unknown[] = [];
+    const preview = (id: number, title: string) => ({
+      track_id: id,
+      title,
+      track_number: id,
+      album_id: 4,
+      album_title: 'Dummy',
+      album_type: 'album',
+      file_path: `/m/${id}.flac`,
+      diff: [{ field: 'title', file_value: 'old', db_value: title, changed: true }],
+      has_changes: true,
+    });
+    server.use(
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+      http.get('/api/library/v2/albums/4/tag-preview', () =>
+        HttpResponse.json({
+          success: true,
+          tracks: [preview(1, 'Mysterons'), preview(2, 'Sour Times')],
+          changed_count: 2,
+          truncated: false,
+        }),
+      ),
+      http.post('/api/library/v2/tags/write', async ({ request }) => {
+        writes.push(await request.json());
+        return HttpResponse.json({ success: true, job_id: 'w1' });
+      }),
+    );
+    const tracks = [{ id: 1, file: null }] as LibraryV2Track[];
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <LibraryV2CanWriteContext.Provider value>
+          <TrackTableBulkBar albumId={4} tracks={tracks} onClear={vi.fn()} />
+        </LibraryV2CanWriteContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Write Tags' }));
+    expect((await screen.findAllByText(/Mysterons/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Sour Times/)).not.toBeInTheDocument();
+    // nothing is written until the preview is confirmed
+    expect(writes).toEqual([]);
+  });
 });

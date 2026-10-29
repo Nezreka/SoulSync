@@ -8982,6 +8982,8 @@ export function TrackTableBulkBar({
   } | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
+  // dev's bulk write tags showed the diff first
+  const [showTagPreview, setShowTagPreview] = useState(false);
 
   const trackIds = tracks.filter((t) => t.id != null).map((t) => t.id as number);
   const fileIds = tracks.map((t) => t.file?.file_id).filter((id): id is number => id != null);
@@ -9087,16 +9089,19 @@ export function TrackTableBulkBar({
         className={styles.bulkBarButton}
         data-requires-write=""
         disabled={busy !== null || trackIds.length === 0 || !canWrite}
-        onClick={() =>
-          void run('Write Tags', async () => {
-            const jobId = await writeLibraryV2Tags(trackIds);
-            const jobError = await awaitBulkJob(queryClient, jobId);
-            if (jobError) throw new Error(jobError);
-          })
-        }
+        onClick={() => setShowTagPreview(true)}
       >
-        {busy === 'Write Tags' ? 'Writing…' : 'Write Tags'}
+        Write Tags
       </button>
+      {showTagPreview ? (
+        <RetagModal
+          entity="albums"
+          id={albumId}
+          title={`${trackIds.length} selected track${trackIds.length === 1 ? '' : 's'}`}
+          trackIds={trackIds}
+          onClose={() => setShowTagPreview(false)}
+        />
+      ) : null}
       <button
         type="button"
         className={styles.bulkBarButton}
