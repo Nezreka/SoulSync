@@ -5,8 +5,11 @@ un-owned episodes (specials opt-in; 'ended' shows included — ended matters for
 watching-for-NEW, not for filling back-catalog gaps). The finding's entity_id
 is show_id + a hash of the missing set, so when the set changes (new episode
 airs, some got downloaded) a fresh finding appears and the end-of-scan
-absent-dismissal retires the stale pending one — while a dismissed/resolved
-finding for the SAME set never comes back (standard dedup).
+absent-dismissal retires the stale pending one. A dismissed finding for
+the SAME set never comes back; a resolved one does — after the recurrence
+grace window — if the set is still missing (approving it again is a no-op
+success: the episodes are already on the wishlist). See
+VideoDatabase.repair_create_finding for the full contract.
 
 Fix (approve): send the episodes to the video wishlist through the SAME
 write-parity path as a manual add — show poster proxy URL + library_id +
@@ -150,6 +153,19 @@ class MissingEpisodesJob(VideoRepairJob):
             tmdb_id, title, rows, poster_url=poster, library_id=show_id,
             server_source=d.get("server_source"))
         if not n:
+            # A re-raised finding (#1882 recurrence: the episodes were
+            # wishlisted by an earlier approve but haven't landed) adds 0
+            # genuinely-new rows because the wishlist add is idempotent.
+            # That is a completed approve, not an error — otherwise the
+            # finding sits pending erroring on every approve until the
+            # episodes arrive, and dismissing it would silence it forever.
+            def _already_wished(e):
+                sn, en = e.get("season_number"), e.get("episode_number")
+                return (sn is not None and en is not None
+                        and context.db.wishlist_has_episode(tmdb_id, sn, en))
+            if all(_already_wished(e) for e in eps):
+                return {"success": True, "action": "wishlisted",
+                        "message": f"All episodes of {title} are already on the wishlist"}
             return {"success": False, "error": "nothing could be wishlisted"}
         return {"success": True, "action": "wishlisted",
                 "message": f"Sent {n} episode{'s' if n != 1 else ''} of {title} to the wishlist"}

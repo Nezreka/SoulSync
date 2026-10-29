@@ -14,7 +14,14 @@ The Library page shows every artist in your collection as cards with images, alb
 
 ## Browsing
 
-- **Search bar** — find artists by name
+- **Search bar** — find artists by name. When it matches songs, the best few show above the results, with a link into all of them
+- **Artists / Albums / Songs** — three views of the same library. **Songs** lists every song you can see, searchable by title or artist (the match is highlighted), sorted A–Z, by artist, by album, newest first or recently added
+  - **Click a song** to play it and the songs after it; the playing one shows moving bars. **Play all** / **Shuffle** queue up to 500 of what you're looking at
+  - **♥** saves a song to Liked Songs; the playlist button files it; **⋯** plays it next, adds it to the queue, opens its album or artist
+  - **Filters**: **Duplicates** (songs you have more than one copy of), **Lossless**, and **Could be better** (below their quality profile, from Library Maintenance)
+  - **N copies** opens the copies side by side, best file first (lossless, then bitrate), each playable; admins can **Keep this one** and remove the rest, from the library or from disk
+  - **Tick songs** (or shift-click a range) to play, queue, add to a playlist, like or (admins) delete them together
+  - On a big library a broad search or filter counts up to 1,000 songs and says "1,000+"
 - **Alphabet navigation** (A–Z, #) — jump through large collections
 - **Watchlist filter** — All, Watched, or Unwatched artists
 - **Metadata source filter** — find artists unmatched to a specific service (e.g. "No Discogs") or matched to one (e.g. "Has Spotify")
@@ -50,6 +57,8 @@ Toggle **Enhanced** on any library artist's detail page to access the profession
 In the Enhanced view, each artist, album, and track shows **match status chips** — the service set differs by level: 12 on artists (adding Tidal, Qobuz and Amazon), 10 on albums, and 9 on tracks (Spotify, MusicBrainz, Deezer, JioSaavn, AudioDB, iTunes, Last.fm, Genius, Bandcamp — no Discogs, Tidal or Qobuz chip at track level).
 
 - Click any chip to **manually search and link** the correct external ID when automatic matching gets it wrong
+- **Paste a link or an ID** instead of a name when several artists share one (eleven called "1905"): open the right one on that service, copy its address, and paste it. Works for Spotify, MusicBrainz, Deezer, iTunes/Apple Music, Discogs, Tidal, Qobuz, Amazon, AudioDB, JioSaavn, Last.fm and Bandcamp links, and Genius IDs. A paste that doesn't resolve falls back to a normal search
+- Fixing an artist's match also fixes it on **your watchlist**, so new releases are scanned for the right artist. Only your own watchlist changes, and never onto an ID another watched artist already uses
 - Run per-service **enrichment** from the Enrich dropdown to pull in metadata from a specific source
 - Matched services show as clickable badges linking to the entity on that service's website
 

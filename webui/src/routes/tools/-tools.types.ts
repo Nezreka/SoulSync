@@ -155,6 +155,12 @@ export interface BulkFixStatus {
   total?: number;
   fixed?: number;
   failed?: number;
+  /** Findings held back by design (e.g. the album completeness gate),
+   *  tallied apart from failures. */
+  skipped?: number;
+  /** Tracks the album gate held back across the run, including on
+   *  findings that otherwise fixed successfully. */
+  other_artist_skipped?: number;
   stopped?: boolean;
   error?: string | null;
   note?: string | null;
@@ -194,6 +200,8 @@ export interface DatabaseStats {
   tracks: number;
   database_size_mb: number;
   last_full_refresh?: string | null;
+  /** the weekly deep scan reads the whole server too; same naive local time */
+  last_deep_scan?: string | null;
   /** Drives the "<Plex|Jellyfin|Navidrome> Database Updater" card title. */
   server_source?: string | null;
 }

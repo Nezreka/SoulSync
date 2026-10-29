@@ -1,18 +1,17 @@
 /**
- * The SoulSync Discovery sync tab (sync-soulsync-discovery.js, whole file).
- * Different shape from the MB tabs: personalized tracks already carry
- * provider ids, so there is no discovery hop — click = Refresh & Mirror
- * (regenerate the kind, project into the mirror contract with inline
- * matched_data, POST the mirror, open the mirrored detail modal via the
- * stats-automations seam, window-reachable).
+ * The SoulSync Discovery tab: your personalized playlists (daily mixes, time
+ * machine, hidden gems and the rest), each one ready to import.
  *
- * Declared improvement over the vanilla: after a successful mirror the CARD
- * re-renders with the new count + 'Ready' (the vanilla updated its array but
- * never re-rendered the DOM, leaving the card stale until a tab reload).
+ * Their tracks already carry provider ids, so there's no identify step:
+ * importing one builds it (the kind's generator), saves it as a mirror with
+ * the matches inline, and lands you on it under Mirrored. Once it's in, the
+ * card opens it, and the mirror's Refresh from source regenerates it (the
+ * automation does too, on its schedule).
  */
 
 import { useCallback, useEffect, useState } from 'react';
 
+import type { ImportSpec } from '../-sync.importer';
 import type { SsdRecord } from '../-sync.lb-tabs';
 
 import { postMirrorPlaylist } from '../-sync.api';
@@ -21,29 +20,74 @@ import {
   fetchSsdRecords,
   postSsdRefresh,
   soulsyncSyntheticId,
-  ssdStaleness,
 } from '../-sync.lb-tabs';
-import { SourceCard } from './source-card';
+import { ImportCard, ImportGrid, ImportIntro } from './import-card';
+import { useImporter } from './use-importer';
 
-export interface SoulsyncDiscoveryTabProps {
-  /**
-   * Open the mirrored playlist's detail modal. Injected so this tab uses the
-   * page's ONE modal — it used to reach for the legacy global, which is a
-   * second implementation of the same modal over the same endpoint. Optional:
-   * the tab stands alone in its own tests, and the mirror still succeeds
-   * without a modal to show for it.
-   */
-  onOpenMirrored?: (playlistId: number) => void;
+const SSD_SOURCE = 'soulsync_discovery';
+
+function recordName(record: SsdRecord): string {
+  return record.name || `${record.kind} ${record.variant || ''}`.trim();
 }
 
-export function SoulsyncDiscoveryTab({ onOpenMirrored }: SoulsyncDiscoveryTabProps = {}) {
+/** What importing one personalized playlist takes. Exported for the tests. */
+export function ssdImportSpec(
+  record: SsdRecord,
+  onBuilt?: (record: SsdRecord, trackCount: number) => void,
+): ImportSpec {
+  const variant = record.variant || '';
+  return {
+    source: SSD_SOURCE,
+    sourceId: soulsyncSyntheticId(record.kind, variant || undefined),
+    name: recordName(record),
+    save: async () => {
+      if (!record.kind) throw new Error('Missing kind');
+      const data = await postSsdRefresh(record.kind, variant);
+      if (!data.success) throw new Error(data.error || 'Generator failed');
+      const built = (data.playlist ?? {}) as SsdRecord;
+      const tracks = data.tracks ?? [];
+      const name = built.name || recordName(record);
+      if (tracks.length === 0) {
+        throw new Error(
+          `'${name}' generated 0 tracks. Try widening the playlist's config in Discover.`,
+        );
+      }
+      const res = await postMirrorPlaylist(
+        buildSsdMirrorPayload(record.kind, variant, name, tracks),
+      );
+      if (!res.success || typeof res.playlist_id !== 'number') {
+        throw new Error(res.error || `Couldn't import ${name}`);
+      }
+      onBuilt?.({ ...record, ...built }, tracks.length);
+      return res.playlist_id;
+    },
+  };
+}
+
+/** runs of records sharing a group, in order */
+function ssdSections(
+  records: SsdRecord[],
+): { key: string; group?: string; records: SsdRecord[] }[] {
+  const sections: { key: string; group?: string; records: SsdRecord[] }[] = [];
+  for (const record of records) {
+    const last = sections[sections.length - 1];
+    if (last && last.group === record.group) last.records.push(record);
+    else {
+      sections.push({
+        key: `section-${sections.length}-${record.group ?? ''}`,
+        group: record.group,
+        records: [record],
+      });
+    }
+  }
+  return sections;
+}
+
+export function SoulsyncDiscoveryTab() {
   const [records, setRecords] = useState<SsdRecord[] | null>(null);
   const [placeholder, setPlaceholder] = useState('🔄 Loading SoulSync Discovery playlists...');
   const [refreshing, setRefreshing] = useState(false);
-  // Per-card busy + result lines — cards refresh independently (the vanilla
-  // disabled each card's own DOM, 136-142).
-  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
-  const [resultLines, setResultLines] = useState<Record<string, string>>({});
+  const importer = useImporter();
 
   const load = useCallback(async () => {
     setPlaceholder('🔄 Loading SoulSync Discovery playlists...');
@@ -69,81 +113,21 @@ export function SoulsyncDiscoveryTab({ onOpenMirrored }: SoulsyncDiscoveryTabPro
     void load();
   }, [load]);
 
-  /** Refresh & Mirror (handleSoulsyncDiscoverySyncCardClick 131-281). */
-  const refreshAndMirror = useCallback(async (record: SsdRecord) => {
-    const kind = record.kind;
-    const variant = record.variant || '';
-    if (!kind) {
-      window.showToast?.('Missing kind', 'error');
-      return;
-    }
-    const syntheticId = soulsyncSyntheticId(kind, variant || undefined);
-    setBusyIds((current) => new Set(current).add(syntheticId));
-    // The vanilla unhides the (empty) progress element while refreshing (142).
-    setResultLines((current) => ({ ...current, [syntheticId]: '' }));
-    try {
-      const data = await postSsdRefresh(kind, variant);
-      if (!data.success) throw new Error(data.error || 'Generator failed');
-
-      const generated = data.playlist ?? {};
-      const tracks = data.tracks ?? [];
-      const finalName =
-        (generated as { name?: string }).name || record.name || `${kind} ${variant}`.trim();
-
-      if (tracks.length === 0) {
-        window.showToast?.(
-          `'${finalName}' generated 0 tracks. Try widening the playlist's config in Discover.`,
-          'warning',
-        );
-      }
-
-      // POST inline (not fire-and-forget) — the returned row id opens the
-      // detail modal afterward (204-234).
-      const mirrorData = await postMirrorPlaylist(
-        buildSsdMirrorPayload(kind, variant, finalName, tracks),
-      );
-      if (!mirrorData.success) throw new Error(mirrorData.error || 'Mirror creation failed');
-
-      setRecords((current) =>
-        (current ?? []).map((row) =>
-          row.kind === kind && (row.variant || '') === variant
-            ? {
-                ...row,
-                ...(generated as SsdRecord),
-                track_count: tracks.length,
-                is_stale: false,
-                _never_generated: false,
-              }
-            : row,
-        ),
-      );
-      // The vanilla writes the mirrored line into the progress element (236-238).
-      setResultLines((current) => ({
-        ...current,
-        [syntheticId]: `♪ ${tracks.length} / ✓ ${tracks.length} / mirrored`,
-      }));
-      window.showToast?.(`Mirrored '${finalName}' with ${tracks.length} tracks`, 'success');
-
-      if (mirrorData.playlist_id) {
-        try {
-          onOpenMirrored?.(mirrorData.playlist_id);
-        } catch {
-          // Non-fatal — the mirror exists; the detail modal is a convenience.
-        }
-      }
-    } catch (err) {
-      window.showToast?.(
-        `Refresh failed: ${err instanceof Error ? err.message : 'unknown error'}`,
-        'error',
-      );
-    } finally {
-      setBusyIds((current) => {
-        const next = new Set(current);
-        next.delete(syntheticId);
-        return next;
-      });
-    }
+  /** a built playlist's card shows its real count without a reload */
+  const onBuilt = useCallback((built: SsdRecord, trackCount: number) => {
+    setRecords((current) =>
+      (current ?? []).map((row) =>
+        row.kind === built.kind && (row.variant || '') === (built.variant || '')
+          ? { ...row, ...built, track_count: trackCount, is_stale: false, _never_generated: false }
+          : row,
+      ),
+    );
   }, []);
+
+  const remaining = (records ?? []).filter(
+    (r) =>
+      importer.statusOf(SSD_SOURCE, soulsyncSyntheticId(r.kind, r.variant || undefined)) === 'new',
+  );
 
   return (
     <div>
@@ -167,31 +151,43 @@ export function SoulsyncDiscoveryTab({ onOpenMirrored }: SoulsyncDiscoveryTabPro
               : 'No SoulSync Discovery playlists yet. Open the Discover page and generate a few personalized playlists first.'}
           </div>
         ) : (
-          records.map((record) => {
-            const syntheticId = soulsyncSyntheticId(record.kind, record.variant || undefined);
-            const staleness = ssdStaleness(record);
-            const busy = busyIds.has(syntheticId);
-            return (
-              <SourceCard
-                key={syntheticId}
-                id={`soulsync-discovery-sync-card-${syntheticId}`}
-                cardClassName="soulsync-discovery-playlist-card"
-                icon="✨"
-                name={record.name || `${record.kind} ${record.variant || ''}`.trim()}
-                countText={`${record.track_count || 0} tracks`}
-                owner={record.variant ? `${record.kind} · ${record.variant}` : record.kind}
-                phase="fresh"
-                statusText={staleness.text}
-                statusColor={staleness.color}
-                buttonText={busy ? 'Refreshing…' : 'Refresh & Mirror'}
-                buttonDisabled={busy}
-                progressLine={resultLines[syntheticId] ?? null}
-                onClick={() => {
-                  if (!busy) void refreshAndMirror(record);
-                }}
-              />
-            );
-          })
+          <>
+            <ImportIntro
+              remaining={remaining.length}
+              onImportAll={() =>
+                void importer.importAll(remaining.map((r) => ssdImportSpec(r, onBuilt)))
+              }
+            />
+            {/* a heading wherever the section changes: 41 cards in one run read
+                as a pile. each section is its own grid under its heading */}
+            {ssdSections(records).map((section) => (
+              <div key={section.key}>
+                {section.group ? <div className="ssd-group-title">{section.group}</div> : null}
+                <ImportGrid>
+                  {section.records.map((r) => {
+                    const rid = soulsyncSyntheticId(r.kind, r.variant || undefined);
+                    const count = r.track_count || 0;
+                    const what = r.description || r.kind;
+                    return (
+                      <ImportCard
+                        key={rid}
+                        id={`soulsync-discovery-sync-card-${rid}`}
+                        name={recordName(r)}
+                        meta={
+                          r._never_generated
+                            ? `Not built yet · ${what}`
+                            : `${count} track${count === 1 ? '' : 's'} · ${what}`
+                        }
+                        glyph="✨"
+                        status={importer.statusOf(SSD_SOURCE, rid)}
+                        onAction={() => void importer.importOrOpen(ssdImportSpec(r, onBuilt))}
+                      />
+                    );
+                  })}
+                </ImportGrid>
+              </div>
+            ))}
+          </>
         )}
       </div>
     </div>

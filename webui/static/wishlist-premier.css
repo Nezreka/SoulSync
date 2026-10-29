@@ -380,9 +380,13 @@
   align-items: start;
 }
 
+/* a grid, not a column flexbox: chrome sized each zone as a flex item before
+   knowing its width, as if every poster sat on its own row, so a one-row zone
+   of 7 movies stood 1,656px tall over 287px of posters */
 .wlp .wl-nebula-field.wlp-field {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   gap: 34px;
   padding: 22px 4px 40px;
 }

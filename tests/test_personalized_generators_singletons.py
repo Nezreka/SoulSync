@@ -31,8 +31,9 @@ class _StubService:
         self.calls: List[dict] = []
         self.return_value = return_value if return_value is not None else []
 
-    def get_hidden_gems(self, limit):
+    def get_hidden_gems(self, limit, taste_profile=None):
         self.calls.append({'method': 'get_hidden_gems', 'limit': limit})
+        self.taste_profile = taste_profile
         return self.return_value
 
     def get_discovery_shuffle(self, limit):
@@ -88,6 +89,24 @@ class TestHiddenGemsGenerator:
         svc = _StubService()
         _hg_mod.generate(_deps(svc), '', PlaylistConfig())
         assert svc.calls[0]['limit'] == 50
+
+    def test_ranks_by_the_profiles_genre_taste_like_discover(self):
+        svc = _StubService()
+        asked = []
+
+        def taste(profile_id):
+            asked.append(profile_id)
+            return {'synthwave': 1.0}
+        svc.genre_taste_profile = taste
+        deps = SimpleNamespace(service=svc, get_current_profile_id=lambda: 3)
+        _hg_mod.generate(deps, '', PlaylistConfig())
+        assert asked == [3]
+        assert svc.taste_profile == {'synthwave': 1.0}
+
+    def test_no_taste_profile_is_plain_hidden_gems(self):
+        svc = _StubService()
+        _hg_mod.generate(_deps(svc), '', PlaylistConfig())
+        assert svc.taste_profile is None
 
     def test_coerces_tracks(self):
         svc = _StubService(return_value=[

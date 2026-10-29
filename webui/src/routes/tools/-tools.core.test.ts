@@ -196,7 +196,8 @@ describe('finding labels', () => {
     expect(Object.keys(FINDING_SEVERITY_ICONS)).toHaveLength(4);
     expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(25);
     expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(23);
-    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(16);
+    // 16 music + obsolete + the 10 video fix actions + the scan retirement
+    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(28);
   });
 
   it('labels known finding types', () => {
@@ -792,6 +793,22 @@ describe('bulkFixRunMessage', () => {
   it('is an error when nothing was fixed, even with no failures', () => {
     expect(bulkFixRunMessage({ fixed: 0, failed: 0, total: 4 }).type).toBe('error');
   });
+
+  it('reports findings skipped by design apart from failures', () => {
+    expect(
+      bulkFixRunMessage({
+        fixed: 0,
+        failed: 0,
+        skipped: 3,
+        total: 3,
+        note: '2 track(s) by other artists were not added to the wishlist. Fix those albums on their own to add them.',
+      }),
+    ).toEqual({
+      message:
+        'Fixed 0, 3 skipped of 3: 2 track(s) by other artists were not added to the wishlist. Fix those albums on their own to add them.',
+      type: 'success',
+    });
+  });
 });
 
 describe('bulkFixLoopMessage', () => {
@@ -803,6 +820,16 @@ describe('bulkFixLoopMessage', () => {
     expect(bulkFixLoopMessage(4, 1, 'nope').message).toBe('Fixed 4, 1 failed: nope');
     expect(bulkFixLoopMessage(4, 1, '').message).toBe('Fixed 4, 1 failed');
     expect(bulkFixLoopMessage(0, 2, 'nope').type).toBe('error');
+    expect(bulkFixLoopMessage(0, 0, '', 2)).toEqual({
+      message: 'Fixed 0, 2 skipped',
+      type: 'success',
+    });
+    // skipped-by-design does not turn a run with real failures green
+    expect(bulkFixLoopMessage(0, 5, 'nope', 1).type).toBe('error');
+    // a partial gate on a fixed finding is reported, not silent
+    expect(bulkFixLoopMessage(3, 0, '', 0, 2).message).toBe(
+      'Fixed 3: 2 track(s) by other artists were not added to the wishlist. To add them, fix the album on its own (reopen its finding first if it resolved)',
+    );
     // The `failed` half of the guard is load-bearing even though the caller only
     // ever sets lastError alongside a failure — a stale error must not surface
     // on a clean run.

@@ -87,6 +87,34 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
         art_snapshot = []  # defined up front so the except handler can restore
         audio_file = None
         try:
+            # Snapshot the file's own album tag BEFORE anything clears it.
+            # Tracks whose context carries no real album (the 'Unknown
+            # Album' placeholder from album-less playlist entries) fall
+            # back to it in extract_source_metadata instead of having the
+            # placeholder stamped over a correct tag.
+            try:
+                from core.imports.track_number import (
+                    read_embedded_album,
+                    read_embedded_album_artist,
+                )
+                _file_album_tag = read_embedded_album(file_path)
+                _file_album_artist_tag = read_embedded_album_artist(file_path)
+            except Exception:
+                _file_album_tag = None
+                _file_album_artist_tag = None
+            if isinstance(context, dict):
+                if _file_album_tag:
+                    context["_file_album_tag"] = _file_album_tag
+                else:
+                    # Context dicts are reused across a task's candidate
+                    # attempts — never let one file's snapshot ride into
+                    # the next file's tagging.
+                    context.pop("_file_album_tag", None)
+                if _file_album_artist_tag:
+                    context["_file_album_artist_tag"] = _file_album_artist_tag
+                else:
+                    context.pop("_file_album_artist_tag", None)
+
             strip_all_non_audio_tags(file_path)
             audio_file = symbols.File(file_path)
             if audio_file is None:

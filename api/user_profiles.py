@@ -501,14 +501,16 @@ def create_profile():
             from werkzeug.security import generate_password_hash
             pin_hash = generate_password_hash(pin, method='pbkdf2:sha256')
 
-        # No-gaps: while login mode is on, a new member must be born with a login
-        # password or they could never sign in.
+        # No-gaps: while login mode is on, a new member must be born with a way
+        # to sign in. made by hand that's a password; under oidc-only (#1839)
+        # there is none, so it goes through an invite instead.
         password = (data.get('password') or '').strip()
-        from core.security.login_provisioning import create_needs_password
-        if create_needs_password(_require_login_enabled()) and not password:
-            return jsonify({'success': False,
-                            'error': 'Login mode is on — give this profile a login '
-                                     'password so they can sign in.'}), 400
+        from core.security import oidc_only
+        from core.security.login_provisioning import create_refusal
+        _refusal = create_refusal(_require_login_enabled(), has_password=bool(password),
+                                  oidc_only=oidc_only.is_on(config_manager))
+        if _refusal:
+            return jsonify({'success': False, 'error': _refusal}), 400
 
         _controls, control_error = _admin_controls(data)
         if control_error:
@@ -757,6 +759,12 @@ def select_profile():
         _now = time.time()
         pin_checked = False
         if _require_login_enabled() and session.get('profile_id') != profile_id:
+            # switching to another profile is a password sign-in, which
+            # oidc-only closes (#1839)
+            from core.security.oidc_only import refuse_unless_open
+            closed = refuse_unless_open(config_manager)
+            if closed:
+                return closed
             _locked, _retry_after = _login_limiter.is_locked(_ip, profile['name'], _now)
             if _locked:
                 return (jsonify({'success': False, 'error': 'Too many attempts - please wait and try again'}),
@@ -794,7 +802,7 @@ def select_profile():
         if session.get('device_owner') != profile_id or not session.get('device_id'):
             from core.security.devices import start_device
             start_device(session, database.add_profile_device, profile_id, request.headers.get('User-Agent', ''),
-                         request.remote_addr or '')
+                         request.remote_addr or '', revoke_row=database.revoke_profile_device)
             session['device_owner'] = profile_id
         # If the admin PIN was just validated, also mark launch PIN as
         # verified so the subsequent page reload doesn't ask again. only a pin
@@ -1031,9 +1039,15 @@ def set_profile_password_endpoint(profile_id):
         data = request.json or {}
         password = data.get('password', '')
         # No-gaps: clearing a password while login mode is on would lock that
-        # profile out — refuse it (delete the profile instead if that's intended).
-        from core.security.login_provisioning import removing_password_strands
-        if not (password or '').strip() and removing_password_strands(_require_login_enabled()):
+        # profile out unless it has another way in (a plex or oidc link whose
+        # sign-in is on). the admin's never comes off: it's the way back in
+        # when the oidc-only override is set (#1839).
+        from core.security import oidc_only
+        from core.security.login_provisioning import SignInWays, removing_password_strands
+        if not (password or '').strip() and removing_password_strands(
+                _require_login_enabled(), profile_id=profile_id,
+                methods=database.profile_sign_in_methods(profile_id),
+                ways=SignInWays.from_config(config_manager, oidc_only=oidc_only.is_on(config_manager))):
             return jsonify({'success': False,
                             'error': "Can't remove this password while login mode is on — "
                                      "that profile couldn't sign in."}), 400
@@ -1041,7 +1055,9 @@ def set_profile_password_endpoint(profile_id):
         if ok:
             # a new password signs out every other browser on that profile;
             # the one that changed it (if it's the profile's own) stays in
-            epoch = database.bump_profile_session_epoch(profile_id)
+            epoch = database.bump_profile_session_epoch(
+                profile_id,
+                keep_device_id=session.get('device_id') if int(profile_id) == int(current_pid) else None)
             from core.security.session_epoch import forget
             forget(profile_id)
             if int(profile_id) == int(current_pid) and epoch is not None:
@@ -1576,7 +1592,16 @@ def oidc_disconnect():
     try:
         pid = get_current_profile_id()
         methods = get_database().profile_sign_in_methods(pid)
-        if _require_login_enabled and _require_login_enabled() and not (methods['password'] or methods['plex']):
+        from core.security import oidc_only
+        from core.security.login_provisioning import SignInWays, removing_oidc_strands
+        _only = oidc_only.is_on(config_manager)
+        if removing_oidc_strands(bool(_require_login_enabled and _require_login_enabled()),
+                                 methods=methods,
+                                 ways=SignInWays.from_config(config_manager, oidc_only=_only)):
+            if _only:
+                return jsonify({'success': False,
+                                'error': "Sign-in is OIDC only, so this connection is the only "
+                                         "way this profile can sign in."}), 400
             return jsonify({'success': False,
                             'error': "This is the only way this profile can sign in. "
                                      "Ask your admin to set a password first."}), 400

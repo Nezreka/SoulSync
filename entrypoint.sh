@@ -91,6 +91,15 @@ fi
 mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts 2>/dev/null || true
 chown soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/Transfer /app/Staging /app/Stream /app/storage /app/MusicVideos /app/scripts 2>/dev/null || true
 
+# /app/storage is soulsync's own (playlist covers, avatars, album staging) and
+# usually not a mount, so it lives in the container layer. the recursive chown
+# above is skipped whenever /app/data already matches PUID, and the line above
+# only fixes the top dir, so anything under it that came out of the image or an
+# older PUID kept its old owner: playlist covers failed with permission denied
+# for PUID 1026 (SeadogsBooty). only touches what's actually wrong, so a normal
+# boot changes nothing.
+find /app/storage -xdev \( ! -user "$PUID" -o ! -group "$PGID" \) -exec chown soulsync:soulsync {} + 2>/dev/null || true
+
 # Writability audit — surface a loud warning if any bind-mounted dir
 # isn't writable by the soulsync user. The restart-loop fix above makes
 # the container start regardless, but a non-writable Staging / downloads

@@ -50,6 +50,10 @@ downloads/*
 Transfer/*
 !Transfer/.gitkeep
 Storage/*
+# lowercase too: linux is case-sensitive, and the nightly build runs right after
+# the test suite in the same checkout, so storage/playlist_covers made by tests
+# rode into the image owned by uid 1000 and stayed unwritable for any other PUID
+storage/*
 cache/*
 Stream/*
 Incomplete/*

@@ -1,15 +1,13 @@
-**SoulSync 3.6.0 is out** :musical_note:
+**SoulSync 3.6.1 is out** :musical_note:
 
-MetaSync is here. The optional MetaSync companion lets your install join SIN, a network of SoulSync installs that share anonymous weekly signals keyed only by MusicBrainz IDs. Back come SoulSync Charts on the dashboard and Discover: Trending, Most Wanted, Just Landed, Loved & Kept and more, as playlists ready to sync. An album only charts once 15+ installs reported it, and nothing downloads until you press Sync & download. Help & Docs > MetaSync explains exactly what is shared.
+The video side moves onto the new React pages. The video dashboard now matches the music one, the calendar says where every episode stands, video tools shares the Tools page, and movie and show pages read like a streaming app with a new Your library tab for every copy you own. Fix match sticks, and you can mark one episode or season watched.
 
-Sign in with any OpenID Connect provider, like Pocket ID, Authentik or Keycloak, with sessions that follow the provider, and anime is picked by library instead of a genre tag (thanks @PapaBearDoes).
+Optional 4K libraries: a separate Movies 4K and TV 4K folder, off until you turn one on, filled by quality profiles set to save to 4K. And every folder in Settings now checks itself as you type: free space, write access, nested folders and unmapped Docker volumes. Audiobooks can read extra folders on other drives too.
 
-Settings, Watchlist and Wishlist got simpler: sections where you'd look, help under every setting, one artist panel, watchlist defaults artists follow, and download now in one click.
+Playlists: every source tab imports into SoulSync and lands you on the playlist, you can keep your own editable copy instead of a mirror (#1913), and Download missing can retry unidentified tracks first (#1912).
 
-New naming tokens for artist disambiguation and explicit/clean badges, lookalike characters instead of underscores, and a live path preview under every template. Playlists can generate cover art, and NewPipe backups import as playlists.
+The Library page gets a Songs tab with filters, sorts, copies side by side and bulk actions (#1906), and match search takes a pasted link or ID (#1901). Daily mixes are rebuilt on what you actually play together, and interactive search lets you listen before you pick (#1911).
 
-Video can prefer or require dubbed and MULTI audio, and anime TMDB lumps into one season now follows TVDB's seasons.
-
-Plus an opt-in YouTube album bundle (thanks @SimpleSimonLA), Deezer sign-in alerts and working track downloaded automations (thanks @PapaBearDoes), failed Prowlarr indexers named in search (thanks @glebosotov), pooled database connections (thanks @splitsec2), holiday skies in the sidebar weather, audiobook matching on your own Audible store (thanks @SimpleSimonLA), big Tidal playlists that open with their tracks, LRCLib hiccups no longer read as no lyrics, and a lot of fixes.
+Sign in with OIDC only, plus OIDC fixes and video naming fixes (thanks @PapaBearDoes). Navidrome scans finish on time and the hourly update stops missing albums (#1899), idle CPU is down (#1905), the lyrics filler stops repeating LRCLib lookups (#1902), and staged downloads no longer look missing to the watchlist (thanks @SimpleSimonLA). Plus a lot of fixes.
 
 Full notes on GitHub.

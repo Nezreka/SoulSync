@@ -331,3 +331,85 @@ class TestMusicBrainzWorkerMarksMatched:
         fake_service.update_artist_mbid.assert_called_once_with(
             artist_id, "mb-uuid", "matched"
         )
+
+
+# ---------------------------------------------------------------------------
+# #1889: the backfill runs once per column, not on every boot
+# ---------------------------------------------------------------------------
+
+def _updates_issued(conn, fn):
+    """Run fn(cursor) and return the backfill UPDATEs it sent."""
+    seen = []
+    conn.set_trace_callback(seen.append)
+    try:
+        fn(conn.cursor())
+    finally:
+        conn.set_trace_callback(None)
+    return [s for s in seen if s.lstrip().upper().startswith("UPDATE") and "_match_status = 'matched'" in s]
+
+
+class TestBackfillRunsOnce:
+    """#1889 (QT3496): a restart held the database, and the web ui, for 19
+    minutes inside this backfill. It ran 17 full-table UPDATEs on every boot
+    (none can use an index), which on a big library on spinning disks is
+    minutes of reads for rows that were healed long ago. It only has to run
+    once per status column."""
+
+    def test_the_first_boot_records_every_column_it_ran(self, db):
+        with db._get_connection() as conn:
+            row = conn.execute(
+                "SELECT value FROM metadata WHERE key = 'match_status_backfill_done'").fetchone()
+        import json
+        done = set(json.loads(row[0]))
+        assert "tracks.musicbrainz_match_status" in done
+        assert "artists.lastfm_match_status" in done
+        assert len(done) == len(MusicDatabase._MATCH_STATUS_BACKFILL_TARGETS)
+
+    def test_a_later_boot_runs_no_backfill_at_all(self, db):
+        with db._get_connection() as conn:
+            issued = _updates_issued(conn, db._backfill_match_status_once)
+        assert issued == []
+
+    def test_a_column_added_later_still_gets_its_one_pass(self, db):
+        import json
+        with db._get_connection() as conn:
+            cur = conn.cursor()
+            done = set(json.loads(cur.execute(
+                "SELECT value FROM metadata WHERE key = 'match_status_backfill_done'").fetchone()[0]))
+            done.discard("tracks.jiosaavn_match_status")
+            cur.execute("UPDATE metadata SET value = ? WHERE key = 'match_status_backfill_done'",
+                        (json.dumps(sorted(done)),))
+            cur.execute("INSERT INTO artists (id, name) VALUES ('ar', 'A')")
+            cur.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al', 'ar', 'Al')")
+            cur.execute("INSERT INTO tracks (id, artist_id, album_id, title, jiosaavn_id) "
+                        "VALUES ('t', 'ar', 'al', 'T', 'js1')")
+            conn.commit()
+
+            issued = _updates_issued(conn, db._backfill_match_status_once)
+            conn.commit()
+            assert len(issued) == 1 and "UPDATE tracks SET jiosaavn_match_status" in issued[0]
+            assert cur.execute(
+                "SELECT jiosaavn_match_status FROM tracks WHERE id = 't'").fetchone()[0] == "matched"
+            # and remembered, so the next boot skips it too
+            assert _updates_issued(conn, db._backfill_match_status_once) == []
+
+    def test_an_unreadable_marker_runs_it_again(self, db):
+        with db._get_connection() as conn:
+            conn.execute("UPDATE metadata SET value = 'not json' "
+                         "WHERE key = 'match_status_backfill_done'")
+            conn.commit()
+            issued = _updates_issued(conn, db._backfill_match_status_once)
+        assert len(issued) == len(MusicDatabase._MATCH_STATUS_BACKFILL_TARGETS)
+
+    def test_a_missing_column_is_not_marked_done(self, db, monkeypatch):
+        """a target whose column doesn't exist yet must run once it does."""
+        fake = (("tracks", "nope_id", "nope_match_status"),)
+        monkeypatch.setattr(MusicDatabase, "_MATCH_STATUS_BACKFILL_TARGETS",
+                            MusicDatabase._MATCH_STATUS_BACKFILL_TARGETS + fake)
+        import json
+        with db._get_connection() as conn:
+            db._backfill_match_status_once(conn.cursor())
+            conn.commit()
+            done = set(json.loads(conn.execute(
+                "SELECT value FROM metadata WHERE key = 'match_status_backfill_done'").fetchone()[0]))
+        assert "tracks.nope_match_status" not in done

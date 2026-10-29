@@ -189,3 +189,49 @@ def test_wishlist_pick_refusals(env, payload, status):
     resp = env['client'].post('/api/wishlist/inspect/download', json=payload)
     assert resp.status_code == status
     assert env['dispatched'] == []
+
+
+def test_inspect_lines_carry_the_length_the_rows_were_judged_against(env):
+    _wish(env['db'])
+    slsk = _lines(env['client'].post('/api/wishlist/inspect', json={'track_id': 'sp-fade'}))['soulseek']
+    assert slsk['expected_duration_ms'] == 238_000
+
+
+def test_wishlist_inspect_searches_a_retyped_title_and_artist(env):
+    _wish(env['db'])
+    slsk = _lines(env['client'].post('/api/wishlist/inspect', json={
+        'track_id': 'sp-fade', 'name': 'Drop It Like It\'s Hot', 'artist': 'Snoop Dogg'}))['soulseek']
+    assert any('snoop dogg' in q.lower() for q in env['soulseek'].queries)
+    assert not any('mazzy' in q.lower() for q in env['soulseek'].queries)
+    # a new title is a different song, its length isn't known
+    assert slsk['expected_duration_ms'] == 0
+
+
+def test_wishlist_pick_downloads_as_the_retyped_song(env):
+    _wish(env['db'])
+    body = env['client'].post('/api/wishlist/inspect/download', json={
+        'track_id': 'sp-fade', 'candidate': {'username': 'alice', 'filename': 'a.flac'},
+        'name': 'Fade Into You', 'artist': 'Hope Sandoval',
+    }).get_json()
+    info = download_tasks[body['task_id']]['track_info']
+    assert info['name'] == 'Fade Into You'
+    assert info['artists'] == [{'name': 'Hope Sandoval'}]
+    assert info['artist_name'] == 'Hope Sandoval'
+    # the old album was the old artist's, and the old id would pull its tags back
+    assert info['album'] == {} and info['track_data']['album'] == {}
+    assert info['id'] == '' and info['spotify_track_id'] == ''
+    # same title, same song: the length still holds
+    assert info['duration_ms'] == 238_000
+    # and the wishlist row still clears when it lands
+    assert info['wishlist_id']
+
+
+def test_wishlist_pick_ignores_a_blank_or_unchanged_query(env):
+    _wish(env['db'])
+    body = env['client'].post('/api/wishlist/inspect/download', json={
+        'track_id': 'sp-fade', 'candidate': {'username': 'alice', 'filename': 'a.flac'},
+        'name': 'Fade Into You', 'artist': '  ',
+    }).get_json()
+    info = download_tasks[body['task_id']]['track_info']
+    assert info['id'] == 'sp-fade'
+    assert info['album']['name'] == 'So Tonight That I Might See'

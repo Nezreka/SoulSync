@@ -21,7 +21,14 @@ KIND = 'hidden_gems'
 
 def generate(deps: Any, variant: str, config: PlaylistConfig) -> List[Track]:
     service = get_service(deps)
-    rows = service.get_hidden_gems(limit=config.limit)
+    # ranked by your genre taste, the way discover shows it. without this the
+    # synced playlist was random obscure while the page was best obscure
+    fn = getattr(deps, 'get_current_profile_id', None) or (
+        deps.get('get_current_profile_id') if isinstance(deps, dict) else None
+    )
+    taste_fn = getattr(service, 'genre_taste_profile', None)
+    taste = taste_fn(fn() if callable(fn) else None) if callable(taste_fn) else None
+    rows = service.get_hidden_gems(limit=config.limit, taste_profile=taste or None)
     return coerce_tracks(rows)
 
 

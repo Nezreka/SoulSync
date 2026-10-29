@@ -776,8 +776,12 @@ describe('the finding list', () => {
     // dashboard chips — the raw snake_case id meant one job went by two
     // names on the same screen.
     expect(meta).toContain('Orphan File Detector');
-    expect(meta).toContain('track');
-    expect(meta).toContain('ID: abc123');
+    // the entity id is for us, not the user: it moved to the tooltip
+    expect(meta).not.toContain('ID: abc123');
+    expect(meta).toContain('found');
+    expect(document.querySelector('.repair-finding-meta span')?.getAttribute('title')).toBe(
+      'track abc123',
+    );
   });
 
   it('shows the action badge on a non-pending finding and hides the fix buttons', async () => {
@@ -1321,7 +1325,32 @@ describe('bulk selection', () => {
       ids: [1, 2],
       action: 'dismiss',
     });
-    expect(toastSpy).toHaveBeenCalledWith('2 findings dismissed', 'success');
+    // dismiss is "never raise this again", so it comes with a way back
+    expect(document.querySelector('.repair-undo-bar')?.textContent).toContain(
+      '2 findings dismissed',
+    );
+  });
+
+  it('undo after a bulk dismiss reopens exactly the dismissed ids', async () => {
+    routes({
+      [FINDINGS]: page([finding({ id: 1 }), finding({ id: 2 })]),
+      '/api/repair/findings/1/reopen': { success: true },
+      '/api/repair/findings/2/reopen': { success: true },
+    });
+    await renderList();
+    await flush();
+    fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
+    await flush();
+    fireEvent.click(screen.getByText('Dismiss Selected'));
+    await flush();
+    fireEvent.click(screen.getByText('Undo'));
+    await flush();
+    const reopened = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.endsWith('/reopen'));
+    expect(reopened).toEqual(['/api/repair/findings/1/reopen', '/api/repair/findings/2/reopen']);
+    expect(toastSpy).toHaveBeenCalledWith('Brought back 2 findings', 'success');
+    expect(document.querySelector('.repair-undo-bar')).toBeNull();
   });
 
   it('asks once per finding KIND, then fixes each id with its own action', async () => {
@@ -1349,9 +1378,9 @@ describe('bulk selection', () => {
     await flush();
 
     const bodyFor = (id: number) => bodyOf(`/${id}/fix`);
-    expect(bodyFor(1)).toEqual({ fix_action: 'staging' });
-    expect(bodyFor(2)).toEqual({ fix_action: 'staging' });
-    expect(bodyFor(3)).toEqual({ fix_action: 'remove' });
+    expect(bodyFor(1)).toEqual({ fix_action: 'staging', bulk: true });
+    expect(bodyFor(2)).toEqual({ fix_action: 'staging', bulk: true });
+    expect(bodyFor(3)).toEqual({ fix_action: 'remove', bulk: true });
     expect(toastSpy).toHaveBeenCalledWith('Fixed 3', 'success');
   });
 
@@ -1681,7 +1710,7 @@ describe('clear findings', () => {
       target: { value: 'dead_file_cleaner' },
     });
     await flush();
-    fireEvent.click(screen.getByText('Clear Findings'));
+    fireEvent.click(screen.getByText('Delete matching…'));
     await flush();
 
     // `renderList` types 'a' into the search box, so this test has always run
@@ -1706,7 +1735,7 @@ describe('clear findings', () => {
     routes({ [FINDINGS]: page([finding()]) });
     await renderList();
     await flush();
-    fireEvent.click(screen.getByText('Clear Findings'));
+    fireEvent.click(screen.getByText('Delete matching…'));
     await flush();
     expect(confirmSpy).toHaveBeenCalledWith(
       expect.objectContaining({ message: expect.stringContaining('for all jobs (pending)') }),
@@ -1718,7 +1747,7 @@ describe('clear findings', () => {
     routes({ [FINDINGS]: page([finding()]) });
     await renderList();
     await flush();
-    fireEvent.click(screen.getByText('Clear Findings'));
+    fireEvent.click(screen.getByText('Delete matching…'));
     await flush();
     expect(fetchMock.mock.calls.some((c) => String(c[0]).endsWith('/findings/clear'))).toBe(false);
   });

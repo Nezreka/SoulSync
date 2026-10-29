@@ -12,6 +12,7 @@ clear lockouts). bodies byte-identical; only the decorator changed and
 the limiter dropped its underscore on the way over.
 """
 
+import threading
 import time
 
 from flask import Blueprint, jsonify, redirect, request, session
@@ -59,7 +60,8 @@ def _complete_sign_in(database, profile_id):
     session['profile_epoch'] = (database.get_profile(profile_id) or {}).get('session_epoch', 0)
     from core.security.devices import start_device
     start_device(session, database.add_profile_device, profile_id,
-                 request.headers.get('User-Agent', ''), request.remote_addr or '')
+                 request.headers.get('User-Agent', ''), request.remote_addr or '',
+                 revoke_row=database.revoke_profile_device)
     session['device_owner'] = profile_id
     # A fresh login also clears any stale launch-PIN flag.
     session.pop('launch_pin_verified', None)
@@ -72,6 +74,9 @@ bp = Blueprint('login', __name__)
 def auth_login():
     """Username/password login (opt-in login mode). Username = profile name.
     Brute-force limited per IP; a profile with no password set can't log in."""
+    closed = _closed_by_oidc_only()
+    if closed:
+        return closed
     try:
         _ip = request.remote_addr or 'unknown'
         _now = time.time()
@@ -104,8 +109,16 @@ def auth_login():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _closed_by_oidc_only():
+    """a 403 for the sign-ins oidc-only closes (#1839), or None"""
+    from core.security.oidc_only import refuse_unless_open
+    return refuse_unless_open(config_manager)
+
+
 def _plex_signin_enabled():
-    return bool(config_manager and config_manager.get('security.plex_signin', False))
+    from core.security.oidc_only import is_on
+    return bool(config_manager and config_manager.get('security.plex_signin', False)
+                and not is_on(config_manager))
 
 
 @bp.route('/api/auth/plex/available', methods=['GET'])
@@ -118,6 +131,9 @@ def plex_signin_available():
 def plex_signin_start():
     """a plex pin for this browser, and plex's page to approve it. the pin
     is remembered in this session only, so nobody else can claim it"""
+    closed = _closed_by_oidc_only()
+    if closed:
+        return closed
     if not _plex_signin_enabled():
         return jsonify({'success': False, 'error': 'Plex sign-in is turned off'}), 403
     _ip = request.remote_addr or 'unknown'
@@ -143,6 +159,9 @@ def plex_signin_start():
 def plex_signin_check():
     """poll the session's pin. pending until the user approves it on plex,
     then signed in (or told why not)"""
+    closed = _closed_by_oidc_only()
+    if closed:
+        return closed
     if not _plex_signin_enabled():
         return jsonify({'success': False, 'error': 'Plex sign-in is turned off'}), 403
     pin_id = session.get('plex_signin_pin')
@@ -216,9 +235,9 @@ def _app_root():
 def oidc_redirect_uri(settings):
     """the callback address the provider must have registered. the admin can
     pin it, for proxies that don't pass the public host through"""
-    if settings.redirect_uri:
-        return settings.redirect_uri
-    return request.url_root.rstrip('/') + OIDC_CALLBACK_PATH
+    from core.security.oidc_signin import callback_uri
+    return callback_uri(getattr(settings, 'redirect_uri', '') or '', request.url_root,
+                        request.headers.get('X-Forwarded-Proto', ''), OIDC_CALLBACK_PATH)
 
 
 def _oidc_done(error=None, mode='signin'):
@@ -233,27 +252,84 @@ def _oidc_done(error=None, mode='signin'):
     return redirect(_app_root())
 
 
-def oidc_begin(mode='signin', profile_id=None):
-    """send this browser to the provider. shared by sign-in and by connect
-    from my account, which differ only in what the callback does"""
+# an invite accepted while sign-in is oidc only (#1839) waits here for the
+# browser to come back from the provider: the name and pin it chose and the
+# invite it came from. kept in the process, never in the cookie (which is
+# signed, not encrypted), keyed by the flow's state, and dropped once the
+# flow is too old to finish. soulsync runs one worker, so the process is
+# enough; a restart in between means opening the link again
+_pending_invites = {}
+_pending_lock = threading.Lock()
+
+
+def _keep_pending_invite(state, pending):
+    from core.security.oidc_signin import FLOW_MAX_AGE
+    now = time.time()
+    with _pending_lock:
+        for key in [k for k, (at, _) in _pending_invites.items() if now - at > FLOW_MAX_AGE]:
+            _pending_invites.pop(key, None)
+        _pending_invites[state] = (now, dict(pending))
+
+
+def _take_pending_invite(state):
+    from core.security.oidc_signin import FLOW_MAX_AGE
+    with _pending_lock:
+        hit = _pending_invites.pop(state or '', None)
+    if not hit or time.time() - hit[0] > FLOW_MAX_AGE:
+        return None
+    return hit[1]
+
+
+def oidc_start_url(mode='signin', profile_id=None, pending=None):
+    """(the provider's address for this browser, None) or (None, why not).
+    the flow is kept in the session; an invite's details (`pending`) are
+    kept server-side for the callback"""
     from core.security import oidc_signin
     settings = oidc_signin.read_settings(config_manager)
     if settings is None:
-        return jsonify({'success': False, 'error': 'OIDC sign-in is turned off'}), 403
+        return None, 'OIDC sign-in is turned off'
     _ip = request.remote_addr or 'unknown'
     _now = time.time()
     _locked, _retry_after = oidc_start_limiter.is_locked(_ip, '<oidc>', _now)
     if _locked:
-        return _oidc_done('Too many attempts — please wait and try again', mode)
+        return None, 'Too many attempts — please wait and try again'
     oidc_start_limiter.record_failure(_ip, '<oidc>', _now)  # every start counts
     try:
         doc = oidc_signin.discover(settings.issuer)
         url, flow = oidc_signin.start(settings, doc, oidc_redirect_uri(settings),
                                       mode=mode, profile_id=profile_id)
     except oidc_signin.OidcError as e:
-        return _oidc_done(str(e), mode)
+        return None, str(e)
     session['oidc_flow'] = flow.to_session()
+    if pending is not None:
+        _keep_pending_invite(flow.state, pending)
+    return url, None
+
+
+def oidc_begin(mode='signin', profile_id=None):
+    """send this browser to the provider. shared by sign-in and by connect
+    from my account, which differ only in what the callback does"""
+    from core.security import oidc_signin
+    if oidc_signin.read_settings(config_manager) is None:
+        return jsonify({'success': False, 'error': 'OIDC sign-in is turned off'}), 403
+    url, error = oidc_start_url(mode, profile_id)
+    if error:
+        return _oidc_done(error, mode)
     return redirect(url)
+
+
+def _invite_back(token, error):
+    """an invite round trip that didn't work: back to the invite page, which
+    shows why once. nothing was spent"""
+    session['oidc_invite_error'] = error
+    return redirect(_app_root() + 'invite/' + token)
+
+
+class _PinnedOnly:
+    """oidc is off but the admin is filling the form in: the override still counts"""
+
+    def __init__(self, cfg):
+        self.redirect_uri = ((cfg.get('security.oidc_redirect_uri', '') if cfg else '') or '').strip()
 
 
 @bp.route('/api/auth/oidc/available', methods=['GET'])
@@ -262,8 +338,14 @@ def oidc_signin_available():
     and (once) why the last attempt in this browser didn't work"""
     from core.security import oidc_signin
     settings = oidc_signin.read_settings(config_manager)
+    from core.security.oidc_only import is_on
     return jsonify({'success': True, 'enabled': settings is not None,
                     'label': settings.button_label if settings else oidc_signin.DEFAULT_BUTTON_LABEL,
+                    # the login screen shows nothing else while it's on (#1839)
+                    'oidc_only': is_on(config_manager),
+                    # what this server will send the provider, so the settings
+                    # page shows the uri to register instead of guessing it
+                    'callback_url': oidc_redirect_uri(settings or _PinnedOnly(config_manager)),
                     'error': session.pop('oidc_error', None)})
 
 
@@ -282,30 +364,14 @@ def oidc_signin_callback():
     from core.security.signup_defaults import signup_access
     flow = oidc_signin.Flow.from_session(session.pop('oidc_flow', None))
     mode = flow.mode if flow else 'signin'
-    if request.args.get('error'):
-        # the provider's description is its own text; only its code is logged
-        logger.info("OIDC sign-in: provider returned %s", request.args.get('error'))
-        cancelled = request.args.get('error') == 'access_denied'
-        return _oidc_done('Sign-in was cancelled.' if cancelled else 'The sign-in provider refused the sign-in.', mode)
-    try:
-        oidc_signin.check_callback(flow, request.args.get('state', ''))
-        settings = oidc_signin.read_settings(config_manager)
-        if settings is None:
-            return _oidc_done('OIDC sign-in is turned off', mode)
-        code = request.args.get('code', '')
-        if not code:
-            return _oidc_done('The sign-in provider refused the sign-in.', mode)
-        doc = oidc_signin.discover(settings.issuer)
-        tokens = oidc_signin.exchange_code(settings, doc, code, flow)
-        claims = oidc_signin.id_token_claims(tokens['id_token'], settings, doc, flow.nonce)
-        extra = oidc_signin.userinfo(doc, tokens.get('access_token', '')) \
-            if oidc_signin.needs_userinfo(claims, settings) else None
-        account = oidc_signin.account_from_claims(claims, doc, settings, extra)
-    except oidc_signin.OidcError as e:
-        return _oidc_done(str(e), mode)
-    except Exception as e:
-        logger.error(f"OIDC sign-in failed: {e}")
-        return _oidc_done('Sign-in failed. Try again.', mode)
+    pending = _take_pending_invite(flow.state) if flow and mode == 'invite' else None
+    if mode == 'invite':
+        if not pending:
+            return _oidc_done('Sign-in expired. Open the invite link again.')
+        return _finish_invite(flow, pending)
+    settings, account, tokens, claims, error = _provider_account(flow)
+    if error:
+        return _oidc_done(error, mode)
 
     database = get_database()
     if mode == 'connect':
@@ -323,19 +389,87 @@ def oidc_signin_callback():
     )
     if result.error:
         return _oidc_done(result.error)
-    _complete_sign_in(database, result.profile_id)
+    return _keep_oidc_sign_in(database, result.profile_id, account, tokens, claims,
+                              'Sign-in failed. Try again.')
+
+
+def _keep_oidc_sign_in(database, profile_id, account, tokens, claims, failed):
+    """sign this browser in as the profile, on the provider's clock"""
+    _complete_sign_in(database, profile_id)
     # the session lasts as long as the provider says (#1838). one whose
     # clock can't be recorded would never end, so it isn't kept
     from core.security import oidc_session
     if not oidc_session.record_sign_in(database, session.get('device_id'), account.identity, tokens, claims):
         logger.warning("OIDC sign-in for profile %s not kept: its session clock couldn't be saved",
-                       result.profile_id)
+                       profile_id)
         if session.get('device_id'):
             oidc_session.end_device(database, session['device_id'])
         for _k in ('login_authenticated', 'profile_id', 'profile_epoch', 'device_id', 'device_owner'):
             session.pop(_k, None)
-        return _oidc_done('Sign-in failed. Try again.')
+        return _oidc_done(failed)
     return _oidc_done()
+
+
+def _provider_account(flow):
+    """(settings, account, tokens, claims, None) for the code the provider
+    sent back, or (.., why) when it can't be used"""
+    from core.security import oidc_signin
+    if request.args.get('error'):
+        # the provider's description is its own text; only its code is logged
+        logger.info("OIDC sign-in: provider returned %s", request.args.get('error'))
+        cancelled = request.args.get('error') == 'access_denied'
+        return None, None, None, None, ('Sign-in was cancelled.' if cancelled
+                                        else 'The sign-in provider refused the sign-in.')
+    try:
+        oidc_signin.check_callback(flow, request.args.get('state', ''))
+        settings = oidc_signin.read_settings(config_manager)
+        if settings is None:
+            return None, None, None, None, 'OIDC sign-in is turned off'
+        code = request.args.get('code', '')
+        if not code:
+            return None, None, None, None, 'The sign-in provider refused the sign-in.'
+        doc = oidc_signin.discover(settings.issuer)
+        tokens = oidc_signin.exchange_code(settings, doc, code, flow)
+        claims = oidc_signin.id_token_claims(tokens['id_token'], settings, doc, flow.nonce)
+        extra = oidc_signin.userinfo(doc, tokens.get('access_token', '')) \
+            if oidc_signin.needs_userinfo(claims, settings) else None
+        account = oidc_signin.account_from_claims(claims, doc, settings, extra)
+    except oidc_signin.OidcError as e:
+        return None, None, None, None, str(e)
+    except Exception as e:
+        logger.error(f"OIDC sign-in failed: {e}")
+        return None, None, None, None, 'Sign-in failed. Try again.'
+    return settings, account, tokens, claims, None
+
+
+def _finish_invite(flow, pending):
+    """back from the provider with an invite (#1839): the account that signed
+    in gets the invite's profile, linked to it, and this browser signs in as
+    it. anything that stops it sends the browser back to the invite page with
+    the invite still unspent"""
+    from api import profile_admin
+    from core.security import oidc_signin
+    token = str(pending.get('token') or '')
+    settings, account, tokens, claims, error = _provider_account(flow)
+    if error:
+        return _invite_back(token, error)
+    database = get_database()
+    inv = profile_admin.reopen_invite(token)
+    if not inv:
+        return _invite_back(token, "This invite link isn't valid any more")
+
+    def _create():
+        return profile_admin.create_from_invite(
+            database, inv, name=pending.get('name'), color=pending.get('color') or '#6366f1',
+            pin_hash=pending.get('pin_hash'))
+
+    result = oidc_signin.sign_up_by_invite(database, account, settings, _create)
+    if result.error:
+        if result.error == 'That name is taken':
+            return _invite_back(token, 'Someone took that name while you were away. Pick another.')
+        return _invite_back(token, result.error)
+    return _keep_oidc_sign_in(database, result.profile_id, account, tokens, claims,
+                              'Your profile was made, but signing in failed. Sign in again.')
 
 
 @bp.route('/api/auth/logout', methods=['POST'])
@@ -365,6 +499,9 @@ def auth_logout():
 def auth_recovery_question():
     """Return the recovery security-question for a username (forgot-password flow).
     Generic when the user/question is absent — don't confirm which names exist."""
+    closed = _closed_by_oidc_only()
+    if closed:
+        return closed
     try:
         username = (request.args.get('username') or '').strip()
         database = get_database()
@@ -381,6 +518,9 @@ def auth_recovery_question():
 def auth_recovery_reset():
     """Reset a login password by answering the recovery question. Brute-force
     limited; a correct answer sets the new password and authenticates the session."""
+    closed = _closed_by_oidc_only()
+    if closed:
+        return closed
     try:
         _ip = request.remote_addr or 'unknown'
         _now = time.time()
@@ -415,7 +555,8 @@ def auth_recovery_reset():
         session['profile_epoch'] = (database.get_profile(profile['id']) or {}).get('session_epoch', 0)
         from core.security.devices import start_device
         start_device(session, database.add_profile_device, profile['id'],
-                     request.headers.get('User-Agent', ''), request.remote_addr or '')
+                     request.headers.get('User-Agent', ''), request.remote_addr or '',
+                     revoke_row=database.revoke_profile_device)
         session['device_owner'] = profile['id']
         session.pop('launch_pin_verified', None)
         return jsonify({'success': True})

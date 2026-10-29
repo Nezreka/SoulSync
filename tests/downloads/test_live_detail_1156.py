@@ -228,3 +228,27 @@ def test_unified_live_completed_row_finally_names_its_source():
     row = out['downloads'][0]
     assert row['download_source'] == 'YouTube'
     assert 'live_detail' not in row, 'completed rows carry the label, not live detail'
+
+
+def test_downloading_detail_decodes_a_streaming_dispatch_key():
+    # A SoundCloud task's filename is `id||permalink||name`, not a path:
+    # the live detail must name the song, not the permalink slug (#1911).
+    task = {
+        'username': 'soundcloud',
+        'filename': ('1207415400||https://soundcloud.com/andrewbundy/christmas-in-july'
+                     '||Andrew Bundy - Christmas in July'),
+    }
+    d = build_live_detail(task, {'state': 'InProgress'}, 'downloading')
+    assert d['filename'] == 'Andrew Bundy - Christmas in July'
+
+
+def test_downloading_detail_decodes_a_two_part_key():
+    task = {'username': 'youtube', 'filename': 'vid123||Artist - Song'}
+    d = build_live_detail(task, {'state': 'InProgress'}, 'downloading')
+    assert d['filename'] == 'Artist - Song'
+
+
+def test_downloading_detail_keeps_basename_for_a_peer_path_with_separator_in_name():
+    task = {'username': 'some_peer', 'filename': 'Music||Flac/03 - XO.flac'}
+    d = build_live_detail(task, {'state': 'InProgress'}, 'downloading')
+    assert d['filename'] == '03 - XO.flac'

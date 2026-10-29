@@ -11,6 +11,8 @@ Manage-Workers modal can drive video workers by pointing at /api/video/...
 
 from __future__ import annotations
 
+import sqlite3
+
 from flask import jsonify, request
 
 from utils.logging_config import get_logger
@@ -98,12 +100,16 @@ def register_routes(bp):
 
     @bp.route("/prefs", methods=["GET"])
     def video_prefs():
-        # Lightweight UI prefs for the detail page (no API keys).
+        # Lightweight UI prefs for the detail page (no API keys). The subtitle
+        # languages you grab lead the "subtitles exist in" fact.
         from . import get_video_db
+        from core.video import organization
         db = get_video_db()
+        langs = str(organization.load(db).get("subtitle_langs") or "en")
         return jsonify({
             "billboard_autoplay": (db.get_setting("billboard_autoplay") or "1") == "1",
             "watch_region": (db.get_setting("watch_region") or "US").upper(),
+            "subtitle_langs": [x for x in langs.split(",") if x],
         })
 
     @bp.route("/enrichment/config", methods=["POST"])
@@ -352,11 +358,33 @@ def register_routes(bp):
                 except (TypeError, ValueError):
                     return jsonify({"error": "external_id must be numeric"}), 400
         from . import get_video_db
+        if service == "tmdb" and external_id is not None and kind in ("movie", "show"):
+            # the identity re-point: fills the new title's imdb/tvdb ids and
+            # name straight away, and locks them so a scan can't undo it
+            from core.video.identity import identify
+            res = identify(get_video_db(), kind, item_id, external_id)
+            if not res.get("success"):
+                return jsonify(res), 400
+            return jsonify(res)
         try:
             ok = get_video_db().rematch_item(kind, item_id, service, external_id)
             if not ok:
                 return jsonify({"success": False, "error": "Unknown item or service"}), 400
             return jsonify({"success": True})
+        except sqlite3.IntegrityError:
+            # an older database allows one row per id; the boot rebuild lifts
+            # that, so this only fires if it couldn't run. say who has it.
+            holder = get_video_db().external_id_holder(kind, service, external_id, exclude_id=item_id)
+            label = {"tvdb": "TVDB", "tmdb": "TMDB", "imdb": "IMDb"}.get(service, service)
+            if holder:
+                msg = ("%s %s is already on \u201c%s\u201d%s in your library (row %s, %s). If that's "
+                       "the same show listed twice by your server, merge them there."
+                       % (label, external_id, holder.get("title"),
+                          " (%s)" % holder["year"] if holder.get("year") else "", holder.get("id"),
+                          "%s owned" % holder.get("owned") if holder.get("owned") else "nothing owned"))
+            else:
+                msg = "%s %s is already used by another title in your library" % (label, external_id)
+            return jsonify({"success": False, "error": msg, "conflict": holder}), 409
         except Exception:
             logger.exception("video match apply failed for %s %s (%s)", kind, item_id, service)
             return jsonify({"success": False, "error": "Failed to update the match"}), 500

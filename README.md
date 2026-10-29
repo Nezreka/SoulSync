@@ -93,7 +93,7 @@ The home screen is split in two: your music on the left, the machine on the righ
 
 Bring a playlist in from anywhere, keep a mirror of it, and keep your media server's copy in step on a schedule.
 
-- **Add playlist**: paste any link and SoulSync works out the service, or pick from a connected account, or drop a CSV / TSV / TXT / M3U file and map its columns, or a NewPipe backup to bring its playlists over.
+- **Add playlist**: paste any link and SoulSync works out the service and imports it, or open a connected account and press **Import** on the playlists you want (or **Import all**), or drop a CSV / TSV / TXT / M3U file and map its columns, or a NewPipe backup to bring its playlists over. Either way you land on the imported playlist under Mirrored, already identifying itself in the background.
 - **Mirrored library**: every playlist as a card whose artwork carries its state (a coverage ring, a pulse while syncing, desaturated when something's wrong). Filter by *Needs attention / Working / Discovered / Scheduled*, search, sort, bulk delete.
 - **Discovery**: matches each source track to real metadata with live progress. Fix any match by hand (including by MusicBrainz ID), retry the failures, or let **Wing It** make best-effort guesses that you can review later in the **Wing It Pool**.
 - **Sync modes**: *Replace*, *Reconcile* (edit in place, keep the server playlist's image and description) or *Append*.
@@ -160,6 +160,8 @@ A personal front page shaped by your library, your listening and your watchlist.
 ## Library & artist pages
 
 - **Library**: every artist, filterable by letter, watch state, and which metadata sources each one is (or isn't) matched to. Export as JSON / CSV / text / M3U.
+- **Songs**: every song you own, searchable by title from any library view. Each one shows its album and file quality so copies are easy to tell apart; play it, add it to a playlist, and (admins) delete it.
+- **Fix a wrong match** by pasting the artist's link or ID from Spotify, Apple Music, Deezer, Discogs, Tidal, Qobuz and more. The watchlist follows the fix.
 - **Artist pages**: full discography with ownership, live completion bars for albums / EPs / singles, top tracks, similar artists, a **music video player**, and **concerts** (Ticketmaster dates and Setlist.fm setlists you can play from your own library).
   - **Gap-fill** pulls in releases your other metadata sources know about.
   - **Enhanced view** (admins): inline tag editing, bulk BPM / mood / style edits, write tags to files with a diff preview, ReplayGain, reorganize with a path preview, move an album to another artist, re-identify a track, redownload with source picking, and delete (database only, or files too).
@@ -184,6 +186,7 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 ## Tools & library maintenance
 
 - **Library health score** with a findings inbox that turns thousands of findings into a few decisions, and **Fix all safe** for metadata-only repairs.
+- Findings sorted by what a fix would do (safe, needs your call, review only), **undo** on every dismiss, and keyboard triage (\`j\`/\`k\`/\`f\`/\`d\`).
 - **31 maintenance jobs**, each with its own schedule: duplicate and single/album dedup, dead and orphan files, AcoustID scanning, fake-lossless and corrupt-file detection, cover art, lyrics and ReplayGain fillers, metadata gaps, album completeness, discography backfill, quality upgrades, lossy conversion, reorganize and re-tag, MBID mismatches, album tag consistency, unknown-artist and comma-artist fixes, genre cleanup and enrichment, and more.
 - **Database updater** (incremental, full refresh or deep scan), manual library matching, **backups with restore**, a metadata cache browser, and **config export/import** (optionally with credentials).
 
@@ -206,7 +209,7 @@ A full web player built into the sidebar.
 ## Podcasts & audiobooks
 
 - **Podcasts**: discover via Apple Podcasts search or add any RSS feed (private and Patreon feeds included), OPML import/export, show notes and transcripts, and a watchlist that auto-downloads new episodes and cleans up old ones.
-- **Audiobooks**: browse Audible's catalogue by genre, series, author and narrator, follow authors for new books, and fetch releases from Soulseek, torrent or usenet. SoulSync looks inside each release before downloading, matches your existing books to catalogue editions, and keeps its own wishlist, blocklist and recycle bin.
+- **Audiobooks**: browse Audible's catalogue by genre, series, author and narrator, follow authors for new books, and fetch releases from Soulseek, torrent or usenet. SoulSync looks inside each release before downloading, matches your existing books to catalogue editions (across extra folders on other drives too), and keeps its own wishlist, blocklist and recycle bin.
 
 ---
 
@@ -214,15 +217,24 @@ A full web player built into the sidebar.
 
 A complete video side with its own database, pages and pipeline. Switch sides from the header; each profile can be given music, video, or both.
 
+**Dashboard**
+- The music dashboard's layout on video: a greeting with your library's size, a scan strip, and the video enrichment workers on their own orb stage.
+- **Next up**: the calendar's billboard for what airs next, each episode with its state.
+- **Continue watching**, **Downloading now** (only while something is), and **Recently added** with Movies / Shows tabs.
+- **This week** in the rail: how many of the episodes that aired this week you have, a meter by state, when auto-wishlist last ran, and one button to wishlist what's missing.
+- **Up next** video automations, watchlist and wishlist counts, and issue / findings tiles that only appear when something needs you.
+
 **Library**
 - Movies, shows and YouTube channels from **Plex** or **Jellyfin**, with incremental, full and deep scans, per-title sync, and a path resolver for mismatched Docker / NAS mounts.
 - **15 enrichment workers**: TMDB, TVDB, OMDb (IMDb, Rotten Tomatoes, Metacritic), fanart.tv, OpenSubtitles, Trakt, TVmaze, AniList, Wikidata, SponsorBlock, DeArrow, Return YouTube Dislike, streaming (where-to-watch), Mediastinger (credits scenes) and awards — plus a background YouTube upload-date enricher.
 - **Bulk edit & field locks**: edits are written to SoulSync and pushed to your server, and locked fields are never overwritten by enrichment.
 
 **Detail pages**
-- Trailer-backed heroes with Play / Resume on your server.
+- Trailer-backed heroes with one primary action (Play / Resume on your server, else Get) and everything else in one More menu.
 - Every rating, cast and crew, where to watch, collections and acquisition history.
 - Four season views, and season tools: grab, search, wishlist, monitor.
+- A **Your library** tab on every movie and show: each copy you own with its quality, codecs, size, folder and subtitles, whether its name matches your template, and file actions (rename to template, delete to the recycle bin). Shows get every season with counts, size, a resolution mix and a monitored switch, plus the folders a show is split across.
+- **Fix match** that sticks: re-point a title to the right TMDB entry and scans can't switch it back.
 - Person, studio, channel and playlist pages.
 
 **Finding things**
@@ -235,8 +247,9 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Charts, streaming services, moods and world cinema.
   - A full browse filter.
 - **TV Calendar**:
-  - Week grid with acquisition state on every episode, and cinema / home release dates for movies.
-  - An **iCal feed** for your phone.
+  - Week, agenda and month views. Every episode says where it stands (in library, downloading, wanted, failed, missing, auto-grabs on air), with cinema / home release dates for movies.
+  - Aired episodes are wishlisted on their own every few hours, each once, and the page says when that last ran.
+  - A per-profile **iCal feed** for your phone, readable without signing in.
 
 **Getting things**
 - **Watchlist → wishlist → download**:
@@ -251,6 +264,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 - **Quality profiles**:
   - A 16-tier ladder with upgrade-until-cutoff and Sonarr-style **custom formats**.
   - Codec, HDR and audio preferences, **audio language** (prefer or require a dubbed / MULTI release), size limits and minimum seeders.
+  - **Optional 4K libraries**: a separate Movies 4K and TV 4K folder, off until you switch them on. A profile set to save to the 4K library files new titles there.
   - A separate YouTube profile.
 - **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames, NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
 - **Downloads page**: Downloads / Review / Clients views with live batches, a review queue and download-client management — the same setup as the music side.
@@ -263,7 +277,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Smart-filter and list collections from TMDB, IMDb, Trakt and MDBList.
   - Presets, seasonal windows, generated artwork, and wishlisting missing members.
 - **Poster Manager** for TMDB posters, including textless ones.
-- **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more. Plus backups and mass rename.
+- **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more, on the same Tools page as music (health score, findings inbox, fix-all in the background). Plus backups and mass rename.
 - **Server Activity**: a Tautulli-style live view of streams, history and stats.
 - **Watch Together** in chat: vote on a title and watch together.
 
@@ -298,6 +312,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 - Non-admins get a **My Account** panel for their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
 - **Security**:
   - An admin PIN with brute-force limits, or full **username/password login** with recovery questions.
+  - Sign in with Plex or with your own OIDC provider, or **OIDC only**, which turns every other sign-in off. If the provider is ever down, `SOULSYNC_OIDC_ONLY_OVERRIDE=off` and a restart let the admin back in with their password. Setup and troubleshooting: [docs/guides/OIDC.md](docs/guides/OIDC.md).
   - Or trust a forward-auth header from Authelia, Authentik or oauth2-proxy.
   - Reverse-proxy and sub-path aware.
 - **Own library per profile** (Plex / Jellyfin): a profile can have its own folder and server library.
@@ -512,7 +527,7 @@ Behind Docker or a remote host? See [Support/DOCKER-OAUTH-FIX.md](Support/DOCKER
 
 ### 3. Configure SoulSync
 
-Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and download clients on its own, signs in to Plex, Tidal and Qobuz, checks every folder and connection for real, and leaves a **Finish setting up** checklist on the dashboard for anything you skip. Everything else lives in **Settings**:
+Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and download clients on its own, signs in to Plex, Tidal and Qobuz, checks every folder and connection for real (Settings > Folders keeps checking each folder as you type: free space, write access, nesting, unmapped Docker volumes), and leaves a **Finish setting up** checklist on the dashboard for anything you skip. Everything else lives in **Settings**:
 
 - **Sources / Downloads**: pick a source or build your hybrid chain.
 - **Quality**: pick a preset or build a quality profile.
@@ -532,8 +547,13 @@ Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and
 | Music videos | `/app/MusicVideos` | Optional |
 | Podcasts / audiobooks | `/app/podcasts`, `/app/audiobooks` | Optional |
 | Video | `/media/movies`, `/media/tv`, `/media/youtube` | Optional, for the video side |
+| Video extras | `/media/anime`, `/media/movies-4k`, `/media/tv-4k` | Optional: the anime and 4K libraries, commented out in the compose file |
 
 Useful environment variables: `PUID`, `PGID`, `UMASK`, `TZ`, `SOULSYNC_URL_BASE` (serve under a sub-path, see [docs/REVERSE_PROXY_SUBPATH.md](docs/REVERSE_PROXY_SUBPATH.md)), and `SOULSYNC_LOG_LEVEL`.
+
+### 5. Sign in with OIDC (optional)
+
+To let people sign in with Pocket ID, Authentik, Authelia, Keycloak or another OpenID Connect provider, follow [docs/guides/OIDC.md](docs/guides/OIDC.md).
 
 ---
 

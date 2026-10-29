@@ -71,6 +71,9 @@ services:
       # Keep this OUT of your music library: a book is a folder of chapter files,
       # and a music scanner will happily index it as an album of 300 tracks.
       # - ./audiobooks:/app/audiobooks
+      # An existing collection on another drive: mount it at its own path and add
+      # it under Settings → Library → Folders → Audiobooks → More audiobook folders.
+      # - /mnt/drive2/Audiobooks:/app/audiobooks2:rw
       # ─── Sample Studio folders (OUTPUT) — optional: uncomment + set your path ───
       # Saved Sample Studio chops are rendered here, organized as Artist/Track
       # folders by the sample path template. UNCOMMENT the line below, point the
@@ -92,6 +95,13 @@ services:
       - ./Movies:/media/movies
       - ./TV:/media/tv
       - ./YouTube:/media/youtube
+      # Optional anime library (Folders → Videos → Anime), uncomment to use:
+      # - ./Anime:/media/anime
+      # Optional 4K libraries, off until you switch them on in Folders → Videos →
+      # 4K libraries. Titles on a quality profile saved to the 4K library land
+      # here, like a separate "Movies 4K" library in Plex. Uncomment to use:
+      # - ./Movies-4K:/media/movies-4k
+      # - ./TV-4K:/media/tv-4k
       # Multiple movie / TV drives: give EVERY mount a UNIQUE container path.
       # Mounts do not merge: do NOT bind several drives to /media/movies or /media/tv.
       # Replace the host paths below with your real folders, then uncomment:
@@ -103,8 +113,8 @@ services:
       # - /mnt/drive4/TV:/media/tv4:rw
       # Recreate the container after adding mounts. In Settings → Library →
       # Folders → Videos, add /media/movies2, /media/movies3, /media/movies4 under
-      # Additional Movie Libraries, and the /media/tv2 etc. paths under Additional
-      # TV Libraries. Enter CONTAINER paths (right side), not /mnt/drive2 paths.
+      # Collections on other drives → More movie folders, and the /media/tv2 etc.
+      # paths under More TV folders. Enter CONTAINER paths (right side), not /mnt/drive2 paths.
       # Keep /media/movies and /media/tv as primary destinations for new downloads.
       # Extra paths let SoulSync locate existing files for playback, upgrades,
       # renaming and recycling; :rw permits those file operations.
@@ -151,7 +161,9 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8008/" ]
+      # Lightweight JSON probe, not / (rendering the index every 30s was a
+      # steady idle-CPU cost, #1905); allowlisted by every auth gate.
+      test: [ "CMD", "curl", "-f", "http://localhost:8008/api/setup/status" ]
       interval: 30s
       timeout: 10s
       retries: 3

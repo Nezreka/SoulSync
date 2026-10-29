@@ -467,20 +467,7 @@ describe('panel mounting — the one-shot load flags (3724-3803)', () => {
   });
 });
 
-describe('the sidebar slot', () => {
-  it('renders the sidebar beside the main panel when given one', () => {
-    const { container } = renderShell({ sidebar: <aside data-testid="side" /> });
-    const area = container.querySelector('.sync-content-area') as HTMLElement;
-    expect(area.querySelector('[data-testid="side"]')).not.toBeNull();
-    // Second column, after the main panel.
-    expect(area.children[0].className).toBe('sync-main-panel');
-  });
-
-  it('omits it entirely when there is none', () => {
-    const { container } = renderShell();
-    expect(container.querySelector('.sync-content-area')?.children).toHaveLength(1);
-  });
-
+describe('the tab opener', () => {
   it('hands the host an opener that switches tabs like a click does', () => {
     // The import tab has to send the user to Mirrored after a write
     // (sync-services.js 449-455) and the shell owns tab state, so it registers
@@ -505,23 +492,6 @@ describe('the sidebar slot', () => {
     act(() => open?.('spotify-public'));
     expect(document.querySelector('[data-testid="routed-panel"]')).not.toBeNull();
     expect(onTabChange).toHaveBeenCalledTimes(1);
-  });
-
-  it('widens the grid to two columns only while the sidebar is shown', () => {
-    // showSyncSidebar/hideSyncSidebar (downloads.js 4041-4057) set
-    // gridTemplateColumns inline alongside the sidebar's own display. The port
-    // splits them — each element's visibility lives with the component that
-    // renders it — so the shell owns this half and the sidebar owns the other.
-    const closed = renderShell({ sidebar: <aside /> });
-    expect(closed.container.querySelector('.sync-content-area')?.className).toBe(
-      'sync-content-area',
-    );
-    closed.unmount();
-
-    const open = renderShell({ sidebar: <aside />, sidebarVisible: true });
-    expect(open.container.querySelector('.sync-content-area')?.className).toBe(
-      'sync-content-area sync-content-area--with-sidebar',
-    );
   });
 });
 

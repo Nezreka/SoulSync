@@ -42,6 +42,8 @@ Invites **run out after** a chosen time — 1 day, 3 days, 1 week, or 30 days. T
 
 Accepting the link spends it (one use), then creates the profile with the invite's pages, download rights, side access, kids limits, and request quota. The person picks a name, an optional PIN, and a login password when login mode is on.
 
+While sign-in is **OIDC only** there's no password: the invite page sends the person to your provider, and the account they sign in with there is linked to the new profile. The link is only spent when they come back signed in, so giving up at the provider leaves it usable. An account that already has a profile here is turned away, and the provider's required group still applies.
+
 ## Turning a profile off
 
 Admins can **Turn off** a profile without deleting it. Everything of theirs is kept, but nobody can open it until it's turned back on — anyone using it right now is signed out everywhere immediately. You can't turn off the owner (profile 1) or yourself.
@@ -135,6 +137,20 @@ Any profile (or an admin for them) can set a **recovery question and answer** as
 ## Forgot the admin PIN?
 
 The owner can clear their PIN by proving they run the install: enter any configured service credential (for example the Spotify client secret or the Plex token). That only works for the main admin profile — a member's forgotten PIN is the admin's to reset from Manage Profiles.
+
+## OIDC callback URL
+
+Settings > Security > Sign in with OIDC shows the callback URL to register at your provider. It's the one SoulSync will actually send, so register it exactly. Behind a reverse proxy that serves https, SoulSync uses https when the proxy sends \`X-Forwarded-Proto\` (Nginx Proxy Manager, Traefik and Caddy do; plain nginx needs \`proxy_set_header X-Forwarded-Proto $scheme;\`). If the page warns that SoulSync sees plain http, turn on **Behind a reverse proxy** and restart, or set the **Callback URL override** to your https address.
+
+## OIDC only
+
+Settings > Security > Sign in with OIDC has an **OIDC only** switch. With it on, the provider is the only way in: password sign-in, the recovery question, Sign in with Plex and switching profiles with a password all stop working, and anyone signed in some other way is signed out. API keys keep working.
+
+To turn it on you have to be signed in with OIDC yourself, and every profile that isn't turned off needs an OIDC connection (each person connects from My Account first). A profile can't be made by hand while it's on: send an invite, or let OIDC sign-up make it.
+
+Passwords aren't deleted. They just aren't used, and work again when the switch is off. The admin's password can't be removed while login mode is on, because it's the way back in.
+
+**If the provider is down:** set \`SOULSYNC_OIDC_ONLY_OVERRIDE=off\` on the container and restart. OIDC only is off while it's set (the saved setting stays on), so you can sign in with the admin password and fix things. An amber shield joins the buttons at the bottom right for admins as a reminder. Remove the variable and restart to turn OIDC only back on.
 `
         },
         {

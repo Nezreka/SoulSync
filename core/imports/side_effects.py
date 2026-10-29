@@ -12,6 +12,7 @@ from core.settings import config_manager
 from core.imports.context import (
     extract_artist_name,
     get_import_clean_album,
+    has_real_album_name,
     get_import_clean_artist,
     get_import_clean_title,
     get_import_context_album,
@@ -90,15 +91,29 @@ def _retention_provenance_json(context: Dict[str, Any]) -> tuple[str | None, str
 # Tiny SQL allowlist for the fill-empty helpers — prevents accidental
 # SQL injection through the f-string column-name interpolation. Only
 # columns the soulsync library write path ever updates are listed.
+# soul_id is deliberately absent: it is a computed key owned by the
+# SoulID worker (kinded_v2, derived from the row's own names). Filling it
+# from an import payload would pin the row to whatever scheme the source
+# used and the worker would never correct it (it only fills empty ids).
 _SOULSYNC_FILLABLE_COLUMNS = {
     "artists": frozenset({"thumb_url", "genres", "summary", "spotify_artist_id",
-                          "itunes_artist_id", "deezer_id", "discogs_id", "soul_id",
+                          "itunes_artist_id", "deezer_id", "discogs_id",
                           "hifi_artist_id"}),
     "albums": frozenset({"thumb_url", "genres", "year", "track_count", "duration",
                          "record_type",
                          "spotify_album_id", "itunes_album_id", "deezer_id",
-                         "discogs_id", "soul_id", "hifi_album_id"}),
+                         "discogs_id", "hifi_album_id"}),
 }
+
+# Columns the SoulID worker owns outright. The hydrabase source map
+# (get_library_source_id_columns) points at them — a peer's id for an
+# entity IS its soul_id — but the peer's value was minted under the
+# peer's scheme, so an import must never write it into a local row: the
+# local worker mints the local id from the row's own names. The
+# fill-empty helpers are closed via the allowlist above; the insert
+# branches in record_soulsync_library_entry write the source id
+# directly, so they check this set explicitly.
+_WORKER_OWNED_ID_COLUMNS = frozenset({"soul_id", "album_soul_id"})
 
 
 def _fill_empty_mb_release_id(cursor, album_id: Any, release_id: str) -> None:
@@ -407,6 +422,9 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
         qobuz_track_id = _embedded("QOBUZ_TRACK_ID")
         musicbrainz_recording_id, recording_disambiguation = _recording_identity(context)
         audiodb_id = _embedded("AUDIODB_TRACK_ID")
+        # Provenance only: the tag a file carries is recorded as history,
+        # never copied back into tracks.soul_id (worker-owned — the
+        # provenance backfill map deliberately has no soul_id entry).
         soul_id = _embedded("SOUL_ID")
         isrc = context.get("_isrc")
         acquired_quality_json, retention_json = _retention_provenance_json(context)
@@ -560,8 +578,16 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         else:
             if album_info and isinstance(album_info, dict):
                 album_name = album_info.get("album_name", "")
-            if not album_name:
-                album_name = album_ctx.get("name", "") or original_search.get("album", "")
+            if not has_real_album_name(album_name):
+                # Never record the 'Unknown Album' placeholder as the
+                # library album — the album-mismatch tool reads this row.
+                # Skip placeholder candidates and fall through to the
+                # track title, like album-less singles.
+                album_name = ""
+                for _album_candidate in (album_ctx.get("name", ""), original_search.get("album", "")):
+                    if has_real_album_name(_album_candidate):
+                        album_name = _album_candidate
+                        break
         if not album_name:
             album_name = track_info.get("name", "Unknown")
 
@@ -790,7 +816,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     f"INSERT INTO artists ({', '.join(_a_cols)}) VALUES ({', '.join(_a_vals)})",
                     _a_params,
                 )
-                if artist_source_col and artist_source_id:
+                if (artist_source_col and artist_source_id
+                        and artist_source_col not in _WORKER_OWNED_ID_COLUMNS):
                     try:
                         cursor.execute(
                             f"UPDATE artists SET {artist_source_col} = ? WHERE id = ?",
@@ -900,7 +927,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     f"INSERT INTO albums ({', '.join(_al_cols)}) VALUES ({', '.join(_al_vals)})",
                     _al_params,
                 )
-                if album_source_col and album_source_id:
+                if (album_source_col and album_source_id
+                        and album_source_col not in _WORKER_OWNED_ID_COLUMNS):
                     try:
                         cursor.execute(
                             f"UPDATE albums SET {album_source_col} = ? WHERE id = ?",
@@ -1058,7 +1086,8 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                         f"track id still collides after retries: {final_path}"
                     )
                 track_source_col = source_columns.get("track")
-                if track_source_col and track_source_id:
+                if (track_source_col and track_source_id
+                        and track_source_col not in _WORKER_OWNED_ID_COLUMNS):
                     try:
                         cursor.execute(
                             f"UPDATE tracks SET {track_source_col} = ? WHERE id = ?",
@@ -1069,6 +1098,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                         # source's id family — never write a cross-source
                         # (Spotify) album id into it.
                         if (track_album_col and album_source_id
+                                and track_album_col not in _WORKER_OWNED_ID_COLUMNS
                                 and not _own_album_id_cross_source):
                             cursor.execute(
                                 f"UPDATE tracks SET {track_album_col} = ? WHERE id = ?",

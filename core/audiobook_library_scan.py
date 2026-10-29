@@ -113,7 +113,7 @@ def scan(root: Optional[str] = None, db: Any = None, progress=None,
          match_catalog: bool = False, match_limit: int = 25, client=None) -> Dict[str, Any]:
     """Read files, reconcile inventory, then optionally match a bounded catalogue batch."""
     from core.audiobook_database import get_audiobook_db
-    from core.audiobook_organizer import library_root
+    from core.audiobook_organizer import library_roots
     from core.audiobook_library_metadata import read_metadata
     from core.audiobook_library_inventory import discover
     if not _SCAN_LOCK.acquire(blocking=False):
@@ -132,18 +132,27 @@ def scan(root: Optional[str] = None, db: Any = None, progress=None,
         summary["error"] = f"Could not fully scan {path}: {detail}"
         logger.warning(summary["error"])
     try:
-        root_path = Path(str(root or library_root())).resolve()
+        # the main folder, then any extra ones (a second drive); an explicit
+        # root scans just that one
+        roots = [Path(str(r)).resolve() for r in ([root] if root else library_roots())]
+        root_path = roots[0]
         summary["root"] = str(root_path)
         database = db if db is not None else get_audiobook_db()
         report()
         if not root_path.is_dir():
             summary.update(missing_root=True, status="error", error="The audiobook folder is not reachable. Check its setting and mount.")
             return summary
+        # an unplugged extra drive is skipped, not an error: its books stay
+        # in the library (the cleanup below only looks inside scanned folders)
+        scanned = [r for r in roots if r.is_dir()]
+        summary["unreachable"] = [str(r) for r in roots if r not in scanned]
+        for missing in summary["unreachable"]:
+            logger.warning("Audiobook folder not reachable, its books are kept as they are: %s", missing)
         rows = database.get_library()
         downloads = database.get_downloads()
         by_path = {_key(Path(r["path"])): r for r in rows if r.get("path")}
         ids = {r["asin"] for r in rows}
-        groups = discover(root_path, database, error)
+        groups = [group for folder in scanned for group in discover(folder, database, error)]
         summary["found"] = len(groups)
         seen_ids, seen_files = set(), set()
         for index, group in enumerate(groups):
@@ -211,14 +220,15 @@ def scan(root: Optional[str] = None, db: Any = None, progress=None,
             finally:
                 if index % 10 == 0:
                     report()
-        if not root_path.is_dir():
-            error(root_path,"Folder became unavailable during the scan")
+        for folder in scanned:
+            if not folder.is_dir():
+                error(folder, "Folder became unavailable during the scan")
         if not summary["errors"]:
             for row in rows:
                 if row["asin"] in seen_ids or not row.get("path"):
                     continue
                 path = Path(row["path"])
-                if not path.resolve().is_relative_to(root_path):
+                if not any(path.resolve().is_relative_to(folder) for folder in scanned):
                     continue
                 try:
                     old_files = row.get("file_paths") or []

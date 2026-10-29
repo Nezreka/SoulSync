@@ -35,9 +35,14 @@ from core.video.slskd_download import (
 
 logger = get_logger("video.download_monitor")
 
-_INTERVAL = 3            # seconds between polls
+_INTERVAL = 3            # seconds between polls while downloads are active
+_IDLE_INTERVAL = 30      # seconds between polls when nothing is in flight (#1905):
+                         # every poll opens fresh SQLite connections, so polling an
+                         # empty queue at the active cadence burned CPU all day idle
 _started = False
 _lock = threading.Lock()
+_wake_event = threading.Event()   # set by ensure_started() so a fresh grab
+                                  # interrupts the idle sleep at once (#1905)
 
 
 def _scene_alt(ctx):
@@ -207,10 +212,16 @@ def _protected_roots() -> set:
     try:
         from api.video import get_video_db
         db = get_video_db()
-        for key in ("movies_path", "tv_path", "youtube_path", "transfer_path"):
+        # anime too: an emptied anime folder is a library root, not a leftover
+        for key in ("movies_path", "tv_path", "anime_path", "youtube_path", "transfer_path"):
             v = db.get_setting(key)
             if v:
                 roots.add(os.path.abspath(str(v)))
+        from core.video.library_roots import four_k_path
+        for kind in ("movie", "episode"):
+            v = four_k_path(db, kind)
+            if v:
+                roots.add(os.path.abspath(v))
     except Exception:   # noqa: BLE001
         pass
     return roots
@@ -241,6 +252,14 @@ def _sweep_import_temps(db) -> int:
             v = None
         if v:
             roots.add(os.path.abspath(str(v)))
+    try:
+        from core.video.library_roots import four_k_path
+        for kind in ("movie", "episode"):
+            v = four_k_path(db, kind)
+            if v:
+                roots.add(os.path.abspath(v))
+    except Exception:   # noqa: BLE001 - the sweep is best-effort
+        pass
     try:
         from core.settings import config_manager
         dl_dir = str(config_manager.get("soulseek.download_path", "") or "")
@@ -316,8 +335,9 @@ def _make_organizer(db):
         except Exception:   # noqa: BLE001 - a probe crash must not block the import
             probe_info = None
         plan = plan_import(dl, src, list_dir=fs.list_dir, probe=probe_info,
-                           settings=settings, library_dir=_owned_library_dir(db, dl),
-                           expected_duration_sec=_expected_duration_sec(db, dl))
+                           settings=settings, library_dir=_owned_library_dir(db, dl, settings),
+                           expected_duration_sec=_expected_duration_sec(db, dl),
+                           ids=template_ids(db, dl, settings))
         if _pre_persist_dest and plan["action"] in ("import", "upgrade") and plan.get("dest"):
             try:
                 db.update_video_download(dl["id"], dest_path=plan["dest"]["path"])
@@ -531,6 +551,63 @@ def _media_ids(db, dl):
         except Exception:   # noqa: BLE001
             return (None, None)
     return (None, None)
+
+
+_ID_TOKENS = {"tmdb_id": ("$tmdbid", "${tmdbid}"), "imdb_id": ("$imdbid", "${imdbid}"),
+              "tvdb_id": ("$tvdbid", "${tvdbid}")}
+
+
+def template_ids(db, dl, settings, *, tmdb_lookup=None):
+    """{tmdb_id, imdb_id, tvdb_id, year} for the naming template's id tokens and
+    its $year -- an episode's are its show's (the show's first-air year). The
+    library row answers first (by row id for a library re-grab, by TMDB id
+    otherwise); TMDB is asked, once, only when the template uses an id or the
+    year the library doesn't have. Never raises; a value that can't be found
+    is None and renders empty.
+
+    The year is for NAMING: a grab's own context has none for a show not in
+    the library yet, or for a repair grab, and the importer only falls back to
+    this one when the grab carried none.
+
+    ``tmdb_lookup(kind, tmdb_id) -> detail`` is injectable for tests; the
+    default is the enrichment engine's full TMDB detail."""
+    out = {"tmdb_id": None, "imdb_id": None, "tvdb_id": None, "year": None}
+    try:
+        dl = dl or {}
+        kind = "movie" if str(dl.get("kind") or "").lower() == "movie" else "show"
+        if str(dl.get("kind") or "").lower() == "youtube" or not dl.get("media_id"):
+            return out
+        src = str(dl.get("media_source") or "").lower()
+        if src == "library":
+            out.update(db.video_external_ids(kind, media_id=dl.get("media_id")))
+            out["year"] = db.video_title_year(kind, media_id=dl.get("media_id"))
+        elif src == "tmdb":
+            out["tmdb_id"] = int(dl.get("media_id"))
+            found = db.video_external_ids(kind, tmdb_id=out["tmdb_id"])
+            out.update({k: v for k, v in found.items() if v})
+            out["year"] = db.video_title_year(kind, tmdb_id=out["tmdb_id"])
+        else:
+            return out
+        if kind == "movie":
+            out["tvdb_id"] = None
+        tmpl = str((settings or {}).get("movie_template" if kind == "movie" else "episode_template")
+                   or "")
+        wanted = [k for k, toks in _ID_TOKENS.items()
+                  if any(t in tmpl for t in toks) and not (kind == "movie" and k == "tvdb_id")]
+        if any(t in tmpl for t in ("$year", "${year}")):
+            wanted.append("year")
+        if out["tmdb_id"] and any(out[k] is None for k in wanted):
+            lookup = tmdb_lookup
+            if lookup is None:
+                from core.video.enrichment.engine import get_video_enrichment_engine
+                lookup = get_video_enrichment_engine().tmdb_full_detail
+            d = lookup(kind, out["tmdb_id"]) or {}
+            for k in wanted:
+                if out[k] is None and d.get(k):
+                    out[k] = d.get(k)
+    except Exception:   # noqa: BLE001 - an id is a naming nicety, never a blocker
+        logger.debug("template id resolution failed", exc_info=True)
+    return out
 
 
 def write_sidecars(db, dl, dest_path, settings, fs):
@@ -1027,31 +1104,107 @@ def _wishlist_ids(db, dl):
             ctx.get("season"), ctx.get("episode"), ctx)
 
 
-def _owned_library_dir(db, dl):
+def _owned_library_dir(db, dl, settings=None):
     """The REAL local folder of the copy the library already owns for this
     download's target, or None for brand-new items. The DB stores the SERVER's
     view of the file path (Plex part.file / Jellyfin Path — a different Docker
     mount, drive letter, or NAS export from here); the video path resolver
     re-roots it against the folders SoulSync knows. This is what makes an
     upgrade replace the copy WHERE IT LIVES instead of forking a second copy
-    into the template location. Best-effort — None falls back to the template."""
+    into the template location. Best-effort — None falls back to the template.
+
+    A NEW episode of a show the library already owns has no file of its own, so
+    it is placed beside the show's other episodes: the same season's folder, or
+    for a new season the show's folder plus the template's own season folder.
+    Without this, a library whose show folders don't match the episode template
+    (an imported Sonarr library, a renamed folder) split every show in two the
+    first time a new episode arrived."""
     try:
         import os as _os
 
-        from core.video.path_resolver import resolve_video_file_path, video_base_dirs
-        kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        from core.video.path_resolver import (
+            resolve_video_dir, resolve_video_file_path, video_base_dirs)
+        kind, tmdb_id, sn, en, ctx = _wishlist_ids(db, dl)
         if kind == "youtube" or not tmdb_id:
             return None
         stored = db.video_stored_file_path("movie" if kind == "movie" else "episode",
                                            tmdb_id=int(tmdb_id), season=sn, episode=en)
-        if not stored:
+        base_dirs = video_base_dirs(db)
+        if stored:
+            resolved = resolve_video_file_path(stored["path"], base_dirs,
+                                               size_bytes=stored.get("size_bytes"))
+            if resolved:
+                return _os.path.dirname(resolved)
+            # renamed in place since the server last reported it: the file's
+            # folder still says where the title lives
+            floor = 1 if kind == "movie" else _show_folder_floor(settings, ctx, sn)
+            return resolve_video_dir(stored["path"], base_dirs, min_segments=floor)
+        if kind != "episode" or sn is None:
             return None
-        resolved = resolve_video_file_path(stored["path"], video_base_dirs(db),
-                                           size_bytes=stored.get("size_bytes"))
-        return _os.path.dirname(resolved) if resolved else None
+        return _owned_show_dir(db, int(tmdb_id), sn, ctx, settings, base_dirs,
+                               resolve_video_file_path)
     except Exception:   # noqa: BLE001 - resolution is an assist, never a blocker
         logger.debug("owned-library-dir resolution failed", exc_info=True)
         return None
+
+
+def _show_folder_floor(settings, ctx, season) -> int:
+    """How many folder segments an episode's folder must match to be trusted
+    when re-rooting it by folder alone: the show folder plus the template's
+    folders below it (a bare 'Season 01' never stands in for a show). Two when
+    the template has no series folder to count from."""
+    from core.video import organization
+    ctx = ctx if isinstance(ctx, dict) else {}
+    tail = organization.episode_folders_below_series(
+        settings, {"series": ctx.get("title"), "year": ctx.get("year"), "season": season})
+    return len(tail) + 1 if tail is not None else 2
+
+
+def _owned_show_dir(db, tmdb_id, season, ctx, settings, base_dirs, resolve):
+    """Where a new episode of an owned show goes, from one of the show's owned
+    episodes. Same season: that episode's folder. Another season: climb from it
+    to the show folder by the template's own depth below the series folder, then
+    descend into the template's folders for the new season. The climb must stay
+    strictly inside a library folder, or the template path is used instead."""
+    import os as _os
+
+    from core.video import organization
+    from core.video.path_resolver import resolve_video_dir
+    sib = db.video_show_episode_file_path(tmdb_id, season=season)
+    if not sib:
+        return None
+    ctx = ctx if isinstance(ctx, dict) else {}
+    base = {"series": ctx.get("title"), "year": ctx.get("year")}
+    sib_tail = organization.episode_folders_below_series(
+        settings, dict(base, season=sib.get("season_number")))
+    resolved = resolve(sib["path"], base_dirs, size_bytes=sib.get("size_bytes"))
+    if resolved:
+        ep_dir = _os.path.dirname(resolved)
+    else:
+        # the sibling was renamed in place since the server last reported it
+        # (a rename pass): its folder is still the show's folder
+        ep_dir = resolve_video_dir(sib["path"], base_dirs,
+                                   min_segments=_show_folder_floor(settings, ctx,
+                                                                   sib.get("season_number")))
+        if not ep_dir:
+            return None
+    try:
+        same_season = int(sib.get("season_number")) == int(season)
+    except (TypeError, ValueError):
+        same_season = False
+    if same_season:
+        return ep_dir
+    new_tail = organization.episode_folders_below_series(settings, dict(base, season=season))
+    if sib_tail is None or new_tail is None:
+        return None
+    show_dir = ep_dir
+    for _ in sib_tail:
+        show_dir = _os.path.dirname(show_dir)
+    show_norm = _os.path.normpath(show_dir)
+    inside = any(show_norm.startswith(_os.path.normpath(b) + _os.sep) for b in base_dirs if b)
+    if not inside:
+        return None
+    return _os.path.join(show_dir, *new_tail) if new_tail else show_dir
 
 
 def _wishlist_failed(db, dl) -> None:
@@ -1435,7 +1588,17 @@ def _spawn_requery(dl_id) -> None:
                      name="video-dl-requery-%s" % dl_id).start()
 
 
-def _tick(db) -> None:
+def _tick(db) -> bool:
+    """Poll the non-YouTube active downloads once. Returns True when any row
+    was in flight (the caller keeps the fast poll cadence), False when the
+    queue is empty (the caller backs off to the idle cadence, #1905).
+
+    This is the loop's authority for "any row in flight": its check covers
+    every row get_active_video_downloads() returns, including YouTube and
+    'searching' rows it does not process itself (a YouTube row mid-merge
+    is status 'importing' with import_phase 'merging', so it is covered
+    too). _recover_youtube by contrast reports only its own actions
+    (recovered / started), so _run ORs the two."""
     all_active = db.get_active_video_downloads()
     # Re-adopt any 'searching' row whose requery thread is gone (its state is in-memory,
     # so a restart/crash mid-requery would otherwise strand it forever — _tick skips
@@ -1456,7 +1619,10 @@ def _tick(db) -> None:
               if d.get("status") != "searching" and d.get("source") != "youtube"]
     if not active:
         _misses.clear()
-        return
+        # Rows this tick did not process can still mean work is in flight:
+        # 'searching' rows are owned by their requery thread and YouTube rows
+        # by their workers / the recovery pump — either keeps the fast cadence.
+        return bool(all_active)
     from core.settings import config_manager
     download_dir = str(config_manager.get("soulseek.download_path", "") or "")
     transfers = list_downloads() if any(d.get("source") not in ("torrent", "usenet")
@@ -1572,22 +1738,30 @@ def _tick(db) -> None:
             notify_batch_complete({"completed": completed_now})
         except Exception:
             logger.exception("video monitor: batch-complete notify failed")
+    return True
 
 
-def _recover_youtube(db_provider) -> None:
+def _recover_youtube(db_provider) -> bool:
     """Re-adopt orphaned YouTube downloads (stranded at 'downloading' or 'importing'/
     'merging' when a restart killed their worker thread) + keep the YouTube queue pumped.
     Guarded on its own — a YouTube hiccup must never wedge the slskd/torrent monitor.
     YouTube rows are owned by their yt-dlp worker (not the slskd/client poll below), so
-    this is their ONLY reliable recovery path once the process that owned them is gone."""
+    this is their ONLY reliable recovery path once the process that owned them is gone.
+    Returns True when it recovered or started anything, False when it had
+    nothing to do. False does NOT mean no YouTube work is in flight — rows
+    held by live workers need no recovery and are reported by _tick, whose
+    active-row check is the loop's in-flight authority (#1905)."""
     try:
         from core.video.youtube_download import recover_and_pump
         recovered, started = recover_and_pump(db_provider)
         if recovered or started:
             logger.info("youtube recovery: re-queued %d orphan(s), started %d worker(s)",
                         recovered, started)
+            return True
+        return False
     except Exception:
         logger.exception("youtube recovery pass failed")
+        return True   # a failed pass retries at the fast cadence, as before
 
 
 _RUNTIME_REQUEUE_KEY = "runtime_rule_requeue_v1"
@@ -1650,26 +1824,61 @@ def _run(db_provider) -> None:
     except Exception:
         logger.exception("video runtime-reject requeue failed")
     while True:
+        _wake_event.clear()
+        worked = False
         try:
             db = db_provider()
             if db is not None:
-                _recover_youtube(db_provider)   # re-adopt orphaned youtube rows + pump the queue
-                _tick(db)
+                yt_worked = _recover_youtube(db_provider)   # re-adopt orphaned youtube rows + pump the queue
+                tick_worked = _tick(db)
+                worked = yt_worked or tick_worked
         except Exception:
             logger.exception("video download monitor tick failed")
-        time.sleep(_INTERVAL)
+            worked = True   # a failed pass retries at the fast cadence, as before
+        # #1905: an empty queue needs no 3s poll — each pass opens fresh
+        # SQLite connections, so idle polling was the top idle-CPU cost.
+        # The sleep is interruptible: grab paths end in ensure_started(),
+        # which sets _wake_event (read-only page polls call it with
+        # wake=False), so a row enqueued during an idle window (queued
+        # season-pack grabs and orphaned YouTube rows are MONITOR-only
+        # pickups — nothing else starts them) is picked up at once, not
+        # up to an idle interval later. Producers always commit their row
+        # BEFORE ensure_started(), so a wake erased by the clear() at the
+        # top of this loop is harmless: that pass's snapshot already saw
+        # the row. Two honest exceptions: the native YouTube queue
+        # enqueue relies on its own pump (start_next_queued) rather than
+        # ensure_started(), so a row it cannot start immediately is
+        # noticed within one idle interval; and a wake also cuts the
+        # ACTIVE sleep short, so a burst of grabs runs back-to-back
+        # passes — bounded by the number of grabs, and each pass is the
+        # work those grabs asked for.
+        # A row created by a path that never calls ensure_started() is
+        # still noticed within one idle interval. A provider returning
+        # None is not work either, so it backs off the same way.
+        _wake_event.wait(timeout=_INTERVAL if worked else _IDLE_INTERVAL)
 
 
-def ensure_started(db_provider) -> None:
-    """Start the monitor thread once (idempotent). Called when the first grab happens."""
+def ensure_started(db_provider, *, wake: bool = True) -> None:
+    """Start the monitor thread once (idempotent). Called when the first grab happens.
+
+    ``wake=False`` for read-only callers (the downloads page polls): they may
+    (re)start the thread but must not interrupt its idle sleep — a page left
+    open polling every few seconds would otherwise defeat the #1905 backoff."""
     global _started, _db_provider
     with _lock:
         _db_provider = db_provider
-        if _started:
-            return
-        _started = True
-        threading.Thread(target=_run, args=(db_provider,), daemon=True,
-                         name="video-download-monitor").start()
+        already_started = _started
+        if not _started:
+            _started = True
+            threading.Thread(target=_run, args=(db_provider,), daemon=True,
+                             name="video-download-monitor").start()
+    # Every grab calls this, started or not: wake a monitor that is in its
+    # idle sleep so the new row is picked up immediately (#1905). Read-only
+    # polls pass wake=False and skip this.
+    if wake:
+        _wake_event.set()
+    if already_started:
+        return
     # The subtitle wanted-loop rides along: it retries subtitle_wanted rows on
     # its own cadence (Phase 2, "Replace Bazarr"). Idempotent; no-op when the
     # master toggle is off.

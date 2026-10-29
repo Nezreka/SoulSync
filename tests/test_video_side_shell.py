@@ -16,7 +16,8 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="replace")
 _JS = (_ROOT / "webui" / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
-_DASH_JS = (_ROOT / "webui" / "static" / "video" / "video-dashboard.js").read_text(encoding="utf-8")
+_INIT_JS = (_ROOT / "webui" / "static" / "init.js").read_text(encoding="utf-8")
+_DASH_DIR = _ROOT / "webui" / "src" / "routes" / "dashboard" / "-video"
 _LIB_JS = (_ROOT / "webui" / "static" / "video" / "video-library.js").read_text(encoding="utf-8")
 _SCAN_JS = (_ROOT / "webui" / "static" / "video" / "video-scan.js").read_text(encoding="utf-8")
 _VSETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
@@ -41,8 +42,13 @@ _ALLOWED_WINDOW = {
     "window.VideoGet", "window.VideoWatchlist", "window.VideoYoutube", "window.VideoDownload",
     "window.VideoGrab", "window.VideoManage", "window.VideoPoster", "window.VideoIssues",
     "window.VideoRequestSheet", "window.VideoRequests",
-    "window.VideoCalendar", "window.VideoOverlayEditor", "window.VideoCollectionEditor",
+    "window.VideoOverlayEditor", "window.VideoCollectionEditor",
+    # video-side.js: the hand-off to the React calendar (the dashboard's upcoming row)
+    "window.videoOpenCalendar",
     "window.VideoSubtitles",
+    # the detail page's Your library tab (a React island) and the bridge it
+    # calls back through - both video-side
+    "window.VideoLibraryTab", "window.SoulSyncVideoDetail",
     "window.videoWorkerOrbs", "window._videoWorkerOrbsEnabled",
     "window._buildAutomationSection", "window._buildAutomationHub",
     "window._reloadVideoAutomations", "window._vdpgAnyActive", "window._reduceEffectsActive",
@@ -136,40 +142,47 @@ def test_music_sidebar_nav_still_intact():
     assert "Music Sync & Manager" in _INDEX
 
 
-# --- the video dashboard (first built page) -------------------------------
+# --- the video dashboard ---------------------------------------------------
+# React since Oct 28 2026: /dashboard?media=video, the music dashboard's layout
+# on video data (webui/src/routes/dashboard/-video, tested there with vitest).
+# These pin the shell side of the hand-off.
 
-def test_video_dashboard_subpage_present_with_expected_cards():
-    block = _section_block(
-        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"')
-    # The video landing page's own card set (redesigned Jul 2026: recently-added
-    # hero, stats, library, upcoming, tools + the two admin studio cards).
-    for card in ("recent", "stats", "library", "upcoming", "tools", "studios"):
-        assert f'data-card="{card}"' in block, f"video dashboard missing the '{card}' card"
-    # Reuses music's dashboard classes so the look matches.
-    assert 'class="dash-grid"' in block
-    assert "stat-card-dashboard" in block
-    # Driven by data, not music code: stat values carry data-video-stat hooks.
-    assert "data-video-stat=" in block
-    # Isolation + integrity contract: no inline handlers anywhere in the page.
-    assert "onclick" not in block
+def test_video_dashboard_is_handed_off_to_the_react_route():
+    assert 'data-video-subpage="video-dashboard"' not in _INDEX
+    assert "video/video-dashboard.js" not in _INDEX
+    assert not (_ROOT / "webui" / "static" / "video" / "video-dashboard.js").exists()
+    assert "'video-dashboard': 1" in _JS                 # HANDED_OFF: no url re-assert
+    assert "function gotoUnifiedDashboard" in _JS
+    assert "if (pageId === 'video-dashboard') { gotoUnifiedDashboard(mode); return; }" in _JS
+    assert "wsr.navigateToPage('dashboard', { query: { media: 'video' }" in _JS
+    # a reload or Back onto /dashboard?media=video stays on the video side
+    assert "if (path === '/dashboard') return media === 'video' ? 'video-dashboard' : null;" in _JS
+    # its permission is video-dashboard's, not the music dashboard's
+    assert "dashboard: { media: ['video'], videoPage: 'video-dashboard' }" in _INIT_JS
 
 
-def test_video_dashboard_header_matches_music_shape():
-    block = _section_block(
-        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"')
-    header = _block(block, r'<div class="dashboard-header">', "<div class=\"dash-grid\">")
-    # Same shell as music: sweep band + icon title + subtitle.
-    assert "dashboard-header-sweep" in header
-    assert "page-header-icon" in header and "header-title" in header
-    assert "header-subtitle" in header
-    # Watchlist/Wishlist quick-nav present, navigating to the video pages (no
-    # music IDs — would duplicate + bind music JS — just classes + data-goto).
-    assert "header-quick-nav" in header
-    assert 'data-video-goto="video-watchlist"' in header
-    assert 'data-video-goto="video-wishlist"' in header
-    assert 'id="watchlist-button"' not in header and 'id="wishlist-button"' not in header
-    # The enrichment-worker button row isn't built yet (will match music later).
-    assert "onclick" not in header
+def test_video_dashboard_reveals_the_react_root():
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert 'body[data-side="video"][data-video-page="video-dashboard"] #webui-react-root' in css
+    assert 'body[data-side="video"][data-video-page="video-dashboard"] #video-page-host' in css
+
+
+def test_switching_to_music_from_a_react_video_page_takes_music_home():
+    """the React page stays mounted when the side flips, so music showed the
+    video page under its own sidebar (seen on /tools?media=video)."""
+    switch = _block(_JS, r"function switchSide\(side, opts\)", "window._switchAppSide")
+    assert "onSharedVideoUrl()" in switch
+    assert "getProfileHomePage" in switch
+    helper = _block(_JS, r"function onSharedVideoUrl\(\)", "    }\n")
+    assert "parseSharedPath" in helper and "/active-downloads" in helper
+
+
+def test_video_dashboard_studio_launchers_live_in_the_shell():
+    """the tools page's studio cards carry the same data attributes; the
+    handler used to live in video-dashboard.js, which is gone."""
+    for attr in ("data-video-overlay-studio", "data-video-collection-studio",
+                 "data-video-poster-manager"):
+        assert f"[{attr}]" in _JS
 
 
 def test_video_dashboard_sweep_hidden_on_video_side():
@@ -179,20 +192,6 @@ def test_video_dashboard_sweep_hidden_on_video_side():
 
 def test_video_dashboard_has_placeholder_slot_for_unbuilt_pages():
     assert 'id="video-placeholder-slot"' in _INDEX
-
-
-def test_video_dashboard_data_module_referenced_and_isolated():
-    assert "video/video-dashboard.js" in _INDEX
-    stripped = _DASH_JS.strip()
-    assert stripped.startswith("/*") or stripped.startswith("(function")
-    assert "(function" in _DASH_JS and "})();" in _DASH_JS
-    # Decoupled from the controller: it listens for the page-shown event rather
-    # than being called directly. READING sibling-video handles (window.VideoX)
-    # is fine; the isolation contract is that it never ASSIGNS a global.
-    assert "soulsync:video-page-shown" in _DASH_JS
-    assert "addEventListener" in _DASH_JS
-    assert not re.search(r"window\.\w+\s*=[^=]", _DASH_JS), "dashboard module must not add globals"
-    assert _window_isolated(_DASH_JS)
 
 
 def test_video_library_subpage_present():
@@ -225,29 +224,20 @@ def test_video_library_module_referenced_and_isolated():
 
 
 def test_video_tools_page_has_three_scan_modes():
-    block = _block(
-        _INDEX, r'<section class="video-subpage" data-video-subpage="video-tools"', "</section>")
-    # Mode dropdown + single Scan button, same shape as the music tool card.
+    # the video tools page is the React /tools page on ?media=video now; its
+    # library scan card sits on the music ToolCard chassis
+    cards = (_ROOT / "webui" / "src" / "routes" / "tools" / "-ui" /
+             "video-tool-cards.tsx").read_text(encoding="utf-8")
+    block = cards.split("export function VideoLibraryScanCard")[1].split("// ── Server scan")[0]
     for mode in ("incremental", "full", "deep"):
         assert f'value="{mode}"' in block, f"tools page missing scan mode {mode}"
-    assert "data-video-scan-run" in block and "data-video-scan-select" in block
-    assert "data-video-scan-phase" in block          # reuses music progress markup
-    assert "tool-card" in block and "tool-card-controls" in block  # reuses music classes
-    # Matches the music Database Updater card: help button, last-scan line, stats grid.
-    assert "tool-help-button" in block
-    assert "data-video-scan-last" in block
-    assert "tool-card-stats" in block and 'data-video-scan-stat="movies"' in block
-    assert "onclick" not in block
-
-
-def test_dashboard_library_card_has_refresh_and_deep_buttons():
-    block = _section_block(
-        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"')
-    assert 'data-video-scan-mode="full"' in block   # Refresh
-    assert 'data-video-scan-mode="deep"' in block    # Deep Scan
-    assert "library-status-actions" in block
-    # The card shows live scan progress (parity with the music dashboard).
-    assert "data-video-dash-progress" in block and "data-video-dash-bar" in block
+    assert "<ToolCard" in block and "<ToolProgress" in block      # the music chassis
+    assert 'helpTool="video-scan"' in block                       # the ? button
+    assert "Last full scan" in block and "'Movies:'" in block      # last-scan line + stats
+    # started through the one scan controller, never by writing its nodes
+    assert "soulsync:video-scan-start" in block
+    assert "data-video-scan-" not in block
+    assert '<section class="video-subpage" data-video-subpage="video-tools"' not in _INDEX
 
 
 def test_scan_module_referenced_and_isolated():
@@ -301,19 +291,21 @@ def test_video_side_hides_music_api_config_and_shows_placeholders():
     assert 'data-video-test-service="tmdb"' in _INDEX and 'data-video-test-service="tvdb"' in _INDEX
 
 
-def test_dashboard_enrichment_buttons_present():
-    block = _section_block(
-        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"')
-    assert 'data-video-enrich="tmdb"' in block and 'data-video-enrich="tvdb"' in block
-    assert 'data-video-enrich="omdb"' in block       # OMDb is a full worker too
-    assert "data-video-manage-workers" in block
-    assert "video-enrich-spinner" in block          # spins while running
-    assert "onclick" not in block
-    # The Manage Workers button reuses music's classes verbatim so it's identical
-    # (icon circle + logo), but stays wired by data-attr — never an inline onclick.
-    mbtn = _block(block, r'<button class="em-manage-btn"', "</button>")
-    assert "data-video-manage-workers" in mbtn and "onclick" not in mbtn
-    assert "em-manage-btn-icon" in mbtn and "em-manage-btn-logo" in mbtn and "em-manage-btn-label" in mbtn
+def test_dashboard_enrichment_buttons_are_delegated():
+    """the buttons are React-rendered after load and remounted per visit, so a
+    click bound at init would never reach them."""
+    src = (_ROOT / "webui" / "static" / "video" / "video-enrichment.js").read_text(encoding="utf-8")
+    assert "closest('[data-video-enrich]')" in src
+    assert "closest('[data-video-manage-workers]')" in src
+    assert "window.videoEnrichmentPrime = primeOnce" in src
+    hero = (_DASH_DIR / "video-hero.tsx").read_text(encoding="utf-8")
+    assert "data-video-manage-workers" in hero and "data-video-orb-stage" in hero
+    # the page reuses #dashboard-page and .orb-stage, so it opts out of the
+    # music orbs explicitly (worker-orbs.js skips data-foreign-orbs)
+    assert hero.count('data-foreign-orbs=""') == 2
+    music = (_ROOT / "webui" / "static" / "worker-orbs.js").read_text(encoding="utf-8")
+    assert ".orb-stage:not([data-foreign-orbs])" in music
+    assert "onClick" not in hero.split("const OrbButtons")[1].split("function OrbStage")[0]
 
 
 def test_video_enrichment_module_referenced_and_isolated():
@@ -321,10 +313,11 @@ def test_video_enrichment_module_referenced_and_isolated():
     src = (_ROOT / "webui" / "static" / "video" / "video-enrichment.js").read_text(encoding="utf-8")
     assert src.strip().startswith("/*") or src.strip().startswith("(function")
     assert "(function" in src and "})();" in src
-    # The only window.* touch is the (optional) handoff to the VIDEO orbs global
-    # — never a music global, and it declares none of its own.
+    # The only window.* touches are video globals: the (optional) handoff to
+    # the VIDEO orbs, and the prime hook the React dashboard calls on mount.
+    # Never a music global.
     assert all(
-        ref == "window.videoWorkerOrbs"
+        ref in ("window.videoWorkerOrbs", "window.videoEnrichmentPrime")
         for ref in re.findall(r"window\.\w+", src)
     )
     assert "/api/video/enrichment/" in src
@@ -365,7 +358,9 @@ def test_video_settings_module_referenced_and_isolated():
     stripped = _VSETTINGS_JS.strip()
     assert stripped.startswith("/*") or stripped.startswith("(function")
     assert "(function" in _VSETTINGS_JS and "})();" in _VSETTINGS_JS
-    assert set(re.findall(r"window\.\w+", _VSETTINGS_JS)) <= {"window.refreshLibrarySummaries"}
+    # the folder checker is the shared settings helper (folder-check.js), not music
+    assert set(re.findall(r"window\.\w+", _VSETTINGS_JS)) <= {"window.refreshLibrarySummaries",
+                                                                 "window.SoulSyncFolderCheck"}
     assert "addEventListener" in _VSETTINGS_JS
     assert "/api/video/libraries" in _VSETTINGS_JS
     assert "soulsync:video-page-shown" in _VSETTINGS_JS
@@ -381,7 +376,9 @@ def test_video_worker_orbs_referenced_and_isolated():
     assert "window.workerOrbs" not in src
     # Activates only on the video dashboard (own page-awareness, not setPage).
     assert "soulsync:video-page-shown" in src
-    assert 'data-video-subpage="video-dashboard"' in src
+    # anchors the React page's stage, lazily (it mounts after this script runs)
+    assert "querySelector('[data-video-orb-stage]')" in src
+    assert "function awaitStage" in src
     assert 'data-video-enrich="tmdb"' in src and 'data-video-enrich="tvdb"' in src
     assert "data-video-manage-workers" in src
     # Same 7-second idle that triggers the floating-orb collapse as music.
@@ -614,3 +611,25 @@ def test_discover_filter_bar_has_collapse_toggle():
     assert "data-vdsc-filter-toggle" in _INDEX
     assert "_toggleFilterCollapsed" in disc_js and "vdsc-filters-collapsed" in disc_js
     assert "vdsc-filterbar--collapsed" in disc_js and ".vdsc-filterbar--collapsed" in css
+
+
+# --- the calendar is the React /calendar?media=video page --------------------
+
+def test_calendar_is_handed_off_to_react():
+    """The vanilla calendar (video-calendar.js + its subpage) is gone; the video
+    nav hands /video-calendar to the React route like the wishlist and tools."""
+    side = (_ROOT / "webui" / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
+    init = (_ROOT / "webui" / "static" / "init.js").read_text(encoding="utf-8")
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert not (_ROOT / "webui" / "static" / "video" / "video-calendar.js").exists()
+    assert "video-calendar.js" not in _INDEX
+    assert 'data-video-subpage="video-calendar"' not in _INDEX
+    # the nav entry stays, and navigate() hands it off
+    assert 'data-video-page="video-calendar"' in _INDEX
+    assert "if (pageId === 'video-calendar') { gotoUnifiedCalendar(mode); return; }" in side
+    assert "'video-calendar': 1" in side                       # never re-asserted over the react url
+    assert "if (path === '/calendar') return 'video-calendar';" in side
+    # the video calendar's permission, not a music page's
+    assert "calendar: { media: ['video'], videoPage: 'video-calendar' }" in init
+    # the react host shows on the video side for it
+    assert 'body[data-side="video"][data-video-page="video-calendar"] #webui-react-root' in css

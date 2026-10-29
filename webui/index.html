@@ -367,8 +367,6 @@
                                 <rect x="14" y="3" width="7" height="4" rx="1" />
                                 <rect x="3" y="14" width="7" height="4" rx="1" />
                                 <rect x="14" y="11" width="7" height="7" rx="1" />
-                                <line x1="5" y1="20" x2="5" y2="22" />
-                                <line x1="8" y1="19" x2="8" y2="22" />
                             </svg></span>
                         <span class="nav-text">Dashboard</span>
                     </a>
@@ -385,8 +383,6 @@
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="11" cy="11" r="8" />
                                 <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                                <line x1="11" y1="8" x2="11" y2="14" />
-                                <polyline points="8 11 11 14 14 11" />
                             </svg></span>
                         <span class="nav-text">Search</span>
                     </a>
@@ -518,6 +514,17 @@
                             </svg></span>
                         <span class="nav-text">Stats</span>
                     </a>
+                    <a class="nav-button" data-page="sample-studio" href="/sample-studio">
+                        <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="4" y1="10" x2="4" y2="14" />
+                                <line x1="8" y1="7" x2="8" y2="17" />
+                                <line x1="12" y1="4" x2="12" y2="20" />
+                                <line x1="16" y1="8" x2="16" y2="16" />
+                                <line x1="20" y1="10" x2="20" y2="14" />
+                            </svg></span>
+                        <span class="nav-text">Sample Studio</span>
+                    </a>
                     <button type="button" class="nav-section-label" data-section="system"
                         onclick="toggleNavSection(this)">
                         <span class="nav-section-title">System</span>
@@ -540,17 +547,6 @@
                             </svg></span>
                         <span class="nav-text">Chat</span>
                         <span class="issues-nav-badge hidden" id="chat-nav-badge">0</span>
-                    </a>
-                    <a class="nav-button" data-page="sample-studio" href="/sample-studio">
-                        <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
-                                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                <line x1="4" y1="10" x2="4" y2="14" />
-                                <line x1="8" y1="7" x2="8" y2="17" />
-                                <line x1="12" y1="4" x2="12" y2="20" />
-                                <line x1="16" y1="8" x2="16" y2="16" />
-                                <line x1="20" y1="10" x2="20" y2="14" />
-                            </svg></span>
-                        <span class="nav-text">Sample Studio</span>
                     </a>
                     <a class="nav-button" data-page="tools" href="/tools">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
@@ -639,7 +635,7 @@
                     </a>
                     <button type="button" class="nav-section-label" data-section="video-find"
                         onclick="toggleNavSection(this)">
-                        <span class="nav-section-title">Find</span>
+                        <span class="nav-section-title">Collect</span>
                         <svg class="nav-section-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none"
                             stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="6 9 12 15 18 9" />
@@ -674,7 +670,7 @@
                     </a>
                     <button type="button" class="nav-section-label" data-section="video-content"
                         onclick="toggleNavSection(this)">
-                        <span class="nav-section-title">Video</span>
+                        <span class="nav-section-title">Manage</span>
                         <svg class="nav-section-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none"
                             stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                             <polyline points="6 9 12 15 18 9" />
@@ -706,6 +702,15 @@
                         <span class="nav-text">Wishlist</span>
                         <span class="dl-nav-badge hidden" data-video-wishlist-badge>0</span>
                     </a>
+                    <a class="nav-button nav-idle" data-video-page="video-requests" href="/video-requests">
+                        <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <path
+                                    d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                            </svg></span>
+                        <span class="nav-text">Requests</span>
+                        <span class="dl-nav-badge hidden" data-video-requests-badge>0</span>
+                    </a>
                     <a class="nav-button" data-video-page="video-downloads" href="/video-downloads">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -715,15 +720,6 @@
                             </svg></span>
                         <span class="nav-text">Downloads</span>
                         <span class="dl-nav-badge hidden" data-video-downloads-badge>0</span>
-                    </a>
-                    <a class="nav-button nav-idle" data-video-page="video-requests" href="/video-requests">
-                        <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
-                                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                <path
-                                    d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-                            </svg></span>
-                        <span class="nav-text">Requests</span>
-                        <span class="dl-nav-badge hidden" data-video-requests-badge>0</span>
                     </a>
                     <!-- Import page hidden for now: on the video side the media server does
                      the identification, so this only ever surfaced the rare download the
@@ -744,9 +740,7 @@
                     <a class="nav-button" data-video-page="video-automations" href="/video-automations">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                <circle cx="12" cy="12" r="3" />
-                                <path
-                                    d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                                <polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
                             </svg></span>
                         <span class="nav-text">Automations</span>
                     </a>
@@ -762,7 +756,7 @@
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                 <path
-                                    d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.1-.5-.5-2.1 2.7-2.4z" />
+                                    d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
                             </svg></span>
                         <span class="nav-text">Tools</span>
                     </a>
@@ -904,653 +898,8 @@
                  off the (future) video DB — no music code is referenced. No
                  inline onclick (data-attrs + addEventListener only). -->
             <div class="page video-page" id="video-page-host">
-                <section class="video-subpage" data-video-subpage="video-dashboard">
-                    <div class="page-shell dashboard-container">
-                        <div class="dashboard-header">
-                            <div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
-                            <div class="header-text">
-                                <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon"
-                                        alt=""><span>Video Dashboard</span></h2>
-                                <p class="header-subtitle">Monitor your video library and downloads</p>
-                            </div>
-                            <!-- Video enrichment-worker buttons (isolated; poll
-                                 /api/video/enrichment, wired by video-enrichment.js).
-                                 Click toggles pause/resume; spins while running. -->
-                            <div class="header-actions">
-                                <div class="video-enrich-container" style="--ve-accent: 56, 189, 248;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="tmdb"
-                                        title="TMDB Enrichment">
-                                        <img class="video-enrich-logo" src="/static/img/brands/tmdb.svg" alt="TMDB">
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="tmdb">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">TMDB Enrichment</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No active matches
-                                                </div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="video-enrich-container" style="--ve-accent: 168, 85, 247;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="tvdb"
-                                        title="TVDB Enrichment">
-                                        <img class="video-enrich-logo" src="/static/img/brands/tvdb.svg" alt="TVDB">
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="tvdb">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">TVDB Enrichment</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No active matches
-                                                </div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="video-enrich-container" style="--ve-accent: 245, 197, 24;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="omdb"
-                                        title="OMDb Ratings">
-                                        <span class="video-enrich-glyph" aria-hidden="true">★</span>
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="omdb">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">OMDb Ratings</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No active matches
-                                                </div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="video-enrich-container" style="--ve-accent: 255, 59, 59;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="youtube"
-                                        title="YouTube Dates">
-                                        <span class="video-enrich-glyph" aria-hidden="true">&#9654;</span>
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="youtube">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">YouTube Dates</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No channels
-                                                    queued</div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="video-enrich-container" style="--ve-accent: 228, 80, 154;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="fanart"
-                                        title="fanart.tv Artwork">
-                                        <span class="video-enrich-glyph" aria-hidden="true">&#127912;</span>
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="fanart">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">fanart.tv Artwork</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No active matches
-                                                </div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="video-enrich-container" style="--ve-accent: 34, 160, 121;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="opensubtitles"
-                                        title="OpenSubtitles">
-                                        <span class="video-enrich-glyph" aria-hidden="true">&#128172;</span>
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="opensubtitles">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">OpenSubtitles</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No active matches
-                                                </div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="video-enrich-container" style="--ve-accent: 239, 68, 68;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="ryd"
-                                        title="YouTube Votes (Return YouTube Dislike)">
-                                        <span class="video-enrich-glyph" aria-hidden="true">&#128077;</span>
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="ryd">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">YouTube Votes</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No active matches
-                                                </div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="video-enrich-container" style="--ve-accent: 0, 180, 160;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="sponsorblock"
-                                        title="SponsorBlock">
-                                        <span class="video-enrich-glyph" aria-hidden="true">&#9197;</span>
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="sponsorblock">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">SponsorBlock</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No active matches
-                                                </div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="video-enrich-container" style="--ve-accent: 31, 119, 206;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="dearrow"
-                                        title="DeArrow (better YouTube titles)">
-                                        <span class="video-enrich-glyph" aria-hidden="true">&#127993;</span>
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="dearrow">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">DeArrow</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No active matches
-                                                </div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="video-enrich-container" style="--ve-accent: 237, 28, 36;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="trakt"
-                                        title="Trakt (audience rating)">
-                                        <span class="video-enrich-glyph" aria-hidden="true">&#9733;</span>
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="trakt">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">Trakt</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No active matches
-                                                </div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="video-enrich-container" style="--ve-accent: 61, 214, 192;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="tvmaze"
-                                        title="TVmaze (TV rating)">
-                                        <span class="video-enrich-glyph" aria-hidden="true">&#128250;</span>
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="tvmaze">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">TVmaze</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No active matches
-                                                </div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="video-enrich-container" style="--ve-accent: 2, 169, 255;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="anilist"
-                                        title="AniList (anime score)">
-                                        <span class="video-enrich-glyph" aria-hidden="true">&#127884;</span>
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="anilist">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">AniList</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No active matches
-                                                </div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="video-enrich-container" style="--ve-accent: 51, 153, 102;">
-                                    <button class="video-enrich-button" type="button" data-video-enrich="wikidata"
-                                        title="Wikidata (official site)">
-                                        <span class="video-enrich-glyph" aria-hidden="true">&#128279;</span>
-                                        <span class="video-enrich-spinner" aria-hidden="true"></span>
-                                    </button>
-                                    <div class="video-enrich-tooltip" data-video-enrich-tooltip="wikidata">
-                                        <div class="tooltip-content">
-                                            <div class="tooltip-header">Wikidata</div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-status">Status: <span
-                                                        data-video-enrich-status>Idle</span></div>
-                                                <div class="tooltip-current" data-video-enrich-current>No active matches
-                                                </div>
-                                                <div class="tooltip-progress" data-video-enrich-progress>Progress: 0 / 0
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <!-- Reuses music's .em-manage-btn* classes verbatim so it's
-                                     pixel-identical; wired by data-attribute (no inline
-                                     handler) via video-enrichment.js, never music's. -->
-                                <button class="em-manage-btn" type="button" data-video-manage-workers
-                                    title="Manage video enrichment workers">
-                                    <span class="em-manage-btn-icon"><img src="/static/trans2.png" alt="SoulSync"
-                                            class="em-manage-btn-logo"></span>
-                                    <span class="em-manage-btn-label">Manage Workers</span>
-                                </button>
-                            </div>
-                            <!-- Watchlist / Wishlist quick-nav (top-right corner) — same as
-                                 music; navigates to the video pages via data-video-goto. -->
-                            <div class="header-quick-nav">
-                                <button class="header-button watchlist-button" type="button"
-                                    data-video-goto="video-watchlist">
-                                    <span class="hero-btn-icon">&#128065;</span>
-                                    <span class="hero-btn-label">Watchlist</span>
-                                    <span class="hero-btn-badge" data-video-badge="watchlist">0</span>
-                                    <span class="hero-btn-shimmer"></span>
-                                </button>
-                                <button class="header-button wishlist-button" type="button"
-                                    data-video-goto="video-wishlist">
-                                    <span class="hero-btn-icon">&#11088;</span>
-                                    <span class="hero-btn-label">Wishlist</span>
-                                    <span class="hero-btn-badge" data-video-badge="wishlist">0</span>
-                                    <span class="hero-btn-shimmer"></span>
-                                </button>
-                                <button class="header-button" type="button" data-video-goto="video-issues"
-                                    data-video-issues-btn style="display:none">
-                                    <span class="hero-btn-icon">&#9873;</span>
-                                    <span class="hero-btn-label">Issues</span>
-                                    <span class="hero-btn-badge" data-video-badge="issues_open">0</span>
-                                    <span class="hero-btn-shimmer"></span>
-                                </button>
-                                <button class="header-button" type="button" data-video-goto="video-tools"
-                                    data-video-maint-btn style="display:none">
-                                    <span class="hero-btn-icon">&#128295;</span>
-                                    <span class="hero-btn-label">Findings</span>
-                                    <span class="hero-btn-badge" data-video-badge="findings_pending">0</span>
-                                    <span class="hero-btn-shimmer"></span>
-                                </button>
-                            </div>
-                        </div>
-                        <!-- Continue Watching — the resume rail.
-                             LEADS the page because "where was I" is the first
-                             question anyone brings to a media library, and it
-                             is the only half of this dashboard that is about
-                             WATCHING rather than owning.
-                             Hidden until it has rows: an empty resume rail on a
-                             fresh install is an advert for a feature you cannot
-                             use yet. video-dashboard.js unhides it. -->
-                        <section class="vcw" data-video-continue-section hidden>
-                            <div class="vcw-head">
-                                <h3 class="vcw-title">Continue watching</h3>
-                            </div>
-                            <div class="vcw-rail" data-video-continue-rail></div>
-                        </section>
-
-                        <!-- downloading now. the music dashboard shows live transfer
-                             rows, video only had three numbers in a stats card, so
-                             you could see THAT four things were downloading but not
-                             WHAT. a grid, not a list of full width rows, so a couple
-                             of downloads don't leave a band of mostly empty page.
-                             namespaced vdn-, because vdl- is the download modal's.
-                             hidden when nothing is in flight. -->
-                        <section class="vdn" data-video-dl-section hidden>
-                            <div class="vdn-head">
-                                <h3 class="vdn-title">Downloading now</h3>
-                                <!-- data-video-goto, not data-video-page. only .video-nav buttons get
-                                     the page attr wired, a plain link with it full reloads. -->
-                                <a class="vdn-all" href="/video-downloads" data-video-goto="video-downloads">All
-                                    downloads &rsaquo;</a>
-                            </div>
-                            <div class="vdn-grid" data-video-dl-list></div>
-                        </section>
-
-                        <div class="dash-grid">
-
-                            <!-- Recently Added -->
-                            <article class="dash-card" data-card="recent">
-                                <header class="dash-card__head">
-                                    <h3 class="dash-card__title">Recently Added</h3>
-                                    <p class="dash-card__sub">The newest movies &amp; shows in your library.</p>
-                                </header>
-                                <div class="dash-card__body">
-                                    <div class="video-recent-grid" data-video-recent>
-                                        <div class="video-recent-empty">Loading…</div>
-                                    </div>
-                                </div>
-                            </article>
-
-                            <!-- System Stats -->
-                            <article class="dash-card" data-card="stats">
-                                <header class="dash-card__head">
-                                    <h3 class="dash-card__title">System Stats</h3>
-                                    <p class="dash-card__sub">Live performance metrics.</p>
-                                </header>
-                                <div class="dash-card__body">
-                                    <div class="stats-grid-dashboard">
-                                        <div class="stat-card-dashboard">
-                                            <p class="stat-card-title">Active Downloads</p>
-                                            <p class="stat-card-value" data-video-stat="active-downloads">0</p>
-                                            <p class="stat-card-subtitle">Currently downloading</p>
-                                        </div>
-                                        <div class="stat-card-dashboard">
-                                            <p class="stat-card-title">Finished Downloads</p>
-                                            <p class="stat-card-value" data-video-stat="finished-downloads">0</p>
-                                            <p class="stat-card-subtitle">Completed this session</p>
-                                        </div>
-                                        <div class="stat-card-dashboard">
-                                            <p class="stat-card-title">Download Speed</p>
-                                            <p class="stat-card-value" data-video-stat="download-speed">0 KB/s</p>
-                                            <p class="stat-card-subtitle">Combined speed</p>
-                                        </div>
-                                        <div class="stat-card-dashboard">
-                                            <p class="stat-card-title">Disk Usage</p>
-                                            <p class="stat-card-value" data-video-stat="disk-usage">--</p>
-                                            <p class="stat-card-subtitle">Video library size</p>
-                                        </div>
-                                        <div class="stat-card-dashboard">
-                                            <p class="stat-card-title">System Uptime</p>
-                                            <p class="stat-card-value" data-video-stat="uptime">0m</p>
-                                            <p class="stat-card-subtitle">Application runtime</p>
-                                        </div>
-                                        <div class="stat-card-dashboard">
-                                            <p class="stat-card-title">Memory Usage</p>
-                                            <p class="stat-card-value" data-video-stat="memory">--</p>
-                                            <p class="stat-card-subtitle" data-video-stat="memory_note">Current usage
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </article>
-
-                            <!-- Library -->
-                            <article class="dash-card" data-card="library">
-                                <header class="dash-card__head">
-                                    <h3 class="dash-card__title">Library</h3>
-                                    <p class="dash-card__sub">Your collection at a glance.</p>
-                                </header>
-                                <div class="dash-card__body">
-                                    <div class="library-status-card">
-                                        <div class="library-status-glow"></div>
-                                        <div class="library-status-header">
-                                            <div class="library-status-icon">
-                                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
-                                                    stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-                                                    stroke-linejoin="round">
-                                                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                                                    <path
-                                                        d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                                                    <line x1="9" y1="7" x2="16" y2="7" />
-                                                    <line x1="9" y1="11" x2="14" y2="11" />
-                                                </svg>
-                                            </div>
-                                            <div class="library-status-info">
-                                                <h4 class="library-status-title">Library</h4>
-                                                <p class="library-status-subtitle">Movies, shows &amp; episodes</p>
-                                            </div>
-                                            <div class="library-status-actions">
-                                                <button class="library-status-btn" type="button"
-                                                    data-video-scan-mode="full">
-                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                                                        stroke="currentColor" stroke-width="2.5">
-                                                        <polyline points="23 4 23 10 17 10" />
-                                                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                                                    </svg>
-                                                    <span>Refresh</span>
-                                                </button>
-                                                <button class="library-status-btn library-status-btn-secondary"
-                                                    type="button" data-video-scan-mode="deep">
-                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                                                        stroke="currentColor" stroke-width="2">
-                                                        <circle cx="11" cy="11" r="8" />
-                                                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                                                        <line x1="11" y1="8" x2="11" y2="14" />
-                                                        <line x1="8" y1="11" x2="14" y2="11" />
-                                                    </svg>
-                                                    <span>Deep Scan</span>
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <div class="library-status-stats">
-                                            <div class="library-status-stat">
-                                                <div class="library-status-stat-icon">
-                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                                                        stroke="currentColor" stroke-width="2">
-                                                        <rect x="2" y="2" width="20" height="20" rx="2.18" />
-                                                        <line x1="7" y1="2" x2="7" y2="22" />
-                                                        <line x1="17" y1="2" x2="17" y2="22" />
-                                                        <line x1="2" y1="12" x2="22" y2="12" />
-                                                        <line x1="2" y1="7" x2="7" y2="7" />
-                                                        <line x1="2" y1="17" x2="7" y2="17" />
-                                                        <line x1="17" y1="17" x2="22" y2="17" />
-                                                        <line x1="17" y1="7" x2="22" y2="7" />
-                                                    </svg>
-                                                </div>
-                                                <div class="library-status-stat-text">
-                                                    <span class="library-status-stat-value"
-                                                        data-video-stat="movies">0</span>
-                                                    <span class="library-status-stat-label">Movies</span>
-                                                </div>
-                                            </div>
-                                            <div class="library-status-stat">
-                                                <div class="library-status-stat-icon">
-                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                                                        stroke="currentColor" stroke-width="2">
-                                                        <rect x="2" y="7" width="20" height="15" rx="2" />
-                                                        <polyline points="17 2 12 7 7 2" />
-                                                    </svg>
-                                                </div>
-                                                <div class="library-status-stat-text">
-                                                    <span class="library-status-stat-value"
-                                                        data-video-stat="shows">0</span>
-                                                    <span class="library-status-stat-label">Shows</span>
-                                                </div>
-                                            </div>
-                                            <div class="library-status-stat">
-                                                <div class="library-status-stat-icon">
-                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                                                        stroke="currentColor" stroke-width="2">
-                                                        <polygon points="5 3 19 12 5 21 5 3" />
-                                                    </svg>
-                                                </div>
-                                                <div class="library-status-stat-text">
-                                                    <span class="library-status-stat-value"
-                                                        data-video-stat="episodes">0</span>
-                                                    <span class="library-status-stat-label">Episodes</span>
-                                                </div>
-                                            </div>
-                                            <div class="library-status-stat">
-                                                <div class="library-status-stat-icon">
-                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                                                        stroke="currentColor" stroke-width="2">
-                                                        <ellipse cx="12" cy="5" rx="9" ry="3" />
-                                                        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-                                                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-                                                    </svg>
-                                                </div>
-                                                <div class="library-status-stat-text">
-                                                    <span class="library-status-stat-value"
-                                                        data-video-stat="library-size">--</span>
-                                                    <span class="library-status-stat-label">Disk Size</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="library-status-progress hidden" data-video-dash-progress>
-                                            <div class="library-status-phase" data-video-dash-phase>Scanning&hellip;
-                                            </div>
-                                            <div class="library-status-bar">
-                                                <div class="library-status-bar-fill" data-video-dash-bar
-                                                    style="width: 0%;"></div>
-                                            </div>
-                                            <div class="library-status-progress-detail" data-video-dash-detail>0 movies,
-                                                0 shows</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </article>
-
-                            <!-- Upcoming (calendar preview) -->
-                            <article class="dash-card" data-card="upcoming">
-                                <header class="dash-card__head">
-                                    <h3 class="dash-card__title">Upcoming</h3>
-                                    <p class="dash-card__sub">Airing today for the shows you follow. <a
-                                            class="dash-card__link" href="/video-calendar"
-                                            data-video-goto="video-calendar">Open calendar →</a></p>
-                                </header>
-                                <div class="dash-card__body">
-                                    <div class="video-upcoming" data-video-upcoming>
-                                        <p class="video-empty-note">Loading…</p>
-                                    </div>
-                                </div>
-                            </article>
-
-                            <!-- Quick Actions -->
-                            <article class="dash-card dash-card--quick-actions" data-card="tools">
-                                <header class="dash-card__head">
-                                    <h3 class="dash-card__title">Quick Actions</h3>
-                                    <p class="dash-card__sub">Jump straight into the video side.</p>
-                                </header>
-                                <div class="dash-card__body qa-bento">
-                                    <button class="qa-tile qa-tile--hero" type="button" data-video-poster-manager
-                                        aria-label="Open the Poster Manager">
-                                        <div class="qa-tile__topline">
-                                            <span class="qa-tile__pulse" aria-hidden="true"></span>
-                                            <span class="qa-tile__kicker">Artwork</span>
-                                        </div>
-                                        <div class="qa-tile__heading">
-                                            <strong class="qa-tile__title">Poster Manager</strong>
-                                            <p class="qa-tile__desc">Search your library and swap in a new poster —
-                                                pushed straight to your server.</p>
-                                        </div>
-                                        <div class="qa-tile__cta">
-                                            <span class="qa-tile__cta-label">Open</span>
-                                            <span class="qa-tile__cta-arrow" aria-hidden="true">&rarr;</span>
-                                        </div>
-                                    </button>
-                                    <button class="qa-tile qa-tile--minor" type="button"
-                                        data-video-goto="video-watchlist" aria-label="Open Watchlist">
-                                        <div class="qa-tile__topline">
-                                            <span class="qa-tile__kicker">Following</span>
-                                        </div>
-                                        <div class="qa-tile__heading">
-                                            <strong class="qa-tile__title">Watchlist</strong>
-                                            <p class="qa-tile__desc">Shows &amp; channels you monitor.</p>
-                                        </div>
-                                        <div class="qa-tile__cta">
-                                            <span class="qa-tile__cta-label">Open</span>
-                                            <span class="qa-tile__cta-arrow" aria-hidden="true">&rarr;</span>
-                                        </div>
-                                    </button>
-                                    <button class="qa-tile qa-tile--minor" type="button"
-                                        data-video-goto="video-downloads" aria-label="Open Downloads">
-                                        <div class="qa-tile__topline">
-                                            <span class="qa-tile__kicker">Activity</span>
-                                        </div>
-                                        <div class="qa-tile__heading">
-                                            <strong class="qa-tile__title">Downloads</strong>
-                                            <p class="qa-tile__desc">Queue, progress and history.</p>
-                                        </div>
-                                        <div class="qa-tile__cta">
-                                            <span class="qa-tile__cta-label">Open</span>
-                                            <span class="qa-tile__cta-arrow" aria-hidden="true">&rarr;</span>
-                                        </div>
-                                    </button>
-                                </div>
-                            </article>
-
-                            <!-- Studios — Overlay + Collection combined (they share the enrichment
-                                 metadata, so one card, one 'Metadata ready' widget). Each half is a
-                                 whole clickable launcher; backgrounds are painted by video-dashboard.js. -->
-                            <article class="dash-card vst-combo" data-card="studios">
-                                <header class="dash-card__head dash-card__head--withaction dash-card__head--cov">
-                                    <div class="dash-card__head-txt">
-                                        <h3 class="dash-card__title">Studios</h3>
-                                        <p class="dash-card__sub">Poster overlays &amp; smart collections — built from
-                                            your library's metadata.</p>
-                                    </div>
-                                    <div data-video-studio-coverage></div>
-                                </header>
-                                <div class="vst-combo-panels">
-                                    <button type="button" class="vst-half vst-half--overlay" data-video-overlay-studio
-                                        aria-label="Open Overlay Studio">
-                                        <span class="vst-half-bg" data-vst-bg="overlay" aria-hidden="true"></span>
-                                        <span class="vst-half-scrim" aria-hidden="true"></span>
-                                        <span class="vst-half-fg">
-                                            <span class="vst-half-eyebrow">Artwork</span>
-                                            <span class="vst-half-title">Overlay Studio</span>
-                                            <span class="vst-half-desc">Rating, resolution &amp; logo badges dropped
-                                                onto your posters — a live visual canvas.</span>
-                                            <span class="vst-half-cta">Open Studio <span
-                                                    aria-hidden="true">&rarr;</span></span>
-                                        </span>
-                                    </button>
-                                    <button type="button" class="vst-half vst-half--collection"
-                                        data-video-collection-studio aria-label="Open Collection Studio">
-                                        <span class="vst-half-bg" data-vst-bg="collection" aria-hidden="true"></span>
-                                        <span class="vst-half-scrim" aria-hidden="true"></span>
-                                        <span class="vst-half-fg">
-                                            <span class="vst-half-eyebrow">Collections</span>
-                                            <span class="vst-half-title">Collection Studio</span>
-                                            <span class="vst-half-desc">Group by studio, universe, decade, franchise or
-                                                a chart — synced to Plex/Jellyfin.</span>
-                                            <span class="vst-half-cta">Open Studio <span
-                                                    aria-hidden="true">&rarr;</span></span>
-                                        </span>
-                                    </button>
-                                </div>
-                            </article>
-
-                        </div>
-                    </div>
-                </section>
+                <!-- the video dashboard is the React /dashboard?media=video page
+                     (webui/src/routes/dashboard/-video); video-side.js hands off to it -->
                 <section class="video-subpage" data-video-subpage="video-library" hidden>
                     <!-- Reuses the music library's exact classes (.library-container,
                          .library-artist-card, .alphabet-selector, .library-search-input)
@@ -1940,130 +1289,6 @@
                         </div>
                     </div>
                 </section>
-                <!-- Calendar — upcoming TV episodes for owned shows (agenda + day
-                     strip). Built by video/video-calendar.js, styled by .vcal-* in
-                     video-side.css. -->
-                <section class="video-subpage" data-video-subpage="video-calendar" hidden>
-                    <div class="vcal-page">
-                        <div class="vcal-head">
-                            <div class="vcal-head-glow" aria-hidden="true"></div>
-                            <div class="vcal-head-row">
-                                <div class="vcal-head-titles">
-                                    <h1 class="vcal-title" data-video-cal-title>This Week</h1>
-                                    <p class="vcal-sub" data-video-cal-sub>Upcoming episodes from your shows</p>
-                                </div>
-                                <div class="vcal-controls">
-                                    <div class="vcal-nav" role="group" aria-label="Week">
-                                        <button class="vcal-nav-btn" type="button" data-video-cal-prev
-                                            aria-label="Previous week">&#8249;</button>
-                                        <button class="vcal-nav-today" type="button" data-video-cal-today>Today</button>
-                                        <button class="vcal-nav-btn" type="button" data-video-cal-next
-                                            aria-label="Next week">&#8250;</button>
-                                    </div>
-                                    <div class="vcal-views" role="group" aria-label="View">
-                                        <button class="vcal-view-btn" type="button" data-video-cal-view="cards"
-                                            title="Card view with episode art">
-                                            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"
-                                                aria-hidden="true">
-                                                <rect x="1" y="1" width="6" height="6" rx="1.6" />
-                                                <rect x="9" y="1" width="6" height="6" rx="1.6" />
-                                                <rect x="1" y="9" width="6" height="6" rx="1.6" />
-                                                <rect x="9" y="9" width="6" height="6" rx="1.6" />
-                                            </svg>
-                                            <span>Cards</span>
-                                        </button>
-                                        <button class="vcal-view-btn vcal-view-btn--on" type="button"
-                                            data-video-cal-view="compact"
-                                            title="Compact view — hide art to fit more episodes">
-                                            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"
-                                                aria-hidden="true">
-                                                <rect x="1" y="2.4" width="14" height="2.3" rx="1.1" />
-                                                <rect x="1" y="6.85" width="14" height="2.3" rx="1.1" />
-                                                <rect x="1" y="11.3" width="14" height="2.3" rx="1.1" />
-                                            </svg>
-                                            <span>Compact</span>
-                                        </button>
-                                        <button class="vcal-view-btn" type="button" data-video-cal-view="agenda"
-                                            title="Agenda — one chronological list, day by day">
-                                            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"
-                                                aria-hidden="true">
-                                                <rect x="1" y="2" width="3" height="3" rx="1" />
-                                                <rect x="6" y="2.4" width="9" height="2.2" rx="1.1" />
-                                                <rect x="1" y="8" width="3" height="3" rx="1" />
-                                                <rect x="6" y="8.4" width="9" height="2.2" rx="1.1" />
-                                            </svg>
-                                            <span>Agenda</span>
-                                        </button>
-                                    </div>
-                                    <div class="vcal-filter" role="group" aria-label="Source">
-                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button"
-                                            data-video-cal-scope="watchlist"
-                                            title="Only shows on your watchlist">Watchlist</button>
-                                        <button class="vcal-filter-btn" type="button" data-video-cal-scope="all"
-                                            title="Every airing show in your library">All library</button>
-                                    </div>
-                                    <div class="vcal-filter" role="group" aria-label="Filter">
-                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button"
-                                            data-video-cal-filter="all">All</button>
-                                        <button class="vcal-filter-btn" type="button" data-video-cal-filter="owned">In
-                                            library</button>
-                                        <button class="vcal-filter-btn" type="button"
-                                            data-video-cal-filter="missing">Missing</button>
-                                        <!-- Aired, nothing has it, nothing is looking for it. The
-                                             server decides this so the filter and the count agree. -->
-                                        <button class="vcal-filter-btn vcal-filter-btn--needs" type="button"
-                                            data-video-cal-filter="needs">Needs action</button>
-                                    </div>
-                                    <div class="vcal-filter hidden" role="group" aria-label="Movie releases"
-                                        data-video-cal-movies-wrap>
-                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button"
-                                            data-video-cal-movietype="cinema"
-                                            title="Theatrical premieres of wishlisted movies">🎬 Cinema</button>
-                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button"
-                                            data-video-cal-movietype="available"
-                                            title="Home releases (digital/physical) of wishlisted movies">🏠
-                                            Home</button>
-                                    </div>
-                                    <button class="vcal-addmissing hidden" type="button" data-video-cal-addmissing
-                                        title="Add already-aired missing episodes to your wishlist">
-                                        <span class="vcal-addmissing-ic" aria-hidden="true">&#43;</span>
-                                        <span data-video-cal-addmissing-label>Add missing to wishlist</span>
-                                    </button>
-                                    <button class="vcal-nav-btn vcal-ics-btn" type="button" data-video-cal-ical
-                                        title="Subscribe to this calendar from Google/Apple/Outlook (iCal feed)"
-                                        aria-label="Subscribe (iCal feed)">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                                            stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                            stroke-linejoin="round" aria-hidden="true">
-                                            <rect x="3" y="4" width="18" height="18" rx="2" />
-                                            <line x1="16" y1="2" x2="16" y2="6" />
-                                            <line x1="8" y1="2" x2="8" y2="6" />
-                                            <line x1="3" y1="10" x2="21" y2="10" />
-                                            <line x1="12" y1="13.5" x2="12" y2="18.5" />
-                                            <line x1="9.5" y1="16" x2="14.5" y2="16" />
-                                        </svg>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="vcal-body">
-                            <div class="vcal-loading hidden" data-video-cal-loading>
-                                <div class="loading-spinner"></div>
-                                <div class="loading-text">Loading calendar&hellip;</div>
-                            </div>
-                            <div class="vcal-hero-wrap" data-video-cal-hero></div>
-                            <div class="vcal-grid" data-video-cal-grid>
-                                <div class="vcal-cols" data-video-cal-cols></div>
-                            </div>
-                            <div class="vcal-state hidden" data-video-cal-empty>
-                                <div class="vcal-state-ic">&#128250;</div>
-                                <div class="vcal-state-title">Nothing scheduled this week</div>
-                                <div class="vcal-state-sub">No upcoming episodes for your shows in the next 7 days.
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
                 <!-- Watchlist (nav page): the shows + people you follow, split by
                      a tab switcher. Built by video/video-watchlist.js, styled by
                      .vwlp-* in video-side.css. -->
@@ -2302,6 +1527,14 @@
                             </div>
                         </div>
                         <div class="vd-body">
+                            <!-- Two tabs on a library title: the page as you know it, and Your library
+                                 (files, quality, match, monitoring) — a React island,
+                                 webui/src/features/video-library. Hidden on previews and YouTube. -->
+                            <div class="vd-tabs" data-vd-tabs role="tablist" aria-label="Page sections" hidden>
+                                <button class="vd-tab" type="button" role="tab" data-vd-tab="main" aria-selected="true">Episodes</button>
+                                <button class="vd-tab" type="button" role="tab" data-vd-tab="library" aria-selected="false">Your library</button>
+                            </div>
+                            <div class="vd-library-panel" data-vd-library-panel role="tabpanel" aria-label="Your library" hidden></div>
                             <!-- Where acquisition stands RIGHT NOW. First thing in the
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
@@ -2310,8 +1543,8 @@
                                 <div class="vd-acq" data-vd-acq></div>
                             </div>
                             <!-- Subtitle language overrides (per show/movie) — video-subtitles.js. -->
-                            <div class="vd-subcfg-section" data-vd-subcfg-section hidden>
-                                <h2 class="vd-section-h">Subtitles</h2>
+                            <div class="vd-subcfg-section vd-lib-extra" data-vd-subcfg-section hidden>
+                                <h2 class="vd-section-h">Subtitle languages</h2>
                                 <div class="vd-subcfg" data-vd-subcfg></div>
                             </div>
                             <div class="vd-ep-toolbar">
@@ -2346,11 +1579,13 @@
                                 <div class="vd-crew" data-vd-crew></div>
                                 <div class="vd-cast" data-vd-cast></div>
                             </div>
-                            <div class="vd-facts-section" data-vd-facts-section hidden>
-                                <h2 class="vd-section-h">Details</h2>
-                                <div class="vd-facts" data-vd-facts></div>
-                                <div class="vd-studios" data-vd-studios></div>
-                                <div class="vd-keywords" data-vd-keywords></div>
+                            <div class="vd-collection-section" data-vd-collection-section hidden>
+                                <h2 class="vd-section-h" data-vd-collection-title>Collection</h2>
+                                <div class="vd-similar" data-vd-collection></div>
+                            </div>
+                            <div class="vd-similar-section" data-vd-similar-section hidden>
+                                <h2 class="vd-section-h">More Like This</h2>
+                                <div class="vd-similar" data-vd-similar></div>
                             </div>
                             <div class="vd-videos-section" data-vd-videos-section hidden>
                                 <h2 class="vd-section-h">Videos</h2>
@@ -2360,23 +1595,21 @@
                                 <h2 class="vd-section-h">Photos</h2>
                                 <div class="vd-gallery" data-vd-gallery></div>
                             </div>
-                            <div class="vd-review-section" data-vd-review-section hidden>
-                                <h2 class="vd-section-h">Review</h2>
-                                <div class="vd-review" data-vd-review></div>
+                            <div class="vd-facts-section" data-vd-facts-section hidden>
+                                <h2 class="vd-section-h">About</h2>
+                                <div class="vd-facts" data-vd-facts></div>
+                                <div class="vd-studios" data-vd-studios></div>
+                                <div class="vd-keywords" data-vd-keywords></div>
                             </div>
                             <div class="vd-providers-section" data-vd-providers-section hidden>
                                 <h2 class="vd-section-h">Where to Watch</h2>
                                 <div class="vd-providers" data-vd-providers></div>
                             </div>
-                            <div class="vd-collection-section" data-vd-collection-section hidden>
-                                <h2 class="vd-section-h" data-vd-collection-title>Collection</h2>
-                                <div class="vd-similar" data-vd-collection></div>
+                            <div class="vd-review-section" data-vd-review-section hidden>
+                                <h2 class="vd-section-h">Review</h2>
+                                <div class="vd-review" data-vd-review></div>
                             </div>
-                            <div class="vd-similar-section" data-vd-similar-section hidden>
-                                <h2 class="vd-section-h">More Like This</h2>
-                                <div class="vd-similar" data-vd-similar></div>
-                            </div>
-                            <div class="vd-history-section" data-vd-history-section hidden>
+                            <div class="vd-history-section vd-lib-extra" data-vd-history-section hidden>
                                 <h2 class="vd-section-h">Acquisition History</h2>
                                 <div class="vd-history" data-vd-history></div>
                             </div>
@@ -2425,6 +1658,14 @@
                             </div>
                         </div>
                         <div class="vd-body">
+                            <!-- Two tabs on a library title: the page as you know it, and Your library
+                                 (files, quality, match, monitoring) — a React island,
+                                 webui/src/features/video-library. Hidden on previews and YouTube. -->
+                            <div class="vd-tabs" data-vd-tabs role="tablist" aria-label="Page sections" hidden>
+                                <button class="vd-tab" type="button" role="tab" data-vd-tab="main" aria-selected="true">Overview</button>
+                                <button class="vd-tab" type="button" role="tab" data-vd-tab="library" aria-selected="false">Your library</button>
+                            </div>
+                            <div class="vd-library-panel" data-vd-library-panel role="tabpanel" aria-label="Your library" hidden></div>
                             <!-- Where acquisition stands RIGHT NOW. First thing in the
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
@@ -2434,8 +1675,8 @@
                                 <div class="vd-acq" data-vd-acq></div>
                             </div>
                             <!-- Subtitle language overrides (per show/movie) — video-subtitles.js. -->
-                            <div class="vd-subcfg-section" data-vd-subcfg-section hidden>
-                                <h2 class="vd-section-h">Subtitles</h2>
+                            <div class="vd-subcfg-section vd-lib-extra" data-vd-subcfg-section hidden>
+                                <h2 class="vd-section-h">Subtitle languages</h2>
                                 <div class="vd-subcfg" data-vd-subcfg></div>
                             </div>
                             <div class="vd-cast-section" data-vd-cast-section hidden>
@@ -2446,11 +1687,13 @@
                                 <div class="vd-crew" data-vd-crew></div>
                                 <div class="vd-cast" data-vd-cast></div>
                             </div>
-                            <div class="vd-facts-section" data-vd-facts-section hidden>
-                                <h2 class="vd-section-h">Details</h2>
-                                <div class="vd-facts" data-vd-facts></div>
-                                <div class="vd-studios" data-vd-studios></div>
-                                <div class="vd-keywords" data-vd-keywords></div>
+                            <div class="vd-collection-section" data-vd-collection-section hidden>
+                                <h2 class="vd-section-h" data-vd-collection-title>Collection</h2>
+                                <div class="vd-similar" data-vd-collection></div>
+                            </div>
+                            <div class="vd-similar-section" data-vd-similar-section hidden>
+                                <h2 class="vd-section-h">More Like This</h2>
+                                <div class="vd-similar" data-vd-similar></div>
                             </div>
                             <div class="vd-videos-section" data-vd-videos-section hidden>
                                 <h2 class="vd-section-h">Videos</h2>
@@ -2460,279 +1703,29 @@
                                 <h2 class="vd-section-h">Photos</h2>
                                 <div class="vd-gallery" data-vd-gallery></div>
                             </div>
-                            <div class="vd-review-section" data-vd-review-section hidden>
-                                <h2 class="vd-section-h">Review</h2>
-                                <div class="vd-review" data-vd-review></div>
+                            <div class="vd-facts-section" data-vd-facts-section hidden>
+                                <h2 class="vd-section-h">About</h2>
+                                <div class="vd-facts" data-vd-facts></div>
+                                <div class="vd-studios" data-vd-studios></div>
+                                <div class="vd-keywords" data-vd-keywords></div>
                             </div>
                             <div class="vd-providers-section" data-vd-providers-section hidden>
                                 <h2 class="vd-section-h">Where to Watch</h2>
                                 <div class="vd-providers" data-vd-providers></div>
                             </div>
-                            <div class="vd-collection-section" data-vd-collection-section hidden>
-                                <h2 class="vd-section-h" data-vd-collection-title>Collection</h2>
-                                <div class="vd-similar" data-vd-collection></div>
+                            <div class="vd-review-section" data-vd-review-section hidden>
+                                <h2 class="vd-section-h">Review</h2>
+                                <div class="vd-review" data-vd-review></div>
                             </div>
-                            <div class="vd-similar-section" data-vd-similar-section hidden>
-                                <h2 class="vd-section-h">More Like This</h2>
-                                <div class="vd-similar" data-vd-similar></div>
-                            </div>
-                            <div class="vd-history-section" data-vd-history-section hidden>
+                            <div class="vd-history-section vd-lib-extra" data-vd-history-section hidden>
                                 <h2 class="vd-section-h">Acquisition History</h2>
                                 <div class="vd-history" data-vd-history></div>
                             </div>
                         </div>
                     </div>
                 </section>
-                <section class="video-subpage" data-video-subpage="video-tools" hidden>
-                    <div class="page-shell tools-page-container">
-                        <div class="dashboard-header">
-                            <div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
-                            <div class="header-text">
-                                <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon"
-                                        alt=""><span>Tools</span></h2>
-                                <p class="header-subtitle">Maintenance jobs and library tools</p>
-                            </div>
-                        </div>
-
-                        <!-- ── Library Maintenance (jobs & findings — the music standard, video-scoped).
-                             Same classes as the music hero (shared styling); ids are video-prefixed
-                             because both Tools pages live in this one document. Driven by
-                             video/video-repair.js against /api/video/repair. -->
-                        <div class="tools-maintenance-hero" data-video-repair>
-                            <div class="tools-maintenance-header">
-                                <div class="tools-maintenance-header-left">
-                                    <img src="/static/whisoul.png" alt="" class="tools-maintenance-logo" />
-                                    <div>
-                                        <h3 class="tools-maintenance-title">Library Maintenance</h3>
-                                        <p class="tools-maintenance-subtitle">Jobs that scan your video library and
-                                            report findings for review</p>
-                                    </div>
-                                </div>
-                                <label class="repair-master-toggle">
-                                    <input type="checkbox" id="video-repair-master-toggle">
-                                    <span class="repair-toggle-slider"></span>
-                                    <span class="repair-toggle-label" id="video-repair-master-label">Enabled</span>
-                                </label>
-                            </div>
-
-                            <div class="repair-tabs" data-video-repair-tabs>
-                                <button class="repair-tab active" type="button"
-                                    data-video-repair-tab="jobs">Jobs</button>
-                                <button class="repair-tab" type="button" data-video-repair-tab="findings">
-                                    Findings <span class="repair-tab-badge" id="video-repair-findings-tab-badge"
-                                        style="display:none">0</span>
-                                </button>
-                                <button class="repair-tab" type="button"
-                                    data-video-repair-tab="history">History</button>
-                            </div>
-
-                            <div class="repair-tab-content" id="video-repair-tab-jobs">
-                                <div class="repair-jobs-list" id="video-repair-jobs-list">
-                                    <div class="repair-loading">Loading jobs...</div>
-                                </div>
-                            </div>
-
-                            <div class="repair-tab-content" id="video-repair-tab-findings" style="display:none;">
-                                <div class="repair-findings-toolbar">
-                                    <div class="repair-findings-filters">
-                                        <select id="video-repair-findings-job-filter">
-                                            <option value="">All Jobs</option>
-                                        </select>
-                                        <select id="video-repair-findings-severity-filter">
-                                            <option value="">All Severity</option>
-                                            <option value="info">Info</option>
-                                            <option value="warning">Warning</option>
-                                        </select>
-                                        <select id="video-repair-findings-status-filter">
-                                            <option value="pending">Pending</option>
-                                            <option value="">All Status</option>
-                                            <option value="resolved">Resolved</option>
-                                            <option value="dismissed">Dismissed</option>
-                                        </select>
-                                    </div>
-                                    <label class="repair-select-all" title="Select all on this page">
-                                        <input type="checkbox" id="video-repair-select-all-cb">
-                                        <span>Select All</span>
-                                    </label>
-                                    <div class="repair-findings-bulk" id="video-repair-findings-bulk"
-                                        style="display:none;">
-                                        <span class="repair-bulk-count" id="video-repair-bulk-count"></span>
-                                        <button class="btn btn--sm btn--primary" type="button"
-                                            data-video-repair-bulk="fix">Approve Selected</button>
-                                        <button class="btn btn--sm btn--secondary" type="button"
-                                            data-video-repair-bulk="dismiss">Dismiss Selected</button>
-                                    </div>
-                                    <button class="repair-clear-btn" type="button" data-video-repair-clear
-                                        title="Clear findings matching current filters">Clear Findings</button>
-                                </div>
-                                <div class="repair-findings-list" id="video-repair-findings-list">
-                                    <div class="repair-loading">Loading findings...</div>
-                                </div>
-                                <div class="repair-findings-pagination" id="video-repair-findings-pagination"></div>
-                            </div>
-
-                            <div class="repair-tab-content" id="video-repair-tab-history" style="display:none;">
-                                <div class="repair-history-list" id="video-repair-history-list">
-                                    <div class="repair-loading">Loading history...</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- ── Studios: the visual editors, launchable as tools (they also live
-                             on the dashboard). Admin-only — hidden for non-admin profiles. -->
-                        <div class="tools-section" data-video-studios-section>
-                            <h3 class="tools-section-title">Studios</h3>
-                            <div class="tools-grid">
-                                <div class="tool-card">
-                                    <div class="tool-card-header">
-                                        <h4 class="tool-card-title">🎨 Overlay Studio</h4>
-                                        <button class="tool-help-button" data-tool="video-overlay-studio"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
-                                    <p class="tool-card-info">Design poster overlays (ratings, resolution, awards…) in a
-                                        visual editor and apply them to your whole library — filtered targeting, nightly
-                                        re-apply, clean-art restore.</p>
-                                    <div class="tool-card-controls">
-                                        <button type="button" data-video-overlay-studio>Open Overlay Studio</button>
-                                    </div>
-                                </div>
-                                <div class="tool-card">
-                                    <div class="tool-card-header">
-                                        <h4 class="tool-card-title">🗂️ Collection Studio</h4>
-                                        <button class="tool-help-button" data-tool="video-collection-studio"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
-                                    <p class="tool-card-info">Build living collections — charts, franchises, universes,
-                                        seasonal windows, smart rules — with generated posters, server sync, and
-                                        wishlist tie-ins.</p>
-                                    <div class="tool-card-controls">
-                                        <button type="button" data-video-collection-studio>Open Collection
-                                            Studio</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="tools-section">
-                            <h3 class="tools-section-title">Database &amp; Scanning</h3>
-                            <div class="tools-grid">
-                                <div class="tool-card" data-video-backups-card>
-                                    <div class="tool-card-header">
-                                        <h4 class="tool-card-title">💾 Backups</h4>
-                                        <button class="tool-help-button" data-tool="video-backups"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
-                                    <p class="tool-card-info">Verified snapshots of the video database (wishlist,
-                                        watchlist, history, settings). The nightly automation keeps a rolling set;
-                                        restore stages a swap for the next restart — your current database is set aside,
-                                        never deleted.</p>
-                                    <div class="vbk-pending hidden" data-vbk-pending>
-                                        ⏳ A restore is staged — it applies on the next restart.
-                                        <button type="button" class="vbk-cancel" data-vbk-cancel>Cancel</button>
-                                    </div>
-                                    <div class="vbk-list" data-vbk-list></div>
-                                    <div class="tool-card-controls">
-                                        <button type="button" data-vbk-create>Back up now</button>
-                                    </div>
-                                </div>
-                                <div class="tool-card" data-video-rename-card>
-                                    <div class="tool-card-header">
-                                        <h4 class="tool-card-title">✏️ Mass Rename</h4>
-                                        <button class="tool-help-button" data-tool="video-rename"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
-                                    <p class="tool-card-info">Re-render every file name to your current naming templates
-                                        (Settings → Organization). Preview first — nothing moves until you apply.
-                                        Subtitles and sidecars travel with their file; the server re-adopts the names on
-                                        its next scan.</p>
-                                    <div class="vbk-list" data-vrn-list></div>
-                                    <div class="tool-card-controls">
-                                        <button type="button" data-vrn-preview>Preview</button>
-                                        <button type="button" data-vrn-apply style="display:none">Apply renames</button>
-                                    </div>
-                                </div>
-                                <div class="tool-card">
-                                    <div class="tool-card-header">
-                                        <h4 class="tool-card-title" data-video-scan-title>Library Scan</h4>
-                                        <button class="tool-help-button" data-tool="video-scan"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
-                                    <p class="tool-card-info">Last Scan: <span data-video-scan-last>Never</span></p>
-                                    <div class="tool-card-stats">
-                                        <div class="stat-item">
-                                            <span class="stat-item-label">Movies:</span>
-                                            <span class="stat-item-value" data-video-scan-stat="movies">0</span>
-                                        </div>
-                                        <div class="stat-item">
-                                            <span class="stat-item-label">Shows:</span>
-                                            <span class="stat-item-value" data-video-scan-stat="shows">0</span>
-                                        </div>
-                                        <div class="stat-item">
-                                            <span class="stat-item-label">Episodes:</span>
-                                            <span class="stat-item-value" data-video-scan-stat="episodes">0</span>
-                                        </div>
-                                        <div class="stat-item">
-                                            <span class="stat-item-label">Size:</span>
-                                            <span class="stat-item-value" data-video-scan-stat="size">0.0 MB</span>
-                                        </div>
-                                    </div>
-                                    <div class="tool-card-controls">
-                                        <select data-video-scan-target aria-label="Which library to scan"
-                                            title="Movies and TV are separate libraries — scan one or both">
-                                            <option value="all">All Libraries</option>
-                                            <option value="movie">Movies Only</option>
-                                            <option value="show">TV Shows Only</option>
-                                        </select>
-                                        <select data-video-scan-select aria-label="Scan type">
-                                            <option value="incremental">Incremental Update</option>
-                                            <option value="full">Full Refresh</option>
-                                            <option value="deep">Deep Scan</option>
-                                        </select>
-                                        <button type="button" data-video-scan-run>Scan Library</button>
-                                    </div>
-                                    <div class="tool-card-progress-section">
-                                        <p class="progress-phase-label" data-video-scan-phase>Idle</p>
-                                        <div class="progress-bar-container">
-                                            <div class="progress-bar-fill" data-video-scan-bar style="width: 0%;"></div>
-                                        </div>
-                                        <p class="progress-details-label" data-video-scan-detail>0 movies, 0 shows</p>
-                                    </div>
-                                </div>
-                                <!-- Server Scan: tells the media server to rescan its OWN folders so
-                                     newly-downloaded files get indexed (distinct from the Library Scan
-                                     above, where SoulSync READS the server into its DB). -->
-                                <div class="tool-card">
-                                    <div class="tool-card-header">
-                                        <h4 class="tool-card-title" data-video-srvscan-title>Server Scan</h4>
-                                        <button class="tool-help-button" data-tool="video-server-scan"
-                                            title="Learn more about this tool">?</button>
-                                    </div>
-                                    <p class="tool-card-info">Tell the media server to scan its folders for
-                                        newly-downloaded movies &amp; episodes — then a Library Scan pulls them into
-                                        SoulSync.</p>
-                                    <div class="tool-card-controls">
-                                        <select data-video-srvscan-target
-                                            aria-label="Which library the server should scan"
-                                            title="Movies and TV are separate server libraries — scan one or both">
-                                            <option value="all">All Libraries</option>
-                                            <option value="movie">Movies Only</option>
-                                            <option value="show">TV Shows Only</option>
-                                        </select>
-                                        <button type="button" data-video-srvscan-run>Scan Server</button>
-                                    </div>
-                                    <div class="tool-card-progress-section">
-                                        <p class="progress-phase-label" data-video-srvscan-phase>Idle</p>
-                                        <div class="progress-bar-container">
-                                            <div class="progress-bar-fill" data-video-srvscan-bar style="width: 0%;">
-                                            </div>
-                                        </div>
-                                        <p class="progress-details-label" data-video-srvscan-detail></p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
+                <!-- Tools: the React /tools page on ?media=video (webui/src/routes/tools),
+                     handed off by gotoUnifiedTools() in video/video-side.js. -->
                 <!-- Person detail (drill-in from a cast/crew member; not a nav page).
                      Bio + filmography, every credit links back into SoulSync. Built
                      by video/video-person.js, styled by .vp-* in video-side.css. -->
@@ -4710,6 +3703,17 @@
                                                     <button type="button" data-vq-lang-mode="require">Require</button>
                                                 </div>
                                                 <div class="vq-chips" id="vq-langs" style="margin-top:10px;" hidden></div>
+                                            </div>
+                                            <div class="vq-block">
+                                                <div class="vq-label">Save to <span class="vq-hint">which library
+                                                        new titles on this profile are filed in. the 4K library is
+                                                        used once its folder is switched on in Settings &gt; Folders,
+                                                        until then they go to the main one. titles you already have
+                                                        stay put</span></div>
+                                                <div class="vq-seg" id="vq-library">
+                                                    <button type="button" data-vq-library="main">Main library</button>
+                                                    <button type="button" data-vq-library="4k">4K library</button>
+                                                </div>
                                             </div>
                                             <div class="vq-block">
                                                 <div class="vq-label">Max size <span class="vq-hint">skip anything
@@ -6952,7 +5956,7 @@
                                                 <div class="form-group">
                                                     <label>Download Folder (input):</label>
                                                     <div class="path-input-group">
-                                                        <input type="text" id="download-path" placeholder="./downloads"
+                                                        <input type="text" id="download-path" data-folder-check="music" data-folder-role="input" data-folder-label="Download folder" placeholder="./downloads"
                                                             readonly>
                                                         <button class="browse-button locked"
                                                             onclick="togglePathLock('download', this)">Unlock</button>
@@ -6964,7 +5968,7 @@
                                                 <div class="form-group">
                                                     <label>Music Library Folder (output):</label>
                                                     <div class="path-input-group">
-                                                        <input type="text" id="transfer-path" placeholder="./Transfer"
+                                                        <input type="text" id="transfer-path" data-folder-check="music" data-folder-label="Music library folder" placeholder="./Transfer"
                                                             readonly>
                                                         <button class="browse-button locked"
                                                             onclick="togglePathLock('transfer', this)">Unlock</button>
@@ -6986,7 +5990,7 @@
                                                 <div class="form-group">
                                                     <label>Import Folder:</label>
                                                     <div class="path-input-group">
-                                                        <input type="text" id="staging-path" placeholder="./Staging"
+                                                        <input type="text" id="staging-path" data-folder-check="music" data-folder-role="input" data-folder-label="Import folder" placeholder="./Staging"
                                                             readonly>
                                                         <button class="browse-button locked"
                                                             onclick="togglePathLock('staging', this)">Unlock</button>
@@ -6996,7 +6000,7 @@
                                                 <div class="form-group">
                                                     <label>Music Videos Dir:</label>
                                                     <div class="path-input-group">
-                                                        <input type="text" id="music-videos-path"
+                                                        <input type="text" id="music-videos-path" data-folder-check="music" data-folder-label="Music videos folder"
                                                             placeholder="./MusicVideos" readonly>
                                                         <button class="browse-button locked"
                                                             onclick="togglePathLock('music-videos', this)">Unlock</button>
@@ -7006,7 +6010,7 @@
                                                 <div class="form-group">
                                                     <label>Playlists Folder:</label>
                                                     <div class="path-input-group">
-                                                        <input type="text" id="playlists-materialize-path"
+                                                        <input type="text" id="playlists-materialize-path" data-folder-check="music" data-folder-label="Playlists folder"
                                                             placeholder="./Playlists" readonly>
                                                         <button class="browse-button locked"
                                                             onclick="togglePathLock('playlists-materialize', this)">Unlock</button>
@@ -7164,7 +6168,7 @@
                                                 <div class="form-group">
                                                     <label>Audiobooks Folder (output):</label>
                                                     <div class="path-input-group">
-                                                        <input type="text" id="audiobooks-path"
+                                                        <input type="text" id="audiobooks-path" data-folder-check="audiobooks" data-folder-label="Audiobooks folder"
                                                             placeholder="./audiobooks" readonly>
                                                         <button class="browse-button locked"
                                                             onclick="typeof togglePathLock==='function'?togglePathLock('audiobooks', this):((function(b){const i=document.getElementById('audiobooks-path');if(!i)return;const l=i.hasAttribute('readonly')||i.readOnly;if(l){i.removeAttribute('readonly');i.readOnly=false;i.focus();b.textContent='Lock';b.classList.remove('locked');}else{i.setAttribute('readonly','');i.readOnly=true;b.textContent='Unlock';b.classList.add('locked');}})(this))">Unlock</button>
@@ -7172,6 +6176,17 @@
                                                     <small class="settings-hint">Where downloaded audiobooks are saved
                                                         and organized. Keep this separate from your music library so a
                                                         media server does not index chapter files as albums.</small>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>More audiobook folders:</label>
+                                                    <div id="audiobooks-extra-paths"></div>
+                                                    <button type="button" class="test-button"
+                                                        onclick="addAudiobookExtraPathRow()">+ Add folder</button>
+                                                    <small class="settings-hint">An existing collection on another
+                                                        drive. SoulSync scans and manages it, but new books always land
+                                                        in the folder above. In Docker, mount it at its own container
+                                                        path, like /app/audiobooks2. If a drive is unplugged, its
+                                                        books stay in your library until it's back.</small>
                                                 </div>
                                             </div>
 
@@ -7202,7 +6217,7 @@
                                                 <div class="form-group">
                                                     <label>Podcasts Folder (output):</label>
                                                     <div class="path-input-group">
-                                                        <input type="text" id="podcasts-path" placeholder="./podcasts"
+                                                        <input type="text" id="podcasts-path" data-folder-check="podcasts" data-folder-label="Podcasts folder" placeholder="./podcasts"
                                                             readonly>
                                                         <button class="browse-button locked"
                                                             onclick="typeof togglePathLock==='function'?togglePathLock('podcasts', this):((function(b){const i=document.getElementById('podcasts-path');if(!i)return;const l=i.hasAttribute('readonly')||i.readOnly;if(l){i.removeAttribute('readonly');i.readOnly=false;i.focus();b.textContent='Lock';b.classList.remove('locked');}else{i.setAttribute('readonly','');i.readOnly=true;b.textContent='Unlock';b.classList.add('locked');}})(this))">Unlock</button>
@@ -7222,33 +6237,73 @@
                                                     &amp; YouTube libraries</span></div>
 
                                             <div class="settings-group" data-stg="library">
-
+                                                <h3>Where downloads arrive</h3>
                                                 <div class="setting-help-text">
-                                                    One shared download folder (where slskd / torrent drop files), then
-                                                    a separate library folder per type — finished files are sorted to
-                                                    the right one automatically. SEPARATE from your Music paths.
+                                                    Files land in the download folder first, then get renamed and
+                                                    moved into the right library below. Each folder gets a live check
+                                                    under it: whether SoulSync can write there and how much room is
+                                                    left. Video folders are separate from your Music folders.
+                                                </div>
+                                                <!-- settings.js applyPathsEnvironment shows the one that fits -->
+                                                <div class="setting-help-text" data-paths-guide="docker">
+                                                    <strong>Docker / Unraid detected:</strong> these start on the
+                                                    container paths your compose file maps. Leave them and map your
+                                                    real folders in the container config. Unlock one only if you mapped
+                                                    it somewhere else.
+                                                </div>
+                                                <div class="setting-help-text" data-paths-guide="native">
+                                                    <strong>Bare metal / Proxmox LXC / systemd:</strong> there is no
+                                                    container, so unlock each folder and point it at your real one.
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>Download Folder (Input — shared with Music):</label>
-                                                    <input type="text" id="video-download-path"
-                                                        placeholder="./downloads">
-                                                    <div class="setting-help-text">Where downloads land — point this at
-                                                        the same folder as your slskd / torrent client. This is the SAME
-                                                        folder as the Music side; changing it here changes it there too.
+                                                    <label for="video-download-path">Download folder (input, shared with Music):</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-download-path" placeholder="./downloads"
+                                                            readonly data-folder-check="video" data-folder-role="input"
+                                                            data-folder-label="Download folder">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-download', this)">Unlock</button>
+                                                    </div>
+                                                    <div class="setting-help-text">Point this at the same folder as
+                                                        your slskd / torrent / usenet client. It's the same setting as
+                                                        the Music side's Download Folder, so it's locked here too:
+                                                        change it and Music changes with it.
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <h3>Libraries</h3>
+                                                <div class="setting-help-text">
+                                                    Where finished downloads are filed. Point your Plex / Jellyfin /
+                                                    Emby libraries at the same folders.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label for="video-movies-path">🎬 Movies:</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-movies-path" readonly placeholder="/media/movies"
+                                                            data-folder-check="video" data-folder-label="Movies library">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-movies', this)">Unlock</button>
                                                     </div>
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>🎬 Movies Library:</label>
-                                                    <input type="text" id="video-movies-path"
-                                                        placeholder="/media/movies">
+                                                    <label for="video-tv-path">📺 TV shows:</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-tv-path" readonly placeholder="/media/tv"
+                                                            data-folder-check="video" data-folder-label="TV library">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-tv', this)">Unlock</button>
+                                                    </div>
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>📺 TV Shows Library:</label>
-                                                    <input type="text" id="video-tv-path" placeholder="/media/tv">
-                                                </div>
-                                                <div class="form-group">
-                                                    <label>🍥 Anime Library (optional):</label>
-                                                    <input type="text" id="video-anime-path" placeholder="/media/anime">
+                                                    <label for="video-anime-path">🍥 Anime (optional):</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-anime-path" readonly placeholder="/media/anime"
+                                                            data-folder-check="video" data-folder-label="Anime library">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-anime', this)">Unlock</button>
+                                                    </div>
                                                     <div class="setting-help-text">New episodes of anime shows go
                                                         here instead of the TV folder: shows in a TV library ticked Anime
                                                         (Settings &gt; Connections), shows set to Anime by hand, and shows
@@ -7257,37 +6312,97 @@
                                                         keep anime with TV.
                                                     </div>
                                                 </div>
+                                                <div class="form-group">
+                                                    <label for="video-youtube-path">▶️ YouTube:</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="video-youtube-path" readonly placeholder="/media/youtube"
+                                                            data-folder-check="video" data-folder-label="YouTube library">
+                                                        <button type="button" class="browse-button locked"
+                                                            onclick="togglePathLock('video-youtube', this)">Unlock</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <h3>4K libraries (optional)</h3>
                                                 <div class="setting-help-text">
-                                                    Movies and TV folders above are the destinations for new downloads.
-                                                    Add extra libraries below for existing collections on other drives.
-                                                    Include those libraries in your Plex/Jellyfin scan selection. In
-                                                    Docker, mount each folder at a different container path and enter
-                                                    that path here; use read-write access for renaming, upgrades, and
-                                                    recycling.
+                                                    Keep 4K copies in their own folders, like a separate Movies 4K
+                                                    library in Plex. Off until you turn one on. A title files here when
+                                                    its quality profile is set to save to the 4K library (Settings &gt;
+                                                    Quality). Titles you already have stay where they are, and their
+                                                    upgrades land beside the copy you have.
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>Additional Movie Libraries:</label>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="video-movies-4k-enabled"
+                                                            data-video-4k-toggle="movies">
+                                                        Separate 4K movies folder
+                                                    </label>
+                                                    <div class="video-4k-path" data-folder-optional data-video-4k-row="movies" hidden>
+                                                        <div class="path-input-group">
+                                                            <input type="text" id="video-movies-4k-path" readonly
+                                                                placeholder="/media/movies-4k" aria-label="4K movies folder"
+                                                                data-folder-check="video" data-folder-label="Movies 4K library">
+                                                            <button type="button" class="browse-button locked"
+                                                                onclick="togglePathLock('video-movies-4k', this)">Unlock</button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="video-tv-4k-enabled"
+                                                            data-video-4k-toggle="tv">
+                                                        Separate 4K TV folder
+                                                    </label>
+                                                    <div class="video-4k-path" data-folder-optional data-video-4k-row="tv" hidden>
+                                                        <div class="path-input-group">
+                                                            <input type="text" id="video-tv-4k-path" readonly
+                                                                placeholder="/media/tv-4k" aria-label="4K TV folder"
+                                                                data-folder-check="video" data-folder-label="TV 4K library">
+                                                            <button type="button" class="browse-button locked"
+                                                                onclick="togglePathLock('video-tv-4k', this)">Unlock</button>
+                                                        </div>
+                                                    </div>
+                                                    <div class="setting-help-text">Anime keeps its own folder when one
+                                                        is set, whatever the profile.</div>
+                                                </div>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <h3>Collections on other drives</h3>
+                                                <div class="setting-help-text">
+                                                    Extra folders SoulSync scans and manages but never downloads into,
+                                                    for an existing collection on another drive. Add them to your
+                                                    Plex / Jellyfin scan too. No need to repeat the main folder.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>More movie folders:</label>
                                                     <div id="video-movies-additional-paths"
                                                         data-video-extra-kind="movies"></div>
                                                     <button type="button" class="test-button"
-                                                        data-video-add-path="movies">+ Add Path</button>
-                                                    <div class="setting-help-text">Extra folders only — no need to
-                                                        repeat the primary folder. Example: /media/movies2</div>
+                                                        data-video-add-path="movies">+ Add folder</button>
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>Additional TV Libraries:</label>
+                                                    <label>More TV folders:</label>
                                                     <div id="video-tv-additional-paths" data-video-extra-kind="tv">
                                                     </div>
                                                     <button type="button" class="test-button" data-video-add-path="tv">+
-                                                        Add Path</button>
-                                                    <div class="setting-help-text">Extra folders only — no need to
-                                                        repeat the primary folder. Example: /media/tv2</div>
+                                                        Add folder</button>
                                                 </div>
-                                                <div class="form-group">
-                                                    <label>▶️ YouTube Library:</label>
-                                                    <input type="text" id="video-youtube-path"
-                                                        placeholder="/media/youtube">
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library" data-video-compose hidden>
+                                                <h3>Docker volumes</h3>
+                                                <div class="setting-help-text">
+                                                    In Docker every folder above is a path inside the container. Each
+                                                    one needs a line in your compose file mapping a real folder to it,
+                                                    read-write so renames, upgrades and the recycle bin work. These are
+                                                    the lines for what's set here: swap the left side for the folder on
+                                                    your machine, then recreate the container.
                                                 </div>
+                                                <pre class="video-compose-lines" id="video-compose-lines"></pre>
+                                                <button type="button" class="test-button" id="video-compose-copy">Copy
+                                                    lines</button>
                                             </div>
 
                                         </div>
@@ -8229,7 +7344,8 @@
                                                         placeholder="$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality">
                                                     <small class="settings-hint">Variables: $series, $season (01),
                                                         $seasonraw (1), $episode (01), $episodetitle, $year, $quality,
-                                                        $resolution, $source, $codec, $tvdbid.</small>
+                                                        $resolution, $source, $codec, $tmdbid, $imdbid, $tvdbid (the show's
+                                                        ids).</small>
                                                     <small class="settings-hint">Example: <code
                                                             id="vo-episode-preview">&hellip;</code></small>
                                                 </div>
@@ -9759,6 +8875,12 @@
                                                         the admin, save these settings, then connect your own account
                                                         at the bottom.
                                                     </div>
+                                                    <div class="setting-warning" id="security-oidc-callback-warn" role="status" hidden>
+                                                        SoulSync sees this connection as plain http, so that's the
+                                                        callback it sends your provider. Turn on Behind a reverse proxy
+                                                        below and restart, have your proxy send X-Forwarded-Proto, or
+                                                        set the Callback URL override to your https address.
+                                                    </div>
                                                     <!-- the provider's settings: one nested block inside the toggle's row -->
                                                     <div class="security-nested security-nested-block" id="security-oidc-provider">
                                                         <div class="form-group">
@@ -9841,8 +8963,28 @@
                                                              status, icon and disconnect when connected, else connect -->
                                                         <div class="form-group security-oidc-admin" id="security-oidc-admin">
                                                             <button type="button" class="auth-button"
-                                                                onclick="window.location.assign('/api/profiles/me/oidc-connect/start')">Connect
+                                                                onclick="window.location.assign(window.SoulSyncURL.resolve('/api/profiles/me/oidc-connect/start'))">Connect
                                                                 my admin account</button>
+                                                        </div>
+                                                        <!-- sign in with oidc only (#1839; webui/src/shell/oidc-only.ts) -->
+                                                        <div class="form-group" id="security-oidc-only-wrap">
+                                                            <label class="toggle-label">
+                                                                <input type="checkbox" id="security-oidc-only">
+                                                                <span>OIDC only: turn off every other way to sign in</span>
+                                                            </label>
+                                                            <div class="setting-help-text">
+                                                                Password sign-in, the recovery question, Sign in with Plex
+                                                                and switching profiles with a password stop working, and
+                                                                anyone signed in some other way is signed out. Invites send
+                                                                people to your provider instead of asking for a password.
+                                                                Needs login mode, and you have to be signed in with OIDC
+                                                                yourself to turn it on. Every profile needs an OIDC
+                                                                connection first. Passwords are kept and work again if you
+                                                                turn this off. If the provider is ever down, set
+                                                                <code>SOULSYNC_OIDC_ONLY_OVERRIDE=off</code> on the
+                                                                container and restart, then sign in with the admin password.
+                                                            </div>
+                                                            <div class="setting-help-text" id="security-oidc-only-status" hidden></div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -13076,6 +12218,7 @@
     <script src="{{ url_for('static', filename='media-player.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='media-player-v2.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='settings.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='folder-check.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-spotify.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
@@ -13269,7 +12412,6 @@
     <script src="{{ url_for('static', filename='video/video-side.js', v=static_v) }}"></script>
     <!-- Shared video scan controller (triggers + polls scans for all video pages) -->
     <script src="{{ url_for('static', filename='video/video-scan.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='video/video-server-scan.js', v=static_v) }}"></script>
     <!-- Video settings additions (isolated; library mapping on the settings page) -->
     <script src="{{ url_for('static', filename='video/video-settings.js', v=static_v) }}"></script>
     <!-- Video enrichment dashboard buttons (isolated; polls /api/video/enrichment) -->
@@ -13277,7 +12419,6 @@
     <!-- Video Manage-Workers modal (isolated; reuses music's .em-* CSS, own JS) -->
     <script src="{{ url_for('static', filename='video/video-enrichment-manager.js', v=static_v) }}"></script>
     <!-- Video dashboard data layer (isolated; populates the dashboard from the video DB) -->
-    <script src="{{ url_for('static', filename='video/video-dashboard.js', v=static_v) }}"></script>
     <!-- Video-side sidebar service status: dots + the server/download switch modal -->
     <script src="{{ url_for('static', filename='video/video-service-status.js', v=static_v) }}"></script>
     <!-- Video watchlist button (shared; the add-to-watchlist control used by every
@@ -13291,7 +12432,6 @@
     <!-- Manage panel (per-item metadata editor slide-over; "Manage" on detail pages) -->
     <script src="{{ url_for('static', filename='video/video-manage-panel.js', v=static_v) }}"></script>
     <!-- Library Maintenance (jobs & findings on the video Tools page) -->
-    <script src="{{ url_for('static', filename='video/video-repair.js', v=static_v) }}"></script>
     <!-- Issues (report on items via the Manage sidebar; triage on the Issues page) -->
     <script src="{{ url_for('static', filename='video/video-issues.js', v=static_v) }}"></script>
     <!-- Overlay Studio (full-bleed visual editor for poster-overlay templates; Artwork Studio) -->
@@ -13318,7 +12458,6 @@
     <script src="{{ url_for('static', filename='video/video-search.js', v=static_v) }}"></script>
     <!-- Video discover (isolated; trending hero + lazy genre/decade rails + filter grid) -->
     <script src="{{ url_for('static', filename='video/video-discover.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='video/video-calendar.js', v=static_v) }}"></script>
     <!-- Video person page (isolated; cast/crew drill-in → filmography) -->
     <script src="{{ url_for('static', filename='video/video-person.js', v=static_v) }}"></script>
     <!-- Video studio page (isolated; production-company drill-in → film collection) -->

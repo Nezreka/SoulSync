@@ -1,0 +1,299 @@
+/* The source tabs' import card. Same footprint and language as the Mirrored
+   tab's cards (.pl-card) so the two read as one library: cover first, the
+   name, one meta line, and one action on the right. */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 2px 6px 10px;
+}
+
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 1280px) {
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  gap: 13px;
+  align-items: center;
+  padding: 10px 12px 10px 10px;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-card);
+  background: var(--white-a03);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-base) var(--ease-out),
+    background var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
+}
+
+.card:hover,
+.card:focus-visible {
+  border-color: var(--white-a14);
+  background: var(--white-a05);
+  transform: translateY(-2px);
+}
+
+.card:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+}
+
+.card[data-status='importing'],
+.card[data-status='checking'] {
+  cursor: default;
+  transform: none;
+}
+
+.art {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-control);
+  background: var(--white-a05);
+  font-size: 22px;
+  place-items: center;
+}
+
+.art > * {
+  width: 100%;
+  height: 100%;
+}
+
+.art img {
+  object-fit: cover;
+}
+
+/* no cover: the glyph sits in the middle of the tile */
+.art > span {
+  display: grid;
+  place-items: center;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  overflow: hidden;
+  color: var(--white-a55);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  margin-right: 7px;
+  color: var(--white-a70);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.inTag {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--success-rgb), 0.12);
+  color: rgb(var(--success-rgb));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.inTag::before {
+  margin-right: 5px;
+  content: '✓';
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 15px;
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--text-1);
+  font-size: 12.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  transition:
+    background var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out);
+}
+
+.card:hover .action {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  background: rgba(var(--accent-rgb), 0.3);
+}
+
+.card[data-status='imported'] .action {
+  border-color: var(--white-a14);
+  background: var(--white-a05);
+  color: var(--white-a85);
+}
+
+.card[data-status='imported']:hover .action {
+  border-color: var(--white-a25);
+  background: var(--white-a10);
+}
+
+.card[data-status='importing'] .action,
+.card[data-status='checking'] .action {
+  opacity: 0.7;
+}
+
+/* keep your own copy (#1913): on the cover's corner. it shows with the
+   card's hover or keyboard focus, and always on a touch screen, which has no
+   hover to find it with. (.art is position: relative above.) */
+.art > .copy {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--white-a25);
+  border-radius: var(--radius-pill);
+  background: var(--black-a55);
+  color: var(--text-1);
+  cursor: pointer;
+  opacity: 0;
+  place-items: center;
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    background var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out);
+}
+
+.card:hover .copy,
+.card:focus-within .copy,
+.art > .copy:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .art > .copy {
+    opacity: 1;
+  }
+}
+
+/* phones give every button a 38px touch height; match it so it stays round */
+@media (max-width: 768px) {
+  .art > .copy {
+    right: 3px;
+    bottom: 3px;
+    width: 38px;
+    height: 38px;
+  }
+}
+
+.art > .copy:hover,
+.art > .copy:focus-visible {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  background: rgba(var(--accent-rgb), 0.55);
+}
+
+.art > .copy:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+}
+
+.art > .copy:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--white-a25);
+  border-top-color: var(--text-1);
+  border-radius: var(--radius-pill);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .action {
+    transition: none;
+  }
+
+  .card:hover,
+  .card:focus-visible {
+    transform: none;
+  }
+
+  .spinner {
+    animation: none;
+  }
+}
+
+.intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin: 0 6px 12px;
+}
+
+.intro p {
+  flex: 1 1 320px;
+  margin: 0;
+  color: var(--white-a55);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.importAll {
+  padding: 8px 16px;
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.importAll:hover {
+  background: rgba(var(--accent-rgb), 0.3);
+}

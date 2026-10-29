@@ -55,7 +55,7 @@ def _movie_fields(row: Dict[str, Any]) -> Dict[str, Any]:
     return {"title": row.get("title"), "year": row.get("year"),
             "quality": row.get("quality"), "resolution": row.get("resolution"),
             "source": row.get("release_source"), "codec": row.get("video_codec"),
-            "tmdbid": row.get("tmdb_id")}
+            "tmdbid": row.get("tmdb_id"), "imdbid": row.get("imdb_id")}
 
 
 def _episode_fields(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -63,7 +63,10 @@ def _episode_fields(row: Dict[str, Any]) -> Dict[str, Any]:
             "episode": row.get("episode_number"), "episode_title": row.get("episode_title"),
             "year": row.get("show_year"), "quality": row.get("quality"),
             "resolution": row.get("resolution"), "source": row.get("release_source"),
-            "codec": row.get("video_codec")}
+            "codec": row.get("video_codec"),
+            # an episode's ids are its show's, the same as at import
+            "tmdbid": row.get("show_tmdb_id"), "imdbid": row.get("show_imdb_id"),
+            "tvdbid": row.get("show_tvdb_id")}
 
 
 def _base_dir_of(path: str, base_dirs: List[str]) -> Optional[str]:
@@ -113,6 +116,7 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
     caller can report a live count. Pure read — never mutates."""
     from api.video import get_video_db
     from core.video import organization
+    from core.video.library_paths import file_quality
     from core.video.path_resolver import resolve_video_file_path, video_base_dirs
     db = get_video_db()
     settings = organization.load(db)
@@ -155,6 +159,7 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
             return
         base = _base_dir_of(local, base_dirs) or os.path.dirname(local)
         ext = os.path.splitext(local)[1]
+        fields = dict(fields, quality=file_quality(fields.get("quality"), local))
         proposed = organization.render_path(kind, base, fields, settings, ext)["path"]
         if os.path.normpath(proposed) != os.path.normpath(local):
             entries.append({"key": key, "kind": kind, "title": title,

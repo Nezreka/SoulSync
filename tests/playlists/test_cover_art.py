@@ -677,3 +677,36 @@ def test_name_switch_without_a_preview_says_so(mdb, monkeypatch, tmp_path, http)
     r = c.post(f"/api/mirrored-playlists/{pid}/cover-art/name", json={"show_name": False})
     assert r.status_code == 404
     assert "Generate a new one" in r.get_json()["error"]
+
+
+# ── an unwritable cover folder (SeadogsBooty, PUID 1026) ───────────────────
+
+
+def test_an_unwritable_cover_folder_says_so_instead_of_couldnt_make_a_cover(mdb, tmp_path, monkeypatch):
+    """/app/storage/playlist_covers came out of the image owned by 1000:1000
+    and the app ran as 1026:100. every generate failed with Errno 13, which the
+    page showed as "Couldn't make a cover" and read like pollinations being down."""
+    pid = _mirror(mdb)
+
+    def denied(path, data):
+        raise PermissionError(13, "Permission denied", "/app/storage/playlist_covers/preview-13-raw.webp.tmp")
+
+    monkeypatch.setattr(ca, "_write", denied)
+    with pytest.raises(ca.CoverArtError) as e:
+        ca.make_preview(mdb, mdb.get_mirrored_playlist(pid), base_dir=str(tmp_path), http_get=_Http())
+    assert e.value.status == 500
+    assert "/app/storage/playlist_covers isn't writable" in str(e.value)
+    assert "PUID/PGID" in str(e.value)
+
+
+def test_an_unwritable_cover_folder_on_apply_says_so_too(mdb, tmp_path, monkeypatch):
+    pid = _mirror(mdb)
+    ca.make_preview(mdb, mdb.get_mirrored_playlist(pid), base_dir=str(tmp_path), http_get=_Http())
+
+    def denied(src, dst):
+        raise PermissionError(13, "Permission denied", dst)
+
+    monkeypatch.setattr(ca.os, "replace", denied)
+    with pytest.raises(ca.CoverArtError) as e:
+        ca.apply_preview(mdb, mdb.get_mirrored_playlist(pid), base_dir=str(tmp_path))
+    assert "isn't writable" in str(e.value)

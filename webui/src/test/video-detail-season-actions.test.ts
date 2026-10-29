@@ -13,6 +13,9 @@ import { extractFunction } from './vanilla-extract';
  * complete season you no longer want hunted still needs the toggle. The bar
  * used to render only when something was missing, which put both of those out
  * of reach exactly when the season was healthy.
+ *
+ * Oct 2026 (Boulder: "so many buttons"): every action is still offered, but
+ * only Grab sits on the bar; the rest are behind one ⋯ menu.
  */
 
 const SRC = readFileSync(resolve(process.cwd(), 'static/video/video-detail.js'), 'utf8');
@@ -29,6 +32,7 @@ function bar(season: Record<string, unknown>, ctx: Ctx = {}): HTMLElement {
     var data = ${JSON.stringify(data)};
     var ytFilter = { q: ${JSON.stringify(ctx.q ?? '')}, state: 'all', duration: 'all' };
     window.VideoGrab = ${ctx.grab === false ? 'undefined' : '{}'};
+    ${extractFunction('grabScope', SRC)}
   `;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const build = new Function(
@@ -62,8 +66,9 @@ function partial(mon = 2) {
   };
 }
 
+/** every action the bar offers, visible or behind its ⋯ menu (not the toggle). */
 function buttons(host: HTMLElement): string[] {
-  return Array.from(host.querySelectorAll('button')).map(
+  return Array.from(host.querySelectorAll('button:not([data-vd-pop])')).map(
     (b) => b.querySelector('.discog-btn-text')?.textContent ?? '',
   );
 }
@@ -118,6 +123,14 @@ describe('the season action bar', () => {
     expect(host.querySelector('[data-vd-season-clearfail]')).toBeNull();
   });
 
+  it('a playlist grabs all of it, not a year it does not have', () => {
+    const host = bar(partial(), { source: 'youtube', kind: 'playlist' });
+    expect(buttons(host)).toEqual(['Grab all', 'Wishlist all']);
+    expect(host.querySelector('[data-vd-pop]')?.getAttribute('aria-label')).toBe(
+      'More for this playlist',
+    );
+  });
+
   it('treats a filtered youtube view as not-the-season', () => {
     // A search result is a slice, so "grab everything missing" would grab the
     // wrong set. The old bar already knew this; keep it true after the lift.
@@ -128,5 +141,17 @@ describe('the season action bar', () => {
 
   it('drops the grab buttons when the grab module never loaded', () => {
     expect(buttons(bar(partial(), { grab: false }))).toEqual(['Monitored', 'Clear failures']);
+  });
+
+  it('shows only Grab on the bar and keeps the rest one click away', () => {
+    const host = bar(partial());
+    const visible = Array.from(
+      host.querySelectorAll('.vd-season-actions > button .discog-btn-text'),
+    ).map((b) => b.textContent);
+    expect(visible).toEqual(['Grab season']);
+    const menu = host.querySelector('[data-vd-pop-menu]') as HTMLElement;
+    expect(menu.hidden).toBe(true);
+    expect(menu.querySelector('[data-vd-season-monitor]')).not.toBeNull();
+    expect(host.querySelector('[data-vd-pop]')?.getAttribute('aria-haspopup')).toBe('menu');
   });
 });

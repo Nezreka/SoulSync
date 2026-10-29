@@ -67,19 +67,19 @@
         "selector-class-pattern": [
           "^[a-z][a-zA-Z0-9]*$",
           {
-            "message": "Module classes are camelCase"
+            "message": "Module classes are camelCase (see docs/styling.md)"
           }
         ],
         "keyframes-name-pattern": [
           "^[a-z][a-zA-Z0-9]*$",
           {
-            "message": "Module keyframes are camelCase"
+            "message": "Module keyframes are camelCase (see docs/styling.md)"
           }
         ],
         "color-no-hex": [
           true,
           {
-            "message": "No hex colours in modules: use a token from static/tokens.css"
+            "message": "No hex colours in modules: use a token from static/tokens.css (see docs/styling.md)"
           }
         ],
         "declaration-property-value-disallowed-list": [
@@ -89,7 +89,7 @@
             ]
           },
           {
-            "message": "No literal rgb()/hsl() colours in modules: use a token, or rgba(var(--x-rgb), a)"
+            "message": "No literal rgb()/hsl() colours in modules: use a token, or rgba(var(--x-rgb), a) (see docs/styling.md)"
           }
         ],
         "declaration-property-value-allowed-list": [
@@ -105,13 +105,13 @@
             ]
           },
           {
-            "message": "z-index must be var(--z-*) (or a single-digit local layer); border-radius must be var(--radius-*)"
+            "message": "z-index must be var(--z-*) (or a single-digit local layer); border-radius must be var(--radius-*) (see docs/styling.md)"
           }
         ],
         "declaration-no-important": [
           true,
           {
-            "message": "No !important in modules: raise specificity or fix the source rule"
+            "message": "No !important in modules: raise specificity or fix the source rule (see docs/styling.md)"
           }
         ]
       }

@@ -18424,6 +18424,19 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .spotify-public-card,
 .listenbrainz-playlist-card,
 .lastfm-playlist-card,
+.ssd-group-title {
+    margin: 18px 8px 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+}
+
+.ssd-group-title:first-child {
+    margin-top: 4px;
+}
+
 .soulsync-discovery-playlist-card {
     background: rgba(18, 18, 22, 0.9);
     backdrop-filter: blur(12px);
@@ -18764,7 +18777,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 /* entries the source never handed over, so N / N isn't read as the whole playlist (#1613) */
-.youtube-discovery-modal .progress-skipped-note {
+.youtube-discovery-modal .progress-skipped-note,
+.youtube-discovery-modal .discovery-meaning-note {
     margin-top: 6px;
     color: var(--white-a55);
     font-size: 12px;
@@ -23258,7 +23272,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 /* Title — bold white, slight negative tracking */
 .download-missing-modal-content .download-tracks-table .track-name {
     font-weight: 600;
-    color: #fff;
+    color: var(--text-primary);
     letter-spacing: -0.005em;
 }
 
@@ -52506,6 +52520,10 @@ tr.tag-diff-same {
 
 .operations-pillars-sub {
     min-width: 0;
+    margin: 0;
+    font-size: 12px;
+    color: var(--white-a50);
+    text-align: right;
 }
 
 /* Phones: the title group and the explainer paragraph can't share a row —
@@ -52693,6 +52711,7 @@ tr.tag-diff-same {
 }
 
 .operations-pillar-autopilot {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -56199,6 +56218,25 @@ tr.tag-diff-same {
 .redownload-current-title { font-size: 16px; font-weight: 700; color: rgba(255,255,255,0.95); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .redownload-current-meta { font-size: 12px; color: var(--white-a35); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .redownload-current-badges { display: flex; gap: 4px; flex-shrink: 0; }
+/* interactive search: retype the title/artist when the row's own are wrong */
+.redownload-btn.rdl-query-edit { flex-shrink: 0; padding: 8px 14px; font-size: 12px; }
+.rdl-query-form { flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.rdl-query-form label { flex: 1 1 180px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.rdl-query-form label span {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--white-a35);
+}
+.rdl-query-form input {
+    width: 100%; box-sizing: border-box; padding: 9px 12px; font-size: 14px;
+    color: rgba(255,255,255,0.95); background: rgba(0,0,0,0.25);
+    border: 1px solid var(--white-a10); border-radius: var(--radius-lg);
+    transition: border-color var(--dur-moderate), box-shadow var(--dur-moderate);
+}
+.rdl-query-form input:focus {
+    outline: none; border-color: rgba(var(--accent-rgb), 0.6);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.15);
+}
+.rdl-query-form .redownload-btn { padding: 9px 16px; font-size: 13px; }
 .redownload-badge {
     font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: var(--radius-sm);
     letter-spacing: 0.03em;
@@ -56362,6 +56400,22 @@ tr.tag-diff-same {
 .rdl-src-item-name {
     font-size: 13px; font-weight: 600; color: var(--white-a90);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;
+}
+.rdl-src-listen {
+    display: inline-grid; place-items: center; flex-shrink: 0;
+    width: 22px; height: 22px; padding: 0 0 0 2px;
+    border: 1px solid var(--white-a14); border-radius: var(--radius-pill);
+    background: var(--white-a05); color: var(--white-a85);
+    font-size: 9px; line-height: 1; cursor: pointer;
+    transition: background var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out), color var(--dur-base) var(--ease-out);
+}
+.rdl-src-listen:hover, .rdl-src-listen:focus-visible {
+    border-color: rgba(var(--accent-rgb), 0.6); background: rgba(var(--accent-rgb), 0.18); color: var(--accent);
+}
+.rdl-src-listen:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.6); outline-offset: 2px; }
+/* phones give every button a 38px touch height; match it so it stays a circle */
+@media (max-width: 768px) {
+    .rdl-src-listen { width: 38px; height: 38px; font-size: 11px; }
 }
 .rdl-src-recommended {
     font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
@@ -67679,6 +67733,10 @@ body.max-performance {
     align-items: center; justify-content: center; padding: 0 4px; line-height: 1;
     border: 2px solid rgba(16, 16, 16, 0.95);
 }
+/* OIDC-only overridden (#1839): admins only, the next slot left of server activity */
+.oidc-override-btn { right: 192px; color: var(--warning); border-color: rgba(var(--warning-rgb), 0.45); }
+.oidc-override-btn:hover { color: var(--warning); border-color: rgba(var(--warning-rgb), 0.7); }
+.oidc-override-text { margin: 0; padding: 12px 18px 16px; font-size: 13px; line-height: 1.5; color: var(--white-a75); }
 
 .sact-scrim-bg { position: fixed; inset: 0; z-index: 999997; background: var(--black-a50);
     opacity: 0; pointer-events: none; transition: opacity 0.28s ease; }
@@ -75363,6 +75421,43 @@ body.src-modal-open { overflow: hidden; }
 }
 #settings-page .stg-media-panel > .settings-group:last-child { margin-bottom: 0 !important; }
 
+/* live folder checks (folder-check.js): one quiet line under each folder */
+#settings-page .folder-check {
+    margin-top: 6px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--white-a50);
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+}
+#settings-page .folder-check[hidden] { display: none; }
+#settings-page .folder-check::before { flex: 0 0 auto; font-weight: 700; }
+#settings-page .folder-check[data-tone="ok"] { color: var(--success); }
+#settings-page .folder-check[data-tone="ok"]::before { content: "\2713"; }
+#settings-page .folder-check[data-tone="info"] { color: var(--white-a50); }
+#settings-page .folder-check[data-tone="info"]::before { content: "+"; }
+#settings-page .folder-check[data-tone="warn"] { color: var(--warning); }
+#settings-page .folder-check[data-tone="warn"]::before { content: "!"; }
+#settings-page .folder-check[data-tone="bad"] { color: var(--danger-light); }
+#settings-page .folder-check[data-tone="bad"]::before { content: "\2715"; }
+#settings-page .video-4k-path { margin: 8px 0 0 26px; }
+#settings-page .video-4k-path[hidden] { display: none; }
+#settings-page .video-compose-lines {
+    margin: 10px 0;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--white-a08);
+    background: var(--black-a70);
+    color: var(--text-primary);
+    font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre;
+    overflow-x: auto;
+}
+@media (max-width: 600px) {
+    #settings-page .video-4k-path { margin-left: 0; }
+}
+
 
 /* ════════════════════════════════════════════════════════════════════════
    The dashboard (Sept 2026 redesign). Music first, the system beside it.
@@ -76783,3 +76878,236 @@ body.src-modal-open { overflow: hidden; }
     cursor: pointer;
 }
 .pl-card-attn:hover { text-decoration: underline; }
+
+/* ── findings, oct 27 pass ──────────────────────────────────────────────────
+   the undo bar after a dismiss, the keyboard cursor, the albums-view note,
+   the triage cards' type chips, and the video "downloads" risk tag. */
+.repair-undo-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: min(560px, calc(100vw - 32px));
+    padding: 10px 12px 10px 18px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-secondary);
+    border: 1px solid var(--white-a12);
+    box-shadow: 0 12px 40px var(--black-a45);
+    color: var(--white-a85);
+    font-size: 13px;
+    animation: repair-undo-in 0.18s ease-out;
+}
+@keyframes repair-undo-in {
+    from { opacity: 0; transform: translate(-50%, 8px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+}
+.repair-undo-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.repair-undo-btn {
+    flex: 0 0 auto;
+    padding: 5px 14px;
+    border-radius: var(--radius-pill);
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.16);
+    color: rgb(var(--accent-rgb));
+    font-weight: 700;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+.repair-undo-btn:hover { background: rgba(var(--accent-rgb), 0.26); }
+.repair-undo-close {
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--white-a50);
+    font-size: 16px;
+    cursor: pointer;
+}
+.repair-undo-close:hover { color: var(--text-primary); background: var(--white-a08); }
+
+.repair-finding-card.kb-active {
+    outline: 2px solid rgba(var(--accent-rgb), 0.55);
+    outline-offset: 1px;
+}
+
+.repair-kb-hint {
+    font-size: 11px;
+    color: var(--white-a40);
+    margin-left: auto;
+    white-space: nowrap;
+}
+.repair-kb-hint kbd {
+    display: inline-block;
+    min-width: 16px;
+    padding: 0 4px;
+    margin: 0 1px;
+    border-radius: 4px;
+    border: 1px solid var(--white-a15);
+    background: var(--white-a06);
+    font: 600 10.5px/16px ui-monospace, SFMono-Regular, monospace;
+    text-align: center;
+    color: var(--white-a70);
+}
+
+.repair-albums-uncovered {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    background: rgba(var(--accent-rgb), 0.07);
+    font-size: 12.5px;
+    color: var(--white-a70);
+}
+.repair-albums-uncovered button {
+    padding: 5px 12px;
+    border-radius: var(--radius-pill);
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    background: transparent;
+    color: rgb(var(--accent-rgb));
+    font-weight: 700;
+    font-size: 12px;
+    cursor: pointer;
+}
+.repair-albums-uncovered button:hover { background: rgba(var(--accent-rgb), 0.12); }
+
+.repair-inbox-risk.acquires {
+    border-color: rgba(var(--info-rgb), 0.35);
+    background: rgba(var(--info-rgb), 0.1);
+    color: var(--info);
+    margin-left: 6px;
+}
+
+.operations-triage-types {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 0 12px;
+}
+.operations-triage-type {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px 4px 10px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--white-a10);
+    background: var(--white-a04);
+    color: var(--white-a75);
+    font-size: 11.5px;
+    cursor: pointer;
+    max-width: 100%;
+}
+.operations-triage-type:hover { border-color: var(--white-a20); color: var(--text-primary); }
+.operations-triage-type-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.operations-triage-type-count {
+    flex: 0 0 auto;
+    padding: 1px 7px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.operations-triage-type-more {
+    align-self: center;
+    font-size: 11px;
+    color: var(--white-a45);
+}
+
+/* the simple-mode score speaks the same band colours as the advanced one */
+.operations-exec-score.healthy { --band-rgb: var(--success-strong-rgb); --band-text: var(--success); }
+.operations-exec-score.attention { --band-rgb: var(--warning-strong-rgb); --band-text: var(--warning); }
+.operations-exec-score.unhealthy { --band-rgb: var(--danger-rgb); --band-text: var(--danger-light); }
+.operations-exec-score.healthy,
+.operations-exec-score.attention,
+.operations-exec-score.unhealthy {
+    border-color: rgba(var(--band-rgb), 0.45);
+    background: radial-gradient(circle, rgba(var(--band-rgb), 0.2) 0%, var(--black-a60) 100%);
+}
+.operations-exec-score.healthy .operations-exec-status,
+.operations-exec-score.attention .operations-exec-status,
+.operations-exec-score.unhealthy .operations-exec-status { color: var(--band-text); }
+
+@media (max-width: 768px) {
+    .repair-kb-hint { display: none; }
+    .repair-undo-bar { bottom: 16px; }
+}
+
+/* sections that hide themselves with the hidden attribute: their display
+   rules outranked it, so the advanced section nav showed in simple mode. */
+.repair-section-nav[hidden],
+.repair-advanced-chassis[hidden],
+.repair-families[hidden] {
+    display: none;
+}
+
+/* the schedule switch: the checkbox is the switch's input, not a second control */
+.operations-pillar-autopilot input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    pointer-events: none;
+}
+.operations-pillar-autopilot input:focus-visible + .repair-toggle-slider {
+    outline: 2px solid rgba(var(--accent-rgb), 0.7);
+    outline-offset: 2px;
+}
+
+/* playbook cards had no type scale: an h6 title smaller than its own body
+   and a run label bigger than both */
+.operations-playbook-name {
+    margin: 10px 0 4px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.005em;
+}
+.operations-playbook-cta {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--white-a75);
+}
+.operations-playbook-card:hover .operations-playbook-cta {
+    color: var(--text-primary);
+}
+/* the switch only knew how to look ON inside a job card, so every area's
+   switch read OFF even with all its jobs scheduled */
+.operations-pillar-autopilot .repair-toggle-slider.small {
+    width: 32px;
+    height: 18px;
+    border-radius: 9px;
+}
+.operations-pillar-autopilot .repair-toggle-slider.small::after {
+    top: 3px;
+    left: 3px;
+    width: 12px;
+    height: 12px;
+}
+.operations-pillar-autopilot input:checked + .repair-toggle-slider.small {
+    background: rgba(var(--accent-rgb), 0.5);
+}
+.operations-pillar-autopilot input:checked + .repair-toggle-slider.small::after {
+    transform: translateX(14px);
+    background: rgb(var(--accent-light-rgb));
+}

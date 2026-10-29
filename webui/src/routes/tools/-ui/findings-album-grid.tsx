@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { fetchFindingAlbums, type FindingAlbumGroup } from '../-tools.api';
 import { VinylCoverFallback } from './album-cover-fallback';
@@ -31,7 +31,14 @@ export interface FindingsAlbumGridProps {
   selectedGroupKey?: string | null;
   /** bumps when a job finishes, so the grid picks up what it found (#1386) */
   refreshToken?: number;
+  /** how many findings the grid holds once it loads, and whether the server
+   *  capped the album list (then the sum is a floor, not a total). the
+   *  surface uses it to say how many findings AREN'T on any album. */
+  onLoaded?: (covered: number, capped: boolean) => void;
 }
+
+/** the server's default cap on album groups (api/repair.py). */
+export const ALBUM_GROUP_LIMIT = 200;
 
 /** Album art first, artist as the fallback, then a letter tile. Never a broken
  *  image: a grid of missing-image icons reads as a broken page. */
@@ -89,14 +96,22 @@ export function FindingsAlbumGrid({
   onOpen,
   selectedGroupKey,
   refreshToken = 0,
+  onLoaded,
 }: FindingsAlbumGridProps) {
   const [groups, setGroups] = useState<FindingAlbumGroup[] | null>(null);
+  const onLoadedRef = useRef(onLoaded);
+  onLoadedRef.current = onLoaded;
 
   useEffect(() => {
     let live = true;
     setGroups(null);
     void fetchFindingAlbums({ groupBy, jobId, status, findingType, q }).then((rows) => {
-      if (live) setGroups(rows);
+      if (!live) return;
+      setGroups(rows);
+      onLoadedRef.current?.(
+        rows.reduce((sum, group) => sum + (group.count || 0), 0),
+        rows.length >= ALBUM_GROUP_LIMIT,
+      );
     });
     return () => {
       live = false;

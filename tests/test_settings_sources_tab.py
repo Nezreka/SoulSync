@@ -1361,8 +1361,9 @@ def test_services_without_art_reuse_the_app_s_own_glyphs(js):
     The ones with no established glyph keep a monogram on their brand colour -
     that is a deliberate floor, not an oversight.
     """
-    index = _read("webui/index.html")
-    dash = set(re.findall(r'<span class="video-enrich-glyph"[^>]*>(.*?)</span>', index))
+    # the video dashboard is React now; its worker table holds the glyphs
+    hero = _read("webui/src/routes/dashboard/-video/video-hero.tsx")
+    dash = set(re.findall(r"logo: \{ glyph: '([^']+)' \}", hero))
     assert dash, "the dashboard glyphs this borrows from are gone"
 
     block = js.split('const SERVICE_GLYPHS = {', 1)[1].split('};', 1)[0]

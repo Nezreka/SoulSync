@@ -138,8 +138,14 @@ def test_channel_season_bar_matches_tv_minus_manual_search():
     # grew the monitor + clear-failures actions, so the old comment anchor is gone.
     bar = _DETAIL_JS.split("function seasonActionsHtml(")[1].split("function renderEpisodes(")[0]
     assert "isYt" in bar
-    assert "Grab ' + (isYt ? 'year' : 'season')" in bar
-    assert "Wishlist ' + (isYt ? 'year' : 'season')" in bar
+    # The year/season noun moved into grabScope() when the bar grew a
+    # playlist scope ('all'); the labels are built from scope.word now.
+    assert "var scope = grabScope()" in bar
+    assert "Grab ' + scope.word" in bar
+    assert "Wishlist ' + scope.word" in bar
+    scope = _DETAIL_JS.split("function grabScope(")[1].split("function ytTagChips(")[0]
+    assert "data.source === 'youtube') return { word: 'year'" in scope
+    assert "return { word: 'season'" in scope
     assert "canAcquire && !isYt ?" in bar              # manual search hidden for channels
     assert "ytFilter.q" in bar                         # a filtered view isn't "the season"
     # ...and a channel gets no library management: no episode rows to monitor.

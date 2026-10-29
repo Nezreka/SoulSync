@@ -139,7 +139,10 @@ describe('a reload onto the video wishlist stays on the video side', () => {
     // a /video-wishlist deep link IS a bootPage, but its url is handed off to
     // /wishlist?media=...; re-asserting /video-wishlist over that sent the
     // router to an unknown path and the shell bounced the profile home
-    expect(SIDE).toContain("var HANDED_OFF = { 'video-wishlist': 1 };");
+    // (the tools page is handed off the same way since it went React)
+    expect(SIDE).toContain(
+      "var HANDED_OFF = { 'video-wishlist': 1, 'video-tools': 1, 'video-calendar': 1, 'video-dashboard': 1 };",
+    );
     expect(boot).toContain('if (bootPage && !HANDED_OFF[initialPage] &&');
     // the re-assert is still gated on bootPage only
     expect(boot).toContain('if (bootPage) [120, 350, 700].forEach');

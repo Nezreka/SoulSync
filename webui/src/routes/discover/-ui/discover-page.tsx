@@ -76,6 +76,7 @@ import { useBlacklist } from '../-discover.use-blacklist';
 import { useBuildPlaylist } from '../-discover.use-build-playlist';
 import { useDownloadBar } from '../-discover.use-download-bar';
 import { useHero } from '../-discover.use-hero';
+import { useHeroVideo } from '../-discover.use-hero-video';
 import { useLastfmRadio } from '../-discover.use-lastfm-radio';
 import { useDiscoverLayout } from '../-discover.use-layout';
 import { useListenBrainz } from '../-discover.use-listenbrainz';
@@ -357,6 +358,16 @@ export function DiscoverPage() {
   // ── the living banners: one music video at a time, only the one on screen ──
   const [videosOn, setVideosOn] = useVideoBackdropsEnabled();
   const heroGlow = useDominantColor(hero.artist?.image_url ?? null);
+  // the hero's hidden music video: behind the active slide, only ever
+  // brought forward by the reader's click on the preview button.
+  const heroVideo = useHeroVideo(hero.artist?.artist_name ?? null, videosOn);
+  // the rotation holds while the pointer is on the hero, and holds for as
+  // long as a preview is playing: one pause, two reasons.
+  const [heroHovered, setHeroHovered] = useState(false);
+  const setHeroPaused = hero.setPaused;
+  useEffect(() => {
+    setHeroPaused(heroHovered || heroVideo.preview);
+  }, [heroHovered, heroVideo.preview, setHeroPaused]);
   const stationPreview = useStationPreview();
   // A profile switch discards an open preview: it belongs to the old profile,
   // and a response already in flight for it must never fill this one in.
@@ -1559,8 +1570,18 @@ export function DiscoverPage() {
               onViewRecommended={() => setRecModalKind('picks')}
               onOpenBlacklist={blacklist.openModal}
               artists={hero.artists}
-              onPauseChange={hero.setPaused}
+              onPauseChange={setHeroHovered}
               glowRgb={heroGlow}
+              rootRef={heroVideo.ref}
+              videoId={heroVideo.videoId}
+              videoPlaying={heroVideo.playing}
+              preview={heroVideo.preview}
+              closing={heroVideo.closing}
+              videoLive={heroVideo.videoLive}
+              soundOn={heroVideo.soundOn}
+              onTogglePreview={heroVideo.togglePreview}
+              onUnplayable={heroVideo.onUnplayable}
+              onLiveChange={heroVideo.onLiveChange}
             />
           </div>
           {week || gap ? (

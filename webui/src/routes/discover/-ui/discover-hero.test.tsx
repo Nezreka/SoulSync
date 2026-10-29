@@ -2,11 +2,21 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { DiscoverHeroArtist } from '../-discover.types';
+import type { BackdropVideoProps } from './backdrop-video';
 import type { DiscoverSectionProps } from './discover-section';
 
 import { HERO_WATCHLIST_SUBTITLE } from '../-discover.hero';
 import { DiscoverHero } from './discover-hero';
 import { DiscoverSection } from './discover-section';
+
+/** the video layer, stubbed: these tests assert what the hero hands it. */
+const mockBackdropProps: BackdropVideoProps[] = [];
+vi.mock('./backdrop-video', () => ({
+  BackdropVideo: (props: BackdropVideoProps) => {
+    mockBackdropProps.push(props);
+    return <div className="dsc-backdrop-video" />;
+  },
+}));
 
 /**
  * The hero billboard and the shared section shell.
@@ -16,7 +26,10 @@ import { DiscoverSection } from './discover-section';
  * slideshow, and an empty hero has to say what to do rather than sit blank.
  */
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  mockBackdropProps.length = 0;
+});
 
 const artist = (over: Partial<DiscoverHeroArtist> = {}): DiscoverHeroArtist => ({
   artist_id: 'sp1',
@@ -330,6 +343,146 @@ describe('the hero', () => {
     expect(p.onWatchAll).toHaveBeenCalled();
     expect(p.onViewRecommended).toHaveBeenCalled();
     expect(p.onOpenBlacklist).toHaveBeenCalled();
+  });
+});
+
+// ── The hero's hidden music video ────────────────────────────────────────────
+
+describe('the hero video preview', () => {
+  it('offers no preview when this artist has no video', () => {
+    const { container } = render(<DiscoverHero {...heroProps()} />);
+    expect(screen.queryByLabelText('Preview music video')).toBeNull();
+    expect(container.querySelector('.discover-hero-preview-btn')).toBeNull();
+    expect(mockBackdropProps).toHaveLength(0);
+  });
+
+  it('puts the preview switch in the top-right cluster when there is a video', () => {
+    const onTogglePreview = vi.fn();
+    const { container } = render(
+      <DiscoverHero {...heroProps({ videoId: 'v1', onTogglePreview })} />,
+    );
+    const btn = screen.getByLabelText('Preview music video');
+    expect(btn).toHaveClass('discover-hero-preview-btn');
+    expect(btn).toHaveAttribute('aria-pressed', 'false');
+    expect(btn).toHaveAttribute('title', 'Preview music video');
+    // same cluster as help and block: after them in the markup, so its
+    // stylesheet slot (third from the right) is the one it renders in
+    const cluster = [...container.querySelectorAll('button')].filter((b) =>
+      ['tool-help-button', 'discover-blacklist-btn', 'discover-hero-preview-btn'].some((c) =>
+        b.classList.contains(c),
+      ),
+    );
+    expect(cluster.map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Learn about the Discover page',
+      'Blocked artists',
+      'Preview music video',
+    ]);
+    fireEvent.click(btn);
+    expect(onTogglePreview).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads as a close switch, pressed and lit, while the preview is on', () => {
+    render(
+      <DiscoverHero {...heroProps({ videoId: 'v1', onTogglePreview: vi.fn(), preview: true })} />,
+    );
+    const btn = screen.getByLabelText('Close preview');
+    expect(btn).toHaveAttribute('aria-pressed', 'true');
+    expect(btn).toHaveClass('on');
+  });
+
+  it('offers the preview again while the exit fade runs', () => {
+    const onTogglePreview = vi.fn();
+    render(
+      <DiscoverHero
+        {...heroProps({
+          videoId: 'v1',
+          onTogglePreview,
+          preview: true,
+          closing: true,
+          videoLive: true,
+        })}
+      />,
+    );
+    // the preview is still on, but a click now reopens it rather than
+    // closing anything: the switch says what the click does — the offer,
+    // unpressed and unlit — not a lit "close" that would do the opposite
+    expect(screen.queryByLabelText('Close preview')).toBeNull();
+    const btn = screen.getByLabelText('Preview music video');
+    expect(btn).toHaveAttribute('title', 'Preview music video');
+    expect(btn).toHaveAttribute('aria-pressed', 'false');
+    expect(btn).not.toHaveClass('on');
+    fireEvent.click(btn);
+    expect(onTogglePreview).toHaveBeenCalledTimes(1);
+  });
+
+  it('mounts the video between the still and the scrim, muted unless it owns the sound', () => {
+    const onUnplayable = vi.fn();
+    const onLiveChange = vi.fn();
+    const { container, rerender } = render(
+      <DiscoverHero
+        {...heroProps({
+          videoId: 'v1',
+          videoPlaying: true,
+          onUnplayable,
+          onLiveChange,
+          onTogglePreview: vi.fn(),
+        })}
+      />,
+    );
+    expect(mockBackdropProps).toHaveLength(1);
+    expect(mockBackdropProps[0]).toMatchObject({ videoId: 'v1', playing: true, muted: true });
+    expect(mockBackdropProps[0].onUnplayable).toBe(onUnplayable);
+    expect(mockBackdropProps[0].onLiveChange).toBe(onLiveChange);
+    const root = container.querySelector('.discover-hero')!;
+    const layers = [...root.children].map((el) => el.className);
+    const bgAt = layers.findIndex((c) => c.includes('discover-hero-background'));
+    const videoAt = layers.findIndex((c) => c.includes('dsc-backdrop-video'));
+    const scrimAt = layers.findIndex((c) => c.includes('discover-hero-overlay'));
+    expect(bgAt).toBeGreaterThanOrEqual(0);
+    expect(videoAt).toBeGreaterThan(bgAt);
+    expect(scrimAt).toBeGreaterThan(videoAt);
+
+    rerender(
+      <DiscoverHero
+        {...heroProps({
+          videoId: 'v1',
+          videoPlaying: true,
+          soundOn: true,
+          onUnplayable,
+          onLiveChange,
+          onTogglePreview: vi.fn(),
+        })}
+      />,
+    );
+    expect(mockBackdropProps[mockBackdropProps.length - 1]).toMatchObject({ muted: false });
+  });
+
+  it('fades the still out only once the preview is actually playing', () => {
+    const p = heroProps({ videoId: 'v1', videoPlaying: true, onTogglePreview: vi.fn() });
+    const { container, rerender } = render(<DiscoverHero {...p} preview={false} videoLive />);
+    const root = () => container.querySelector('.discover-hero')!;
+    // asked for, but not playing yet: the still stays (no black gap)
+    rerender(<DiscoverHero {...p} preview videoLive={false} />);
+    expect(root()).not.toHaveClass('discover-hero--video-live');
+    rerender(<DiscoverHero {...p} preview videoLive />);
+    expect(root()).toHaveClass('discover-hero--video-live');
+    // closed again: the still comes back
+    rerender(<DiscoverHero {...p} preview={false} videoLive />);
+    expect(root()).not.toHaveClass('discover-hero--video-live');
+  });
+
+  it('wears the closing class while the exit fade runs, and drops the live class for it', () => {
+    const p = heroProps({ videoId: 'v1', videoPlaying: true, onTogglePreview: vi.fn() });
+    const { container, rerender } = render(<DiscoverHero {...p} preview videoLive />);
+    const root = () => container.querySelector('.discover-hero')!;
+    expect(root()).toHaveClass('discover-hero--video-live');
+    expect(root()).not.toHaveClass('discover-hero--video-closing');
+    // mid-fade the video is still live underneath, but the live class must
+    // come off: it is the class that holds the still at opacity 0, and the
+    // still is supposed to be fading back in over the video.
+    rerender(<DiscoverHero {...p} preview videoLive closing />);
+    expect(root()).toHaveClass('discover-hero--video-closing');
+    expect(root()).not.toHaveClass('discover-hero--video-live');
   });
 });
 

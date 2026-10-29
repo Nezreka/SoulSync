@@ -8,7 +8,10 @@ import type { LibraryAlbum, LibraryArtist, LibraryArtistsResponse } from '../-li
 
 import {
   libraryAlbumsQueryOptions,
+  fetchSongsToPlay,
   libraryArtistsQueryOptions,
+  librarySongsQueryOptions,
+  PLAY_ALL_LIMIT,
   libraryUnmatchedQueryOptions,
   loadAlbumTracks,
   setArtistWatchlisted,
@@ -17,6 +20,9 @@ import {
   albumQueueTrack,
   readAlbumsResponse,
   readArtistsResponse,
+  readSongsResponse,
+  shuffled,
+  songQueueTrack,
   watchlistArtistId,
 } from '../-library.helpers';
 import { useLibraryChanged } from '../-library.live';
@@ -26,6 +32,12 @@ import { Route } from '../route';
 import { ExportArtistsModal } from './export-modal';
 import { LibraryAlbumCard } from './library-album-card';
 import { LibraryArtistCard } from './library-artist-card';
+import {
+  LibrarySongList,
+  LibrarySongSkeleton,
+  LibrarySongsStrip,
+  songsStripQueryOptions,
+} from './library-songs';
 import { WatchAllModal } from './watch-all-modal';
 
 const ALPHABET = ['all', ...'abcdefghijklmnopqrstuvwxyz'.split(''), '#'];
@@ -91,7 +103,17 @@ const SORT_OPTIONS = {
     { value: 'year_asc', label: 'Oldest first' },
     { value: 'recent', label: 'Recently added' },
   ],
+  songs: [
+    { value: '', label: 'A–Z' },
+    { value: 'artist', label: 'Artist' },
+    { value: 'album', label: 'Album' },
+    { value: 'year_desc', label: 'Newest first' },
+    { value: 'recent', label: 'Recently added' },
+  ],
 } as const;
+
+/** What each view counts, for the header stat, the loading line and the empty state. */
+const VIEW_NOUNS = { artists: 'artists', albums: 'albums', songs: 'songs' } as const;
 
 /**
  * The "you have tracks nobody could identify" strip (#1202).
@@ -134,7 +156,9 @@ function UnmatchedImportsBanner() {
 export function LibraryPage() {
   useReactPageShell('library');
 
-  const { profileId } = useProfile();
+  const profile = useProfile();
+  const { profileId } = profile;
+  const isAdmin = Boolean(profile?.isAdmin);
   useLibraryChanged();
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
@@ -170,33 +194,63 @@ export function LibraryPage() {
   // Both are declared because hooks cannot be called conditionally; only the
   // one the current view needs is enabled, so only it fetches.
   const albumView = search.view === 'albums';
+  const songsView = search.view === 'songs';
+  const artistsView = !albumView && !songsView;
+  const noun = VIEW_NOUNS[search.view];
   const artistsQuery = useQuery({
     ...libraryArtistsQueryOptions(profileId, search),
-    enabled: !albumView,
+    enabled: artistsView,
   });
   const albumsQuery = useQuery({
     ...libraryAlbumsQueryOptions(profileId, search),
     enabled: albumView,
   });
-  const query = albumView ? albumsQuery : artistsQuery;
+  const songsQuery = useQuery({
+    ...librarySongsQueryOptions(profileId, search),
+    enabled: songsView,
+  });
+  const query = songsView ? songsQuery : albumView ? albumsQuery : artistsQuery;
+  // the song matches shown above an artist or album search (the strip's own
+  // query, shared): with them, an empty grid isn't "not in your library"
+  const stripQuery = useQuery({
+    ...songsStripQueryOptions(profileId, search),
+    enabled: !songsView && search.q.trim().length >= 2,
+  });
+  const songHits = !songsView && (stripQuery.data?.songs?.length ?? 0) > 0;
 
-  const { artists, albums, pagination, upgradableTotal } = useMemo(() => {
+  const { artists, albums, songs, pagination, upgradableTotal, capped } = useMemo(() => {
     try {
-      // The album grid has no upgradable count — nothing reports one for it.
+      // Only the artist grid has an upgradable count; only a song search caps its count.
+      if (songsView) {
+        return {
+          artists: [],
+          albums: [],
+          upgradableTotal: 0,
+          ...readSongsResponse(songsQuery.data),
+        };
+      }
       return albumView
-        ? { artists: [], upgradableTotal: 0, ...readAlbumsResponse(albumsQuery.data) }
-        : { albums: [], ...readArtistsResponse(artistsQuery.data) };
+        ? {
+            artists: [],
+            songs: [],
+            upgradableTotal: 0,
+            capped: false,
+            ...readAlbumsResponse(albumsQuery.data),
+          }
+        : { albums: [], songs: [], capped: false, ...readArtistsResponse(artistsQuery.data) };
     } catch {
       // The thrown reason surfaces through query.error below; the grid just
       // renders empty rather than taking the page down.
       return {
         artists: [],
         albums: [],
+        songs: [],
         upgradableTotal: 0,
+        capped: false,
         pagination: { page: 1, totalPages: 0, totalCount: 0, hasPrev: false, hasNext: false },
       };
     }
-  }, [albumView, albumsQuery.data, artistsQuery.data]);
+  }, [songsView, albumView, albumsQuery.data, artistsQuery.data, songsQuery.data]);
 
   // Read per render, not memoized: the JioSaavn gate lives on the shell and
   // the badges read it the same way.
@@ -209,7 +263,9 @@ export function LibraryPage() {
 
   const failed = query.isError || query.data?.success === false;
   const loading = query.isPending;
-  const isEmpty = !loading && (albumView ? albums.length === 0 : artists.length === 0);
+  const isEmpty =
+    !loading &&
+    (songsView ? songs.length === 0 : albumView ? albums.length === 0 : artists.length === 0);
 
   // The vanilla catch toasted a FIXED string on every failed load — not the
   // server's reason, which it only used as the thrown message. Keyed on the
@@ -218,8 +274,8 @@ export function LibraryPage() {
   const failedAt = failed ? query.errorUpdatedAt || query.dataUpdatedAt : 0;
   useEffect(() => {
     if (!failedAt) return;
-    window.showToast?.(albumView ? 'Failed to load albums' : 'Failed to load artists', 'error');
-  }, [failedAt, albumView]);
+    window.showToast?.(`Failed to load ${noun}`, 'error');
+  }, [failedAt, noun]);
 
   // Add-to-watchlist straight from a card badge.
   //
@@ -236,9 +292,43 @@ export function LibraryPage() {
    * exists in both) and resets it otherwise — a year sort carried into the
    * artists view would be a URL param nothing honors.
    */
-  const switchView = (view: 'artists' | 'albums') => {
+  const switchView = (view: 'artists' | 'albums' | 'songs') => {
     const offered = SORT_OPTIONS[view].some((o) => o.value === search.sort);
-    setSearch({ view, sort: offered ? search.sort : '' });
+    setSearch({
+      view,
+      sort: offered ? search.sort : '',
+      // duplicates and lossless are song filters; "could be better" means
+      // something in the artists view too
+      dupes: view === 'songs' ? search.dupes : false,
+      quality: view === 'songs' || search.quality !== 'lossless' ? search.quality : '',
+    });
+  };
+
+  /** Play all / Shuffle: the first PLAY_ALL_LIMIT songs of what's shown. */
+  const [queueing, setQueueing] = useState(false);
+  const playSongs = async (shuffle: boolean) => {
+    if (queueing) return;
+    setQueueing(true);
+    try {
+      const list = (await fetchSongsToPlay(search)).filter((s) => s.file_path);
+      if (!list.length) {
+        window.showToast?.('Nothing here to play', 'info');
+        return;
+      }
+      const ordered = shuffle ? shuffled(list) : list;
+      const q = search.q.trim();
+      await window.playTrackList?.(
+        ordered.map(songQueueTrack),
+        q ? `Songs matching "${q}"` : 'Your songs',
+      );
+      if (pagination.totalCount > PLAY_ALL_LIMIT || capped) {
+        window.showToast?.(`Playing the first ${PLAY_ALL_LIMIT} songs`, 'info');
+      }
+    } catch {
+      window.showToast?.("Couldn't load the songs to play", 'error');
+    } finally {
+      setQueueing(false);
+    }
   };
 
   /**
@@ -247,13 +337,17 @@ export function LibraryPage() {
    * fetch. The prefetched params mirror what the tab will actually navigate
    * to — including the sort reset switchView applies.
    */
-  const prefetchView = (view: 'artists' | 'albums') => {
+  const prefetchView = (view: 'artists' | 'albums' | 'songs') => {
     if (view === search.view) return;
     const offered = SORT_OPTIONS[view].some((o) => o.value === search.sort);
     const target = { ...search, view, sort: offered ? search.sort : '' };
-    // One call per branch: the two options types are different generics and a
+    // One call per branch: the options types are different generics and a
     // union of them is not acceptable to prefetchQuery.
-    if (view === 'albums') {
+    if (view === 'songs') {
+      void queryClient
+        .prefetchQuery(librarySongsQueryOptions(profileId, target))
+        .catch(() => undefined);
+    } else if (view === 'albums') {
       void queryClient
         .prefetchQuery(libraryAlbumsQueryOptions(profileId, target))
         .catch(() => undefined);
@@ -406,9 +500,10 @@ export function LibraryPage() {
         <div className="library-stats" id="library-stats">
           <span className="library-stat">
             <span className="stat-number" id="library-artist-count">
-              {pagination.totalCount}
+              {pagination.totalCount.toLocaleString()}
+              {capped ? '+' : ''}
             </span>
-            <span className="stat-label">{albumView ? 'Albums' : 'Artists'}</span>
+            <span className="stat-label">{noun[0].toUpperCase() + noun.slice(1)}</span>
           </span>
         </div>
         <button
@@ -420,11 +515,35 @@ export function LibraryPage() {
           <span className="watchlist-all-icon">📻</span>
           <span className="watchlist-all-text">Radio</span>
         </button>
+        {songsView ? (
+          <>
+            <button
+              type="button"
+              className="library-watchlist-all-btn library-songs-play-btn"
+              disabled={queueing || songs.length === 0}
+              title={`Play these songs in order (up to ${PLAY_ALL_LIMIT})`}
+              onClick={() => void playSongs(false)}
+            >
+              <span className="watchlist-all-icon">▶</span>
+              <span className="watchlist-all-text">Play all</span>
+            </button>
+            <button
+              type="button"
+              className="library-watchlist-all-btn library-songs-shuffle-btn"
+              disabled={queueing || songs.length === 0}
+              title={`Shuffle these songs (up to ${PLAY_ALL_LIMIT})`}
+              onClick={() => void playSongs(true)}
+            >
+              <span className="watchlist-all-icon">🔀</span>
+              <span className="watchlist-all-text">Shuffle</span>
+            </button>
+          </>
+        ) : null}
         {/* The export is artist-scoped (watchlist/library artists as JSON/CSV/
             text); in the album grid it would export something no card shows,
             so it is gone rather than present and misleading — the same call
             the watchlist filter got. */}
-        {albumView ? null : (
+        {!artistsView ? null : (
           <button
             type="button"
             className="library-watchlist-all-btn library-export-btn"
@@ -483,7 +602,7 @@ export function LibraryPage() {
               segmented control, in the same row. Hovering (or tabbing to) the
               other tab warms its first page so the click lands on cache. */}
           <div className="watchlist-filter" role="group" aria-label="Library view">
-            {(['artists', 'albums'] as const).map((v) => (
+            {(['artists', 'albums', 'songs'] as const).map((v) => (
               <button
                 key={v}
                 type="button"
@@ -492,15 +611,53 @@ export function LibraryPage() {
                 onMouseEnter={() => prefetchView(v)}
                 onFocus={() => prefetchView(v)}
               >
-                {v === 'artists' ? 'Artists' : 'Albums'}
+                {v === 'artists' ? 'Artists' : v === 'albums' ? 'Albums' : 'Songs'}
               </button>
             ))}
           </div>
 
+          {/* songs: copies of one song, lossless files, the ones the quality
+              jobs say could be better. toggles, so they combine */}
+          {songsView ? (
+            <div className="watchlist-filter" role="group" aria-label="Song filters">
+              <button
+                type="button"
+                className={`watchlist-filter-btn${search.dupes ? ' active' : ''}`}
+                aria-pressed={search.dupes}
+                title="Songs you have more than one copy of"
+                onClick={() => setSearch({ dupes: !search.dupes })}
+              >
+                Duplicates
+              </button>
+              <button
+                type="button"
+                className={`watchlist-filter-btn${search.quality === 'lossless' ? ' active' : ''}`}
+                aria-pressed={search.quality === 'lossless'}
+                title="FLAC, WAV, AIFF and other lossless files"
+                onClick={() =>
+                  setSearch({ quality: search.quality === 'lossless' ? '' : 'lossless' })
+                }
+              >
+                Lossless
+              </button>
+              <button
+                type="button"
+                className={`watchlist-filter-btn${search.quality === 'upgradable' ? ' active' : ''}`}
+                aria-pressed={search.quality === 'upgradable'}
+                title="Songs below their quality profile (from Library Maintenance)"
+                onClick={() =>
+                  setSearch({ quality: search.quality === 'upgradable' ? '' : 'upgradable' })
+                }
+              >
+                Could be better
+              </button>
+            </div>
+          ) : null}
+
           {/* The watchlist is a property of an ARTIST. In the album grid it
               would filter on something no card shows, so it is gone rather
               than present and inert. */}
-          {albumView ? null : (
+          {!artistsView ? null : (
             <>
               <div
                 className="watchlist-filter"
@@ -542,7 +699,7 @@ export function LibraryPage() {
               value={search.sort}
               onChange={(e) => setSearch({ sort: e.target.value })}
             >
-              {SORT_OPTIONS[albumView ? 'albums' : 'artists'].map((o) => (
+              {SORT_OPTIONS[search.view].map((o) => (
                 <option key={o.value || 'az'} value={o.value}>
                   {o.label}
                 </option>
@@ -554,7 +711,9 @@ export function LibraryPage() {
               which is artist-only, is not. The `source` value is shared, and
               a key the other side has no column for is ignored rather than
               emptying the grid. */}
-          <div className="library-source-filter">
+          {/* songs have no source filter: their ids are the albums' and the
+              artists', which those views already filter by */}
+          <div className={`library-source-filter${songsView ? ' hidden' : ''}`}>
             <select
               className="library-source-filter-select"
               aria-label="Filter by metadata source"
@@ -582,7 +741,7 @@ export function LibraryPage() {
           {/* The quality jobs' findings, where people look: only offered when
               there is something to show, or while it's the active filter — and
               never in the album grid, which counts no upgradable tracks. */}
-          {!albumView && (upgradableTotal > 0 || search.quality) ? (
+          {artistsView && (upgradableTotal > 0 || search.quality) ? (
             <button
               type="button"
               className={`library-upgrade-filter${search.quality ? ' active' : ''}`}
@@ -614,10 +773,11 @@ export function LibraryPage() {
       </div>
 
       <div className="library-content">
-        {loading ? (
+        {loading && songsView ? <LibrarySongSkeleton /> : null}
+        {loading && !songsView ? (
           <div className="library-loading">
             <div className="loading-spinner" />
-            <div className="loading-text">Loading {albumView ? 'albums' : 'artists'}...</div>
+            <div className="loading-text">Loading {noun}...</div>
           </div>
         ) : null}
 
@@ -626,7 +786,27 @@ export function LibraryPage() {
             put it: after the loading row, above the cards. */}
         <div ref={downloadsHost} data-library-downloads-host="" />
 
-        {albumView ? (
+        {/* a search finds songs from any view: the few best title matches sit
+            above the artist or album results, with a way into all of them */}
+        {!songsView && search.q.trim().length >= 2 ? (
+          <LibrarySongsStrip
+            profileId={profileId}
+            search={search}
+            isAdmin={isAdmin}
+            onSeeAll={() => switchView('songs')}
+          />
+        ) : null}
+
+        {songsView ? (
+          <LibrarySongList
+            songs={songs}
+            isAdmin={isAdmin}
+            query={search.q.trim()}
+            context={search.q.trim() ? `Songs matching "${search.q.trim()}"` : 'Your songs'}
+            stale={songsQuery.isPlaceholderData}
+            onChanged={() => void songsQuery.refetch()}
+          />
+        ) : albumView ? (
           // The artists grid's own class: the two views are meant to look the
           // same apart from what is on the tile.
           <div className="library-artists-grid" id="library-albums-grid">
@@ -661,7 +841,7 @@ export function LibraryPage() {
         )}
 
         {isEmpty ? (
-          <LibraryEmpty query={search.q} failed={failed} noun={albumView ? 'albums' : 'artists'} />
+          <LibraryEmpty query={search.q} failed={failed} noun={noun} songHits={songHits} />
         ) : null}
 
         {pagination.totalPages > 1 ? (
@@ -677,6 +857,7 @@ export function LibraryPage() {
             <div className="pagination-info">
               <span>
                 Page {pagination.page} of {pagination.totalPages}
+                {capped ? '+' : ''}
               </span>
             </div>
             <button
@@ -711,13 +892,24 @@ function LibraryEmpty({
   query,
   failed,
   noun,
+  songHits = false,
 }: {
   query: string;
   failed: boolean;
-  noun: 'artists' | 'albums';
+  noun: 'artists' | 'albums' | 'songs';
+  /** songs above matched the search, so it IS in the library */
+  songHits?: boolean;
 }) {
   const q = query.trim();
   const searching = q.length > 0 && !failed;
+  if (searching && songHits) {
+    return (
+      <div className="library-empty">
+        <div className="empty-title">{`No ${noun} match "${q}"`}</div>
+        <div className="empty-subtitle">The songs above do.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="library-empty">

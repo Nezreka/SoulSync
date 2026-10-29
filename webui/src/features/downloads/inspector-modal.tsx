@@ -15,6 +15,12 @@ import { SourceColumn } from './inspector-columns';
  * inside its own three steps.
  */
 
+/** A title/artist typed over the target's own, when those were wrong. */
+export interface InspectorQuery {
+  name: string;
+  artist: string;
+}
+
 export interface InspectorTarget {
   name: string;
   artist?: string;
@@ -24,8 +30,10 @@ export interface InspectorTarget {
   searchUrl: string;
   searchBody?: unknown;
   /** Start the chosen file. Throw with a message the person should see. */
-  onGrab: (candidate: InspectorCandidate) => Promise<void>;
+  onGrab: (candidate: InspectorCandidate, query?: InspectorQuery) => Promise<void>;
   cannotGrab?: GrabRule;
+  /** The title/artist can be retyped and searched again; searchBody gets them. */
+  editable?: boolean;
 }
 
 export function CandidateInspectorModal({
@@ -45,17 +53,22 @@ export function CandidateInspectorModal({
   // Provenance + policy facet from the first streamed payload: one per
   // inspection (core/downloads/provenance.py).
   const [searchMeta, setSearchMeta] = useState<InspectorSearchMeta | null>(null);
+  // the openers don't know the length, the server does
+  const [serverDurationMs, setServerDurationMs] = useState(0);
+  const [query, setQuery] = useState<InspectorQuery | null>(null);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     void streamInspection(
       target.searchUrl,
-      target.searchBody,
+      query ? { ...(target.searchBody as object), ...query } : target.searchBody,
       (source, fresh, all, rejected, meta) => {
         if (cancelled) return;
         setColumns((prev) => [...prev, { source, candidates: fresh, rejected }]);
         setCandidates([...all]);
         if (meta?.provenance) setSearchMeta((prev) => prev ?? meta);
+        if (meta?.expected_duration_ms) setServerDurationMs(meta.expected_duration_ms);
       },
     )
       .then(() => {
@@ -67,7 +80,20 @@ export function CandidateInspectorModal({
     return () => {
       cancelled = true;
     };
-  }, [target]);
+  }, [target, query]);
+
+  const search = (next: InspectorQuery) => {
+    setEditing(false);
+    if (next.name === shown.name && next.artist === shown.artist) return;
+    setColumns([]);
+    setCandidates([]);
+    setStreamDone(false);
+    setStreamError('');
+    setPickedIdx(null);
+    setStartError('');
+    setServerDurationMs(0);
+    setQuery(next);
+  };
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -80,19 +106,21 @@ export function CandidateInspectorModal({
   const bestIdx = bestCandidateIndex(candidates, target.cannotGrab);
   const selectedIdx = pickedIdx ?? (bestIdx >= 0 ? bestIdx : null);
   const selected = selectedIdx != null ? candidates[selectedIdx] : null;
+  const shown = query ?? { name: target.name, artist: target.artist || '' };
   const expected = {
-    name: target.name,
-    artist: target.artist,
-    album: target.album,
-    duration_ms: target.durationMs,
+    name: shown.name,
+    artist: shown.artist,
+    // a new artist means the row's album was someone else's (the server drops it too)
+    album: query && query.artist !== (target.artist || '') ? undefined : target.album,
+    duration_ms: (query ? 0 : target.durationMs) || serverDurationMs || undefined,
   };
 
   const grab = async (candidate: InspectorCandidate) => {
     setStarting(true);
     setStartError('');
     try {
-      await target.onGrab(candidate);
-      window.showToast?.(`Downloading ${candidate.display_name || target.name}`, 'success');
+      await (query ? target.onGrab(candidate, query) : target.onGrab(candidate));
+      window.showToast?.(`Downloading ${candidate.display_name || shown.name}`, 'success');
       onClose();
     } catch (error) {
       setStartError((error as Error).message);
@@ -132,12 +160,28 @@ export function CandidateInspectorModal({
           </button>
         </div>
         <div className="redownload-current">
-          <div className="redownload-current-info">
-            <div className="redownload-current-title">{target.name}</div>
-            <div className="redownload-current-meta">
-              {[target.artist, target.album].filter(Boolean).join(' · ')}
-            </div>
-          </div>
+          {editing ? (
+            <QueryEditor initial={shown} onSearch={search} onCancel={() => setEditing(false)} />
+          ) : (
+            <>
+              <div className="redownload-current-info">
+                <div className="redownload-current-title">{shown.name}</div>
+                <div className="redownload-current-meta">
+                  {[shown.artist, expected.album].filter(Boolean).join(' · ')}
+                  {query ? ' · downloads as typed' : ''}
+                </div>
+              </div>
+              {target.editable ? (
+                <button
+                  type="button"
+                  className="redownload-btn secondary rdl-query-edit"
+                  onClick={() => setEditing(true)}
+                >
+                  Edit search
+                </button>
+              ) : null}
+            </>
+          )}
         </div>
         <div className="redownload-body">
           <div className="rdl-src-columns">
@@ -196,6 +240,44 @@ export function CandidateInspectorModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Retype the title/artist when the row's own are wrong, and search again. */
+function QueryEditor({
+  initial,
+  onSearch,
+  onCancel,
+}: {
+  initial: InspectorQuery;
+  onSearch: (query: InspectorQuery) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initial.name);
+  const [artist, setArtist] = useState(initial.artist);
+  return (
+    <form
+      className="rdl-query-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (name.trim()) onSearch({ name: name.trim(), artist: artist.trim() });
+      }}
+    >
+      <label>
+        <span>Title</span>
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+      </label>
+      <label>
+        <span>Artist</span>
+        <input value={artist} onChange={(e) => setArtist(e.target.value)} />
+      </label>
+      <button type="submit" className="redownload-btn primary" disabled={!name.trim()}>
+        Search
+      </button>
+      <button type="button" className="redownload-btn secondary" onClick={onCancel}>
+        Cancel
+      </button>
+    </form>
   );
 }
 
@@ -294,15 +376,17 @@ export function openWishlistInspector(track: {
     album: track.album,
     searchUrl: '/api/wishlist/inspect',
     searchBody: { track_id: track.id },
+    editable: true,
     cannotGrab: (c) =>
       RELEASE_LEVEL.has(String(c.username || '').toLowerCase())
         ? "A torrent or Usenet hit is a whole release, so it can't be picked for one track. The wishlist's own download can use it."
         : null,
-    onGrab: async (candidate) => {
+    onGrab: async (candidate, query) => {
       await postJson('/api/wishlist/inspect/download', {
         track_id: track.id,
         candidate: candidatePayload(candidate),
         override: overrideOf(candidate),
+        ...query,
       });
       window.updateWishlistCount?.();
     },

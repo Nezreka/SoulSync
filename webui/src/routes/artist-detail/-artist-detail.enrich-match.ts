@@ -109,6 +109,32 @@ export function _resetEnrichmentLock(): void {
 
 // ---- Manual match (4726-4840) ----
 
+/**
+ * What a service's match search takes besides a name (#1901): a pasted link,
+ * a bare id, or both. Mirrors core/library/direct_id.parse_direct_ref, so the
+ * hint never promises a paste the backend won't recognise.
+ */
+const PASTE_HINTS: Record<string, 'link or id' | 'link' | 'id'> = {
+  spotify: 'link or id',
+  musicbrainz: 'link or id',
+  deezer: 'link or id',
+  itunes: 'link or id',
+  discogs: 'link or id',
+  tidal: 'link or id',
+  qobuz: 'link or id',
+  amazon: 'link or id',
+  audiodb: 'link or id',
+  genius: 'id',
+  jiosaavn: 'link',
+  lastfm: 'link',
+  bandcamp: 'link',
+};
+
+export function matchSearchPlaceholder(service: string, label: string): string {
+  const paste = PASTE_HINTS[service];
+  return paste ? `Search ${label}, or paste a ${label} ${paste}` : `Search ${label}…`;
+}
+
 export interface MatchSearchResult {
   id: string;
   name?: string;
@@ -142,9 +168,15 @@ export interface MatchApplyParams {
 }
 
 /** PUT /api/library/manual-match; hands back updated_data when provided. */
-export async function applyManualMatchRequest(
-  params: MatchApplyParams,
-): Promise<EnrichmentOutcome> {
+/** A manual match's outcome: the refreshed view, and what the watchlist did. */
+export interface MatchOutcome extends EnrichmentOutcome {
+  /** Watched artists that now point at the new match too (#1901). */
+  watchlistUpdated: string[];
+  /** Watched artists left alone: another one already has that id. */
+  watchlistSkipped: string[];
+}
+
+export async function applyManualMatchRequest(params: MatchApplyParams): Promise<MatchOutcome> {
   const response = await fetch('/api/library/manual-match', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -160,7 +192,23 @@ export async function applyManualMatchRequest(
   if (!result.success) throw new Error(result.error);
   return {
     updatedData: result.updated_data && result.updated_data.success ? result.updated_data : null,
+    watchlistUpdated: Array.isArray(result.watchlist_updated) ? result.watchlist_updated : [],
+    watchlistSkipped: Array.isArray(result.watchlist_skipped) ? result.watchlist_skipped : [],
   };
+}
+
+/**
+ * Tell the user what the watchlist did after a match: nothing when it had no
+ * entry for the artist, a note when it followed, a warning when it couldn't.
+ */
+export function announceWatchlistFollow(outcome: MatchOutcome, label: string): string {
+  if (outcome.watchlistSkipped.length) {
+    window.showToast?.(
+      `Your watchlist still has the old ${label} match for ${outcome.watchlistSkipped.join(', ')}: another watched artist already uses this one`,
+      'warning',
+    );
+  }
+  return outcome.watchlistUpdated.length ? '. Your watchlist follows it too' : '';
 }
 
 /**

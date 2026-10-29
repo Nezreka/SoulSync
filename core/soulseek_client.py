@@ -2900,10 +2900,14 @@ class SoulseekClient(DownloadSourcePlugin):
 
         slskd exposes server state at /api/v0/server in standard releases,
         and /api/v0/server/state in some builds. Probe both so endpoint differences
-        do not falsely lock users out of chat.
+        do not falsely lock users out of chat. slskd 0.26.2 made the server
+        controller admin-only, so non-admin api keys get a 403 there; the
+        application state (any role) carries the same block under 'server'.
         """
-        for endpoint in ('server', 'server/state'):
+        for endpoint in ('server', 'server/state', 'application'):
             state = await self._make_request('GET', endpoint)
+            if endpoint == 'application' and isinstance(state, dict):
+                state = state.get('server') or state.get('Server')
             if isinstance(state, dict) and any(k in state for k in ('isConnected', 'IsConnected', 'isLoggedIn', 'IsLoggedIn')):
                 connected = state.get('isConnected', state.get('IsConnected', False))
                 logged_in = state.get('isLoggedIn', state.get('IsLoggedIn', False))

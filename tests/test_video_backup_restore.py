@@ -106,8 +106,10 @@ def test_api_admin_gate_and_flow(env_db, monkeypatch):
 
 def test_tools_card_exists():
     root = Path(__file__).resolve().parent.parent
-    index = (root / "webui" / "index.html").read_text(encoding="utf-8")
-    repair_js = (root / "webui" / "static" / "video" / "video-repair.js").read_text(encoding="utf-8")
-    assert "data-video-backups-card" in index and "data-vbk-restore" in repair_js
-    assert "showConfirmDialog" in repair_js        # restore is confirm-gated (house rule)
-    assert "loadBackups()" in repair_js
+    tools = root / "webui" / "src" / "routes" / "tools"
+    cards = (tools / "-ui" / "video-tool-cards.tsx").read_text(encoding="utf-8")
+    page = (tools / "-ui" / "tools-page.tsx").read_text(encoding="utf-8")
+    api_ts = (tools / "-video-tools.api.ts").read_text(encoding="utf-8")
+    assert "<VideoBackupsCard />" in page and "export function VideoBackupsCard" in cards
+    assert "showConfirmDialog" in cards            # restore is confirm-gated (house rule)
+    assert "'/api/video/backups/restore'" in api_ts

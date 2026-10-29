@@ -120,8 +120,7 @@ def _extract_year_from_release_date(release_date) -> str:
     slice. When something upstream poisons ``release_date`` with a non-date
     value (e.g. the album NAME — #745, where "Mantras (Deluxe)" produced a
     "(Mant)" folder), that slice happily emitted garbage. Validate that the
-    leading 4 chars are a plausible year, matching the guard the rest of the
-    codebase already uses (see ``soulid_worker._extract_year``). Anything
+    leading 4 chars are a plausible year before trusting them. Anything
     that isn't a real year resolves to '' — the template's bracket-cleanup
     then drops the empty ``()`` instead of writing rubbish into the path.
     """

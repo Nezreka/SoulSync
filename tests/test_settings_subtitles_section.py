@@ -161,17 +161,18 @@ def test_library_sweep_points_at_the_tools_job(panel, video_js):
     assert "/api/video/subtitles/backfill" not in video_js
     assert 'id="vo-sub-open-job"' in panel
     assert "MISSING_SUBS_JOB = 'missing_subtitles'" in video_js
-    assert "page: 'video-tools'" in video_js
-    assert ".repair-job-card[data-job-id=" in video_js
+    # the React tools page opens the job from ?job= (gotoUnifiedTools)
+    assert "page: 'video-tools', job: MISSING_SUBS_JOB" in video_js
 
 
 def test_tools_page_knows_the_job():
     from pathlib import Path
-    js = (Path(__file__).resolve().parents[1] / "webui/static/video/video-repair.js").read_text(
-        encoding="utf-8")
-    assert "missing_subtitles: 'Missing Subtitles'" in js
-    assert "missing_subtitles: 'Queue Subtitles'" in js
-    assert "if (f.finding_type === 'missing_subtitles') return subtitlesDetailHTML(d);" in js
+    from core.video.repair.catalog import VIDEO_FINDING_TYPE_META
+    assert VIDEO_FINDING_TYPE_META["missing_subtitles"]["label"] == "Missing Subtitles"
+    assert VIDEO_FINDING_TYPE_META["missing_subtitles"]["verb"] == "Queue Subtitles"
+    tsx = (Path(__file__).resolve().parents[1] /
+           "webui/src/routes/tools/-ui/video-finding-detail.tsx").read_text(encoding="utf-8")
+    assert "type === 'missing_subtitles') body = <SubtitlesDetail d={d} />" in tsx
 
 
 def test_advanced_knobs_wired(panel, video_js):

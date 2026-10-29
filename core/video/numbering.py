@@ -178,6 +178,13 @@ def scene_info(item: Dict[str, Any], db: Any = None, client: Any = None,
 REGROUP_MAX_SEASONS = 40
 
 
+def _shift(day: str, days: int) -> str:
+    try:
+        return (_dt.date.fromisoformat(day) + _dt.timedelta(days=days)).isoformat()
+    except ValueError:
+        return ""
+
+
 def tvdb_regroup(season: int, episodes: Sequence[Dict[str, Any]],
                  tvdb_seasons: Dict[int, Sequence[Tuple[int, Any]]]):
     """split one TMDB season's episodes by the season TVDB files them under.
@@ -186,6 +193,13 @@ def tvdb_regroup(season: int, episodes: Sequence[Dict[str, Any]],
     TVDB, the servers, the scene and the subtitle sites all split it (24/23/12).
     an episode TVDB's same season doesn't have is moved to the TVDB episode
     that aired the same day, in another season. everything else stays put.
+
+    late-night anime slips a day between the two: TVDB dates a 00:26 airing by
+    the broadcast day before, TMDB by the calendar. five of Jujutsu Kaisen's
+    stayed behind as phantom S1E32-35 and S1E46 (Thibs). a leftover moves to a
+    TVDB episode one day either side, but only when that's the only candidate,
+    nobody else claimed it, and no TMDB episode has that TVDB day exactly, so a
+    show airing every day never shuffles onto its neighbours.
 
     returns ({season: [episode dicts]}, {old episode number: (season, episode)})."""
     season = int(season)
@@ -197,17 +211,40 @@ def tvdb_regroup(season: int, episodes: Sequence[Dict[str, Any]],
         if e.get("episode_number") is not None and _day(e.get("air_date")):
             by_day.setdefault(_day(e["air_date"]), []).append((season, int(e["episode_number"])))
     claimed = set()
-    for e in episodes or []:
+    targets: Dict[int, Numbering] = {}
+    leftovers = []
+    for idx, e in enumerate(episodes or []):
         en = e.get("episode_number")
-        target = None
-        if season > 0 and have and en is not None and int(en) not in have:
-            alt = scene_numbering((season, int(en)), e.get("air_date"), tvdb_seasons,
-                                  by_day.get(_day(e.get("air_date"))))
-            if alt and alt[0] > 0 and alt[0] != season and alt not in claimed:
-                target = alt
+        if not (season > 0 and have and en is not None and int(en) not in have):
+            continue
+        alt = scene_numbering((season, int(en)), e.get("air_date"), tvdb_seasons,
+                              by_day.get(_day(e.get("air_date"))))
+        if alt and alt[0] > 0 and alt[0] != season and alt not in claimed:
+            claimed.add(alt)
+            targets[idx] = alt
+        else:
+            leftovers.append(idx)
+
+    if leftovers:
+        others = [(int(s), int(n), _day(d)) for s, eps in (tvdb_seasons or {}).items()
+                  if int(s) > 0 and int(s) != season for n, d in eps or [] if _day(d)]
+        tmdb_days = set(by_day)
+        for idx in leftovers:
+            e = episodes[idx]
+            day = _day(e.get("air_date"))
+            if not day:
+                continue
+            near = {_shift(day, -1), _shift(day, 1)}
+            hits = [(s, n) for s, n, d in others
+                    if d in near and d not in tmdb_days and (s, n) not in claimed]
+            if len(hits) == 1:
+                claimed.add(hits[0])
+                targets[idx] = hits[0]
+
+    for idx, e in enumerate(episodes or []):
+        target = targets.get(idx)
         if target:
-            claimed.add(target)
-            moved[int(en)] = target
+            moved[int(e["episode_number"])] = target
             groups.setdefault(target[0], []).append(dict(e, episode_number=target[1]))
         else:
             groups[season].append(e)

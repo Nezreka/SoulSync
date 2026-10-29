@@ -74,6 +74,39 @@ def _series_type_for(db, kind, body) -> str | None:
         return db.routing_series_type(library_id=int(mid))
     except (ValueError, TypeError):
         return None
+
+
+def _profile_library_for(db, kind, body) -> str:
+    """The library the title's quality profile files it in ('main' / '4k'):
+    the request's own profile id, else the title's assignment (by TMDB id or
+    library id, the way _series_type_for reads media_id), else Default's."""
+    from core.video.quality_profile import profile_by_id
+    body = body or {}
+    pid = body.get("quality_profile_id")
+    if pid in (None, "", 0, "0"):
+        kind_key = "movie" if str(kind or "").lower() == "movie" else "show"
+        mid = body.get("tmdb_id") or body.get("media_id")
+        try:
+            if mid not in (None, ""):
+                if str(body.get("media_source") or "tmdb").lower() == "tmdb" or body.get("tmdb_id"):
+                    pid = db.quality_profile_id_for(kind_key, tmdb_id=int(mid))
+                else:
+                    pid = db.quality_profile_id_for(kind_key, library_id=int(mid))
+        except (TypeError, ValueError):
+            pid = None
+    return str(profile_by_id(db, pid).get("library") or "main")
+
+
+def _target_for(db, kind, body) -> str:
+    """The library folder a download of this title is filed in: by kind, the
+    show's routing type (the anime folder) and the title's quality profile's
+    library (the 4K folder, when it's switched on)."""
+    from core.video.download_pipeline import target_dir_for
+    from core.video.library_roots import output_paths
+    return target_dir_for(kind, output_paths(db), _series_type_for(db, kind, body),
+                          _profile_library_for(db, kind, body))
+
+
 # The shared input/download dir — the SAME config key the music side reads/writes.
 _SHARED_DOWNLOAD_KEY = "soulseek.download_path"
 
@@ -411,6 +444,11 @@ def register_routes(bp):
         out["download_path"] = config_manager.get(_SHARED_DOWNLOAD_KEY, "") or ""   # shared w/ music
         from core.video.library_roots import ADDITIONAL_KEYS, additional_paths
         out.update({key: additional_paths(db, key) for key in ADDITIONAL_KEYS})
+        # the optional 4K libraries: a switch and a folder each, off by default
+        from core.video.library_roots import FOUR_K_KEYS, _on
+        for enabled, folder in FOUR_K_KEYS.values():
+            out[enabled] = _on(db.get_setting(enabled))
+            out[folder] = db.get_setting(folder) or ""
         out.update(load_source(db))   # download_mode + hybrid_order
         return jsonify(out)
 
@@ -431,6 +469,12 @@ def register_routes(bp):
         for key in _PATH_KEYS:
             if key in body:
                 db.set_setting(key, (str(body.get(key) or "")).strip())
+        from core.video.library_roots import FOUR_K_KEYS
+        for enabled, folder in FOUR_K_KEYS.values():
+            if enabled in body:
+                db.set_setting(enabled, "1" if body.get(enabled) in (True, 1, "1", "true") else "0")
+            if folder in body:
+                db.set_setting(folder, (str(body.get(folder) or "")).strip())
         if "download_path" in body:   # SHARED with music — write the same config key
             from core.settings import config_manager
             config_manager.set(_SHARED_DOWNLOAD_KEY, (str(body.get("download_path") or "")).strip())
@@ -1115,7 +1159,6 @@ def register_routes(bp):
         from . import get_video_db
         from core.settings import config_manager
         from core.video.download_monitor import ensure_started
-        from core.video.download_pipeline import target_dir_for
         from core.video.slskd_download import start_download
 
         body = request.get_json(silent=True) or {}
@@ -1135,11 +1178,7 @@ def register_routes(bp):
         # 507 took 39.9 seconds to arrive, all of it spent earning a magnet that
         # was then thrown away.
         db = get_video_db()
-        paths = {k: db.get_setting(k) or "" for k in _PATH_KEYS}
-        if not paths["movies_path"]:
-            paths["movies_path"] = db.get_setting("transfer_path") or ""
-        target = target_dir_for(body.get("kind"), paths,
-                                _series_type_for(db, body.get("kind"), body))
+        target = _target_for(db, body.get("kind"), body)
         from core.video import disk_guard, organization
         room = disk_guard.check_room(
             target, organization.load(db),
@@ -1270,7 +1309,6 @@ def register_routes(bp):
         """
         from . import get_video_db
         from core.video.download_monitor import ensure_started
-        from core.video.download_pipeline import target_dir_for
 
         body = request.get_json(silent=True) or {}
         source = str(body.get("source") or "").lower()
@@ -1284,10 +1322,7 @@ def register_routes(bp):
             return jsonify({"ok": False, "error": "Pick what this download is first."}), 400
 
         db = get_video_db()
-        paths = {k: db.get_setting(k) or "" for k in _PATH_KEYS}
-        if not paths["movies_path"]:
-            paths["movies_path"] = db.get_setting("transfer_path") or ""
-        target = target_dir_for(kind, paths, _series_type_for(db, kind, body))
+        target = _target_for(db, kind, body)
         if not target:
             return jsonify({"ok": False, "error": "Set the library folder for this type on Settings → Downloads."}), 400
 
@@ -1375,7 +1410,6 @@ def register_routes(bp):
         media_source, year, poster_url, quality_label}."""
         from . import get_video_db
         from core.video.download_monitor import ensure_started
-        from core.video.download_pipeline import target_dir_for
         from core.video.slskd_download import start_download
         from core.video.release_parse import parse_release
         from core.video.slskd_search import build_query
@@ -1389,8 +1423,7 @@ def register_routes(bp):
             return jsonify({"ok": False, "error": "Missing the pack's source info."}), 400
 
         db = get_video_db()
-        paths = {k: db.get_setting(k) or "" for k in _PATH_KEYS}
-        target = target_dir_for("show", paths, _series_type_for(db, "show", body))
+        target = _target_for(db, "show", body)
         from core.video import disk_guard, organization
         room = disk_guard.check_room(target, organization.load(get_video_db()))
         if not room["ok"]:
@@ -1517,7 +1550,7 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.download_monitor import ensure_started
         db = get_video_db()
-        ensure_started(get_video_db)   # also (re)start the monitor when the page is open
+        ensure_started(get_video_db, wake=False)   # (re)start the monitor when the page is open, without interrupting its idle sleep (#1905)
         rows = db.list_video_downloads()
         _annotate_upgrade_watches(db, rows, _request_profile())
         _annotate_packs(rows)
@@ -1532,7 +1565,7 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.download_monitor import ensure_started
         db = get_video_db()
-        ensure_started(get_video_db)
+        ensure_started(get_video_db, wake=False)   # read-only poll: (re)start only, never wake (#1905)
         dl_id = request.args.get("id")
         if dl_id:
             try:

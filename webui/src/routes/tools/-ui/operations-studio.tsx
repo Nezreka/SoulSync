@@ -1,16 +1,22 @@
 /**
- * Operations Studio — The Premier Outcome-Driven Operations Workstation.
+ * Simple mode: the maintenance surface for people who want a tidy library
+ * without managing thirty jobs. Same page on both sides; what differs (the
+ * pillars, the playbooks, the album spotlight) comes from a per-side table.
  *
- * Designed for everyday collectors and audiophiles who want immaculate libraries
- * without micromanaging 30 individual backend cron daemons.
+ * Oct 27 2026 rework. Simple mode used to open with its OWN health number,
+ * "(library − open findings) / library", while Advanced opened with the
+ * weighted score from -tools.groups. Same page, two numbers that disagreed
+ * (0% here, 95 there on the same library). There is one score now, and it is
+ * the weighted one.
  *
- * Features:
- * 1. Executive Library Health & Telemetry Hero
- * 2. Smart Action Triage Center (Safe 1-Click Auto-Fixes vs. Quarantine Staging)
- * 3. Live Scanning Mission Control HUD with real-time telemetry
- * 4. 1-Click Playbooks (Full Tune-Up, Audio Integrity Sweep, Metadata Polish, Media Enrichment)
- * 5. The 4 Strategic Pillars with direct resolution actions
- * 6. Visual Album Spotlight Grid with Luxury Vinyl Record disc sleeves & Album Inspection Tray.
+ * The three triage cards also said things that weren't true: "Quarantine" for
+ * findings nothing had quarantined, "zero-risk" fixes listed as "high-res vinyl
+ * covers". They are now sorted by what a fix actually does, they name the
+ * finding types inside them, and every name is a link into those findings.
+ *
+ *   safe to fix      fixable, touches no file, starts no download
+ *   needs your call  fixable, but moves/deletes/renames files or downloads
+ *   review only      no automatic fix; something for you to look at
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -39,6 +45,8 @@ import {
   stopRepairJob,
 } from '../-tools.api';
 import { repairJobBadge } from '../-tools.core';
+import { healthBandLabel, isSafeType, libraryHealth } from '../-tools.groups';
+import { useToolsMedia, type ToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { AlbumInspectionTray } from './album-inspection-tray';
 import { FindingsAlbumGrid } from './findings-album-grid';
@@ -66,9 +74,9 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     title: 'Audio Fidelity & Integrity',
     icon: '🎵',
     glow: '244, 114, 182',
-    tagline: 'Lossless verification, corrupt file detection, and bitrate inspection',
+    tagline: 'Whether the audio is what it claims to be, and good enough',
     description:
-      'Analyzes spectrums for fake 320kbps upconversions, verifies FLAC frame integrity, and flags truncated preview tracks.',
+      'Finds files that fail to decode, FLAC made from a lossy source, tracks below your quality profile and 30-second preview clips saved as full tracks.',
     jobIds: [
       'audio_corruption_detector',
       'fake_lossless_detector',
@@ -83,9 +91,9 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     title: 'Metadata & Tag Perfection',
     icon: '🏷️',
     glow: '129, 140, 248',
-    tagline: 'Standardize artist names, split collaborations, and align discographies',
+    tagline: 'What is written on and about your tracks',
     description:
-      'Cleans up featured artists, commas, Romanized non-Latin titles, and inconsistent album release metadata.',
+      'Splits combined artists, cleans genres, lines up track numbers and release years, and flags tracks filed under the wrong album.',
     jobIds: [
       'album_tag_consistency',
       'album_release_year_repair',
@@ -112,9 +120,8 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     title: 'Media & Artwork Enrichment',
     icon: '🎨',
     glow: '251, 191, 36',
-    tagline: 'Fetch synchronized lyrics, maximum-resolution covers, and loudness tags',
-    description:
-      'Locates synchronized time-coded lyrics, downloads high-resolution album art sleeves, and applies ReplayGain normalization.',
+    tagline: 'The extras that make a library feel finished',
+    description: 'Fills in synced lyrics, album and artist artwork, and ReplayGain loudness tags.',
     jobIds: ['missing_lyrics', 'missing_cover_art', 'replaygain_filler'],
     findingTypes: ['missing_lyrics', 'missing_cover_art', 'missing_replaygain', 'replaygain_retag'],
   },
@@ -124,9 +131,9 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     title: 'Storage & Library Hygiene',
     icon: '📦',
     glow: '56, 189, 248',
-    tagline: 'Relocate tracks, clean duplicates, and quarantine unlinked files',
+    tagline: 'What is on disk, where it belongs, and what should not be there',
     description:
-      'Detects duplicate recordings, cleans up unlinked orphan tracks, and moves files into organized directory structures.',
+      'Finds duplicate tracks, audio files the library has no row for, library rows whose file is gone, and empty folders.',
     jobIds: [
       'duplicate_detector',
       'orphan_file_detector',
@@ -149,7 +156,7 @@ export const PLAYBOOK_PRESETS: readonly PlaybookPreset[] = [
   {
     id: 'tune_up',
     title: 'Full Library Tune-Up',
-    subtitle: 'Complete system-wide health sweep across audio fidelity, metadata tags, and storage',
+    subtitle: 'One pass over audio, tags, artwork, lyrics and duplicates',
     icon: '🛡️',
     jobIds: [
       'audio_corruption_detector',
@@ -162,14 +169,14 @@ export const PLAYBOOK_PRESETS: readonly PlaybookPreset[] = [
   {
     id: 'audio_sweep',
     title: 'Audio Fidelity Sweep',
-    subtitle: 'Audit FLAC integrity, detect fake transcodes, and check low bitrates',
+    subtitle: 'Broken files, fake FLAC and tracks below your quality profile',
     icon: '🎵',
     jobIds: ['audio_corruption_detector', 'fake_lossless_detector', 'quality_upgrade_scanner'],
   },
   {
     id: 'metadata_polish',
     title: 'Metadata Polish',
-    subtitle: 'Clean up collaboration tags, commas, genres, and track numbering',
+    subtitle: 'Album tags, combined artists, genres and track numbers',
     icon: '🏷️',
     jobIds: [
       'album_tag_consistency',
@@ -181,20 +188,220 @@ export const PLAYBOOK_PRESETS: readonly PlaybookPreset[] = [
   {
     id: 'enrichment_pass',
     title: 'Media Enrichment',
-    subtitle: 'Download missing synced lyrics, high-res vinyl covers, and loudness tags',
+    subtitle: 'Lyrics, cover art and loudness tags',
     icon: '🎨',
     jobIds: ['missing_lyrics', 'missing_cover_art', 'replaygain_filler'],
   },
 ] as const;
+
+export const VIDEO_PILLARS: readonly StrategicPillar[] = [
+  {
+    id: 'files',
+    category: 'Files & storage',
+    title: 'Files & Storage',
+    icon: '📦',
+    glow: '56, 189, 248',
+    tagline: 'Broken files, extra copies, names and disk you could reclaim',
+    description:
+      'Finds truncated or stub files, titles you own twice, file names that drift from your templates, watched movies taking up disk, and YouTube downloads whose file is gone.',
+    jobIds: [
+      'broken_files',
+      'duplicate_movies',
+      'naming_conformance',
+      'watched_cleanup',
+      'youtube_ghosts',
+    ],
+    findingTypes: [
+      'broken_file',
+      'duplicate_movie',
+      'duplicate_episode',
+      'naming_mismatch',
+      'watched_cleanup',
+      'youtube_ghost',
+      'youtube_mass_missing',
+    ],
+  },
+  {
+    id: 'quality',
+    category: 'Quality',
+    title: 'Picture & Subtitles',
+    icon: '🎞️',
+    glow: '244, 114, 182',
+    tagline: 'Upgrades to your quality cutoff, and subtitles in your languages',
+    description:
+      'Finds movies and episodes whose best file sits below the cutoff in your quality profile, and videos with no subtitles in the languages you watch in.',
+    jobIds: ['quality_upgrade', 'missing_subtitles'],
+    findingTypes: ['quality_upgrade', 'missing_subtitles'],
+  },
+  {
+    id: 'gaps',
+    category: 'Collection gaps',
+    title: 'Collection Gaps',
+    icon: '🧩',
+    glow: '34, 197, 94',
+    tagline: 'Missing episodes, unfinished franchises, a tidy wishlist',
+    description:
+      'Finds aired episodes of your shows with no file, franchises you started but have not finished, and wishlist rows for things you already own.',
+    jobIds: ['missing_episodes', 'movie_collections', 'wishlist_audit'],
+    findingTypes: ['missing_episodes', 'incomplete_collection', 'stale_wishlist'],
+  },
+  {
+    id: 'metadata',
+    category: 'Metadata',
+    title: 'Metadata',
+    icon: '🏷️',
+    glow: '168, 85, 247',
+    tagline: 'Summaries, genres, artwork and TMDB matches',
+    description:
+      'Finds movies missing a summary, genres, a poster or backdrop, or a TMDB match, and fills them in from the metadata sources.',
+    jobIds: ['metadata_gaps'],
+    findingTypes: ['metadata_gap'],
+  },
+] as const;
+
+export const VIDEO_PLAYBOOKS: readonly PlaybookPreset[] = [
+  {
+    id: 'checkup',
+    title: 'Full Library Check-Up',
+    subtitle: 'Broken files, quality, missing episodes, metadata and duplicates',
+    icon: '🛡️',
+    jobIds: [
+      'broken_files',
+      'quality_upgrade',
+      'missing_episodes',
+      'metadata_gaps',
+      'duplicate_movies',
+    ],
+  },
+  {
+    id: 'gaps',
+    title: 'Fill The Gaps',
+    subtitle: 'Missing episodes, unfinished collections and subtitles',
+    icon: '🧩',
+    jobIds: ['missing_episodes', 'movie_collections', 'missing_subtitles'],
+  },
+  {
+    id: 'files',
+    title: 'File Health',
+    subtitle: 'Broken files, duplicate copies and names off your templates',
+    icon: '🩺',
+    jobIds: ['broken_files', 'duplicate_movies', 'naming_conformance'],
+  },
+  {
+    id: 'tidy',
+    title: 'Tidy Up',
+    subtitle: 'Stale wishlist rows, YouTube ghosts and watched movies',
+    icon: '🧹',
+    jobIds: ['wishlist_audit', 'youtube_ghosts', 'watched_cleanup'],
+  },
+] as const;
+
+/** what differs between the two sides' simple mode. */
+export interface StudioConfig {
+  pillars: readonly StrategicPillar[];
+  playbooks: readonly PlaybookPreset[];
+  /** the album spotlight (music only: video findings aren't about albums) */
+  spotlight: boolean;
+  /** what lives in each triage bucket, in this side's words */
+  safeHint: string;
+  callHint: string;
+  reviewHint: string;
+}
+
+export const STUDIO_CONFIG: Record<ToolsMedia, StudioConfig> = {
+  music: {
+    pillars: STRATEGIC_PILLARS,
+    playbooks: PLAYBOOK_PRESETS,
+    spotlight: true,
+    safeHint: 'These only write tags and data. No file is moved or deleted.',
+    callHint: 'Fixing these moves, deletes or replaces files, so each one asks first.',
+    reviewHint: 'Reported for you to look at. There is no automatic fix.',
+  },
+  video: {
+    pillars: VIDEO_PILLARS,
+    playbooks: VIDEO_PLAYBOOKS,
+    spotlight: false,
+    safeHint: "These only change SoulSync's own data. Nothing on disk, nothing downloaded.",
+    callHint: 'Fixing these renames or recycles files, or starts downloads, so look first.',
+    reviewHint: 'Reported for you to look at. There is no automatic fix.',
+  },
+};
+
+/** one bucket of the triage: the types in it, biggest first. */
+export interface TriageBucket {
+  count: number;
+  types: Array<{ type: string; label: string; count: number }>;
+}
+
+/**
+ * sort every pending type into the bucket its fix belongs to. pure, so the
+ * buckets the cards show are pinned by tests.
+ */
+export function triageBuckets(
+  groups: readonly FindingGroup[],
+  infoOf: (findingType: string) => FindingTypeInfo | undefined,
+): { safe: TriageBucket; call: TriageBucket; review: TriageBucket } {
+  const empty = (): TriageBucket => ({ count: 0, types: [] });
+  const out = { safe: empty(), call: empty(), review: empty() };
+  for (const group of groups) {
+    const count = Math.max(0, group.pending || 0);
+    if (count <= 0) continue;
+    const info = infoOf(group.finding_type);
+    const bucket = isSafeType(info) ? out.safe : info?.fixable ? out.call : out.review;
+    bucket.count += count;
+    bucket.types.push({
+      type: group.finding_type,
+      label: info?.label || group.finding_type.replace(/_/g, ' '),
+      count,
+    });
+  }
+  for (const bucket of Object.values(out)) bucket.types.sort((a, b) => b.count - a.count);
+  return out;
+}
 
 export interface OperationsStudioProps {
   jobs: RepairJob[] | null;
   progress: Record<string, RepairJobProgress>;
   runs: RepairJobRun[];
   trackCount?: number | null;
+  /** the library size in its own words (video: movies + episodes) */
+  sizeLabel?: string | null;
   onChanged: () => void;
   onShowFindings: (jobId: string, options?: { severity?: string; findingType?: string }) => void;
   onSwitchToAdvanced: (category?: string) => void;
+}
+
+/** the chips under a triage card: the types inside it, each a way in. */
+function TriageTypes({
+  bucket,
+  onOpen,
+}: {
+  bucket: TriageBucket;
+  onOpen: (findingType: string) => void;
+}) {
+  if (!bucket.types.length) return null;
+  const shown = bucket.types.slice(0, 4);
+  return (
+    <div className="operations-triage-types">
+      {shown.map((entry) => (
+        <button
+          type="button"
+          key={entry.type}
+          className="operations-triage-type"
+          onClick={() => onOpen(entry.type)}
+          title={`Open the ${entry.count.toLocaleString()} ${entry.label.toLowerCase()} findings`}
+        >
+          <span className="operations-triage-type-label">{entry.label}</span>
+          <span className="operations-triage-type-count">{entry.count.toLocaleString()}</span>
+        </button>
+      ))}
+      {bucket.types.length > shown.length ? (
+        <span className="operations-triage-type-more">
+          +{bucket.types.length - shown.length} more
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 export function OperationsStudio({
@@ -202,13 +409,19 @@ export function OperationsStudio({
   progress,
   runs: _runs,
   trackCount,
+  sizeLabel,
   onChanged,
   onShowFindings,
   onSwitchToAdvanced,
 }: OperationsStudioProps) {
+  const media = useToolsMedia();
+  const config = STUDIO_CONFIG[media];
   const [runningPlaybook, setRunningPlaybook] = useState<string | null>(null);
   const [runningPillar, setRunningPillar] = useState<string | null>(null);
   const [groups, setGroups] = useState<FindingGroup[]>([]);
+  /** until the first groups land, every count here would read zero, and a
+   *  zero health page says "nothing needs you". say we're checking instead. */
+  const [loaded, setLoaded] = useState(false);
   const [catalog, setCatalog] = useState<Record<string, FindingTypeInfo>>({});
   const [bulkStatus, setBulkStatus] = useState<BulkFixStatus | null>(null);
   const [selectedAlbum, setSelectedAlbum] = useState<FindingAlbumGroup | null>(null);
@@ -229,12 +442,21 @@ export function OperationsStudio({
       setCatalog(catMap);
     } catch {
       // Ignore load error
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
   useEffect(() => {
     void loadData();
   }, [loadData, jobs]);
+
+  // a fix-all started elsewhere (advanced, another tab) shows its progress here too
+  useEffect(() => {
+    void fetchBulkFixStatus().then((status) => {
+      if (status?.running) setBulkStatus(status);
+    });
+  }, []);
 
   // Poll bulk fix progress if active
   useEffect(() => {
@@ -248,7 +470,10 @@ export function OperationsStudio({
           bulkTimerRef.current = null;
         }
         if (status.fixed && status.fixed > 0) {
-          toast(`Successfully applied ${status.fixed} fixes!`, 'success');
+          toast(
+            `Fixed ${status.fixed.toLocaleString()}${status.failed ? `, ${status.failed.toLocaleString()} failed` : ''}`,
+            status.failed ? 'warning' : 'success',
+          );
         }
         onChanged();
         void loadData();
@@ -276,55 +501,17 @@ export function OperationsStudio({
     return map;
   }, [jobs]);
 
-  // Compute Authority Buckets (Uses both groups & catalog)
-  const { safeCount, suggestionCount, quarantineCount, topSuggestion, topQuarantine } =
-    useMemo(() => {
-      let safe = 0;
-      let suggestions = 0;
-      let quarantine = 0;
-      // the biggest type in each bucket, which its button opens. the buckets
-      // are destructive / fixable, not severity, so filtering the list by
-      // severity showed something else (orphans are 'info' but quarantined)
-      let topSuggestion = { type: '', count: 0 };
-      let topQuarantine = { type: '', count: 0 };
+  const infoOf = useCallback((findingType: string) => catalog[findingType], [catalog]);
+  const buckets = useMemo(() => triageBuckets(groups, infoOf), [groups, infoOf]);
+  const safeCount = buckets.safe.count;
 
-      for (const g of groups) {
-        const count = g.pending ?? (g as any).count ?? 0;
-        if (count <= 0) continue;
+  // ONE health number, the same one advanced mode shows
+  const health = useMemo(() => libraryHealth(groups, trackCount), [groups, trackCount]);
+  const runningCount = (jobs || []).filter(
+    (job) => job.is_running || progress[job.job_id]?.status === 'running',
+  ).length;
 
-        const info = catalog[g.finding_type];
-        const isDestructive = info ? info.destructive : (g as any).destructive;
-        const isFixable = info ? info.fixable : (g as any).fixable;
-
-        if (isDestructive) {
-          quarantine += count;
-          if (count > topQuarantine.count) topQuarantine = { type: g.finding_type, count };
-        } else if (isFixable) {
-          safe += count;
-        } else {
-          suggestions += count;
-          if (count > topSuggestion.count) topSuggestion = { type: g.finding_type, count };
-        }
-      }
-
-      return {
-        safeCount: safe,
-        suggestionCount: suggestions,
-        quarantineCount: quarantine,
-        topSuggestion: topSuggestion.type,
-        topQuarantine: topQuarantine.type,
-      };
-    }, [groups, catalog]);
-
-  // Executive Health Score
-  const healthScore = useMemo(() => {
-    const total = trackCount || 1000;
-    const totalPending = groups.reduce((acc, g) => acc + (g.pending ?? (g as any).count ?? 0), 0);
-    if (totalPending === 0) return 100;
-    return Math.max(0, Math.min(100, Math.round(((total - totalPending) / total) * 100)));
-  }, [groups, trackCount]);
-
-  // Active running job for Live Mission Control HUD
+  // Active running job for the "running now" strip
   const activeRunningJob = useMemo(() => {
     for (const job of jobs || []) {
       if (job.is_running || progress[job.job_id]?.status === 'running') {
@@ -337,32 +524,47 @@ export function OperationsStudio({
     return null;
   }, [jobs, progress]);
 
+  const openType = useCallback(
+    (findingType: string) => onShowFindings('', { findingType }),
+    [onShowFindings],
+  );
+
   const handleApplyAllSafeFixes = useCallback(async () => {
+    const confirmed = await window.showConfirmDialog?.({
+      title: 'Fix all safe findings',
+      message: `Apply the default fix to ${safeCount.toLocaleString()} findings? ${config.safeHint}`,
+      confirmText: 'Fix all safe',
+      destructive: false,
+    });
+    if (confirmed === false) return;
     try {
       const result = await startBulkFix({ safeOnly: true });
       if (result.started) {
-        toast(`Applying ${result.total || safeCount} safe fixes in background…`, 'info');
+        toast(
+          `Fixing ${(result.total || safeCount).toLocaleString()} findings in the background…`,
+          'info',
+        );
         setBulkStatus({ running: true, done: 0, total: result.total || safeCount });
       } else if (result.already_running) {
-        toast('A maintenance fix task is already in progress', 'info');
+        toast('A fix is already running, showing its progress', 'info');
         setBulkStatus({ running: true });
       } else {
-        toast(result.error || 'Could not start safe fixes', 'error');
+        toast(result.error || 'Could not start the fixes', 'error');
       }
     } catch {
-      toast('Error launching safe fixes', 'error');
+      toast('Could not start the fixes', 'error');
     }
-  }, [safeCount]);
+  }, [config.safeHint, safeCount]);
 
   const handleStopBulkFix = useCallback(async () => {
     try {
-      await stopBulkFix();
-      toast('Stopping bulk fix task…', 'info');
+      stopBulkFix();
+      toast('Stopping after the current fix…', 'info');
       setBulkStatus((prev) => (prev ? { ...prev, running: false } : null));
       onChanged();
       void loadData();
     } catch {
-      toast('Failed to stop bulk fix task', 'error');
+      toast('Could not stop the fix', 'error');
     }
   }, [loadData, onChanged]);
 
@@ -370,10 +572,10 @@ export function OperationsStudio({
     async (jobId: string) => {
       try {
         await stopRepairJob(jobId);
-        toast('Stop signal sent to operation', 'info');
+        toast('Stopping the job', 'info');
         setTimeout(onChanged, 800);
       } catch {
-        toast('Failed to stop job', 'error');
+        toast('Could not stop the job', 'error');
       }
     },
     [onChanged],
@@ -390,8 +592,6 @@ export function OperationsStudio({
         return;
       }
 
-      toast(`Triggering ${label} (${activeTargets.length} operations)...`, 'info');
-
       for (const target of activeTargets) {
         try {
           await runRepairJob(target.job_id);
@@ -400,7 +600,10 @@ export function OperationsStudio({
         }
       }
 
-      toast(`${label} successfully launched in background`, 'success');
+      toast(
+        `${label}: ${activeTargets.length} job${activeTargets.length === 1 ? '' : 's'} queued`,
+        'success',
+      );
       setTimeout(onChanged, 800);
     },
     [jobMap, onChanged],
@@ -440,37 +643,50 @@ export function OperationsStudio({
         for (const target of targets) {
           await setRepairJobEnabled(target.job_id, enable);
         }
-        toast(`${pillar.title} autopilot ${enable ? 'activated' : 'paused'}`, 'success');
+        toast(
+          `${pillar.title} ${enable ? 'now runs on its schedule' : 'is off its schedule'}`,
+          'success',
+        );
         onChanged();
       } catch {
-        toast('Error toggling autopilot for pillar', 'error');
+        toast('Could not change the schedule', 'error');
       }
     },
     [jobMap, onChanged],
   );
 
+  const pending = health.pending;
+  const sizeLine = sizeLabel || (trackCount ? `${trackCount.toLocaleString()} tracks` : '');
+
   return (
-    <div className="operations-studio">
-      {/* ── Executive Library Health Hero ─────────────────────────────────── */}
-      <div className="operations-executive-hero">
+    <div className="operations-studio" data-studio-media={media}>
+      {/* ── Health ─────────────────────────────────────────────────────── */}
+      <div className={`operations-executive-hero ${loaded ? health.band : ''}`}>
         <div className="operations-exec-metric">
-          <div className="operations-exec-score">
-            <span className="operations-exec-num">{healthScore}%</span>
+          <div className={`operations-exec-score ${loaded ? health.band : ''}`}>
+            <span className="operations-exec-num">{loaded ? health.score : '–'}</span>
             <span className="operations-exec-status">
-              {safeCount === 0 && quarantineCount === 0 ? 'Pristine' : 'Tune-Up Ready'}
+              {loaded ? healthBandLabel(health.band) : 'checking'}
             </span>
           </div>
           <div className="operations-exec-detail">
             <div className="operations-exec-title">
-              {trackCount ? `${trackCount.toLocaleString()} Tracks Verified` : 'Library Telemetry'}
+              {!loaded
+                ? 'Looking at your findings…'
+                : pending > 0
+                  ? `${pending.toLocaleString()} open finding${pending === 1 ? '' : 's'}`
+                  : 'Nothing needs you'}
             </div>
             <div className="operations-exec-sub">
-              {safeCount > 0
-                ? `${safeCount} one-click enrichments ready · `
-                : 'All tags & lyrics aligned · '}
-              {quarantineCount > 0
-                ? `${quarantineCount} files in quarantine review`
-                : 'Zero audio defects'}
+              {[
+                sizeLine,
+                safeCount > 0 ? `${safeCount.toLocaleString()} safe to fix in one click` : '',
+                runningCount > 0
+                  ? `${runningCount} job${runningCount === 1 ? '' : 's'} running`
+                  : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </div>
           </div>
         </div>
@@ -480,39 +696,35 @@ export function OperationsStudio({
             type="button"
             className="operations-exec-cta"
             onClick={() => void handleApplyAllSafeFixes()}
+            title={config.safeHint}
           >
-            ⚡ Apply All {safeCount} Safe Fixes
+            Fix {safeCount.toLocaleString()} safe
           </button>
         ) : null}
       </div>
 
-      {/* ── Autonomous Authority & Triage Center ────────────────────────── */}
+      {/* ── Triage ─────────────────────────────────────────────────────── */}
       <div className="operations-triage-section">
         <div className="operations-triage-header">
           <div className="operations-triage-title-group">
-            <span className="operations-triage-badge">Autonomous Curation</span>
-            <h5 className="operations-triage-title">Smart Action Triage</h5>
+            <h5 className="operations-triage-title">What needs you</h5>
           </div>
           <p className="operations-triage-sub">
-            Prioritized by authority and data safety. Apply zero-risk enrichments instantly or
-            review quarantined file changes.
+            Every open finding, sorted by what fixing it would do. Click a type to see its findings.
           </p>
         </div>
 
         <div className="operations-triage-grid">
-          {/* Card 1: Safe 1-Click Auto-Fixes */}
           <div className="operations-triage-card safe">
             <div className="operations-triage-top">
               <span className="operations-triage-icon">⚡</span>
               <span className="operations-triage-count-pill safe">
-                {safeCount > 0 ? `${safeCount} Ready` : 'All Clean'}
+                {safeCount > 0 ? `${safeCount.toLocaleString()} ready` : 'All clear'}
               </span>
             </div>
-            <h6 className="operations-triage-heading">Zero-Risk Auto-Fixes</h6>
-            <p className="operations-triage-desc">
-              Missing synced lyrics, high-res vinyl covers, ReplayGain loudness normalization, and
-              tag alignment.
-            </p>
+            <h6 className="operations-triage-heading">Safe to fix</h6>
+            <p className="operations-triage-desc">{config.safeHint}</p>
+            <TriageTypes bucket={buckets.safe} onOpen={openType} />
             <div className="operations-triage-action-row">
               <button
                 type="button"
@@ -521,70 +733,70 @@ export function OperationsStudio({
                 onClick={() => void handleApplyAllSafeFixes()}
               >
                 {bulkStatus?.running
-                  ? `Applying Fixes (${bulkStatus.done || 0}/${bulkStatus.total || safeCount})…`
-                  : `⚡ Apply All ${safeCount} Safe Fixes`}
+                  ? `Fixing ${bulkStatus.done || 0} / ${bulkStatus.total || safeCount}…`
+                  : safeCount > 0
+                    ? `Fix all ${safeCount.toLocaleString()}`
+                    : 'Nothing to fix'}
               </button>
             </div>
           </div>
 
-          {/* Card 2: Curator Suggestions */}
-          <div className="operations-triage-card suggestions">
-            <div className="operations-triage-top">
-              <span className="operations-triage-icon">💡</span>
-              <span className="operations-triage-count-pill suggestions">
-                {suggestionCount > 0 ? `${suggestionCount} Suggestions` : 'Optimal'}
-              </span>
-            </div>
-            <h6 className="operations-triage-heading">Curator Recommendations</h6>
-            <p className="operations-triage-desc">
-              Collaboration artist splits, canonical release alignment, and discography gaps.
-            </p>
-            <div className="operations-triage-action-row">
-              <button
-                type="button"
-                className="operations-triage-btn suggestions"
-                disabled={suggestionCount === 0}
-                onClick={() => onShowFindings('', { findingType: topSuggestion })}
-              >
-                Review Suggestions ➔
-              </button>
-            </div>
-          </div>
-
-          {/* Card 3: Quarantine & High-Risk Decisions */}
           <div className="operations-triage-card quarantine">
             <div className="operations-triage-top">
               <span className="operations-triage-icon">🛡️</span>
               <span className="operations-triage-count-pill quarantine">
-                {quarantineCount > 0 ? `⚠️ ${quarantineCount} In Quarantine` : '0 Critical'}
+                {buckets.call.count > 0
+                  ? `${buckets.call.count.toLocaleString()} to decide`
+                  : 'None'}
               </span>
             </div>
-            <h6 className="operations-triage-heading">Quarantine &amp; Review</h6>
-            <p className="operations-triage-desc">
-              Corrupt audio files, duplicate recordings, orphan audio files, and short preview
-              clips.
-            </p>
+            <h6 className="operations-triage-heading">Needs your call</h6>
+            <p className="operations-triage-desc">{config.callHint}</p>
+            <TriageTypes bucket={buckets.call} onOpen={openType} />
             <div className="operations-triage-action-row">
               <button
                 type="button"
                 className="operations-triage-btn quarantine"
-                disabled={quarantineCount === 0}
-                onClick={() => onShowFindings('', { findingType: topQuarantine })}
+                disabled={buckets.call.count === 0}
+                onClick={() => openType(buckets.call.types[0]?.type || '')}
               >
-                🛡️ Inspect Quarantine ➔
+                Review {buckets.call.types[0]?.label || 'findings'} →
+              </button>
+            </div>
+          </div>
+
+          <div className="operations-triage-card suggestions">
+            <div className="operations-triage-top">
+              <span className="operations-triage-icon">💡</span>
+              <span className="operations-triage-count-pill suggestions">
+                {buckets.review.count > 0
+                  ? `${buckets.review.count.toLocaleString()} to look at`
+                  : 'None'}
+              </span>
+            </div>
+            <h6 className="operations-triage-heading">Review only</h6>
+            <p className="operations-triage-desc">{config.reviewHint}</p>
+            <TriageTypes bucket={buckets.review} onOpen={openType} />
+            <div className="operations-triage-action-row">
+              <button
+                type="button"
+                className="operations-triage-btn suggestions"
+                disabled={buckets.review.count === 0}
+                onClick={() => openType(buckets.review.types[0]?.type || '')}
+              >
+                Review {buckets.review.types[0]?.label || 'findings'} →
               </button>
             </div>
           </div>
         </div>
 
-        {/* Live Bulk Fix Progress Bar if running */}
         {bulkStatus?.running ? (
           <div className="operations-triage-bulk-banner" role="status">
             <div className="operations-triage-bulk-info">
               <span className="operations-triage-bulk-pulse" />
               <span className="operations-triage-bulk-text">
-                Applying non-destructive fixes in background: {bulkStatus.done || 0} /{' '}
-                {bulkStatus.total || safeCount} completed
+                Fixing in the background: {bulkStatus.done || 0} / {bulkStatus.total || safeCount}{' '}
+                done
               </span>
             </div>
             <button
@@ -592,13 +804,13 @@ export function OperationsStudio({
               className="operations-triage-bulk-stop"
               onClick={() => void handleStopBulkFix()}
             >
-              ⏹ Stop Fix
+              Stop
             </button>
           </div>
         ) : null}
       </div>
 
-      {/* ── Live Mission Control Telemetry HUD ───────────────────────────── */}
+      {/* ── Running now ────────────────────────────────────────────────── */}
       {activeRunningJob ? (
         <div className="operations-live-hud" role="status" aria-live="polite">
           <div className="operations-live-hud-head">
@@ -607,7 +819,7 @@ export function OperationsStudio({
               <span className="operations-live-hud-dot" />
             </div>
             <div className="operations-live-hud-title-wrap">
-              <span className="operations-live-hud-badge">Active Operation Telemetry</span>
+              <span className="operations-live-hud-badge">Running now</span>
               <h6 className="operations-live-hud-name">{activeRunningJob.job.display_name}</h6>
               {activeRunningJob.prog?.phase ? (
                 <span className="operations-live-hud-phase">{activeRunningJob.prog.phase}</span>
@@ -620,7 +832,7 @@ export function OperationsStudio({
                 onClick={() => void handleStopSingleJob(activeRunningJob.job.job_id)}
                 title={`Stop ${activeRunningJob.job.display_name}`}
               >
-                ⏹ Stop Operation
+                ⏹ Stop
               </button>
             </div>
           </div>
@@ -636,21 +848,19 @@ export function OperationsStudio({
         </div>
       ) : null}
 
-      {/* ── 1-Click Curated Playbooks ─────────────────────────────────────── */}
+      {/* ── Playbooks ──────────────────────────────────────────────────── */}
       <div className="operations-playbooks-section">
         <div className="operations-playbooks-header">
           <div className="operations-playbooks-title-group">
-            <span className="operations-playbooks-badge">1-Click Automation</span>
-            <h5 className="operations-playbooks-title">Curated Library Playbooks</h5>
+            <h5 className="operations-playbooks-title">Run a check</h5>
           </div>
           <p className="operations-playbooks-sub">
-            Run automated composite health audits across your music library without tweaking
-            individual scripts.
+            Each one queues a handful of jobs together. Their findings land above.
           </p>
         </div>
 
         <div className="operations-playbooks-grid">
-          {PLAYBOOK_PRESETS.map((playbook) => {
+          {config.playbooks.map((playbook) => {
             const isRunning = runningPlaybook === playbook.id;
             return (
               <button
@@ -659,17 +869,17 @@ export function OperationsStudio({
                 className={`operations-playbook-card ${isRunning ? 'running' : ''}`}
                 disabled={isRunning}
                 onClick={() => void handlePlaybookRun(playbook)}
-                title={`Launch ${playbook.title}`}
+                title={`Run ${playbook.title}`}
               >
                 <div className="operations-playbook-card-top">
                   <span className="operations-playbook-icon">{playbook.icon}</span>
-                  <span className="operations-playbook-arrow">➔</span>
+                  <span className="operations-playbook-arrow">→</span>
                 </div>
                 <h6 className="operations-playbook-name">{playbook.title}</h6>
                 <p className="operations-playbook-desc">{playbook.subtitle}</p>
                 <div className="operations-playbook-action-row">
                   <span className="operations-playbook-cta">
-                    {isRunning ? 'Launching…' : '▶ Run Playbook'}
+                    {isRunning ? 'Queuing…' : '▶ Run'}
                   </span>
                 </div>
               </button>
@@ -678,21 +888,19 @@ export function OperationsStudio({
         </div>
       </div>
 
-      {/* ── The 4 Strategic Pillars ───────────────────────────────────────── */}
+      {/* ── Areas ──────────────────────────────────────────────────────── */}
       <div className="operations-pillars-section">
         <div className="operations-pillars-header">
           <div className="operations-pillars-title-group">
-            <span className="operations-pillars-badge">Operational Pillars</span>
-            <h5 className="operations-pillars-title">4 Strategic Domains</h5>
+            <h5 className="operations-pillars-title">Areas</h5>
           </div>
           <p className="operations-pillars-sub">
-            Autonomous background curation grouped by collection priorities. Toggle continuous
-            Autopilot or run manual domain sweeps.
+            The jobs grouped by what they look after. Put an area on its schedule, or check it now.
           </p>
         </div>
 
         <div className="operations-pillars-grid">
-          {STRATEGIC_PILLARS.map((pillar) => {
+          {config.pillars.map((pillar) => {
             const pillarJobs = pillar.jobIds
               .map((id) => jobMap.get(id))
               .filter((j): j is RepairJob => Boolean(j));
@@ -703,9 +911,14 @@ export function OperationsStudio({
 
             const openFindings = groups
               .filter((g) => pillar.findingTypes.includes(g.finding_type))
-              .reduce((sum, g) => sum + (g.pending ?? (g as any).count ?? 0), 0);
+              .reduce((sum, g) => sum + Math.max(0, g.pending || 0), 0);
 
             const allEnabled = pillarJobs.length > 0 && pillarJobs.every((j) => j.enabled);
+            const enabledCount = pillarJobs.filter((j) => j.enabled).length;
+            // the biggest open type in this area is where its badge goes
+            const topType = groups
+              .filter((g) => pillar.findingTypes.includes(g.finding_type) && (g.pending || 0) > 0)
+              .sort((a, b) => (b.pending || 0) - (a.pending || 0))[0]?.finding_type;
 
             return (
               <div
@@ -725,23 +938,19 @@ export function OperationsStudio({
                     <button
                       type="button"
                       className="operations-pillar-findings-badge"
-                      title="View these findings in the inspection tray"
+                      title="See these findings"
                       onClick={() => {
+                        if (topType) {
+                          openType(topType);
+                          return;
+                        }
                         const firstWithFindings = pillarJobs.find(
                           (j) => repairJobBadge(j).kind === 'pending',
                         );
-                        if (firstWithFindings) {
-                          onShowFindings(firstWithFindings.job_id, {
-                            severity: pillar.id === 'audio' ? 'error' : undefined,
-                          });
-                        } else {
-                          onShowFindings('', {
-                            severity: pillar.id === 'audio' ? 'error' : undefined,
-                          });
-                        }
+                        onShowFindings(firstWithFindings?.job_id || '');
                       }}
                     >
-                      {openFindings.toLocaleString()} Issues
+                      {openFindings.toLocaleString()} open
                     </button>
                   ) : null}
                 </div>
@@ -750,18 +959,26 @@ export function OperationsStudio({
 
                 <div className="operations-pillar-stats-row">
                   <div className="operations-pillar-stat">
-                    <span className="operations-pillar-stat-val">{pillarJobs.length}</span>
-                    <span className="operations-pillar-stat-lbl">Active Jobs</span>
+                    <span className="operations-pillar-stat-val">
+                      {enabledCount}/{pillarJobs.length}
+                    </span>
+                    <span className="operations-pillar-stat-lbl">On schedule</span>
                   </div>
                   <div className="operations-pillar-stat">
                     <span className="operations-pillar-stat-val">
-                      {isRunning ? 'Auditing' : allEnabled ? 'Scheduled' : 'Paused'}
+                      {isRunning
+                        ? 'Checking'
+                        : allEnabled
+                          ? 'Scheduled'
+                          : enabledCount
+                            ? 'Partly'
+                            : 'Off'}
                     </span>
                     <span className="operations-pillar-stat-lbl">Status</span>
                   </div>
                   <div className="operations-pillar-stat">
                     <span className="operations-pillar-stat-val">
-                      {openFindings > 0 ? `${openFindings} open` : 'Clean'}
+                      {openFindings > 0 ? `${openFindings.toLocaleString()} open` : 'Clean'}
                     </span>
                     <span className="operations-pillar-stat-lbl">Findings</span>
                   </div>
@@ -772,8 +989,8 @@ export function OperationsStudio({
                     className="operations-pillar-autopilot"
                     title={
                       allEnabled
-                        ? 'Pause automated background scans for this pillar'
-                        : 'Enable automated background scans for this pillar'
+                        ? 'Take every job in this area off its schedule'
+                        : 'Put every job in this area on its schedule'
                     }
                   >
                     <input
@@ -783,7 +1000,7 @@ export function OperationsStudio({
                     />
                     <span className="repair-toggle-slider small" />
                     <span className="operations-pillar-autopilot-label">
-                      Autopilot {allEnabled ? 'On' : 'Off'}
+                      {allEnabled ? 'On schedule' : 'Off schedule'}
                     </span>
                   </label>
 
@@ -792,15 +1009,14 @@ export function OperationsStudio({
                     className="operations-pillar-scan-btn"
                     disabled={isRunning}
                     onClick={() => void handlePillarScan(pillar)}
-                    title={`Scan all ${pillar.title} now`}
+                    title={`Check ${pillar.title} now`}
                   >
-                    {isRunning ? 'Scanning…' : '▶ Run Scan'}
+                    {isRunning ? 'Checking…' : '▶ Check now'}
                   </button>
                 </div>
 
                 <div className="operations-pillar-footer">
                   <span className="operations-pillar-subjob-hint">
-                    Includes{' '}
                     {pillarJobs
                       .map((j) => j.display_name)
                       .slice(0, 3)
@@ -811,9 +1027,9 @@ export function OperationsStudio({
                     type="button"
                     className="operations-pillar-inspect-link"
                     onClick={() => onSwitchToAdvanced(pillar.category)}
-                    title="Inspect individual script cadences and settings in Advanced Mode"
+                    title="See each job's schedule and settings in Advanced"
                   >
-                    Inspect in Advanced ➔
+                    Job settings →
                   </button>
                 </div>
               </div>
@@ -822,56 +1038,56 @@ export function OperationsStudio({
         </div>
       </div>
 
-      {/* ── Releases Needing Attention (Album Spotlight Grid) ─────────────── */}
-      <div className="operations-spotlight-section">
-        <div className="operations-spotlight-header">
-          <div className="operations-spotlight-title-group">
-            <span className="operations-spotlight-badge">Album Spotlight</span>
-            <h5 className="operations-spotlight-title">Releases Needing Attention</h5>
+      {/* ── Releases needing attention (music) ─────────────────────────── */}
+      {config.spotlight ? (
+        <div className="operations-spotlight-section">
+          <div className="operations-spotlight-header">
+            <div className="operations-spotlight-title-group">
+              <h5 className="operations-spotlight-title">Albums with findings</h5>
+            </div>
+            <p className="operations-spotlight-sub">
+              The album-level view of what the jobs found. Open one to work on it track by track.
+            </p>
           </div>
-          <p className="operations-spotlight-sub">
-            Curated visual overview of albums flagged for audio quality defects, missing artwork, or
-            tag alignment.
-          </p>
-        </div>
 
-        {selectedAlbum ? (
-          <AlbumInspectionTray
-            group={selectedAlbum}
+          {selectedAlbum ? (
+            <AlbumInspectionTray
+              group={selectedAlbum}
+              status="pending"
+              onClose={() => setSelectedAlbum(null)}
+              onFixFinding={async (f) => {
+                await fixFinding(f.id);
+                onChanged();
+                void loadData();
+              }}
+              onDismissFinding={async (id) => {
+                await dismissFinding(id);
+                onChanged();
+                void loadData();
+              }}
+              onInspectRedownload={(f) => {
+                setRedownloadFinding(f);
+              }}
+              onRefresh={() => {
+                onChanged();
+                void loadData();
+              }}
+              onReopenFinding={async (id) => {
+                await reopenFinding(id);
+                onChanged();
+                void loadData();
+              }}
+            />
+          ) : null}
+
+          <FindingsAlbumGrid
+            groupBy="album"
             status="pending"
-            onClose={() => setSelectedAlbum(null)}
-            onFixFinding={async (f) => {
-              await fixFinding(f.id);
-              onChanged();
-              void loadData();
-            }}
-            onDismissFinding={async (id) => {
-              await dismissFinding(id);
-              onChanged();
-              void loadData();
-            }}
-            onInspectRedownload={(f) => {
-              setRedownloadFinding(f);
-            }}
-            onRefresh={() => {
-              onChanged();
-              void loadData();
-            }}
-            onReopenFinding={async (id) => {
-              await reopenFinding(id);
-              onChanged();
-              void loadData();
-            }}
+            selectedGroupKey={selectedAlbum?.key}
+            onOpen={(group) => setSelectedAlbum(group)}
           />
-        ) : null}
-
-        <FindingsAlbumGrid
-          groupBy="album"
-          status="pending"
-          selectedGroupKey={selectedAlbum?.key}
-          onOpen={(group) => setSelectedAlbum(group)}
-        />
-      </div>
+        </div>
+      ) : null}
 
       {/* ── Redownload Modal ──────────────────────────────────────────────── */}
       {/* a finding with no track behind it (a fake-lossless FILE finding) has no

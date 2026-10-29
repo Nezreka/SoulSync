@@ -45,6 +45,10 @@ if _XDIST_WORKER and 'soulsync-test-imagecache-' in _os.environ.get('SOULSYNC_IM
     _os.environ.pop('SOULSYNC_IMAGE_CACHE_DIR', None)
 if _XDIST_WORKER and 'soulsync-test-audiobooks-' in _os.environ.get('AUDIOBOOK_DATABASE_PATH', ''):
     _os.environ.pop('AUDIOBOOK_DATABASE_PATH', None)
+for _var, _mark in (('SOULSYNC_PLAYLIST_COVER_DIR', 'soulsync-test-covers-'),
+                    ('SOULSYNC_AVATAR_DIR', 'soulsync-test-avatars-')):
+    if _XDIST_WORKER and _mark in _os.environ.get(_var, ''):
+        _os.environ.pop(_var, None)
 
 if not _os.environ.get('SOULSYNC_TEST_DB_READY'):
     _TEST_DB_DIR = _tempfile.mkdtemp(prefix='soulsync-testdb-')
@@ -83,6 +87,22 @@ if not _os.environ.get('AUDIOBOOK_DATABASE_PATH'):
     _TEST_AUDIOBOOK_DIR = _tempfile.mkdtemp(prefix='soulsync-test-audiobooks-')
     _os.environ['AUDIOBOOK_DATABASE_PATH'] = _os.path.join(_TEST_AUDIOBOOK_DIR, 'test_audiobooks.db')
     _atexit.register(lambda: _shutil.rmtree(_TEST_AUDIOBOOK_DIR, ignore_errors=True))
+
+# covers and avatars default to ./storage under the checkout. the nightly docker
+# build runs right after the suite in the same checkout, so a test that made a
+# cover shipped storage/playlist_covers in the image, owned by uid 1000, and it
+# stayed unwritable for anyone running another PUID (SeadogsBooty, PUID 1026).
+# covers get their own folder per test (see _isolated_cover_dir below):
+# cover_dir() reads the env before a test's own base_dir, so one shared folder
+# would let one test's preview-1.webp leak into the next.
+for _var, _prefix in (('SOULSYNC_PLAYLIST_COVER_DIR', 'soulsync-test-covers-'),
+                      ('SOULSYNC_AVATAR_DIR', 'soulsync-test-avatars-')):
+    if not _os.environ.get(_var):
+        _dir = _tempfile.mkdtemp(prefix=_prefix)
+        _os.environ[_var] = _dir
+        _atexit.register(lambda d=_dir: _shutil.rmtree(d, ignore_errors=True))
+_COVER_ROOT = _os.environ['SOULSYNC_PLAYLIST_COVER_DIR']
+_cover_seq = iter(range(1, 10 ** 9))
 
 import copy
 import os as _os
@@ -1615,3 +1635,12 @@ def _no_background_playlist_identify(monkeypatch):
     threads. unhooked here; the auto_identify tests hook their own runner."""
     from core.playlists import auto_identify
     monkeypatch.setattr(auto_identify, "_runner", None)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cover_dir(monkeypatch):
+    """a fresh playlist-cover folder per test, under the session's temp root.
+    cover_dir() makes it on first use, so tests that never touch covers pay
+    nothing."""
+    monkeypatch.setenv('SOULSYNC_PLAYLIST_COVER_DIR',
+                       _os.path.join(_COVER_ROOT, str(next(_cover_seq))))

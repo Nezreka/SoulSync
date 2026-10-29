@@ -34,6 +34,7 @@ from core.imports.context import (
     get_import_source,
     get_import_source_ids,
     get_import_track_info,
+    has_real_album_name,
     normalize_import_context,
 )
 from core.imports.file_integrity import (
@@ -1328,6 +1329,57 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             if detected_album_info:
                 album_info = detected_album_info
 
+        # The playlist entry never carried an album (paste-link playlists,
+        # discovery-pool rows, TXT imports): every context source holds the
+        # 'Unknown Album' placeholder or nothing, and detection had nothing
+        # real to identify. The downloaded file usually knows its own album
+        # — recover it from the file's tags so grouping, filing and tagging
+        # use the real album instead of the placeholder. Identified albums
+        # are untouched (their album_info already carries a real name);
+        # album-flagged downloads are included for the same reason — a
+        # wishlist album context can itself carry only the placeholder
+        # name, and filing '' while tagging the file's real album would
+        # split the folder from the tag.
+        if album_info and not has_real_album_name(album_info.get('album_name')):
+            from core.imports.track_number import (
+                embedded_album_belongs_to_track,
+                embedded_album_name_is_real,
+                read_embedded_album,
+                read_embedded_album_artist,
+            )
+            _file_album = read_embedded_album(file_path)
+            # Single files are usually tagged album == title (or == artist);
+            # build_import_album_info refuses both as album evidence, and
+            # so does this recovery — adopting them would flip an ordinary
+            # single onto the album path for no gain.
+            _clean_title = get_import_clean_title(
+                context, album_info=album_info,
+                default=original_search.get('title', ''),
+            )
+            _self_named = {
+                str(v).strip().lower()
+                for v in (_clean_title, original_search.get('artist', ''))
+                if str(v or '').strip()
+            }
+            if (
+                embedded_album_name_is_real(_file_album)
+                and str(_file_album).strip().lower() not in _self_named
+                and embedded_album_belongs_to_track(
+                    read_embedded_album_artist(file_path), original_search.get('artist'),
+                )
+            ):
+                logger.info(
+                    "Recovered album from the file's own tags: %r (playlist entry carried none)",
+                    _file_album,
+                )
+                album_info['album_name'] = _file_album
+                album_info['is_album'] = True
+            elif embedded_album_name_is_real(_file_album):
+                logger.info(
+                    "File's album %r is the track itself or another artist's; not adopting it",
+                    _file_album,
+                )
+
         if album_info and album_info['is_album'] and not is_album_download:
             logger.info(
                 "SMART ALBUM GROUPING for track=%r original_album=%r",
@@ -1350,6 +1402,23 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             album_info=album_info,
             default=original_search.get('title', 'Unknown Track'),
         )
+
+        # An album flag with no name left (the entry's album was the
+        # placeholder and nothing real replaced it: no context name, no
+        # recovered file tag) must not reach the filing path as an album —
+        # the folder would be built from an empty album segment. File it
+        # as a single under the track title instead, the same outcome
+        # album-less singles get. Explicit album downloads keep their
+        # flag: an unnamed bundle still stays together.
+        if (
+            album_info
+            and album_info.get('is_album')
+            and not is_album_download
+            and not has_real_album_name(album_info.get('album_name'))
+        ):
+            logger.info("Album flagged but unnamed; filing as a single under the track title")
+            album_info['is_album'] = False
+            album_info['album_name'] = clean_track_name
         # Resolve track_number from the richest available source.
         # See ``core/imports/track_number.py`` for the resolution
         # chain — pure function, unit-tested in isolation, single

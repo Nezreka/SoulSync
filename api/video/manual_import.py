@@ -85,7 +85,6 @@ def register_routes(bp):
         {scope, title, year, season, episode, episode_title, media_id}."""
         from . import get_video_db
         from core.video import organization
-        from core.video.download_pipeline import target_dir_for
         from core.video.importer import real_fs, run_import
         from core.video.mediainfo import probe
 
@@ -102,10 +101,7 @@ def register_routes(bp):
         if scope not in ("movie", "episode"):
             return jsonify({"success": False, "error": "Choose a movie or an episode."}), 400
 
-        from .downloads import _PATH_KEYS, _series_type_for
-        paths = {k: db.get_setting(k) or "" for k in _PATH_KEYS}
-        if not paths["movies_path"]:
-            paths["movies_path"] = db.get_setting("transfer_path") or ""
+        from .downloads import _target_for
         override = {
             "scope": scope,
             "title": body.get("title"),
@@ -117,11 +113,11 @@ def register_routes(bp):
             # the chosen identity's show decides anime vs TV. The place screen
             # sends the picked result's TMDB id as media_id (video-import.js), so
             # read it as one; an id that isn't resolves to 'standard' -> TV folder.
-            "target_dir": target_dir_for(
-                _KIND_FOR_SCOPE[scope], paths,
-                _series_type_for(db, _KIND_FOR_SCOPE[scope],
-                                 {"media_id": body.get("media_id"),
-                                  "media_source": body.get("media_source") or "tmdb"})),
+            # and its quality profile decides main vs the 4K library
+            "target_dir": _target_for(
+                db, _KIND_FOR_SCOPE[scope],
+                {"media_id": body.get("media_id"),
+                 "media_source": body.get("media_source") or "tmdb"}),
         }
         settings = organization.load(db)
         prober = probe if settings.get("verify_with_ffprobe", True) else None
@@ -135,9 +131,13 @@ def register_routes(bp):
             probe_info = prober(src) if prober is not None else None
         except Exception:   # noqa: BLE001 - a probe crash must not block the import
             probe_info = None
+        from core.video.download_monitor import template_ids
+        # the picked identity's ids (its media_id is a TMDB id), not the grab's
+        ids = template_ids(db, {"kind": _KIND_FOR_SCOPE[scope], "media_source": "tmdb",
+                                "media_id": override.get("media_id")}, settings)
         plan = plan_import(row, src, list_dir=fs.list_dir, probe=probe_info,
                            settings=settings, force=True, override=override,
-                           expected_duration_sec=_expected_duration_sec(db, row))
+                           expected_duration_sec=_expected_duration_sec(db, row), ids=ids)
         if plan["action"] in ("import", "upgrade") and plan.get("dest"):
             try:
                 db.update_video_download(dl_id, dest_path=plan["dest"]["path"])

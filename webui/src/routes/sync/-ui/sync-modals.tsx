@@ -1,56 +1,39 @@
 /**
- * Mounts the source modals for all nine verticals from ONE table.
+ * The mirrored playlist's identify / sync windows.
  *
- * Nine hand-written `<SourceModals config={SYNC_SOURCES.x} …>` blocks is the
- * shape kettui's fourth observation warns about — nine places to drift, and a
- * tenth source added to the table silently getting no modal at all. The
- * registry's `SYNC_VERTICAL_IDS` drives it instead, so a source cannot be in
- * the table and missing here.
+ * This used to mount one host per source vertical, ten of them, back when
+ * each source tab identified and synced its own playlists. Every tab imports
+ * into a mirror now, so the mirrored vertical is the only one with anything
+ * to show.
  *
- * NOTHING RENDERED SourceModals BEFORE THIS. The tabs only ever signalled
- * `onOpen`; the component existed and was tested but had no production mount
- * site. This is it.
- *
- * `discoveryStartBody` is deliberately NOT passed. SourceModals already
- * derives the ListenBrainz `{playlist}` body from `config.discovery.startBody`
- * precisely so a wiring omission here cannot break the start invisibly — its
- * own comment says so. Passing it again would put the same decision in two
- * places, and the one here would be the copy that drifts.
+ * `discoveryStartBody` is deliberately NOT passed: SourceModals derives it
+ * from the config, so a wiring omission here can't break the start.
  */
 
 import type { SyncModals as SyncModalsState } from '../-sync.use-modals';
-import type { SyncVerticals } from '../-sync.verticals';
+import type { SourceVertical } from '../-sync.use-vertical';
 
 import { SYNC_SOURCES } from '../-sync.sources';
-import { SYNC_VERTICAL_IDS } from '../-sync.verticals';
 import { SourceModals } from './source-modals';
 
 export interface SyncModalsProps {
-  verticals: SyncVerticals;
+  vertical: SourceVertical;
   modals: SyncModalsState;
-  /** useStandalone() — one page-level signal, the same for every source. */
+  /** useStandalone() — one page-level signal. */
   standalone: boolean;
-  /**
-   * The mirrored row's source, for label capitalisation. Mirrored only: every
-   * other vertical knows its own name from its config.
-   */
+  /** The mirrored row's source, for label capitalisation. */
   mirroredSource?: string;
 }
 
-export function SyncModals({ verticals, modals, standalone, mirroredSource }: SyncModalsProps) {
+export function SyncModals({ vertical, modals, standalone, mirroredSource }: SyncModalsProps) {
   return (
-    <>
-      {SYNC_VERTICAL_IDS.map((id) => (
-        <SourceModals
-          key={id}
-          config={SYNC_SOURCES[id]}
-          vertical={verticals[id]}
-          openId={modals.openIdFor(id)}
-          onClose={modals.close}
-          standalone={standalone}
-          mirroredSource={id === 'mirrored' ? mirroredSource : undefined}
-        />
-      ))}
-    </>
+    <SourceModals
+      config={SYNC_SOURCES.mirrored}
+      vertical={vertical}
+      openId={modals.openIdFor('mirrored')}
+      onClose={modals.close}
+      standalone={standalone}
+      mirroredSource={mirroredSource}
+    />
   );
 }

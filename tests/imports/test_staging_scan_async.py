@@ -3,6 +3,7 @@ scan exceed gunicorn's 120s timeout. The runner moves the SAME scan off the requ
 with progress + a generation guard. Metadata reads are injected so no real audio is needed."""
 
 import os
+import threading
 import time
 import types
 
@@ -1070,3 +1071,81 @@ def test_scan_status_not_ready_when_cold(tmp_path):
     payload, _ = routes.staging_scan_status(_full_runtime(sp))
     assert payload["ready"] is False
     assert "scanned" in payload and "total" in payload
+
+
+def _expire_scan_cache():
+    routes._staging_scan_cache["ts"] = 0.0
+
+
+def test_rescan_only_rereads_changed_files(tmp_path):
+    """#1889: a rescan after the ttl re-read every tag, which on a full
+    library took minutes and kept the folder in a scan forever."""
+    sp = _staging(tmp_path, 3)
+    seen = []
+
+    def counting(full, rel):
+        seen.append(os.path.basename(full))
+        return _meta(full, rel)
+
+    rt = _runtime(counting)
+    routes._scan_staging_records(rt, sp)
+    assert len(seen) == 3
+    seen.clear()
+
+    changed = next((tmp_path / "staging").rglob("01.flac"))
+    changed.write_text("longer now")
+    _expire_scan_cache()
+    recs = routes._scan_staging_records(rt, sp)
+    assert len(recs) == 3
+    assert seen == ["01.flac"]
+
+
+def test_rescan_drops_files_that_left_staging(tmp_path):
+    sp = _staging(tmp_path, 2)
+    rt = _runtime()
+    routes._scan_staging_records(rt, sp)
+    gone = next((tmp_path / "staging").rglob("00.flac"))
+    gone.unlink()
+    _expire_scan_cache()
+    recs = routes._scan_staging_records(rt, sp)
+    assert [r["filename"] for r in recs] == ["01.flac"]
+    assert str(gone) not in routes._staging_meta_cache["entries"]
+
+
+def test_expired_records_served_while_rescan_runs(tmp_path):
+    """#1889: past the ttl the accessor answers with the last scan at once
+    instead of waiting out the grace and returning the scanning stub."""
+    sp = _staging(tmp_path, 2)
+    routes._scan_staging_records(_runtime(), sp)
+    _expire_scan_cache()
+    release = threading.Event()
+
+    def blocked(full, rel):
+        release.wait(5)
+        return _meta(full, rel)
+
+    # a new reader drops the per-file cache, so the rescan really has to read
+    started = time.time()
+    try:
+        state, val = routes.get_staging_records_or_status(_runtime(blocked), sp, grace_seconds=3.0)
+        assert time.time() - started < 1.0
+        assert state == "ready" and len(val) == 2
+        assert routes._staging_scan_status["status"] == "scanning"
+    finally:
+        release.set()
+        _await_done()
+
+
+def test_invalidated_cache_still_waits_for_the_scan(tmp_path):
+    """an import invalidates: its moved files must not be served stale."""
+    sp = _staging(tmp_path, 2)
+    routes._scan_staging_records(_runtime(), sp)
+    routes.invalidate_staging_scan_cache()
+
+    def slow(full, rel):
+        time.sleep(0.4)
+        return _meta(full, rel)
+
+    state, _val = routes.get_staging_records_or_status(_runtime(slow), sp, grace_seconds=0.1)
+    assert state == "scanning"
+    _await_done()

@@ -249,6 +249,39 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
             except Exception as e:
                 logger.debug("durable manual match fast-path failed: %s", e)
 
+        # exact spotify id (#1885), same as the media matcher. not cached,
+        # see the note there
+        try:
+            from core.artists.map import get_current_profile_id
+            from core.sync.provider_match import honorable_provider_rows
+            # this matcher is patched onto sync_service, so the sync's own
+            # profile wins over the ambient one
+            try:
+                from services.sync_service import _sync_profile_id
+                _profile_id = _sync_profile_id.get()
+            except Exception:
+                _profile_id = None
+            _profile_id = _profile_id or get_current_profile_id()
+            provider_row = next(iter(honorable_provider_rows(
+                db, spotify_track, active_server, _profile_id)), None)
+            if provider_row is not None:
+                def _pv(name):
+                    return (provider_row.get(name) if isinstance(provider_row, dict)
+                            else getattr(provider_row, name, None))
+
+                class DatabaseTrackProvider:
+                    def __init__(self):
+                        self.ratingKey = _pv('id')
+                        self.title = _pv('title')
+                        self.id = _pv('id')
+                        self.artist = _pv('artist_name') or ''
+                        self.album = _pv('album_title') or ''
+
+                logger.debug(f"Provider-ID match for '{original_title}' → {_pv('id')}")
+                return DatabaseTrackProvider(), 1.0
+        except Exception as e:
+            logger.debug("provider-id match failed: %s", e)
+
         # Try each artist
         for artist in spotify_track.artists:
             if isinstance(artist, str):
@@ -347,6 +380,9 @@ def _record_library_membership(tracks_json, match_details) -> None:
                 # until the next sync, and a number that cannot say how old it
                 # is invites more trust than it has earned.
                 'library_checked_at': checked_at,
+                # the sync's verdict, so the mirror's library check
+                # (core/playlists/library_check) leaves it alone
+                'library_checked_via': 'sync',
             })
             written += 1
         if written:

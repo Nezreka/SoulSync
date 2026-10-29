@@ -59,12 +59,34 @@
     background-size: cover !important;
     background-position: 85% 25% !important;
     transform: scale(1.02);
-    transition: transform 6s var(--ease-emphasized), filter 1s ease;
+    transition: transform 6s var(--ease-emphasized), filter 1s ease, opacity 1.4s ease;
     filter: saturate(1.15) contrast(1.05);
 }
 
 .discover-hero:hover .discover-hero-background {
     transform: scale(1.05);
+}
+
+/* the preview is live: the still steps aside for the artist's video under
+   it. the hero only wears this class once youtube says the video is really
+   playing, so the fade (the video layer's own 1.4s) never crosses a black
+   gap, and the scrim above the video keeps the words readable over it.
+   animation: none is load-bearing, not tidiness: style.css breathes this
+   background (opacity 1 to 0.75 and back, forever), and a running animation
+   overrides the opacity below, so without it the still never fades at
+   all — it just keeps breathing over the video */
+.discover-hero--video-live .discover-hero-background {
+    opacity: 0;
+    animation: none;
+}
+
+/* the reader closed the preview: the still comes back the same way it
+   left, fading in over the video's own fade-out (the closing rule beside
+   the video layer's rules below). animation stays off for the same reason
+   as above — a breathing still has no opacity left to transition */
+.discover-hero--video-closing .discover-hero-background {
+    opacity: 1;
+    animation: none;
 }
 
 /* Scrim vignette — deep obsidian left shield guaranteeing 100% text legibility */
@@ -1443,9 +1465,12 @@
     transition: width var(--dur-base) ease !important;
 }
 
-/* Hero Help & Blacklist frosted glass buttons */
+/* Hero Help & Blacklist frosted glass buttons. The preview switch is the
+   third in the cluster: style.css parks help at right: 20px and block at
+   right: 58px, so the preview takes the next slot left, at 96px */
 .tool-help-button.discover-page-help-button,
-.discover-blacklist-btn {
+.discover-blacklist-btn,
+.discover-hero-preview-btn {
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -1460,12 +1485,23 @@
     transition: all var(--dur-quick) ease !important;
 }
 
+/* the preview switch stays lit while its preview plays, like the promo's
+   sound on, so it shares the hover look */
 .tool-help-button.discover-page-help-button:hover,
-.discover-blacklist-btn:hover {
+.discover-blacklist-btn:hover,
+.discover-hero-preview-btn:hover,
+.discover-hero-preview-btn.on {
     background: var(--white-a20) !important;
     color: #ffffff !important;
     border-color: var(--white-a30) !important;
     transform: scale(1.06) !important;
+}
+
+.discover-hero-preview-btn {
+    position: absolute;
+    top: 20px;
+    right: 96px;
+    z-index: 10;
 }
 
 /* ── 10. Premier Artist Map & Artist Web Hubs (Explore & Build) ──────────── */
@@ -3119,6 +3155,22 @@
 
 .dsc-backdrop-video.ready {
     opacity: 0.9;
+}
+
+/* in the hero the video replaces the still outright (the still fades to 0
+   over it), so it plays at full strength. its layer is the base rule's
+   z-index 0: above the background (z-index auto, earlier in the hero) and
+   below the scrim (z-index 1) and the words (z-index 2) */
+.discover-hero .dsc-backdrop-video.ready {
+    opacity: 1;
+}
+
+/* the exit fade: while the hero is closing, its video fades out under the
+   still fading back in. same specificity as the rule above (0,3,0), so
+   this only wins by standing after it — the pins in premier-css.test.ts
+   hold that order. the base rule's 1.4s transition does the fading */
+.discover-hero--video-closing .dsc-backdrop-video.ready {
+    opacity: 0;
 }
 
 .dsc-backdrop-video iframe {

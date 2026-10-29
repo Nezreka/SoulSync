@@ -214,10 +214,29 @@ def _existing_match(scope: str, dest_dir: str, ctx: dict, list_dir: Callable) ->
     return None
 
 
+def _fallback_ids(dl: dict, override: dict, force: bool) -> dict:
+    """Ids for the naming template when the caller resolved none: only a TMDB
+    id we can be sure of. A download's ``media_id`` is a TMDB id only when it
+    was grabbed from TMDB (a library re-grab carries SoulSync's own row id),
+    and a manual placement's ``media_id`` is the picked result's TMDB id."""
+    mid = override.get("media_id") if force else dl.get("media_id")
+    src = "tmdb" if force else str(dl.get("media_source") or "").lower()
+    return {"tmdb_id": mid} if (mid and src == "tmdb") else {}
+
+
+def _naming_year(ctx_year, ids):
+    """The year the template names a title by: the grab's own, else the one
+    resolved for the title (``ids['year']``). Empty values count as missing."""
+    if ctx_year not in (None, ""):
+        return ctx_year
+    return (ids or {}).get("year")
+
+
 def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | None = None,
                 settings: dict | None = None, force: bool = False,
                 override: dict | None = None, library_dir: str | None = None,
-                expected_duration_sec: float | None = None) -> dict:
+                expected_duration_sec: float | None = None,
+                ids: dict | None = None) -> dict:
     """Decide what to do with a finished download. Returns one of:
 
       {"action": "import",  "dest": {...}, "quality_label": str}
@@ -230,7 +249,9 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     too-short junk. ``settings`` are the user's organisation settings (naming templates
     + replace policy); None = defaults. ``expected_duration_sec`` is the item's known
     runtime (TMDB, resolved by the caller): a probed file running far shorter is a
-    truncated download or the wrong file entirely, and is rejected.
+    truncated download or the wrong file entirely, and is rejected. ``ids`` are
+    the title's {tmdb_id, imdb_id, tvdb_id} for the $tmdbid/$imdbid/$tvdbid
+    tokens (an episode's are its show's); None = only a TMDB id we're sure of.
 
     MANUAL placement: ``force=True`` with an ``override`` ({scope, title, year, season,
     episode, episode_title, target_dir, media_id}) trusts the user's chosen identity —
@@ -357,6 +378,8 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
         return _reject("No library folder configured for this type")
 
     media_id = override.get("media_id") if force else dl.get("media_id")
+    if ids is None:
+        ids = _fallback_ids(dl, override, force)
     quality = quality_full(parsed)
     # A multi-episode file is NAMED by its full span (S01E01-E02, the Sonarr/Plex
     # convention) even though the download row's identity is one episode of it.
@@ -374,14 +397,16 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
         }
     else:
         fields = {
-            "title": ctx.get("title"), "year": ctx.get("year"),
+            # the grab's own year wins; a show not in the library yet and a
+            # repair grab carry none, so the title's year is used to NAME it
+            "title": ctx.get("title"), "year": _naming_year(ctx.get("year"), ids),
             "series": ctx.get("title"), "season": ctx.get("season"),
             "episode": ep, "episode_end": ep_end, "episode_title": ctx.get("episode_title"),
             "air_date": ctx.get("air_date"),
             "quality": quality, "resolution": parsed.get("resolution"),
             "source": parsed.get("source"), "codec": parsed.get("codec"),
-            "tmdbid": media_id if scope == "movie" else None,
-            "tvdbid": media_id if scope == "episode" else None,
+            "tmdbid": ids.get("tmdb_id"), "imdbid": ids.get("imdb_id"),
+            "tvdbid": ids.get("tvdb_id") if scope == "episode" else None,
         }
     dest = organization.render_path(scope, root, fields, settings, ext)
     # The library already owns this item at a REAL, resolved location
@@ -472,7 +497,7 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                override: dict | None = None, library_dir: str | None = None,
                recycle: Callable | None = None,
                expected_duration_sec: float | None = None,
-               plan: dict | None = None) -> dict:
+               plan: dict | None = None, ids: dict | None = None) -> dict:
     """Execute the import and return a DB patch dict for the download row.
 
     ``fs`` is an injected facade with: ``list_dir(dir)->iterable[name]``,
@@ -505,7 +530,8 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                 probe_info = None
         plan = plan_import(dl, src_path, list_dir=fs.list_dir, probe=probe_info,
                            settings=settings, force=force, override=override,
-                           library_dir=library_dir, expected_duration_sec=expected_duration_sec)
+                           library_dir=library_dir, expected_duration_sec=expected_duration_sec,
+                           ids=ids)
     if plan["action"] == "reject":
         # Leave the file where it is; remember WHERE so manual import can find it.
         # _bad_release is transient (stripped by update_video_download): it tells

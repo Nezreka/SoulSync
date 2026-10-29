@@ -23,6 +23,9 @@ export const shellPageIds = [
   'podcasts',
   'audiobooks',
   'sample-studio',
+  // the video calendar (/calendar?media=video); the vanilla shell hands
+  // /video-calendar off to it
+  'calendar',
 ] as const;
 
 export type ShellPageId = (typeof shellPageIds)[number];
@@ -59,6 +62,7 @@ export const shellRouteManifest: readonly ShellRouteDefinition[] = [
   { pageId: 'podcasts', path: '/podcasts', kind: 'react' },
   { pageId: 'audiobooks', path: '/audiobooks', kind: 'react' },
   { pageId: 'sample-studio', path: '/sample-studio', kind: 'react' },
+  { pageId: 'calendar', path: '/calendar', kind: 'react' },
 ] as const;
 
 const routeByPageId = new Map(shellRouteManifest.map((route) => [route.pageId, route]));

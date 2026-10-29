@@ -1,8 +1,9 @@
 """Automation handler: ``video_add_airing_episodes`` action.
 
-Sonarr-style "monitor airings": add every episode airing TODAY — for the TV shows you
-follow on the video watchlist — to the video WISHLIST, skipping ones you already own.
-Runs on a daily schedule so the day's airings queue up to be grabbed automatically.
+Sonarr-style "monitor airings": add every episode that aired in the last week — for the
+TV shows you follow on the video watchlist — to the video WISHLIST, once each, skipping
+ones you already own. Runs every few hours, so a run the server missed costs hours, not
+a day, and an episode TMDB learns about late still gets offered.
 
 Like the other video handlers it lives on the SHARED automation side (so it may import
 ``core.video`` / ``api.video`` — the isolation contract only forbids the reverse) and
@@ -29,17 +30,17 @@ def is_airing_already_running() -> bool:
     return _RUN_GUARD()
 
 
-# Self-healing catch-up (Boulder's Sunday gap): a daily_time trigger that fires
-# while the box is asleep is discarded, not made up — so with a today-only window
-# every slept-through day was permanently skipped. Each run now covers
-# (last-covered-bookmark + 1 .. today), capped at this many days including today,
-# so any gap ≤ a week heals on the next nightly run. Delivery is at-least-once:
-# the bookmark normally advances once per successful run, but if the bookmark
-# write itself fails the next run re-covers the window (the wishlist upsert is
-# idempotent, so re-offers never duplicate — though a deliberately-deleted episode
-# can boomerang back in that rare case).
-CATCHUP_MAX_DAYS = 7
-_BOOKMARK_KEY = 'airing_last_covered'
+# Every run looks back a week, and a per-episode receipt says what was already
+# offered. The old shape covered (bookmark + 1 .. today) once a day at 01:00, and
+# that lost episodes two ways: a daily slot the server was restarting through is
+# discarded (it missed Oct 21, 24 and 27 on Boulder's box, each healed a day
+# late), and an episode that reached TMDB on or after its own air date (a
+# same-day streaming drop, a date moved earlier) sat behind a bookmark that had
+# already passed it, so it was never offered at all. The receipt is also what
+# keeps an episode the user deleted from the wishlist from coming back.
+LOOKBACK_DAYS = 7
+_BOOKMARK_KEY = 'airing_last_covered'      # the old coverage line, read once to seed
+_SEEDED_KEY = 'airing_offers_seeded'
 
 
 def _profile() -> int:
@@ -67,30 +68,48 @@ def _default_get_bookmark() -> Optional[str]:
     return get_video_db().get_setting(_BOOKMARK_KEY)
 
 
-def _default_set_bookmark(day: str) -> None:
+def _default_get_offered(keys) -> set:
     from api.video import get_video_db
-    get_video_db().set_setting(_BOOKMARK_KEY, day)
+    return get_video_db().airing_offered_keys(_profile(), keys)
 
 
-def compute_catchup_window(today: str, bookmark: Optional[str],
-                           max_days: int = CATCHUP_MAX_DAYS) -> str:
-    """The window START for this run: the day after the bookmark, clamped to
-    [today - (max_days-1), today]. No/invalid bookmark → today (the pre-catch-up
-    behavior — a fresh install never backfills history). Pure."""
-    if not bookmark:
-        return today
+def _default_mark_offered(keys) -> None:
+    from api.video import get_video_db
+    get_video_db().mark_airing_offered(_profile(), keys)
+
+
+def _default_is_seeded() -> bool:
+    from api.video import get_video_db
+    return (get_video_db().get_setting('%s:%d' % (_SEEDED_KEY, _profile())) or '') == '1'
+
+
+def _default_set_seeded() -> None:
+    from api.video import get_video_db
+    get_video_db().set_setting('%s:%d' % (_SEEDED_KEY, _profile()), '1')
+
+
+def lookback_start(today: str, days: int = LOOKBACK_DAYS) -> str:
+    """The window start: ``days`` days ending today. Pure."""
+    return (date.fromisoformat(str(today)) - timedelta(days=max(1, int(days)) - 1)).isoformat()
+
+
+def seed_boundary(today: str, bookmark: Optional[str]) -> str:
+    """The last day the old bookmark rules already covered, so the first
+    receipt-based run doesn't re-offer what they offered (and the user may have
+    since deleted). No usable bookmark means a fresh install, which never
+    backfilled history either: everything before today counts as covered. Pure."""
+    yesterday = (date.fromisoformat(str(today)) - timedelta(days=1)).isoformat()
     try:
-        bm_d = date.fromisoformat(str(bookmark))
-        t_d = date.fromisoformat(str(today))
+        bm = date.fromisoformat(str(bookmark)).isoformat() if bookmark else None
     except ValueError:
-        return today
-    start_d = bm_d + timedelta(days=1)
-    floor_d = t_d - timedelta(days=max(1, int(max_days)) - 1)
-    if start_d < floor_d:
-        start_d = floor_d
-    if start_d > t_d:
-        start_d = t_d
-    return start_d.isoformat()
+        bm = None
+    if not bm or bm > yesterday:
+        return yesterday
+    return bm
+
+
+def _key(tid, sn, en) -> tuple:
+    return (int(tid), int(sn), int(en))
 
 
 def _default_add_episodes(show_tmdb_id: Any, show_title: Any, episodes: List[Dict[str, Any]],
@@ -241,28 +260,14 @@ def auto_video_add_airing_episodes_all_profiles(config: Dict[str, Any], deps: Au
     follows: the calendar also counts every airing library show as watched by
     default, and copying those into every profile's wishlist is noise.
 
-    the catch-up bookmark is shared, so it is read once up front and written
-    once after every pass worked. otherwise the first pass would advance it
-    and the next profile would lose the days it was meant to catch up.
+    receipts are per profile (the background profile is set for each pass),
+    so the passes share nothing and one failing never costs another its days.
     """
     from core.automation.handlers.video_profile_fanout import run_per_profile
 
-    real_get = kwargs.pop('get_bookmark', None) or _default_get_bookmark
-    real_set = kwargs.pop('set_bookmark', None) or _default_set_bookmark
     fetch_airing = kwargs.pop('fetch_airing', None) or _default_fetch_airing
     fetch_follows = kwargs.pop('fetch_follows', None) or _default_followed_shows
     follower_profiles = kwargs.pop('follower_profiles', None)
-    try:
-        bookmark, bookmark_err = real_get(), None
-    except Exception as e:   # noqa: BLE001 - each pass degrades to today-only, no write
-        bookmark, bookmark_err = None, e
-
-    def get_bookmark():
-        if bookmark_err is not None:
-            raise bookmark_err
-        return bookmark
-
-    wrote: List[str] = []
 
     def run_pass(pass_deps, pid, is_owner):
         extra = dict(kwargs)
@@ -273,17 +278,9 @@ def auto_video_add_airing_episodes_all_profiles(config: Dict[str, Any], deps: Au
                 if str(r.get('show_tmdb_id')) in follows]
         else:
             extra['fetch_airing'] = fetch_airing
-        return auto_video_add_airing_episodes(
-            config, pass_deps, get_bookmark=get_bookmark, set_bookmark=wrote.append, **extra)
+        return auto_video_add_airing_episodes(config, pass_deps, **extra)
 
-    result = run_per_profile(run_pass, deps, ['show'], follower_profiles=follower_profiles)
-    if wrote and result.get('status') != 'error':
-        try:
-            real_set(wrote[-1])
-        except Exception as e:   # noqa: BLE001 - same rule as the single run: re-cover next time
-            result = dict(result, status='error',
-                          error='Could not persist the catch-up bookmark: %s' % e)
-    return result
+    return run_per_profile(run_pass, deps, ['show'], follower_profiles=follower_profiles)
 
 
 def _default_followed_shows(profile_id: int) -> List[Dict[str, Any]]:
@@ -303,12 +300,16 @@ def auto_video_add_airing_episodes(
     show_status: Optional[Callable[[Any], Any]] = None,
     remove_show: Optional[Callable[[Any], None]] = None,
     get_bookmark: Optional[Callable[[], Optional[str]]] = None,
-    set_bookmark: Optional[Callable[[str], None]] = None,
+    get_offered: Optional[Callable[[Any], set]] = None,
+    mark_offered: Optional[Callable[[Any], None]] = None,
+    is_seeded: Optional[Callable[[], bool]] = None,
+    set_seeded: Optional[Callable[[], None]] = None,
     unowned_follows: Optional[Callable[[], List[Dict[str, Any]]]] = None,
     tmdb_airings: Optional[Callable[[Any, str, str], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """Add today's airing (unowned, followed-show) episodes to the video wishlist, and
-    first tidy the watchlist by dropping shows that have ended / been canceled.
+    """Add the last week's aired (unowned, monitored, followed-show) episodes to the
+    video wishlist, each one once, and first tidy the watchlist by dropping shows
+    that have ended / been canceled.
 
     Returns ``{'status': 'completed', 'episodes_added': int, 'shows': int,
     'shows_pruned': int, ...}``."""
@@ -318,26 +319,17 @@ def auto_video_add_airing_episodes(
         season_meta = season_meta or _default_season_meta
         today_fn = today_fn or (lambda: _today_in_tz(config.get('_trigger_tz')))
         get_bookmark = get_bookmark or _default_get_bookmark
-        set_bookmark = set_bookmark or _default_set_bookmark
+        get_offered = get_offered or _default_get_offered
+        mark_offered = mark_offered or _default_mark_offered
+        is_seeded = is_seeded or _default_is_seeded
+        set_seeded = set_seeded or _default_set_seeded
         unowned_follows = unowned_follows or _default_unowned_follows
         tmdb_airings = tmdb_airings or _default_tmdb_airings
         automation_id = config.get('_automation_id')
         prune_ended = config.get('prune_ended', True)
         try:
             today = today_fn()
-            # Catch-up window: heal any days a slept-through 01:00 run skipped.
-            # A bookmark READ failure degrades to today-only — but the bookmark must
-            # NOT advance on such a run, or the skipped catch-up days would be
-            # stamped as covered and lost forever. The next healthy run re-covers
-            # them instead.
-            bookmark_degraded = False
-            try:
-                bookmark = get_bookmark()
-            except Exception:   # noqa: BLE001 - a bookmark read failure degrades to today-only
-                bookmark = None
-                bookmark_degraded = True
-            window_start = compute_catchup_window(today, bookmark)
-            caught_up_days = (date.fromisoformat(today) - date.fromisoformat(window_start)).days
+            window_start = lookback_start(today)
             # Watchlist hygiene first: a followed show that has since ended/been canceled
             # won't air again, so drop it (ended LIBRARY shows are already auto-excluded;
             # this catches explicit eye-button follows).
@@ -348,18 +340,14 @@ def auto_video_add_airing_episodes(
                 pruned = prune_ended_show_follows(deps, automation_id, fetch_follows=prune_follows,
                                                   show_status=show_status, remove_show=remove_show)
             deps.update_progress(
-                automation_id, phase="Checking today's airings…", progress=25,
-                log_line=('Reading the calendar for episodes airing today' if not caught_up_days
-                          else 'Reading the calendar for %s → %s (catching up %d missed day(s))'
-                          % (window_start, today, caught_up_days)),
+                automation_id, phase='Checking recent airings…', progress=25,
+                log_line='Reading the calendar for %s → %s' % (window_start, today),
                 log_type='info')
             rows = fetch_airing(window_start, today) or []
 
-            # Group what to wish for by show: airing today, NOT already owned, NOT
+            # What could be wished for: aired in the window, NOT owned, NOT
             # deliberately unmonitored, with a real season/episode.
-            # add_episodes_to_wishlist is idempotent, so re-runs never duplicate.
-            by_show: Dict[tuple, Dict[str, Any]] = {}
-            season_cache: Dict[tuple, tuple] = {}
+            cand = []
             for r in rows:
                 if r.get('has_file'):
                     continue
@@ -372,24 +360,7 @@ def auto_video_add_airing_episodes(
                 sn, en = r.get('season_number'), r.get('episode_number')
                 if not tid or sn is None or en is None:
                     continue
-                # Pull the SAME TMDB metadata a manual add gets (still + overview + season
-                # poster); fall back to the calendar/DB values if TMDB is unavailable.
-                poster, emap = _season_lookup(season_meta, tid, sn, season_cache)
-                tm = emap.get(en) or {}
-                # library_id (the show's library row id, given as show_id) is REQUIRED — the
-                # wishlist resolves a show's synopsis + cast from /detail/show/<library_id>;
-                # without it the show shows as un-matched with no synopsis/actors.
-                grp = by_show.setdefault((tid, r.get('show_title')),
-                                         {'library_id': r.get('show_id'), 'eps': []})
-                grp['eps'].append({
-                    'season_number': sn,
-                    'episode_number': en,
-                    'title': r.get('title') or tm.get('title'),
-                    'air_date': r.get('air_date') or tm.get('air_date'),
-                    'overview': tm.get('overview') or r.get('overview'),
-                    'still_url': tm.get('still_url') or r.get('still_url'),
-                    'season_poster_url': poster,
-                })
+                cand.append(r)
 
             # Second pass: shows you follow but do NOT own. The calendar only knows
             # library shows, so without this a tmdb-only follow never acquired
@@ -407,11 +378,12 @@ def auto_video_add_airing_episodes(
             # pass off video_watchlist.title, and those drift the moment someone
             # renames a show in the Manage panel — a title-keyed check would then
             # look the show up twice and add it twice.
-            covered = {tid for (tid, _t) in by_show}
+            covered = {str(r.get('show_tmdb_id')) for r in cand}
+            tmdb_groups = []
             for show in unowned:
                 tid = show.get('tmdb_id')
                 title = show.get('title') or tid
-                if tid in covered:
+                if str(tid) in covered:
                     continue                      # already covered by the calendar pass
                 try:
                     res = tmdb_airings(tid, window_start, today) or {}
@@ -419,48 +391,79 @@ def auto_video_add_airing_episodes(
                     deps.update_progress(automation_id, log_type='warning',
                                          log_line="Couldn't check %s on TMDB" % title)
                     continue
-                eps = res.get('episodes') or []
+                eps = [e for e in (res.get('episodes') or [])
+                       if e.get('season_number') is not None and e.get('episode_number') is not None]
                 if eps:
+                    covered.add(str(tid))
+                    tmdb_groups.append((tid, title, res.get('poster_url'), eps))
+
+            # Receipts. The first run on a profile marks what the old bookmark
+            # already covered as offered, without adding it.
+            keys = [_key(r['show_tmdb_id'], r['season_number'], r['episode_number']) for r in cand]
+            for tid, _t, _p, eps in tmdb_groups:
+                keys += [_key(tid, e['season_number'], e['episode_number']) for e in eps]
+            if not is_seeded():
+                try:
+                    bookmark = get_bookmark()
+                except Exception:   # noqa: BLE001 - unreadable reads like a fresh install
+                    bookmark = None
+                line = seed_boundary(today, bookmark)
+                old = [_key(r['show_tmdb_id'], r['season_number'], r['episode_number'])
+                       for r in cand if str(r.get('air_date') or '')[:10] <= line]
+                for tid, _t, _p, eps in tmdb_groups:
+                    old += [_key(tid, e['season_number'], e['episode_number'])
+                            for e in eps if str(e.get('air_date') or '')[:10] <= line]
+                mark_offered(old)
+                set_seeded()
+            offered = get_offered(keys) if keys else set()
+
+            # Group what's left by show, carrying the SAME TMDB metadata a manual
+            # add gets (still + overview + season poster); the calendar/DB values
+            # fill in if TMDB is unavailable.
+            by_show: Dict[tuple, Dict[str, Any]] = {}
+            season_cache: Dict[tuple, tuple] = {}
+            for r in cand:
+                tid, sn, en = r['show_tmdb_id'], r['season_number'], r['episode_number']
+                if _key(tid, sn, en) in offered:
+                    continue
+                poster, emap = _season_lookup(season_meta, tid, sn, season_cache)
+                tm = emap.get(en) or {}
+                # library_id (the show's library row id, given as show_id) is REQUIRED — the
+                # wishlist resolves a show's synopsis + cast from /detail/show/<library_id>;
+                # without it the show shows as un-matched with no synopsis/actors.
+                grp = by_show.setdefault((tid, r.get('show_title')),
+                                         {'library_id': r.get('show_id'), 'eps': []})
+                grp['eps'].append({
+                    'season_number': sn,
+                    'episode_number': en,
+                    'title': r.get('title') or tm.get('title'),
+                    'air_date': r.get('air_date') or tm.get('air_date'),
+                    'overview': tm.get('overview') or r.get('overview'),
+                    'still_url': tm.get('still_url') or r.get('still_url'),
+                    'season_poster_url': poster,
+                })
+            for tid, title, poster_url, eps in tmdb_groups:
+                fresh = [e for e in eps
+                         if _key(tid, e['season_number'], e['episode_number']) not in offered]
+                if fresh:
                     # No library_id (it isn't owned), so no /api/video/poster/show/<id>
                     # proxy either. Carry TMDB's own poster instead — a wishlist row
                     # with a null poster_url renders as an initials orb that reads as
                     # "not matched", which is the exact symptom 94e06f2d fixed.
-                    covered.add(tid)
-                    by_show[(tid, title)] = {'library_id': None, 'eps': eps,
-                                             'poster_url': res.get('poster_url')}
+                    by_show[(tid, title)] = {'library_id': None, 'eps': fresh,
+                                             'poster_url': poster_url}
 
+            # Each show's receipt lands right after its write, so a failure
+            # part-way leaves the rest to be offered by the next run.
             added = 0
             for (tid, title), grp in by_show.items():
                 poster = _show_poster_url(grp['library_id']) or grp.get('poster_url')
                 added += int(add_episodes(tid, title, grp['eps'], grp['library_id'], poster) or 0)
+                mark_offered([_key(tid, e['season_number'], e['episode_number']) for e in grp['eps']])
             shows = len(by_show)
 
-            # Advance the bookmark ONLY on success — a failed run must re-cover its
-            # window next time. A degraded run (bookmark unreadable, covered today
-            # only) must not advance it either: stamping today would mark the
-            # un-covered catch-up days as done and lose them permanently.
-            # A bookmark WRITE failure fails the run outright — the wishlist writes
-            # already landed, but coverage was not committed, so the next run must
-            # re-cover the window (at-least-once; the upsert is idempotent).
-            if not bookmark_degraded:
-                try:
-                    set_bookmark(today)
-                except Exception as e:   # noqa: BLE001
-                    err = 'Could not persist the catch-up bookmark: %s' % e
-                    deps.update_progress(automation_id, status='error', phase='Error',
-                                         log_line=err, log_type='error')
-                    return {'status': 'error', 'error': err, 'episodes_added': added,
-                            'shows': shows, 'shows_pruned': pruned,
-                            '_manages_own_progress': True}
-            else:
-                deps.update_progress(automation_id, log_line='Bookmark unreadable — covered today only, '
-                                     'catch-up days will be re-covered next run',
-                                     log_type='warning')
-
-            done = ('Added %d airing episode(s) across %d show(s) to the wishlist'
-                    % (added, shows)) if added else 'No new airing episodes to wishlist today'
-            if caught_up_days:
-                done += ' · caught up %d missed day(s)' % caught_up_days
+            done = ('Added %d aired episode(s) across %d show(s) to the wishlist'
+                    % (added, shows)) if added else 'No new aired episodes to wishlist'
             if pruned:
                 done += ' · pruned %d ended show(s)' % pruned
             deps.update_progress(

@@ -2721,6 +2721,10 @@
         height: 38px;
     }
 
+    .oidc-override-btn {
+        right: 150px;
+    }
+
     .activity-float-badge {
         font-size: 9px;
         min-width: 14px;
@@ -2789,6 +2793,10 @@
         right: 96px;
         width: 34px;
         height: 34px;
+    }
+
+    .oidc-override-btn {
+        right: 138px;
     }
 
     .gsearch-bar {
@@ -3733,6 +3741,8 @@ html.download-modal-open body {
         min-height: 0;
         padding: 12px 16px;
         gap: 6px;
+        flex-shrink: 0;
+        overflow: visible;
     }
     .sidebar-header .app-subtitle {
         display: none;
@@ -3753,6 +3763,20 @@ html.download-modal-open body {
     }
     #profile-indicator {
         margin-top: 2px;
+    }
+    /* compacting alone left the nav ~196px at 740x360, and less with a phone's
+       larger text (Thibs' screenshot: the header filled most of the screen and
+       the nav couldn't be reached). at this height the whole drawer scrolls,
+       header and all, so every item can be reached. the header isn't sticky
+       here, so nothing can paint over it (the reason .sidebar-scroll exists). */
+    .sidebar {
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+    .sidebar-scroll {
+        flex: 0 0 auto;
+        min-height: auto;
+        overflow: visible;
     }
 }
 

@@ -12,6 +12,8 @@ declare global {
     showToast?: (message: string, type?: string, durationOrContext?: number | string) => void;
     /** core.js: the latest server-side active music download count from the status push. */
     __soulsyncMusicActiveDownloads?: number;
+    /** src/shell/oidc-signin.ts: sign-in is OIDC only right now (#1839), from /api/auth/oidc/available. */
+    __soulsyncOidcOnly?: boolean;
     /** core.js: repaints the music Requests nav badge (admin: waiting, member: news). */
     refreshMusicRequestsBadge?: () => void;
     /** core.js: after a wishlist add, tells a profile that asks first it went out as a
@@ -262,50 +264,6 @@ declare global {
       chartImage: string,
       virtualPlaylistId: string,
     ) => void;
-    /**
-     * core.js — shows the modal of an already-active download process.
-     *
-     * `activeDownloadProcesses` is a top-level `let` in a classic script, so it
-     * is not a window property and no module can read it. The search page needs
-     * the answer BEFORE fetching album detail: on a re-click while the source is
-     * down, the fetch fails and the modal the user already had would never come
-     * back. Returns true when a modal was shown.
-     */
-    /**
-     * THE app-wide download flow for an ACCOUNT playlist — sync-spotify.js
-     * 2193. Twelve call sites across both worlds; the Spotify and Deezer-ARL
-     * tabs hand off to it rather than reimplementing any of it.
-     *
-     * It reads the playlist out of the script-scoped `spotifyPlaylists` array,
-     * which is why an ARL playlist must be shimmed into that array first
-     * (sync-services.js 2646-2654) — see arlShimRow in -sync.accounts.ts.
-     */
-    openDownloadMissingModal?: (playlistId: string) => Promise<void> | void;
-    /**
-     * core.js — seed `spotifyPlaylists` so openDownloadMissingModal can find a
-     * playlist React rendered. That array is a top-level `let` (core.js:33), so
-     * a module cannot push to it; this is the same bridge shape as
-     * startDiscoverVirtualSync, which the discover port added for this exact
-     * trap. Idempotent by id.
-     */
-    registerSyncAccountPlaylist?: (row: {
-      id: string;
-      name?: string;
-      track_count?: number;
-      image_url?: string;
-      owner?: string;
-    }) => void;
-    /**
-     * The account sync engine's two card writers (downloads.js 4139 / 3969).
-     * The Deezer-ARL tab calls BOTH on load for any playlist the backend
-     * reports mid-sync (sync-services.js 2473-2474), which is how a sync
-     * started before the page loaded keeps painting.
-     *
-     * They write `#progress-<id>` and the card's status/action nodes directly,
-     * so the React card must render those ids and then leave them alone.
-     */
-    updateCardToSyncing?: (playlistId: string, percent: number, progress?: unknown) => void;
-    startSyncPolling?: (playlistId: string) => void;
     /**
      * The generic engine entry (misnamed ForTidal) that tidal/qobuz/deezer/
      * spotify-public/itunes use — sync-services.js 1312. Unlike the YouTube
@@ -675,6 +633,17 @@ declare global {
         poster?: string | null;
       }) => void;
     };
+    /** video-poster-modal.js: the poster manager (search, then pick art). */
+    VideoPoster?: { openSearch?: () => void };
+    /** video-overlay-editor.js / video-collection-editor.js: the two studios. */
+    VideoOverlayEditor?: { open?: () => void };
+    VideoCollectionEditor?: { open?: () => void };
+    /** video-worker-orbs.js: re-anchor to the video dashboard's orb stage. */
+    videoWorkerOrbs?: { refresh: () => void; onStatus: (id: string, data: unknown) => void };
+    /** video-enrichment.js: fill the worker buttons now, not at the next push. */
+    videoEnrichmentPrime?: () => void;
+    /** video-side.js: the calendar on a day, optionally with an episode open. */
+    videoOpenCalendar?: (opts?: { date?: string; ep?: number | string }) => void;
     /** video-side.js: flip the shell chrome music <-> video (does NOT navigate). */
     _switchAppSide?: (side: 'music' | 'video', opts?: { force?: boolean }) => void;
     /** unified downloads page: true while any video download is active.
@@ -872,17 +841,6 @@ declare global {
     checkForActiveProcesses?: () => Promise<void>;
     updateDashboardDownloads?: () => void;
 
-    /* ── The sync page's download-engine interface (downloads.js / core.js) ──
-     * The engine stays vanilla across the flip; the React page injects these
-     * as a typed object rather than reaching for them at each call site.
-     * `isPlaylistSyncing` and `getSyncAccountPlaylists` are ACCESSORS added for
-     * the port — `activeSyncPollers` and `spotifyPlaylists` are top-level
-     * `let`s, which create no window property at all. */
-    startPlaylistSync?: (playlistId: string) => Promise<void> | void;
-    isPlaylistSyncing?: (playlistId: string) => boolean;
-    disablePlaylistSelection?: (disabled: boolean) => void;
-    updateRefreshButtonState?: () => void;
-    getSyncAccountPlaylists?: () => { id: string | number; name?: string }[];
     /** Ask the tools page to show whichever tab holds `selector`. True when it
      *  had to switch, so the caller knows to wait a frame before measuring. */
     revealToolsTabFor?: (selector: string) => boolean;

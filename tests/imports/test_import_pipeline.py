@@ -298,7 +298,7 @@ def test_post_process_matched_download_forwards_separate_metadata_runtime(tmp_pa
 # different download entirely.
 # ---------------------------------------------------------------------------
 
-def _wire_post_process_common(monkeypatch, tmp_path, target_path, *, track_number, is_album_download):
+def _wire_post_process_common(monkeypatch, tmp_path, target_path, *, track_number, is_album_download, album_name="Album", is_album=None):
     monkeypatch.setattr(import_pipeline, "config_manager", types.SimpleNamespace(
         get=lambda key, default=None: {
             "post_processing.replaygain_enabled": False,
@@ -317,8 +317,8 @@ def _wire_post_process_common(monkeypatch, tmp_path, target_path, *, track_numbe
         import_pipeline,
         "build_import_album_info",
         lambda context, force_album=False: {
-            "is_album": is_album_download,
-            "album_name": "Album",
+            "is_album": is_album_download if is_album is None else is_album,
+            "album_name": album_name,
             "track_number": track_number,
             "disc_number": 1,
             "clean_track_name": "Track",
@@ -1165,3 +1165,140 @@ def test_replacement_move_failure_keeps_existing_library_file(tmp_path, monkeypa
     assert target_path.read_bytes() == b"known good audio"
     assert "injected move failure" in context["_context_failure_msg"]
     assert context.get("_pipeline_import_succeeded") is not True
+
+
+# ---------------------------------------------------------------------------
+# Album-less playlist entries (paste-link playlists, discovery-pool rows,
+# TXT imports): the context carries only the 'Unknown Album' placeholder,
+# so album_info arrives with no name. Post-processing must recover the
+# album from the downloaded file's own tags instead of filing/tagging the
+# track under the placeholder.
+# ---------------------------------------------------------------------------
+
+def _write_tagged_flac(path, album, album_artist=None):
+    streaminfo = bytearray(34)
+    streaminfo[0:2] = (4096).to_bytes(2, "big")
+    streaminfo[2:4] = (4096).to_bytes(2, "big")
+    streaminfo[10:18] = ((44100 << 44) | (1 << 41) | (15 << 36)).to_bytes(8, "big")
+    path.write_bytes(b"fLaC" + bytes([0x80]) + len(streaminfo).to_bytes(3, "big") + bytes(streaminfo))
+    from mutagen.flac import FLAC
+
+    audio = FLAC(str(path))
+    if album is not None:
+        audio["album"] = [album]
+    if album_artist is not None:
+        audio["albumartist"] = [album_artist]
+    audio["title"] = ["Track"]
+    audio.save()
+
+
+def test_post_process_recovers_album_from_file_tags_when_context_has_none(tmp_path, monkeypatch):
+    source_path = tmp_path / "source.flac"
+    _write_tagged_flac(source_path, "What the Brothers Sang")
+    target_path = tmp_path / "Album Folder" / "track.flac"
+
+    library_calls = _wire_post_process_common(
+        monkeypatch, tmp_path, target_path,
+        track_number=13, is_album_download=False, album_name="", is_album=False,
+    )
+    monkeypatch.setattr(import_pipeline, "detect_album_info_web", lambda *a, **k: None)
+
+    runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=None,
+                                    web_scan_manager=None, repair_worker=None)
+    context = {
+        "track_info": {},
+        "original_search_result": {"title": "Track", "album": "Unknown Album"},
+        "is_album_download": False,
+    }
+    import_pipeline.post_process_matched_download("ctx-1", context, str(source_path), runtime)
+
+    assert library_calls, "post-processing never reached the library entry"
+    assert library_calls[0]["album_name"] == "What the Brothers Sang"
+    assert library_calls[0]["is_album"] is True
+
+
+def test_post_process_does_not_adopt_a_various_artists_compilation_album(tmp_path, monkeypatch):
+    """The file's album tag is only adopted when the file's album artist
+    agrees. A various-artists compilation's name on an album-less entry
+    would file the track under its own artist with the compilation's
+    name, scattering the compilation across per-artist folders."""
+    source_path = tmp_path / "source.flac"
+    _write_tagged_flac(source_path, "Now That's What I Call Music! 85", album_artist="Various Artists")
+    target_path = tmp_path / "Album Folder" / "track.flac"
+
+    library_calls = _wire_post_process_common(
+        monkeypatch, tmp_path, target_path,
+        track_number=3, is_album_download=False, album_name="", is_album=False,
+    )
+    monkeypatch.setattr(import_pipeline, "detect_album_info_web", lambda *a, **k: None)
+
+    runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=None,
+                                    web_scan_manager=None, repair_worker=None)
+    context = {
+        "track_info": {},
+        "original_search_result": {"title": "Track", "album": "Unknown Album", "artist": "Dawn McCarthy"},
+        "is_album_download": False,
+    }
+    import_pipeline.post_process_matched_download("ctx-1", context, str(source_path), runtime)
+
+    assert library_calls, "post-processing never reached the library entry"
+    assert library_calls[0]["album_name"] != "Now That's What I Call Music! 85"
+    assert library_calls[0]["is_album"] is False
+
+
+def test_post_process_demotes_an_unnamed_album_to_a_single(tmp_path, monkeypatch):
+    """An album-flagged context whose only album name was the placeholder,
+    with an untagged file (nothing to recover), must not reach the filing
+    path as an album with an empty name — it files as a single under the
+    track title instead."""
+    source_path = tmp_path / "source.flac"
+    _write_tagged_flac(source_path, None)
+    target_path = tmp_path / "Album Folder" / "track.flac"
+
+    library_calls = _wire_post_process_common(
+        monkeypatch, tmp_path, target_path,
+        track_number=1, is_album_download=False, album_name="Unknown Album", is_album=True,
+    )
+    monkeypatch.setattr(import_pipeline, "detect_album_info_web", lambda *a, **k: None)
+
+    runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=None,
+                                    web_scan_manager=None, repair_worker=None)
+    context = {
+        "track_info": {},
+        "original_search_result": {"title": "Track", "album": "Unknown Album"},
+        "is_album_download": False,
+    }
+    import_pipeline.post_process_matched_download("ctx-1", context, str(source_path), runtime)
+
+    assert library_calls, "post-processing never reached the library entry"
+    assert library_calls[0]["is_album"] is False
+    assert library_calls[0]["album_name"] == "Track"
+
+
+def test_post_process_does_not_adopt_junk_or_self_named_file_albums(tmp_path, monkeypatch):
+    """Two file tags that must not become the track's album: junk
+    placeholders Soulseek files carry ('Unknown'), and the single
+    convention album == title, which is not album evidence."""
+    for album_tag in ("Unknown", "Track"):
+        source_path = tmp_path / f"source-{album_tag}.flac"
+        _write_tagged_flac(source_path, album_tag)
+        target_path = tmp_path / "Album Folder" / f"track-{album_tag}.flac"
+
+        library_calls = _wire_post_process_common(
+            monkeypatch, tmp_path, target_path,
+            track_number=3, is_album_download=False, album_name="", is_album=False,
+        )
+        monkeypatch.setattr(import_pipeline, "detect_album_info_web", lambda *a, **k: None)
+
+        runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=None,
+                                        web_scan_manager=None, repair_worker=None)
+        context = {
+            "track_info": {},
+            "original_search_result": {"title": "Track", "album": "Unknown Album", "artist": "Dawn McCarthy"},
+            "is_album_download": False,
+        }
+        import_pipeline.post_process_matched_download("ctx-1", context, str(source_path), runtime)
+
+        assert library_calls, "post-processing never reached the library entry"
+        assert library_calls[0]["album_name"] != album_tag
+        assert library_calls[0]["is_album"] is False

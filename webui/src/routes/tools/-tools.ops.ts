@@ -23,9 +23,12 @@ import { parseDbTimestamp } from './-tools.core';
 export const CATEGORY_ORDER = [
   'Files & storage',
   'Audio quality',
+  // the video side's families (core/video/repair/catalog.py)
+  'Quality',
   'Tags & metadata',
   'Artwork & lyrics',
   'Collection gaps',
+  'Metadata',
   'System',
   'Other',
 ];
@@ -41,6 +44,8 @@ export const CATEGORY_GLOW: Record<string, string> = {
   'Tags & metadata': '168,85,247',
   'Artwork & lyrics': '245,158,11',
   'Collection gaps': '34,197,94',
+  Quality: '244,114,182',
+  Metadata: '168,85,247',
   System: '148,163,184',
   Other: '148,163,184',
 };
@@ -55,7 +60,9 @@ export const CATEGORY_BLURBS: Record<string, string> = {
   'Audio quality': 'Whether the audio is what it claims to be, and good enough.',
   'Tags & metadata': 'What is written on and about your tracks.',
   'Artwork & lyrics': 'The extras that make a library feel finished.',
-  'Collection gaps': 'Releases you are missing rather than problems you have.',
+  'Collection gaps': 'What you are missing rather than problems you have.',
+  Quality: 'Picture quality against your cutoff, and subtitles in your languages.',
+  Metadata: 'Summaries, genres, artwork and matches.',
   System: 'Housekeeping SoulSync does for itself.',
   Other: 'Jobs that have not been filed under a family yet.',
 };

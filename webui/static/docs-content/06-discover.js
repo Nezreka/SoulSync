@@ -28,19 +28,31 @@ SoulSync auto-generates playlists from your **discovery pool** (similar artists 
 | Playlist | Description |
 |----------|-------------|
 | **The Archives** | Your Discover Weekly — curated discovery picks |
-| **Daily Mix** | One personalized mix per top library genre |
-| **Discovery Shuffle** | Pure random shuffle from the discovery pool — different every refresh |
+| **Daily Mix** | Up to six mixes of the artists you play together, mostly songs you own, new every day |
+| **Discovery Shuffle** | A shuffle of the discovery pool with a gentle lean toward artists near what you play — different every refresh |
 | **Fresh Tape** | Release Radar — new releases from artists you follow |
-| **Genre — X** | Discovery picks within one genre |
-| **Hidden Gems** | Low-popularity underground / indie discovery picks |
+| **Genre — X** | Discovery picks within one genre, leaning toward artists near what you play. Only genres your pool has music for are listed |
+| **Hidden Gems** | Low-popularity picks, chosen from artists near what you play |
 | **Your Listening Mix** | Tracks from artists matched to what you actually listen to |
-| **Popular Picks** | High-popularity tracks from the discovery pool |
+| **Popular Picks** | Popular tracks from the discovery pool, chosen for your taste |
 | **Seasonal — X** | Holiday / season-themed picks |
-| **Time Machine — X** | Tracks from a specific decade |
+| **Time Machine — X** | A decade, as you would hear it. Only decades your pool has music for are listed |
 
 ![Discovery playlist cards](disc-playlists.jpg)
 
 Each playlist can be played in the media player, downloaded, or synced to your media server.
+
+The pool playlists (Popular Picks, Hidden Gems, Discovery Shuffle, Genre and Time Machine) draw mostly from artists near what you actually play, with some room left for strangers, and each refresh is a fresh draw. One version of each song, no audiobook chapters or compilation credits, no live recordings unless little else fits, and no artist twice in a row. Artists you blocked or set aside never reach a synced playlist.
+
+On the Sync page, **Add playlist → Discovery playlists → SoulSync Discovery** lists every one of these, grouped, including the ones not built yet. **Import** builds one (when it isn't built yet), adds it to your playlists and opens it under **Mirrored**; **Import all** does every one not in yet.
+
+## Daily Mixes
+
+Each Daily Mix is one corner of your taste. SoulSync groups the artists you play most by how they actually go together: the ones you play in the same sittings, the ones listed as similar to each other, and the ones that share similar artists. A genre only counts when it is a rare one in your top artists, so a tag like "pop" can no longer glue unrelated artists into one mix. A big artist that fits no group still gets a mix of its own.
+
+A mix is mostly songs you own (so it plays straight away): your artists first, a few owned artists that sit next to them and that you play less, and a handful of discovery picks from their similar artists, spread across several artists. One copy of each song, no short skits, and Christmas songs wait for November.
+
+The mixes are rebuilt every day, shortly after midnight. Favourites usually make the cut and deep cuts sometimes do, and anything a mix played in the last three days is less likely to come back, so each day sounds like the same taste with different songs. Mix numbers stay with their artists, so a synced Daily Mix 2 keeps its flavour on your server. Blocking an artist, or saying more or less like this, rebuilds them straight away.
 
 ## Jump back in
 

@@ -342,3 +342,191 @@ def test_track_detail_carries_the_decision():
     assert d['decision']['outcome'] == 'nothing_passed'
     assert d['decision']['rejected_counts'] == {'duration_mismatch': 9}
     assert build_track_detail(task)['decision'] is None
+
+
+def test_same_title_service_hits_keep_their_own_identity(db):
+    # Three YouTube uploads of one song share a decoded display name; the
+    # stored rows must still tell them apart by filename (#1911 review).
+    hits = [_hit('youtube', 'vidAAA||Artist - Song', size=111),
+            _hit('youtube', 'vidBBB||Artist - Song', size=222),
+            _hit('youtube', 'vidCCC||Artist - Song', size=333)]
+    download_tasks['t1'] = {'username': 'youtube', 'filename': 'vidAAA||Artist - Song',
+                            'track_info': {'name': 'Song', 'artists': [{'name': 'Artist'}]}}
+    decision_log.record('t1', [(h, accept(0.9)) for h in hits], outcome='chosen')
+    download_tasks['t1'].update(filename='vidCCC||Artist - Song')
+    decision_log.note_retry_winner('t1')
+    stored = db.get_download_decision('t1')
+    assert stored['chosen']['filename'] == 'vidCCC||Artist - Song'
+    assert stored['chosen']['size'] == 333
+    assert {a['filename'] for a in stored['alternatives']} == {
+        'vidAAA||Artist - Song', 'vidBBB||Artist - Song'}
+
+
+def test_merge_keeps_distinct_same_title_alternatives():
+    brief = lambda fn, size: {'username': 'youtube', 'filename': fn,
+                              'display_name': 'Artist - Song', 'size': size,
+                              'decision': {'accepted': True, 'score': 0.9}}
+    merged = decision_log._merge(
+        {'chosen': brief('vidAAA||Artist - Song', 111), 'alternatives': [],
+         'rejected_counts': {}, 'accepted_total': 1, 'rejected_total': 0},
+        {'chosen': None, 'alternatives': [brief('vidBBB||Artist - Song', 222)],
+         'rejected_counts': {}, 'accepted_total': 1, 'rejected_total': 0},
+    )
+    assert {a['filename'] for a in merged['alternatives']} == {
+        'vidAAA||Artist - Song', 'vidBBB||Artist - Song'}
+
+
+def _legacy_brief(username, display_name, size):
+    # A brief as stored before filenames rode along: no 'filename' key, and
+    # display_name is the pre-fix basename of the dispatch key.
+    return {'username': username, 'display_name': display_name,
+            'source_service': username, 'quality': 'mp3', 'quality_label': '',
+            'bitrate': 128, 'size': size, 'duration': 200_000, 'confidence': 0.8,
+            'decision': {'accepted': True, 'code': 'accepted', 'detail': '',
+                         'stage': 'decision', 'score': 0.8}}
+
+
+def test_retry_winner_finds_a_legacy_brief_by_its_old_name(db):
+    download_tasks['t1'] = {
+        'username': 'youtube', 'filename': 'vidBBB||Artist - Song',
+        'track_info': {'name': 'Song', 'artists': [{'name': 'Artist'}]},
+        'decision_summary': {
+            'outcome': 'chosen',
+            'chosen': _legacy_brief('youtube', 'vidAAA||Artist - Song', 111),
+            'alternatives': [_legacy_brief('youtube', 'vidBBB||Artist - Song', 222)],
+            'accepted_total': 2, 'rejected_total': 0, 'rejected_counts': {},
+        },
+    }
+    decision_log.note_retry_winner('t1', database=db)
+    stored = db.get_download_decision('t1')
+    assert stored['chosen']['size'] == 222
+    assert stored['alternatives'][0]['size'] == 111
+
+
+def test_retry_winner_finds_a_legacy_soundcloud_brief(db):
+    key = ('1207415400||https://soundcloud.com/andrewbundy/christmas-in-july'
+           '||Andrew Bundy - Christmas in July')
+    legacy_name = 'christmas-in-july||Andrew Bundy - Christmas in July'
+    download_tasks['t1'] = {
+        'username': 'soundcloud', 'filename': key,
+        'track_info': {'name': 'Christmas in July', 'artists': [{'name': 'Andrew Bundy'}]},
+        'decision_summary': {
+            'outcome': 'chosen',
+            'chosen': _legacy_brief('soundcloud', 'other-slug||Other Song', 111),
+            'alternatives': [_legacy_brief('soundcloud', legacy_name, 222)],
+            'accepted_total': 2, 'rejected_total': 0, 'rejected_counts': {},
+        },
+    }
+    decision_log.note_retry_winner('t1', database=db)
+    stored = db.get_download_decision('t1')
+    assert stored['chosen']['size'] == 222
+
+
+def test_retry_winner_never_promotes_an_ambiguous_legacy_name(db):
+    # Two filename-less rows share the winner's old display name and neither
+    # can be told apart: promoting either would attribute the wrong file's
+    # stats, so the winner is named bare instead (#1911 review).
+    download_tasks['t1'] = {
+        'username': 'youtube', 'filename': 'vidCCC||Artist - Song',
+        'track_info': {'name': 'Song', 'artists': [{'name': 'Artist'}]},
+        'decision_summary': {
+            'outcome': 'chosen',
+            'chosen': _legacy_brief('youtube', 'Artist - Song', 111),
+            'alternatives': [_legacy_brief('youtube', 'Artist - Song', 222),
+                             _legacy_brief('youtube', 'Artist - Song', 333)],
+            'accepted_total': 3, 'rejected_total': 0, 'rejected_counts': {},
+        },
+    }
+    decision_log.note_retry_winner('t1', database=db)
+    stored = db.get_download_decision('t1')
+    assert stored['chosen']['filename'] == 'vidCCC||Artist - Song'
+    assert stored['chosen']['size'] == 0
+
+
+def test_merge_dedupes_a_legacy_soundcloud_row_against_the_new_shape():
+    key = ('1207415400||https://soundcloud.com/andrewbundy/christmas-in-july'
+           '||Andrew Bundy - Christmas in July')
+    legacy = _legacy_brief('soundcloud', 'christmas-in-july||Andrew Bundy - Christmas in July', 222)
+    new = dict(legacy, filename=key, display_name='Andrew Bundy - Christmas in July')
+    merged = decision_log._merge(
+        {'chosen': legacy, 'alternatives': [],
+         'rejected_counts': {}, 'accepted_total': 1, 'rejected_total': 0},
+        {'chosen': new, 'alternatives': [],
+         'rejected_counts': {}, 'accepted_total': 1, 'rejected_total': 0},
+    )
+    # the legacy sighting of the winner is the winner, not an alternative
+    assert merged['alternatives'] == []
+    assert merged['chosen']['filename'] == key
+
+
+def test_bare_chosen_carries_the_filename_and_decoded_name():
+    bare = decision_log._bare_chosen('soundcloud', '999||https://soundcloud.com/u/s||A - Song')
+    assert bare['filename'] == '999||https://soundcloud.com/u/s||A - Song'
+    assert bare['display_name'] == 'A - Song'
+
+
+def test_retry_winner_never_promotes_a_different_file_sharing_the_name(db):
+    # The winner (vidCCC) never made the stored alternatives; the one row
+    # there is a DIFFERENT upload (vidBBB) whose decoded name matches. Its
+    # stats must not be recorded as the winner's (Claude gate repro).
+    from core.downloads.candidate_pool import _brief
+    other = _hit('youtube', 'vidBBB||Artist - Song', size=222)
+    download_tasks['t1'] = {'username': 'youtube', 'filename': 'vidCCC||Artist - Song',
+                            'track_info': {'name': 'Song', 'artists': [{'name': 'Artist'}]}}
+    # the summary the way a capped pool would have stored it
+    download_tasks['t1']['decision_summary'] = {
+        'outcome': 'chosen',
+        'chosen': decision_log._bare_chosen('youtube', 'vidAAA||Artist - Song'),
+        'alternatives': [_brief(other, accept(0.9))],
+        'accepted_total': 1, 'rejected_total': 0, 'rejected_counts': {},
+    }
+    decision_log.note_retry_winner('t1', database=db)
+    stored = db.get_download_decision('t1')
+    assert stored['chosen']['filename'] == 'vidCCC||Artist - Song'
+    assert stored['chosen']['size'] == 0
+    assert [(a['filename'], a['size']) for a in stored['alternatives']] == [
+        ('vidAAA||Artist - Song', 0), ('vidBBB||Artist - Song', 222)]
+
+
+def test_bare_chosen_decodes_a_release_token():
+    bare = decision_log._bare_chosen('torrent', 'tok123||Release - Title')
+    assert bare['filename'] == 'tok123||Release - Title'
+    assert bare['display_name'] == 'Release - Title'
+
+
+def test_retry_winner_that_is_already_chosen_keeps_its_record(db):
+    # The retry took the same file again: the stored winner keeps its
+    # stats instead of being demoted to an alternative behind a bare row.
+    download_tasks['t1'] = {'username': 'youtube', 'filename': 'vidAAA||Artist - Song',
+                            'track_info': {'name': 'Song', 'artists': [{'name': 'Artist'}]}}
+    decision_log.record('t1', [(_hit('youtube', 'vidAAA||Artist - Song', size=111), accept(0.95)),
+                               (_hit('youtube', 'vidBBB||Artist - Song', size=222), accept(0.9))],
+                        outcome='chosen')
+    decision_log.note_retry_winner('t1', database=db)
+    stored = db.get_download_decision('t1')
+    assert stored['chosen']['filename'] == 'vidAAA||Artist - Song'
+    assert stored['chosen']['size'] == 111
+    assert [a['filename'] for a in stored['alternatives']] == ['vidBBB||Artist - Song']
+
+
+def test_retry_winner_legacy_row_already_chosen_keeps_its_record(db):
+    # Same early return, legacy generation: the stored winner is a
+    # filename-less brief whose old name is the basename of the task's key.
+    download_tasks['t1'] = {
+        'username': 'soundcloud',
+        'filename': '999||https://soundcloud.com/u/slug||Artist - Song',
+        'track_info': {'name': 'Song', 'artists': [{'name': 'Artist'}]},
+        'decision_summary': {
+            'outcome': 'chosen',
+            'chosen': _legacy_brief('soundcloud', 'slug||Artist - Song', 111),
+            'alternatives': [_legacy_brief('soundcloud', 'other||Other Song', 222)],
+            'accepted_total': 2, 'rejected_total': 0, 'rejected_counts': {},
+        },
+    }
+    decision_log.note_retry_winner('t1', database=db)
+    # nothing was re-recorded: the DB still holds no row for t1, and the
+    # in-memory summary is untouched (chosen is still the legacy winner)
+    assert db.get_download_decision('t1') is None
+    summary = download_tasks['t1']['decision_summary']
+    assert summary['chosen']['size'] == 111
+    assert len(summary['alternatives']) == 1

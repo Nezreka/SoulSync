@@ -1,26 +1,18 @@
 /**
- * The Last.fm Radio sync tab (sync-lastfm.js, whole file) — intentionally
- * thin: the radios live in the same listenbrainz_playlists table
- * (playlist_type='lastfm_radio') and share the LB vertical, card list and
- * click flow; only the fetch, copy and chrome differ. Generation stays on
- * the Discover page — this tab lists + syncs.
+ * The Last.fm Radio tab (sync-lastfm.js, whole file), intentionally thin: the
+ * radios live in the same listenbrainz_playlists table
+ * (playlist_type='lastfm_radio') and import exactly like the LB playlists
+ * (a 'Last.fm Radio:' title files the mirror under source 'lastfm'); only the
+ * fetch, copy and chrome differ. Generation stays on the Discover page; this
+ * tab lists and imports.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 
-import type { LbCardData } from '../-sync.lb-tabs';
-import type { SourceVertical } from '../-sync.use-vertical';
-
 import { fetchLastfmRadios, unwrapJspfPlaylist } from '../-sync.lb-tabs';
-import { LbCardList } from './lb-sync-tab';
+import { LbImportList } from './lb-sync-tab';
 
-export function LastfmSyncTab({
-  vertical,
-  onOpen,
-}: {
-  vertical: SourceVertical;
-  onOpen: (card: LbCardData) => void;
-}) {
+export function LastfmSyncTab() {
   const [playlists, setPlaylists] = useState<unknown[] | null>(null);
   const [placeholder, setPlaceholder] = useState('🔄 Loading Last.fm Radio playlists...');
   const [refreshing, setRefreshing] = useState(false);
@@ -79,14 +71,7 @@ export function LastfmSyncTab({
               : 'No Last.fm Radio playlists yet. Generate one from the Discover page by picking a seed track.'}
           </div>
         ) : (
-          <LbCardList
-            cards={cards}
-            vertical={vertical}
-            icon="📻"
-            cardClassName="lastfm-playlist-card"
-            idPrefix="lastfm-sync-card"
-            onOpen={onOpen}
-          />
+          <LbImportList cards={cards} glyph="📻" idPrefix="lastfm-sync-card" />
         )}
       </div>
     </div>

@@ -97,8 +97,22 @@ The video side keeps its own library paths, migrated from the legacy single vide
 - \`tv_path\` — where finished TV downloads are organized
 - \`anime_path\` — optional: where finished episodes of anime-type shows are organized instead of \`tv_path\` (empty = anime goes to \`tv_path\`)
 - \`youtube_path\` — where YouTube channel downloads land
+- \`movies_4k_path\` / \`tv_4k_path\` — optional 4K libraries, each off until its switch is on (\`movies_4k_enabled\` / \`tv_4k_enabled\`)
 
-The engine routes each finished download to the library path matching its type. See [Video: Downloads](#video-downloads) for the full pipeline.
+The engine routes each finished download to the library path matching its type.
+
+In Docker, Movies, TV and YouTube start on \`/media/movies\`, \`/media/tv\` and \`/media/youtube\` when the container has those mapped (the default compose file does), the way Music starts on \`/app/Transfer\`. Like the Music folders, each is locked: hit **Unlock** to change one. A folder you've cleared or set yourself is never reset.
+
+## 4K libraries
+
+To keep 4K copies apart, like a separate **Movies 4K** library in Plex, switch on **Separate 4K movies folder** and / or **Separate 4K TV folder** under Settings > Folders > Video > 4K libraries and give each a folder. Then set **Save to: 4K library** on the [quality profile](#vdl-quality) those titles use.
+
+- New grabs of a title on that profile file into the 4K folder, from the wishlist, RSS sync, a manual grab or a manual import.
+- Titles you already have stay where they are, and their upgrades land beside the copy you have, so changing a profile never duplicates a title.
+- Anime keeps its own folder when one is set, whatever the profile: that one is by type, the 4K one by quality.
+- Switch a 4K folder off and it's ignored everywhere (routing, scans, health checks). Its path is kept for next time.
+
+In Docker, map each 4K folder in your compose file (the default compose has commented \`/media/movies-4k\` and \`/media/tv-4k\` lines) and add it to a library on your media server. See [Video: Downloads](#video-downloads) for the full pipeline.
 `
         },
         {
@@ -117,7 +131,7 @@ See [Video: Settings](#video-settings) and [Multi-Profile](#profiles) for how to
     ]
 });
 
-// Video: Dashboard — overview & health, continue watching, recent & activity.
+// Video: Dashboard: overview, continue watching, this week and the rail.
 registerDocsSection({
     id: 'video-dashboard',
     title: 'Video: Dashboard',
@@ -125,19 +139,18 @@ registerDocsSection({
     pages: [
         {
             id: 'vdash-overview',
-            title: 'Overview & Health',
-            lede: 'Your at-a-glance home for the video side: library counts, download activity, enrichment coverage, and service health.',
+            title: 'Overview',
+            lede: 'Your home for the video side, laid out like the music dashboard: what you watch on the left, the system on the right.',
             body: `
-The Video **Dashboard** is your at-a-glance home for the video side:
+The Video **Dashboard** uses the same layout as the music one.
 
-- **Library counts** — movies, shows, and episodes tracked in \`video_library.db\`
-- **Download activity** — what's grabbing, importing, or upgrading right now
-- **Enrichment coverage** — how much of your library has full metadata and art
-- **Attention** — open issues and pending maintenance findings that need you
-- **System stats** — live memory and uptime
+- **Hero**: a greeting, your movies, shows, episodes and disk size (click one for the library), and the scan strip. **Scan** picks up what changed on your server; the **⋯** menu has a deep scan, the library, the poster manager and repair.
+- **Worker orbs**: every video enrichment worker on its own stage, the same animation as music. Hover to open them into a grid; click one to pause or resume it, or **Manage Workers** for the full view.
+- **Next up**: the calendar's billboard for the next episodes on your watchlist, each with its state. Click one to open it on the calendar.
+- **Make it yours** (admins): Overlay Studio and Collection Studio, with how much of your library has the metadata they draw on.
 
 > [!NOTE]
-> There is no health strip here. Server, indexer, and download-client reachability surfaces through the scan flows that actually use them. \`/api/video/health\` checks local state only — library roots, disk space, the recycle folder, maintenance errors, monitor liveness — and the notification panel header surfaces it (fetched by the downloads page, which is the only page that queries it).
+> There is no health block here. System health is a state, not news, so it lives in the notification panel header.
 `
         },
         {
@@ -154,12 +167,14 @@ See [Watch State & History](#vdet-watch) for how watch state works per title.
         },
         {
             id: 'vdash-activity',
-            title: 'Recently Added & Attention',
-            lede: 'What just landed in your library, plus open issues and maintenance findings that need you.',
+            title: 'This Week, Recently Added & the Rail',
+            lede: 'Whether this week\'s episodes landed, what just arrived, and what needs you.',
             body: `
-**Recently added** titles show what's landed in your library. The dashboard's **attention** area surfaces open issues and pending maintenance findings — the things that actually need your input.
+**This week** answers one question: did what aired land? It counts the episodes on your watchlist that aired in the last seven days and how many you have, with a meter by state (in library, downloading, wanted, failed, missing). Underneath: how many more air in the next seven days and when auto-wishlist last ran. If any aired episodes are missing, **Wishlist N missing** adds them in one go (not shown to profiles that have to ask first).
 
-Use it as a quick sanity check after an overnight run: if an automation grabbed something, you'll see it in recently-added; if it found a problem, it's in attention. There is no running activity feed.
+**Recently added** shows what landed on your server, newest first, with **Movies** and **Shows** tabs when there's a mix. **Downloading now** appears only while something is in flight.
+
+The rail also has the next **video automations** to run, your **watchlist** and **wishlist** counts, and **open issues** / **findings to review** tiles that only show up when there's something to look at.
 `
         },
     ]
@@ -385,7 +400,45 @@ Every title has a rich **detail page**:
 - Format badges (HDR, Dolby Vision, Atmos, channel layout)
 - For shows: a full **season / episode** breakdown
 
-Movies and shows can come from either Plex or Jellyfin and render the same way. From a detail page you can manage metadata, change quality profiles, toggle watch state, and kick off downloads.
+Movies and shows can come from either Plex or Jellyfin and render the same way.
+
+The hero keeps one main action: **Play / Resume** on your server when you own it, otherwise **Get**. Trailer and the follow toggle (watchlist for an airing show, wishlist for a movie you don't own) sit beside it, and everything else is in one **More** menu, grouped into **Get**, **Library** (edit details, change poster, sync with server, mark watched, files and match) and **Open on** (IMDb, TMDB, TVDB, Letterboxd, official site). An episode's **⋯** menu marks just that episode watched or unwatched, and the season's **⋯** marks the whole season; both sync to your server like the show-wide toggle.
+
+The synopsis shows three lines; **More** opens the rest in place. Every score in the ratings row opens its own site (IMDb, Rotten Tomatoes, Metacritic, Trakt, TVmaze). Below the tabs, cast comes first, then the collection and **More Like This**, videos and photos, then one **About** section with the facts (release, runtime, rating, network, budget, language, the languages subtitles exist in, with the ones you grab listed first), the studios, and keywords. **Where to Watch** shows one tile per service. The side-scrolling rows have arrows when you hover them.
+
+A show's numbers count like you'd read them: **Specials** and episodes that haven't aired yet are never "missing", so a show with every aired episode reads **Complete**. Specials sit after the real seasons.
+
+If a page can't load (the title left your library, YouTube didn't return a channel or playlist, or the server didn't answer), it says which, with **Try again** and, for YouTube, **Open on YouTube**.
+
+On a show, each episode row shows **Missing** or **Upcoming** only when there's a gap. A missing episode gets one **Get** button, and the rest (manual search, wishlist, download again for an upgrade, subtitles) is in the row's **⋯** menu. The season bar works the same way: **Grab season** plus a menu with manual search, wishlist, monitoring and clear failures.
+`
+        },
+        {
+            id: 'vdet-library',
+            title: 'Your Library Tab',
+            lede: 'Every copy you own of a title: where it lives, how good it is, and what you can do with it.',
+            body: `
+Every movie and show in your library has two tabs: the page itself (**Overview** for a movie, **Episodes** for a show) and **Your library**. The tab you used last is remembered.
+
+**What you have**: how many copies and how big, your best copy's resolution, and whether it meets the quality target of the title's profile. **Find an upgrade** opens a manual search when it doesn't; **Quality and download settings** opens the Manage panel.
+
+**Files**: one card per copy, with the quality tag, codecs, audio, size and runtime, the file name and its folder, the subtitle files beside it, and whether its name matches your [naming template](#vlib-manage). The **⋯** menu on each file:
+
+| Action | What it does |
+|--------|--------------|
+| **Rename to template** | Renames the file to what your template says, where it sits. Subtitles and sidecars move with it, nothing is overwritten, and the stored path follows. |
+| **Search subtitles** | The manual subtitle search, for that file. |
+| **Copy path** | The path as your media server reports it. |
+| **Delete to recycle bin** | Moves the file to the recycle bin. If it was the last copy the title shows as missing. A file outside your library folders is refused rather than deleted for good. |
+
+> [!NOTE]
+> A file on a drive only your media server can see (a different Docker mount or NAS path) still shows everything the server reports, but it can't be renamed or deleted from SoulSync. The page says so instead of guessing.
+
+For a **show**, the tab lists every season with what's owned, missing and upcoming, its size and resolution mix, and a **Monitored** switch. Open a season to see each episode's file, and **Rename all** when several have drifted from your template. **Where it lives** lists the folders the show's files are in; when it says *Split across 2 folders*, part of the show forked off somewhere else, usually an upgrade that couldn't find the original.
+
+**Match** shows the TMDB, IMDb and TVDB ids the title is matched to. **Fix match** searches TMDB (a title, a title and year, or a pasted TMDB id) and re-points the title. The ids are locked, so a library scan can't switch them back, and if your server named the title differently, SoulSync takes TMDB's name and year. **Use the server's match again** undoes it.
+
+Subtitle language overrides and the acquisition history for the title live under this tab too.
 `
         },
         {
@@ -399,7 +452,7 @@ SoulSync ingests per-episode and per-movie **watch state** from your server:
 - Powers a **Next Up** call-to-action on show pages
 - Lets you toggle **watched / unwatched** right on the page
 
-A per-title **History** tab shows grabs, imports, and upgrades over time — useful for answering "when did this land, and from where?"
+The **acquisition history** on the [Your library tab](#vdet-library) shows grabs, imports, and upgrades over time — useful for answering "when did this land, and from where?"
 `
         },
         {
@@ -411,6 +464,10 @@ Edit any metadata field and **lock** it so enrichment never overwrites your chan
 
 > [!WARNING]
 > A re-match changes the title's identity and can update its name and art — but it does **not** silently wipe your locked fields. Locked means locked.
+
+A re-point from the **Matches** list (or **Fix match** on the [Your library tab](#vdet-library)) is locked too: the next scan keeps it even if your server still reports the old match.
+
+On a TMDB page for something you own but SoulSync didn't recognise, **More → I have this** links it to your copy. An unmatched copy is re-identified as that title on the spot; a copy matched to a different title asks first.
 
 Episodes are treated as facts: a scan that no longer sees an episode **demotes** it to missing rather than deleting the row, so your history and watch state survive server hiccups.
 `
@@ -602,6 +659,10 @@ For dubbed or MULTI copies, pick one or more **audio languages** on the profile 
 
 A release with no language tag is the original audio, so Require skips it. Subtitle-only tags like VOSTFR or SUBFRENCH never count as audio.
 
+## Save to
+
+**Save to** picks the library new titles on the profile are filed in: **Main library**, or **4K library** once that folder is switched on in Settings > Folders. Until then a 4K profile files into the main folder. See [4K libraries](#vid-sources).
+
 ## Custom formats
 
 **Custom formats** are scored release matchers layered on top of the profile. They nudge the ranker toward releases you like (a preferred release group, a specific HDR flavor, TrueHD audio) and away from ones you don't (extras, mislabeled scene tags). Positive scores boost a release; negative scores penalize it.
@@ -733,23 +794,59 @@ registerDocsSection({
     pages: [
         {
             id: 'vcal-grid',
-            title: 'Week Grid & Air Times',
-            lede: 'Upcoming episodes on a week grid with air times, agenda, and click-through details.',
+            title: 'Week, Agenda & Month',
+            lede: 'Every episode and movie release, each one showing where it stands.',
             body: `
-The **Calendar** lays out upcoming episodes on a week grid — the same shape as the Sonarr/Radarr calendars. Each day shows what's airing with air times; clicking a day opens an agenda, and clicking an episode opens its details.
+The **Calendar** shows what airs this week for the shows you follow, plus release dates for the movies on your wishlist. Up top, **Next up** shows the next three episodes as one billboard; hover one to open it out.
 
-You can scope the calendar to your **watchlist** or everything (\`watchlist\` / \`all\`), and switch between compact and agenda views. Everything is scoped per media server, so you only see what's relevant to your setup.
+Three views, with ‹ › and **Today** to move around (or the ← → and T keys):
 
-> [!TIP]
-> The calendar is driven by your monitored shows — follow a show on the [video watchlist](#vwatch-follow) and its airings appear automatically.
+- **Week**: seven columns, grouped by time of day. A whole season dropped on one day is a single card (*S2 · E1–19 · 19 eps*).
+- **Agenda**: one list with episode stills and a line saying why each is in its state. On the current week it starts at today; earlier days fold away.
+- **Month**: a six-week grid, one line per show per day. Click a day to open it in the agenda.
+
+**Watchlist** shows the shows you follow plus every airing show you haven't muted; **All library** shows every airing show you own. Followed shows that aren't in your library yet appear too, marked *Not in your library*. Specials (season 0) are hidden unless you turn on **Show specials** in the ⋯ menu.
+`
+        },
+        {
+            id: 'vcal-states',
+            title: 'Episode States',
+            lede: 'Every card says whether you have it, are getting it, or nothing is.',
+            body: `
+| State | Means |
+|---|---|
+| **In library** | The file is on your server |
+| **Downloading** | Being fetched now; the card shows its percent |
+| **Queued** | Waiting for a download slot |
+| **Wanted** | On your wishlist and being searched |
+| **Failed** | Searched, and nothing passed your quality profile. Open it to **Retry now** |
+| **Missing** | Aired, and nothing is looking for it |
+| **Auto** / Upcoming | Hasn't aired. *Auto* means the airing automation will grab it after it airs |
+| **Not monitored** | You told SoulSync to stop looking for it |
+
+The chips above the calendar count each state and filter to it. When aired episodes are **Missing**, a bar offers to wishlist all of them at once. Click any episode for details: an admin can **Ignore** one (stop monitoring it), and anyone with download rights can wishlist or retry it.
+
+The line at the right says when air dates were last refreshed from TMDB and when the auto-wishlist last ran, so a quiet calendar and a stalled automation never look the same. The page refreshes itself every 15 seconds while something is downloading, every few minutes otherwise, and whenever you come back to it.
+`
+        },
+        {
+            id: 'vcal-auto',
+            title: 'Auto-Wishlist for Airings',
+            lede: 'How aired episodes reach your wishlist without you.',
+            body: `
+**Auto-Wishlist Episodes Airing Today** runs every 4 hours. Each run looks back a week and adds every aired, monitored episode you don't own for the shows you follow, **once each**. An episode you remove from the wishlist isn't added back.
+
+Looking back a week means a run the server missed (asleep, restarting) costs a few hours, not a day, and an episode TMDB lists late, like a streaming season posted on release day, still gets picked up. **Refresh Airing TV Schedules** re-pulls air dates from TMDB every night, so the calendar and the automation both see new and moved episodes.
+
+Unaired episodes aren't added ahead of time: they show as **Auto** until they air. RSS sync then grabs them as soon as a release is posted.
 `
         },
         {
             id: 'vcal-movie',
             title: 'Movie Lane',
-            lede: 'Upcoming film releases — theatrical, digital, and physical windows — in one lane.',
+            lede: 'Release dates for the movies on your wishlist.',
             body: `
-Alongside the TV grid, a dedicated **movie lane** tracks upcoming releases for your **wishlisted movies**: the **cinema** (theatrical premiere) date and the **available** (home-release) date, filterable by type. Movies and shows live in one view, so you can see the whole week of what's coming at a glance.
+Movies on your wishlist appear on the day they reach **cinemas** and the day they're **available** at home (digital or physical). A film that skips cinemas gets one entry. Each movie shows its state like an episode does: wanted, downloading, failed or in your library.
 `
         },
         {
@@ -757,16 +854,11 @@ Alongside the TV grid, a dedicated **movie lane** tracks upcoming releases for y
             title: 'iCal Feed',
             lede: 'Subscribe to upcoming airings and releases from any calendar app.',
             body: `
-Take the calendar with you: SoulSync serves an **iCal feed** you can subscribe to from Apple Calendar, Google Calendar, or anything else that speaks iCal.
+Open the ⋯ menu and choose **Subscribe in a calendar app**. Copy the link into Google Calendar, Apple Calendar or Outlook ("add calendar from URL").
 
-\`\`\`text
-/api/video/calendar.ics?scope=watchlist
-\`\`\`
+The link has your own token in it, so a calendar app can read it without signing in, and it shows your calendar: your follows, your profile's rating limits. Treat it like a password. **Reset link** makes a new one and the old one stops working.
 
-The feed respects the same scope parameter as the page (\`watchlist\` or \`all\`), so your phone calendar only shows what you care about.
-
-> [!NOTE]
-> The iCal feed uses your session context — subscribe from a browser where you're logged in, or check with your admin about feed authentication for your setup.
+The feed covers the next 14 days; add \`days=60\` to the link for up to 60. Episodes with a known air time are timed events, everything else is all-day.
 `
         },
     ]
@@ -792,7 +884,7 @@ The video side surfaces the same **system automation engine** the music side use
 | **Auto-Update Video Database After Scan** | On *Video Library Scan Done* | Reads newly-indexed media from the server into SoulSync |
 | **Auto-Update Video Database (Hourly)** | Every hour | Incremental server read so manual additions appear within the hour |
 | **Refresh Airing TV Schedules** | Daily 23:00 | Re-pulls TMDB episode schedules (air dates, stills) for still-airing watchlisted shows |
-| **Auto-Wishlist Episodes Airing Today** | Daily 01:00 | Wishes every episode airing today for followed shows; prunes ended/canceled shows |
+| **Auto-Wishlist Episodes Airing Today** | Every 4 hours | Wishes every episode that aired in the last week for followed shows, once each; prunes ended/canceled shows |
 | **Refresh Stale Metadata** | Every 6 hours | Re-pulls the stalest matched movies & shows (up to 500/run, skipping anything refreshed in the last 30 days) |
 | **Auto-Update Overlays** | Daily 04:00 | Renders + pushes enabled overlay templates onto server artwork |
 | **Sync Collections** | Daily 04:30 | Resolves + pushes every enabled collection to the server |
@@ -836,7 +928,7 @@ Every action below is a DO block you can drop into your own automations. Config 
 | **Refresh Stale Metadata** | Rolling freshness pass over the stalest matched titles (ratings, overviews, art, air dates); never clobbers your locked data | Items per run (500), Skip movies/shows refreshed within 30 days |
 | **Clean Old YouTube Episodes** | Delete downloaded channel episodes outside each channel's keep window (history kept so they're never re-downloaded) | — |
 | **Empty Recycle Bin** | Permanently delete recycled files older than the keep window in Settings → Library Organization | — |
-| **Wishlist Today's Airings** | Add every episode airing today (followed shows) to the wishlist; optionally prune ended/canceled shows | Prune ended shows (on) |
+| **Wishlist Aired Episodes** | Add every episode that aired in the last week (followed shows) to the wishlist, once each, so a removed one stays removed; optionally prune ended/canceled shows | Prune ended shows (on) |
 | **Scan Watchlist People** | Wishlist every movie a followed person acted in or directed that you don't own | — |
 | **Scan Watchlist Studios** | Wishlist every movie a followed studio produced that you don't own | — |
 | **Scan Watchlist Channels** | Wishlist new long-form uploads from followed YouTube channels | — |
@@ -921,9 +1013,17 @@ Follow a **YouTube channel** (or a specific **playlist**) the way you'd follow a
 
 It's visual-first: channels get artwork and a proper detail page showing their videos, what you own, and what's still available.
 
+## The channel page
+
+Videos show as a **grid** of thumbnails, like YouTube's own Videos tab: title, views, date, length, and a **Downloaded** or **In wishlist** badge. Click a thumbnail to play it. Each card has a download button for videos you don't have, and a **⋯** menu with wishlist, download again and Open on YouTube. Prefer the old wide rows? The **Grid / List** switch next to the sort menu remembers your choice.
+
+Upload years show as pills above the videos, and search, sort and the Downloaded / Not downloaded / length filters work in both layouts. **Grab year** downloads every missing video in the selected year. A playlist page has no years: **Grab all** downloads every missing video in it.
+
+A channel without a banner uses a blurred version of its most-viewed video as the page backdrop. The first six playlists are listed under the videos, with **Show all** for the rest.
+
 ## Per-channel settings
 
-Each followed channel (or playlist) has its own settings:
+Each followed channel (or playlist) has its own settings, under **More → Channel settings** on the channel's page (or the cog on the watchlist):
 
 - **Custom name** — a display-name override
 - **Quality** — a per-channel quality override (blank uses the global default)
@@ -1012,7 +1112,11 @@ Each collection hands a title to the wishlist **once**. Remove it from the wishl
             title: 'Library Maintenance',
             lede: 'Repair jobs that find library problems and fix them — individually or in bulk.',
             body: `
-**Library Maintenance** runs ten repair jobs that scan the video library for problems. Each job produces rich, lazy-loaded **findings** you can fix individually, fix in bulk, resolve, or dismiss — with a full run history and live progress while jobs execute. Run jobs on demand, on the Tools page's interval, or from an automation via the **Run Maintenance Job** action (chain it with the *Maintenance Finding Raised* trigger for alerts).
+**Library Maintenance** runs eleven repair jobs that scan the video library for problems. Each job produces rich, lazy-loaded **findings** you can fix individually, fix in bulk, resolve, or dismiss — with a full run history and live progress while jobs execute. Run jobs on demand, on their schedule, or from an automation via the **Run Maintenance Job** action (chain it with the *Maintenance Finding Raised* trigger for alerts).
+
+The video **Tools** page is the same page as music's: an **Operations** tab (Simple and Advanced mode, the findings inbox, the jobs and their history) and a **Tools** tab (Library Scan, Server Scan, the Overlay and Collection Studios, Backups and Mass Rename). Findings work the same way on both sides, see [Repair & Maintenance](#dash-repair).
+
+On the video side, **Fix all safe** only runs fixes that change SoulSync's own data. Anything that renames or recycles a file (Naming, Watched Cleanup) or starts a download (Missing Episodes, Collections, Quality Upgrades, Broken Files) is left for you to fix by type, and a file-changing fix asks before it runs. Duplicate Copies stays review-only.
 
 | Job | What it scans | What approving a finding does |
 |-----|---------------|------------------------------|
@@ -1201,7 +1305,10 @@ Base path: \`/api/video\`. Read-only content endpoints, open to any video-enable
 | GET | \`/studio/{id}\`, \`/studio/{id}/movies\`, \`/studio/presets\` | Studio detail, paged filmography, preset studios |
 | GET | \`/discover/hero\`, \`/discover/foryou\`, \`/discover/taste\`, \`/discover/morelike\`, \`/discover/gaps\`, \`/discover/genres\`, \`/discover/list\`, \`/discover/trailer\` | Discover feed surfaces |
 | GET/POST | \`/discover/ignore\`, \`/discover/languages\`, \`/discover/providers-pref\` | Global discover preferences |
-| GET | \`/calendar\`, \`/calendar.ics\` | Upcoming airings/releases (JSON + iCal feed) |
+| GET | \`/calendar\`, \`/calendar/followed\` | The window with each episode's state; followed shows not in the library |
+| POST | \`/calendar/wishlist-missing\` | Wishlist every missing episode in a window |
+| GET/POST | \`/calendar/feed-url\` | This profile's iCal link (POST makes a new one) |
+| GET | \`/calendar/feed/<token>.ics\` | The iCal feed calendar apps subscribe to |
 | GET | \`/poster/{kind}/{id}\`, \`/backdrop/...\`, \`/img\` | Poster/backdrop/art proxy |
 `
         },
@@ -1256,7 +1363,9 @@ Base path: \`/api/video\`. **Admin-only** for every method.
 | POST | \`/collections/{id}/sync\`, \`/collections/sync\`, \`/collections/server/adopt\` | Sync collections to Plex/Jellyfin; adopt existing |
 | POST | \`/collections/{id}/wishlist_missing\`, \`/collections/posters/regenerate\` | Wishlist gaps; regenerate posters |
 | GET/POST/PUT | \`/repair/jobs...\`, \`/repair/status\`, \`/repair/toggle\`, \`/repair/pause\`, \`/repair/resume\` | Library Maintenance jobs & scheduler |
-| GET/POST | \`/repair/findings...\` | Findings: fix, bulk-fix, resolve, dismiss, clear |
+| GET/POST | \`/repair/findings...\` | Findings: list (type, search, sort), counts, fix, resolve, dismiss, reopen, bulk, clear |
+| GET | \`/repair/findings/groups\`, \`/repair/finding-types\` | Findings folded by type; the type catalog (label, verb, fixable, touches files, downloads) |
+| POST | \`/repair/findings/bulk-fix-start\`, \`/repair/bulk-fix/stop\` · GET \`/repair/bulk-fix/status\` | Fix all in the background (by type, or safe only) |
 | GET/POST | \`/import/failed\`, \`/import/{id}/place\`, \`/import/{id}/dismiss\` | Manual import of failed downloads |
 | GET | \`/backups\` | List backups |
 | POST | \`/backups\` | Create a backup |

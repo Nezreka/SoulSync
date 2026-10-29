@@ -478,3 +478,39 @@ def test_cycle_skips_corrupt_language_row(db, tmp_path, monkeypatch):
     assert prov.searches == 0
     rows = db.subtitle_get_for_video("download", dl_id)
     assert [r["language"] for r in rows] == ["../../evil"]  # kept, unfetched
+
+
+class _InfoDB:
+    def __init__(self, info):
+        self._info = info
+
+    def subtitle_video_info(self, kind, vid):
+        return dict(self._info)
+
+
+def test_resolve_file_reroots_absolute_server_path(tmp_path, monkeypatch):
+    # plex reports /mnt/... paths soulsync can't see as-is; the library row
+    # must still re-root onto the configured tv folder
+    root = tmp_path / "TV SHOWS"
+    real = root / "Show" / "Season 02" / "Show - S02E01.mkv"
+    real.parent.mkdir(parents=True)
+    real.write_bytes(b"x")
+    monkeypatch.setattr("core.video.path_resolver.video_base_dirs",
+                        lambda db: [str(root)])
+    db = _InfoDB({"relative_path": "/mnt/plex_drive/PLEX/TV SHOWS/Show/Season 02/Show - S02E01.mkv",
+                  "season": 2, "episode": 1})
+    path, identity = worker._resolve_file(db, {"video_kind": "episode", "video_id": 1})
+    assert path == str(real)
+    assert identity == {"season": 2, "episode": 1}
+
+
+def test_resolve_file_never_reroots_missing_download_dest(tmp_path, monkeypatch):
+    root = tmp_path / "Movies"
+    same_name = root / "M (2020)" / "M (2020).mkv"
+    same_name.parent.mkdir(parents=True)
+    same_name.write_bytes(b"x")
+    monkeypatch.setattr("core.video.path_resolver.video_base_dirs",
+                        lambda db: [str(root)])
+    db = _InfoDB({"dest_path": str(tmp_path / "gone" / "M (2020)" / "M (2020).mkv")})
+    path, _ = worker._resolve_file(db, {"video_kind": "download", "video_id": 1})
+    assert path is None

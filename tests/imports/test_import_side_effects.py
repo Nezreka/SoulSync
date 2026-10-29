@@ -909,3 +909,74 @@ def test_is_active_media_server_ready_false_when_server_not_connected(monkeypatc
         "place without adding them to your Library. Connect Jellyfin in "
         "Settings, or switch to Standalone mode, then try again."
     )
+
+
+def _make_soulsync_db_with_soul_ids():
+    conn = _make_soulsync_db()
+    conn.execute("ALTER TABLE artists ADD COLUMN soul_id TEXT")
+    conn.execute("ALTER TABLE albums ADD COLUMN soul_id TEXT")
+    conn.execute("ALTER TABLE tracks ADD COLUMN soul_id TEXT")
+    conn.execute("ALTER TABLE tracks ADD COLUMN album_soul_id TEXT")
+    return conn
+
+
+def test_hydrabase_import_never_writes_the_peers_soul_ids(tmp_path, monkeypatch):
+    """soul_id/album_soul_id are owned by the local SoulID worker
+    (kinded_v2, minted from the row's own names). A hydrabase payload's
+    ids were minted under the PEER's scheme — writing them into the new
+    rows would pin them forever, because the worker only fills empty
+    ids. The rows must land with the columns empty."""
+    conn = _make_soulsync_db_with_soul_ids()
+    fake_db = _FakeDB(conn)
+    final_path = tmp_path / "track.flac"
+    final_path.write_bytes(b"audio")
+
+    monkeypatch.setattr(side_effects, "get_database", lambda: fake_db)
+    monkeypatch.setattr(
+        side_effects,
+        "_get_config_manager",
+        lambda: SimpleNamespace(get_active_media_server=lambda: "soulsync"),
+    )
+
+    import core.genre_filter as genre_filter
+
+    monkeypatch.setattr(genre_filter, "filter_genres", lambda genres, _cfg: list(genres))
+
+    context = {
+        "source": "hydrabase",
+        "artist": {"soul_id": "soul_peer_artist", "name": "Peer Artist"},
+        "album": {
+            "soul_id": "soul_peer_album",
+            "name": "Peer Album",
+            "release_date": "2024-02-03",
+            "total_tracks": 12,
+        },
+        "track_info": {
+            "soul_id": "soul_peer_track",
+            "album_soul_id": "soul_peer_album",
+            "name": "Peer Song",
+            "track_number": 3,
+            "duration_ms": 200000,
+            "artists": [{"name": "Peer Artist"}],
+            "_source": "hydrabase",
+        },
+        "original_search_result": {
+            "title": "Peer Song",
+            "artists": [{"name": "Peer Artist"}],
+            "_source": "hydrabase",
+        },
+        "_final_processed_path": str(final_path),
+    }
+    artist_context = {"name": "Peer Artist", "genres": ["rock"]}
+    album_info = {"is_album": True, "album_name": "Peer Album", "track_number": 3}
+
+    side_effects.record_soulsync_library_entry(context, artist_context, album_info)
+
+    artist_row = conn.execute("SELECT * FROM artists").fetchone()
+    album_row = conn.execute("SELECT * FROM albums").fetchone()
+    track_row = conn.execute("SELECT * FROM tracks").fetchone()
+    assert artist_row is not None and album_row is not None and track_row is not None
+    assert artist_row["soul_id"] is None
+    assert album_row["soul_id"] is None
+    assert track_row["soul_id"] is None
+    assert track_row["album_soul_id"] is None

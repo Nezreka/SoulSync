@@ -298,6 +298,21 @@ export const FINDING_ACTION_LABELS: Record<string, string> = {
   removed_duplicates: 'Duplicates Removed',
   genres_applied: 'Genres Applied',
   ignored: 'Ignored',
+  // the file a finding was about vanished before it was fixed (#1143)
+  obsolete: 'File Gone',
+  // the video side's fix actions
+  wishlisted: 'Wishlisted',
+  grabbed: 'Grabbed',
+  refreshed: 'Refreshed',
+  removed: 'Removed',
+  marked_deleted: 'Marked Deleted',
+  forgotten: 'Forgotten',
+  flagged: 'Flagged',
+  cleaned: 'Cleaned',
+  renamed: 'Renamed',
+  queued: 'Queued',
+  // retired by a later scan that no longer saw the problem
+  'superseded by a newer scan': 'Gone on rescan',
 };
 
 /** The badge shown on a non-pending finding: the user action if we have a label
@@ -874,12 +889,13 @@ export function findingsBulkBarState(
 export function bulkFixRunMessage(
   status: Pick<
     BulkFixStatus,
-    'fixed' | 'failed' | 'total' | 'stopped' | 'error' | 'note' | 'errors'
+    'fixed' | 'failed' | 'skipped' | 'total' | 'stopped' | 'error' | 'note' | 'errors'
   >,
 ): { message: string; type: 'success' | 'error' } {
   const fixed = status.fixed || 0;
   const failed = status.failed || 0;
-  let message = `Fixed ${fixed}${failed ? `, ${failed} failed` : ''} of ${status.total || 0}`;
+  const skipped = status.skipped || 0;
+  let message = `Fixed ${fixed}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} skipped` : ''} of ${status.total || 0}`;
   if (status.stopped) {
     message = `Bulk fix stopped — ${message.charAt(0).toLowerCase()}${message.slice(1)}`;
   }
@@ -896,7 +912,7 @@ export function bulkFixRunMessage(
     const errors = status.errors;
     if (errors && errors.length > 0) message += `: ${errors[0].error}`;
   }
-  return { message, type: fixed > 0 ? 'success' : 'error' };
+  return { message, type: fixed > 0 || (skipped > 0 && failed === 0) ? 'success' : 'error' };
 }
 
 /** From the tail of `bulkFixFindings` — the per-id loop's own summary. Note it
@@ -905,10 +921,18 @@ export function bulkFixLoopMessage(
   fixed: number,
   failed: number,
   lastError: string,
+  skipped = 0,
+  otherArtistSkipped = 0,
 ): { message: string; type: 'success' | 'error' } {
-  let message = `Fixed ${fixed}${failed ? `, ${failed} failed` : ''}`;
+  let message = `Fixed ${fixed}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} skipped` : ''}`;
   if (failed && lastError) message += `: ${lastError}`;
-  return { message, type: fixed > 0 ? 'success' : 'error' };
+  // A failed gated finding's own error already carries this sentence.
+  if (otherArtistSkipped && !lastError.includes('other artists were not added')) {
+    message += `: ${otherArtistSkipped} track(s) by other artists were not added to the wishlist. To add them, fix the album on its own (reopen its finding first if it resolved)`;
+  }
+  // Same rule as bulkFixRunMessage: skipped-by-design softens the type
+  // only when nothing actually failed.
+  return { message, type: fixed > 0 || (skipped > 0 && failed === 0) ? 'success' : 'error' };
 }
 
 /**

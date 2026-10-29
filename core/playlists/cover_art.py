@@ -593,6 +593,21 @@ def raw_preview_path(playlist_id: int, base_dir: Optional[str] = None, *, mkdir:
     return os.path.join(up.cover_dir(base_dir, mkdir=mkdir), f"preview-{int(playlist_id)}-raw.webp")
 
 
+def _storage_denied(err: OSError, base_dir: Optional[str]) -> "CoverArtError":
+    """the cover folder isn't writable. on docker that's an owner that doesn't
+    match PUID/PGID, which used to surface as "Couldn't make a cover" and read
+    like pollinations being down (SeadogsBooty: /app/storage/playlist_covers
+    owned 1000:1000, the app running as 1026:100)."""
+    folder = os.path.dirname(getattr(err, "filename", "") or "") or up.cover_dir(base_dir, mkdir=False)
+    who = ""
+    if hasattr(os, "getuid"):
+        who = " (SoulSync runs as %s:%s)" % (os.getuid(), os.getgid())
+    return CoverArtError(
+        "SoulSync can't save covers: %s isn't writable%s. Give it the same owner "
+        "as your PUID/PGID, or restart the container to let it fix that." % (folder, who),
+        status=500)
+
+
 def _write(path: str, data: bytes) -> None:
     tmp = path + ".tmp"
     with open(tmp, "wb") as fh:
@@ -614,7 +629,10 @@ def set_preview_name(playlist: Dict[str, Any], show_name: bool, *,
         raise CoverArtError("That preview is gone. Generate a new one.", status=404)
     with open(raw_path, "rb") as fh:
         raw = fh.read()
-    _render_preview(playlist, raw, show_name, base_dir)
+    try:
+        _render_preview(playlist, raw, show_name, base_dir)
+    except PermissionError as e:
+        raise _storage_denied(e, base_dir) from None
     return {'preview_url': preview_url(playlist['id']), 'show_name': bool(show_name)}
 
 
@@ -641,8 +659,11 @@ def make_preview(
         data = up._encode_cover(raw)
     except up.UserPlaylistError:
         raise CoverArtError("Pollinations sent back something that isn't an image. Try again.") from None
-    _write(raw_preview_path(playlist['id'], base_dir), data)
-    _render_preview(playlist, data, show_name, base_dir)
+    try:
+        _write(raw_preview_path(playlist['id'], base_dir), data)
+        _render_preview(playlist, data, show_name, base_dir)
+    except PermissionError as e:
+        raise _storage_denied(e, base_dir) from None
     logger.info("cover art preview for playlist %s (attempt %s)", playlist['id'], attempt)
     return {
         'preview_url': preview_url(playlist['id']),
@@ -659,7 +680,10 @@ def apply_preview(db: Any, playlist: Dict[str, Any], *, base_dir: Optional[str] 
     src = preview_path(playlist['id'], base_dir, mkdir=False)
     if not os.path.isfile(src):
         raise CoverArtError("That preview is gone. Generate a new one.", status=404)
-    os.replace(src, up.cover_path(playlist['id'], base_dir))
+    try:
+        os.replace(src, up.cover_path(playlist['id'], base_dir))
+    except PermissionError as e:
+        raise _storage_denied(e, base_dir) from None
     try:
         os.remove(raw_preview_path(playlist['id'], base_dir, mkdir=False))
     except OSError:

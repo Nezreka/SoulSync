@@ -571,3 +571,38 @@ class TestStalenessHistory:
         mgr.refresh_playlist('popular_picks', '', 1)
         assert mgr.recent_track_ids(1, 'hidden_gems', 7) == ['gem-1']
         assert mgr.recent_track_ids(1, 'popular_picks', 7) == ['pop-1']
+
+
+class TestBlocksNeverReachASnapshot:
+    """discover hides blocks in its responses, but a sync reads the snapshot
+    straight: a generator that only checked blocked names (or nothing) put a
+    snoozed track or an id-blocked artist on the server."""
+
+    def test_blocked_artists_and_set_aside_tracks_are_dropped(self, db, registry, monkeypatch):
+        from core.discovery.blocked import BlockedArtists
+        db.get_blocklist = lambda *a, **k: []
+        blocked = BlockedArtists(names=frozenset({'banned'}),
+                                 ids={'spotify': frozenset({'sp-art-9'})},
+                                 works=frozenset({('a1', 'not now song')}))
+        monkeypatch.setattr(BlockedArtists, 'load', classmethod(lambda cls, d, p: blocked))
+        tracks = [
+            _make_track('Keep', 'A1', 'k'),
+            _make_track('Song', 'Banned', 'b'),
+            _make_track('Not Now Song', 'A1', 'n'),
+            Track(track_name='By Id', artist_name='Renamed', spotify_track_id='i',
+                  track_data_json={'name': 'By Id',
+                                   'artists': [{'name': 'Renamed', 'spotify_artist_id': 'sp-art-9'}]}),
+        ]
+        _register_simple_kind(registry, lambda deps, variant, config: tracks)
+        manager = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        record = manager.refresh_playlist('hidden_gems')
+        assert [t.track_name for t in manager.get_playlist_tracks(record.id)] == ['Keep']
+
+    def test_no_blocks_is_untouched(self, db, registry):
+        db.get_blocklist = lambda *a, **k: []
+        db.get_discovery_feedback = lambda *a, **k: []
+        tracks = [_make_track('A', 'X', 'a'), _make_track('B', 'Y', 'b')]
+        _register_simple_kind(registry, lambda deps, variant, config: tracks)
+        manager = PersonalizedPlaylistManager(db, deps=None, registry=registry)
+        record = manager.refresh_playlist('hidden_gems')
+        assert record.track_count == 2

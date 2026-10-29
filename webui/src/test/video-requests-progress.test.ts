@@ -205,8 +205,31 @@ describe('the request flow', () => {
   let requests: Row[];
   let profiles: Row[];
   let showType: Row | null;
+  // every test evaluates a fresh copy of the module, and each copy's document
+  // listeners and 200ms repaint timers outlive its test. a stale copy's repaint,
+  // landing inside a later slow test, painted from its own cache and flipped
+  // Requested back to Preview. track both and tear them down per test.
+  let listeners: [string, EventListenerOrEventListenerObject][] = [];
+  let timers: ReturnType<typeof setTimeout>[] = [];
+  const realAdd = document.addEventListener.bind(document);
+  const realSetTimeout = globalThis.setTimeout;
 
   beforeEach(() => {
+    vi.spyOn(document, 'addEventListener').mockImplementation(
+      (
+        type: string,
+        fn: EventListenerOrEventListenerObject,
+        opts?: boolean | AddEventListenerOptions,
+      ) => {
+        listeners.push([type, fn]);
+        realAdd(type, fn, opts);
+      },
+    );
+    vi.stubGlobal('setTimeout', (fn: () => void, ms?: number) => {
+      const id = realSetTimeout(fn, ms);
+      timers.push(id);
+      return id;
+    });
     toasts = [];
     posts = [];
     quota = null;
@@ -239,6 +262,10 @@ describe('the request flow', () => {
   });
 
   afterEach(() => {
+    for (const [type, fn] of listeners) document.removeEventListener(type, fn);
+    for (const id of timers) clearTimeout(id);
+    listeners = [];
+    timers = [];
     vi.unstubAllGlobals();
   });
 

@@ -31,7 +31,7 @@ def auto_scan_audiobook_library(config: Dict[str, Any], deps: AutomationDeps) ->
             phase=phase, log_line=phase, log_type="error" if failed else "info")
 
     try:
-        result = scan(root=root, progress=progress, match_catalog=bool(config.get("match_catalog", True)),
+        result = scan(root=config.get("root") or None, progress=progress, match_catalog=bool(config.get("match_catalog", True)),
                       match_limit=max(1,min(int(config.get("match_batch_size",25)),100)))
         return {**result, "_manages_own_progress": result.get("status") != "skipped"}
     except Exception as exc:

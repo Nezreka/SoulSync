@@ -77,7 +77,7 @@ describe('sync page id collisions', () => {
     const all = syncRouteSources()
       .map((s) => s.source)
       .join('\n');
-    for (const id of ['beatport-rebuild-content', 'server-disambig-overlay', 'sync-log-area']) {
+    for (const id of ['beatport-rebuild-content', 'server-disambig-overlay']) {
       expect(all, `React should render #${id}`).toContain(`id="${id}"`);
     }
   });

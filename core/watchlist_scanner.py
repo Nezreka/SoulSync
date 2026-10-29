@@ -2963,7 +2963,7 @@ class WatchlistScanner:
                     # When allow_duplicates is on, skip album hint so we get title+artist matches only
                     search_album = None if allow_duplicates else album_name
                     from core.downloads.atomic_album_publish import contains_staging_segment
-                    db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=search_album, include_downloads=True)
+                    db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=search_album, include_downloads=True, prefer_album=album_name)
 
                     if db_track and confidence >= 0.7:
                         # #1289: a row whose file is still in atomic-publish

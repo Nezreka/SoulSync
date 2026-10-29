@@ -80,6 +80,7 @@ import {
   REPAIR_PAGE_SIZE_OPTIONS,
 } from '../-tools.core';
 import { safeFixablePending, visibleGroups } from '../-tools.groups';
+import { useToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
 import { AlbumInspectionTray } from './album-inspection-tray';
@@ -88,6 +89,7 @@ import { useFindingPrompts } from './finding-prompts';
 import { FindingsAlbumGrid } from './findings-album-grid';
 import { FindingsInbox } from './findings-inbox';
 import { HealthHero } from './health-hero';
+import { VideoFindingDetail } from './video-finding-detail';
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
@@ -131,6 +133,38 @@ export async function openSuspectAlbum(finding: RepairFinding): Promise<void> {
 /** The vanilla's poll interval for a background Fix All run. */
 const BULK_FIX_POLL_MS = 2000;
 
+/** how long the undo bar stays after a dismiss. */
+const UNDO_MS = 8000;
+
+/** a dialog is up (a confirm, a prompt, the reidentify modal). the shell keeps
+ *  hidden and faded dialogs in the page, so presence alone means nothing: the
+ *  element and every ancestor must actually be showing and clickable. */
+function visibleDialogOpen(): boolean {
+  const candidates = document.querySelectorAll<HTMLElement>(
+    '[role="dialog"], [aria-modal="true"], .repair-help-overlay',
+  );
+  for (const el of candidates) {
+    let node: HTMLElement | null = el;
+    let shown = true;
+    while (node && node !== document.body) {
+      const style = window.getComputedStyle(node);
+      if (
+        node.hidden ||
+        style.display === 'none' ||
+        style.visibility === 'hidden' ||
+        style.opacity === '0' ||
+        style.pointerEvents === 'none'
+      ) {
+        shown = false;
+        break;
+      }
+      node = node.parentElement;
+    }
+    if (shown) return true;
+  }
+  return false;
+}
+
 const PAGE_SIZE_KEY = 'repairFindingsPageSize';
 
 function readStoredPageSize(): number {
@@ -161,6 +195,14 @@ const STATUS_SEGMENTS = [
   { value: 'resolved', label: 'Fixed' },
   { value: 'dismissed', label: 'Dismissed' },
   { value: '', label: 'All' },
+] as const;
+
+const VIDEO_SORT_OPTIONS = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'severity', label: 'Severity' },
+  { value: 'title', label: 'Title' },
+  { value: 'path', label: 'File path' },
 ] as const;
 
 const SORT_OPTIONS = [
@@ -195,6 +237,9 @@ export interface FindingsSurfaceProps {
   runs: RepairJobRun[];
   /** Library size, for the per-1,000-tracks health normalisation. */
   trackCount: number | null;
+  /** What that size is OF, when it isn't tracks ("8,864 movies · 105,472
+   *  episodes"). */
+  sizeLabel?: string | null;
   /** A jump from the run history: scope the surface to one job's open
    *  findings. The token re-fires the same job. */
   focusJob?: {
@@ -214,10 +259,13 @@ export function FindingsSurface({
   jobs,
   runs,
   trackCount,
+  sizeLabel,
   focusJob,
   onStatusChanged,
   defaultView,
 }: FindingsSurfaceProps) {
+  const media = useToolsMedia();
+  const video = media === 'video';
   /** job_id → display name, falling back to a de-underscored id for a job the
    *  list hasn't loaded (or one that has since been removed). */
   const jobLabel = useCallback(
@@ -235,10 +283,15 @@ export function FindingsSurface({
   const [page, setPage] = useState(0);
 
   const [viewMode, setViewMode] = useState<'albums' | 'inbox' | 'table'>(() => {
-    if (defaultView) return defaultView;
+    // the album grid only holds findings that recorded an album, so as the
+    // landing view it hid everything else: 134 orphan files were simply not
+    // on screen. issue types shows every finding, so that's where you land,
+    // and albums is a lens you pick (music only, video has no albums).
+    if (defaultView && !(video && defaultView === 'albums')) return defaultView;
     try {
       const saved = localStorage.getItem('soulsync-findings-view-mode');
-      if (saved === 'albums' || saved === 'inbox' || saved === 'table') return saved;
+      if (saved === 'inbox' || saved === 'table') return saved;
+      if (saved === 'albums' && !video) return saved;
     } catch {}
     return 'inbox';
   });
@@ -251,6 +304,9 @@ export function FindingsSurface({
   };
 
   const [selectedAlbum, setSelectedAlbum] = useState<FindingAlbumGroup | null>(null);
+  /** findings the album grid holds, so the albums view can say how many it
+   *  CAN'T show. null until the grid loads, or when the server capped it. */
+  const [albumCovered, setAlbumCovered] = useState<number | null>(null);
   const [redownloadFinding, setRedownloadFinding] = useState<RepairFinding | null>(null);
 
   /** Which group is expanded. Exactly one at a time: the open group hosts the
@@ -262,6 +318,7 @@ export function FindingsSurface({
   const [groupView, setGroupView] = useState<'list' | 'album' | 'artist'>('list');
 
   const [groups, setGroups] = useState<FindingGroup[]>([]);
+  const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [types, setTypes] = useState<FindingTypeInfo[]>([]);
   const [items, setItems] = useState<RepairFinding[] | null>(null);
   const [total, setTotal] = useState(0);
@@ -286,12 +343,46 @@ export function FindingsSurface({
 
   const prompts = useFindingPrompts();
 
+  /** the last dismiss, offered back for a few seconds. dismiss means "never
+   *  raise this again", which is only fair to make one click if it's one
+   *  click to take back. */
+  const [undo, setUndo] = useState<{ ids: number[]; label: string; token: number } | null>(null);
+  const offerUndo = useCallback((ids: number[], label: string) => {
+    setUndo((previous) => ({ ids, label, token: (previous?.token || 0) + 1 }));
+  }, []);
+  useEffect(() => {
+    if (!undo) return;
+    const timer = setTimeout(
+      () => setUndo((current) => (current?.token === undo.token ? null : current)),
+      UNDO_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [undo]);
+
+  /** row lookups from callbacks that shouldn't re-create on every page load */
+  const itemsRef = useRef<RepairFinding[] | null>(null);
+
   const typeMap = useMemo(() => {
     const map = new Map<string, FindingTypeInfo>();
     for (const info of types) map.set(info.type, info);
     return map;
   }, [types]);
   const typeInfo = useCallback((findingType: string) => typeMap.get(findingType), [typeMap]);
+
+  /** the row's fix button label, or null when the row has none. the catalog
+   *  decides (it knows every fixable type); the old client list is only the
+   *  fallback before the catalog has loaded, and only on music. */
+  const rowFixLabel = useCallback(
+    (finding: RepairFinding): string | null => {
+      const special = findingFixLabel(finding.finding_type, finding.entity_type);
+      if (special === 'Open album') return special;
+      const info = typeMap.get(finding.finding_type);
+      if (info) return info.fixable ? info.verb || 'Fix' : null;
+      return video ? null : special;
+    },
+    [typeMap, video],
+  );
+  const rowCanFix = (finding: RepairFinding) => Boolean(rowFixLabel(finding));
 
   /** A non-empty search escapes the grouping: people search for a path or a
    *  title, not for a category, and making them guess the category first is
@@ -318,11 +409,13 @@ export function FindingsSurface({
       setCounts(null);
       return;
     }
-    setCacheHealth(await fetchCacheHealth());
-  }, []);
+    // the metadata cache is the music side's
+    if (!video) setCacheHealth(await fetchCacheHealth());
+  }, [video]);
 
   const loadGroups = useCallback(async () => {
     setGroups(await fetchFindingGroups());
+    setGroupsLoaded(true);
   }, []);
 
   const loadFindings = useCallback(async () => {
@@ -350,6 +443,7 @@ export function FindingsSurface({
       setBusyFix(new Set());
       setTotal(data.total);
       setServerPage(data.page);
+      itemsRef.current = data.items;
       setItems(data.items);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error));
@@ -535,10 +629,29 @@ export function FindingsSurface({
         toast(`Could not dismiss finding: ${(error as Error).message}`, 'error');
         return;
       }
+      const title = itemsRef.current?.find((finding) => finding.id === id)?.title;
+      offerUndo([id], title ? `Dismissed "${title}"` : 'Finding dismissed');
       refreshAll();
     },
-    [refreshAll],
+    [offerUndo, refreshAll],
   );
+
+  const runUndo = useCallback(async () => {
+    const current = undo;
+    if (!current) return;
+    setUndo(null);
+    let back = 0;
+    for (const id of current.ids) {
+      if (await reopenFinding(id)) back += 1;
+    }
+    toast(
+      back
+        ? `Brought back ${back.toLocaleString()} finding${back === 1 ? '' : 's'}`
+        : 'Could not undo that',
+      back ? 'success' : 'error',
+    );
+    refreshAll();
+  }, [refreshAll, undo]);
 
   /** The undo half of dismiss. Dismiss suppresses that finding forever, which
    *  is only safe to offer freely because this exists. */
@@ -554,55 +667,72 @@ export function FindingsSurface({
     [refreshAll],
   );
 
-  /** `fixRepairFinding`. The per-type prompts run BEFORE the button is disabled. */
+  /** `fixRepairFinding`. The per-type prompts run BEFORE the button is disabled.
+   *  `override` is a non-default action picked in the detail panel (the video
+   *  ghost's Forget); it skips the prompts because the user just chose. */
   const fixOne = useCallback(
-    async (finding: RepairFinding) => {
+    async (finding: RepairFinding, override?: string) => {
       const type = finding.finding_type;
-      let fixAction: string | null = null;
-
-      if (type === TYPE_ORPHAN) {
-        fixAction = await prompts.promptOrphan();
-        if (!fixAction) return;
-      }
-      if (type === TYPE_DEAD) {
-        fixAction = await prompts.promptDeadFile();
-        if (!fixAction) return;
-      }
-      if (type === TYPE_ACOUSTID) {
-        // an ambiguous finding carries its candidate recordings - hand them to
-        // the dialog so the user can pick which one to retag/relocate as
-        const d = (finding.details || {}) as {
-          ambiguous?: boolean;
-          candidates?: string[];
-        };
-        fixAction = await prompts.promptAcoustid(d.ambiguous ? d.candidates : undefined);
-        if (!fixAction) return;
-      }
-      if (type === TYPE_QUALITY) {
-        fixAction = await prompts.promptQuality();
-        if (!fixAction) return;
-        if (fixAction === 'ignore') {
-          await dismissOne(finding.id);
+      let fixAction: string | null = override ?? null;
+      if (video) {
+        // video types share some slugs with music (quality_upgrade) but none
+        // of music's questions. a fix that changes a file on disk asks once,
+        // in the words the catalog has for it.
+        const info = typeInfo(type);
+        if (!override && info?.destructive) {
+          const confirmed = await window.showConfirmDialog?.({
+            title: `${info.verb || 'Fix'}: ${finding.title}`,
+            message: info.confirm || 'This changes a file on disk.',
+            confirmText: info.verb || 'Fix',
+            destructive: true,
+          });
+          if (!confirmed) return;
+        }
+      } else if (!override) {
+        if (type === TYPE_ORPHAN) {
+          fixAction = await prompts.promptOrphan();
+          if (!fixAction) return;
+        }
+        if (type === TYPE_DEAD) {
+          fixAction = await prompts.promptDeadFile();
+          if (!fixAction) return;
+        }
+        if (type === TYPE_ACOUSTID) {
+          // an ambiguous finding carries its candidate recordings - hand them to
+          // the dialog so the user can pick which one to retag/relocate as
+          const d = (finding.details || {}) as {
+            ambiguous?: boolean;
+            candidates?: string[];
+          };
+          fixAction = await prompts.promptAcoustid(d.ambiguous ? d.candidates : undefined);
+          if (!fixAction) return;
+        }
+        if (type === TYPE_QUALITY) {
+          fixAction = await prompts.promptQuality();
+          if (!fixAction) return;
+          if (fixAction === 'ignore') {
+            await dismissOne(finding.id);
+            return;
+          }
+        }
+        if (type === TYPE_BACKFILL) {
+          const choice = await prompts.promptBackfill(1);
+          if (!choice) return;
+          if (choice === 'dismiss') {
+            await dismissOne(finding.id);
+            return;
+          }
+          // 'add_to_wishlist' falls through with no fix_action — the handler
+          // already adds to the wishlist by default.
+        }
+        if (type === TYPE_SUSPECT_ALBUM && finding.entity_type === 'album') {
+          await openSuspectAlbum(finding);
           return;
         }
-      }
-      if (type === TYPE_BACKFILL) {
-        const choice = await prompts.promptBackfill(1);
-        if (!choice) return;
-        if (choice === 'dismiss') {
-          await dismissOne(finding.id);
+        if (type === TYPE_SUSPECT_ALBUM) {
+          setReidentifyingFinding(finding);
           return;
         }
-        // 'add_to_wishlist' falls through with no fix_action — the handler
-        // already adds to the wishlist by default.
-      }
-      if (type === TYPE_SUSPECT_ALBUM && finding.entity_type === 'album') {
-        await openSuspectAlbum(finding);
-        return;
-      }
-      if (type === TYPE_SUSPECT_ALBUM) {
-        setReidentifyingFinding(finding);
-        return;
       }
 
       setBusyFix((current) => new Set(current).add(finding.id));
@@ -648,7 +778,7 @@ export function FindingsSurface({
         });
       }
     },
-    [dismissOne, prompts, refreshAll],
+    [dismissOne, prompts, refreshAll, typeInfo, video],
   );
 
   const handleInspectRedownload = useCallback((finding: RepairFinding) => {
@@ -705,14 +835,15 @@ export function FindingsSurface({
   const bulkDismiss = useCallback(async () => {
     if (selected.size === 0) return;
     const count = selected.size;
+    const ids = [...selected];
     try {
-      await bulkFindingAction([...selected], 'dismiss');
-      toast(`${count} findings dismissed`, 'success');
+      await bulkFindingAction(ids, 'dismiss');
+      offerUndo(ids, `${count.toLocaleString()} findings dismissed`);
       refreshAll();
     } catch {
       toast('Error updating findings', 'error');
     }
-  }, [refreshAll, selected]);
+  }, [offerUndo, refreshAll, selected]);
 
   /** `bulkFixFindings` — ask once per finding KIND, then fix one id at a time. */
   const bulkFix = useCallback(async () => {
@@ -722,48 +853,70 @@ export function FindingsSurface({
     const typeOf = (id: number) => byId.get(id)?.finding_type;
     const withType = (findingType: string) => ids.filter((id) => typeOf(id) === findingType);
 
-    const orphanIds = withType(TYPE_ORPHAN);
     let orphanAction: string | null = null;
-    if (orphanIds.length > 0) {
-      orphanAction = await prompts.promptOrphan();
-      if (!orphanAction) return;
-      // The scary dialog is for mass DELETION only — staging is reversible.
-      if (orphanAction === 'delete' && orphanIds.length > MASS_ORPHAN_THRESHOLD) {
-        const hasMassFlag = ids.some((id) => Boolean((byId.get(id)?.details || {}).mass_orphan));
-        if (hasMassFlag && !(await prompts.promptWitnessMe(orphanIds.length))) return;
-      }
-    }
-
-    const deadIds = withType(TYPE_DEAD);
     let deadAction: string | null = null;
-    if (deadIds.length > 0) {
-      deadAction = await prompts.promptDeadFile();
-      if (!deadAction) return;
-    }
-
-    const acoustidIds = withType(TYPE_ACOUSTID);
     let acoustidAction: string | null = null;
-    if (acoustidIds.length > 0) {
-      acoustidAction = await prompts.promptAcoustid(undefined, acoustidIds.length);
-      if (!acoustidAction) return;
-    }
-
-    const backfillIds = withType(TYPE_BACKFILL);
     let backfillAction: string | null = null;
-    if (backfillIds.length > 0) {
-      backfillAction = await prompts.promptBackfill(backfillIds.length);
-      if (!backfillAction) return;
-    }
-
-    const qualityIds = withType(TYPE_QUALITY);
     let qualityAction: string | null = null;
-    if (qualityIds.length > 0) {
-      qualityAction = await prompts.promptQuality();
-      if (!qualityAction) return;
+    if (video) {
+      // one question for the whole selection, only when something in it
+      // changes a file on disk
+      const risky = [...new Set(ids.map(typeOf).filter(Boolean) as string[])].filter(
+        (findingType) => typeInfo(findingType)?.destructive,
+      );
+      if (risky.length) {
+        const labels = risky.map((t) => typeInfo(t)?.label || t.replace(/_/g, ' ')).join(', ');
+        const confirmed = await window.showConfirmDialog?.({
+          title: `Fix ${ids.length.toLocaleString()} findings`,
+          message: `Some of these change files on disk (${labels}). ${
+            risky.length === 1 ? typeInfo(risky[0])?.confirm || '' : ''
+          }`.trim(),
+          confirmText: 'Fix selected',
+          destructive: true,
+        });
+        if (!confirmed) return;
+      }
+    } else {
+      const orphanIds = withType(TYPE_ORPHAN);
+      if (orphanIds.length > 0) {
+        orphanAction = await prompts.promptOrphan();
+        if (!orphanAction) return;
+        // The scary dialog is for mass DELETION only — staging is reversible.
+        if (orphanAction === 'delete' && orphanIds.length > MASS_ORPHAN_THRESHOLD) {
+          const hasMassFlag = ids.some((id) => Boolean((byId.get(id)?.details || {}).mass_orphan));
+          if (hasMassFlag && !(await prompts.promptWitnessMe(orphanIds.length))) return;
+        }
+      }
+
+      const deadIds = withType(TYPE_DEAD);
+      if (deadIds.length > 0) {
+        deadAction = await prompts.promptDeadFile();
+        if (!deadAction) return;
+      }
+
+      const acoustidIds = withType(TYPE_ACOUSTID);
+      if (acoustidIds.length > 0) {
+        acoustidAction = await prompts.promptAcoustid(undefined, acoustidIds.length);
+        if (!acoustidAction) return;
+      }
+
+      const backfillIds = withType(TYPE_BACKFILL);
+      if (backfillIds.length > 0) {
+        backfillAction = await prompts.promptBackfill(backfillIds.length);
+        if (!backfillAction) return;
+      }
+
+      const qualityIds = withType(TYPE_QUALITY);
+      if (qualityIds.length > 0) {
+        qualityAction = await prompts.promptQuality();
+        if (!qualityAction) return;
+      }
     }
 
     let fixed = 0;
     let failed = 0;
+    let skipped = 0;
+    let otherArtistSkipped = 0;
     let lastError = '';
     toast(`Fixing ${ids.length} findings...`, 'info');
 
@@ -796,8 +949,18 @@ export function FindingsSurface({
         // Backfill "Add to Wishlist" falls through with no action — the fix
         // handler already adds to the wishlist by default.
 
-        const result = await fixFinding(id, fixAction);
+        // bulk: true — fixing a selection is a bulk run even though it
+        // posts one id at a time. Without it every selected finding
+        // would count as an explicit single fix, and the album gate
+        // would let a select-all wishlist every other artist on every
+        // compilation in the selection.
+        const result = await fixFinding(id, fixAction, { bulk: true });
+        // Counted even on a successful fix: a partial gate resolves the
+        // finding, and without this the held-back tracks are silent here
+        // (the background Fix All reports them in its run note).
+        otherArtistSkipped += result.other_artist_skipped || 0;
         if (result.success) fixed++;
+        else if (result.skipped_by_design) skipped++;
         else {
           failed++;
           lastError = result.error || 'unknown error';
@@ -807,10 +970,16 @@ export function FindingsSurface({
       }
     }
 
-    const { message, type } = bulkFixLoopMessage(fixed, failed, lastError);
+    const { message, type } = bulkFixLoopMessage(
+      fixed,
+      failed,
+      lastError,
+      skipped,
+      otherArtistSkipped,
+    );
     toast(message, type);
     refreshAll();
-  }, [items, prompts, refreshAll, selected]);
+  }, [items, prompts, refreshAll, selected, typeInfo, video]);
 
   // ── Group-scoped actions ───────────────────────────────────────────────────
 
@@ -825,7 +994,26 @@ export function FindingsSurface({
       const count = group.pending;
       let fixAction: string | null = null;
 
-      if (group.finding_type === TYPE_BACKFILL) {
+      // Everything without a question of its own takes its default action.
+      // Destructive types still spell out what happens to files; safe ones
+      // just confirm the scale.
+      const confirmDefault = () =>
+        window.showConfirmDialog?.({
+          title: `${info?.verb || 'Fix'} ${label}`,
+          message: info?.confirm
+            ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? ${info.confirm}`
+            : info?.destructive
+              ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This moves or deletes files on disk and cannot be undone.`
+              : `Apply "${info?.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This only writes metadata — no files are deleted or moved.`,
+          confirmText: info?.verb || 'Fix',
+          destructive: Boolean(info?.destructive),
+        });
+
+      if (video) {
+        // the music questions below key on slugs video shares (quality_upgrade)
+        // but means something else by. video asks the one catalog question.
+        if (!(await confirmDefault())) return;
+      } else if (group.finding_type === TYPE_BACKFILL) {
         const choice = await prompts.promptBackfill(count);
         if (!choice) return;
         if (choice === 'dismiss') {
@@ -907,20 +1095,8 @@ export function FindingsSurface({
           });
           if (!confirmed) return;
         }
-      } else {
-        // Everything else takes its default action. Destructive types still
-        // spell out what happens to files; safe ones just confirm the scale.
-        const confirmed = await window.showConfirmDialog?.({
-          title: `${info?.verb || 'Fix'} ${label}`,
-          message: info?.confirm
-            ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? ${info.confirm}`
-            : info?.destructive
-              ? `Apply "${info.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This moves or deletes files on disk and cannot be undone.`
-              : `Apply "${info?.verb || 'Fix'}" to all ${count.toLocaleString()} ${label.toLowerCase()} findings? This only writes metadata — no files are deleted or moved.`,
-          confirmText: info?.verb || 'Fix',
-          destructive: Boolean(info?.destructive),
-        });
-        if (!confirmed) return;
+      } else if (!(await confirmDefault())) {
+        return;
       }
 
       try {
@@ -941,7 +1117,7 @@ export function FindingsSurface({
         toast('Error starting bulk fix', 'error');
       }
     },
-    [prompts, refreshAll, watchBulkFixRun],
+    [prompts, refreshAll, video, watchBulkFixRun],
   );
 
   const dismissGroup = useCallback(
@@ -1004,7 +1180,9 @@ export function FindingsSurface({
   const fixAllSafe = useCallback(async () => {
     const confirmed = await window.showConfirmDialog?.({
       title: 'Fix all safe findings',
-      message: `Apply the default fix to all ${safeCount.toLocaleString()} findings that only write metadata? Nothing is deleted or moved — anything that touches a file on disk is skipped.`,
+      message: video
+        ? `Apply the default fix to all ${safeCount.toLocaleString()} findings that only change SoulSync's own data? Nothing on disk is touched and nothing is downloaded; those findings are skipped.`
+        : `Apply the default fix to all ${safeCount.toLocaleString()} findings that only write metadata? Nothing is deleted or moved — anything that touches a file on disk is skipped.`,
       confirmText: 'Fix all safe',
       destructive: false,
     });
@@ -1023,7 +1201,7 @@ export function FindingsSurface({
     } catch {
       toast('Error starting bulk fix', 'error');
     }
-  }, [safeCount, watchBulkFixRun]);
+  }, [safeCount, video, watchBulkFixRun]);
 
   /** `clearRepairFindings` — deletes rows outright, filter-scoped. */
   const clearAll = useCallback(async () => {
@@ -1065,6 +1243,74 @@ export function FindingsSurface({
     }
   }, [jobFilter, jobLabel, query, refreshAll, severityFilter, statusFilter]);
 
+  // ── Keyboard triage ────────────────────────────────────────────────────────
+  //
+  // j/k move, x selects, enter opens, f fixes, d dismisses, z undoes, / jumps
+  // to search. gmail's keys, because working through two hundred findings
+  // with a mouse is the slow part of all this. letters only: arrows and space
+  // keep scrolling the page like they always did.
+
+  const [cursor, setCursor] = useState(-1);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    setCursor(-1);
+  }, [items]);
+
+  useEffect(() => {
+    if (cursor < 0 || !items?.[cursor]) return;
+    document
+      .querySelector(`.repair-finding-card[data-id="${items[cursor].id}"]`)
+      ?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [cursor, items]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+      // the surface is mounted but hidden in simple mode and on the tools tab
+      if (!surfaceRef.current || surfaceRef.current.offsetParent === null) return;
+      if (visibleDialogOpen()) return;
+      const key = event.key;
+      if (key === '/') {
+        event.preventDefault();
+        document.getElementById('repair-findings-search')?.focus();
+        return;
+      }
+      if (key === 'z' && undo) {
+        event.preventDefault();
+        void runUndo();
+        return;
+      }
+      const rows = items || [];
+      if (!rows.length) return;
+      if (key === 'j' || key === 'k') {
+        event.preventDefault();
+        setCursor((current) =>
+          key === 'j' ? Math.min(rows.length - 1, current + 1) : Math.max(0, current - 1),
+        );
+        return;
+      }
+      const row = rows[cursor];
+      if (!row) return;
+      if (key === 'x') {
+        event.preventDefault();
+        toggleSelect(row.id, !selected.has(row.id));
+      } else if (key === 'Enter' || key === 'o') {
+        event.preventDefault();
+        toggleDetail(row.id);
+      } else if (key === 'd' && row.status === 'pending') {
+        event.preventDefault();
+        void dismissOne(row.id);
+      } else if (key === 'f' && row.status === 'pending' && rowCanFix(row)) {
+        event.preventDefault();
+        void fixOne(row);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const shown = useMemo(
@@ -1102,6 +1348,13 @@ export function FindingsSurface({
   /** Auto-fixed is its own status: findings the worker dealt with by itself.
    *  The segment only appears once there are any, so a library where nothing
    *  auto-fixes never grows a control that always reads zero. */
+  /** only comparable with no narrowing filter, and only for one status (the
+   *  album endpoint reads "all statuses" as pending) */
+  const albumsUncovered =
+    albumCovered !== null && statusFilter && !jobFilter && !severityFilter && !query.trim()
+      ? Math.max(0, (statusCount(statusFilter) ?? 0) - albumCovered)
+      : 0;
+
   const statusSegments =
     (counts?.auto_fixed || 0) > 0
       ? [
@@ -1144,26 +1397,27 @@ export function FindingsSurface({
   /* The list/album/artist switch. Only offered inside an opened type - grouping
      across every type at once would mix "192kbps" and "missing lyrics" into one
      album card and mean nothing. */
-  const viewSwitch = openType ? (
-    <div className="repair-view-switch" role="group" aria-label="Group findings by">
-      {(
-        [
-          ['list', 'List'],
-          ['album', 'Albums'],
-          ['artist', 'Artists'],
-        ] as const
-      ).map(([value, label]) => (
-        <button
-          type="button"
-          key={value}
-          aria-pressed={groupView === value}
-          onClick={() => setGroupView(value)}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  ) : null;
+  const viewSwitch =
+    openType && !video ? (
+      <div className="repair-view-switch" role="group" aria-label="Group findings by">
+        {(
+          [
+            ['list', 'List'],
+            ['album', 'Albums'],
+            ['artist', 'Artists'],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            type="button"
+            key={value}
+            aria-pressed={groupView === value}
+            onClick={() => setGroupView(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    ) : null;
 
   /* Drilling into a card reuses the search box, which already matches
      details_json - so the album name filters straight to that album's rows and
@@ -1232,7 +1486,7 @@ export function FindingsSurface({
                 setPage(0);
               }}
             >
-              {SORT_OPTIONS.map((option) => (
+              {(video ? VIDEO_SORT_OPTIONS : SORT_OPTIONS).map((option) => (
                 <option value={option.value} key={option.value}>
                   {option.label}
                 </option>
@@ -1250,6 +1504,11 @@ export function FindingsSurface({
                 </option>
               ))}
             </select>
+            <span className="repair-kb-hint" aria-hidden="true">
+              <kbd>j</kbd>
+              <kbd>k</kbd> move · <kbd>x</kbd> select · <kbd>f</kbd> fix · <kbd>d</kbd> dismiss ·{' '}
+              <kbd>z</kbd> undo
+            </span>
           </div>
 
           <div className="repair-findings-list" id="repair-findings-list">
@@ -1263,10 +1522,14 @@ export function FindingsSurface({
             ) : items.length === 0 ? (
               <div className="repair-empty">Nothing here matches your filters.</div>
             ) : (
-              items.map((finding) => (
+              items.map((finding, index) => (
                 <FindingCard
                   finding={finding}
                   key={finding.id}
+                  video={video}
+                  info={typeInfo(finding.finding_type)}
+                  fixLabel={rowFixLabel(finding)}
+                  active={index === cursor}
                   selected={selected.has(finding.id)}
                   expanded={expanded.has(finding.id)}
                   fixing={busyFix.has(finding.id)}
@@ -1343,11 +1606,13 @@ export function FindingsSurface({
   );
 
   return (
-    <>
+    <div className="repair-findings-surface" ref={surfaceRef}>
       <HealthHero
         groups={groups}
         typeInfo={typeInfo}
         trackCount={trackCount}
+        sizeLabel={sizeLabel}
+        loading={!groupsLoaded}
         runs={runs}
         runningJobs={runningJobs}
         safeCount={safeCount}
@@ -1377,16 +1642,7 @@ export function FindingsSurface({
 
       <div className="repair-findings-header-row">
         <div className="repair-view-mode-tabs" role="tablist" aria-label="Findings View Mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={viewMode === 'albums'}
-            className={`repair-view-mode-tab${viewMode === 'albums' ? ' active' : ''}`}
-            onClick={() => changeViewMode('albums')}
-          >
-            <span className="repair-view-mode-icon">💿</span>
-            <span>Albums & Releases</span>
-          </button>
+          {/* issue types first: it's the view that holds every finding */}
           <button
             type="button"
             role="tab"
@@ -1397,6 +1653,18 @@ export function FindingsSurface({
             <span className="repair-view-mode-icon">📂</span>
             <span>Issue Types</span>
           </button>
+          {video ? null : (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'albums'}
+              className={`repair-view-mode-tab${viewMode === 'albums' ? ' active' : ''}`}
+              onClick={() => changeViewMode('albums')}
+            >
+              <span className="repair-view-mode-icon">💿</span>
+              <span>Albums & Releases</span>
+            </button>
+          )}
           <button
             type="button"
             role="tab"
@@ -1481,13 +1749,16 @@ export function FindingsSurface({
           </select>
         </div>
 
+        {/* deletes rows outright, which is not what dismiss does (dismiss
+            remembers, clear forgets and lets the next scan raise them again).
+            it sits last and quiet so it isn't mistaken for the triage button. */}
         <button
           className="repair-clear-btn"
           type="button"
-          title="Clear findings matching current filters"
+          title="Delete the findings these filters match. The next scan can raise them again. Dismiss is the one that remembers."
           onClick={() => void clearAll()}
         >
-          Clear Findings
+          Delete matching…
         </button>
       </div>
 
@@ -1509,6 +1780,18 @@ export function FindingsSurface({
               }}
             />
           ) : null}
+          {albumsUncovered > 0 ? (
+            <div className="repair-albums-uncovered" role="note">
+              <span>
+                <strong>{albumsUncovered.toLocaleString()}</strong>{' '}
+                {albumsUncovered === 1 ? 'finding isn’t' : 'findings aren’t'} about an album, so
+                {albumsUncovered === 1 ? ' it isn’t' : ' they aren’t'} in this grid.
+              </span>
+              <button type="button" onClick={() => changeViewMode('inbox')}>
+                See every finding by issue type
+              </button>
+            </div>
+          ) : null}
           <FindingsAlbumGrid
             groupBy="album"
             jobId={jobFilter || undefined}
@@ -1518,6 +1801,7 @@ export function FindingsSurface({
             selectedGroupKey={selectedAlbum?.key}
             refreshToken={refreshToken}
             onOpen={(group) => setSelectedAlbum(group)}
+            onLoaded={(covered, capped) => setAlbumCovered(capped ? null : covered)}
           />
         </div>
       ) : viewMode === 'table' && !searching ? (
@@ -1643,14 +1927,45 @@ export function FindingsSurface({
           }}
         />
       ) : null}
-    </>
+
+      {undo ? (
+        <div className="repair-undo-bar" role="status" aria-live="polite">
+          <span className="repair-undo-text">{undo.label}</span>
+          <button type="button" className="repair-undo-btn" onClick={() => void runUndo()}>
+            Undo
+          </button>
+          <button
+            type="button"
+            className="repair-undo-close"
+            aria-label="Close"
+            onClick={() => setUndo(null)}
+          >
+            &times;
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 // ── A finding card ───────────────────────────────────────────────────────────
 
+/** music types whose fix is a re-download: the row opens the source picker
+ *  (RedownloadModal) instead of firing a blind fix. */
+const MUSIC_REDOWNLOAD_TYPES = new Set([
+  'quality_upgrade',
+  'missing_discography_track',
+  'fake_lossless',
+  'short_preview_track',
+  'dead_file',
+]);
+
 function FindingCard({
   finding,
+  video,
+  info,
+  fixLabel,
+  active,
   selected,
   expanded,
   fixing,
@@ -1665,13 +1980,20 @@ function FindingCard({
   onInspectRedownload,
 }: {
   finding: RepairFinding;
+  video?: boolean;
+  /** the served catalog row for this type */
+  info?: FindingTypeInfo;
+  /** the fix button's label, or null for a review-only row */
+  fixLabel: string | null;
+  /** the keyboard cursor is on this row */
+  active?: boolean;
   selected: boolean;
   expanded: boolean;
   fixing: boolean;
   onToggleSelect: (id: number, checked: boolean) => void;
   onToggleDetail: (id: number) => void;
   jobLabel: (jobId: string) => string;
-  onFix: (finding: RepairFinding) => Promise<void>;
+  onFix: (finding: RepairFinding, override?: string) => Promise<void>;
   onDismiss: (id: number) => Promise<void>;
   onReopen: (id: number) => Promise<void>;
   onKeepDuplicate: (findingId: number, trackId: string) => void;
@@ -1680,12 +2002,13 @@ function FindingCard({
 }) {
   const details = finding.details || {};
   const filePath = findingFilePath(finding);
-  const fixLabel = findingFixLabel(finding.finding_type, finding.entity_type);
   const statusBadge = findingStatusBadge(finding.status, finding.user_action);
+  const typeLabel = info?.label || findingTypeLabel(finding.finding_type);
+  const age = formatCacheAge(finding.created_at);
 
   return (
     <div
-      className={`repair-finding-card ${finding.severity}`}
+      className={`repair-finding-card ${finding.severity}${active ? ' kb-active' : ''}`}
       data-id={finding.id}
       data-job-id={finding.job_id}
       data-mass-orphan={String(Boolean(details.mass_orphan))}
@@ -1695,6 +2018,7 @@ function FindingCard({
           <input
             type="checkbox"
             checked={selected}
+            aria-label={`Select ${finding.title}`}
             onChange={(event) => onToggleSelect(finding.id, event.target.checked)}
           />
         </div>
@@ -1702,9 +2026,7 @@ function FindingCard({
           <div className="repair-finding-title">
             <span className="repair-finding-icon">{findingSeverityIcon(finding.severity)}</span>
             {finding.title}
-            <span className="repair-finding-type-badge">
-              {findingTypeLabel(finding.finding_type)}
-            </span>
+            <span className="repair-finding-type-badge">{typeLabel}</span>
             {statusBadge ? (
               <span className={`repair-finding-status-badge ${finding.status}`}>{statusBadge}</span>
             ) : null}
@@ -1714,18 +2036,21 @@ function FindingCard({
           <div className="repair-finding-meta">
             {/* The display name the filter dropdown uses — a row showing the
                 raw snake_case id meant the same job went by two different
-                names on one screen. */}
-            <span>{jobLabel(finding.job_id)}</span>
+                names on one screen. The entity id is for us, not the user:
+                it lives in the tooltip now. */}
+            <span
+              title={
+                finding.entity_id
+                  ? `${finding.entity_type || 'item'} ${finding.entity_id}`
+                  : undefined
+              }
+            >
+              {jobLabel(finding.job_id)}
+            </span>
             <span>&middot;</span>
-            <span>{finding.entity_type || 'file'}</span>
-            {finding.entity_id ? (
-              <>
-                <span>&middot;</span>
-                <span>ID: {finding.entity_id}</span>
-              </>
-            ) : null}
-            <span>&middot;</span>
-            <span>{formatCacheAge(finding.created_at)}</span>
+            <span>
+              {age === 'now' ? 'found just now' : age === '—' ? 'found' : `found ${age} ago`}
+            </span>
           </div>
         </div>
         {/* This wrapper swallows clicks so the row toggle doesn't undo them. */}
@@ -1734,20 +2059,17 @@ function FindingCard({
             <>
               {fixLabel ? (
                 <button
-                  className="repair-finding-btn fix"
+                  className={`repair-finding-btn fix${info?.destructive ? ' destructive' : ''}`}
                   type="button"
-                  title={fixLabel}
+                  title={info?.confirm ? `${fixLabel}: ${info.confirm}` : fixLabel}
                   disabled={fixing}
                   onClick={() => {
-                    const isRedownload =
-                      fixLabel.toLowerCase().includes('re-download') ||
-                      fixLabel.toLowerCase().includes('download') ||
-                      finding.finding_type === 'quality_upgrade' ||
-                      finding.finding_type === 'missing_discography_track' ||
-                      finding.finding_type === 'fake_lossless' ||
-                      finding.finding_type === 'short_preview_track' ||
-                      finding.finding_type === 'dead_file';
-                    if (isRedownload && onInspectRedownload && finding.entity_id) {
+                    if (
+                      !video &&
+                      MUSIC_REDOWNLOAD_TYPES.has(finding.finding_type) &&
+                      onInspectRedownload &&
+                      finding.entity_id
+                    ) {
                       onInspectRedownload(finding);
                     } else {
                       void onFix(finding);
@@ -1760,7 +2082,8 @@ function FindingCard({
               <button
                 className="repair-finding-btn dismiss"
                 type="button"
-                title="Dismiss — never show this finding again"
+                title="Dismiss. It won't be raised again (you can undo, or reopen it later)"
+                aria-label={`Dismiss ${finding.title}`}
                 onClick={() => void onDismiss(finding.id)}
               >
                 &times;
@@ -1824,11 +2147,18 @@ function FindingCard({
               behind max-height:0 — so a 100-row page rendered 100 invisible
               panels and hammered the thumbnail endpoints for them. */}
           {expanded ? (
-            <FindingDetail
-              finding={finding}
-              onKeepDuplicate={onKeepDuplicate}
-              onApplyCoverArt={onApplyCoverArt}
-            />
+            video ? (
+              <VideoFindingDetail
+                finding={finding}
+                onFixAction={(target, action) => void onFix(target, action)}
+              />
+            ) : (
+              <FindingDetail
+                finding={finding}
+                onKeepDuplicate={onKeepDuplicate}
+                onApplyCoverArt={onApplyCoverArt}
+              />
+            )
           ) : null}
         </div>
       </div>

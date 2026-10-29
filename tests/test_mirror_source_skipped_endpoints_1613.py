@@ -96,7 +96,9 @@ def test_tidal_identify_refreshes_the_mirrors_counts(client, monkeypatch):
     monkeypatch.setattr(sp, '_tidal_client', lambda: _Tidal(_gappy('D1')))
     # start fetches with the profile's client, like the page does
     monkeypatch.setattr(sp, 'get_tidal_client_for_profile', lambda: None)
-    monkeypatch.setattr(sp.tidal_discovery_executor, 'submit', lambda *a, **k: None)
+    # the fetch runs in the worker; run it here, minus the discovery itself
+    monkeypatch.setattr(sp.tidal_discovery_executor, 'submit', lambda fn, *a: fn(*a))
+    monkeypatch.setattr(sp, '_run_tidal_discovery_worker', lambda *a: None)
     monkeypatch.setitem(sp.tidal_discovery_states, 'D1', {'phase': 'discovered'})
     monkeypatch.setattr(sp, 'add_activity_item', lambda *a, **k: None)
     r = client.post('/api/tidal/discovery/start/D1')

@@ -260,3 +260,25 @@ def test_downloads_status_filter(client):
         bad = client.get("/api/v1/video/downloads?status=downlaoding")
         assert bad.status_code == 400
         assert bad.get_json()["error"]["code"] == "BAD_REQUEST"
+
+
+def test_title_library_and_fix_match_round_trip(client, monkeypatch):
+    import api.video as videoapi
+    import core.video.identity as identity
+    db = videoapi._video_db
+    mid = db.upsert_movie("plex", {"server_id": "100", "title": "Dune", "year": 2021,
+                                   "tmdb_id": 438631, "imdb_id": "tt1160419"})
+    r = client.get(f"/api/v1/video/movie/{mid}/library")
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["data"]["identity"]["tmdb_id"] == 438631
+
+    monkeypatch.setattr(identity, "_default_lookup",
+                        lambda k, t: {"title": "Dune", "year": "1984", "imdb_id": "tt0087182"})
+    r = client.post(f"/api/v1/video/movie/{mid}/identify", json={"tmdb_id": 841})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()["data"]["year"] == 1984
+    assert client.get(f"/api/v1/video/movie/{mid}/library").get_json()["data"]["identity"]["fixed"] is True
+
+    monkeypatch.setattr(identity, "_default_lookup", lambda k, t: None)
+    r = client.post(f"/api/v1/video/movie/{mid}/identify", json={"tmdb_id": 9})
+    assert r.status_code == 409 and r.get_json()["success"] is False

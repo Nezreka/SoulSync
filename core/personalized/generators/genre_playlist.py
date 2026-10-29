@@ -50,16 +50,31 @@ def generate(deps: Any, variant: str, config: PlaylistConfig) -> List[Track]:
     return coerce_tracks(rows)
 
 
+def variant_label(variant: str) -> str:
+    """'electronic_dance' -> 'Electronic/Dance'. a free-form keyword reads as
+    itself, title-cased."""
+    from core.personalized_playlists import PersonalizedPlaylistsService
+    for parent in PersonalizedPlaylistsService.GENRE_MAPPING:
+        if parent.lower().replace('/', '_').replace(' ', '_') == (variant or '').lower():
+            return parent
+    return (variant or '').replace('_', ' ').title()
+
+
 def variant_resolver(deps: Any) -> List[str]:
     """Return the URL-safe variant for every parent genre defined on
     the service. Specific (free-form) genre variants aren't enumerated
     — they're created on demand when the user requests a custom one."""
     service = get_service(deps)
     mapping = getattr(service, 'GENRE_MAPPING', {})
-    return [
-        parent.lower().replace('/', '_').replace(' ', '_')
-        for parent in mapping.keys()
-    ]
+    every = [parent.lower().replace('/', '_').replace(' ', '_') for parent in mapping.keys()]
+    # only the families the pool has music for (biggest first): an empty
+    # genre in the picker is a playlist that can't be built
+    try:
+        available = [g.get('name') for g in (service.get_available_genres() or [])]
+    except Exception:  # noqa: BLE001 - the picker must still render
+        available = []
+    have = [a.lower().replace('/', '_').replace(' ', '_') for a in available if a in mapping]
+    return have or every
 
 
 SPEC = PlaylistKindSpec(
@@ -71,6 +86,7 @@ SPEC = PlaylistKindSpec(
     variant_resolver=variant_resolver,
     requires_variant=True,
     tags=['genre'],
+    variant_label=variant_label,
 )
 
 

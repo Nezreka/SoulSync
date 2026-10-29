@@ -4,30 +4,23 @@
  * (file:line cited per describe), wire calls against a captured fetch.
  */
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { LbProgressInput, SsdTrack } from './-sync.lb-tabs';
+import type { SsdTrack } from './-sync.lb-tabs';
 
-import { extractFunction } from '../../test/vanilla-extract';
 import {
   LB_EMPTY_MESSAGES,
   LB_SUB_TABS,
-  buildLbMirrorTracks,
   buildSsdMirrorPayload,
   buildSsdMirrorTracks,
   fetchLastfmRadios,
   fetchLbCategories,
   fetchLbPlaylistTracks,
   fetchSsdRecords,
-  lbCoverageCounts,
-  mirrorLbAfterDiscovery,
   resolveLbMirrorTarget,
   postLbCacheRefresh,
   postSsdRefresh,
   soulsyncSyntheticId,
-  ssdStaleness,
   unwrapJspfPlaylist,
 } from './-sync.lb-tabs';
 
@@ -125,74 +118,6 @@ describe('unwrapJspfPlaylist (sync-listenbrainz.js 89-105)', () => {
   });
 });
 
-describe('the LB card numbers (_refreshOneLbSyncCard 253-283)', () => {
-  /*
-   * These were written against lbCardProgressLine, the vanilla's "♪ T / ✓ M /
-   * ✗ F / P%" string. The cards render the shared coverage bar now, so that
-   * string had no caller left and pinning it pinned dead code. The PARITY that
-   * mattered was never the punctuation — it was the four numbers, which is
-   * what these assert.
-   */
-  it('fresh hides; discovery counters carry the pct fallback', () => {
-    expect(
-      lbCoverageCounts({
-        phase: 'fresh',
-        spotifyTotal: 5,
-        spotifyMatches: 1,
-        discoveryProgress: 10,
-      }),
-    ).toBeNull();
-    expect(
-      lbCoverageCounts({
-        phase: 'discovered',
-        spotifyTotal: 10,
-        spotifyMatches: 7,
-        discoveryProgress: 0,
-      }),
-    ).toEqual({ total: 10, matched: 7, failed: 3, percentage: 70 });
-    // an inflated counter (unmatch never decrements client-side, and after
-    // discovery no poll frame corrects it) must clamp, never paint 105%
-    expect(
-      lbCoverageCounts({
-        phase: 'discovered',
-        spotifyTotal: 100,
-        spotifyMatches: 105,
-        discoveryProgress: 0,
-      }),
-    ).toEqual({ total: 100, matched: 100, failed: 0, percentage: 100 });
-    // Total 0 → the discovery progress stands in for the percent.
-    expect(
-      lbCoverageCounts({
-        phase: 'discovering',
-        spotifyTotal: 0,
-        spotifyMatches: 0,
-        discoveryProgress: 40,
-      }),
-    ).toEqual({ total: 0, matched: 0, failed: 0, percentage: 40 });
-  });
-
-  it('syncing reads lastSyncProgress; failed falls back to total-matched; percent is matched/total', () => {
-    expect(
-      lbCoverageCounts({
-        phase: 'syncing',
-        spotifyTotal: 99,
-        spotifyMatches: 99,
-        discoveryProgress: 99,
-        lastSyncProgress: { total_tracks: 10, matched_tracks: 4 },
-      }),
-    ).toEqual({ total: 10, matched: 4, failed: 6, percentage: 40 });
-    expect(
-      lbCoverageCounts({
-        phase: 'sync_complete',
-        spotifyTotal: 0,
-        spotifyMatches: 0,
-        discoveryProgress: 0,
-        lastSyncProgress: { total_tracks: 10, matched_tracks: 4, failed_tracks: 1 },
-      }),
-    ).toEqual({ total: 10, matched: 4, failed: 1, percentage: 40 });
-  });
-});
-
 describe('the LB wire calls', () => {
   it('fetchLbCategories: three parallel category GETs + the auth detection (33-47)', async () => {
     responder = (url) =>
@@ -263,43 +188,66 @@ describe('SoulSync Discovery (sync-soulsync-discovery.js)', () => {
     expect(soulsyncSyntheticId('time_machine', '1990s')).toBe('ssd_time_machine_1990s');
   });
 
-  it('ssdStaleness: never-generated / stale / ready with the vanilla colors (86-90)', () => {
-    expect(ssdStaleness({ kind: 'k', _never_generated: true, is_stale: true })).toEqual({
-      text: 'Tap “Refresh & Mirror” to generate',
-      color: '#facc15',
-    });
-    expect(ssdStaleness({ kind: 'k', is_stale: true })).toEqual({
-      text: 'Stale — refresh to regenerate',
-      color: '#facc15',
-    });
-    expect(ssdStaleness({ kind: 'k' })).toEqual({ text: 'Ready', color: '#14b8a6' });
-  });
-
-  it('fetchSsdRecords: existing + synthetic never-generated SINGLETONS; kinds failure tolerated (33-57)', async () => {
+  it('fetchSsdRecords: every kind AND variant, in tab order and grouped, built rows merged in', async () => {
     responder = (url) =>
       url.includes('/kinds')
         ? {
             success: true,
             kinds: [
-              { kind: 'hidden_gems', name_template: 'Hidden Gems' },
-              { kind: 'listening_mix' }, // already generated → not synthesized
-              { kind: 'time_machine', requires_variant: true }, // variant kinds excluded
+              { kind: 'hidden_gems', name_template: 'Hidden Gems', description: 'Obscure picks' },
+              { kind: 'listening_mix', description: 'From what you play' },
+              {
+                kind: 'time_machine',
+                name_template: 'Time Machine — {variant}',
+                requires_variant: true,
+                variants: ['1980s', '1990s'],
+              },
+              {
+                kind: 'daily_mix',
+                name_template: 'Daily Mix {variant}',
+                requires_variant: true,
+                variants: ['1', '2'],
+              },
             ],
           }
-        : { success: true, playlists: [{ kind: 'listening_mix', variant: '', track_count: 30 }] };
+        : {
+            success: true,
+            playlists: [
+              { kind: 'listening_mix', variant: '', track_count: 30 },
+              { kind: 'daily_mix', variant: '1', name: 'Daily Mix 1', track_count: 40 },
+              { kind: 'daily_mix', variant: '6', name: 'Daily Mix 6', track_count: 40 },
+            ],
+          };
     stubFetch();
     const { records } = await fetchSsdRecords();
-    expect(records).toEqual([
-      { kind: 'listening_mix', variant: '', track_count: 30 },
-      {
-        kind: 'hidden_gems',
-        variant: '',
-        name: 'Hidden Gems',
-        track_count: 0,
-        is_stale: true,
-        _never_generated: true,
-      },
+    // daily mixes first, then the singles, then the big variant families
+    expect(records.map((r) => `${r.kind}|${r.variant}`)).toEqual([
+      'daily_mix|1',
+      'daily_mix|2',
+      'daily_mix|6', // built yesterday, not listed today: kept in its family
+      'listening_mix|',
+      'hidden_gems|',
+      'time_machine|1980s',
+      'time_machine|1990s',
     ]);
+    expect(records.map((r) => r.group)).toEqual([
+      'Daily Mix',
+      'Daily Mix',
+      'Daily Mix',
+      'Discovery playlists',
+      'Discovery playlists',
+      'Time Machine',
+      'Time Machine',
+    ]);
+    expect(records[0]).toMatchObject({ track_count: 40, name: 'Daily Mix 1' });
+    expect(records[0]._never_generated).toBeUndefined();
+    expect(records[1]).toMatchObject({
+      name: 'Daily Mix 2',
+      track_count: 0,
+      _never_generated: true,
+    });
+    expect(records[4]).toMatchObject({ name: 'Hidden Gems', description: 'Obscure picks' });
+    expect(records[5]).toMatchObject({ name: 'Time Machine — 1980s', _never_generated: true });
 
     // A kinds failure must never sink the tab (49-52).
     failer = (url) => url.includes('/kinds');
@@ -367,282 +315,6 @@ describe('SoulSync Discovery (sync-soulsync-discovery.js)', () => {
   });
 });
 
-/* ── The post-discovery LB mirror (differential vs 10928-11020) ───────────── */
-
-describe('mirrorLbAfterDiscovery (differential vs _mirrorListenBrainzAfterDiscovery)', () => {
-  const SYNC_SERVICES = readFileSync(resolve(process.cwd(), 'static/sync-services.js'), 'utf8');
-  type MirrorVanilla = { _mirrorListenBrainzAfterDiscovery: (mbid: string) => Promise<void> };
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  const mirrorVanilla = new Function(
-    `${extractFunction('_mirrorListenBrainzAfterDiscovery', SYNC_SERVICES)}
-     return { _mirrorListenBrainzAfterDiscovery };`,
-  )() as MirrorVanilla;
-
-  interface MirrorCall {
-    source: string;
-    sourcePlaylistId: string;
-    name: string;
-    tracks: unknown[];
-    meta: Record<string, unknown>;
-  }
-
-  /** Run the vanilla with its globals faked, and report what it mirrored. */
-  async function runVanilla(
-    mbid: string,
-    state: Record<string, unknown> | undefined,
-    series: unknown,
-  ): Promise<MirrorCall | null> {
-    let call: MirrorCall | null = null;
-    const g = globalThis as Record<string, unknown>;
-    g.listenbrainzPlaylistStates = state ? { [mbid]: state } : {};
-    g.mirrorPlaylist = (
-      source: string,
-      sourcePlaylistId: string,
-      name: string,
-      tracks: unknown[],
-      meta: Record<string, unknown>,
-    ) => {
-      call = { source, sourcePlaylistId, name, tracks, meta };
-    };
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(JSON.stringify(series), { status: 200 })),
-    );
-    await mirrorVanilla._mirrorListenBrainzAfterDiscovery(mbid);
-    return call;
-  }
-
-  /** Run the port and report the payload it POSTed to /api/mirror-playlist. */
-  async function runPort(
-    mbid: string,
-    state: Record<string, unknown> | undefined,
-    series: unknown,
-  ): Promise<MirrorCall | null> {
-    let body: Record<string, unknown> | null = null;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string, init?: RequestInit) => {
-        if (String(url).startsWith('/api/mirror-playlist')) {
-          body = JSON.parse(init?.body as string) as Record<string, unknown>;
-          return new Response('{}', { status: 200 });
-        }
-        return new Response(JSON.stringify(series), { status: 200 });
-      }),
-    );
-    await mirrorLbAfterDiscovery(
-      mbid,
-      state
-        ? {
-            playlist: state.playlist as Record<string, unknown>,
-            rawResults: state.discovery_results as unknown[],
-          }
-        : undefined,
-    );
-    // Let the fire-and-forget POST settle.
-    await new Promise((r) => setTimeout(r, 0));
-    if (!body) return null;
-    const b = body as Record<string, unknown>;
-    return {
-      source: b.source as string,
-      sourcePlaylistId: b.source_playlist_id as string,
-      name: b.name as string,
-      tracks: b.tracks as unknown[],
-      meta: {
-        owner: b.owner,
-        description: b.description,
-        image_url: b.image_url,
-      },
-    };
-  }
-
-  const RESULTS = [
-    // Object artists + object album with images — the fully-populated row.
-    {
-      confidence: 0.91,
-      spotify_data: {
-        id: 't1',
-        name: 'Alright',
-        artists: [{ name: 'Kendrick Lamar' }, { name: 'Pharrell' }],
-        album: { name: 'To Pimp a Butterfly', images: [{ url: 'http://img/1' }] },
-        duration_ms: 219000,
-        source: 'spotify',
-      },
-    },
-    // String artists array + string album + top-level image_url fallback.
-    {
-      spotify_data: {
-        id: 't2',
-        name: 'Redbone',
-        artists: ['Childish Gambino'],
-        album: 'Awaken, My Love!',
-        image_url: 'http://img/2',
-        duration_ms: 326000,
-      },
-    },
-    // Bare-string artists, no album, no image at all.
-    { spotify_data: { id: 't3', name: 'Nights', artists: 'Frank Ocean' } },
-    // A NON-spotify provider — extra_data.provider follows spotify_data.source
-    // (10957), it is not hardcoded.
-    {
-      confidence: 0.4,
-      spotify_data: { id: 't4', name: 'Teardrop', artists: ['Massive Attack'], source: 'deezer' },
-    },
-    // Unmatched rows: no spotify_data, and spotify_data without an id.
-    { spotify_track: 'unmatched' },
-    { spotify_data: { name: 'no id here' } },
-  ];
-
-  const PLAYLIST = {
-    name: 'Weekly Jams for user',
-    tracks: [],
-    description: '5 tracks from Weekly Jams for user',
-    source: 'listenbrainz',
-  };
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  const CASES: { label: string; state: Record<string, unknown>; series: unknown }[] = [
-    {
-      label: 'a plain LB playlist, no series match',
-      state: { playlist: PLAYLIST, discovery_results: RESULTS },
-      series: { matched: false },
-    },
-    {
-      label: 'a matched rotating series (id + name + source all rewritten)',
-      state: { playlist: PLAYLIST, discovery_results: RESULTS },
-      series: {
-        matched: true,
-        source: 'listenbrainz',
-        series_id: 'lb_weekly_jams_boulder',
-        canonical_name: 'Weekly Jams',
-      },
-    },
-    {
-      label: 'a Last.fm Radio title routes to source lastfm',
-      state: {
-        playlist: { ...PLAYLIST, name: 'Last.fm Radio: Boards of Canada' },
-        discovery_results: RESULTS,
-      },
-      series: { matched: false },
-    },
-    {
-      label: 'a Last.fm Radio whose series match rewrites the source back',
-      state: {
-        playlist: { ...PLAYLIST, name: 'Last.fm Radio: Boards of Canada' },
-        discovery_results: RESULTS,
-      },
-      series: { matched: true, series_id: 'lb_x' },
-    },
-    {
-      label: 'a title merely CONTAINING Radio is not a Last.fm radio (10976)',
-      state: {
-        playlist: { ...PLAYLIST, name: 'Radio Ga Ga Mix' },
-        discovery_results: RESULTS,
-      },
-      series: { matched: false },
-    },
-    {
-      label: 'series fields are ignored unless matched is true (10990)',
-      state: { playlist: PLAYLIST, discovery_results: RESULTS },
-      series: {
-        matched: false,
-        series_id: 'lb_ignored',
-        canonical_name: 'Ignored',
-        source: 'lastfm',
-      },
-    },
-    {
-      label: 'a matched series rewrites a Last.fm radio back to listenbrainz (10991)',
-      state: {
-        playlist: { ...PLAYLIST, name: 'Last.fm Radio: Boards of Canada' },
-        discovery_results: RESULTS,
-      },
-      series: {
-        matched: true,
-        source: 'listenbrainz',
-        series_id: 'lb_series',
-        canonical_name: 'Rolled Up',
-      },
-    },
-    {
-      label: 'a creator on the playlist wins over the owner fallback',
-      state: {
-        playlist: { ...PLAYLIST, creator: 'troi', image_url: 'http://cover' },
-        discovery_results: RESULTS,
-      },
-      series: { matched: false },
-    },
-    {
-      label: 'a partial series match keeps the fields it did not send',
-      state: { playlist: PLAYLIST, discovery_results: RESULTS },
-      series: { matched: true, canonical_name: 'Weekly Jams' },
-    },
-  ];
-
-  it.each(CASES)('mirrors identically: $label', async ({ state, series }) => {
-    const theirs = await runVanilla('mbid-1', state, series);
-    const ours = await runPort('mbid-1', state, series);
-    expect(theirs).not.toBeNull();
-    expect(ours).toEqual(theirs);
-  });
-
-  const SKIPS: { label: string; state: Record<string, unknown> | undefined }[] = [
-    { label: 'no state at all (10931)', state: undefined },
-    { label: 'a state with no playlist (10931)', state: { discovery_results: RESULTS } },
-    { label: 'no results (10935)', state: { playlist: PLAYLIST, discovery_results: [] } },
-    {
-      label: 'results but none matched (10964)',
-      state: { playlist: PLAYLIST, discovery_results: [{ spotify_track: 'x' }] },
-    },
-  ];
-
-  it.each(SKIPS)('mirrors nothing when there is $label', async ({ state }) => {
-    expect(await runVanilla('mbid-1', state, { matched: false })).toBeNull();
-    expect(await runPort('mbid-1', state, { matched: false })).toBeNull();
-  });
-
-  it('still mirrors when the series lookup fails outright (11000-11002)', async () => {
-    let body: Record<string, unknown> | null = null;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string, init?: RequestInit) => {
-        if (String(url).startsWith('/api/mirror-playlist')) {
-          body = JSON.parse(init?.body as string) as Record<string, unknown>;
-          return new Response('{}', { status: 200 });
-        }
-        throw new Error('series endpoint down');
-      }),
-    );
-    await mirrorLbAfterDiscovery('mbid-1', {
-      playlist: PLAYLIST,
-      rawResults: RESULTS,
-    });
-    await new Promise((r) => setTimeout(r, 0));
-    expect(body).not.toBeNull();
-    // Falls through to the per-playlist mbid rather than dropping the mirror.
-    expect((body as unknown as Record<string, unknown>).source_playlist_id).toBe('mbid-1');
-  });
-
-  it('sends only the matched rows, with extra_data as a JSON string (10955)', () => {
-    const tracks = buildLbMirrorTracks(RESULTS);
-    expect(tracks).toHaveLength(4);
-    expect(JSON.parse(String(tracks[0].extra_data))).toEqual({
-      discovered: true,
-      provider: 'spotify',
-      confidence: 0.91,
-      matched_data: RESULTS[0].spotify_data,
-    });
-    // The confidence default is 1.0 when the row carries none (10958).
-    expect(JSON.parse(String(tracks[1].extra_data)).confidence).toBe(1.0);
-    // provider defaults to 'spotify' when spotify_data.source is absent (10957)
-    // but FOLLOWS spotify_data.source when it carries one.
-    expect(JSON.parse(String(tracks[1].extra_data)).provider).toBe('spotify');
-    expect(JSON.parse(String(tracks[3].extra_data)).provider).toBe('deezer');
-  });
-});
-
 describe('resolveLbMirrorTarget (10975-11004) — direct', () => {
   it('routes a Last.fm Radio PREFIX to lastfm, and only the prefix', () => {
     expect(resolveLbMirrorTarget('m', 'Last.fm Radio: Boards of Canada', undefined).source).toBe(
@@ -680,65 +352,5 @@ describe('resolveLbMirrorTarget (10975-11004) — direct', () => {
     expect(resolveLbMirrorTarget('m', 'Weekly Jams', 'troi').owner).toBe('troi');
     expect(resolveLbMirrorTarget('m', 'Weekly Jams', undefined).owner).toBe('ListenBrainz');
     expect(resolveLbMirrorTarget('m', 'Last.fm Radio: x', undefined).owner).toBe('Last.fm');
-  });
-});
-
-/** LbProgressInput requires all four counters; these tests each care about a
- *  couple at a time, so the rest default to the zeroes a fresh card carries. */
-function lbInput(patch: Partial<LbProgressInput> & { phase: string }): LbProgressInput {
-  return { spotifyTotal: 0, spotifyMatches: 0, discoveryProgress: 0, ...patch };
-}
-
-describe('lbCoverageCounts — the numbers behind the card bar', () => {
-  it('sync phases use matched/total, NOT (matched+failed)/total like other sources', () => {
-    // The parity that must not drift (sync-listenbrainz.js 271). Every other
-    // vertical counts failures as processed; ListenBrainz does not, in either
-    // phase, and the shared coverage bar renders whatever this returns.
-    expect(
-      lbCoverageCounts(
-        lbInput({
-          phase: 'syncing',
-          lastSyncProgress: { total_tracks: 10, matched_tracks: 6, failed_tracks: 2 },
-        }),
-      ),
-    ).toEqual({ total: 10, matched: 6, failed: 2, percentage: 60 });
-  });
-
-  it('falls back to total-matched when the sync payload omits failures', () => {
-    expect(
-      lbCoverageCounts(
-        lbInput({
-          phase: 'sync_complete',
-          lastSyncProgress: { total_tracks: 8, matched_tracks: 5 },
-        }),
-      ),
-    ).toEqual({ total: 8, matched: 5, failed: 3, percentage: 63 });
-  });
-
-  it('accepts the spotify_* aliases the payload sometimes uses instead', () => {
-    expect(
-      lbCoverageCounts(
-        lbInput({
-          phase: 'syncing',
-          lastSyncProgress: { spotify_total: 4, spotify_matches: 1 },
-        }),
-      ),
-    ).toMatchObject({ total: 4, matched: 1, percentage: 25 });
-  });
-
-  it('non-sync phases read the discovery counters', () => {
-    expect(
-      lbCoverageCounts(lbInput({ phase: 'discovered', spotifyTotal: 5, spotifyMatches: 4 })),
-    ).toEqual({ total: 5, matched: 4, failed: 1, percentage: 80 });
-  });
-
-  it('a zero total falls back to the discovery progress, not to 0%', () => {
-    expect(
-      lbCoverageCounts(lbInput({ phase: 'discovering', spotifyTotal: 0, discoveryProgress: 42 })),
-    ).toMatchObject({ total: 0, percentage: 42 });
-  });
-
-  it('fresh returns null so the card hides the element entirely', () => {
-    expect(lbCoverageCounts(lbInput({ phase: 'fresh' }))).toBeNull();
   });
 });

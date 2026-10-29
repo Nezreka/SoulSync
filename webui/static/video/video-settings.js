@@ -469,12 +469,16 @@
 
     function addVideoPathRow(host, value) {
         var row = document.createElement('div');
+        row.setAttribute('data-folder-row', '');
         row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px';
         var input = document.createElement('input');
         input.type = 'text';
         input.value = value || '';
         input.placeholder = host.dataset.videoExtraKind === 'movies' ? '/media/movies2' : '/media/tv2';
         input.setAttribute('aria-label', host.dataset.videoExtraKind === 'movies' ? 'Additional movie library path' : 'Additional TV library path');
+        input.setAttribute('data-folder-check', 'video');
+        input.setAttribute('data-folder-role', 'existing');
+        input.setAttribute('data-folder-label', host.dataset.videoExtraKind === 'movies' ? 'Movie folder' : 'TV folder');
         input.style.cssText = 'flex:1;min-width:0';
         input.addEventListener('change', function () { saveDownloads(true); });
         var remove = document.createElement('button');
@@ -482,7 +486,11 @@
         remove.className = 'test-button';
         remove.textContent = 'Remove';
         remove.setAttribute('aria-label', 'Remove library path');
-        remove.addEventListener('click', function () { row.remove(); saveDownloads(true); });
+        remove.addEventListener('click', function () {
+            var status = row.nextElementSibling;
+            if (status && status.classList.contains('folder-check')) status.remove();
+            row.remove(); saveDownloads(true); refreshVideoFolders();
+        });
         if (host.closest('[aria-busy="true"]')) {
             [input, remove].forEach(function (control) {
                 control.setAttribute('data-library-disabled', 'false');
@@ -493,6 +501,40 @@
         row.appendChild(remove);
         host.appendChild(row);
         return input;
+    }
+
+    // ── the optional 4K libraries + the docker compose helper ──
+    function syncVideo4kRows() {
+        ['movies', 'tv'].forEach(function (kind) {
+            var box = document.getElementById('video-' + kind + '-4k-enabled');
+            var row = document.querySelector('[data-video-4k-row="' + kind + '"]');
+            if (box && row) row.hidden = !box.checked;
+        });
+    }
+
+    // every folder set here, as the compose volume line it needs
+    function renderVideoCompose() {
+        var pre = document.getElementById('video-compose-lines');
+        if (!pre) return;
+        var paths = Array.from(document.querySelectorAll('[data-folder-check="video"]'))
+            .filter(function (input) { return !input.closest('[data-folder-optional][hidden]') && input.value.trim(); })
+            .map(function (input) { return input.value.trim().replace(/[\\/]+$/, ''); });
+        var seen = {};
+        var lines = paths.filter(function (path) {
+            if (seen[path]) return false;
+            seen[path] = true;
+            return true;
+        }).map(function (path) {
+            var name = path.split(/[\\/]/).filter(Boolean).pop() || 'folder';
+            return '      - /path/on/your/machine/' + name + ':' + path;
+        });
+        pre.textContent = lines.length ? '    volumes:\n' + lines.join('\n') : 'Set a folder above to see its line.';
+    }
+
+    function refreshVideoFolders() {
+        syncVideo4kRows();
+        renderVideoCompose();
+        if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('video');
     }
 
     function loadVideoPaths(kind, paths) {
@@ -522,6 +564,12 @@
                 loadVideoPaths('movies', d.movies_additional_paths);
                 loadVideoPaths('tv', d.tv_additional_paths);
                 setP('video-youtube-path', d.youtube_path);
+                var setC = function (id, v) { var el = document.getElementById(id); if (el) el.checked = !!v; };
+                setC('video-movies-4k-enabled', d.movies_4k_enabled);
+                setP('video-movies-4k-path', d.movies_4k_path);
+                setC('video-tv-4k-enabled', d.tv_4k_enabled);
+                setP('video-tv-4k-path', d.tv_4k_path);
+                refreshVideoFolders();
                 _videoMode = d.download_mode || 'soulseek';
                 _videoHybrid = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : ['soulseek'];
                 var ms = document.getElementById('video-download-mode');
@@ -544,6 +592,7 @@
 
     function saveDownloads(silent) {
         var val = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
+        var checked = function (id) { var el = document.getElementById(id); return !!(el && el.checked); };
         return fetch(DOWNLOADS_URL, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({
@@ -554,6 +603,10 @@
                 movies_additional_paths: collectVideoPaths('movies'),
                 tv_additional_paths: collectVideoPaths('tv'),
                 youtube_path: val('video-youtube-path'),
+                movies_4k_enabled: checked('video-movies-4k-enabled'),
+                movies_4k_path: val('video-movies-4k-path'),
+                tv_4k_enabled: checked('video-tv-4k-enabled'),
+                tv_4k_path: val('video-tv-4k-path'),
                 // download_mode / hybrid_order are NOT sent from here any more.
                 // The shared download-chain widget owns them and writes them
                 // straight to this endpoint. _videoMode/_videoHybrid only refresh
@@ -922,7 +975,7 @@
             button._vdWired = true;
             button.addEventListener('click', function () {
                 var host = document.getElementById('video-' + button.dataset.videoAddPath + '-additional-paths');
-                if (host && host.dataset.loaded === 'true') addVideoPathRow(host, '').focus();
+                if (host && host.dataset.loaded === 'true') { addVideoPathRow(host, '').focus(); refreshVideoFolders(); }
             });
         });
         var ms = document.getElementById('video-download-mode');
@@ -945,10 +998,54 @@
             });
         }
         // Folder inputs save on change too.
-        ['video-download-path', 'video-movies-path', 'video-tv-path', 'video-anime-path', 'video-youtube-path'].forEach(function (id) {
+        ['video-download-path', 'video-movies-path', 'video-tv-path', 'video-anime-path', 'video-youtube-path',
+         'video-movies-4k-path', 'video-tv-4k-path'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el && !el._vdWired) { el._vdWired = true; el.addEventListener('change', function () { saveDownloads(true); }); }
         });
+        // a 4K switch shows its folder; switching one off keeps the path for next time
+        document.querySelectorAll('[data-video-4k-toggle]').forEach(function (box) {
+            if (box._vdWired) return;
+            box._vdWired = true;
+            box.addEventListener('change', function () {
+                refreshVideoFolders();
+                var path = document.getElementById('video-' + box.getAttribute('data-video-4k-toggle') + '-4k-path');
+                if (box.checked && path && !path.value.trim()) {
+                    // nothing to protect yet: open the lock so the folder can be typed
+                    var lock = path.parentElement.querySelector('.browse-button.locked');
+                    path.readOnly = false;
+                    path.removeAttribute('readonly');
+                    if (lock) { lock.textContent = 'Lock'; lock.classList.remove('locked'); }
+                    path.focus();
+                }
+                saveDownloads(true);
+            });
+        });
+        var panel = document.getElementById('folders-video-panel');
+        if (panel && !panel._vdComposeWired) {
+            panel._vdComposeWired = true;
+            panel.addEventListener('input', function (e) {
+                if (e.target && e.target.getAttribute('data-folder-check') === 'video') renderVideoCompose();
+            });
+            if (window.SoulSyncFolderCheck) {
+                window.SoulSyncFolderCheck.environment().then(function (env) {
+                    var box = document.querySelector('[data-video-compose]');
+                    if (box) box.hidden = !(env && env.docker);
+                });
+            }
+        }
+        var copy = document.getElementById('video-compose-copy');
+        if (copy && !copy._vdWired) {
+            copy._vdWired = true;
+            copy.addEventListener('click', function () {
+                var pre = document.getElementById('video-compose-lines');
+                var text = pre ? pre.textContent : '';
+                if (!navigator.clipboard) { toast('Select the lines and copy them', 'info'); return; }
+                navigator.clipboard.writeText(text)
+                    .then(function () { toast('Compose lines copied', 'success'); })
+                    .catch(function () { toast('Select the lines and copy them', 'info'); });
+            });
+        }
     }
 
     // ── Video quality profile (resolution tiers + source/codec/HDR/size) ──
@@ -1219,6 +1316,7 @@
         // Audio language (dubbed / MULTI). MULTI always counts as a match.
         var lmode = p.audio_language_mode || 'off';
         _vqSeg('vq-lang-mode', 'data-vq-lang-mode', lmode);
+        _vqSeg('vq-library', 'data-vq-library', p.library === '4k' ? '4k' : 'main');
         var lg = document.getElementById('vq-langs');
         if (lg) {
             var langs = Array.isArray(p.audio_languages) ? p.audio_languages : [];
@@ -1326,6 +1424,8 @@
             if (au) { _videoQuality.prefer_audio = au.getAttribute('data-vq-audio'); renderQuality(); saveQuality(true); return; }
             var lm = e.target.closest('[data-vq-lang-mode]');
             if (lm) { _videoQuality.audio_language_mode = lm.getAttribute('data-vq-lang-mode'); renderQuality(); saveQuality(true); return; }
+            var lb = e.target.closest('[data-vq-library]');
+            if (lb) { _videoQuality.library = lb.getAttribute('data-vq-library'); renderQuality(); saveQuality(true); return; }
             var lc = e.target.closest('[data-vq-lang]');
             if (lc) { toggleLang(lc.getAttribute('data-vq-lang')); return; }
         });
@@ -1490,7 +1590,8 @@
     var _ORG_MOVIE_EG = { title: 'The Matrix', titlefirst: 'T', year: '1999', quality: 'Bluray-1080p',
         resolution: '1080p', source: 'Bluray', codec: 'HEVC', edition: '', tmdbid: '603', imdbid: 'tt0133093' };
     var _ORG_EP_EG = { series: 'Breaking Bad', season: '01', seasonraw: '1', episode: '01', episodetitle: 'Pilot',
-        year: '2008', quality: 'WEBDL-1080p', resolution: '1080p', source: 'WEBDL', codec: 'H264', tvdbid: '81189' };
+        year: '2008', quality: 'WEBDL-1080p', resolution: '1080p', source: 'WEBDL', codec: 'H264', tvdbid: '81189',
+        tmdbid: '1396', imdbid: 'tt0903747' };
     var _ORG_YT_EG = { channel: 'Veritasium', title: 'How Electricity Actually Works', year: '2024',
         date: '2024-03-15', month: '03', day: '15', sxe: 's2024e0315', videoid: 'oI_X2cMHNe0' };
 
@@ -1506,7 +1607,9 @@
         keys.forEach(function (k) { out = out.split('${' + k + '}').join(_orgSanitize(vals[k])); });
         keys.forEach(function (k) { out = out.split('$' + k).join(_orgSanitize(vals[k])); });
         return out.split('/').map(function (p) {
+            p = p.replace(/\{\s*(?:[A-Za-z]+-)?\s*\}/g, '');   // '{imdb-}' / '{}' from an empty id
             p = p.replace(/\s+-\s+(?=(\s|$))/g, ' ').replace(/\(\s*\)/g, '').replace(/\[\s*\]/g, '');
+            p = p.replace(/\((\d{4})\)(?:\s*\(\d{4}\))+/g, '($1)');
             p = p.replace(/\s+/g, ' ').trim().replace(/^-+|-+$/g, '').trim().replace(/[ .]+$/, '');
             return p;
         }).filter(function (p) { return p !== ''; }).join('/');
@@ -1986,23 +2089,11 @@
             })
             .catch(function () { /* status is best-effort */ });
     }
-    // Jump to Tools and bring the job's card into view (cards render async).
+    // Jump to Tools on this job: the React tools page opens the job's card
+    // (advanced view) and lights it up from ?job=.
     function openMissingSubsJob() {
         document.dispatchEvent(new CustomEvent('soulsync:video-navigate',
-            { detail: { page: 'video-tools' } }));
-        var tries = 0;
-        var t = setInterval(function () {
-            var card = document.querySelector('.repair-job-card[data-job-id="' + MISSING_SUBS_JOB + '"]');
-            if (card || ++tries > 40) {
-                clearInterval(t);
-                if (!card) return;
-                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                // a brief accent ring so the eye lands on the right card
-                card.style.transition = 'box-shadow .35s ease';
-                card.style.boxShadow = '0 0 0 2px rgba(var(--accent-rgb), .85)';
-                setTimeout(function () { card.style.boxShadow = ''; }, 2200);
-            }
-        }, 100);
+            { detail: { page: 'video-tools', job: MISSING_SUBS_JOB } }));
     }
     function fillOrg() {
         if (!_videoOrg) return;
@@ -2322,17 +2413,22 @@
                 });
             })(testBtns[k]);
         }
-        // The shared "Save Settings" button belongs to MUSIC (it runs music's
-        // saveSettings, which would fire a music-config write from the video page).
-        // On the video side we intercept it (capture phase, before music's bubble
-        // listener), block music's handler, flush all video settings, and toast —
-        // so the button is real here and can't reach into music. Music side: this
-        // does nothing, so its behaviour is unchanged.
+        // The shared "Save Settings" button. On the video side it flushes the
+        // video settings here (capture phase), then lets the click through to the
+        // button's own handler, which saves the rest of the page exactly as it
+        // does on the music side - and shows the one toast.
+        //
+        // It used to stop the click here. That was right while the video side
+        // could only show video settings; once Sources, Downloads, Library and
+        // Quality became shared it meant every music field on those tabs, and all
+        // of System (Security & Access included), was editable on the video side
+        // and could never be saved there - while this toasted "Settings saved".
+        // saveSettings is safe to run from here: it keeps the stored
+        // active_media_server on the video side, so the video side still can't
+        // change the music server. Music side: this does nothing.
         document.addEventListener('click', function (e) {
             if (document.body.getAttribute('data-side') !== 'video') return;
             if (!e.target.closest('#save-settings')) return;
-            e.preventDefault();
-            e.stopImmediatePropagation();
             // saveSlskd is NOT in this list any more. Its form is retired - the
             // shared Sources tab's Soulseek card is the single editor now - but
             // the fields are still in the DOM holding whatever they loaded with.
@@ -2342,8 +2438,7 @@
             // The music panel saves through the main settings save.
             Promise.all([saveConn(true), save(true), saveKeys(true), savePrefs(true),
                          saveDownloads(true), saveQuality(true), saveYtQuality(true)])
-                .then(function () { toast('Settings saved', 'success'); })
-                .catch(function () { toast('Some settings could not be saved', 'error'); });
+                .catch(function () { toast('Some video settings could not be saved', 'error'); });
         }, true);
         document.addEventListener('soulsync:video-page-shown', onPageShown);
         document.addEventListener('soulsync:library-settings-shown', loadSharedLibrary);

@@ -202,6 +202,9 @@ def _validate_import_file(runtime: ImportRouteRuntime, raw_path: Any) -> tuple[O
 _STAGING_SCAN_LOCK = threading.Lock()
 _STAGING_SCAN_TTL = 6.0  # seconds — covers the page-open burst; re-scans after
 _staging_scan_cache: Dict[str, Any] = {"path": None, "ts": 0.0, "records": None}
+# full_path -> ((rel_path, mtime_ns, size), meta), for the reader that read them.
+# survives invalidation on purpose: a moved or edited file changes its stamp.
+_staging_meta_cache: Dict[str, Any] = {"reader": None, "entries": {}}
 # Directories the last scan could not list, {path, error}. os.walk swallows
 # these by default, so an unreadable staging folder answered "0 files" with
 # nothing to say why (truenas apps uid vs the container's PUID).
@@ -283,6 +286,14 @@ def get_staging_records_or_status(runtime: ImportRouteRuntime, staging_path: str
     if records is not None:
         return ("ready", records)
     ensure_background_staging_scan(runtime, staging_path)
+    # #1889: past the ttl but never invalidated, the last scan is still the
+    # folder as far as anyone moved it. serve it while the rescan runs instead
+    # of making every poll wait out the grace and then drop the page to the
+    # scanning stub. an import invalidates (records None), so this never
+    # serves files an import just moved.
+    c = _staging_scan_cache
+    if c["records"] is not None and c["path"] == staging_path:
+        return ("ready", c["records"])
     deadline = time.time() + max(0.0, grace_seconds)
     while True:
         records = _staging_cache_hit(staging_path)
@@ -363,6 +374,15 @@ def _scan_staging_records(runtime: ImportRouteRuntime, staging_path: str,
 
         start_generation = _staging_scan_generation["value"]
 
+        # #1889: tags are kept per file between scans and only re-read when the
+        # file changed. a full-library staging folder took minutes to re-read,
+        # so the 6s ttl meant the page kept the folder in a scan forever.
+        reader = runtime.read_staging_file_metadata
+        if _staging_meta_cache["reader"] is not reader:
+            _staging_meta_cache.update({"reader": reader, "entries": {}})
+        old_entries = _staging_meta_cache["entries"]
+        new_entries: Dict[str, tuple] = {}
+
         # Pass 1 (fast): collect the audio-file list — no tag I/O — so we know the total.
         audio_files: list[tuple[str, str, Optional[str]]] = []
         problems: list[Dict[str, str]] = []
@@ -394,7 +414,18 @@ def _scan_staging_records(runtime: ImportRouteRuntime, staging_path: str,
         for root, fname, top_folder in audio_files:
             full_path = os.path.join(root, fname)
             rel_path = os.path.relpath(full_path, staging_path)
-            meta = runtime.read_staging_file_metadata(full_path, rel_path)
+            try:
+                st = os.stat(full_path)
+                stamp = (rel_path, st.st_mtime_ns, st.st_size)
+            except OSError:
+                stamp = None
+            hit = old_entries.get(full_path)
+            if stamp is not None and hit is not None and hit[0] == stamp:
+                meta = hit[1]
+            else:
+                meta = reader(full_path, rel_path)
+            if stamp is not None:
+                new_entries[full_path] = (stamp, meta)
             records.append({
                 "filename": fname, "rel_path": rel_path, "full_path": full_path,
                 "extension": os.path.splitext(fname)[1].lower(),
@@ -407,6 +438,9 @@ def _scan_staging_records(runtime: ImportRouteRuntime, staging_path: str,
             })
             if progress is not None:
                 progress["scanned"] += 1
+
+        # files that left staging drop out here, so the cache never outgrows the folder
+        _staging_meta_cache["entries"] = new_entries
 
         # Generation guard: if an import invalidated the cache mid-scan, these records are
         # stale — return them to this caller but do NOT commit them as the shared cache.

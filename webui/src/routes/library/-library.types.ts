@@ -72,9 +72,18 @@ export const librarySearchSchema = z.object({
    * better; '' is everyone and is not sent.
    */
   quality: z
-    .preprocess((v) => (searchString(v) === 'upgradable' ? 'upgradable' : ''), z.string())
+    .preprocess((v) => {
+      const s = searchString(v);
+      // 'lossless' only means something in the songs view, which reads it
+      return s === 'upgradable' || s === 'lossless' ? s : '';
+    }, z.string())
     .default('')
     .catch(''),
+  /** Songs view: only songs the library holds more than one copy of. */
+  dupes: z
+    .preprocess((v) => v === true || v === 1 || v === '1' || v === 'true', z.boolean())
+    .default(false)
+    .catch(false),
   /**
    * Which grid the page shows. In the URL with the other filters rather than
    * in localStorage, for the same reason they are: a library you are looking
@@ -82,8 +91,11 @@ export const librarySearchSchema = z.object({
    */
   view: z
     .preprocess(
-      (v) => (searchString(v) === 'albums' ? 'albums' : 'artists'),
-      z.enum(['artists', 'albums']),
+      (v) => {
+        const s = searchString(v);
+        return s === 'albums' || s === 'songs' ? s : 'artists';
+      },
+      z.enum(['artists', 'albums', 'songs']),
     )
     .default('artists')
     .catch('artists'),
@@ -96,7 +108,13 @@ export const librarySearchSchema = z.object({
   sort: z
     .preprocess((v) => {
       const s = searchString(v) ?? '';
-      return s === 'year_desc' || s === 'year_asc' || s === 'recent' ? s : '';
+      return s === 'year_desc' ||
+        s === 'year_asc' ||
+        s === 'recent' ||
+        s === 'artist' ||
+        s === 'album'
+        ? s
+        : '';
     }, z.string())
     .default('')
     .catch(''),
@@ -198,4 +216,40 @@ export interface UnmatchedSummary {
   count: number;
   /** Library artist row holding the most of them, for the link. */
   artist_id: string | number | null;
+}
+
+/** One row from /api/library/songs (#1906). */
+export interface LibrarySong {
+  id: string | number;
+  title: string;
+  artist_name: string;
+  artist_id: string | number;
+  album_id: string | number;
+  album_title: string;
+  album_thumb_url?: string | null;
+  year?: number | null;
+  track_number?: number | null;
+  disc_number?: number | null;
+  /** milliseconds */
+  duration?: number | null;
+  bitrate?: number | null;
+  /** the file's extension, upper-cased ('FLAC'); '' when unknown */
+  format: string;
+  file_path: string;
+  play_count: number;
+  file_size?: number | null;
+  /** how many copies of this song (title + artist) the library holds */
+  copies: number;
+  /** in this profile's Liked Songs */
+  liked?: boolean;
+}
+
+export interface LibrarySongsResponse {
+  success?: boolean;
+  error?: string;
+  songs?: LibrarySong[];
+  pagination?: LibraryPagination & {
+    /** the count stopped at the server's cap: "1,000+" */
+    total_capped?: boolean;
+  };
 }

@@ -100,7 +100,7 @@ describe('ManualMatchModal', () => {
       vi.fn(async () => new Response(JSON.stringify({ success: true, results: [] }))),
     );
     mount({ service: 'deezer', defaultQuery: 'Raccoons' });
-    const input = await screen.findByPlaceholderText(/paste a Deezer URL/i);
+    const input = await screen.findByPlaceholderText(/paste a Deezer link or id/i);
     expect(input).toBeTruthy();
   });
 

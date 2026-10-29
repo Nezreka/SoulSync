@@ -234,7 +234,52 @@ def _album_fill_artist_names_match(expected_artist: str, candidate_artist: str) 
     Auto-fill moves/copies files into an existing album, so artist identity
     must outrank album/title similarity. Use the alias-aware matcher when it
     is available, then fall back to conservative normalized similarity.
+
+    The alias matcher splits only the CANDIDATE side of a combined credit,
+    so a duo album artist ("John Lennon & Yoko Ono") never matched its own
+    members' solo credits. Split the expected side too and retry each
+    member: a track credited to one member of the credited duo is that
+    album artist's track.
+
+    Split members match on EXACT normalized equality only, never the
+    fuzzy 0.82: a member name is a weaker claim than the full credit,
+    so a near-name must not carry it — a duo album wrongly matched to
+    a member's solo release must not pass the wrong-release check
+    because a member's name is close to the track's artist ("Beyond"
+    the band vs "Beyonder"). Exactness cannot help when the names are
+    literally identical (a track by an artist actually called
+    "Beyond" on an Above & Beyond album reads as the album's own);
+    that collision is indistinguishable from a real member credit.
     """
+    if _album_fill_artist_names_match_direct(expected_artist, candidate_artist):
+        return True
+    try:
+        from core.matching.artist_aliases import split_artist_credit
+        parts = split_artist_credit(expected_artist or '')
+    except Exception:
+        parts = []
+    expected_norm = (expected_artist or '').strip().lower()
+    candidate_norm = _album_fill_normalized_name(candidate_artist)
+    if not candidate_norm:
+        return False
+    return any(
+        len(part) >= 2 and part.lower() != expected_norm
+        and _album_fill_normalized_name(part) == candidate_norm
+        for part in parts)
+
+
+def _album_fill_normalized_name(name: str) -> str:
+    """The matching engine's cleaned form of a name, for exact compares."""
+    try:
+        from core.matching_engine import MusicMatchingEngine
+        return MusicMatchingEngine().clean_artist(name or '')
+    except Exception:
+        return (name or '').strip().lower()
+
+
+def _album_fill_artist_names_match_direct(expected_artist: str, candidate_artist: str) -> bool:
+    """One expected name against one candidate credit (which the alias
+    matcher itself splits). See `_album_fill_artist_names_match`."""
     expected = (expected_artist or '').strip()
     candidate = (candidate_artist or '').strip()
     if not expected or not candidate:
@@ -284,6 +329,61 @@ def _album_fill_target_artist_allows_track(album_artist: str, track_artists: Lis
         return True
 
     return any(_album_fill_artist_names_match(album_artist, artist) for artist in source_artists)
+
+
+def _album_fill_track_is_other_artist(album_artist: str, track_artists: List[str]) -> bool:
+    """Return whether a source track is credited to someone other than the
+    album artist.
+
+    This is the strict per-track test the WISHLIST fallback uses, unlike
+    ``_album_fill_target_artist_allows_track`` above: no Various
+    Artists / soundtrack blanket (every credited track on such an album
+    is someone else's track), and no album-level tracklist exemption (a
+    guest credit somewhere on the album does not make every other
+    artist's track the album artist's).
+
+    Fail-closed edges, all verified review shapes:
+
+    - No usable album artist (empty, or the providers' "Unknown Artist"
+      placeholder): no track can be shown to be theirs, so every
+      credited track counts as other. Two placeholders matching each
+      other is not evidence of identity.
+    - No credited track artists on a normal album: NOT other-artist —
+      thin metadata must not drop what may be the album artist's own
+      track, and the wishlist payload falls back to the album artist
+      for such tracks anyway. On a compilation/soundtrack album the
+      same empty credit proves nothing either way, so it counts as
+      other there rather than being wishlisted under the blanket label.
+    """
+    album_artist = (album_artist or '').strip()
+    album_norm = album_artist.lower()
+    compilation_album = album_norm in {'various artists', 'various', 'soundtrack'}
+
+    if not album_artist or album_norm == 'unknown artist':
+        # Checked before the empty-credit case on purpose: a track with
+        # no credit on an album with no usable artist would be
+        # wishlisted under the placeholder name itself.
+        return True
+
+    source_artists = [str(a).strip() for a in (track_artists or []) if str(a or '').strip()]
+    if not source_artists:
+        return compilation_album
+
+    if compilation_album and any(a.lower() in {'various artists', 'various', 'soundtrack'}
+                                 for a in source_artists):
+        # A track credited to the blanket label itself, on an album
+        # credited to the same blanket, is the album's own track.
+        return False
+
+    # "X feat. Y" / "X (feat. Y)" is still X's track. the credit splitter
+    # breaks band names that carry an "&" ("Above & Beyond feat. Zoe"
+    # splits into Above, Beyond, Zoe), so also compare the feat-stripped
+    # credit against the album artist exactly.
+    album_clean = _album_fill_normalized_name(album_artist)
+    return not any(
+        _album_fill_artist_names_match(album_artist, artist)
+        or (album_clean and _album_fill_normalized_name(artist) == album_clean)
+        for artist in source_artists)
 
 
 def _split_acoustid_credit(credit: str) -> List[str]:
@@ -775,41 +875,14 @@ class RepairWorker:
 
         Returns {job_id: {'automation_id': int, 'interval_hours': float,
         'next_run': str|None}}. Used by get_all_job_info to avoid N+1 queries.
+        the scan itself is shared with the video side (system_job_schedules).
         """
-        result = {}
         try:
-            from core.automation.migrate_repair_jobs import _SYSTEM_OWNER
-            import json
-            automations = self.db.get_automations(1)
-            for a in automations or []:
-                if a.get("owned_by") != _SYSTEM_OWNER:
-                    continue
-                if a.get("action_type") != "run_repair_job":
-                    continue
-                try:
-                    cfg = a.get("action_config") or "{}"
-                    if isinstance(cfg, str):
-                        cfg = json.loads(cfg)
-                    job_id = cfg.get("job_id")
-                    if not job_id or job_id in result:
-                        continue  # Skip duplicates; migration logs them.
-                    # Extract interval from trigger_config if it's a schedule trigger.
-                    interval_hours = None
-                    if a.get("trigger_type") == "schedule":
-                        tcfg = a.get("trigger_config") or "{}"
-                        if isinstance(tcfg, str):
-                            tcfg = json.loads(tcfg)
-                        interval_hours = tcfg.get("interval")
-                    result[job_id] = {
-                        "automation_id": a.get("id"),
-                        "interval_hours": interval_hours,
-                        "next_run": a.get("next_run"),
-                    }
-                except Exception:
-                    continue
+            from core.automation.migrate_repair_jobs import system_job_schedules
         except Exception as e:
             logger.debug("Could not scan system automations: %s", e)
-        return result
+            return {}
+        return system_job_schedules(self.db, "run_repair_job", 1)
 
     def _get_pending_count_by_job(self) -> dict:
         """Return ``{job_id: pending_count}`` for every job that has
@@ -2114,12 +2187,20 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-    def fix_finding(self, finding_id: int, fix_action: str = None) -> dict:
+    def fix_finding(self, finding_id: int, fix_action: str = None, explicit: bool = False) -> dict:
         """Execute the appropriate fix action for a finding, then mark it resolved.
 
         Args:
             finding_id: ID of the finding to fix
             fix_action: Optional action override (e.g. 'staging' or 'delete' for orphan files)
+            explicit: True ONLY for a fix of the one finding in front of
+                the user (their click on that finding's own Fix button,
+                declared by the single-fix API route). It defaults to
+                False on purpose: the incomplete-album fixer relies on it
+                before wishlisting other artists' tracks from a
+                compilation or soundtrack, so any caller that forgets
+                the flag — a new bulk loop, an automation — gets the
+                gated behavior, never the explicit one.
         """
         # Refresh transfer folder from config before each fix — same logic as _run_next_job
         if self._config_manager:
@@ -2147,6 +2228,12 @@ class RepairWorker:
             # Pass fix_action through to handler via details
             if fix_action:
                 details['_fix_action'] = fix_action
+
+            # How this fix was asked for, stamped fresh on every run: the
+            # flag lives only in this in-memory copy of the details, never
+            # in the stored finding, so a finding row cannot carry an
+            # explicit request from one run into a later bulk run.
+            details['_explicit_single_fix'] = bool(explicit)
 
             # Dispatch fix by finding type
             result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
@@ -5254,12 +5341,25 @@ class RepairWorker:
         3. Single source (1-track album) → MOVE file; multi-track → COPY
         4. Retag the file with correct album metadata
         5. If no candidate found or quality too low → add to wishlist
+
+        One limit on step 5: a track credited to a DIFFERENT artist than
+        the album artist is only wishlisted when the user fixed this one
+        finding directly (an explicit "Fill Album" on this album, stamped
+        by fix_finding as ``_explicit_single_fix``). Under a bulk fix the
+        track may still be filled from a file already in the library —
+        that moves the user's own music — but it is never wishlisted:
+        wishlisting is what auto-processes into a download, and one
+        artist's compilation or soundtrack must not silently pull every
+        other artist on it into the library. This is the same per-track
+        rule the watchlist scanner applies for include_other_artists=0;
+        that setting itself is scanner-only and does not reach this path.
         """
         album_id = details.get('album_id')
         missing_tracks = details.get('missing_tracks', [])
         album_title = details.get('album_title', 'Unknown Album')
         artist_name = details.get('artist', 'Unknown Artist')
         spotify_album_id = details.get('spotify_album_id', '')
+        explicit_album_fix = bool(details.get('_explicit_single_fix'))
 
         if not album_id:
             return {'success': False, 'error': 'Missing album_id in finding details'}
@@ -5344,6 +5444,7 @@ class RepairWorker:
         fixed_count = 0
         wishlisted_count = 0
         skipped_count = 0
+        other_artist_skipped_count = 0
         track_details = []
         existing_track_ids = {t.id for t in existing_tracks}
         _tracklist_cache: Dict[str, Any] = {}
@@ -5378,6 +5479,13 @@ class RepairWorker:
                     'target_artist': artist_name,
                 })
                 continue
+
+            # Strict per-track test for the wishlist fallback below. The
+            # permissive check above only decided this track belongs on
+            # this album at all (a guest on a soundtrack passes, a track
+            # from a wrongly matched release does not); belonging on the
+            # album is not the same as being the album artist's track.
+            other_artist_track = _album_fill_track_is_other_artist(artist_name, track_artists)
 
             # Search library for this track
             candidates = self.db.search_tracks(title=track_name, artist=artist_search, limit=20)
@@ -5450,7 +5558,28 @@ class RepairWorker:
                     # File operation failed — fall through to wishlist
                     logger.warning("File operation failed for '%s': %s", track_name, result.get('error'))
 
-            # Phase 4: Wishlist fallback
+            # Phase 4: Wishlist fallback. Another artist's track is only
+            # wishlisted on an explicit fix of this one album finding;
+            # in a bulk run it stops here (a library file above may still
+            # have filled it — that is the user's own music, not a new
+            # download being queued behind their back).
+            if other_artist_track and not explicit_album_fix:
+                skipped_count += 1
+                other_artist_skipped_count += 1
+                logger.warning(
+                    "Album auto-fill did not wishlist '%s' by %s: other artist on album by '%s', "
+                    "and this is not an explicit single-album fix",
+                    track_name, track_artists, artist_name,
+                )
+                track_details.append({
+                    'track': track_name,
+                    'status': 'skipped',
+                    'reason': 'other artist track not wishlisted without an explicit fix of this album',
+                    'source_artists': track_artists,
+                    'target_artist': artist_name,
+                })
+                continue
+
             if source_track_id:
                 try:
                     # Build album images from finding thumb URL
@@ -5520,7 +5649,7 @@ class RepairWorker:
         message = f'Album "{album_title}": ' + ', '.join(parts) if parts else 'No tracks processed'
 
         success = fixed_count > 0 or wishlisted_count > 0
-        return {
+        result = {
             'success': success,
             'action': 'auto_fill_album',
             'message': message,
@@ -5529,6 +5658,31 @@ class RepairWorker:
             'skipped': skipped_count,
             'details': track_details,
         }
+        if other_artist_skipped_count:
+            # Say why on the finding itself: when nothing else could be
+            # done the finding stays pending, and a silent refusal is
+            # what made this path impossible to diagnose from outside.
+            result['other_artist_skipped'] = other_artist_skipped_count
+            if not success:
+                result['error'] = (
+                    f'{other_artist_skipped_count} track(s) by other artists were not added '
+                    f'to the wishlist. Fix this album on its own to add them.')
+                if other_artist_skipped_count != skipped_count:
+                    # Other tracks were skipped for their own reasons
+                    # (in the details) — the error must not pin the
+                    # whole outcome on the gate.
+                    result['error'] += (
+                        f' {skipped_count - other_artist_skipped_count} other track(s) '
+                        f'were skipped for other reasons.')
+                if other_artist_skipped_count == skipped_count:
+                    # Nothing failed — every remaining track was held
+                    # back by the gate alone. The bulk loops tally this
+                    # as skipped-by-design, not as a failure: at library
+                    # scale every compilation finding would otherwise be
+                    # reported as a fresh failure on every Fix All,
+                    # forever, for doing exactly what it was told to do.
+                    result['skipped_by_design'] = True
+        return result
 
     def _album_tracklist_credits_artist(self, details, artist_name, cache) -> bool:
         """True when the album's own source tracklist credits the album artist
@@ -6331,6 +6485,8 @@ class RepairWorker:
 
             fixed = 0
             failed = 0
+            skipped = 0
+            other_artist_skipped = 0
             errors = []
             for fid in ids_to_fix:
                 try:
@@ -6343,18 +6499,28 @@ class RepairWorker:
                     # The background twin (_run_bulk_fix) has always had this
                     # guard; this loop never got it.
                     result = {'success': False, 'error': str(e)}
+                # Tracks the album gate held back, counted even on a
+                # successful finding so a partial gate is never silent.
+                other_artist_skipped += result.get('other_artist_skipped', 0) or 0
                 if result.get('success'):
                     fixed += 1
+                elif result.get('skipped_by_design'):
+                    # Held back on purpose (e.g. an album whose only
+                    # missing tracks are other artists') — pending with
+                    # its reason on the row, but not a failure.
+                    skipped += 1
                 else:
                     error_msg = result.get('error', 'unknown error')
                     logger.warning("Fix failed for finding #%s: %s", fid, error_msg)
                     errors.append({'id': fid, 'error': error_msg})
                     failed += 1
 
-            return {'fixed': fixed, 'failed': failed, 'total': len(ids_to_fix), 'errors': errors}
+            return {'fixed': fixed, 'failed': failed, 'skipped': skipped,
+                    'other_artist_skipped': other_artist_skipped,
+                    'total': len(ids_to_fix), 'errors': errors}
         except Exception as e:
             logger.error("Error bulk fixing findings: %s", e, exc_info=True)
-            return {'fixed': 0, 'failed': 0, 'total': 0, 'error': str(e)}
+            return {'fixed': 0, 'failed': 0, 'skipped': 0, 'total': 0, 'error': str(e)}
 
     # ------------------------------------------------------------------
     # Background bulk fix — "Fix All" at library scale
@@ -6420,6 +6586,12 @@ class RepairWorker:
                 'done': 0,
                 'fixed': 0,
                 'failed': 0,
+                # Findings held back by design (the album gate), and how
+                # many tracks it held back across the whole run — a
+                # partial gate on a resolved finding counts here too, so
+                # it is never silent.
+                'skipped': 0,
+                'other_artist_skipped': 0,
                 'stopped': False,
                 'job_id': job_id,
                 'finding_type': finding_type,
@@ -6547,7 +6719,15 @@ class RepairWorker:
                     # Any other failure (a purely local error: missing
                     # file, write failure) says nothing about LRCLib —
                     # it neither increments nor resets the streak.
-                if slug:
+                # Tracks the album gate held back, counted even on a
+                # successful finding so a partial gate is never silent.
+                # .get with a default: some test harnesses seed a partial
+                # state dict that predates these keys.
+                state['other_artist_skipped'] = (
+                    state.get('other_artist_skipped', 0)
+                    + (result.get('other_artist_skipped', 0) or 0))
+                skipped_by_design = bool(result.get('skipped_by_design'))
+                if slug and not skipped_by_design:
                     tally = state['per_type'].get(slug)
                     if tally is None:
                         # Seeded whole, never key-by-key: get_bulk_fix_status
@@ -6558,6 +6738,11 @@ class RepairWorker:
                     tally['fixed' if result.get('success') else 'failed'] += 1
                 if result.get('success'):
                     state['fixed'] += 1
+                elif skipped_by_design:
+                    # Held back on purpose — pending with its reason on
+                    # the row, tallied apart so a Fix All does not report
+                    # it as a failure on every run forever.
+                    state['skipped'] = state.get('skipped', 0) + 1
                 else:
                     state['failed'] += 1
                     error_msg = result.get('error', 'unknown error')
@@ -6570,6 +6755,15 @@ class RepairWorker:
             logger.error("Background bulk fix crashed: %s", e, exc_info=True)
             state['error'] = str(e)
         finally:
+            if state.get('other_artist_skipped'):
+                # An album that otherwise fixed resolves its finding, so
+                # "fix it on its own" needs the reopen step for those;
+                # a fully gated album is still pending and needs neither.
+                gate_note = (
+                    f"{state['other_artist_skipped']} track(s) by other artists were not "
+                    f"added to the wishlist. To add them, fix the album on its own "
+                    f"(reopen its finding first if it resolved).")
+                state['note'] = f"{state['note']} {gate_note}" if state.get('note') else gate_note
             # Release the thread reference BEFORE clearing the running flag.
             #
             # start_bulk_fix's single-flight guard asks `_bulk_fix_thread

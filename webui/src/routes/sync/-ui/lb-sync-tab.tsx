@@ -1,175 +1,173 @@
 /**
- * The ListenBrainz sync tab (sync-listenbrainz.js, whole file) and its
- * Last.fm Radio sibling's shared card list. Three JSPF categories behind
- * sub-tabs; cards read the shared listenbrainz vertical (Last.fm radios live
- * in the same table and state machine, playlist_type='lastfm_radio').
+ * The ListenBrainz tab (sync-listenbrainz.js, whole file) and the import list
+ * it shares with its Last.fm Radio sibling. Three JSPF categories behind
+ * sub-tabs, each playlist ready to import into SoulSync.
  *
- * The click flow diverges from the vanilla ON PURPOSE: the vanilla handed off
- * to openDownloadModalForListenBrainzPlaylist, whose downstream fills the
- * script-scoped registries and opens the VANILLA modal. Here the click
- * fetches + caches tracks (the same on-demand fetch, 175-195), seeds the
- * React vertical, and opens the React DiscoveryModal — the same
- * discover→sync→download machine, one implementation. The vanilla's 500ms
- * card refresh loop is gone: cards re-render when the vertical's state does.
+ * ListenBrainz and Last.fm playlists carry names (and recording MBIDs), not a
+ * service's track ids, so importing saves those tracks as a mirror and the
+ * mirror identifies them in the background, the way a file import does. A
+ * rotating series (Weekly Jams, Weekly Exploration, a yearly round-up) files
+ * under ONE series key, so next week's rolls onto the same mirror instead of
+ * piling up; that's why a card's key has to be resolved before it can say
+ * whether it's in.
+ *
+ * These used to run their own identify in an LB-only window and mirror only
+ * the matched tracks when it finished. The import flow replaces that.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
-import type { LbCardData, LbSubTabType, LbTrack } from '../-sync.lb-tabs';
-import type { SourceVertical } from '../-sync.use-vertical';
+import type { ImportSpec } from '../-sync.importer';
+import type { LbCardData, LbMirrorTarget, LbSubTabType, LbTrack } from '../-sync.lb-tabs';
 
+import { detectLbSeries } from '../-sync.api';
+import { mapWithConcurrency } from '../-sync.core';
 import {
   LB_EMPTY_MESSAGES,
   LB_SUB_TABS,
   fetchLbCategories,
   fetchLbPlaylistTracks,
-  lbCoverageCounts,
-  mirrorLbAfterDiscovery,
   postLbCacheRefresh,
+  resolveLbMirrorTarget,
   unwrapJspfPlaylist,
 } from '../-sync.lb-tabs';
-import { SYNC_SOURCES } from '../-sync.sources';
-import { freshSourceState } from '../-sync.state';
-import { useSourceVertical } from '../-sync.use-vertical';
-import { CardCoverage } from './card-coverage';
-import { SourceCard } from './source-card';
+import { ImportCard, ImportGrid, ImportIntro } from './import-card';
+import { useImporter } from './use-importer';
 
-/**
- * ListenBrainz/Last.fm cards render the SAME coverage bar as every other card;
- * only the numbers behind it are theirs (percentage is matched/total in both
- * phases — see lbCoverageCounts). Fresh returns null so the element hides.
- */
-function lbCoverageLine(state: Parameters<typeof lbCoverageCounts>[0]) {
-  const counts = lbCoverageCounts(state);
-  if (!counts) return null;
-  return (
-    <CardCoverage
-      total={counts.total}
-      matched={counts.matched}
-      failed={counts.failed}
-      percentage={counts.percentage}
-    />
-  );
+/** an LB track as a mirror row: names to identify by, the recording mbid kept */
+export function lbMirrorTrack(t: LbTrack): Record<string, unknown> {
+  return {
+    track_name: t.track_name,
+    artist_name: t.artist_name,
+    album_name: t.album_name,
+    duration_ms: t.duration_ms,
+    image_url: t.album_cover_url || null,
+    source_track_id: t.mbid || '',
+    extra_data: null,
+  };
 }
 
-/** The shared card list both MB-style tabs render. */
-export function LbCardList({
+/** What importing one LB / Last.fm playlist takes. Exported for the tests. */
+export function lbImportSpec(card: LbCardData, target: LbMirrorTarget): ImportSpec {
+  return {
+    source: target.source,
+    sourceId: target.sourcePlaylistId,
+    name: target.name,
+    owner: target.owner,
+    description: `${card.count} tracks from ${card.title}`,
+    loadTracks: async () => ({ tracks: await fetchLbPlaylistTracks(card.mbid) }),
+    toMirrorTracks: (tracks) => (tracks as LbTrack[]).map(lbMirrorTrack),
+  };
+}
+
+/** where each card's mirror is filed, resolved once per playlist */
+const targetCache = new Map<string, LbMirrorTarget>();
+
+async function resolveTarget(card: LbCardData): Promise<LbMirrorTarget> {
+  const cached = targetCache.get(card.mbid);
+  if (cached) return cached;
+  let series = null;
+  try {
+    series = await detectLbSeries(card.title);
+  } catch {
+    // no series answer files it under its own mbid, like the old mirror did
+  }
+  const target = resolveLbMirrorTarget(card.mbid, card.title, card.creator, series);
+  targetCache.set(card.mbid, target);
+  return target;
+}
+
+/** forget resolved keys (tests) */
+export function forgetLbTargets(): void {
+  targetCache.clear();
+}
+
+function useLbTargets(cards: LbCardData[]): ReadonlyMap<string, LbMirrorTarget> {
+  const [targets, setTargets] = useState<ReadonlyMap<string, LbMirrorTarget>>(
+    () =>
+      new Map(
+        cards.flatMap((c) => (targetCache.has(c.mbid) ? [[c.mbid, targetCache.get(c.mbid)!]] : [])),
+      ),
+  );
+  const ids = cards.map((c) => c.mbid).join('|');
+  useEffect(() => {
+    let alive = true;
+    void mapWithConcurrency(cards, 6, async (card) => {
+      const target = await resolveTarget(card);
+      if (alive) setTargets((prev) => new Map(prev).set(card.mbid, target));
+    });
+    return () => {
+      alive = false;
+    };
+    // the card list is rebuilt every render; its ids are what matter
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids]);
+  return targets;
+}
+
+/** the import cards both LB-style tabs render */
+export function LbImportList({
   cards,
-  vertical,
-  icon,
-  cardClassName,
+  glyph,
   idPrefix,
-  onOpen,
 }: {
   cards: LbCardData[];
-  vertical: SourceVertical;
-  icon: string;
-  cardClassName: string;
+  glyph: string;
   idPrefix: string;
-  onOpen: (card: LbCardData) => void;
 }) {
+  const importer = useImporter();
+  const targets = useLbTargets(cards);
+  const statusOf = (card: LbCardData) => {
+    const target = targets.get(card.mbid);
+    return target ? importer.statusOf(target.source, target.sourcePlaylistId) : 'checking';
+  };
+  // a series' weeks share one mirror, so they count once toward Import all
+  const remaining = [
+    ...new Map(
+      cards
+        .filter((card) => statusOf(card) === 'new')
+        .map((card) => {
+          const target = targets.get(card.mbid)!;
+          return [
+            `${target.source}:${target.sourcePlaylistId}`,
+            lbImportSpec(card, target),
+          ] as const;
+        }),
+    ).values(),
+  ];
+
   return (
     <>
-      {cards.map((card) => {
-        const state =
-          vertical.states[card.mbid] ?? freshSourceState(SYNC_SOURCES.listenbrainz, card.mbid);
-        return (
-          <SourceCard
-            key={card.mbid}
-            id={`${idPrefix}-${card.mbid}`}
-            cardClassName={cardClassName}
-            icon={icon}
-            name={card.title}
-            countText={`${card.count} tracks`}
-            owner={`by ${card.creator}`}
-            phase={state.phase}
-            progressLine={lbCoverageLine(state)}
-            onClick={() => onOpen(card)}
-          />
-        );
-      })}
+      <ImportIntro
+        canCopy
+        remaining={remaining.length}
+        onImportAll={() => void importer.importAll(remaining)}
+      />
+      <ImportGrid>
+        {cards.map((card) => {
+          const target = targets.get(card.mbid);
+          return (
+            <ImportCard
+              key={card.mbid}
+              id={`${idPrefix}-${card.mbid}`}
+              name={card.title}
+              meta={`${card.count} track${card.count === 1 ? '' : 's'} · by ${card.creator}`}
+              glyph={glyph}
+              status={statusOf(card)}
+              onAction={() => {
+                if (target) void importer.importOrOpen(lbImportSpec(card, target));
+              }}
+              onCopy={target ? importer.copyAsMineFor(lbImportSpec(card, target)) : undefined}
+              copying={target ? importer.copyingOf(target.source, target.sourcePlaylistId) : false}
+            />
+          );
+        })}
+      </ImportGrid>
     </>
   );
 }
 
-/**
- * THE way to build the ListenBrainz vertical — used by both this tab and the
- * Last.fm Radio tab, which share one vertical exactly as the vanilla shares
- * listenbrainzPlaylistStates between them.
- *
- * It exists so the post-discovery mirror cannot be forgotten. That mirror
- * (_mirrorListenBrainzAfterDiscovery, 10928, called from both completion paths
- * at 11075/11170) is what puts LB and Last.fm Radio playlists into the Mirrored
- * tab, and LB rows onto the Auto-Sync board; a plain useSourceVertical call for
- * this source would silently drop the feature, which is exactly how it went
- * missing in the first place.
- */
-export function useListenBrainzVertical(): SourceVertical {
-  const verticalRef = useRef<SourceVertical | null>(null);
-  const vertical = useSourceVertical(SYNC_SOURCES.listenbrainz, {
-    onDiscoveryComplete: (mbid) => {
-      void mirrorLbAfterDiscovery(mbid, verticalRef.current?.states[mbid]);
-    },
-  });
-  verticalRef.current = vertical;
-  return vertical;
-}
-
-/**
- * The on-demand track fetch + seed + open (handleListenBrainzSyncCardClick
- * 159-218), with the module-level tracks cache the vanilla kept in
- * listenbrainzTracksCache.
- */
-export function useLbCardOpen(
-  vertical: SourceVertical,
-  setOpenId: (mbid: string) => void,
-): (card: LbCardData) => Promise<void> {
-  const tracksCache = useRef<Record<string, LbTrack[]>>({});
-  return useCallback(
-    async (card: LbCardData) => {
-      if (!card.mbid) {
-        window.showToast?.('Missing playlist ID', 'error');
-        return;
-      }
-      try {
-        window.showLoadingOverlay?.(`Loading ${card.title}...`);
-        let tracks = tracksCache.current[card.mbid];
-        if (!tracks || tracks.length === 0) {
-          tracks = await fetchLbPlaylistTracks(card.mbid);
-          tracksCache.current[card.mbid] = tracks;
-        }
-        if (!tracks || tracks.length === 0) throw new Error('Playlist has no tracks');
-        window.hideLoadingOverlay?.();
-        // The vanilla's LB state.playlist, field for field (core.js 298-312):
-        // name + tracks + a DERIVED description and the source tag. The
-        // description is not decoration — the post-discovery mirror sends it
-        // as the mirrored row's description (11012).
-        vertical.seed(card.mbid, {
-          name: card.title,
-          tracks,
-          description: `${tracks.length} tracks from ${card.title}`,
-          source: 'listenbrainz',
-        });
-        setOpenId(card.mbid);
-      } catch (error) {
-        window.hideLoadingOverlay?.();
-        window.showToast?.(
-          `Could not open playlist: ${error instanceof Error ? error.message : 'unknown error'}`,
-          'error',
-        );
-      }
-    },
-    [vertical, setOpenId],
-  );
-}
-
-export function ListenBrainzSyncTab({
-  vertical,
-  onOpen,
-}: {
-  vertical: SourceVertical;
-  onOpen: (card: LbCardData) => void;
-}) {
+export function ListenBrainzSyncTab() {
   const [subTab, setSubTab] = useState<LbSubTabType>('created_for_user');
   const [byType, setByType] = useState<Record<LbSubTabType, unknown[]> | null>(null);
   const [placeholder, setPlaceholder] = useState('🔄 Loading ListenBrainz playlists...');
@@ -244,14 +242,7 @@ export function ListenBrainzSyncTab({
             {byType === null ? placeholder : LB_EMPTY_MESSAGES[subTab]}
           </div>
         ) : (
-          <LbCardList
-            cards={cards}
-            vertical={vertical}
-            icon="🎧"
-            cardClassName="listenbrainz-playlist-card"
-            idPrefix="listenbrainz-sync-card"
-            onOpen={onOpen}
-          />
+          <LbImportList cards={cards} glyph="🎧" idPrefix="listenbrainz-sync-card" />
         )}
       </div>
     </div>

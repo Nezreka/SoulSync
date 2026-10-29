@@ -31,7 +31,7 @@ import type {
 
 import { automationCardRows } from '../-dash.automations';
 
-function useAutomationsCard() {
+function useAutomationsCard(side: 'music' | 'video') {
   const [rows, setRows] = useState<AutomationApiRow[] | null>(null);
   const [progress, setProgress] = useState<Record<string, AutomationProgressState>>({});
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -76,8 +76,8 @@ function useAutomationsCard() {
   }, [load]);
 
   const view = useMemo(
-    () => automationCardRows(rows ?? [], nowMs, progress),
-    [rows, nowMs, progress],
+    () => automationCardRows(rows ?? [], nowMs, progress, side),
+    [rows, nowMs, progress, side],
   );
 
   // While an automation runs its phase/progress must move — a short loop
@@ -286,8 +286,20 @@ export function QuickSettings() {
 /** The engine's next moves. `compact` is the dashboard rail's "Up next": the
  *  next three with a "See all" for the rest, no quick-settings footer (that
  *  lives at the page bottom). */
-export function AutomationsCard({ compact = false }: { compact?: boolean } = {}) {
-  const { loaded, view: allRows, busyId, runNow, toggle } = useAutomationsCard();
+/** the automations page for a side: the video one is a vanilla video page */
+function openAutomations(side: 'music' | 'video') {
+  if (side === 'video')
+    document.dispatchEvent(
+      new CustomEvent('soulsync:video-navigate', { detail: { page: 'video-automations' } }),
+    );
+  else void window.navigateToPage?.('automations');
+}
+
+export function AutomationsCard({
+  compact = false,
+  side = 'music',
+}: { compact?: boolean; side?: 'music' | 'video' } = {}) {
+  const { loaded, view: allRows, busyId, runNow, toggle } = useAutomationsCard(side);
   const [showAll, setShowAll] = useState(false);
   const view = compact && !showAll ? allRows.slice(0, 3) : allRows;
 
@@ -301,7 +313,7 @@ export function AutomationsCard({ compact = false }: { compact?: boolean } = {})
         <button
           type="button"
           className={compact ? 'dash-side-link' : 'autosync-manage-btn'}
-          onClick={() => void window.navigateToPage?.('automations')}
+          onClick={() => openAutomations(side)}
         >
           {compact ? 'Automations' : 'All →'}
         </button>
@@ -312,13 +324,14 @@ export function AutomationsCard({ compact = false }: { compact?: boolean } = {})
             <div className="autosync-empty">
               <strong>No automations yet</strong>
               <span>
-                Automations run the machinery on triggers you set — scans, wishlist processing,
-                backups, notifications.
+                {side === 'video'
+                  ? 'Automations keep the video side moving on their own: airing episodes onto the wishlist, scans, upgrades.'
+                  : 'Automations run the machinery on triggers you set — scans, wishlist processing, backups, notifications.'}
               </span>
               <button
                 type="button"
                 className="autosync-empty-cta"
-                onClick={() => void window.navigateToPage?.('automations')}
+                onClick={() => openAutomations(side)}
               >
                 Create one
               </button>

@@ -23,8 +23,10 @@ def test_owned_no_longer_forces_the_badge_only_branch():
 
 
 def test_owned_rows_render_badge_and_actions_together():
-    # badge still exists for owned…
-    assert "'<div class=\"vd-ep-badge\">Owned'" in _JS
+    # Oct 2026: owned rows dropped the "Owned" pill (only a gap gets a badge)
+    # but still emit the badge cell, and their actions sit in the row's ⋯ menu
+    assert "vd-ep-badge vd-ep-badge--none" in _JS
+    assert "(ep.owned" in _JS and "Download again (upgrade)" in _JS
     # …and the action cluster is gated only on VideoGrab, not ownership
     assert "(!window.VideoGrab" in _JS
     for attr in ("data-vd-ep-grab", "data-vd-ep-search", "data-vd-ep-wish"):

@@ -237,21 +237,24 @@ export function mirroredDiscoveryTracks(
  * It lives here, and SourceModals calls it directly, so no mount site can
  * forget to supply it: the button is gated on the callback existing, which is
  * exactly how it silently never rendered before.
+ *
+ * Answers how many tracks it started retrying: 0 when nothing needed it, null
+ * when it couldn't start. A download waiting on the retry (#1912) reads that.
  */
 export async function retryFailedMirroredDiscovery(
   hash: string,
   vertical: Pick<SourceVertical, 'patchState' | 'resumeDiscovery'>,
-): Promise<void> {
+): Promise<number | null> {
   const playlistId = hash.replace('mirrored_', '');
   try {
     const data = await postRetryFailedDiscovery(playlistId);
     if (data.error) {
       window.showToast?.(`Error: ${data.error}`, 'error');
-      return;
+      return null;
     }
     if (data.retry_count === 0) {
       window.showToast?.('All tracks already found!', 'success');
-      return;
+      return 0;
     }
     const retryCount = data.retry_count ?? 0;
     vertical.patchState(hash, (s) => ({
@@ -263,11 +266,13 @@ export async function retryFailedMirroredDiscovery(
     }));
     vertical.resumeDiscovery(hash);
     window.showToast?.(`Retrying ${retryCount} failed tracks...`, 'info');
+    return retryCount;
   } catch (err) {
     window.showToast?.(
       `Error retrying discovery: ${err instanceof Error ? err.message : 'unknown error'}`,
       'error',
     );
+    return null;
   }
 }
 
@@ -433,7 +438,7 @@ export function mirroredPipelineStateWriter(
 
 /**
  * the chip a track row carries. in library is the resting state and says
- * nothing, same as a healthy card, and "not synced yet" would sit on every row
+ * nothing, same as a healthy card, and "not checked yet" would sit on every row
  * of a fresh playlist, so the strip says that once instead.
  */
 export function trackStatusChip(status: MirroredTrackStatus | undefined): string | null {
@@ -479,7 +484,9 @@ export function trackStatusSegments(
       case 'missing':
         return 'not downloaded';
       default:
-        return 'not synced yet';
+        // nothing has checked these against the library yet. the detail
+        // modal checks them on open (#1910), so this is a passing state
+        return 'not checked yet';
     }
   };
   return STRIP_ORDER.flatMap((status) => {

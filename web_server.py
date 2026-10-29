@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.6.0"
+_SOULSYNC_BASE_VERSION = "3.6.1"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -306,23 +306,24 @@ app.config['TEMPLATES_AUTO_RELOAD'] = DEV_STATIC_NO_CACHE
 app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 # Static assets (library.js / style.css / etc.) get aggressive browser
 # caching (1 year). Safe because every static URL is bust-tagged with
-# `?v=static_v` (computed once per process start — see below) so each
-# server restart effectively invalidates every cached asset for every
-# user. Within a single deploy, repeat page loads hit zero round-trips
-# on static files — was a 304 round-trip per asset under the old
-# max-age=0 setting.
+# `?v=static_v` (the newest static-file mtime, cached for a short TTL —
+# see _get_static_v below) so each server restart effectively invalidates
+# every cached asset for every user. Within a single deploy, repeat page
+# loads hit zero round-trips on static files — was a 304 round-trip per
+# asset under the old max-age=0 setting.
 #
 # In dev, DEV_STATIC_NO_CACHE flips this back to 0 so iterating on JS
 # / CSS doesn't require a server restart between edits.
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 
 
-# Cache-bust query string for static assets. Computed once per process
-# start so each server restart invalidates the browser's cached copy of
-# every JS/CSS file. This is the surefire fix for "user has stale JS
-# even after Ctrl+Shift+R" — the URL itself changes, so the browser
-# cannot reuse a previously-cached response no matter what its
-# Cache-Control header said.
+# Cache-bust query string for static assets. _STATIC_CACHE_BUST is the
+# process-start fallback; the live value is the newest static-file mtime
+# (see _get_static_v), so a restart — or a newer file — invalidates the
+# browser's cached copy of every JS/CSS file. This is the surefire fix
+# for "user has stale JS even after Ctrl+Shift+R" — the URL itself
+# changes, so the browser cannot reuse a previously-cached response no
+# matter what its Cache-Control header said.
 import time as _cache_bust_time
 _STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
 
@@ -426,8 +427,25 @@ def _initial_appearance_context():
     }
 
 
-@app.context_processor
-def _inject_static_cache_bust():
+# The scan below walks + stats every .css/.js file under webui/static
+# (~460 files). It used to run inside the context processor — i.e. on EVERY
+# template render, including the Docker healthcheck's render of / every
+# 30s — which made it a steady idle-CPU cost (#1905). Cache the computed
+# value for a short TTL instead. In production static files change on a
+# deploy / restart (which resets the cache anyway); a same-process rebuild
+# is picked up within the TTL. Dev mode (DEV_STATIC_NO_CACHE, whose promise
+# is edit-and-refresh with no restart) bypasses the cache entirely.
+_STATIC_V_TTL_SECONDS = 60
+_static_v_cache = None
+_static_v_cache_at = 0.0
+_static_v_lock = threading.Lock()
+
+
+def _compute_static_v():
+    """Newest .css/.js mtime under the static dir, or the process-start bust
+    value when there are no such files. None on a scan ERROR (e.g. a file
+    vanished mid-walk) so the caller can fall back WITHOUT caching the
+    fallback — a transient failure must not stick for a whole TTL."""
     try:
         static_dir = Path(app.static_folder)
         mtimes = [
@@ -435,10 +453,35 @@ def _inject_static_cache_bust():
             for p in static_dir.rglob('*')
             if p.is_file() and p.suffix.lower() in {'.css', '.js'}
         ]
-        static_v = str(max(mtimes)) if mtimes else _STATIC_CACHE_BUST
+        return str(max(mtimes)) if mtimes else _STATIC_CACHE_BUST
     except Exception:
-        static_v = _STATIC_CACHE_BUST
-    return {'static_v': static_v, **_initial_appearance_context()}
+        return None
+
+
+def _get_static_v():
+    global _static_v_cache, _static_v_cache_at
+    if DEV_STATIC_NO_CACHE:
+        return _compute_static_v() or _STATIC_CACHE_BUST
+    # The lock is held across the scan (a few ms, once per TTL) so racing
+    # renders at expiry neither duplicate the walk nor let a slower scan
+    # overwrite a newer value and extend its staleness.
+    with _static_v_lock:
+        now = _cache_bust_time.monotonic()
+        if _static_v_cache is None or now - _static_v_cache_at >= _STATIC_V_TTL_SECONDS:
+            computed = _compute_static_v()
+            if computed is None:
+                # Scan error: serve the last good value if there is one
+                # (the boot-time bust value otherwise) and leave the
+                # timestamp stale so the next render retries the scan.
+                return _static_v_cache or _STATIC_CACHE_BUST
+            _static_v_cache = computed
+            _static_v_cache_at = now
+        return _static_v_cache
+
+
+@app.context_processor
+def _inject_static_cache_bust():
+    return {'static_v': _get_static_v(), **_initial_appearance_context()}
 
 
 @app.context_processor
@@ -472,6 +515,12 @@ def _init_flask_secret_key():
         return _secrets.token_hex(32)
 
 app.secret_key = _init_flask_secret_key()
+# an oidc-only override left set is said at every start (#1839)
+try:
+    from core.security.oidc_only import log_start_state as _oidc_only_log_start
+    _oidc_only_log_start(config_manager)
+except Exception as _e:  # noqa: BLE001
+    logger.debug("oidc-only start check failed: %s", _e)
 # Flask's default cookie name is "session". Browsers don't scope cookies by port,
 # so another app on the same host using "session" overwrote this one, dropping the
 # selected profile and falling back to profile 1 (admin).
@@ -801,6 +850,13 @@ def _set_profile_context():
             from core.security import oidc_session
             if not oidc_session.check_device(_device_id, get_database(), config_manager):
                 oidc_session.end_device(get_database(), _device_id)
+                _signed_out = True
+        # every sign-in makes a device row, so a session without one didn't
+        # sign in with oidc, and oidc-only (#1839) ends it. the discover
+        # warmer's in-process sessions are marked and stay
+        if not _signed_out and not _device_id and not session.get('internal_warmup'):
+            from core.security import oidc_only
+            if oidc_only.is_on(config_manager):
                 _signed_out = True
         if not _signed_out:
             _devices.touch(_device_id, lambda d: get_database().touch_profile_device(d))
@@ -4262,6 +4318,21 @@ def revoke_api_key_internal(key_id):
     return api_success({"message": "API key revoked"})
 
 
+@app.route('/api/security/oidc-only', methods=['GET'])
+@admin_only
+def oidc_only_status():
+    """settings > security's oidc-only row and the admin's override
+    indicator (#1839): whether it's on, whether the environment override
+    has it off, who isn't linked yet, how many devices that didn't sign in
+    with oidc were used lately, and whether this session could turn it on"""
+    from core.security import oidc_only
+    db = get_database()
+    out = oidc_only.status(config_manager, db=db)
+    out['session_ok'] = oidc_only.session_signed_in_with_oidc(
+        db, session.get('device_id'), session.get('profile_id'))
+    return jsonify({'success': True, **out})
+
+
 @app.route('/api/settings', methods=['GET', 'POST'])
 @admin_only
 def handle_settings():
@@ -4295,17 +4366,16 @@ def handle_settings():
                 if not get_database().profile_has_password(1):
                     return jsonify({"success": False,
                                     "error": "Set an admin password before enabling login mode."}), 400
-                # No-gaps: every member must have a password too, or they'd be
-                # locked out the moment login turns on.
-                from core.security.login_provisioning import members_without_password
-                _stranded = members_without_password(get_database().get_all_profiles())
-                if _stranded:
-                    _names = ', '.join(str(m.get('name') or '?') for m in _stranded)
-                    return jsonify({"success": False,
-                                    "error": f"These members have no login password and "
-                                             f"couldn't sign in: {_names}. Set their passwords "
-                                             f"in Manage Profiles first.",
-                                    "members_without_password": _stranded}), 400
+            # No-gaps: every member keeps a way in (a password, or a plex or
+            # oidc link whose sign-in is on), and oidc-only (#1839) only turns
+            # on from a session that signed in with oidc, with everyone linked.
+            if isinstance(_sec_in, dict) and _sec_in:
+                from core.security.oidc_only import check_security_change
+                _refusal = check_security_change(
+                    config_manager, _sec_in, get_database(),
+                    device_id=session.get('device_id'), profile_id=session.get('profile_id'))
+                if _refusal:
+                    return jsonify({"success": False, **_refusal}), 400
 
             # YouTube pasted cookies.txt (server/Docker path): pull it out BEFORE the
             # generic persist so the raw cookie blob never lands in config.json — it's
@@ -8854,6 +8924,74 @@ def get_library_albums():
             }
         }), 500
 
+def _liked_song_keys(database):
+    """The profile's Liked Songs as the playlists' own song keys, for the
+    songs view's hearts. Empty when nothing's liked yet (or it can't tell)."""
+    try:
+        from core.playlists.user_playlists import _stored_tracks, liked_playlist, track_key
+        playlist = liked_playlist(database, get_current_profile_id())
+        if not playlist:
+            return set()
+        return {track_key(t) for t in _stored_tracks(database, playlist['id'])}
+    except Exception as e:
+        logger.debug("liked songs unavailable for the songs view: %s", e)
+        return set()
+
+
+@app.route('/api/library/songs')
+def get_library_songs():
+    """The library page's Songs view (#1906): this profile's songs on the
+    active server, searchable by title and artist. Same scoping as the
+    artists and albums views."""
+    try:
+        try:
+            page = max(1, int(request.args.get('page', 1)))
+            # up to 500 so Play all can queue a whole search in one call
+            limit = max(1, min(500, int(request.args.get('limit', 75))))
+        except (TypeError, ValueError):
+            page, limit = 1, 75
+        sort = request.args.get('sort', '')
+        quality = request.args.get('quality', '')
+        database = get_database()
+        result = database.get_library_songs(
+            search_query=(request.args.get('search') or '').strip(),
+            letter=request.args.get('letter', 'all'),
+            page=page,
+            limit=limit,
+            sort=sort if sort in ('recent', 'artist', 'album', 'year') else 'title',
+            dupes=request.args.get('dupes') == '1',
+            quality=quality if quality in ('lossless', 'upgradable') else '',
+        )
+        liked = _liked_song_keys(database)
+        from core.playlists.user_playlists import track_key
+        for song in result['songs']:
+            if song.get('album_thumb_url'):
+                song['album_thumb_url'] = fix_artist_image_url(song['album_thumb_url'])
+            song['liked'] = track_key(
+                {'track_name': song['title'], 'artist_name': song['artist_name']}) in liked
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        logger.error(f"Error fetching library songs: {e}")
+        return jsonify({"success": False, "error": "Couldn't load your songs", "songs": [],
+                        "pagination": {"page": 1, "limit": 75, "total_count": 0, "total_pages": 0,
+                                       "has_prev": False, "has_next": False}}), 500
+
+
+@app.route('/api/library/songs/<track_id>/copies')
+def get_library_song_copies(track_id):
+    """Every copy of one song the songs view marked "N copies", best file
+    first, so they can be compared and the rest removed (#1906)."""
+    try:
+        copies = get_database().get_library_song_copies(track_id)
+        for song in copies:
+            if song.get('album_thumb_url'):
+                song['album_thumb_url'] = fix_artist_image_url(song['album_thumb_url'])
+        return jsonify({"success": True, "copies": copies})
+    except Exception as e:
+        logger.error(f"Error fetching copies of track {track_id}: {e}")
+        return jsonify({"success": False, "error": "Couldn't load the copies", "copies": []}), 500
+
+
 @app.route('/api/library/albums/<album_id>/tracks')
 def get_library_album_tracks(album_id):
     """The tracks of one owned album, for the album card's play button.
@@ -11502,8 +11640,18 @@ def library_manual_match():
         table = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}[entity_type]
 
         database = get_database()
+        watchlist_followed = {'updated': [], 'skipped': []}
         with database._get_connection() as conn:
             cursor = conn.cursor()
+            before = {}
+            if entity_type == 'artist':
+                # read before the change: the old ids are how the watchlist
+                # entry for this artist is found (#1901)
+                from core.watchlist.library_match import library_artist_ids
+                try:
+                    before = library_artist_ids(cursor, entity_id)
+                except Exception as e:
+                    logger.debug("watchlist follow: reading library ids failed: %s", e)
             cursor.execute(f"""
                 UPDATE {table}
                 SET {id_col} = ?, {status_col} = 'matched', {attempted_col} = CURRENT_TIMESTAMP
@@ -11512,6 +11660,18 @@ def library_manual_match():
             conn.commit()
             if cursor.rowcount == 0:
                 return jsonify({"success": False, "error": "Entity not found"}), 404
+            if before:
+                # the watchlist keeps its own copy of the artist's ids, so a fixed
+                # library match carries over to it, never failing the match itself
+                try:
+                    from core.watchlist.library_match import follow_library_artist_match
+                    watchlist_followed = follow_library_artist_match(
+                        cursor, before=before, service=service, new_id=str(service_id),
+                        profile_id=get_current_profile_id())
+                    conn.commit()
+                except Exception as e:
+                    logger.warning("Watchlist didn't follow the library match for artist %s: %s",
+                                   entity_id, e)
 
         # #758 — a manual ALBUM match also pins (and LOCKS) the canonical album
         # version to the chosen release, so the auto resolve job and every tool
@@ -11541,7 +11701,9 @@ def library_manual_match():
         return jsonify({
             "success": True,
             "message": f"Manually matched {entity_type} to {service} ID: {service_id}",
-            "updated_data": updated if updated.get('success') else None
+            "updated_data": updated if updated.get('success') else None,
+            "watchlist_updated": watchlist_followed['updated'],
+            "watchlist_skipped": watchlist_followed['skipped'],
         })
 
     except Exception as e:
@@ -12029,15 +12191,20 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
             policy_profile=_inspection_profile,
         )
 
+    # what the rows were judged against, so the "wanted" column can show it
+    _expected_ms = int(getattr(track_obj, 'duration_ms', 0) or 0)
+
     def generate_stream():
         with ThreadPoolExecutor(max_workers=4) as pool:
             futures = {pool.submit(_search_one_source, name, client): name for name, client in download_clients.items()}
             for future in as_completed(futures):
                 source_name = futures[future]
                 try:
-                    yield json.dumps({'source': source_name, **future.result()}) + '\n'
+                    yield json.dumps({'source': source_name, 'expected_duration_ms': _expected_ms,
+                                      **future.result()}) + '\n'
                 except Exception as e:
-                    yield json.dumps({'source': source_name, **empty_source_rows(
+                    yield json.dumps({'source': source_name, 'expected_duration_ms': _expected_ms,
+                                      **empty_source_rows(
                         str(e), provenance=_inspection_provenance,
                         policy=_inspection_policy)}) + '\n'
         yield json.dumps({'done': True}) + '\n'
@@ -12135,6 +12302,13 @@ def _wishlist_track_for_inspector(track_id):
     return WishlistService.format_track_for_download(row)
 
 
+def _wishlist_search_override(track, data):
+    """the title/artist typed into the interactive search, when the row's
+    own were wrong."""
+    from core.wishlist.service import WishlistService
+    return WishlistService.apply_search_override(track, data.get('name'), data.get('artist'))
+
+
 @app.route('/api/wishlist/inspect', methods=['POST'])
 def inspect_wishlist_sources():
     """Search manually for one wishlist track: every source, with the verdicts."""
@@ -12143,6 +12317,7 @@ def inspect_wishlist_sources():
         track = _wishlist_track_for_inspector(data.get('track_id'))
         if not track:
             return jsonify({"success": False, "error": "That track isn't on your wishlist"}), 404
+        track = _wishlist_search_override(track, data)
         return _inspect_sources_stream(
             _pinned_batch.track_object(track), track.get('quality_profile_id'),
             log_tag='Inspector',
@@ -12175,6 +12350,8 @@ def download_wishlist_pick():
         track = _wishlist_track_for_inspector(data.get('track_id'))
         if not track:
             return jsonify({"success": False, "error": "That track isn't on your wishlist"}), 404
+        # the pick downloads as what was searched for, not what the row said
+        track = _wishlist_search_override(track, data)
 
         from core.downloads.decisions import is_quality_override
         name = f"Wishlist: {track.get('artist_name') or 'Unknown'} - {track.get('name') or 'Unknown'}"
@@ -22360,6 +22537,9 @@ _DISCOVER_WARM_PATHS = [
     '/api/discover/decades/available',
     '/api/discover/moods',
     '/api/discover/for-you',
+    # not a shelf cache: asking is what turns the day over, so the new day's
+    # mixes are built shortly after midnight instead of on the first visit
+    '/api/discover/personalized/daily-mixes',
 ]
 
 
@@ -22398,6 +22578,8 @@ def _discover_warm_sweep(paths=None):
                 sess['profile_epoch'] = epoch
                 sess['login_authenticated'] = True
                 sess['launch_pin_verified'] = True
+                # in-process, no device row: oidc-only (#1839) leaves it be
+                sess['internal_warmup'] = True
             for p in (paths or _DISCOVER_WARM_PATHS):
                 try:
                     # recompute, don't read. a sweep inside the 30 min ttl
@@ -23291,6 +23473,12 @@ def _ws_snapshot_revoked(snapshot):
             from core.security import oidc_session
             if not oidc_session.check_device(snapshot['device_id'], get_database(), config_manager):
                 oidc_session.end_device(get_database(), snapshot['device_id'])
+                device_live = False
+        # oidc-only (#1839): a socket of a session that has no device row
+        # never signed in with oidc, the same rule as http
+        if epoch_current and device_live and not snapshot.get('device_id'):
+            from core.security import oidc_only
+            if oidc_only.is_on(config_manager):
                 device_live = False
         return is_session_revoked(has_profile_session=True,
                                   epoch_current=epoch_current,
@@ -25154,6 +25342,15 @@ def start_runtime_services():
         except Exception as _recover_err:
             # Recovery must not crash startup — the files are still on disk.
             logger.warning("[Startup] Atomic staging reconciliation failed: %s", _recover_err)
+
+        # Albums published from staging before the ledger followed them left
+        # track_downloads / library_history rows naming a staging folder that no
+        # longer exists. Point them at where the files went (idempotent).
+        try:
+            from core.downloads.atomic_recovery import repair_staged_path_records
+            repair_staged_path_records(get_database())
+        except Exception as _repair_err:
+            logger.warning("[Startup] Staged-path repair failed: %s", _repair_err)
 
         # Start simple background monitor when server starts
         logger.info("Starting simple background monitor...")

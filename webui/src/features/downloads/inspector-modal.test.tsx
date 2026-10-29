@@ -163,6 +163,58 @@ describe('CandidateInspectorModal', () => {
     );
   });
 
+  it('shows the length the server judged against in the wanted column', async () => {
+    vi.stubGlobal(
+      'fetch',
+      stream({
+        source: 'tidal',
+        expected_duration_ms: 212_000,
+        candidates: [],
+        rejected: [{ ...LIVE, duration: 206_000 }],
+        rejected_total: 1,
+      }),
+    );
+    render(<CandidateInspectorModal target={target()} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByText('Show 1 rejected'));
+    fireEvent.click(screen.getByText('Why?'));
+    const row = screen.getByText('Length').closest('tr')!;
+    expect(row.textContent).toContain('3:32');
+    expect(row.textContent).toContain('3:26');
+  });
+
+  it('a retyped title and artist search again, and the pick downloads as typed', async () => {
+    const fetchSpy = stream({ source: 'soulseek', candidates: [ACCEPTED] });
+    vi.stubGlobal('fetch', fetchSpy);
+    const t = target({ editable: true });
+    render(<CandidateInspectorModal target={t} onClose={vi.fn()} />);
+    await screen.findByText('Fade Into You.flac');
+    fireEvent.click(screen.getByText('Edit search'));
+    fireEvent.change(screen.getByLabelText('Artist'), { target: { value: 'Hope Sandoval' } });
+    fireEvent.click(screen.getByText('Search'));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    const [, init] = fetchSpy.mock.calls[1] as unknown as [string, { body: string }];
+    const body = JSON.parse(init.body);
+    expect(body).toEqual({ track_id: 'sp-fade', name: 'Fade Into You', artist: 'Hope Sandoval' });
+    expect(await screen.findByText('Hope Sandoval · downloads as typed')).toBeTruthy();
+
+    await screen.findByText('Fade Into You.flac');
+    fireEvent.click(screen.getByText('Download Selected'));
+    await waitFor(() =>
+      expect(t.onGrab).toHaveBeenCalledWith(expect.anything(), {
+        name: 'Fade Into You',
+        artist: 'Hope Sandoval',
+      }),
+    );
+  });
+
+  it('has no edit button unless the target allows it', async () => {
+    vi.stubGlobal('fetch', stream({ source: 'soulseek', candidates: [ACCEPTED] }));
+    render(<CandidateInspectorModal target={target()} onClose={vi.fn()} />);
+    await screen.findByText('Fade Into You.flac');
+    expect(screen.queryByText('Edit search')).toBeNull();
+  });
+
   it('shows the inspection date and the ladder rung from the streamed payload', async () => {
     vi.stubGlobal(
       'fetch',
@@ -296,5 +348,60 @@ describe('the host and its entry points', () => {
       size: 33_000_000,
     });
     expect(calls[1].body.override).toBeUndefined();
+  });
+});
+
+describe('row name hover text', () => {
+  it('shows the song name, not the dispatch key, for a keyed row', async () => {
+    const KEYED = {
+      display_name: 'Christmas in July',
+      filename: '1207415400||https://soundcloud.com/u/christmas-in-july||Christmas in July',
+      username: 'soundcloud',
+      source_service: 'soundcloud',
+      confidence: 0.8,
+      size_display: '0.0 MB',
+      decision: { accepted: true, code: 'accepted', stage: 'decision', detail: '', score: 0.8 },
+    };
+    vi.stubGlobal('fetch', stream({ source: 'soundcloud', candidates: [KEYED] }));
+    render(<CandidateInspectorModal target={target()} onClose={vi.fn()} />);
+    const name = await screen.findByText('Christmas in July');
+    expect(name.getAttribute('title')).toBe('Christmas in July');
+  });
+
+  it('still shows the full remote path for a peer row whose folder contains ||', async () => {
+    const PEER_KEYED_PATH = {
+      ...ACCEPTED,
+      filename: 'Music||Flac/04 - Fade Into You.flac',
+      source_service: 'soulseek',
+    };
+    vi.stubGlobal('fetch', stream({ source: 'soulseek', candidates: [PEER_KEYED_PATH] }));
+    render(<CandidateInspectorModal target={target()} onClose={vi.fn()} />);
+    const name = await screen.findByText('Fade Into You.flac');
+    expect(name.getAttribute('title')).toBe('Music||Flac/04 - Fade Into You.flac');
+  });
+
+  it('still shows the full remote path for a peer row', async () => {
+    vi.stubGlobal('fetch', stream({ source: 'soulseek', candidates: [ACCEPTED] }));
+    render(<CandidateInspectorModal target={target()} onClose={vi.fn()} />);
+    const name = await screen.findByText('Fade Into You.flac');
+    expect(name.getAttribute('title')).toBe('Mazzy Star/So Tonight/04 - Fade Into You.flac');
+  });
+});
+
+describe('row name hover for release sources', () => {
+  it('shows the release title, not the store token, whatever the source label says', async () => {
+    const RELEASE = {
+      display_name: 'So Tonight That I Might See [FLAC]',
+      filename: 'tok123||So Tonight That I Might See [FLAC]',
+      username: 'torrent',
+      source_service: 'hybrid',
+      confidence: 0.9,
+      size_display: '400 MB',
+      decision: { accepted: true, code: 'accepted', stage: 'decision', detail: '', score: 0.9 },
+    };
+    vi.stubGlobal('fetch', stream({ source: 'torrent', candidates: [RELEASE] }));
+    render(<CandidateInspectorModal target={target()} onClose={vi.fn()} />);
+    const name = await screen.findByText('So Tonight That I Might See [FLAC]');
+    expect(name.getAttribute('title')).toBe('So Tonight That I Might See [FLAC]');
   });
 });

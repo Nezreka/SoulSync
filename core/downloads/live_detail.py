@@ -14,6 +14,8 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, Optional
 
+from core.downloads.candidate_pool import display_name_for
+
 # username → display label. Streaming plugins use the source name as the
 # transfer username; anything else is a Soulseek peer. Shared with the
 # history writer (core/imports/side_effects.py) so a live row and its later
@@ -47,8 +49,11 @@ def resolve_source_label(username: Optional[str]) -> str:
     return SOURCE_LABELS.get(username, "Soulseek")
 
 
-def _basename(path: Any) -> str:
-    return str(path or "").replace("\\", "/").rsplit("/", 1)[-1]
+def _task_filename(task: Dict[str, Any]) -> str:
+    """The name to show for a task's file: a streaming source's filename is
+    a dispatch key (`id||name`), so decode it the inspector way (#1911);
+    a peer's real path keeps the basename rule."""
+    return display_name_for(task.get("filename"), str(task.get("username") or ""))
 
 
 def _add_shared_history(detail: Dict[str, Any], task: Dict[str, Any]) -> None:
@@ -101,7 +106,7 @@ def build_live_detail(task: Dict[str, Any], live_info: Optional[Dict[str, Any]],
                 detail["username"] = str(username)
             filename = task.get("filename")
             if filename:
-                detail["filename"] = _basename(filename)
+                detail["filename"] = _task_filename(task)
             picked = task.get("picked_candidate")
             if isinstance(picked, dict):
                 detail["picked"] = picked

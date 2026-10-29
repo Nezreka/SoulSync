@@ -89,6 +89,17 @@ The chain editor lives on the Downloads tab: drag sources from **Available** int
 > [!WARNING]
 > In Docker, all three must be **container paths** — the compose defaults are \`/app/downloads\`, \`/app/Transfer\`, and \`/app/Staging\`. Map your host folders to those in the compose file.
 
+Every folder on the Folders card is checked as you type, with one line under it:
+
+- **Ready**, with the free space left on that drive.
+- **Doesn't exist yet**: SoulSync creates it on first use.
+- **Can't write here**: check the folder's owner, or \`PUID\` / \`PGID\` in Docker.
+- **A Windows path in Docker**, or **the same folder as another row**.
+- **Inside your download folder** (or the other way round): keep downloads and libraries side by side, not nested, or half-finished files get scanned.
+- **Not on a mapped volume** (Docker): files there live inside the container and are lost when it's recreated.
+
+The Video tab adds optional **4K libraries** (see [Video: 4K libraries](#vid-sources)) and, in Docker, the compose volume lines for every folder you've set, ready to copy.
+
 ## Behavior
 
 These live on other tabs, not Downloads:

@@ -17,10 +17,13 @@ Template tokens
   Movies:   $title $titlefirst $year $quality $resolution $source $codec $edition
             $tmdbid $imdbid
   Episodes: $series $season $seasonraw $episode $episodetitle $year $quality
-            $resolution $source $codec $tvdbid $airdate
+            $resolution $source $codec $tmdbid $imdbid $tvdbid $airdate
+            (an episode's ids are its SHOW's)
   ($season/$episode are zero-padded to 2; $seasonraw is the bare number; a
   multi-episode file renders its span through $episode — 'S01E01-E02'; $airdate
-  is the episode's YYYY-MM-DD air date, for daily-show naming.)
+  is the episode's YYYY-MM-DD air date, for daily-show naming. An id that isn't
+  known renders empty, and a brace group it leaves empty -- '{imdb-}', '{}' --
+  is dropped like an empty '()' or '[]'.)
 
 Pure data + a pure renderer (no DB, no FS) so it's unit-tested in isolation. Isolated —
 stdlib + sibling video ``library_paths`` only; nothing from the music side.
@@ -255,6 +258,12 @@ def _plausible_year(v: Any) -> bool:
         return False
 
 
+def _imdb(v: Any) -> str:
+    """An IMDb id as 'tt1234567' (a bare number gains its 'tt'); '' if none."""
+    t = _str(v).strip()
+    return "tt" + t if t.isdigit() else t
+
+
 def _ext(ext: Any) -> str:
     e = str(ext or "").strip().lower()
     if not e:
@@ -274,7 +283,7 @@ def _movie_values(f: dict) -> dict:
         "codec": _str(f.get("codec")).upper(),
         "edition": _str(f.get("edition")),
         "tmdbid": _str(f.get("tmdbid")),
-        "imdbid": _str(f.get("imdbid")),
+        "imdbid": _imdb(f.get("imdbid")),
     }
 
 
@@ -299,6 +308,8 @@ def _episode_values(f: dict) -> dict:
         "resolution": _str(f.get("resolution")),
         "source": source_label(f.get("source")),
         "codec": _str(f.get("codec")).upper(),
+        "tmdbid": _str(f.get("tmdbid")),
+        "imdbid": _imdb(f.get("imdbid")),
         "tvdbid": _str(f.get("tvdbid")),
     }
 
@@ -341,14 +352,44 @@ def render_template(template: Any, values: dict) -> str:
 
 def _tidy_component(part: str) -> str:
     """Clean one path segment: drop a ' - ' left dangling by an empty token, remove
-    empty ()/[] left by an empty $year, collapse whitespace, trim stray dashes and
-    Windows-hostile trailing dots/spaces."""
-    p = re.sub(r"\s+-\s+(?=(\s|$))", " ", part)   # ' - ' before an empty token
+    empty ()/[] left by an empty $year and an empty {}/{imdb-} left by an empty id,
+    collapse whitespace, trim stray dashes and Windows-hostile trailing dots/spaces."""
+    p = re.sub(r"\{\s*(?:[A-Za-z]+-)?\s*\}", "", part)   # '{imdb-}' / '{}' from an empty id
+    p = re.sub(r"\s+-\s+(?=(\s|$))", " ", p)   # ' - ' before an empty token
     p = re.sub(r"\(\s*\)", "", p)                 # empty ( ) from a missing $year
     p = re.sub(r"\[\s*\]", "", p)
+    # a title that already ends in a year ("Treasure Island (2026)", "Battlestar
+    # Galactica (2003)", as Plex names them) followed by $year: the title's own
+    # year is part of its name, so it stays and the appended one goes
+    p = re.sub(r"\((\d{4})\)(?:\s*\(\d{4}\))+", r"(\1)", p)
     p = re.sub(r"\s+", " ", p).strip()
     p = p.strip("-").strip()
     return p.rstrip(". ")
+
+
+_SERIES_TOKEN = re.compile(r"\$(?:\{series\}|series(?![A-Za-z0-9_]))")
+
+
+def episode_folders_below_series(settings: Any, fields: dict) -> list | None:
+    """The episode template's folders BELOW the series folder, rendered and tidied
+    for ``fields`` (the default template gives ['Season 03']). None when no
+    folder segment of the template carries $series, i.e. there is no series
+    folder to place a new episode under. The file name is never included."""
+    settings = settings if isinstance(settings, dict) else {}
+    tmpl = settings.get("episode_template") or DEFAULTS["episode_template"]
+    folders = str(tmpl).split("/")[:-1]
+    # the FIRST folder naming the series is the series folder: a season folder
+    # may repeat the name ('Firefly/Firefly Season 1/') and must not be taken for it
+    idx = next((i for i, seg in enumerate(folders) if _SERIES_TOKEN.search(seg)), None)
+    if idx is None:
+        return None
+    values = _episode_values(fields if isinstance(fields, dict) else {})
+    out = []
+    for seg in folders[idx + 1:]:
+        part = _tidy_component(render_template(seg, values))
+        if part:
+            out.append(part)
+    return out
 
 
 def render_path(scope: Any, root: Any, fields: dict, settings: Any, ext: Any) -> dict:
@@ -390,5 +431,5 @@ def render_path(scope: Any, root: Any, fields: dict, settings: Any, ext: Any) ->
 
 __all__ = [
     "DEFAULTS", "default_settings", "normalize", "load", "save",
-    "render_template", "render_path",
+    "render_template", "render_path", "episode_folders_below_series",
 ]

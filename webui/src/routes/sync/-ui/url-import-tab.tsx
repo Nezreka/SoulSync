@@ -1,8 +1,16 @@
 /**
  * The four URL-import tabs (deezer-link 2706, spotify-public 6611,
- * itunes-link 7633, youtube 8806 — sync-services.js): paste a link, parse it
- * into a card, auto-mirror, keep a Recent-URLs pill bar, and run the shared
- * discover→sync→download vertical from the card.
+ * itunes-link 7633, youtube 8806 — sync-services.js): paste a link and it's
+ * imported. The tab loads it, saves it as a mirror (which starts identifying
+ * it in the background) and lands you on it under Mirrored, where a playlist
+ * is managed. The cards below are what you've pasted before: each opens its
+ * playlist, or imports it if it never made it in. A Recent-URLs pill bar
+ * re-pastes a link.
+ *
+ * The cards used to run their own identify→sync→download vertical, a second
+ * home for the same playlist the Mirrored tab already managed (#1910's
+ * follow-up). The notes below describe that older card flow where the shared
+ * helpers still serve the Mirrored tab.
  *
  * Declared divergences (the P5a pattern): card clicks open the React
  * DiscoveryModal for every phase — the vanilla's downloading/download_complete
@@ -19,6 +27,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { ImportSpec } from '../-sync.importer';
 import type { SourceVerticalConfig } from '../-sync.sources';
 import type { UrlTabPlaylist } from '../-sync.url-tabs';
 import type { SourceVertical } from '../-sync.use-vertical';
@@ -31,16 +40,12 @@ import {
   parseITunesLinkUrl,
   parseSpotifyPublicUrl,
   parseYouTubeUrl,
-  postMirrorPlaylist,
 } from '../-sync.api';
 import {
   DEEZER_PLAYLIST_PROGRESS_EVENT,
   type DeezerPlaylistProgressFrame,
   deezerProgressLabel,
 } from '../-sync.events';
-import { buildMirrorPayload } from '../-sync.import';
-import { SYNC_SOURCES } from '../-sync.sources';
-import { freshSourceState } from '../-sync.state';
 import {
   asString,
   deezerAlreadyLoaded,
@@ -59,16 +64,13 @@ import {
   youtubeAlreadyLoaded,
   youtubeMirrorTracks,
   youtubeUrlError,
-  ytActionButtonText,
-  ytProgressVisible,
 } from '../-sync.url-tabs';
 import { URL_HISTORY_SOURCES } from '../-sync.urls';
-import { fetchAndHydrateState } from '../-sync.use-vertical';
-import { cardProgressLine } from './card-progress';
+import { ImportCard, ImportGrid } from './import-card';
 import { playlistArtUrl } from './playlist-art';
 import { PlaylistSearch, noMatchText, playlistNameMatches } from './playlist-search';
-import { SourceCard } from './source-card';
 import { UrlHistoryBar, useUrlHistory } from './url-history-bar';
+import { useImporter, type Importer } from './use-importer';
 
 /* ── Shared pieces ────────────────────────────────────────────────────────── */
 
@@ -111,58 +113,6 @@ function UrlInputSection({
         {busyLabel !== null && busy ? busyLabel : buttonLabel}
       </button>
     </div>
-  );
-}
-
-/**
- * The card-open flow every URL tab shares (handleDeezerCardClick 2835-2901
- * and its clones): ensure a seeded state, refetch the full backend state when
- * a 'discovered' card lost its results, then open the shared modal.
- */
-export function useUrlCardOpen(
-  config: SourceVerticalConfig,
-  vertical: SourceVertical,
-  setOpenId: (id: string) => void,
-): (sourceId: string, playlist: UrlTabPlaylist) => Promise<void> {
-  return useCallback(
-    async (sourceId, playlist) => {
-      const existing = vertical.states[sourceId];
-      if (!existing) vertical.seed(sourceId, playlist);
-      if (existing && existing.phase === 'discovered' && existing.rawResults.length === 0) {
-        // The vanilla refetches /api/<src>/state/<id> here (2862-2878); the
-        // backend row carries no playlist object, so it is re-attached.
-        await fetchAndHydrateState(config, sourceId, (sid, backend) =>
-          vertical.hydrate(sid, { ...backend, playlist: backend.playlist ?? playlist }),
-        );
-      }
-      setOpenId(sourceId);
-    },
-    [config, vertical, setOpenId],
-  );
-}
-
-/**
- * YouTube's drift (handleYouTubeCardClick 9047-9054): a FRESH card click
- * starts discovery immediately AND opens the modal — the other verticals wait
- * for the modal's Start Discovery button.
- */
-export function useYouTubeCardOpen(
-  vertical: SourceVertical,
-  setOpenId: (id: string) => void,
-): (sourceId: string, playlist: UrlTabPlaylist) => Promise<void> {
-  const openShared = useUrlCardOpen(SYNC_SOURCES.youtube, vertical, setOpenId);
-  return useCallback(
-    async (sourceId, playlist) => {
-      const existing = vertical.states[sourceId];
-      if (!existing || existing.phase === 'fresh') {
-        if (!existing) vertical.seed(sourceId, playlist);
-        void vertical.startDiscovery(sourceId);
-        setOpenId(sourceId);
-        return;
-      }
-      await openShared(sourceId, playlist);
-    },
-    [vertical, setOpenId, openShared],
   );
 }
 
@@ -258,10 +208,9 @@ function usePendingUrl(
 
 function LinkTabShell({
   chrome,
-  config,
-  vertical,
   playlists,
-  idOf,
+  specOf,
+  importer,
   cardIcon,
   typeBadge,
   input,
@@ -270,14 +219,13 @@ function LinkTabShell({
   busyLabel,
   parse,
   isAlreadyLoaded,
-  onOpen,
   historyOps,
 }: {
   chrome: LinkTabChrome;
-  config: SourceVerticalConfig;
-  vertical: SourceVertical;
   playlists: UrlTabPlaylist[];
-  idOf: (p: UrlTabPlaylist) => string;
+  /** How one of these imports (its mirror key, tracks and track shape). */
+  specOf: (p: UrlTabPlaylist) => ImportSpec;
+  importer: Importer;
   cardIcon: (p: UrlTabPlaylist) => string;
   typeBadge?: (p: UrlTabPlaylist) => { text: string; color: string };
   input: string;
@@ -286,8 +234,8 @@ function LinkTabShell({
   busyLabel?: string | null;
   busy: boolean;
   parse: (url: string) => void;
-  isAlreadyLoaded: (url: string) => boolean;
-  onOpen: (sourceId: string, playlist: UrlTabPlaylist) => void;
+  /** The pasted playlist already on a card: opens it rather than loading it again. */
+  isAlreadyLoaded: (url: string) => UrlTabPlaylist | undefined;
   historyOps: ReturnType<typeof useUrlHistory>;
 }) {
   const [query, setQuery] = useState('');
@@ -309,8 +257,9 @@ function LinkTabShell({
         icon={URL_HISTORY_SOURCES[chrome.historySource].icon}
         history={historyOps.history}
         onPick={(url) => {
-          if (isAlreadyLoaded(url)) {
-            window.showToast?.('This playlist is already loaded', 'info');
+          const loaded = isAlreadyLoaded(url);
+          if (loaded) {
+            void importer.importOrOpen(specOf(loaded));
             return;
           }
           setInput(url);
@@ -329,48 +278,61 @@ function LinkTabShell({
         ) : !playlists.some((p) => playlistNameMatches([p.name], query)) ? (
           <div className="playlist-placeholder">{noMatchText(query)}</div>
         ) : (
-          playlists.map((p) => {
-            if (!playlistNameMatches([p.name], query)) return null;
-            const id = idOf(p);
-            const state = vertical.states[id] ?? freshSourceState(config, id);
-            const trackCount =
-              (p.track_count as number | undefined) ||
-              (Array.isArray(p.tracks) ? (p.tracks as unknown[]).length : 0);
-            return (
-              <SourceCard
-                key={id}
-                id={`${chrome.cardIdPrefix}-${id}`}
-                cardClassName={chrome.cardClassName}
-                icon={cardIcon(p)}
-                artUrl={playlistArtUrl(p)}
-                name={asString(p.name)}
-                countText={`${trackCount} tracks`}
-                phase={state.phase}
-                typeBadge={typeBadge?.(p)}
-                progressLine={cardProgressLine(state, config)}
-                onClick={() => onOpen(id, p)}
-              />
-            );
-          })
+          <ImportGrid>
+            {playlists.map((p) => {
+              if (!playlistNameMatches([p.name], query)) return null;
+              const spec = specOf(p);
+              const trackCount =
+                (p.track_count as number | undefined) ||
+                (Array.isArray(p.tracks) ? (p.tracks as unknown[]).length : 0);
+              return (
+                <ImportCard
+                  key={String(spec.sourceId)}
+                  id={`${chrome.cardIdPrefix}-${String(spec.sourceId)}`}
+                  name={asString(p.name)}
+                  meta={`${trackCount} track${trackCount === 1 ? '' : 's'}`}
+                  artUrl={playlistArtUrl(p)}
+                  glyph={cardIcon(p)}
+                  badge={typeBadge?.(p).text}
+                  status={importer.statusOf(spec.source, spec.sourceId)}
+                  onAction={() => void importer.importOrOpen(spec)}
+                  onCopy={importer.copyAsMineFor(spec)}
+                  copying={importer.copyingOf(spec.source, spec.sourceId)}
+                />
+              );
+            })}
+          </ImportGrid>
         )}
       </div>
     </div>
   );
 }
 
+/** What importing a pasted Deezer playlist takes. Exported for the tests. */
+export function deezerLinkSpec(playlist: UrlTabPlaylist, url?: string): ImportSpec {
+  return {
+    source: 'deezer',
+    sourceId: String(playlist.id),
+    name: asString(playlist.name),
+    owner: playlist.owner as string | undefined,
+    imageUrl: playlist.image_url as string | undefined,
+    description: url ?? (playlist.url as string | undefined),
+    loadTracks: async () => ({
+      tracks: Array.isArray(playlist.tracks) ? (playlist.tracks as unknown[]) : [],
+    }),
+    toMirrorTracks: deezerMirrorTracks,
+  };
+}
+
 export function DeezerLinkTab({
-  vertical,
-  onOpen,
   pendingUrl,
   onPendingConsumed,
 }: {
-  vertical: SourceVertical;
-  onOpen: (sourceId: string, playlist: UrlTabPlaylist) => void;
   /** A link routed here by the Add-playlist sheet. */
   pendingUrl?: string;
   onPendingConsumed?: () => void;
-}) {
-  const config = SYNC_SOURCES.deezer;
+} = {}) {
+  const importer = useImporter();
   // Survives leaving /sync — see useRememberedPlaylists.
   const [playlists, setPlaylists] = useRememberedPlaylists(urlTabCacheKey('deezer'));
   const [input, setInput] = useState('');
@@ -391,8 +353,10 @@ export function DeezerLinkTab({
         return;
       }
       if (deezerAlreadyLoaded(playlistsRef.current, checked.id)) {
-        window.showToast?.('This playlist is already loaded', 'info');
+        // pasted again: open it (or import it, if it never made it in)
+        const loaded = playlistsRef.current.find((p) => String(p.id) === String(checked.id));
         setInput('');
+        if (loaded) await importer.importOrOpen(deezerLinkSpec(loaded));
         return;
       }
       setBusy(true);
@@ -415,34 +379,14 @@ export function DeezerLinkTab({
       window.addEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT, onProgress);
       try {
         const playlist = await fetchDeezerLinkPlaylist(checked.id);
-        setPlaylists((prev) => [...prev, playlist]);
-        const tracks = Array.isArray(playlist.tracks) ? (playlist.tracks as unknown[]) : [];
-        if (tracks.length > 0) {
-          // Fire-and-forget, like the vanilla's mirrorPlaylist call (2756).
-          void postMirrorPlaylist(
-            buildMirrorPayload(
-              'deezer',
-              playlist.id as string | number,
-              asString(playlist.name),
-              deezerMirrorTracks(tracks),
-              {
-                owner: playlist.owner as string | undefined,
-                image_url: playlist.image_url as string | undefined,
-                description: rawUrl,
-              },
-            ),
-          ).catch(() => undefined);
-        }
+        setPlaylists((prev) => [...prev, { ...playlist, url: rawUrl }]);
         historyOps.save(rawUrl, asString(playlist.name));
-        vertical.seed(String(playlist.id), playlist);
-        await hydrateStatesForLoaded(config, vertical, (pid) =>
-          [...playlistsRef.current, playlist].find((p) => String(p.id) === pid),
-        );
         setInput('');
-        window.showToast?.(
-          `Deezer playlist loaded: ${asString(playlist.name)} (${(playlist.track_count as number) || tracks.length} tracks)`,
-          'success',
-        );
+        window.removeEventListener(DEEZER_PLAYLIST_PROGRESS_EVENT, onProgress);
+        window.hideLoadingOverlay?.();
+        // loaded is imported: saved as a mirror, identifying in the
+        // background, and you land on it
+        await importer.importOrOpen(deezerLinkSpec(playlist, rawUrl));
       } catch (error) {
         window.showToast?.(
           `Error loading Deezer playlist: ${error instanceof Error ? error.message : 'unknown error'}`,
@@ -455,7 +399,7 @@ export function DeezerLinkTab({
         setBusy(false);
       }
     },
-    [config, vertical, historyOps],
+    [historyOps, importer],
   );
 
   usePendingUrl(pendingUrl, parse, onPendingConsumed);
@@ -473,10 +417,9 @@ export function DeezerLinkTab({
         cardIdPrefix: 'deezer-card',
         cardClassName: 'deezer-playlist-card',
       }}
-      config={config}
-      vertical={vertical}
       playlists={playlists}
-      idOf={(p) => String(p.id)}
+      specOf={(p) => deezerLinkSpec(p)}
+      importer={importer}
       cardIcon={() => '🎵'}
       input={input}
       setInput={setInput}
@@ -485,21 +428,39 @@ export function DeezerLinkTab({
       parse={(url) => void parse(url)}
       isAlreadyLoaded={(url) => {
         const checked = deezerInputResult(url);
-        return checked.ok ? deezerAlreadyLoaded(playlistsRef.current, checked.id) : false;
+        return checked.ok
+          ? playlistsRef.current.find((p) => String(p.id) === String(checked.id))
+          : undefined;
       }}
-      onOpen={onOpen}
       historyOps={historyOps}
     />
   );
 }
 
 /** The spotify-public/itunes-link clone pair, parameterized by their drift. */
+/** What importing a pasted Spotify / iTunes link takes. Exported for the tests. */
+export function publicLinkSpec(
+  source: string,
+  result: UrlTabPlaylist,
+  mirrorTracks: (tracks: unknown[]) => Record<string, unknown>[],
+): ImportSpec {
+  return {
+    source,
+    sourceId: String(result.url_hash),
+    name: asString(result.name),
+    owner: (result.subtitle as string | undefined) || '',
+    imageUrl: '',
+    description: (result.url as string | undefined) || '',
+    loadTracks: async () => ({
+      tracks: Array.isArray(result.tracks) ? (result.tracks as unknown[]) : [],
+    }),
+    toMirrorTracks: mirrorTracks,
+  };
+}
+
 function PublicLinkTab({
-  vertical,
-  onOpen,
   pendingUrl,
   onPendingConsumed,
-  config,
   chrome,
   validateError,
   alreadyLoaded,
@@ -510,12 +471,9 @@ function PublicLinkTab({
   cardIcon,
   typeBadge,
 }: {
-  vertical: SourceVertical;
-  onOpen: (sourceId: string, playlist: UrlTabPlaylist) => void;
   /** A link routed here by the Add-playlist sheet. */
   pendingUrl?: string;
   onPendingConsumed?: () => void;
-  config: SourceVerticalConfig;
   chrome: LinkTabChrome;
   validateError: (url: string) => string | null;
   alreadyLoaded: (playlists: UrlTabPlaylist[], url: string) => boolean;
@@ -527,12 +485,26 @@ function PublicLinkTab({
   cardIcon: (p: UrlTabPlaylist) => string;
   typeBadge: (p: UrlTabPlaylist) => { text: string; color: string };
 }) {
+  const importer = useImporter();
   const [playlists, setPlaylists] = useRememberedPlaylists(urlTabCacheKey(chrome.historySource));
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const historyOps = useUrlHistory(chrome.historySource);
   const playlistsRef = useRef(playlists);
   playlistsRef.current = playlists;
+  const specOf = useCallback(
+    (p: UrlTabPlaylist) => publicLinkSpec(mirrorSource, p, mirrorTracks),
+    [mirrorSource, mirrorTracks],
+  );
+  // a pasted link whose playlist is already on a card. compared the way
+  // alreadyLoaded does, so both agree on what "the same link" means
+  const loadedFor = useCallback(
+    (url: string) =>
+      alreadyLoaded(playlistsRef.current, url)
+        ? playlistsRef.current.find((p) => alreadyLoaded([p], url))
+        : undefined,
+    [alreadyLoaded],
+  );
 
   const parse = useCallback(
     async (url: string) => {
@@ -541,9 +513,10 @@ function PublicLinkTab({
         window.showToast?.(invalid, 'error');
         return;
       }
-      if (alreadyLoaded(playlistsRef.current, url)) {
-        window.showToast?.('This playlist is already loaded', 'info');
+      const loaded = loadedFor(url);
+      if (loaded) {
         setInput('');
+        await importer.importOrOpen(specOf(loaded));
         return;
       }
       setBusy(true);
@@ -553,38 +526,17 @@ function PublicLinkTab({
           window.showToast?.(`Error: ${asString(result.error)}`, 'error');
           return;
         }
-        if (playlistsRef.current.find((p) => String(p.url_hash) === String(result.url_hash))) {
-          window.showToast?.('This playlist is already loaded', 'info');
-          setInput('');
+        const same = playlistsRef.current.find(
+          (p) => String(p.url_hash) === String(result.url_hash),
+        );
+        setInput('');
+        if (same) {
+          await importer.importOrOpen(specOf(same));
           return;
         }
         setPlaylists((prev) => [...prev, result]);
-        const tracks = Array.isArray(result.tracks) ? (result.tracks as unknown[]) : [];
-        if (tracks.length > 0) {
-          void postMirrorPlaylist(
-            buildMirrorPayload(
-              mirrorSource,
-              String(result.url_hash),
-              asString(result.name),
-              mirrorTracks(tracks),
-              {
-                owner: (result.subtitle as string | undefined) || '',
-                image_url: '',
-                description: (result.url as string | undefined) || '',
-              },
-            ),
-          ).catch(() => undefined);
-        }
         historyOps.save(url, asString(result.name));
-        vertical.seed(String(result.url_hash), result);
-        await hydrateStatesForLoaded(config, vertical, (pid) =>
-          [...playlistsRef.current, result].find((p) => String(p.url_hash) === pid),
-        );
-        setInput('');
-        window.showToast?.(
-          `Loaded: ${asString(result.name)} (${String(result.track_count as number | undefined)} tracks)`,
-          'success',
-        );
+        await importer.importOrOpen(specOf(result));
       } catch (error) {
         window.showToast?.(
           `Error parsing ${errorNoun} URL: ${error instanceof Error ? error.message : 'unknown error'}`,
@@ -594,17 +546,7 @@ function PublicLinkTab({
         setBusy(false);
       }
     },
-    [
-      config,
-      vertical,
-      historyOps,
-      validateError,
-      alreadyLoaded,
-      callParse,
-      mirrorSource,
-      mirrorTracks,
-      errorNoun,
-    ],
+    [historyOps, validateError, loadedFor, callParse, errorNoun, importer, specOf],
   );
 
   usePendingUrl(pendingUrl, parse, onPendingConsumed);
@@ -612,34 +554,31 @@ function PublicLinkTab({
   return (
     <LinkTabShell
       chrome={chrome}
-      config={config}
-      vertical={vertical}
       playlists={playlists}
-      idOf={(p) => String(p.url_hash)}
+      specOf={specOf}
+      importer={importer}
       cardIcon={cardIcon}
       typeBadge={typeBadge}
       input={input}
       setInput={setInput}
       busy={busy}
       parse={(url) => void parse(url)}
-      isAlreadyLoaded={(url) => alreadyLoaded(playlistsRef.current, url)}
-      onOpen={onOpen}
+      isAlreadyLoaded={loadedFor}
       historyOps={historyOps}
     />
   );
 }
 
-export function SpotifyPublicTab(props: {
-  vertical: SourceVertical;
-  onOpen: (sourceId: string, playlist: UrlTabPlaylist) => void;
-  /** A link routed here by the Add-playlist sheet. */
-  pendingUrl?: string;
-  onPendingConsumed?: () => void;
-}) {
+export function SpotifyPublicTab(
+  props: {
+    /** A link routed here by the Add-playlist sheet. */
+    pendingUrl?: string;
+    onPendingConsumed?: () => void;
+  } = {},
+) {
   return (
     <PublicLinkTab
       {...props}
-      config={SYNC_SOURCES.spotify_public}
       chrome={{
         historySource: 'spotify-public',
         inputId: 'spotify-public-url-input',
@@ -664,17 +603,16 @@ export function SpotifyPublicTab(props: {
   );
 }
 
-export function ITunesLinkTab(props: {
-  vertical: SourceVertical;
-  onOpen: (sourceId: string, playlist: UrlTabPlaylist) => void;
-  /** A link routed here by the Add-playlist sheet. */
-  pendingUrl?: string;
-  onPendingConsumed?: () => void;
-}) {
+export function ITunesLinkTab(
+  props: {
+    /** A link routed here by the Add-playlist sheet. */
+    pendingUrl?: string;
+    onPendingConsumed?: () => void;
+  } = {},
+) {
   return (
     <PublicLinkTab
       {...props}
-      config={SYNC_SOURCES.itunes_link}
       chrome={{
         historySource: 'itunes-link',
         inputId: 'itunes-link-url-input',
@@ -700,19 +638,29 @@ export function ITunesLinkTab(props: {
 
 /* ── The YouTube tab ──────────────────────────────────────────────────────── */
 
+/** What importing a pasted YouTube playlist takes. Exported for the tests. */
+export function youtubeSpec(playlist: UrlTabPlaylist): ImportSpec {
+  return {
+    source: 'youtube',
+    sourceId: String(playlist.url_hash),
+    name: asString(playlist.name),
+    description: (playlist.url as string | undefined) || '',
+    loadTracks: async () => ({
+      tracks: Array.isArray(playlist.tracks) ? (playlist.tracks as unknown[]) : [],
+    }),
+    toMirrorTracks: youtubeMirrorTracks,
+  };
+}
+
 export function YouTubeTab({
-  vertical,
-  onOpen,
   pendingUrl,
   onPendingConsumed,
 }: {
-  vertical: SourceVertical;
-  onOpen: (sourceId: string, playlist: UrlTabPlaylist) => void;
   /** A link routed here by the Add-playlist sheet. */
   pendingUrl?: string;
   onPendingConsumed?: () => void;
-}) {
-  const config = SYNC_SOURCES.youtube;
+} = {}) {
+  const importer = useImporter();
   const [playlists, setPlaylists] = useRememberedPlaylists(urlTabCacheKey('youtube'));
   /** In-flight parses — each renders the vanilla's temp 'Parsing…' card (8879). */
   const [pendingUrls, setPendingUrls] = useState<string[]>([]);
@@ -729,9 +677,8 @@ export function YouTubeTab({
     [],
   );
 
-  /** loadYouTubePlaylistsFromBackend (sync-spotify.js 695) — restore stored
-   * playlists + their states on mount; non-fresh/discovering rows also pull
-   * the full per-hash state for their discovery results. */
+  /** loadYouTubePlaylistsFromBackend (sync-spotify.js 695): the playlists
+   * the server still holds from earlier pastes come back as cards. */
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -747,17 +694,6 @@ export function YouTubeTab({
               ? prev
               : [...prev, { ...playlist, url_hash: urlHash }],
           );
-          vertical.hydrate(urlHash, { ...info, playlist });
-          const phase = asString(info.phase, 'fresh') || 'fresh';
-          if (phase !== 'fresh' && phase !== 'discovering') {
-            await fetchAndHydrateState(config, urlHash, (sid, backend) =>
-              vertical.hydrate(sid, { ...info, ...backend, playlist }),
-            );
-          }
-          // The vanilla resumed in-flight YT work via checkForActiveProcesses
-          // → rehydrateYouTubePlaylist (sync-spotify.js 1507-1513); here the
-          // vertical's own pollers are the guaranteed path.
-          resumeIfInFlight(vertical, urlHash, phase);
         }
       } catch {
         // Best-effort, like the vanilla's console-only catch.
@@ -778,8 +714,11 @@ export function YouTubeTab({
         return;
       }
       if (youtubeAlreadyLoaded(loadedUrls(), url)) {
-        window.showToast?.('This playlist is already loaded', 'info');
+        // pasted again: open the one already here (or import it, if it never
+        // made it in). one still parsing just waits for its own import
+        const loaded = playlistsRef.current.find((p) => asString(p.url) === url);
         setInput('');
+        if (loaded) await importer.importOrOpen(youtubeSpec(loaded));
         return;
       }
       // The temp card appears immediately (createYouTubeCard 8832).
@@ -792,26 +731,14 @@ export function YouTubeTab({
         }
         const raw = result as Record<string, unknown>;
         const urlHash = asString(raw.url_hash);
-        const tracks = Array.isArray(raw.tracks) ? (raw.tracks as unknown[]) : [];
         historyOps.save(url, asString(raw.name));
         // URL variants (youtube.com vs music.youtube.com) canonicalize to the
         // SAME url_hash server-side — never append a duplicate card.
         setPlaylists((prev) =>
           prev.some((p) => String(p.url_hash) === urlHash) ? prev : [...prev, { ...raw, url }],
         );
-        vertical.seed(urlHash, { ...raw, url });
-        // Unconditional auto-mirror — the one parse head with no length guard
-        // (8861); album_name is always '' for YouTube tracks.
-        void postMirrorPlaylist(
-          buildMirrorPayload('youtube', urlHash, asString(raw.name), youtubeMirrorTracks(tracks), {
-            description: url,
-          }),
-        ).catch(() => undefined);
         setInput('');
-        window.showToast?.(
-          `YouTube playlist parsed: ${asString(raw.name)} (${tracks.length} tracks)`,
-          'success',
-        );
+        await importer.importOrOpen(youtubeSpec({ ...raw, url }));
       } catch (error) {
         window.showToast?.(
           `Error parsing YouTube playlist: ${error instanceof Error ? error.message : 'unknown error'}`,
@@ -822,7 +749,7 @@ export function YouTubeTab({
         setPendingUrls((prev) => prev.filter((u) => u !== url));
       }
     },
-    [config, vertical, historyOps, loadedUrls],
+    [historyOps, loadedUrls, importer],
   );
 
   usePendingUrl(pendingUrl, parse, onPendingConsumed);
@@ -868,32 +795,27 @@ export function YouTubeTab({
               !playlists.some((p) => playlistNameMatches([p.name], query)) && (
                 <div className="playlist-placeholder">{noMatchText(query)}</div>
               )}
-            {playlists.map((p) => {
-              if (!playlistNameMatches([p.name], query)) return null;
-              const urlHash = String(p.url_hash);
-              const state = vertical.states[urlHash] ?? freshSourceState(config, urlHash);
-              const tracks = Array.isArray(p.tracks) ? (p.tracks as unknown[]) : [];
-              return (
-                <SourceCard
-                  key={urlHash}
-                  id={`youtube-card-${urlHash}`}
-                  cardClassName=""
-                  icon="▶"
-                  iconClassName="youtube-icon"
-                  artUrl={playlistArtUrl(p)}
-                  name={asString(p.name)}
-                  countText={`${tracks.length} tracks`}
-                  phase={state.phase}
-                  buttonText={ytActionButtonText(state.phase)}
-                  // YouTube hides the element outside the running phases
-                  // (8988-9036) — inside them the shared line applies.
-                  progressLine={
-                    ytProgressVisible(state.phase) ? cardProgressLine(state, config) : null
-                  }
-                  onClick={() => onOpen(urlHash, p)}
-                />
-              );
-            })}
+            <ImportGrid>
+              {playlists.map((p) => {
+                if (!playlistNameMatches([p.name], query)) return null;
+                const urlHash = String(p.url_hash);
+                const tracks = Array.isArray(p.tracks) ? (p.tracks as unknown[]) : [];
+                return (
+                  <ImportCard
+                    key={urlHash}
+                    id={`youtube-card-${urlHash}`}
+                    name={asString(p.name)}
+                    meta={`${tracks.length} track${tracks.length === 1 ? '' : 's'}`}
+                    artUrl={playlistArtUrl(p)}
+                    glyph="▶"
+                    status={importer.statusOf('youtube', urlHash)}
+                    onAction={() => void importer.importOrOpen(youtubeSpec(p))}
+                    onCopy={importer.copyAsMineFor(youtubeSpec(p))}
+                    copying={importer.copyingOf('youtube', urlHash)}
+                  />
+                );
+              })}
+            </ImportGrid>
             {pendingUrls.map((url) => (
               <div className="youtube-playlist-card" key={url} data-url={url}>
                 <div className="playlist-card-icon youtube-icon">▶</div>
