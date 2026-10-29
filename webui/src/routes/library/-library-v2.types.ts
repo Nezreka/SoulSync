@@ -7,15 +7,13 @@ import { z } from 'zod';
 // Keeping it to one route (vs nested file routes) keeps the TanStack route tree
 // small and avoids codegen surprises while still giving the full drill-down UX.
 export const LIBRARY_V2_SORTS = ['name', 'added', 'albums', 'tracks'] as const;
+export const LIBRARY_V2_SONG_SORTS = ['title', 'artist', 'album', 'year', 'recent'] as const;
+export type LibraryV2SongSort = (typeof LIBRARY_V2_SONG_SORTS)[number];
 export type LibraryV2Sort = (typeof LIBRARY_V2_SORTS)[number];
 
 /** The album browse's orders (upstream's album view, A07). */
 export const LIBRARY_V2_ALBUM_SORTS = ['title', 'year_desc', 'year_asc', 'added'] as const;
 export type LibraryV2AlbumSort = (typeof LIBRARY_V2_ALBUM_SORTS)[number];
-
-/** The songs tab's orders (#1906); 'title' is A-Z. */
-export const LIBRARY_V2_SONG_SORTS = ['title', 'artist', 'album', 'year_desc', 'recent'] as const;
-export type LibraryV2SongSort = (typeof LIBRARY_V2_SONG_SORTS)[number];
 
 export const LIBRARY_V2_MONITOR_FILTERS = ['all', 'monitored', 'unmonitored'] as const;
 export type LibraryV2MonitorFilter = (typeof LIBRARY_V2_MONITOR_FILTERS)[number];
@@ -42,6 +40,15 @@ const libraryV2SearchObject = z.object({
   q: coercedString.default('').catch(''),
   sort: z.enum(LIBRARY_V2_SORTS).default('name').catch('name'),
   albumSort: z.enum(LIBRARY_V2_ALBUM_SORTS).default('title').catch('title'),
+  /** Songs (upstream #1906): sort, "Duplicates" and the lossless / could-be-better toggles. */
+  songSort: z.enum(LIBRARY_V2_SONG_SORTS).default('title').catch('title'),
+  /** only songs held more than once; an old bookmark's ?dupes=1 counts too */
+  dupes: z
+    .preprocess((v) => v === true || v === 1 || v === '1' || v === 'true', z.boolean())
+    .default(false)
+    .catch(false),
+  /** 'upgradable' (could be better; artists and songs) or 'lossless' (songs) */
+  quality: z.enum(['', 'lossless', 'upgradable']).default('').catch(''),
   view: z.enum(['table', 'cards', 'discovery']).default('cards').catch('cards'),
   monitored: z.enum(LIBRARY_V2_MONITOR_FILTERS).default('all').catch('all'),
   page: z.coerce.number().int().positive().default(1).catch(1),
@@ -75,15 +82,6 @@ const libraryV2SearchObject = z.object({
     .catch('all'),
   /** has / has no provider id: 'spotify' or '!spotify'; '' is everything */
   source: coercedString.default('').catch(''),
-  /** 'upgradable' (could be better; artists and songs) or 'lossless' (songs) */
-  quality: z.enum(['', 'lossless', 'upgradable']).default('').catch(''),
-  /** songs tab: only songs held more than once */
-  dupes: z
-    .preprocess((v) => v === true || v === 1 || v === '1' || v === 'true', z.boolean())
-    .default(false)
-    .catch(false),
-  /** songs tab order */
-  songSort: z.enum(LIBRARY_V2_SONG_SORTS).default('title').catch('title'),
 });
 
 /**
@@ -103,7 +101,9 @@ export function mapLegacyLibrarySearch(raw: unknown): unknown {
   const sort = typeof input.sort === 'string' ? input.sort : '';
   delete out.sort;
   if (section === 'songs') {
-    if (['artist', 'album', 'year_desc', 'recent'].includes(sort)) out.songSort = sort;
+    // the old page called newest-first year_desc; this one calls it year
+    if (sort === 'year_desc') out.songSort = 'year';
+    else if (['artist', 'album', 'recent'].includes(sort)) out.songSort = sort;
   } else if (section === 'albums') {
     if (sort === 'recent') out.albumSort = 'added';
     else if (sort === 'year_desc' || sort === 'year_asc') out.albumSort = sort;

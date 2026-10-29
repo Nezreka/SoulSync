@@ -24,7 +24,7 @@ import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-rout
 import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
-import { useReactPageShell } from '@/platform/shell/route-controllers';
+import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import { playLibraryV2ArtistRadio } from '../-artist-radio';
 import { bitrateKbps, formatBitrate } from '../-bitrate';
@@ -123,6 +123,16 @@ import { useLibraryChanged, useMaintenanceChanged } from '../-library-v2.live';
 import { albumQueueRows, artistQueueRows, playlistTrack, queueableRows } from '../-library-v2.play';
 import { getServiceUrl } from '../-library-v2.service-links';
 import {
+  fetchSongsToPlay,
+  type LibrarySearch,
+  type LibrarySong,
+  librarySongsQueryOptions,
+  PLAY_ALL_LIMIT,
+  readSongsResponse,
+  shuffled,
+  songQueueTrack,
+} from '../-library-v2.songs';
+import {
   LIBRARY_V2_WANTED_KINDS,
   type LibraryV2AlbumDetail,
   type LibraryV2AlbumListItem,
@@ -142,6 +152,8 @@ import {
   type LibraryV2QualityProfileSource,
   type LibraryV2QueueStatusAlbum,
   type LibraryV2QueueStatusEntry,
+  type LibraryV2Search,
+  type LibraryV2SongSort,
   type LibraryV2Track,
   type LibraryV2TrackFile,
   type LibraryV2TrackTableColumns,
@@ -149,6 +161,7 @@ import {
   type LibraryV2WantedRow,
 } from '../-library-v2.types';
 import { computeTrackEditValues } from '../-metadata-edit';
+import { announceWatchlistFollow } from '../../artist-detail/-artist-detail.enrich-match';
 import { syncResultMessage } from '../../artist-detail/-artist-detail.meta';
 import { AppearsOnSection } from '../../artist-detail/-ui/appears-on-section';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
@@ -182,11 +195,15 @@ import {
   LibraryRadioButton,
   LibrarySearchFallback,
   LibrarySearchInput,
-  LibrarySongsStripForSearch,
   LibrarySourceFilter,
   useUpgradableCounts,
 } from './library-index-extras';
-import { LibrarySongsSection } from './library-songs-section';
+import {
+  LibrarySongList,
+  LibrarySongSkeleton,
+  LibrarySongsStrip,
+  songsStripQueryOptions,
+} from './library-songs';
 import styles from './library-v2-page.module.css';
 import { AlbumUpgradeButton } from './owned-album-upgrade';
 import { useArrivalBack } from './owned-artist-back';
@@ -1468,7 +1485,9 @@ function ManualMatchModal({
           : {}),
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (outcome) => {
+      const note = announceWatchlistFollow({ updatedData: null, ...outcome }, service.service);
+      if (note) window.showToast?.(`Matched${note}`, 'success');
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
       onClose();
     },
@@ -4531,15 +4550,7 @@ export function LibraryV2Page() {
         ) : search.section === 'wanted' ? (
           <WantedIndexView />
         ) : search.section === 'songs' ? (
-          <LibrarySongsSection
-            canWrite={canWrite}
-            toolbarLead={
-              <>
-                <LibraryScopePicker />
-                <LibrarySectionTabs />
-              </>
-            }
-          />
+          <SongIndexView />
         ) : search.section === 'albums' ? (
           <AlbumIndexView />
         ) : (
@@ -4839,7 +4850,7 @@ function ArtistIndexView() {
           directly above the artist list, where the vanilla page put it. */}
       <div ref={downloadsHost} data-library-downloads-host="" />
 
-      <LibrarySongsStripForSearch canWrite={canWrite} />
+      <SongMatchesStrip />
 
       {artistsQuery.isLoading ? (
         <div className={styles.loading}>Loading…</div>
@@ -4863,6 +4874,7 @@ function ArtistIndexView() {
               ? 'Try a different name or reset the monitoring filter.'
               : 'There are no artists on this page.'}
           </p>
+          <SongMatchesNote />
           <button
             type="button"
             className={styles.btnGhost}
@@ -5001,7 +5013,7 @@ function AlbumIndexView() {
 
       <LibraryAlphabetBar />
 
-      <LibrarySongsStripForSearch canWrite={canWrite} />
+      <SongMatchesStrip />
 
       {albumsQuery.isLoading ? (
         <div className={styles.loading}>Loading albums…</div>
@@ -5016,6 +5028,7 @@ function AlbumIndexView() {
       ) : albums.length === 0 ? (
         <div className={styles.emptyState}>
           <h2>{filtered ? 'No albums match this view' : 'No albums yet'}</h2>
+          <SongMatchesNote />
           <LibrarySearchFallback noun="albums" />
         </div>
       ) : (
@@ -5147,6 +5160,236 @@ function PageNav({
   );
 }
 
+// --- songs (upstream #1906) ---------------------------------------------------
+
+const SONG_SORT_LABELS: Record<LibraryV2SongSort, string> = {
+  title: 'A–Z',
+  artist: 'Artist',
+  album: 'Album',
+  year: 'Newest first',
+  recent: 'Recently added',
+};
+
+/** The page's search as the songs list asks for it. */
+function songSearch(search: LibraryV2Search): LibrarySearch {
+  return {
+    q: search.q,
+    letter: 'all',
+    page: search.page,
+    sort: search.songSort === 'title' ? '' : search.songSort,
+    dupes: search.dupes,
+    quality: search.quality,
+  };
+}
+
+/** The best song matches above an artist or album search, so a song's name
+ *  finds it whichever section you're in; "See all" opens Songs with it. */
+function SongMatchesStrip() {
+  const search = Route.useSearch();
+  const navigate = useNavigate();
+  const canWrite = useLibraryV2CanWrite();
+  return (
+    <LibrarySongsStrip
+      profileId={useProfile()?.profileId ?? 0}
+      search={songSearch(search)}
+      isAdmin={canWrite}
+      onSeeAll={() =>
+        void navigate({
+          search: (p) => ({ ...librarySectionSearch(p, 'songs'), q: p.q }),
+        })
+      }
+    />
+  );
+}
+
+/** An empty artist or album search whose songs matched is still in the library. */
+function SongMatchesNote() {
+  const search = Route.useSearch();
+  const { data } = useQuery({
+    ...songsStripQueryOptions(useProfile()?.profileId ?? 0, songSearch(search)),
+    enabled: search.q.trim().length >= 2,
+  });
+  return search.q.trim().length >= 2 && (data?.songs?.length ?? 0) > 0 ? (
+    <p>The songs above match.</p>
+  ) : null;
+}
+
+function SongIndexView() {
+  const search = Route.useSearch();
+  const navigate = useNavigate();
+  const canWrite = useLibraryV2CanWrite();
+  const profileId = useProfile()?.profileId ?? 0;
+  const songFilter = useUrlSyncedFilter(
+    search.q,
+    (value) => void navigate({ search: (prev) => ({ ...prev, q: value, page: 1 }) }),
+  );
+  const asked = songSearch(search);
+  const songsQuery = useQuery(librarySongsQueryOptions(profileId, asked));
+  const pagination = songsQuery.data?.pagination;
+  let songs: LibrarySong[] = [];
+  let failed = songsQuery.isError;
+  try {
+    songs = readSongsResponse(songsQuery.data).songs;
+  } catch {
+    failed = true;
+  }
+  const q = search.q.trim();
+  const filtered = Boolean(q) || search.dupes || Boolean(search.quality);
+  const setSongs = (patch: Partial<Pick<LibraryV2Search, 'songSort' | 'dupes' | 'quality'>>) =>
+    void navigate({ search: (p) => ({ ...p, ...patch, page: 1 }) });
+
+  /** Play all / Shuffle: the first PLAY_ALL_LIMIT songs of what's shown. */
+  const [queueing, setQueueing] = useState(false);
+  const playSongs = async (shuffle: boolean) => {
+    if (queueing) return;
+    setQueueing(true);
+    try {
+      const list = (await fetchSongsToPlay(asked)).filter((s) => s.file_path);
+      if (!list.length) {
+        window.showToast?.('Nothing here to play', 'info');
+        return;
+      }
+      await window.playTrackList?.(
+        (shuffle ? shuffled(list) : list).map(songQueueTrack),
+        q ? `Songs matching "${q}"` : 'Your songs',
+      );
+      if ((pagination?.total_count ?? 0) > PLAY_ALL_LIMIT || pagination?.total_capped) {
+        window.showToast?.(`Playing the first ${PLAY_ALL_LIMIT} songs`, 'info');
+      }
+    } catch {
+      window.showToast?.("Couldn't load the songs to play", 'error');
+    } finally {
+      setQueueing(false);
+    }
+  };
+
+  const toggles = [
+    {
+      label: 'Duplicates',
+      on: search.dupes,
+      title: 'Songs you have more than one copy of',
+      patch: { dupes: !search.dupes },
+    },
+    {
+      label: 'Lossless',
+      on: search.quality === 'lossless',
+      title: 'FLAC, WAV, AIFF and other lossless files',
+      patch: { quality: search.quality === 'lossless' ? '' : 'lossless' },
+    },
+    {
+      label: 'Could be better',
+      on: search.quality === 'upgradable',
+      title: 'Monitored songs below their quality profile (Wanted → Cutoff Unmet)',
+      patch: { quality: search.quality === 'upgradable' ? '' : 'upgradable' },
+    },
+  ] as const;
+
+  return (
+    <div className={styles.page}>
+      <header className={`${styles.header} library-header`}>
+        <div>
+          <h1 className={styles.title}>Library</h1>
+          <p className={styles.subtitle}>
+            {pagination
+              ? `${pagination.total_count.toLocaleString()}${pagination.total_capped ? '+' : ''} ${
+                  filtered ? 'matches' : 'songs'
+                }`
+              : 'Songs across all artists'}
+          </p>
+        </div>
+      </header>
+
+      <div className={styles.toolbar}>
+        <LibraryScopePicker />
+        <LibrarySectionTabs />
+        <input
+          aria-label="Filter songs"
+          className={styles.searchInput}
+          type="text"
+          placeholder="Filter songs or artists…"
+          value={songFilter.value}
+          onChange={(e) => songFilter.onChange(e.target.value)}
+        />
+        <select
+          aria-label="Sort songs"
+          className={styles.select}
+          value={search.songSort}
+          onChange={(e) => setSongs({ songSort: e.target.value as LibraryV2SongSort })}
+        >
+          {(Object.keys(SONG_SORT_LABELS) as LibraryV2SongSort[]).map((value) => (
+            <option key={value} value={value}>
+              {SONG_SORT_LABELS[value]}
+            </option>
+          ))}
+        </select>
+        <div className={styles.viewToggle} role="group" aria-label="Song filters">
+          {toggles.map((t) => (
+            <button
+              key={t.label}
+              type="button"
+              className={t.on ? styles.viewActive : ''}
+              aria-pressed={t.on}
+              title={t.title}
+              onClick={() => setSongs(t.patch)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className={styles.viewToggle} role="group" aria-label="Play songs">
+          <button
+            type="button"
+            disabled={queueing || songs.length === 0}
+            title={`Play these songs in order (up to ${PLAY_ALL_LIMIT})`}
+            onClick={() => void playSongs(false)}
+          >
+            <span aria-hidden="true">▶ </span>
+            <span>Play all</span>
+          </button>
+          <button
+            type="button"
+            disabled={queueing || songs.length === 0}
+            title={`Shuffle these songs (up to ${PLAY_ALL_LIMIT})`}
+            onClick={() => void playSongs(true)}
+          >
+            Shuffle
+          </button>
+        </div>
+      </div>
+
+      {songsQuery.isPending ? (
+        <LibrarySongSkeleton />
+      ) : failed ? (
+        <div className={styles.emptyState}>
+          <h2>Could not load your songs</h2>
+          <p>{mutationErrorMessage(songsQuery.error, 'The song list failed to load.')}</p>
+          <button type="button" onClick={() => void songsQuery.refetch()}>
+            Try again
+          </button>
+        </div>
+      ) : songs.length === 0 ? (
+        <div className={styles.emptyState}>
+          <h2>{filtered ? 'No songs match this view' : 'No songs yet'}</h2>
+        </div>
+      ) : (
+        <LibrarySongList
+          songs={songs}
+          isAdmin={canWrite}
+          query={q}
+          context={q ? `Songs matching "${q}"` : 'Your songs'}
+          stale={songsQuery.isPlaceholderData}
+          onChanged={() => void songsQuery.refetch()}
+        />
+      )}
+
+      <PageNav
+        pagination={pagination}
+        onStep={(step) => void navigate({ search: (p) => ({ ...p, page: p.page + step }) })}
+      />
+    </div>
+  );
+}
+
 // --- Library sections -------------------------------------------------------
 
 /** The search a section switch produces.
@@ -5165,8 +5408,8 @@ export function librarySectionSearch<T extends Record<string, unknown>>(
   // duplicates and lossless are song filters; "could be better" means
   // something to the artists too
   const songOnly =
-    section !== 'songs' && ('dupes' in previous || 'quality' in previous)
-      ? { dupes: false, ...(previous.quality === 'lossless' ? { quality: '' } : {}) }
+    section !== 'songs'
+      ? { dupes: false, quality: previous.quality === 'upgradable' ? 'upgradable' : '' }
       : {};
   return {
     ...previous,

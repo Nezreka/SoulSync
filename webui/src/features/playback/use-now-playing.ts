@@ -9,27 +9,20 @@ import { useEffect, useState } from 'react';
  */
 export interface NowPlaying {
   id: string | null;
-  /** the Library v2 track id, when the track came from the library */
-  lib2Id: string | null;
   playing: boolean;
 }
 
-type PlayerTrack = { id?: unknown; lib2_track_id?: unknown } | null | undefined;
+type PlayingTrack = { id?: unknown; lib2_track_id?: unknown } | null | undefined;
 
-function asId(value: unknown): string | null {
-  return typeof value === 'string' || typeof value === 'number' ? String(value) : null;
+/** Library v2: the catalogue id is the typed `lib2_track_id`; a queue row's
+ *  `id` is the media server's (or null), never the id a library row shows. */
+function idOf(track: PlayingTrack): string | null {
+  const id = track?.lib2_track_id ?? track?.id;
+  return typeof id === 'string' || typeof id === 'number' ? String(id) : null;
 }
 
-function idOf(track: PlayerTrack): string | null {
-  return asId(track?.id);
-}
-
-function lib2IdOf(track: PlayerTrack): string | null {
-  return asId(track?.lib2_track_id);
-}
-
-function currentTrack(): PlayerTrack {
-  return (window as { __ssCurrentTrack?: PlayerTrack }).__ssCurrentTrack;
+function currentId(): string | null {
+  return idOf((window as { __ssCurrentTrack?: PlayingTrack }).__ssCurrentTrack);
 }
 
 function audio(): HTMLAudioElement | null {
@@ -38,15 +31,14 @@ function audio(): HTMLAudioElement | null {
 
 export function useNowPlaying(): NowPlaying {
   const [state, setState] = useState<NowPlaying>(() => ({
-    id: idOf(currentTrack()),
-    lib2Id: lib2IdOf(currentTrack()),
+    id: currentId(),
     playing: Boolean(audio() && !audio()!.paused),
   }));
 
   useEffect(() => {
     const onTrack = (event: Event) => {
-      const track = (event as CustomEvent<PlayerTrack | null>).detail;
-      setState((s) => ({ ...s, id: idOf(track), lib2Id: lib2IdOf(track) }));
+      const track = (event as CustomEvent<PlayingTrack>).detail;
+      setState((s) => ({ ...s, id: idOf(track) }));
     };
     const onPlay = () => setState((s) => ({ ...s, playing: true }));
     const onPause = () => setState((s) => ({ ...s, playing: false }));

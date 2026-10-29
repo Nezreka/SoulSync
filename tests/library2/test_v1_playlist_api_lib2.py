@@ -76,7 +76,7 @@ def test_curated_playlist_resolves_provider_ids_and_names_to_owned_tracks(api):
     tracks = _data(client.get(f"/api/v1/library/playlists/{playlist_id}/tracks"))["tracks"]
 
     # the bare number is a provider id, never a catalogue id
-    assert [t["id"] for t in tracks] == [by_spotify, by_deezer, by_name]
+    assert [t["id"] for t in tracks] == [str(i) for i in (by_spotify, by_deezer, by_name)]
 
 
 def test_mirrored_playlist_tracks_resolve_external_id_then_name(api):
@@ -96,4 +96,4 @@ def test_mirrored_playlist_tracks_resolve_external_id_then_name(api):
 
     tracks = _data(client.get("/api/v1/library/mirrored-playlists/5/tracks"))["tracks"]
 
-    assert [t["id"] for t in tracks] == [first, second]
+    assert [t["id"] for t in tracks] == [str(first), str(second)]

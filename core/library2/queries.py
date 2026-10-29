@@ -10,6 +10,7 @@ shows under both, but is stored once).
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .metadata_overrides import project_metadata, project_metadata_many
@@ -449,6 +450,192 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
             "provider_ids": _provider_ids(r),
         })
     return albums, int(total)
+
+
+# --- Songs view (upstream #1906) ---------------------------------------------
+
+# A filtered count stops here and the page says "1,000+" (upstream's cap).
+SONGS_COUNT_CAP = 1000
+# what "lossless" means for the Songs filter: the file's extension (upstream)
+_LOSSLESS_EXTS = ('flac', 'wav', 'aiff', 'aif', 'ape', 'wv', 'dsf', 'dff', 'alac')
+_SONG_FROM = ("FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id"
+              " LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id")
+
+
+def _live_file_sql(track: str) -> str:
+    """``owned_f`` is a live file of ``track`` in the caller's library."""
+    from .sql_util import _LIVE_FILE
+    return f"owned_f.track_id = {track}.id AND {_LIVE_FILE.format(owner=owner_clause())}"
+
+
+def _song_files_sql(track: str) -> str:
+    """The caller's live files of ``track`` (alias ``owned_f``)."""
+    return f"FROM lib2_track_files owned_f WHERE {_live_file_sql(track)}"
+
+
+def _song_copies_sql() -> str:
+    """Live files of every song with ``t``'s title by ``t``'s album artist:
+    upstream's copies (title + artist), counted per file as the library v2
+    catalogue keeps one track row with several files."""
+    return ("(SELECT COUNT(*) FROM lib2_tracks t2 JOIN lib2_albums al2 ON al2.id = t2.album_id"
+            " CROSS JOIN lib2_track_files owned_f"
+            " WHERE LOWER(t2.title) = LOWER(t.title)"
+            f" AND al2.primary_artist_id IS al.primary_artist_id AND {_live_file_sql('t2')})")
+
+
+def _fold_sql(column: str) -> str:
+    """``column`` folded like ``normalize_for_comparison`` (unidecode +
+    lowercase, upstream's *_norm columns). Only a value with a non-ASCII
+    character pays for the Python fold; plain ASCII is SQLite's own LOWER,
+    so a search over a big library stays a C-speed scan."""
+    return (f"(CASE WHEN {column} GLOB '*[^ -~]*' THEN norm_text({column})"
+            f" ELSE LOWER({column}) END)")
+
+
+_SONG_SORTS = {
+    "title": "{title}, t.id",
+    "recent": "t.added_at IS NULL, t.added_at DESC, t.id DESC",
+    "artist": ("COALESCE(ar.sort_name, ar.name) COLLATE NOCASE, al.primary_artist_id,"
+               " al.title COLLATE NOCASE, al.id, t.disc_number, t.track_number, t.id"),
+    "album": "al.title COLLATE NOCASE, al.id, t.disc_number, t.track_number, t.id",
+    "year": ("al.year IS NULL, al.year DESC, al.title COLLATE NOCASE, al.id,"
+             " t.disc_number, t.track_number, t.id"),
+}
+
+
+def list_songs(conn, *, search: str = "", letter: str = "all", sort: str = "title",
+               dupes: bool = False, quality: str = "", page: int = 1, limit: int = 75,
+               profile_id: int = 1) -> Dict[str, Any]:
+    """The library's songs (upstream #1906): every catalogue track with a live
+    file in the caller's library, searchable by title and artist.
+
+    A search orders by match (exact title, title prefix, title, then artist)
+    whatever the sort. ``dupes`` keeps songs with more than one copy;
+    ``quality`` is 'lossless' (by the file's extension) or 'upgradable' (the
+    Wanted "Cutoff Unmet" verdict, this fork's "could be better")."""
+    page = max(1, int(page))
+    limit = max(1, min(int(limit), 500))
+    where = [f"EXISTS (SELECT 1 {_song_files_sql('t')})"]
+    params: Dict[str, Any] = {}
+    if letter and letter != "all":
+        from database.music_database import _library_stripped_sql
+        first = f"LOWER(SUBSTR({_library_stripped_sql('t.title')}, 1, 1))"
+        if letter == "#":
+            where.append(f"{first} NOT GLOB '[a-z]'")
+        else:
+            params["letter"] = letter.lower()[:1]
+            where.append(f"{first} = :letter")
+    if dupes:
+        where.append(f"{_song_copies_sql()} > 1")
+    if quality == "lossless":
+        exts = " OR ".join(f"LOWER(owned_f.path) LIKE '%.{ext}'" for ext in _LOSSLESS_EXTS)
+        where.append(f"EXISTS (SELECT 1 {_song_files_sql('t')} AND ({exts}))")
+    elif quality == "upgradable":
+        from .wanted_views import iter_cutoff_unmet
+        params["unmet"] = json.dumps(sorted({
+            int(row["track_id"]) for row in iter_cutoff_unmet(conn, profile_id=profile_id)}))
+        where.append("t.id IN (SELECT value FROM json_each(:unmet))")
+    order = _SONG_SORTS.get(sort, _SONG_SORTS["title"]).replace("{title}", _alpha_key("t.title"))
+    q = str(search or "").strip()
+    if q:
+        # both sides folded the way upstream's *_norm columns are, so "sand"
+        # finds "Sánd" and "SÁND" finds "Sand"
+        from core.text.normalize import normalize_for_comparison
+        conn.create_function("norm_text", 1, lambda x: normalize_for_comparison(x) if x else "",
+                             deterministic=True)
+        # a query unidecode folds away entirely ("♥") must not match everything
+        fq = normalize_for_comparison(q) or q.lower()
+        escaped = fq.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params.update(q=fq, prefix=f"{escaped}%", like=f"%{escaped}%")
+        title = f"{_fold_sql('t.title')} LIKE :like ESCAPE '\\'"
+        where.append(f"({title} OR {_fold_sql('t.track_artist')} LIKE :like ESCAPE '\\'"
+                     f" OR {_fold_sql('ar.name')} LIKE :like ESCAPE '\\')")
+        # the hits carry their folded title (``ft``), read by the ranking
+        # below instead of folding every hit again per ORDER BY term
+        order = ("CASE WHEN t.ft = :q THEN 0 WHEN t.ft LIKE :prefix ESCAPE '\\' THEN 1"
+                 " WHEN t.ft LIKE :like ESCAPE '\\' THEN 2 ELSE 3 END,"
+                 " (CASE WHEN t.ft LIKE :like ESCAPE '\\' THEN t.ak END) COLLATE NOCASE,"
+                 " t.album_id, t.disc_number, t.track_number, t.id")
+    base = f"{_SONG_FROM} WHERE {' AND '.join(where)}"
+    filtered = bool(q) or (letter not in ("", "all")) or dupes or bool(quality)
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM (SELECT 1 {base} LIMIT {SONGS_COUNT_CAP + 1})" if filtered
+        else f"SELECT COUNT(*) {base}", params).fetchone()[0]
+    page_sql = (f"WITH hits AS MATERIALIZED (SELECT t.id, t.album_id, t.disc_number, t.track_number,"
+                f" {_fold_sql('t.title')} AS ft, {_alpha_key('t.title')} AS ak {base})"
+                f" SELECT t.id FROM hits t" if q else f"SELECT t.id {base}")
+    ids = [r[0] for r in conn.execute(
+        f"{page_sql} ORDER BY {order} LIMIT :limit OFFSET :offset",
+        {**params, "limit": limit, "offset": (page - 1) * limit})] if total else []
+    songs = song_rows(conn, ids)
+    capped = filtered and total > SONGS_COUNT_CAP
+    total = min(total, SONGS_COUNT_CAP) if capped else total
+    total_pages = (total + limit - 1) // limit
+    return {"songs": songs, "pagination": {
+        "page": page, "limit": limit, "total_count": total, "total_capped": capped,
+        "total_pages": total_pages, "has_prev": page > 1,
+        # a capped search keeps paging while pages come back full
+        "has_next": page < total_pages or (capped and len(songs) == limit)}}
+
+
+def song_rows(conn, track_ids: List[int], *, per_file: bool = False) -> List[Dict[str, Any]]:
+    """The Songs rows for ``track_ids`` in that order: upstream's LibrarySong
+    shape on catalogue ids, plus ``track_id`` and the live ``file_ids`` a
+    removal acts on. ``per_file`` gives one row per live file (the copies
+    comparison), its id ``<track>:<file>``; otherwise the track's best file."""
+    if not track_ids:
+        return []
+    from .sql_util import scoped_primary_file_join
+    files_join = (f"JOIN lib2_track_files f ON f.id IN (SELECT owned_f.id {_song_files_sql('t')})"
+                  if per_file else f"LEFT JOIN lib2_track_files f ON {scoped_primary_file_join('t', 'f')}")
+    rows = conn.execute(
+        f"""SELECT t.id, t.title, t.track_number, t.disc_number, t.duration, t.play_count,
+                   t.track_artist, t.album_id, al.title AS album_title, al.image_url, al.year,
+                   COALESCE(ar.canonical_artist_id, ar.id) AS artist_id, ar.name AS artist_name,
+                   f.id AS file_id, f.path, f.bitrate, f.size,
+                   (SELECT json_group_array(owned_f.id) {_song_files_sql('t')}) AS file_ids,
+                   {_song_copies_sql()} AS copies
+              {_SONG_FROM} {files_join}
+             WHERE t.id IN (SELECT value FROM json_each(:ids))""",
+        {"ids": json.dumps([int(i) for i in track_ids])}).fetchall()
+    order = {int(tid): n for n, tid in enumerate(track_ids)}
+    songs = []
+    for r in sorted(rows, key=lambda r: (order[r["id"]], r["file_id"] or 0)):
+        path = r["path"] or ""
+        ext = os.path.splitext(path)[1].lstrip(".").upper()
+        songs.append({
+            "id": f"{r['id']}:{r['file_id']}" if per_file else r["id"],
+            "track_id": r["id"],
+            "file_ids": [r["file_id"]] if per_file else _json_list(r["file_ids"]),
+            "title": r["title"] or "",
+            # a compilation's row names its own artist; the album artist is the fallback
+            "artist_name": r["track_artist"] or r["artist_name"] or "",
+            "artist_id": r["artist_id"], "album_id": r["album_id"],
+            "album_title": r["album_title"] or "", "album_thumb_url": r["image_url"],
+            "year": r["year"], "track_number": r["track_number"],
+            "disc_number": r["disc_number"], "duration": r["duration"],
+            "bitrate": _bitrate_kbps(r["bitrate"]),
+            "format": ext if 1 < len(ext) <= 5 else "", "file_path": path,
+            "play_count": r["play_count"] or 0, "file_size": r["size"],
+            "copies": max(1, int(r["copies"] or 0)),
+        })
+    return songs
+
+
+def song_copies(conn, track_id: int) -> List[Dict[str, Any]]:
+    """Every copy of one song (its title by its album artist) in the caller's
+    library, one row per file, best file first: lossless before lossy, then
+    the higher bitrate. [] for a track it doesn't know."""
+    ids = [r[0] for r in conn.execute(
+        f"""SELECT t2.id FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
+              JOIN lib2_tracks t2 ON LOWER(t2.title) = LOWER(t.title)
+              JOIN lib2_albums al2 ON al2.id = t2.album_id
+                                  AND al2.primary_artist_id IS al.primary_artist_id
+             WHERE t.id = ? AND EXISTS (SELECT 1 {_song_files_sql('t2')})
+             ORDER BY t2.id""", (int(track_id),))]
+    lossless = {e.upper() for e in _LOSSLESS_EXTS}
+    return sorted(song_rows(conn, ids, per_file=True),
+                  key=lambda s: (s["format"] not in lossless, -(s["bitrate"] or 0)))
 
 
 def list_artist_track_files(conn, artist_id: int, *, search: str = "",

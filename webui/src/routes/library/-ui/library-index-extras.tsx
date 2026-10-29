@@ -5,7 +5,7 @@ import { useState, type ReactNode } from 'react';
 import { apiClient, readJson } from '@/app/api-client';
 import { useProfile } from '@/platform/shell/route-controllers';
 
-import type { SongsSearch } from '../-library-songs.types';
+import type { LibrarySearch as SongsSearch } from '../-library-v2.songs';
 import type { LibraryV2AlbumListItem, LibraryV2ArtistSummary } from '../-library-v2.types';
 
 import { LIBRARY_V2_QUERY_KEY, libraryV2AlbumQueryOptions } from '../-library-v2.api';
@@ -15,7 +15,7 @@ import { filterJiosaavnEntries } from '../../artist-detail/-artist-detail.enrich
 import { loadTopTracks, trackArtistLabel } from '../../artist-detail/-artist-detail.top-tracks';
 import { ExportArtistsModal } from './export-modal';
 import extras from './library-index-extras.module.css';
-import { LibrarySongsStrip, songsStripQueryOptions } from './library-songs';
+import { songsStripQueryOptions } from './library-songs';
 import styles from './library-v2-page.module.css';
 
 /**
@@ -289,35 +289,9 @@ export function useSongsSearchFromRoute(): SongsSearch {
   };
 }
 
-/** The top song matches above an artist or album search. */
-export function LibrarySongsStripForSearch({ canWrite }: { canWrite: boolean }) {
-  const { profileId } = useProfile();
-  const songsSearch = useSongsSearchFromRoute();
-  const navigate = Route.useNavigate();
-  if (songsSearch.q.trim().length < 2) return null;
-  return (
-    <LibrarySongsStrip
-      profileId={profileId}
-      search={songsSearch}
-      isAdmin={canWrite}
-      onSeeAll={() =>
-        void navigate({
-          search: (prev) => ({
-            ...prev,
-            section: 'songs' as const,
-            artist: undefined,
-            album: undefined,
-            page: 1,
-          }),
-        })
-      }
-    />
-  );
-}
-
 /** A search that found no artists or albums: the songs above did, or look
  *  it up online. Nothing without a search. */
-export function LibrarySearchFallback({ noun }: { noun: string }) {
+export function LibrarySearchFallback({ noun: _noun }: { noun: string }) {
   const { profileId } = useProfile();
   const songsSearch = useSongsSearchFromRoute();
   const q = songsSearch.q.trim();
@@ -325,14 +299,9 @@ export function LibrarySearchFallback({ noun }: { noun: string }) {
     ...songsStripQueryOptions(profileId, songsSearch),
     enabled: q.length >= 2,
   });
-  if (!q) return null;
-  if ((strip.data?.songs?.length ?? 0) > 0) {
-    return (
-      <p className={extras.fallbackNote}>
-        No {noun} match &quot;{q}&quot;. The songs above do.
-      </p>
-    );
-  }
+  // when songs match, the page's own note says so; this is the way out
+  // when nothing in the library does
+  if (!q || (strip.data?.songs?.length ?? 0) > 0) return null;
   return (
     <button
       type="button"

@@ -10,18 +10,17 @@ import {
   type UserPlaylistTrack,
 } from '@/features/playlists/user-playlists';
 
-import type { SongsSearch, LibrarySong } from '../-library-songs.types';
+import type { LibrarySearch, LibrarySong } from '../-library-v2.songs';
 
-import { librarySongsQueryOptions } from '../-library-songs.api';
 import {
+  deleteLibraryTrackRequest,
+  librarySongsQueryOptions,
   matchParts,
   readSongsResponse,
-  songLib2Id,
   songMeta,
   songPlaylistTrack,
   songQueueTrack,
-} from '../-library-songs.helpers';
-import { deleteLibraryTrackRequest } from '../../artist-detail/-artist-detail.manage-actions';
+} from '../-library-v2.songs';
 import { ActionMenu } from '../../artist-detail/-ui/action-menu';
 import { SmartDeleteDialog, TRACK_DELETE_COPY } from '../../artist-detail/-ui/smart-delete-dialog';
 import { SongCopiesDialog } from './library-song-copies';
@@ -108,19 +107,12 @@ function SongRow({
   onDelete,
 }: RowProps) {
   const navigate = useNavigate();
-  // the ids are Library v2's: open them on the library page itself
-  const albumHref = `/library?album=${song.album_id}`;
+  const albumHref = `/artist-detail/library/${song.artist_id}?album=${song.album_id}`;
   const openArtist = (album?: boolean) =>
     void navigate({
-      to: '/library',
-      search: album
-        ? { album: Number(song.album_id) }
-        : {
-            artist: Number(song.artist_id),
-            releases: 'library' as const,
-            releaseView: 'table' as const,
-            header: 'compact' as const,
-          },
+      to: '/artist-detail/$source/$id',
+      params: { source: 'library', id: String(song.artist_id) },
+      search: album ? { album: String(song.album_id) } : {},
     });
   const quality = [song.format, song.bitrate ? `${song.bitrate}k` : ''].filter(Boolean).join(' ');
   const playable = Boolean(song.file_path);
@@ -215,15 +207,7 @@ function SongRow({
         <div className={styles.meta}>
           <Marked text={song.artist_name} query={query} />
           <span className={styles.dot}>·</span>
-          <a
-            className={styles.album}
-            href={albumHref}
-            onClick={(e) => {
-              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-              e.preventDefault();
-              openArtist(true);
-            }}
-          >
+          <a className={styles.album} href={albumHref}>
             {song.album_title || 'Unknown album'}
           </a>
           {songMeta(song) ? (
@@ -307,7 +291,7 @@ async function deleteSongs(songs: LibrarySong[], choice: string): Promise<void> 
   let last: Awaited<ReturnType<typeof deleteLibraryTrackRequest>> | null = null;
   for (const song of songs) {
     try {
-      last = await deleteLibraryTrackRequest(song.id, mode);
+      last = await deleteLibraryTrackRequest(song, mode);
       if (last.extra) window.showToast?.(last.extra, 'warning');
     } catch {
       failed += 1;
@@ -457,9 +441,7 @@ export function LibrarySongList({
             selecting={selected.size > 0}
             liked={isLiked(song)}
             nowPlaying={{
-              // the player names a library track by its lib2 id; its `id` is
-              // a server id that can collide with a catalogue one
-              here: nowPlaying.lib2Id !== null && nowPlaying.lib2Id === String(songLib2Id(song)),
+              here: nowPlaying.id !== null && nowPlaying.id === String(song.id),
               playing: nowPlaying.playing,
             }}
             onPlay={() => playFrom(index)}
@@ -580,7 +562,7 @@ const STRIP_SIZE = 5;
 
 /** The strip's query. The page asks the same one (react-query shares it) to
  *  know whether a search that found no artists did find songs. */
-export function songsStripQueryOptions(profileId: number, search: SongsSearch) {
+export function songsStripQueryOptions(profileId: number, search: LibrarySearch) {
   return librarySongsQueryOptions(
     profileId,
     { ...search, letter: 'all', page: 1, sort: '', dupes: false, quality: '' },
@@ -599,7 +581,7 @@ export function LibrarySongsStrip({
   onSeeAll,
 }: {
   profileId: number;
-  search: SongsSearch;
+  search: LibrarySearch;
   isAdmin: boolean;
   onSeeAll: () => void;
 }) {

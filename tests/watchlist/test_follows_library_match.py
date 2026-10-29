@@ -22,9 +22,9 @@ WRONG = "5S5TmGWWg0cKOu3Dv6cQO0"
 def cur():
     conn = sqlite3.connect(":memory:")
     c = conn.cursor()
+    # Library v2: the catalogue artist's ids are lib2_artists columns + external_ids
     c.execute("""CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT,
-        spotify_id TEXT, musicbrainz_id TEXT, soul_id TEXT,
-        external_ids TEXT NOT NULL DEFAULT '{}')""")
+        spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT)""")
     c.execute("""CREATE TABLE watchlist_artists (id INTEGER PRIMARY KEY, artist_name TEXT,
         spotify_artist_id TEXT, itunes_artist_id TEXT, deezer_artist_id TEXT,
         discogs_artist_id TEXT, musicbrainz_artist_id TEXT, amazon_artist_id TEXT,

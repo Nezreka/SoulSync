@@ -21,6 +21,8 @@ describe('library section switch', () => {
       q: '',
       artist: undefined,
       album: undefined,
+      dupes: false,
+      quality: '',
     });
   });
 

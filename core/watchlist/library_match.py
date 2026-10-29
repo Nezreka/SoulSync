@@ -16,9 +16,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-# service -> (old library artists column, watchlist_artists column). Only the
-# sources the watchlist keeps an id for. The library side is read off the
-# catalogue through provider_id_sql now; the first name is kept for reference.
+# service -> (library artists column, watchlist_artists column). Only the
+# sources the watchlist keeps an id for.
 COLUMNS: Dict[str, tuple] = {
     'spotify': ('spotify_artist_id', 'spotify_artist_id'),
     'itunes': ('itunes_artist_id', 'itunes_artist_id'),
@@ -32,15 +31,17 @@ COLUMNS: Dict[str, tuple] = {
 def library_artist_ids(cursor, artist_id: Any) -> Dict[str, str]:
     """The library artist's current id for every source the watchlist tracks.
 
-    Read off the Library v2 catalogue: spotify and musicbrainz have their own
-    columns, every other source lives in ``external_ids``."""
-    from core.library2.provider_ids import provider_id_sql
-    cols = ', '.join(provider_id_sql(svc) for svc in COLUMNS)
-    cursor.execute(f"SELECT {cols} FROM lib2_artists WHERE id = ?", (artist_id,))
+    Library v2: the catalogue artist is a ``lib2_artists`` row; its ids live in
+    the promoted columns plus ``external_ids``, read by the same helper the
+    artist settings use."""
+    from core.library2.artist_settings import _artist_provider_ids
+    cursor.execute("SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_artists WHERE id = ?",
+                   (artist_id,))
     row = cursor.fetchone()
     if not row:
         return {}
-    return {svc: str(row[i]) for i, svc in enumerate(COLUMNS) if row[i]}
+    ids = _artist_provider_ids(dict(zip(('spotify_id', 'musicbrainz_id', 'external_ids'), row, strict=True)))
+    return {svc: ids[svc] for svc in COLUMNS if ids.get(svc)}
 
 
 def follow_library_artist_match(cursor, *, before: Dict[str, str], service: str,

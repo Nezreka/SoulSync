@@ -426,14 +426,18 @@ describe('library v2 match-status api', () => {
         service: 'deezer',
         service_id: 'dz1',
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ watchlistUpdated: [], watchlistSkipped: [] });
   });
 
   it('applies and clears matches through the Library v2 route', async () => {
     server.use(
       http.put('/api/library/v2/artists/77/manual-match', async ({ request }) => {
         expect(await request.json()).toEqual({ service: 'spotify', service_id: 'sp-native' });
-        return HttpResponse.json({ success: true });
+        return HttpResponse.json({
+          success: true,
+          watchlist_updated: ['1905'],
+          watchlist_skipped: [],
+        });
       }),
       http.delete('/api/library/v2/artists/77/manual-match', async ({ request }) => {
         expect(await request.json()).toEqual({ service: 'spotify' });
@@ -448,7 +452,8 @@ describe('library v2 match-status api', () => {
         service: 'spotify',
         service_id: 'sp-native',
       }),
-    ).resolves.toBeUndefined();
+      // #1901: the watched artists that followed the new match
+    ).resolves.toEqual({ watchlistUpdated: ['1905'], watchlistSkipped: [] });
     await expect(
       clearLibraryV2EntityMatch({
         entity_type: 'artist',

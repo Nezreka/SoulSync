@@ -1,204 +1,178 @@
-"""#1906: the library page's Songs view reads from get_library_songs.
+"""#1906: the library page's Songs view, on the Library v2 catalogue.
 
 cremonies: let everyone search the library by song title, show the album so
 duplicates can be told apart, respect multi-library setups and what a profile
-may see. On the Library v2 catalogue a song is a track with a live file in the
-caller's library, searchable by title and artist, and built so a 300k-track
-library stays fast: a filtered count stops at a cap and says so.
-"""
+may see. A song is a catalogue track with a live file in the caller's library
+(core.library2.queries.list_songs), searchable by title and artist; a filtered
+count stops at a cap and says so.
 
-import sqlite3
+Ported from upstream's legacy-table fixture: "another server" is another
+profile's library here, since the catalogue is not split by media server.
+Upstream's EXPLAIN-plan tests guard the indexes of its legacy normalized
+columns (title_norm/name_norm); Library v2 has none of those columns and
+searches with LIKE over the same fold (normalize_for_comparison, computed per
+row only for values with a non-ASCII character), so they have no counterpart.
+The A-Z order uses the catalogue's A-Z key (leading punctuation skipped), as
+the artist and album lists do, so "'Til Tomorrow" files under T.
+"""
 
 import pytest
 
-from database.music_database import MusicDatabase
+from core import library_scope
+from core.library2 import queries as Q
+from core.library2.schema import ensure_library_v2_schema
+from tests import lib2_seed
 
 
 @pytest.fixture()
-def db(tmp_path, monkeypatch):
-    # one shared library plus profile 9's own: the shared one is what's asked
-    import core.library_scope as library_scope
-    monkeypatch.setattr(library_scope, 'any_own_library_exists', lambda: True)
-    monkeypatch.setattr(library_scope, 'current_library_scope', lambda: 'shared')
-    d = MusicDatabase(database_path=str(tmp_path / "music.db"))
-    c = sqlite3.connect(str(d.database_path))
-    artists = {}
-    for key, name in (('a1', 'Morgan Wallen'), ('a2', 'Chris Young'), ('a3', 'Love Arcade'),
-                      ('a4', 'Nobody')):
-        artists[key] = c.execute("INSERT INTO lib2_artists (name, name_key) VALUES (?, ?)",
-                                 (name, name.lower())).lastrowid
-    albums = {}
-    for key, artist, title, year in (('al1', 'a1', 'Dangerous', 2021),
-                                     ('al2', 'a1', 'Dangerous: The Double Album', 2021),
-                                     ('al3', 'a2', 'Famous Friends', 2021),
-                                     ('al4', 'a3', 'Arcade', 2010),
-                                     ('al5', 'a4', 'Elsewhere', 2000)):
-        albums[key] = c.execute(
-            "INSERT INTO lib2_albums (primary_artist_id, title, year, image_url) VALUES (?, ?, ?, ?)",
-            (artists[artist], title, year, f'/art/{key}.jpg')).lastrowid
+def conn(tmp_path, monkeypatch):
+    c = lib2_seed.row_conn(str(tmp_path / "music.db"))
+    ensure_library_v2_schema(c)
+    albums = {'Dangerous': ('Morgan Wallen', 2021), 'Dangerous: The Double Album': ('Morgan Wallen', 2021),
+              'Famous Friends': ('Chris Young', 2021), 'Arcade': ('Love Arcade', 2010),
+              'Elsewhere': ('Nobody', 2000)}
+    for title, (artist, year) in albums.items():
+        lib2_seed.album(c, artist, title, year=year, image_url=f'/art/{title}.jpg')
     tracks = [
-        # (album, title, n, path, owner)
-        ('al1', 'You Proof', 1, '/m/1.flac', None),
-        ('al2', 'You Proof', 7, '/m/2.mp3', None),          # the same song twice
-        ('al1', 'Sand in My Boots', 2, '/m/3.flac', None),
-        ('al3', 'Famous Friends', 1, '/m/4.flac', None),
-        ('al4', 'Arcadia', 1, '/m/5.flac', None),            # artist matches "love"
-        ('al3', 'Whole Lotta Love', 2, '/m/6.flac', None),
-        ('al3', 'Friends', 3, '/m/8.flac', None),
-        ('al3', "'Til Tomorrow", 4, '/m/9.flac', None),
-        ('al5', 'You Proof', 1, '/m/7.flac', 9),             # another profile's own library
+        # (album, title, n, path)
+        ('Dangerous', 'You Proof', 1, '/m/1.flac'),
+        ('Dangerous: The Double Album', 'You Proof', 7, '/m/2.mp3'),   # the same song twice
+        ('Dangerous', 'Sand in My Boots', 2, '/m/3.flac'),
+        ('Famous Friends', 'Famous Friends', 1, '/m/4.flac'),
+        ('Arcade', 'Arcadia', 1, '/m/5.flac'),                      # artist matches "love"
+        ('Famous Friends', 'Whole Lotta Love', 2, '/m/6.flac'),
+        ('Famous Friends', 'Friends', 3, '/m/8.flac'),
+        ('Famous Friends', "'Til Tomorrow", 4, '/m/9.flac'),
+        ('Elsewhere', 'You Proof', 1, '/m/7.flac'),                 # another library
     ]
-    for album, title, n, path, owner in tracks:
-        tid = c.execute("INSERT INTO lib2_tracks (album_id, title, track_number, duration) "
-                        "VALUES (?, ?, ?, 200000)", (albums[album], title, n)).lastrowid
-        c.execute("INSERT INTO lib2_track_files (track_id, path, format, bitrate, is_primary, "
-                  "file_state, owner_profile_id) VALUES (?, ?, ?, 900, 1, 'active', ?)",
-                  (tid, path, path.rsplit('.', 1)[1], owner))
-    # a catalogue row with no file is a wanted song, not one of yours
-    c.execute("INSERT INTO lib2_tracks (album_id, title, track_number) VALUES (?, 'Missing One', 9)",
-              (albums['al3'],))
+    for album, title, n, path in tracks:
+        lib2_seed.track(c, albums[album][0], album, title, path=path, track_number=n, duration=200000)
+    c.execute("UPDATE lib2_track_files SET bitrate = 900")
+    c.execute("UPDATE lib2_track_files SET owner_profile_id = 9 WHERE path = '/m/7.flac'")
     c.commit()
+    # libraries are separated, and the caller reads the shared one
+    monkeypatch.setattr(library_scope, 'any_own_library_exists', lambda: True)
+    with library_scope.library_scope('shared'):
+        yield c
     c.close()
-    return d
+
+
+def songs(conn, **kw):
+    return Q.list_songs(conn, **kw)
 
 
 def titles(result):
     return [s['title'] for s in result['songs']]
 
 
-def test_every_song_you_have_a_file_for_ordered_by_title(db):
-    result = db.get_library_songs()
-    # the other profile's copy of You Proof and the fileless row aren't yours
-    assert titles(result) == ["'Til Tomorrow", 'Arcadia', 'Famous Friends', 'Friends',
-                              'Sand in My Boots', 'Whole Lotta Love', 'You Proof', 'You Proof']
+def test_every_song_in_the_library_ordered_by_title(conn):
+    result = songs(conn)
+    assert titles(result) == ['Arcadia', 'Famous Friends', 'Friends', 'Sand in My Boots',
+                              "'Til Tomorrow", 'Whole Lotta Love', 'You Proof', 'You Proof']
     assert result['pagination']['total_count'] == 8
     assert result['pagination']['total_capped'] is False
 
 
-def test_a_row_says_which_album_and_counts_its_copies(db):
-    proof = [s for s in db.get_library_songs(search_query='you proof')['songs']]
+def test_a_row_says_which_album_and_counts_its_copies(conn):
+    proof = [s for s in songs(conn)['songs'] if s['title'] == 'You Proof']
     assert {s['album_title'] for s in proof} == {'Dangerous', 'Dangerous: The Double Album'}
     assert all(s['copies'] == 2 for s in proof)
     assert {s['format'] for s in proof} == {'FLAC', 'MP3'}
     one = proof[0]
     assert one['artist_name'] == 'Morgan Wallen' and one['year'] == 2021
     assert one['duration'] == 200000 and one['file_path'].startswith('/m/')
-    assert one['album_thumb_url'].startswith('/art/')
+    assert one['file_ids'] and one['track_id'] == one['id']
 
 
-def test_a_row_carries_the_ids_the_player_reads(db):
-    # the player keys a library play by lib2_track_id; `id` alone is a
-    # catalogue id the media server can't stream by
-    c = sqlite3.connect(str(db.database_path))
-    c.execute("UPDATE lib2_tracks SET legacy_track_id = 4242 WHERE title = 'Arcadia'")
-    c.commit()
-    c.close()
-    rows = {s['title']: s for s in db.get_library_songs()['songs']}
-    arcadia = rows['Arcadia']
-    assert arcadia['lib2_track_id'] == arcadia['id']
-    assert arcadia['legacy_track_id'] == 4242 and arcadia['server_track_id'] == 4242
-    assert rows['Friends']['legacy_track_id'] is None
+def test_search_finds_titles_first_then_artists(conn):
+    # "Arcadia" matches through its artist, Love Arcade
+    assert titles(songs(conn, search='love')) == ['Whole Lotta Love', 'Arcadia']
 
 
-def test_search_finds_titles_first_then_artists(db):
-    # "love" is in one title and one artist's name: the title match leads,
-    # though alphabetically the artist's song comes first
-    assert titles(db.get_library_songs(search_query='love')) == ['Whole Lotta Love', 'Arcadia']
+def test_an_exact_title_outranks_a_title_containing_it(conn):
+    assert titles(songs(conn, search='friends')) == ['Friends', 'Famous Friends']
 
 
-def test_an_exact_title_outranks_a_title_containing_it(db):
-    # alphabetically "famous friends" comes first; the exact title leads
-    assert titles(db.get_library_songs(search_query='friends')) == ['Friends', 'Famous Friends']
+def test_equal_matches_are_alphabetical_whatever_their_case(conn):
+    lib2_seed.track(conn, 'Joji', 'Piss In The Wind', 'LOVE YOU LESS', path='/m/40.flac')
+    lib2_seed.track(conn, 'Joji', 'Piss In The Wind', 'Love Me Better', path='/m/41.flac')
+    conn.commit()
+    assert titles(songs(conn, search='love'))[:2] == ['Love Me Better', 'LOVE YOU LESS']
 
 
-def test_search_ignores_case_and_accents(db):
-    assert titles(db.get_library_songs(search_query='SÁND')) == ['Sand in My Boots']
+def test_search_ignores_case_and_accents(conn):
+    assert titles(songs(conn, search='SÁND')) == ['Sand in My Boots']
 
 
-def test_an_accented_title_is_found_without_the_accent(db):
-    c = sqlite3.connect(str(db.database_path))
-    album = c.execute("SELECT id FROM lib2_albums WHERE title = 'Arcade'").fetchone()[0]
-    tid = c.execute("INSERT INTO lib2_tracks (album_id, title) VALUES (?, 'Café Amour')",
-                    (album,)).lastrowid
-    c.execute("INSERT INTO lib2_track_files (track_id, path, is_primary, file_state) "
-              "VALUES (?, '/m/cafe.flac', 1, 'active')", (tid,))
-    c.commit()
-    c.close()
-    assert titles(db.get_library_songs(search_query='cafe')) == ['Café Amour']
+def test_an_accented_title_or_artist_is_found_without_its_accents(conn):
+    lib2_seed.track(conn, 'Beyoncé', 'Lemonade', 'Mañana', path='/m/30.flac')
+    lib2_seed.track(conn, 'Sigur Rós', 'Takk', 'Hoppípolla', path='/m/31.flac')
+    conn.commit()
+    assert titles(songs(conn, search='manana')) == ['Mañana']
+    assert titles(songs(conn, search='beyonce')) == ['Mañana']
+    assert titles(songs(conn, search='HOPPIPOLLA')) == ['Hoppípolla']
+    # the exact title still ranks first once folded
+    assert titles(songs(conn, search='hoppípolla'))[0] == 'Hoppípolla'
 
 
-def test_nothing_found_is_an_empty_page_not_an_error(db):
-    result = db.get_library_songs(search_query='zzzz')
+def test_a_query_with_nothing_left_after_folding_finds_nothing(conn):
+    assert titles(songs(conn, search='♥')) == []
+
+
+def test_nothing_found_is_an_empty_page_not_an_error(conn):
+    result = songs(conn, search='zzzz')
     assert result['songs'] == [] and result['pagination']['total_count'] == 0
 
 
-def test_letter_files_punctuated_titles_under_their_first_letter(db):
-    # 'Til files under T, like the albums view files "Weird Al" under W
-    assert titles(db.get_library_songs(letter='t')) == ["'Til Tomorrow"]
-    assert titles(db.get_library_songs(letter='y')) == ['You Proof', 'You Proof']
-    assert titles(db.get_library_songs(letter='#')) == []
+def test_letter_files_punctuated_titles_under_their_first_letter(conn):
+    assert titles(songs(conn, letter='t')) == ["'Til Tomorrow"]
+    assert titles(songs(conn, letter='y')) == ['You Proof', 'You Proof']
+    assert titles(songs(conn, letter='#')) == []
 
 
-def test_recent_is_newest_first(db):
-    assert titles(db.get_library_songs(sort='recent'))[0] == "'Til Tomorrow"
+def test_recent_is_newest_first(conn):
+    assert titles(songs(conn, sort='recent'))[0] == "'Til Tomorrow"
 
 
-def test_pages(db):
-    first = db.get_library_songs(limit=5, page=1)
-    second = db.get_library_songs(limit=5, page=2)
+def test_recent_is_insertion_order(conn):
+    lib2_seed.track(conn, 'Morgan Wallen', 'Dangerous', 'Newest Song', path='/m/10.flac')
+    conn.commit()
+    assert titles(songs(conn, sort='recent'))[0] == 'Newest Song'
+
+
+def test_pages(conn):
+    first = songs(conn, limit=5, page=1)
+    second = songs(conn, limit=5, page=2)
     assert len(first['songs']) == 5 and len(second['songs']) == 3
     assert first['pagination']['has_next'] and not second['pagination']['has_next']
     assert not set(titles(first)) & set(t for t in titles(second) if t != 'You Proof')
 
 
-def test_a_broad_search_counts_up_to_the_cap_and_keeps_paging(db, monkeypatch):
-    monkeypatch.setattr(MusicDatabase, 'SONGS_COUNT_CAP', 2)
-    result = db.get_library_songs(search_query='o', limit=2)
+def test_a_broad_search_counts_up_to_the_cap_and_keeps_paging(conn, monkeypatch):
+    monkeypatch.setattr(Q, 'SONGS_COUNT_CAP', 2)
+    result = songs(conn, search='o', limit=2)
     assert result['pagination']['total_capped'] is True
     assert result['pagination']['total_count'] == 2
     # the count stopped, the songs didn't: a full page still offers the next
     assert result['pagination']['has_next'] is True
 
 
-def test_a_deleted_file_is_not_a_song(db):
-    c = sqlite3.connect(str(db.database_path))
-    c.execute("UPDATE lib2_track_files SET file_state = 'deleted' WHERE path = '/m/5.flac'")
-    c.commit()
-    c.close()
-    assert 'Arcadia' not in titles(db.get_library_songs())
+def test_another_profiles_own_library_is_not_listed(conn):
+    conn.execute("UPDATE lib2_track_files SET owner_profile_id = 9 WHERE path = '/m/5.flac'")
+    conn.commit()
+    assert 'Arcadia' not in titles(songs(conn))
 
 
-def test_another_profiles_own_library_is_not_listed(db):
-    c = sqlite3.connect(str(db.database_path))
-    c.execute("UPDATE lib2_track_files SET owner_profile_id = 9 WHERE path = '/m/5.flac'")
-    c.commit()
-    c.close()
-    assert 'Arcadia' not in titles(db.get_library_songs())
-
-
-def _plan(db, sql, params):
-    conn = sqlite3.connect(str(db.database_path))
-    try:
-        return [row[3] for row in conn.execute(f"EXPLAIN QUERY PLAN {sql}", params)]
-    finally:
-        conn.close()
-
-
-@pytest.mark.parametrize('sort', ['title', 'artist', 'album'])
-def test_a_sorted_page_walks_an_index_instead_of_sorting_the_library(db, sort):
-    """a plain ORDER BY sorted every track in the library before the LIMIT
-    (20 s on 300k). the title, artist and album sorts must walk their own
-    LOWER() name index."""
-    source, order = db._songs_sort_sql(sort)
-    _from, owned = db._songs_base()
-    plan = _plan(db, f"SELECT t.id FROM {source} WHERE {owned} ORDER BY {order} LIMIT 5", [])
-    assert not any('USE TEMP B-TREE FOR ORDER BY' in line for line in plan), plan
+def test_a_removed_file_is_not_a_song(conn):
+    conn.execute("UPDATE lib2_track_files SET file_state = 'deleted' WHERE path = '/m/5.flac'")
+    conn.commit()
+    assert 'Arcadia' not in titles(songs(conn))
 
 
 # ── sorts and filters (best in class pass) ───────────────────────────────────
 
-def test_artist_sort_groups_an_artists_albums_in_track_order(db):
-    assert titles(db.get_library_songs(sort='artist')) == [
+def test_artist_sort_groups_an_artists_albums_in_track_order(conn):
+    assert titles(songs(conn, sort='artist')) == [
         # chris young, famous friends in track order
         'Famous Friends', 'Whole Lotta Love', 'Friends', "'Til Tomorrow",
         'Arcadia',                                   # love arcade
@@ -206,85 +180,72 @@ def test_artist_sort_groups_an_artists_albums_in_track_order(db):
     ]
 
 
-def test_album_sort_is_by_album_title_then_track(db):
-    assert titles(db.get_library_songs(sort='album')) == [
+def test_album_sort_is_by_album_title_then_track(conn):
+    assert titles(songs(conn, sort='album')) == [
         'Arcadia', 'You Proof', 'Sand in My Boots', 'You Proof',
         'Famous Friends', 'Whole Lotta Love', 'Friends', "'Til Tomorrow",
     ]
 
 
-def test_year_sort_is_newest_album_first(db):
-    result = titles(db.get_library_songs(sort='year'))
+def test_year_sort_is_newest_album_first(conn):
+    result = titles(songs(conn, sort='year'))
     assert result[-1] == 'Arcadia'                  # 2010, after every 2021 album
     assert result[:3] == ['You Proof', 'Sand in My Boots', 'You Proof']
 
 
-def test_year_sort_pages(db):
-    first = titles(db.get_library_songs(sort='year', limit=3, page=1))
-    second = titles(db.get_library_songs(sort='year', limit=3, page=2))
+def test_year_sort_pages(conn):
+    first = titles(songs(conn, sort='year', limit=3, page=1))
+    second = titles(songs(conn, sort='year', limit=3, page=2))
     assert first == ['You Proof', 'Sand in My Boots', 'You Proof']
     assert second == ['Famous Friends', 'Whole Lotta Love', 'Friends']
 
 
-def test_a_search_keeps_best_match_whatever_the_sort(db):
-    assert titles(db.get_library_songs(search_query='friends', sort='artist')) == [
-        'Friends', 'Famous Friends']
+def test_a_search_keeps_best_match_whatever_the_sort(conn):
+    assert titles(songs(conn, search='friends', sort='artist')) == ['Friends', 'Famous Friends']
 
 
-def _add_song(db, album_title, title, path, bitrate=900):
-    c = sqlite3.connect(str(db.database_path))
-    album = c.execute("SELECT id FROM lib2_albums WHERE title = ?", (album_title,)).fetchone()[0]
-    tid = c.execute("INSERT INTO lib2_tracks (album_id, title) VALUES (?, ?)",
-                    (album, title)).lastrowid
-    c.execute("INSERT INTO lib2_track_files (track_id, path, format, bitrate, is_primary, file_state) "
-              "VALUES (?, ?, ?, ?, 1, 'active')", (tid, path, path.rsplit('.', 1)[1], bitrate))
-    c.commit()
-    c.close()
-    return tid
-
-
-def _track_id(db, path):
-    c = sqlite3.connect(str(db.database_path))
-    try:
-        return c.execute("SELECT track_id FROM lib2_track_files WHERE path = ?", (path,)).fetchone()[0]
-    finally:
-        c.close()
-
-
-def test_duplicates_only(db):
+def test_duplicates_only(conn):
     # the same title by a different artist is a different song, not a copy
-    _add_song(db, 'Arcade', 'Friends', '/m/20.flac')
-    result = db.get_library_songs(dupes=True)
+    lib2_seed.track(conn, 'Love Arcade', 'Arcade', 'Friends', path='/m/20.flac')
+    conn.commit()
+    result = songs(conn, dupes=True)
     assert titles(result) == ['You Proof', 'You Proof']
     assert result['pagination']['total_count'] == 2
 
 
-def test_lossless_only(db):
-    result = titles(db.get_library_songs(quality='lossless'))
+def test_two_files_of_one_track_are_two_copies(conn):
+    sand = conn.execute("SELECT id FROM lib2_tracks WHERE title = 'Sand in My Boots'").fetchone()[0]
+    conn.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, '/m/3.mp3', 0)",
+                 (sand,))
+    conn.commit()
+    row = next(s for s in songs(conn)['songs'] if s['title'] == 'Sand in My Boots')
+    assert row['copies'] == 2 and len(row['file_ids']) == 2
+    assert row['file_path'] == '/m/3.flac'          # the primary file plays
+    assert [c['file_path'] for c in Q.song_copies(conn, sand)] == ['/m/3.flac', '/m/3.mp3']
+
+
+def test_lossless_only(conn):
+    result = titles(songs(conn, quality='lossless'))
     assert result.count('You Proof') == 1           # the mp3 copy is out
     assert len(result) == 7
 
 
-def test_could_be_better_is_the_pending_quality_findings(db):
-    sand, friends = _track_id(db, '/m/3.flac'), _track_id(db, '/m/4.flac')
-    c = sqlite3.connect(str(db.database_path))
-    c.execute("INSERT INTO repair_findings (job_id, finding_type, status, entity_type, entity_id, title) "
-              "VALUES ('quality_upgrade', 'upgrade', 'pending', 'track', ?, 'x')", (str(sand),))
-    c.execute("INSERT INTO repair_findings (job_id, finding_type, status, entity_type, entity_id, title) "
-              "VALUES ('quality_upgrade', 'upgrade', 'resolved', 'track', ?, 'x')", (str(friends),))
-    c.commit()
-    c.close()
-    assert titles(db.get_library_songs(quality='upgradable')) == ['Sand in My Boots']
+def test_could_be_better_is_the_cutoff_unmet_verdict(conn, monkeypatch):
+    # this fork's "could be better": Wanted -> Cutoff Unmet, evaluated (and
+    # tested) in core.library2.wanted_views
+    sand = conn.execute("SELECT id FROM lib2_tracks WHERE title = 'Sand in My Boots'").fetchone()[0]
+    monkeypatch.setattr('core.library2.wanted_views.iter_cutoff_unmet',
+                        lambda conn, **kw: iter([{'track_id': sand}]))
+    assert titles(songs(conn, quality='upgradable')) == ['Sand in My Boots']
 
 
-def test_copies_compare_best_file_first(db):
-    flac, mp3 = _track_id(db, '/m/1.flac'), _track_id(db, '/m/2.mp3')
-    c = sqlite3.connect(str(db.database_path))
-    c.execute("UPDATE lib2_track_files SET bitrate = 320 WHERE path = '/m/2.mp3'")
-    c.commit()
-    c.close()
-    copies = db.get_library_song_copies(str(mp3))
-    # the flac first, though the mp3 was asked about
-    assert [(s['id'], s['format']) for s in copies] == [(flac, 'FLAC'), (mp3, 'MP3')]
+def test_copies_compare_best_file_first(conn):
+    conn.execute("UPDATE lib2_track_files SET bitrate = 320 WHERE path = '/m/2.mp3'")
+    conn.commit()
+    mp3 = conn.execute("SELECT track_id FROM lib2_track_files WHERE path = '/m/2.mp3'").fetchone()[0]
+    copies = Q.song_copies(conn, mp3)
+    # the flac first, though the mp3 was asked about; one row per file
+    assert [(s['file_path'], s['format']) for s in copies] == [('/m/1.flac', 'FLAC'), ('/m/2.mp3', 'MP3')]
     assert {s['album_title'] for s in copies} == {'Dangerous', 'Dangerous: The Double Album'}
-    assert db.get_library_song_copies('nope') == []
+    assert all(s['id'] == f"{s['track_id']}:{s['file_ids'][0]}" for s in copies)
+    assert Q.song_copies(conn, 999999) == []

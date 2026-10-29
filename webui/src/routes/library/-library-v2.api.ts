@@ -350,16 +350,19 @@ export async function unlinkLibraryV2ArtistAlias(artistId: number): Promise<void
   await lib2Json(apiClient.delete(`library/v2/artists/${artistId}/link-alias`), 'Unlink failed');
 }
 
-/** Manually match an entity to a provider id. */
+/** Manually match an entity to a provider id. Answers the watched artists
+ *  that followed the new match and those left alone (#1901). */
 export async function manualMatchLibraryV2Entity(input: {
   entity_type: 'artist' | 'album' | 'track';
   library_v2_entity_id?: number | null;
   service: string;
   service_id: string;
   watchlist_row_id?: number;
-}): Promise<void> {
+}): Promise<{ watchlistUpdated: string[]; watchlistSkipped: string[] }> {
   if (input.library_v2_entity_id == null) throw new Error('No matchable entity id');
-  await lib2Json(
+  const payload = await lib2Json<
+    Ok & { watchlist_updated?: string[]; watchlist_skipped?: string[] }
+  >(
     apiClient.put(`library/v2/${input.entity_type}s/${input.library_v2_entity_id}/manual-match`, {
       json: {
         service: input.service,
@@ -369,6 +372,10 @@ export async function manualMatchLibraryV2Entity(input: {
     }),
     'Manual match failed',
   );
+  return {
+    watchlistUpdated: payload.watchlist_updated ?? [],
+    watchlistSkipped: payload.watchlist_skipped ?? [],
+  };
 }
 
 /** Clear a wrong provider identity, optionally with the linked Watchlist row

@@ -468,23 +468,43 @@ class WatchlistMismatch(ValueError):
 
 def apply_manual_match(conn: Any, entity_type: str, entity_id: int, service: str,
                        service_id: Optional[str], *, actor: str,
-                       watchlist_row_id: Any = None) -> None:
+                       watchlist_row_id: Any = None,
+                       profile_id: Optional[int] = None) -> Dict[str, List[str]]:
     """A user's manual match (``service_id`` None clears it), uncommitted.
 
     steal=True: a deliberate match MOVES an id another entity holds -- the
     automated matcher's mistakes are what someone comes here to correct.
+
+    #1901: a new artist match also moves ``profile_id``'s watchlist entry for
+    that artist, found by the artist's ids from before the change. Answers
+    which watched artists followed and which were skipped.
     """
+    canonical = _canonical(entity_type)
+    follow = (canonical == "artist" and watchlist_row_id is None
+              and profile_id is not None and bool(service_id))
+    followed: Dict[str, List[str]] = {"updated": [], "skipped": []}
+    if follow:
+        from core.watchlist.library_match import library_artist_ids
+        before = library_artist_ids(conn.cursor(), entity_id)
     set_library_v2_match(conn, entity_type, entity_id, service, service_id,
                          actor=actor, steal=True)
-    canonical = _canonical(entity_type)
     # #758: a manual ALBUM match also pins and locks that release; clearing the
     # match lifts a pin it made.
     from core.metadata.canonical_version import should_pin_manual_canonical
     if should_pin_manual_canonical(canonical, service):
         from core.library2.editions import pin_album_release
         pin_album_release(conn, entity_id, service, service_id)
+    if follow and before:
+        # the watchlist follows, but never fails the match itself (upstream)
+        from core.watchlist.library_match import follow_library_artist_match
+        try:
+            followed = follow_library_artist_match(
+                conn.cursor(), before=before, service=service, new_id=str(service_id),
+                profile_id=int(profile_id))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Watchlist didn't follow the match for artist %s: %s", entity_id, exc)
     if watchlist_row_id is None:
-        return
+        return followed
     # Artist settings reuse the Watchlist: keep an identity-checked row in sync.
     if canonical != "artist":
         raise ValueError("Watchlist sync is only valid for artists")
@@ -502,6 +522,7 @@ def apply_manual_match(conn: Any, entity_type: str, entity_id: int, service: str
         raise ValueError(f"Watchlist column {column!r} is unavailable")
     conn.execute(f"UPDATE watchlist_artists SET {column}=? WHERE id=?",
                  (service_id, int(watchlist_row_id)))
+    return followed
 
 
 _configured_services_getter = None

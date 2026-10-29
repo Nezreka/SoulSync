@@ -3,11 +3,9 @@ import { useState } from 'react';
 
 import { DialogFrame } from '@/components/dialog';
 
-import type { LibrarySong } from '../-library-songs.types';
+import type { LibrarySong } from '../-library-v2.songs';
 
-import { fetchSongCopies } from '../-library-songs.api';
-import { songQueueTrack } from '../-library-songs.helpers';
-import { deleteLibraryTrackRequest } from '../../artist-detail/-artist-detail.manage-actions';
+import { deleteLibraryTrackRequest, fetchSongCopies, songQueueTrack } from '../-library-v2.songs';
 import { SmartDeleteDialog, TRACK_DELETE_COPY } from '../../artist-detail/-ui/smart-delete-dialog';
 import styles from './library-songs.module.css';
 import { duration, SongCover } from './song-bits';
@@ -52,7 +50,7 @@ export function SongCopiesDialog({
     let failed = 0;
     for (const other of others) {
       try {
-        await deleteLibraryTrackRequest(other.id, mode);
+        await deleteLibraryTrackRequest(other, mode);
       } catch {
         failed += 1;
       }
