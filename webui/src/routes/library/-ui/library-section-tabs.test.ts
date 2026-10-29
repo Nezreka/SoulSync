@@ -45,4 +45,22 @@ describe('library section switch', () => {
       librarySectionSearch({ section: 'artists', artist: 42, album: 7, q: 'muse' }, 'wanted'),
     ).toMatchObject({ artist: undefined, album: undefined, q: '' });
   });
+
+  it('drops the song-only filters when leaving Songs', () => {
+    expect(
+      librarySectionSearch({ section: 'songs', dupes: true, quality: 'lossless' }, 'artists'),
+    ).toMatchObject({ section: 'artists', dupes: false, quality: '' });
+  });
+
+  it('keeps could be better, which the artists use too', () => {
+    expect(
+      librarySectionSearch({ section: 'songs', dupes: true, quality: 'upgradable' }, 'artists'),
+    ).toMatchObject({ dupes: false, quality: 'upgradable' });
+  });
+
+  it('keeps the song filters going into Songs', () => {
+    expect(
+      librarySectionSearch({ section: 'artists', dupes: true, quality: 'lossless' }, 'songs'),
+    ).toMatchObject({ section: 'songs', dupes: true, quality: 'lossless' });
+  });
 });

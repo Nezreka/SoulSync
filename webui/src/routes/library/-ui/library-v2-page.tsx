@@ -171,6 +171,20 @@ import { FilePathCellBody } from './file-path-cell';
 import { HistoryEventList } from './history-event-list';
 import { groupHistoryEvents, summarizeRecentHistory } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
+import {
+  AlbumCardExtras,
+  ArtistCardExtras,
+  CouldBeBetterToggle,
+  LibraryAlphabetBar,
+  LibraryExportButton,
+  LibraryRadioButton,
+  LibrarySearchFallback,
+  LibrarySearchInput,
+  LibrarySongsStripForSearch,
+  LibrarySourceFilter,
+  useUpgradableCounts,
+} from './library-index-extras';
+import { LibrarySongsSection } from './library-songs-section';
 import styles from './library-v2-page.module.css';
 import { QualityProfilePicker } from './quality-profile-modal';
 import { reassignSubject } from './reassign';
@@ -4496,6 +4510,16 @@ export function LibraryV2Page() {
           <ArtistDetailView artistId={search.artist} />
         ) : search.section === 'wanted' ? (
           <WantedIndexView />
+        ) : search.section === 'songs' ? (
+          <LibrarySongsSection
+            canWrite={canWrite}
+            toolbarLead={
+              <>
+                <LibraryScopePicker />
+                <LibrarySectionTabs />
+              </>
+            }
+          />
         ) : search.section === 'albums' ? (
           <AlbumIndexView />
         ) : (
@@ -4612,10 +4636,11 @@ function UnmatchedImportsBanner() {
 function ArtistIndexView() {
   const search = Route.useSearch();
   const navigate = useNavigate();
+  const canWrite = useLibraryV2CanWrite();
   // Debounce the filter box: navigating per keystroke fires a request each key.
   const artistFilter = useUrlSyncedFilter(
     search.q,
-    (value) => void navigate({ search: (prev) => ({ ...prev, q: value, page: 1 }) }),
+    (value) => void navigate({ search: (prev) => ({ ...prev, q: value, page: 1 }), replace: true }),
   );
 
   // Only fetched for the table view (D6) — the card grid doesn't use either.
@@ -4651,12 +4676,20 @@ function ArtistIndexView() {
       page: search.page,
       monitored: search.monitored,
       includeSize: isTableView && Boolean(artistTableColumns.size),
+      letter: search.letter,
+      source: search.source,
+      quality: search.quality,
     }),
   );
 
   const artists = artistsQuery.data?.artists ?? [];
   const pagination = artistsQuery.data?.pagination;
-  const hasActiveArtistFilters = Boolean(search.q.trim()) || search.monitored !== 'all';
+  const hasActiveArtistFilters =
+    Boolean(search.q.trim()) ||
+    search.monitored !== 'all' ||
+    search.letter !== 'all' ||
+    Boolean(search.source) ||
+    search.quality === 'upgradable';
   const hasNoArtistResults =
     !artistsQuery.isLoading &&
     !artistsQuery.isError &&
@@ -4690,10 +4723,12 @@ function ArtistIndexView() {
           <p className={styles.subtitle}>
             {pagination
               ? `${pagination.total_count} ${hasActiveArtistFilters ? 'matches' : 'artists'}`
-              : 'Experimental library manager'}
+              : 'Browse your complete music collection'}
           </p>
         </div>
         <div className={styles.headerActions}>
+          <LibraryRadioButton />
+          <LibraryExportButton />
           <GlobalAutomaticSearchButton />
           <MonitorAllUnmonitoredButton />
           <ImportButton
@@ -4709,14 +4744,12 @@ function ArtistIndexView() {
       <div className={styles.toolbar}>
         <LibraryScopePicker />
         <LibrarySectionTabs />
-        <input
-          aria-label="Filter artists"
+        <LibrarySearchInput
+          label="Filter artists"
           id="library-search-input"
-          className={styles.searchInput}
-          type="text"
           placeholder="Filter artists…"
           value={artistFilter.value}
-          onChange={(e) => artistFilter.onChange(e.target.value)}
+          onChange={artistFilter.onChange}
         />
         <select
           aria-label="Filter monitoring"
@@ -4757,6 +4790,8 @@ function ArtistIndexView() {
           <option value="albums">Album count</option>
           <option value="tracks">Track count</option>
         </select>
+        <LibrarySourceFilter />
+        <CouldBeBetterToggle count={pagination?.total_count} />
         <div className={styles.viewToggle} id="library-view-toggle">
           <button
             type="button"
@@ -4778,9 +4813,13 @@ function ArtistIndexView() {
         ) : null}
       </div>
 
+      <LibraryAlphabetBar />
+
       {/* Host for the vanilla download bubbles — see the note above. Sits
           directly above the artist list, where the vanilla page put it. */}
       <div ref={downloadsHost} data-library-downloads-host="" />
+
+      <LibrarySongsStripForSearch canWrite={canWrite} />
 
       {artistsQuery.isLoading ? (
         <div className={styles.loading}>Loading…</div>
@@ -4814,6 +4853,9 @@ function ArtistIndexView() {
                   ...previous,
                   q: '',
                   monitored: 'all' as const,
+                  letter: 'all',
+                  source: '',
+                  quality: '' as const,
                   page: 1,
                 }),
               });
@@ -4821,6 +4863,7 @@ function ArtistIndexView() {
           >
             {hasActiveArtistFilters ? 'Reset filters' : 'Back to first page'}
           </button>
+          <LibrarySearchFallback noun="artists" />
         </div>
       ) : search.view === 'table' ? (
         <ArtistTable
@@ -4854,9 +4897,10 @@ const ALBUM_SORT_LABELS: Record<LibraryV2AlbumSort, string> = {
 function AlbumIndexView() {
   const search = Route.useSearch();
   const navigate = useNavigate();
+  const canWrite = useLibraryV2CanWrite();
   const albumFilter = useUrlSyncedFilter(
     search.q,
-    (value) => void navigate({ search: (prev) => ({ ...prev, q: value, page: 1 }) }),
+    (value) => void navigate({ search: (prev) => ({ ...prev, q: value, page: 1 }), replace: true }),
   );
   const albumsQuery = useQuery(
     libraryV2AlbumsQueryOptions({
@@ -4864,11 +4908,17 @@ function AlbumIndexView() {
       albumSort: search.albumSort,
       page: search.page,
       monitored: search.monitored,
+      letter: search.letter,
+      source: search.source,
     }),
   );
   const albums = albumsQuery.data?.albums ?? [];
   const pagination = albumsQuery.data?.pagination;
-  const filtered = Boolean(search.q.trim()) || search.monitored !== 'all';
+  const filtered =
+    Boolean(search.q.trim()) ||
+    search.monitored !== 'all' ||
+    search.letter !== 'all' ||
+    Boolean(search.source);
 
   return (
     <div className={styles.page}>
@@ -4881,18 +4931,20 @@ function AlbumIndexView() {
               : 'Albums across all artists'}
           </p>
         </div>
+        <div className={styles.headerActions}>
+          <LibraryRadioButton />
+        </div>
       </header>
 
       <div className={styles.toolbar}>
         <LibraryScopePicker />
         <LibrarySectionTabs />
-        <input
-          aria-label="Filter albums"
-          className={styles.searchInput}
-          type="text"
+        <LibrarySearchInput
+          label="Filter albums"
+          id="library-search-input"
           placeholder="Filter albums or artists…"
           value={albumFilter.value}
-          onChange={(e) => albumFilter.onChange(e.target.value)}
+          onChange={albumFilter.onChange}
         />
         <select
           aria-label="Filter monitoring"
@@ -4924,7 +4976,12 @@ function AlbumIndexView() {
             </option>
           ))}
         </select>
+        <LibrarySourceFilter albums />
       </div>
+
+      <LibraryAlphabetBar />
+
+      <LibrarySongsStripForSearch canWrite={canWrite} />
 
       {albumsQuery.isLoading ? (
         <div className={styles.loading}>Loading albums…</div>
@@ -4939,6 +4996,7 @@ function AlbumIndexView() {
       ) : albums.length === 0 ? (
         <div className={styles.emptyState}>
           <h2>{filtered ? 'No albums match this view' : 'No albums yet'}</h2>
+          <LibrarySearchFallback noun="albums" />
         </div>
       ) : (
         <div className={styles.cardGrid} id="library-albums-grid">
@@ -5011,6 +5069,7 @@ function AlbumListCard({
       <span className={styles.cardMonitor}>
         <MonitorToggle entity="albums" id={album.id} monitored={album.monitored} />
       </span>
+      <AlbumCardExtras album={album} />
     </article>
   );
 }
@@ -5054,10 +5113,17 @@ function PageNav({
  */
 export function librarySectionSearch<T extends Record<string, unknown>>(
   previous: T,
-  section: 'artists' | 'albums' | 'wanted',
+  section: 'artists' | 'albums' | 'songs' | 'wanted',
 ): T & { section: string; q: string; artist: undefined; album: undefined; page: number } {
+  // duplicates and lossless are song filters; "could be better" means
+  // something to the artists too
+  const songOnly =
+    section !== 'songs' && ('dupes' in previous || 'quality' in previous)
+      ? { dupes: false, ...(previous.quality === 'lossless' ? { quality: '' } : {}) }
+      : {};
   return {
     ...previous,
+    ...songOnly,
     section,
     q: '',
     artist: undefined,
@@ -5110,6 +5176,17 @@ function LibrarySectionTabs() {
         }
       >
         Albums
+      </button>
+      <button
+        type="button"
+        className={search.section === 'songs' ? styles.viewActive : ''}
+        onClick={() =>
+          void navigate({
+            search: (previous) => librarySectionSearch(previous, 'songs'),
+          })
+        }
+      >
+        Songs
       </button>
       <button
         type="button"
@@ -5322,9 +5399,12 @@ function WantedIndexView() {
 export function ArtistCard({
   artist,
   onOpen,
+  upgradable,
 }: {
   artist: LibraryV2ArtistSummary;
   onOpen: (artistId: number) => void;
+  /** tracks that could be better, once counted */
+  upgradable?: number;
 }) {
   return (
     <article className={styles.artistCard}>
@@ -5361,18 +5441,21 @@ export function ArtistCard({
       <span className={styles.cardMonitor}>
         <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
       </span>
+      <ArtistCardExtras artist={artist} upgradable={upgradable ?? artist.upgradable_count} />
     </article>
   );
 }
 
 function ArtistCards({ artists }: { artists: LibraryV2ArtistSummary[] }) {
   const navigate = useNavigate();
+  const upgradable = useUpgradableCounts(artists);
   return (
     <div className={styles.cardGrid} id="library-artists-grid">
       {artists.map((artist) => (
         <ArtistCard
           key={artist.id}
           artist={artist}
+          upgradable={upgradable.get(artist.id)}
           onOpen={(artistId) => void navigate({ search: (p) => openArtistSearch(p, artistId) })}
         />
       ))}
