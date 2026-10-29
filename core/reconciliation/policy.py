@@ -5,6 +5,11 @@ proposals are executable only after every required album decision is settled.
 """
 from __future__ import annotations
 from typing import Any
+from core.reconciliation.fields import (
+    POSITION_FIELDS as _POSITION_CHANGE_KEYS,
+    ARTIST_FIELDS as _TRACK_ARTIST_CHANGE_KEYS,
+    RECORDING_FIELDS as _RECORDING_ID_CHANGE_KEYS,
+)
 
 _DETAILS = "CASE WHEN json_valid(details_json) THEN details_json ELSE '{}' END"
 
@@ -13,15 +18,6 @@ _DESTRUCTIVE_TYPES = frozenset({
     'reconciliation_extra', 'reconciliation_duplicate',
 })
 _GLOBAL_BLOCKER_TYPES = frozenset({'reconciliation_release'})
-_POSITION_CHANGE_KEYS = frozenset({
-    'track_number', 'disc_number', 'total_discs', 'library_track_number', 'library_disc_number',
-})
-_TRACK_ARTIST_CHANGE_KEYS = frozenset({
-    'track_artist', 'library_track_artist',
-})
-_RECORDING_ID_CHANGE_KEYS = frozenset({
-    'musicbrainz_recording_id', 'library_recording_mbid',
-})
 
 
 def _replaces_artist_credit(changes: dict[str, Any], details: dict | None = None) -> bool:
@@ -281,8 +277,9 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
     """One classification for counts, filtering and execution, including draft choices."""
     import json
     from core.reconciliation import choices as choices
-    choices.ensure_schema(conn)
     saved = {} if compact else choices.load_choices(conn)
+    from core.reconciliation.decisions import numbering_choices
+    album_numbering = numbering_choices(conn) if compact else {}
     grouped = {}
     # Lists and counters need policy inputs, not thousands of complete release
     # candidates and evidence snapshots. Execution still reads full evidence.
@@ -300,9 +297,13 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
         pairs += [f"'current_tags', json_object('duration_ms', json_extract({raw_details}, '$.current_tags.duration_ms'))",
                   f"'acoustid', CASE WHEN json_extract({raw_details}, '$.title_difference_kind') IN ('version', 'cosmetic') THEN json_extract({raw_details}, '$.acoustid') ELSE json_object('status', json_extract({raw_details}, '$.acoustid.status')) END"]
         detail_sql = 'json_object(' + ', '.join(pairs) + ')'
-        join = ('LEFT JOIN reconcile_review_choices c ON c.finding_id=f.id '
-                'AND c.case_id=f.review_case_key AND c.evidence_json=f.details_json')
-        choice_sql = 'c.category, c.choice, c.fix_action, c.numbering_choice'
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_review_choices'").fetchone():
+            comparable = 'c.evidence_json=f.details_json'
+            if 'approval_signature' in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}:
+                comparable = f"({comparable} OR (c.approval_signature!='' AND c.approval_signature=f.review_signature))"
+            join = ('LEFT JOIN reconcile_review_choices c ON c.finding_id=f.id '
+                    f'AND c.case_id=f.review_case_key AND {comparable}')
+            choice_sql = 'c.category, c.choice, c.fix_action, c.numbering_choice'
     for fid, key, kind, error, raw, category, choice, action, numbering in conn.execute(
             f"SELECT f.id, f.review_case_key, f.finding_type, f.last_error, {detail_sql}, {choice_sql} "
             f"FROM repair_findings f {join} WHERE f.status = ? AND (? = '' OR f.job_id = ?) "
@@ -314,6 +315,10 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
         if compact:
             details = {k: v for k, v in details.items() if v is not None}
             raw = json.dumps(details)
+        if compact and kind == 'reconciliation_metadata' and key in album_numbering:
+            numbering = album_numbering[key]
+            if not choice or category == 'numbering':
+                category, choice, action = 'numbering', numbering, ''
         saved_choice = (key, raw, category, choice, action, numbering) if compact and choice else saved.get(fid)
         details = choices.project(details if isinstance(details, dict) else {}, saved_choice, case_id=key, raw_json=raw)
         grouped.setdefault(key, []).append({'id': fid, 'finding_type': kind, 'details': details, 'last_error': error})

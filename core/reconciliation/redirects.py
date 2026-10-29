@@ -24,6 +24,12 @@ def record_relocation(db, old_folder: str, new_case: str) -> None:
         target = conn.execute('SELECT album_id, album_folder, source, release_id, profile_id FROM reconcile_album_plans WHERE case_id=?', (new_case,)).fetchone()
         if not target:
             return
+        from core.reconciliation.decisions import rebind_review
+        previous_keys = [row[0] for row in conn.execute(
+            'SELECT case_id FROM reconcile_album_plans WHERE album_folder=? AND case_id!=? AND profile_id=?',
+            (old_folder, new_case, target[4]))]
+        for old_case in previous_keys:
+            rebind_review(conn, old_case, new_case, target[0])
         conn.execute('INSERT OR REPLACE INTO reconcile_case_redirects SELECT case_id, ? FROM reconcile_album_plans WHERE album_folder = ? AND case_id != ? AND profile_id=?', (new_case, old_folder, new_case, target[4]))
         if target and conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_fulfillment'").fetchone():
             from core.reconciliation.fulfillment import ensure_schema

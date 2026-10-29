@@ -44,6 +44,10 @@ def ensure_schema(conn) -> None:
     from core.reconciliation.choices import ensure_schema as ensure_choices
     ensure_choices(conn)
     conn.execute(CREATE_TABLE)
+    if 'numbering_signature' not in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_album_plans)')}:
+        conn.execute("ALTER TABLE reconcile_album_plans ADD COLUMN numbering_signature TEXT NOT NULL DEFAULT ''")
+    from core.reconciliation.decisions import ensure_schema as ensure_decisions
+    ensure_decisions(conn)
     conn.execute('''CREATE INDEX IF NOT EXISTS idx_reconcile_plans_state
                     ON reconcile_album_plans(state, updated_at)''')
     conn.execute('''CREATE INDEX IF NOT EXISTS idx_reconcile_plans_album
@@ -73,6 +77,8 @@ def persist_album_plan(db, header: dict[str, Any], payload: dict[str, Any]) -> s
     conn = db._get_connection()
     try:
         ensure_schema(conn)
+        from core.reconciliation.decisions import register_review, plan_numbering_signature
+        register_review(conn, case_id, header.get('album_id'), header.get('profile_id'))
         conn.execute('''
             INSERT INTO reconcile_album_plans (
                 case_id, album_id, profile_id, album_title, artist_name,
@@ -105,6 +111,8 @@ def persist_album_plan(db, header: dict[str, Any], payload: dict[str, Any]) -> s
             counts['missing'], counts['extra'], json.dumps(categories),
             json.dumps(document, ensure_ascii=False, default=str),
         ))
+        conn.execute('UPDATE reconcile_album_plans SET numbering_signature=? WHERE case_id=?',
+                     (plan_numbering_signature(document), case_id))
         conn.commit()
         return case_id
     finally:
@@ -128,6 +136,10 @@ def load_album_plan(conn, case_id: str) -> dict[str, Any] | None:
         return None
     if isinstance(value, dict):
         value.pop('_planning', None)
+        from core.reconciliation.decisions import find_review
+        identity = find_review(conn, case_id)
+        if identity:
+            value['review_id'], value['decision_revision'] = identity[:2]
         return value
     return None
 

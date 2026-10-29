@@ -32,6 +32,8 @@ from core.library.path_resolver import resolve_library_file_path
 from core.reconciliation.inventory import refresh_scope_for_finding
 from core.reconciliation.identity import missing_slot_key, review_case_key
 from core.reconciliation import choices as review_choices
+from core.reconciliation import decisions as album_decisions
+from core.reconciliation.fields import POSITION_FIELDS
 from core.reconciliation import queue as repair_review_queue
 from core.repair_jobs import get_all_jobs
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -1514,6 +1516,9 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+            if job_id == 'library_reconciliation' and not getattr(self, '_review_decision_schema', False):
+                review_choices.ensure_schema(conn)
+                self._review_decision_schema = True
             has_case_key = getattr(self, '_review_case_column', None)
             if has_case_key is None:
                 has_case_key = self._has_column(cursor, 'repair_findings', 'review_case_key')
@@ -1560,8 +1565,10 @@ class RepairWorker:
                         cursor.execute('''UPDATE reconcile_review_choices SET case_id=?, evidence_json=?
                             WHERE finding_id=? AND evidence_json=?''',
                             (new_key, new_raw, existing_id, saved_raw))
-                        cursor.execute('''UPDATE repair_findings SET file_path=?, review_case_key=?, details_json=?
-                            WHERE id=?''', (file_path, new_key, new_raw, existing_id))
+                        cursor.execute('''UPDATE repair_findings SET file_path=?, review_case_key=?, details_json=?, review_signature=?
+                            WHERE id=?''', (file_path, new_key, new_raw, review_choices.signature(details), existing_id))
+                        cursor.execute('UPDATE reconcile_review_choices SET approval_signature=? WHERE finding_id=? AND evidence_json=?',
+                                       (review_choices.signature(details), existing_id, new_raw))
                         if existing_status in ('resolved', 'dismissed') and existing[4] != 'obsolete':
                             conn.commit()
                             return False
@@ -1577,8 +1584,8 @@ class RepairWorker:
                         # A published file can gain (or change) its library row.
                         # Keep the identity aligned with this scan's observed
                         # proposal so obsolete-finding cleanup cannot remove it.
-                        cursor.execute('UPDATE repair_findings SET entity_type=?, entity_id=? WHERE id=?',
-                                       (entity_type, entity_id, existing_id))
+                        cursor.execute('UPDATE repair_findings SET entity_type=?, entity_id=?, review_signature=? WHERE id=?',
+                                       (entity_type, entity_id, review_choices.signature(details or {}), existing_id))
                     if has_case_key:
                         cursor.execute(
                             "UPDATE repair_findings SET review_case_key = ? WHERE id = ?",
@@ -1620,6 +1627,9 @@ class RepairWorker:
                 cursor.execute(
                     "UPDATE repair_findings SET review_case_key = ? WHERE id = ?",
                     (review_case_key(details, file_path, finding_id), finding_id))
+            if job_id == 'library_reconciliation':
+                cursor.execute('UPDATE repair_findings SET review_signature=? WHERE id=?',
+                               (review_choices.signature(details or {}), cursor.lastrowid))
             conn.commit()
             # getattr, not attribute access: tests build workers via __new__
             # (no __init__), and the emit must NEVER break a finding write.
@@ -2351,6 +2361,9 @@ class RepairWorker:
             if row[2] != 'pending' and not self.reopen_finding(finding_id):
                 return {'success': False, 'error': 'Could not reopen this decision'}
             review_choices.ensure_schema(conn)
+            previous = review_choices.load_choices(conn, finding_id).get(finding_id)
+            if previous and (previous[2] == 'numbering' or previous[5]):
+                album_decisions.clear(conn, case_id, 'numbering')
             conn.execute('DELETE FROM reconcile_review_choices WHERE finding_id=? OR (case_id=? AND fix_action=?)',
                          (finding_id, case_id, f'used_by:{finding_id}'))
             conn.commit()
@@ -2434,6 +2447,7 @@ class RepairWorker:
             try:
                 review_choices.ensure_schema(conn)
                 if category == 'numbering':
+                    album_decisions.clear(conn, case_id, 'numbering')
                     # Reopening numbering also revokes a later whole-proposal
                     # approval, which may depend on the kept numbering.
                     conn.execute("DELETE FROM reconcile_review_choices WHERE case_id=? AND (category=? OR numbering_choice != '')",
@@ -2451,8 +2465,7 @@ class RepairWorker:
                     if (item['id'] in selected_ids if selected_ids is not None else
                         item.get('category') == category or
                         (category == 'numbering' and item['finding_type'] == 'reconciliation_metadata'
-                         and {'track_number', 'disc_number', 'library_track_number', 'library_disc_number'}
-                         .intersection((item.get('details') or {}).get('changes') or {})))]
+                         and POSITION_FIELDS.intersection((item.get('details') or {}).get('changes') or {})))]
         if not findings:
             return {'success': False, 'stale': True, 'error': 'Decision is no longer current'}
         linked_ids = set()
@@ -2474,6 +2487,8 @@ class RepairWorker:
         try:
             review_choices.ensure_schema(conn)
             conn.execute('BEGIN IMMEDIATE')
+            if category == 'numbering':
+                album_decisions.save_numbering(conn, case_id, action)
             for item in findings:
                 if item['id'] not in linked_ids:
                     conn.execute('DELETE FROM reconcile_review_choices WHERE case_id=? AND fix_action=?',
@@ -2494,16 +2509,17 @@ class RepairWorker:
                 if category == 'numbering':
                     numbering = action
                 conn.execute("""INSERT INTO reconcile_review_choices
-                    (finding_id, case_id, evidence_json, category, choice, fix_action, numbering_choice)
-                    VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(finding_id) DO UPDATE SET
+                    (finding_id, case_id, evidence_json, category, choice, fix_action, numbering_choice, approval_signature)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(finding_id) DO UPDATE SET
                     case_id=excluded.case_id, evidence_json=excluded.evidence_json,
                     category=excluded.category, choice=excluded.choice, fix_action=excluded.fix_action,
                     numbering_choice=excluded.numbering_choice,
+                    approval_signature=excluded.approval_signature,
                     playlist_override='',
                     updated_at=CURRENT_TIMESTAMP""",
                     (item['id'], case_id, row[10], category,
                      'dismiss' if item['id'] in linked_ids else action,
-                     f"used_by:{findings[0]['id']}" if item['id'] in linked_ids else fix_action, numbering))
+                     f"used_by:{findings[0]['id']}" if item['id'] in linked_ids else fix_action, numbering, review_choices.signature(json.loads(row[10]))))
                 # A newly reviewed choice may retry a failed apply. The file and
                 # release guards still run when the saved plan is applied.
                 conn.execute('UPDATE repair_findings SET last_error=NULL WHERE id=?', (item['id'],))

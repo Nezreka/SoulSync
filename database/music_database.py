@@ -9611,6 +9611,8 @@ class MusicDatabase:
             ensure_match_schema(cursor.connection)
             from core.reconciliation.store import ensure_schema
             ensure_schema(cursor.connection)
+            from core.reconciliation.migration import upgrade_review_state
+            upgrade_review_state(cursor.connection)
         except Exception as e:
             logger.error(f"Error migrating repair worker columns: {e}")
 

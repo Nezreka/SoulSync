@@ -390,8 +390,11 @@ def classify_case(items: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def evidence_token(row) -> str:
-    """Version a finding by its full persisted evidence, not second-granularity time."""
-    raw = json.dumps(list(row), ensure_ascii=False, default=str, separators=(',', ':'))
+    """Bind commands to effects, identity and state; labels and timestamps may change."""
+    from core.reconciliation.signatures import signature
+    details = json.loads(row[10] or '{}')
+    raw = json.dumps([*row[:8], signature(details), row[11], row[14]],
+                     ensure_ascii=False, default=str, separators=(',', ':'))
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 

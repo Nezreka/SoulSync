@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+from core.reconciliation.fields import POSITION_FIELDS, FILE_POSITION_FIELDS
+from core.reconciliation.signatures import signature, matches
 
 CREATE_TABLE = '''CREATE TABLE IF NOT EXISTS reconcile_review_choices (
     finding_id INTEGER PRIMARY KEY,
@@ -22,6 +24,11 @@ CREATE_TABLE = '''CREATE TABLE IF NOT EXISTS reconcile_review_choices (
 
 def ensure_schema(conn):
     conn.execute(CREATE_TABLE)
+    if 'approval_signature' not in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}:
+        conn.execute("ALTER TABLE reconcile_review_choices ADD COLUMN approval_signature TEXT NOT NULL DEFAULT ''")
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name='repair_findings'").fetchone():
+        if 'review_signature' not in {row[1] for row in conn.execute('PRAGMA table_info(repair_findings)')}:
+            conn.execute("ALTER TABLE repair_findings ADD COLUMN review_signature TEXT NOT NULL DEFAULT ''")
     if 'fix_action' not in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}:
         conn.execute("ALTER TABLE reconcile_review_choices ADD COLUMN fix_action TEXT NOT NULL DEFAULT ''")
     if 'numbering_choice' not in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}:
@@ -31,19 +38,6 @@ def ensure_schema(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS reconcile_saved_plans (
         case_id TEXT PRIMARY KEY, signature TEXT NOT NULL,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
-
-    # Replacement now retains the original through a verified playlist handoff.
-    # Release only the obsolete removal blocker, and only for unchanged saved evidence.
-    if 'last_error' in {r[1] for r in conn.execute('PRAGMA table_info(repair_findings)')}:
-        obsolete = conn.execute("""SELECT f.id FROM repair_findings f JOIN reconcile_review_choices c
-            ON c.finding_id=f.id AND c.evidence_json=f.details_json
-            WHERE f.status='pending' AND c.choice='fix' AND c.fix_action='replace'
-              AND f.last_error IN ('This copy is in a playlist; review that reference first',
-                                   'The current file is in a playlist; review that reference first')""").fetchall()
-        if obsolete:
-            conn.executemany('UPDATE repair_findings SET last_error=NULL WHERE id=?', obsolete)
-            conn.commit()
-
 
 def load_choices(conn, finding_id=None, *, case_id=None):
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_review_choices'").fetchone():
@@ -59,7 +53,40 @@ def load_choices(conn, finding_id=None, *, case_id=None):
         sql, params = sql + ' WHERE case_id=?', (case_id,)
     else:
         params = ()
-    return {row[0]: tuple(row[1:]) for row in conn.execute(sql, params)}
+    result = {row[0]: tuple(row[1:]) for row in conn.execute(sql, params)}
+    # Rebind only the read projection. Immutable approval evidence remains an
+    # audit snapshot; execution still checks the current file and target.
+    if result and 'approval_signature' in columns:
+        query = '''SELECT c.finding_id,f.details_json FROM reconcile_review_choices c
+            JOIN repair_findings f ON f.id=c.finding_id AND c.case_id=f.review_case_key
+            WHERE c.approval_signature!='' AND c.approval_signature=f.review_signature'''
+        if finding_id is not None:
+            query += ' AND c.finding_id=?'
+        elif case_id is not None:
+            query += ' AND c.case_id=?'
+        for fid, raw in conn.execute(query, params):
+            result[fid] = (result[fid][0], raw, *result[fid][2:])
+    from core.reconciliation.decisions import numbering_choices
+    numbering = numbering_choices(conn)
+    if numbering:
+        query = "SELECT id,review_case_key,details_json FROM repair_findings WHERE finding_type='reconciliation_metadata' AND status='pending'"
+        query_params = ()
+        if finding_id is not None:
+            query += ' AND id=?'
+            query_params = (finding_id,)
+        elif case_id is not None:
+            query += ' AND review_case_key=?'
+            query_params = (case_id,)
+        for fid, key, raw in conn.execute(query, query_params):
+            choice = numbering.get(key)
+            if not choice:
+                continue
+            previous = result.get(fid)
+            if previous and previous[0] == key and previous[1] == raw and previous[2] != 'numbering':
+                result[fid] = (*previous[:5], choice, *previous[6:])
+            else:
+                result[fid] = (key, raw, 'numbering', choice, '', choice, '')
+    return result
 
 
 def project(details, saved, *, case_id=None, raw_json=None):
@@ -83,7 +110,7 @@ def project(details, saved, *, case_id=None, raw_json=None):
         result['numbering_choice'] = numbering
     if numbering == 'dismiss':
         result.get('db_data', {}).pop('track_count', None)
-        for key in ('track_number', 'disc_number', 'total_discs'):
+        for key in FILE_POSITION_FIELDS:
             for section in ('db_data', 'db_track_updates'):
                 result.get(section, {}).pop(key, None)
             for change in (key, 'library_' + key):
@@ -104,7 +131,7 @@ def project(details, saved, *, case_id=None, raw_json=None):
 
 def plan_signature(items):
     import hashlib
-    payload = [{'id': item['id'], 'details': item['details'],
+    payload = [{'id': item['id'], 'details': signature(item['details']),
                 'type': item['finding_type'], 'error': item.get('last_error')}
                for item in sorted(items, key=lambda row: row['id'])]
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
@@ -140,7 +167,7 @@ def retains_numbering(previous, current):
     if any(previous.get(key) != current.get(key) for key in
            ('source', 'release_id', 'fingerprint_key', 'expected_title')):
         return False
-    fields = {'track_number', 'disc_number', 'total_discs', 'library_track_number', 'library_disc_number'}
+    fields = POSITION_FIELDS
     before = {k: v for k, v in (previous.get('changes') or {}).items() if k in fields}
     after = {k: v for k, v in (current.get('changes') or {}).items() if k in fields}
     return bool(before) and before == after
@@ -260,7 +287,7 @@ def same_annotated_evidence(previous, current):
                         if key not in {'old_label', 'new_label'}}
                 for field, change in result['changes'].items()}
         return result
-    return bool(previous) and substantive(previous) == substantive(current)
+    return matches(previous, current) or bool(previous) and substantive(previous) == substantive(current)
 
 
 def assignment_for_file(overrides, album_id, source, release_id, file, files, *, db=None):
