@@ -1958,6 +1958,19 @@ def get_artist_db_record(artist_id):
                     counts[label] = cur.fetchone()[0]
                 except Exception:
                     counts[label] = None
+            # the hero's format tags (FLAC, MP3...): what the live files are
+            formats = []
+            try:
+                cur.execute(
+                    "SELECT DISTINCT UPPER(TRIM(f.format)) FROM lib2_track_files f "
+                    "JOIN lib2_tracks t ON t.id = f.track_id "
+                    "JOIN lib2_albums al ON al.id = t.album_id "
+                    "WHERE al.primary_artist_id = ? AND f.format IS NOT NULL "
+                    "AND TRIM(f.format) <> '' AND COALESCE(f.file_state, 'active') = 'active'",
+                    (str(artist_id),))
+                formats = sorted(r[0] for r in cur.fetchall() if r[0])
+            except Exception:  # noqa: BLE001 - the record matters more than its tags
+                formats = []
         finally:
             conn.close()
 
@@ -1965,6 +1978,7 @@ def get_artist_db_record(artist_id):
             "success": True,
             "artist_id": str(artist_id),
             "counts": counts,
+            "formats": formats,
             "record": record,
         })
     except Exception as e:

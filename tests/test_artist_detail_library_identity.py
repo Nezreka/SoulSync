@@ -47,8 +47,8 @@ def client(tmp_path, monkeypatch):
                      (album_id, f"a{album_id}"))
         conn.execute("INSERT INTO lib2_tracks(id, album_id, title) VALUES(?, ?, 't')",
                      (album_id, album_id))
-        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, ?)",
-                     (album_id, fpath))
+        conn.execute("INSERT INTO lib2_track_files(track_id, path, format) VALUES(?, ?, ?)",
+                     (album_id, fpath, "flac" if album_id == 10 else "mp3"))
     conn.commit()
     conn.close()
     _Db.keys = {"drake/hand tagged/01.flac"}
@@ -77,3 +77,10 @@ def test_metadata_lock_reads_the_hand_tagged_files_of_a_lib2_album(client):
     """the unlock item shows only on an album that was tagged by hand."""
     assert client.get("/api/album/10/metadata-lock").get_json()["metadata_locked"] is True
     assert client.get("/api/album/11/metadata-lock").get_json()["metadata_locked"] is False
+
+
+def test_record_carries_the_artists_live_file_formats(client):
+    """the hero's format tags come from the record the db viewer already reads."""
+    body = client.get("/api/artist/1/record").get_json()
+    assert body["formats"] == ["FLAC", "MP3"]
+    assert body["record"]["name"] == "Drake"

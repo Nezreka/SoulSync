@@ -172,6 +172,7 @@ import { HistoryEventList } from './history-event-list';
 import { groupHistoryEvents, summarizeRecentHistory } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
+import { OwnedArtistHeroExtras } from './owned-artist-hero-extras';
 import { AlbumUnlockMenuItem, OwnedTrackMoreMenu } from './owned-artist-track-actions';
 import { QualityProfilePicker } from './quality-profile-modal';
 import { reassignSubject } from './reassign';
@@ -6783,6 +6784,11 @@ function CatalogueArtistHero({
           {downloadAction}
           <NativeAudiobookRouteToggle name={artist.name} />
           <ArtistAliases artistId={artist.id} artistName={artist.name} />
+          <OwnedArtistHeroExtras
+            artistId={artist.id}
+            artistName={artist.name}
+            genres={artist.genres}
+          />
         </>
       }
     />
