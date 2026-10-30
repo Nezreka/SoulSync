@@ -38,6 +38,7 @@ import type {
 } from './-library-v2.types';
 
 import { bitrateKbps } from './-bitrate';
+import { recallPage, rememberPage } from './-library-v2.remembered';
 
 export const LIBRARY_V2_QUERY_KEY = ['library-v2'] as const;
 
@@ -2046,21 +2047,30 @@ export function libraryV2ArtistsQueryOptions(
     includeSize?: boolean;
   } & LibraryV2ListFilters,
 ) {
+  const queryKey = [
+    ...LIBRARY_V2_QUERY_KEY,
+    'artists',
+    search.q,
+    search.sort,
+    search.monitored,
+    search.page,
+    Boolean(search.includeSize),
+    search.letter ?? 'all',
+    search.source ?? '',
+    search.quality === 'upgradable' ? 'upgradable' : '',
+    Boolean(search.includeUpgradable),
+  ];
   return queryOptions({
-    queryKey: [
-      ...LIBRARY_V2_QUERY_KEY,
-      'artists',
-      search.q,
-      search.sort,
-      search.monitored,
-      search.page,
-      Boolean(search.includeSize),
-      search.letter ?? 'all',
-      search.source ?? '',
-      search.quality === 'upgradable' ? 'upgradable' : '',
-      Boolean(search.includeUpgradable),
-    ],
-    queryFn: () => fetchLibraryV2Artists(search),
+    queryKey,
+    queryFn: async () => {
+      const data = await fetchLibraryV2Artists(search);
+      rememberPage(queryKey, data);
+      return data;
+    },
+    // a fresh load paints the last list this browser saw, then refetches at
+    // once (updated at 0 = stale): cards in a frame, the real list right after
+    initialData: () => recallPage<ArtistsResponse>(queryKey),
+    initialDataUpdatedAt: 0,
   });
 }
 
