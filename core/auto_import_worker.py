@@ -150,8 +150,9 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
         'spotify_track_id': '',
     }
     try:
-        from mutagen import File as MutagenFile
-        audio = MutagenFile(file_path, easy=True)
+        # AIFF/WAV carry raw ID3 the easy view can't map (#1919)
+        from core.metadata.easy_tags import open_easy
+        audio = open_easy(file_path)
         if audio:
             # Audio length comes off audio.info, not tags. Mutagen returns
             # seconds as a float; convert to int milliseconds to match the

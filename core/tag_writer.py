@@ -22,6 +22,9 @@ logger = logging.getLogger("tag_writer")
 
 # Supported extensions
 SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}
+# read_file_tags also reads AIFF: its tags are plain ID3 (#1919). writing
+# stays on SUPPORTED_EXTENSIONS.
+READABLE_EXTENSIONS = SUPPORTED_EXTENSIONS | {'.aiff', '.aif'}
 
 # File-field vocabulary shared by repairs. A selected-field write never
 # derives a second field (for example ALBUMARTIST) from an ARTIST change.
@@ -201,7 +204,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         return result
 
     ext = os.path.splitext(file_path)[1].lower()
-    if ext not in SUPPORTED_EXTENSIONS:
+    if ext not in READABLE_EXTENSIONS:
         result['error'] = f'Unsupported format: {ext}'
         return result
 

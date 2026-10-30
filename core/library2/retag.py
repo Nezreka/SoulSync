@@ -516,6 +516,13 @@ def tag_preview(contexts: List[Dict[str, Any]], *, on_observation=None, options=
                 entry.update(error=file_tags["error"], has_changes=False, diff=[])
                 out.append(entry)
                 continue
+            # AIFF is read (#1919) but not written: no change to offer
+            from core.tag_writer import SUPPORTED_EXTENSIONS
+            if os.path.splitext(abs_path)[1].lower() not in SUPPORTED_EXTENSIONS:
+                entry.update(error=f"Unsupported format: {os.path.splitext(abs_path)[1].lower()}",
+                             has_changes=False, diff=[])
+                out.append(entry)
+                continue
             # fill_missing never replaces a file's lyrics: no remote lookup then.
             if (policy and policy['lyrics'] == 'fetch' and ('fields' not in policy or 'lyrics' in policy['fields'])
                     and (policy['mode'] == 'overwrite' or not file_tags.get('lyrics') or row.get('sibling_files'))):

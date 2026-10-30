@@ -35,9 +35,10 @@ module_logger = get_logger("imports.routes")
 
 
 def _default_read_tags(file_path: str):
-    from mutagen import File as MutagenFile
+    # AIFF/WAV carry raw ID3 the easy view can't map (#1919)
+    from core.metadata.easy_tags import open_easy
 
-    return MutagenFile(file_path, easy=True)
+    return open_easy(file_path)
 
 
 def _get_single_track_import_context(*args, **kwargs):
