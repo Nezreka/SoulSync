@@ -61,9 +61,10 @@ def _norm(text: Any) -> str:
     return normalize_key(str(text or "")) or ""
 
 
-def _unmatched_rows(conn) -> List[Any]:
+def _unmatched_rows(conn, file_id: Optional[int] = None) -> List[Any]:
+    one = "AND f.id = ?" if file_id is not None else ""
     return conn.execute(
-        """
+        f"""
         SELECT t.id AS track_id, t.title, t.track_number, t.duration,
                al.id AS album_id, ar.id AS artist_id,
                f.id AS file_id, f.path, f.format, f.bitrate
@@ -74,10 +75,27 @@ def _unmatched_rows(conn) -> List[Any]:
          WHERE LOWER(TRIM(ar.name)) = ?
            AND f.path IS NOT NULL AND TRIM(f.path) <> ''
            AND COALESCE(f.file_state, 'active') = 'active'
+           {one}
          ORDER BY f.path
         """,
-        (_UNKNOWN,),
+        (_UNKNOWN,) if file_id is None else (_UNKNOWN, int(file_id)),
     ).fetchall()
+
+
+def _filing(conn, track_ids: List[int]) -> Dict[int, Dict[str, str]]:
+    """the files already re-identified and waiting for the import pass"""
+    if not track_ids:
+        return {}
+    marks = ",".join("?" for _ in track_ids)
+    try:
+        rows = conn.execute(
+            f"SELECT replace_track_id, album_name, artist_name FROM rematch_hints "
+            f"WHERE status = 'pending' AND replace_track_id IN ({marks})",
+            [int(t) for t in track_ids],
+        ).fetchall()
+    except Exception:  # noqa: BLE001 - no hints table, nothing waiting
+        return {}
+    return {int(r[0]): {"album_name": r[1] or "", "artist_name": r[2] or ""} for r in rows}
 
 
 def _folder_neighbours(conn, folder: str) -> List[Dict[str, Any]]:
@@ -140,39 +158,54 @@ def _duplicate_of(parsed: Dict[str, Any], neighbours: List[Dict[str, Any]]) -> O
 
 def list_unmatched(conn) -> List[Dict[str, Any]]:
     """Every file under Unknown Artist, each with its best guess."""
-    out = []
     neighbours_by_folder: Dict[str, List[Dict[str, Any]]] = {}
-    for row in _unmatched_rows(conn):
-        path = str(row["path"])
-        parsed = parse_file_name(path)
-        folder = parsed["folder"]
-        if folder not in neighbours_by_folder:
-            neighbours_by_folder[folder] = _folder_neighbours(conn, folder) if folder else []
-        neighbours = neighbours_by_folder[folder]
-        context = _folder_album(neighbours)
-        duplicate = _duplicate_of(parsed, neighbours)
-        album, artist = context if context else (None, None)
-        query = " ".join(part for part in (parsed["title"], artist, album) if part)
-        out.append({
-            "track_id": row["track_id"],
-            "file_id": row["file_id"],
-            "album_id": row["album_id"],
-            "artist_id": row["artist_id"],
-            "file_path": path,
-            "file_name": _path_mod(path).basename(path),
-            "folder": folder,
-            "format": str(row["format"] or "").upper(),
-            "bitrate": row["bitrate"],
-            "duration": row["duration"],
-            "title": row["title"],
-            "guess": {
-                "title": parsed["title"],
-                "track_number": parsed["track_number"],
-                "album": album,
-                "artist": artist,
-                "query": query,
-                "copy": parsed["copy"],
-            },
-            "duplicate_of": duplicate,
-        })
+    out = [_entry(conn, row, neighbours_by_folder) for row in _unmatched_rows(conn)]
+    filing = _filing(conn, [e["track_id"] for e in out])
+    for entry in out:
+        entry["filing"] = filing.get(int(entry["track_id"]))
     return out
+
+
+def unmatched_entry(conn, file_id: int) -> Optional[Dict[str, Any]]:
+    """One file's entry, or None when it isn't under Unknown Artist (any more)."""
+    rows = _unmatched_rows(conn, file_id)
+    if not rows:
+        return None
+    entry = _entry(conn, rows[0], {})
+    entry["filing"] = _filing(conn, [entry["track_id"]]).get(int(entry["track_id"]))
+    return entry
+
+
+def _entry(conn, row, neighbours_by_folder: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+    path = str(row["path"])
+    parsed = parse_file_name(path)
+    folder = parsed["folder"]
+    if folder not in neighbours_by_folder:
+        neighbours_by_folder[folder] = _folder_neighbours(conn, folder) if folder else []
+    neighbours = neighbours_by_folder[folder]
+    context = _folder_album(neighbours)
+    duplicate = _duplicate_of(parsed, neighbours)
+    album, artist = context if context else (None, None)
+    query = " ".join(part for part in (parsed["title"], artist, album) if part)
+    return {
+        "track_id": row["track_id"],
+        "file_id": row["file_id"],
+        "album_id": row["album_id"],
+        "artist_id": row["artist_id"],
+        "file_path": path,
+        "file_name": _path_mod(path).basename(path),
+        "folder": folder,
+        "format": str(row["format"] or "").upper(),
+        "bitrate": row["bitrate"],
+        "duration": row["duration"],
+        "title": row["title"],
+        "guess": {
+            "title": parsed["title"],
+            "track_number": parsed["track_number"],
+            "album": album,
+            "artist": artist,
+            "query": query,
+            "copy": parsed["copy"],
+        },
+        "duplicate_of": duplicate,
+    }

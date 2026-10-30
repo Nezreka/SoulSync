@@ -104,6 +104,7 @@ describe('the unmatched-imports banner', () => {
                 artist_id: 8,
                 artist_name: 'Kanye West',
               },
+              filing: null,
             },
             {
               track_id: 2,
@@ -126,11 +127,77 @@ describe('the unmatched-imports banner', () => {
                 copy: false,
               },
               duplicate_of: null,
+              filing: null,
             },
           ],
         }),
       ),
+      http.post('/api/library/v2/unmatched/12/identify', () => {
+        identified.push(12);
+        return HttpResponse.json({
+          success: true,
+          status: 'matched',
+          method: 'fingerprint',
+          heard: { title: 'Tongue', artist: 'MØ', score: 0.97 },
+          already_have: null,
+          message: '',
+          candidates: [
+            {
+              source: 'deezer',
+              track_id: 'dz-1',
+              track_title: 'Tongue',
+              artist_name: 'MØ',
+              album_name: 'No Mythologies to Follow',
+              album_type: 'album',
+              year: 2014,
+              total_tracks: 12,
+              image_url: '',
+              isrc: null,
+              confidence: 0.94,
+              reasons: ['Fingerprint 97%', 'Same length'],
+            },
+            {
+              source: 'deezer',
+              track_id: 'dz-2',
+              track_title: 'Tongue',
+              artist_name: 'MØ',
+              album_name: 'Tongue',
+              album_type: 'single',
+              year: 2014,
+              total_tracks: 1,
+              image_url: '',
+              isrc: null,
+              confidence: 0.7,
+              reasons: ['Fingerprint 97%'],
+            },
+          ],
+        });
+      }),
+      http.post('/api/library/v2/unmatched/11/identify', () => {
+        identified.push(11);
+        return HttpResponse.json({
+          success: true,
+          status: 'duplicate',
+          method: 'fingerprint',
+          heard: { title: 'Suzy', artist: 'Kanye West', score: 0.95 },
+          already_have: {
+            track_id: 9,
+            title: 'Suzy',
+            album_id: 3,
+            album_title: 'Donda 2',
+            artist_name: 'Kanye West',
+          },
+          candidates: [],
+          message: '',
+        });
+      }),
+      http.post('/api/reidentify/apply', async ({ request }) => {
+        applied.push(await request.json());
+        return HttpResponse.json({ success: true, album_name: 'No Mythologies to Follow' });
+      }),
     );
+    const identified: number[] = [];
+    const applied: unknown[] = [];
     const { history } = renderLibrary();
 
     (await screen.findByRole('button', { name: 'Review' })).click();
@@ -139,10 +206,25 @@ describe('the unmatched-imports banner', () => {
       await screen.findByRole('dialog', { name: 'Tracks without a match' }),
     ).toBeInTheDocument();
     expect(await screen.findByText('15 - Suzy (1).flac')).toBeInTheDocument();
-    expect(screen.getByText(/second copy of “Suzy” on Donda 2 by Kanye West/)).toBeInTheDocument();
+    // a copy the folder already gives away needs no listening to say so
+    expect(screen.getByText(/You already have this/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remove duplicate' })).toBeInTheDocument();
-    expect(screen.getByText(/nothing to go on but the name/)).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Find match' })).toHaveLength(2);
+    // the untagged one is fingerprinted and its likely release offered
+    expect(
+      await screen.findByText('No Mythologies to Follow · MØ · Album · 2014'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Strong match')).toBeInTheDocument();
+    expect(screen.getByText('Fingerprint 97%')).toBeInTheDocument();
+    // one lookup at a time, in list order
+    await waitFor(() => expect(identified).toEqual([11, 12]));
+    // the other release is one click away
+    screen.getByRole('button', { name: '1 other match' }).click();
+    expect(await screen.findByText('Tongue · MØ · Single · 2014')).toBeInTheDocument();
+    screen.getByRole('button', { name: 'Accept' }).click();
+    expect(await screen.findByText(/Filing under No Mythologies to Follow/)).toBeInTheDocument();
+    expect(applied).toEqual([
+      { library_track_id: 2, source: 'deezer', track_id: 'dz-1', replace: true },
+    ]);
     // no detour through a fake artist page
     expect(String(history.location.search)).not.toContain('artist=42');
   });

@@ -2354,6 +2354,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             tracks = list_unmatched(conn)
         return jsonify({"success": True, "tracks": tracks})
 
+    @_route("/api/library/v2/unmatched/<int:file_id>/identify", methods=["POST"])
+    def lib2_unmatched_identify(file_id):
+        """Fingerprint one unmatched file with AcoustID and rank the releases
+        it could be (core/library2/unmatched_identify). POST: it spends the
+        AcoustID key and the metadata source's rate, so it's the admin's."""
+        from core.library2.unmatched_identify import identify_file
+        with closing(_conn()) as conn:
+            result = identify_file(conn, file_id)
+        if result is None:
+            return _fail("That file has a match now", 404)
+        return jsonify({"success": True, **result})
+
     @_route("/api/library/v2/artists/<int:artist_id>/match-status")
     def lib2_artist_match_status(artist_id):
         """Per-provider metadata match chips for an artist (legacy parity)."""

@@ -2258,6 +2258,51 @@ export interface LibraryV2UnmatchedTrack {
     artist_id: number;
     artist_name: string;
   } | null;
+  /** re-identified and waiting for the import pass: the release it goes to */
+  filing: { album_name: string; artist_name: string } | null;
+}
+
+/** one release the file could be, ranked by what backs it */
+export interface LibraryV2UnmatchedCandidate {
+  source: string;
+  track_id: string;
+  track_title: string;
+  artist_name: string;
+  album_name: string;
+  album_type: string;
+  year: string | number | null;
+  total_tracks: number | null;
+  image_url: string;
+  isrc: string | null;
+  confidence: number;
+  /** short facts behind the confidence: "Fingerprint 97%", "Same length" */
+  reasons: string[];
+}
+
+export interface LibraryV2UnmatchedIdentify {
+  /** matched: ranked candidates. duplicate: already_have names the copy.
+   *  no_match / unavailable / missing / error: message says why */
+  status: 'matched' | 'duplicate' | 'no_match' | 'unavailable' | 'missing' | 'error';
+  method: 'fingerprint' | 'name';
+  heard: { title: string; artist: string; score: number } | null;
+  candidates: LibraryV2UnmatchedCandidate[];
+  already_have: {
+    track_id: number;
+    title: string;
+    album_id: number;
+    album_title: string;
+    artist_name: string;
+  } | null;
+  message: string;
+}
+
+/** fingerprint the file with AcoustID and look its release up */
+export async function identifyUnmatchedTrack(fileId: number): Promise<LibraryV2UnmatchedIdentify> {
+  const data = await lib2Json<Ok & LibraryV2UnmatchedIdentify>(
+    apiClient.post(`library/v2/unmatched/${fileId}/identify`, { timeout: 90_000 }),
+    'Could not identify the file',
+  );
+  return data;
 }
 
 export function libraryV2UnmatchedTracksQueryOptions() {
