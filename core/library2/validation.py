@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 
 _change_emitter = None
@@ -166,6 +167,116 @@ def validate_tags(conn, file_id, tags, config):
             'checked_at': datetime.now(timezone.utc).isoformat()}
 
 
+_JSON_LINKS = {'key': None, 'at': 0.0, 'links': {}}
+_JSON_LINKS_TTL = 60.0
+
+
+def _json_file_links(conn):
+    """``{file_id: {finding ids}}`` for pending findings that name a file in
+    their details (``library_v2.file_id`` / ``validation.file_id``).
+
+    reading that means parsing every pending finding's details, 16mb on a
+    library with eight thousand retag findings, so it's built once and reused
+    while the pending set is the same (count and newest id) and for at most a
+    minute. a file id kept as a json string counts too, as it did when this was
+    compared against the integer column.
+    """
+    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+    count, newest = conn.execute(
+        "SELECT (SELECT COUNT(*) FROM repair_findings WHERE status='pending'), "
+        "(SELECT MAX(id) FROM repair_findings)").fetchone()
+    key = (db_file, count, newest)
+    now = time.monotonic()
+    if _JSON_LINKS['key'] == key and now - _JSON_LINKS['at'] < _JSON_LINKS_TTL:
+        return _JSON_LINKS['links']
+    links = {}
+    for finding_id, lv2, val in conn.execute(
+            "SELECT id, json_extract(details_json,'$.library_v2.file_id'), "
+            "json_extract(details_json,'$.validation.file_id') FROM repair_findings "
+            "WHERE status='pending' AND details_json LIKE '%file_id%' "
+            "AND json_valid(details_json)"):
+        for value in (lv2, val):
+            if value is not None:
+                links.setdefault(str(value).strip(), set()).add(finding_id)
+    _JSON_LINKS.update(key=key, at=now, links=links)
+    return links
+
+
+def _pending_findings_for_files(conn, file_ids):
+    """``[{**finding, 'subject_file_id': id}, ...]``: each pending finding that
+    names one of these files, by path, by file/track/album/artist id, or by the
+    file id in its details.
+
+    one indexed lookup per kind of link. it used to be a single join with all
+    of them ORed, which matched every file against every pending finding with
+    json parsing in between: seconds an album, a minute for an artist's
+    appears-on page.
+    """
+    marks = ','.join('?' for _ in file_ids)
+    subjects = conn.execute(
+        f"SELECT tf.id, tf.path, t.id AS track_id, t.album_id, a.primary_artist_id "
+        f"FROM lib2_track_files tf JOIN lib2_tracks t ON t.id=tf.track_id "
+        f"JOIN lib2_albums a ON a.id=t.album_id WHERE tf.id IN ({marks})", list(file_ids),
+    ).fetchall()
+    if not subjects:
+        return []
+    by_path, by_key = {}, {}
+    for row in subjects:
+        fid = int(row['id'])
+        if row['path']:
+            by_path.setdefault(row['path'], set()).add(fid)
+        # file and track ids only count for a finding with no path of its own
+        by_key.setdefault(('file', f"lib2:{fid}", True), set()).add(fid)
+        by_key.setdefault(('track', f"lib2:{row['track_id']}", True), set()).add(fid)
+        by_key.setdefault(('album', f"lib2:{row['album_id']}", False), set()).add(fid)
+        by_key.setdefault(('artist', f"lib2:{row['primary_artist_id']}", False), set()).add(fid)
+
+    pairs = {}
+
+    def _take(finding_rows, fids_of):
+        for found in finding_rows:
+            for fid in fids_of(found):
+                pairs.setdefault((found['id'], fid), found)
+
+    paths = list(by_path)
+    for i in range(0, len(paths), 500):
+        part = paths[i:i + 500]
+        _take(conn.execute(
+            f"SELECT * FROM repair_findings WHERE status='pending' AND file_path IN "
+            f"({','.join('?' for _ in part)})", part).fetchall(),
+            lambda f: by_path.get(f['file_path'], ()))
+    for entity_type in ('file', 'track', 'album', 'artist'):
+        keys = [k for k in by_key if k[0] == entity_type]
+        for i in range(0, len(keys), 500):
+            part = keys[i:i + 500]
+            needs_no_path = part[0][2]
+            _take(conn.execute(
+                f"SELECT * FROM repair_findings WHERE status='pending' AND entity_type=? "
+                f"AND entity_id IN ({','.join('?' for _ in part)})"
+                + (" AND file_path IS NULL" if needs_no_path else ""),
+                [entity_type, *[k[1] for k in part]]).fetchall(),
+                lambda f, t=entity_type, n=needs_no_path: by_key.get((t, f['entity_id'], n), ()))
+    links = _json_file_links(conn)
+    by_finding = {}
+    for fid in file_ids:
+        for finding_id in links.get(str(fid), ()):
+            by_finding.setdefault(finding_id, set()).add(int(fid))
+    found_ids = list(by_finding)
+    for i in range(0, len(found_ids), 500):
+        part = found_ids[i:i + 500]
+        _take(conn.execute(
+            f"SELECT * FROM repair_findings WHERE status='pending' AND id IN "
+            f"({','.join('?' for _ in part)})", part).fetchall(),
+            lambda f: by_finding.get(f['id'], ()))
+
+    out = []
+    for (_finding_id, fid), found in pairs.items():
+        finding = dict(found)
+        finding['subject_file_id'] = fid
+        out.append(finding)
+    return out
+
+
 def linked_findings_many(conn, files):
     """Resolve findings in bounded batches; retain file and library ownership."""
     files = {int(f['id']): f for f in files if f}
@@ -175,18 +286,7 @@ def linked_findings_many(conn, files):
     ids = list(files)
     for start in range(0, len(ids), 500):
         chunk = ids[start:start + 500]
-        rows = conn.execute(
-            f"SELECT rf.*, tf.id AS subject_file_id FROM lib2_track_files tf "
-            "JOIN lib2_tracks t ON t.id=tf.track_id JOIN lib2_albums a ON a.id=t.album_id "
-            "JOIN repair_findings rf ON rf.status='pending' AND (rf.file_path=tf.path OR "
-            "(json_valid(rf.details_json) AND (json_extract(rf.details_json,'$.library_v2.file_id')=tf.id OR "
-            "json_extract(rf.details_json,'$.validation.file_id')=tf.id)) OR "
-            "(rf.file_path IS NULL AND ((rf.entity_type='file' AND rf.entity_id='lib2:'||tf.id) OR "
-            "(rf.entity_type='track' AND rf.entity_id='lib2:'||t.id))) OR "
-            "(rf.entity_type='album' AND rf.entity_id='lib2:'||t.album_id) OR "
-            "(rf.entity_type='artist' AND rf.entity_id='lib2:'||a.primary_artist_id)) "
-            f"WHERE tf.id IN ({','.join('?' for _ in chunk)})", chunk,
-        ).fetchall()
+        rows = _pending_findings_for_files(conn, chunk)
         for row in rows:
             finding = dict(row)
             fid = finding.pop('subject_file_id')
