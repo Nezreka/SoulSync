@@ -158,6 +158,75 @@ describe('the search route', () => {
   });
 });
 
+describe('the sidebar opens a fresh search (#1937)', () => {
+  const input = () => document.getElementById('enhanced-search-input') as HTMLInputElement;
+  function type(value: string) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set as (
+      v: string,
+    ) => void;
+    act(() => {
+      setter.call(input(), value);
+      input().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  afterEach(() => {
+    window.__soulsyncFreshNav = null;
+  });
+
+  it('coming back without the sidebar keeps the last search', async () => {
+    const first = renderRoute('/search');
+    await settled();
+    type('radiohead');
+    // the controller takes the query after the debounce
+    await act(() => new Promise((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS + 50)));
+    first.unmount();
+
+    renderRoute('/search');
+    await settled();
+    expect(input().value).toBe('radiohead');
+  });
+
+  it('a sidebar click starts empty', async () => {
+    const first = renderRoute('/search');
+    await settled();
+    type('radiohead');
+    // the controller takes the query after the debounce
+    await act(() => new Promise((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS + 50)));
+    first.unmount();
+
+    window.__soulsyncFreshNav = 'search';
+    renderRoute('/search');
+    await settled();
+    expect(input().value).toBe('');
+    expect(window.__soulsyncFreshNav).toBeNull();
+  });
+
+  it('a sidebar click while already here clears it', async () => {
+    renderRoute('/search');
+    await settled();
+    type('radiohead');
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('soulsync:fresh-nav', { detail: { pageId: 'search' } }));
+    });
+    await waitFor(() => expect(input().value).toBe(''));
+  });
+
+  it('another page in the sidebar leaves it alone', async () => {
+    renderRoute('/search');
+    await settled();
+    type('radiohead');
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('soulsync:fresh-nav', { detail: { pageId: 'library' } }),
+      );
+    });
+    expect(input().value).toBe('radiohead');
+  });
+});
+
 describe('the download bubbles handoff', () => {
   it('asks vanilla to repaint the bubbles on mount', async () => {
     // The bubble store and painter are vanilla; this page recreates the

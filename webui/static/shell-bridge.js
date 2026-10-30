@@ -282,6 +282,11 @@ function _handleShellLinkClick(event) {
     const navPageId = anchor.matches('.nav-button[data-page]') ? anchor.getAttribute('data-page') : null;
     if (navPageId) {
         event.preventDefault();
+        // a sidebar click opens the page fresh, back/forward still restores
+        // it (#1937). the flag covers a page that mounts after this, the
+        // event one that is already on screen.
+        window.__soulsyncFreshNav = navPageId;
+        window.dispatchEvent(new CustomEvent('soulsync:fresh-nav', { detail: { pageId: navPageId } }));
         // iss29-B01: `navigateToPage` early-returns on `pageId === currentPage`
         // (init.js:3175), and every Library V2 sub-view keeps currentPage at
         // 'library' — so from /library?artist=42 the sidebar's own "Library"
