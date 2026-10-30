@@ -6055,10 +6055,9 @@ textarea.searchInput {
   }
 }
 
-/* The dedicated video tab has its own bounded spotlight. */
-.musicVideosPanel :global(.artist-videos-stage) {
-  align-items: start;
-}
+/* The dedicated video tab has its own bounded spotlight. the stage keeps
+   style.css's stretch: the up next list is positioned inside the rail, so a
+   rail that only grows to its content is just its header, an empty queue */
 .musicVideosPanel :global(.artist-video-spotlight) {
   height: 430px;
   min-height: 0;
@@ -8821,6 +8820,9 @@ textarea.searchInput {
   grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
   gap: 20px;
   margin: 20px 0 12px;
+  /* each card is as tall as what it holds: a short collection stretched to
+     ten top tracks on a wide screen was mostly empty card */
+  align-items: start;
 }
 
 .bandPopular,
@@ -9173,7 +9175,7 @@ textarea.searchInput {
   text-align: left;
 }
 
-/* the two cards share a height; download all closes its card, not the list */
+/* download all closes its card, not the list */
 .bandPopular {
   display: flex;
   flex-direction: column;
