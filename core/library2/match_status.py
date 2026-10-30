@@ -118,12 +118,19 @@ def artist_enrichment_coverage(conn: Any, artist_id: int) -> Dict[str, Any]:
 
     group = resolve_alias_group(conn, int(artist_id)) or [int(artist_id)]
     marks = ",".join("?" for _ in group)
+    # two indexed halves, not one OR across two joined tables: the OR made
+    # sqlite walk every track in the catalogue, 20s an artist page on a big
+    # library. UNION keeps the DISTINCT.
     rows = conn.execute(
-        f"""SELECT DISTINCT t.id, t.spotify_id, t.musicbrainz_id, t.external_ids
-              FROM lib2_tracks t
-              LEFT JOIN lib2_track_artists ta ON ta.track_id = t.id
-              LEFT JOIN lib2_albums al ON al.id = t.album_id
-             WHERE ta.artist_id IN ({marks}) OR al.primary_artist_id IN ({marks})""",
+        f"""SELECT t.id, t.spotify_id, t.musicbrainz_id, t.external_ids
+              FROM lib2_track_artists ta
+              JOIN lib2_tracks t ON t.id = ta.track_id
+             WHERE ta.artist_id IN ({marks})
+            UNION
+            SELECT t.id, t.spotify_id, t.musicbrainz_id, t.external_ids
+              FROM lib2_albums al
+              JOIN lib2_tracks t ON t.album_id = al.id
+             WHERE al.primary_artist_id IN ({marks})""",
         tuple(group) * 2,
     ).fetchall()
     total = len(rows)
