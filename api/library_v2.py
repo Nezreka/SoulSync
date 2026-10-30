@@ -323,10 +323,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # stays with the admin.
             if request.endpoint in _OWN_LIBRARY_WISH_ENDPOINTS and _can_wish():
                 return _named_row_hidden()
+            if request.endpoint == "lib2_update_ui_preferences" and _own_preferences_only():
+                return None
             return _fail("Library v2 changes require the admin profile", 403)
         # E-06: for a profile, another library's row does not exist -- its
         # page, its tags, its history alike
         return _named_row_hidden()
+
+    def _own_preferences_only() -> bool:
+        """A profile's own layout (its artist toolbar) is its to change; the
+        shared table layout stays the admin's."""
+        from core.library2.ui_preferences import PROFILE_SECTIONS
+        body = request.get_json(silent=True)
+        return isinstance(body, dict) and bool(body) and set(body) <= PROFILE_SECTIONS
 
     def _resolve_merged_ids(kwargs):
         """A merged release group or track answers under its survivor on
@@ -2668,7 +2677,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     def lib2_get_ui_preferences():
         from core.library2.ui_preferences import get_ui_preferences
         with closing(_conn()) as conn:
-            preferences = get_ui_preferences(conn)
+            preferences = get_ui_preferences(conn, _profile())
         return jsonify({"success": True, "preferences": preferences})
 
     @_route("/api/library/v2/ui-preferences", methods=["PUT"])
@@ -2686,7 +2695,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # into a dozen stuck workers. Fail fast and let the click be lost;
             # the next one re-sends the same state anyway.
             conn.execute("PRAGMA busy_timeout = 2000")
-            preferences = update_ui_preferences(conn, body)
+            preferences = update_ui_preferences(conn, body, _profile())
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
                 raise

@@ -2348,6 +2348,7 @@ type UiPreferencesPatch = {
     columns?: Partial<LibraryV2ArtistTableColumns>;
     column_order?: (keyof LibraryV2ArtistTableColumns)[];
   };
+  artist_toolbar?: LibraryV2UiPreferences['artist_toolbar'];
 };
 
 export async function fetchLibraryV2UiPreferences(): Promise<LibraryV2UiPreferences> {

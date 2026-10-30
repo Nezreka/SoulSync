@@ -201,3 +201,18 @@ def test_quality_and_match_provider_preferences():
     assert prefs["track_table"]["quality_show_format"] is True
     assert prefs["track_table"]["visible_match_providers"]["spotify"] is False
     assert prefs["track_table"]["visible_match_providers"]["tidal"] is True
+
+
+def test_each_profile_keeps_its_own_artist_toolbar():
+    conn = _conn()
+    assert all(get_ui_preferences(conn)["artist_toolbar"].values())
+    update_ui_preferences(conn, {"artist_toolbar": {"enhance_quality": False}}, profile_id=2)
+    update_ui_preferences(conn, {"track_table": {"columns": {"bpm": True}}})
+
+    guest, admin = get_ui_preferences(conn, profile_id=2), get_ui_preferences(conn)
+    assert guest["artist_toolbar"]["enhance_quality"] is False
+    assert guest["artist_toolbar"]["history"] is True
+    assert admin["artist_toolbar"]["enhance_quality"] is True
+    # the table layout stays one, shared
+    assert guest["track_table"]["columns"]["bpm"] is True
+    assert "profiles" not in admin

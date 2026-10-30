@@ -3180,6 +3180,24 @@ def test_ui_preferences_write_rejected_for_non_admin_profile(api):
     assert client.get("/api/library/v2/ui-preferences").status_code == 200
 
 
+def test_a_profile_may_change_only_its_own_artist_toolbar(api):
+    client, db, _ids = api
+    db.active_profile = 7
+
+    resp = client.put("/api/library/v2/ui-preferences",
+                      json={"artist_toolbar": {"enhance_quality": False}})
+
+    assert resp.status_code == 200
+    assert resp.get_json()["preferences"]["artist_toolbar"]["enhance_quality"] is False
+    db.active_profile = 1
+    admin = client.get("/api/library/v2/ui-preferences").get_json()["preferences"]
+    assert admin["artist_toolbar"]["enhance_quality"] is True
+    db.active_profile = 7
+    mixed = client.put("/api/library/v2/ui-preferences",
+                       json={"artist_toolbar": {"history": False}, "track_table": {}})
+    assert mixed.status_code == 403
+
+
 def test_discography_refresh_kicks_mb_reconcile_in_background(api, monkeypatch):
     """§62.6 Stufe 3 wiring: a successful refresh schedules the MB
     release-group reconcile off the hot path (background thread)."""

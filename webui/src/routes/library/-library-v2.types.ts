@@ -804,4 +804,16 @@ export interface LibraryV2UiPreferences {
     columns: LibraryV2ArtistTableColumns;
     column_order: (keyof LibraryV2ArtistTableColumns)[];
   };
+  /** Which artist toolbar buttons this profile sees (Tools always shows). */
+  artist_toolbar?: Partial<Record<ArtistToolbarButton, boolean>>;
 }
+
+export const ARTIST_TOOLBAR_BUTTONS = {
+  automatic_search: 'Automatic Search',
+  interactive_search: 'Interactive Search',
+  enhance_quality: 'Enhance Quality',
+  refresh_scan: 'Refresh & Scan',
+  history: 'History',
+  artist_settings: 'Artist Settings',
+} as const;
+export type ArtistToolbarButton = keyof typeof ARTIST_TOOLBAR_BUTTONS;

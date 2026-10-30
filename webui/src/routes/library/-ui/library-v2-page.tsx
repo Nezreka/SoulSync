@@ -139,6 +139,8 @@ import {
   songQueueTrack,
 } from '../-library-v2.songs';
 import {
+  ARTIST_TOOLBAR_BUTTONS,
+  type ArtistToolbarButton,
   LIBRARY_V2_WANTED_KINDS,
   type LibraryV2AlbumDetail,
   type LibraryV2AlbumListItem,
@@ -163,6 +165,7 @@ import {
   type LibraryV2Track,
   type LibraryV2TrackFile,
   type LibraryV2TrackTableColumns,
+  type LibraryV2UiPreferences,
   type LibraryV2WantedKind,
   type LibraryV2WantedRow,
 } from '../-library-v2.types';
@@ -6259,6 +6262,44 @@ export function shouldAutoFetchDiscography(params: {
  *  one dropdown instead of five separate buttons next to the Lidarr-core
  *  primary bar (Refresh & Scan/Automatic Search/Interactive Search/Update
  *  Discography). */
+/** Tools → Customize Toolbar: which artist toolbar buttons this profile sees.
+ *  Each tick saves at once, like the table options. */
+function ToolbarSettingsModal({
+  shown,
+  onClose,
+}: {
+  shown: LibraryV2UiPreferences['artist_toolbar'];
+  onClose: () => void;
+}) {
+  const mutation = useUiPreferencesMutation();
+  return (
+    <ModalShell
+      title="Customize Toolbar"
+      description="The buttons this profile sees on an artist page. Tools always stays."
+      onClose={onClose}
+    >
+      <section className={styles.tableOptionsSection}>
+        {Object.entries(ARTIST_TOOLBAR_BUTTONS).map(([key, label]) => {
+          const checked = shown?.[key as ArtistToolbarButton] !== false;
+          return (
+            <label key={key} className={styles.tableOptionsItem}>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => mutation.mutate({ artist_toolbar: { [key]: !checked } })}
+              />
+              {label}
+              {key === 'enhance_quality' ? (
+                <span className={styles.tableOptionsExample}>when files can be upgraded</span>
+              ) : null}
+            </label>
+          );
+        })}
+      </section>
+    </ModalShell>
+  );
+}
+
 function ArtistToolsMenu({
   artistId,
   artistName,
@@ -6272,6 +6313,7 @@ function ArtistToolsMenu({
   onUpdateDiscography,
   onServerSync,
   onDelete,
+  onCustomizeToolbar,
   discographyBusy,
 }: {
   artistId: number;
@@ -6286,6 +6328,7 @@ function ArtistToolsMenu({
   onUpdateDiscography: () => void;
   onServerSync?: () => void;
   onDelete: () => void;
+  onCustomizeToolbar: () => void;
   discographyBusy: boolean;
 }) {
   const canWrite = useLibraryV2CanWrite();
@@ -6409,6 +6452,8 @@ function ArtistToolsMenu({
             () => window.showReportIssueModal?.('artist', artistId, artistName, ''),
             false,
           )}
+          <div className={styles.toolMenuHeading}>Page</div>
+          {item('Customize Toolbar…', 'settings', onCustomizeToolbar, false)}
           <div className={styles.toolMenuDivider} />
           {item('Delete Artist…', 'delete', onDelete, true, true)}
         </div>
@@ -7530,6 +7575,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     entity?: Lib2EntityRef;
   } | null>(null);
   const [showArtistSettings, setShowArtistSettings] = useState(false);
+  const [showToolbarSettings, setShowToolbarSettings] = useState(false);
+  const toolbarButtons = useQuery(libraryV2UiPreferencesQueryOptions()).data?.artist_toolbar;
   const [showHistory, setShowHistory] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [showManageTracks, setShowManageTracks] = useState(false);
@@ -7773,8 +7820,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 </button>
               ) : null}
               <div className={styles.toolbarGroup}>
-                {/* The primary bar as named actions, so a setting can later
-                    pick which of them show. Tools and the rest stay. */}
+                {/* The bar as named actions: Customize Toolbar (in Tools)
+                    picks which of them show. Tools itself always stays. */}
                 {(
                   [
                     [
@@ -7816,26 +7863,43 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                       />,
                     ],
                   ] as const
-                ).map(([id, action]) => (
-                  <Fragment key={id}>{action}</Fragment>
-                ))}
+                )
+                  .filter(([id]) => toolbarButtons?.[id] !== false)
+                  .map(([id, action]) => (
+                    <Fragment key={id}>{action}</Fragment>
+                  ))}
               </div>
               <div className={styles.toolbarGroup}>
-                <ArtistRefreshButton artistId={artistId} />
-                <ActionButton
-                  icon="history"
-                  label="History"
-                  title="Recent activity for this artist"
-                  requiresWrite={false}
-                  onClick={() => setShowHistory(true)}
-                />
-                <ActionButton
-                  icon="settings"
-                  label="Artist Settings"
-                  title="Quality profile, monitoring, future releases and audiobook filing"
-                  onClick={() => setShowArtistSettings(true)}
-                />
+                {(
+                  [
+                    ['refresh_scan', <ArtistRefreshButton artistId={artistId} />],
+                    [
+                      'history',
+                      <ActionButton
+                        icon="history"
+                        label="History"
+                        title="Recent activity for this artist"
+                        requiresWrite={false}
+                        onClick={() => setShowHistory(true)}
+                      />,
+                    ],
+                    [
+                      'artist_settings',
+                      <ActionButton
+                        icon="settings"
+                        label="Artist Settings"
+                        title="Quality profile, monitoring, future releases and audiobook filing"
+                        onClick={() => setShowArtistSettings(true)}
+                      />,
+                    ],
+                  ] as const
+                )
+                  .filter(([id]) => toolbarButtons?.[id] !== false)
+                  .map(([id, action]) => (
+                    <Fragment key={id}>{action}</Fragment>
+                  ))}
                 <ArtistToolsMenu
+                  onCustomizeToolbar={() => setShowToolbarSettings(true)}
                   artistId={artistId}
                   artistName={artistName}
                   onRetag={() =>
@@ -8116,6 +8180,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           ) : null}
           {showArtistSettings ? (
             <ArtistSettingsModal artist={artist} onClose={() => setShowArtistSettings(false)} />
+          ) : null}
+          {showToolbarSettings ? (
+            <ToolbarSettingsModal
+              shown={toolbarButtons}
+              onClose={() => setShowToolbarSettings(false)}
+            />
           ) : null}
           {showHistory ? (
             <HistoryModal
@@ -9215,7 +9285,9 @@ function useUiPreferencesMutation() {
   const settledRef = useRef(0);
   return useMutation({
     mutationFn: async (patch: Parameters<typeof updateLibraryV2UiPreferences>[0]) => {
-      if (!canWrite) throw new Error('Library changes require the admin profile');
+      // a profile's own toolbar is its to change; the shared layout is the admin's
+      if (!canWrite && Object.keys(patch).some((key) => key !== 'artist_toolbar'))
+        throw new Error('Library changes require the admin profile');
       const sequence = ++sequenceRef.current;
       const preferences = await updateLibraryV2UiPreferences(patch);
       return { sequence, preferences };

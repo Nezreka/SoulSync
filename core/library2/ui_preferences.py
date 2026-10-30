@@ -135,7 +135,21 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
             "size",
         ],
     },
+    # Which of the artist page's toolbar buttons show (Tools always does).
+    # Each profile picks its own, see PROFILE_SECTIONS.
+    "artist_toolbar": {
+        "automatic_search": True,
+        "interactive_search": True,
+        "enhance_quality": True,
+        "refresh_scan": True,
+        "history": True,
+        "artist_settings": True,
+    },
 }
+
+# Sections each profile keeps for itself, stored in the same blob under
+# "profiles" -> "<profile id>"; everything else is the one shared layout.
+PROFILE_SECTIONS = frozenset({"artist_toolbar"})
 
 
 def ensure_ui_preferences_schema(cursor) -> None:
@@ -152,27 +166,44 @@ def _merge_section(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any
     return merged
 
 
-def get_ui_preferences(conn) -> Dict[str, Any]:
-    """Stored preferences overlaid on ``DEFAULT_PREFERENCES`` (missing/unknown
-    keys fall back to the default so older stored blobs and new keys added
-    later both resolve cleanly)."""
+def _stored(conn) -> Dict[str, Any]:
     row = conn.execute(
         "SELECT preferences_json FROM lib2_ui_preferences WHERE id=1"
     ).fetchone()
-    stored: Dict[str, Any] = {}
     if row and row[0]:
         try:
             parsed = json.loads(row[0])
             if isinstance(parsed, dict):
-                stored = parsed
+                return parsed
         except (TypeError, ValueError):
             pass
-    return _merge_section(DEFAULT_PREFERENCES, stored)
+    return {}
 
 
-def update_ui_preferences(conn, patch: Dict[str, Any]) -> Dict[str, Any]:
-    """Merge ``patch`` into the stored preferences and persist the result."""
-    merged = _merge_section(get_ui_preferences(conn), patch)
+def get_ui_preferences(conn, profile_id: int = 1) -> Dict[str, Any]:
+    """Stored preferences overlaid on ``DEFAULT_PREFERENCES`` (missing/unknown
+    keys fall back to the default so older stored blobs and new keys added
+    later both resolve cleanly), with ``profile_id``'s own sections."""
+    stored = _stored(conn)
+    own = (stored.pop("profiles", None) or {}).get(str(profile_id)) or {}
+    return _merge_section(DEFAULT_PREFERENCES, {
+        **stored, **{k: v for k, v in own.items() if k in PROFILE_SECTIONS}})
+
+
+def update_ui_preferences(conn, patch: Dict[str, Any], profile_id: int = 1) -> Dict[str, Any]:
+    """Merge ``patch`` into the stored preferences and persist the result;
+    a profile section lands on ``profile_id``'s own copy."""
+    stored = _stored(conn)
+    profiles = stored.pop("profiles", None) or {}
+    own = {k: v for k, v in patch.items() if k in PROFILE_SECTIONS}
+    if own:
+        profiles = _merge_section(profiles, {str(profile_id): own})
+    merged = _merge_section(_merge_section(DEFAULT_PREFERENCES, stored),
+                            {k: v for k, v in patch.items() if k not in PROFILE_SECTIONS})
+    for section in PROFILE_SECTIONS:
+        merged.pop(section, None)
+    if profiles:
+        merged["profiles"] = profiles
     conn.execute(
         """INSERT INTO lib2_ui_preferences(id, preferences_json, updated_at)
            VALUES (1, ?, CURRENT_TIMESTAMP)
@@ -182,11 +213,12 @@ def update_ui_preferences(conn, patch: Dict[str, Any]) -> Dict[str, Any]:
         (json.dumps(merged),),
     )
     conn.commit()
-    return merged
+    return get_ui_preferences(conn, profile_id)
 
 
 __all__ = [
     "DEFAULT_PREFERENCES",
+    "PROFILE_SECTIONS",
     "ensure_ui_preferences_schema",
     "get_ui_preferences",
     "update_ui_preferences",

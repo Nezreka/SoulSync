@@ -106,6 +106,39 @@ describe('Library V2 artist detail — All Releases views', () => {
     },
   );
 
+  it('hides the toolbar buttons this profile switched off and customizes them from Tools', async () => {
+    const saved: unknown[] = [];
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { track_table: {}, artist_toolbar: { history: false } },
+        }),
+      ),
+      http.put('/api/library/v2/ui-preferences', async ({ request }) => {
+        saved.push(await request.json());
+        return HttpResponse.json({
+          success: true,
+          preferences: { track_table: {}, artist_toolbar: { history: true } },
+        });
+      }),
+    );
+    renderArtist('/library?artist=1');
+    expect(await screen.findByRole('button', { name: 'Artist Settings' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'History' })).toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tools' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Customize Toolbar…' }));
+    const history = await screen.findByRole('checkbox', { name: 'History' });
+    expect(history).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Refresh & Scan' })).toBeChecked();
+    fireEvent.click(history);
+
+    await waitFor(() => expect(saved).toEqual([{ artist_toolbar: { history: true } }]));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(await screen.findByRole('button', { name: 'History' })).toBeInTheDocument();
+  });
+
   it('keeps media-server sync in Tools and reports its background result', async () => {
     const sync = vi.fn();
     server.use(
