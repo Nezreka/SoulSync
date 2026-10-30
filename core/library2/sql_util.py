@@ -259,10 +259,17 @@ def library_artist_sql(alias: str) -> str:
     """
     if not _VALID_IDENTIFIER.match(alias):
         raise ValueError(f'Invalid alias: {alias!r}')
+    return f"{alias}.id IN ({library_artist_ids_sql()})"
+
+
+def library_artist_ids_sql() -> str:
+    """The canonical ids of every library artist, as a SELECT: the body of
+    library_artist_sql's IN list, for a caller that evaluates it once and
+    reads the result twice (the artist list's count and its page)."""
     intent = intent_profile_id()
     wanted = f"COALESCE(w.wanted, {monitored_sql('track', 't')})=1"
     wanted_join = f"LEFT JOIN lib2_wanted_tracks w ON w.track_id=t.id AND w.profile_id={intent}"
-    return (f"{alias}.id IN (SELECT COALESCE(va.canonical_artist_id,va.id) FROM lib2_artists va WHERE "
+    return (f"SELECT COALESCE(va.canonical_artist_id,va.id) FROM lib2_artists va WHERE "
             f"{owned_sql('artist', 'va')} OR {monitored_sql('artist', 'va')}=1 "
             f"OR EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t ON t.album_id=al.id "
             f"{wanted_join} WHERE al.primary_artist_id=va.id AND {wanted}) "
@@ -270,7 +277,7 @@ def library_artist_sql(alias: str) -> str:
             f"{wanted_join} WHERE ta.artist_id=va.id AND {wanted}) "
             f"OR EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_monitor_rules r ON r.entity_type='album' "
             f"AND r.entity_id=al.id AND r.profile_id={intent} AND r.monitored=1 "
-            f"WHERE al.primary_artist_id=va.id))")
+            f"WHERE al.primary_artist_id=va.id)")
 
 
 def intent_profile_id(scope=_AMBIENT) -> int:

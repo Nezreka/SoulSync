@@ -254,8 +254,17 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
     offset = (page - 1) * limit
     # §40: alias-member rows are folded into their canonical artist's entry
     # (get_artist merges their albums in) and never listed on their own.
-    from core.library2.sql_util import library_artist_sql
-    clauses, params = ["a.canonical_artist_id IS NULL", library_artist_sql('a')], {}
+    from core.library2.sql_util import library_artist_ids_sql
+    # library membership walks every artist (files, monitoring, wanted), and
+    # the count and the page each walked it: half a second to a second apiece
+    # on a big library. it's worked out once per request into a temp table
+    # both of them read.
+    conn.execute("DROP TABLE IF EXISTS temp.lib2_artist_page_members")
+    conn.execute("CREATE TEMP TABLE lib2_artist_page_members (id INTEGER PRIMARY KEY)")
+    conn.execute("INSERT OR IGNORE INTO temp.lib2_artist_page_members "
+                 f"{library_artist_ids_sql()}")
+    clauses, params = ["a.canonical_artist_id IS NULL",
+                       "a.id IN (SELECT id FROM temp.lib2_artist_page_members)"], {}
     # ...and, once directories exist, only the ones this library may see: a
     # file of ours hangs off it, or we have monitoring intent on it. Empty
     # while the scope is every library, so an install without own directories
