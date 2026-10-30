@@ -28,16 +28,44 @@ logger = get_logger("personalized_playlists")
 # Ownership requires an active physical file; provenance alone must not hide a
 # missing/provider track from discovery. The column-name asymmetry survives on the
 # discovery side: ``discovery_pool.deezer_track_id``, not ``deezer_id``.
-_OWNED_PROVIDER_IDS_CTE = """
-                WITH owned AS MATERIALIZED (
+_OWNED_PROVIDER_IDS_SQL = """
                     SELECT t.spotify_id AS spotify_id,
                            json_extract(t.external_ids, '$.itunes') AS itunes_id,
                            json_extract(t.external_ids, '$.deezer') AS deezer_id
                     FROM lib2_tracks t
                     WHERE EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
                                   AND f.file_state='active' AND TRIM(f.path)<>'')
-                      AND (t.spotify_id IS NOT NULL OR t.external_ids NOT IN ('', '{}'))
-                )"""
+                      AND (t.spotify_id IS NOT NULL OR t.external_ids NOT IN ('', '{}'))"""
+
+# the provider ids of every track you own, which every discover shelf leaves
+# out. building them walks the whole catalogue (~2s on a big library), and
+# each shelf, each query, rebuilt them. now each pooled connection keeps them
+# in indexed temp tables, refilled in one sql pass when a file is added or
+# after five minutes.
+_OWNED_IDS_TTL = 300.0
+
+
+def _ensure_owned_ids(conn) -> None:
+    """Fill temp.owned_spotify / owned_itunes / owned_deezer for this
+    connection with the current owned provider ids."""
+    import time as _time
+    stamp = conn.execute("SELECT MAX(id) FROM lib2_track_files").fetchone()[0]
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS owned_ids_version (stamp, built_at REAL)")
+    current = conn.execute("SELECT stamp, built_at FROM temp.owned_ids_version").fetchone()
+    now = _time.monotonic()
+    if current and current[0] == stamp and now - current[1] < _OWNED_IDS_TTL:
+        return
+    conn.execute("DROP TABLE IF EXISTS temp.owned_all")
+    conn.execute(f"CREATE TEMP TABLE owned_all AS {_OWNED_PROVIDER_IDS_SQL}")
+    for name, column in (('owned_spotify', 'spotify_id'), ('owned_itunes', 'itunes_id'),
+                         ('owned_deezer', 'deezer_id')):
+        conn.execute(f"CREATE TEMP TABLE IF NOT EXISTS {name} (v PRIMARY KEY) WITHOUT ROWID")
+        conn.execute(f"DELETE FROM temp.{name}")
+        conn.execute(f"INSERT OR IGNORE INTO temp.{name} "
+                     f"SELECT {column} FROM temp.owned_all WHERE {column} IS NOT NULL")
+    conn.execute("DROP TABLE temp.owned_all")
+    conn.execute("DELETE FROM temp.owned_ids_version")
+    conn.execute("INSERT INTO temp.owned_ids_version VALUES (?, ?)", (stamp, now))
 
 
 def _blocklist_profile() -> int:
@@ -224,9 +252,9 @@ class PersonalizedPlaylistsService:
                     if near_names else "0")
         try:
             with self.database._get_connection() as conn:
+                _ensure_owned_ids(conn)
                 ids = conn.execute(
-                    f"""{_OWNED_PROVIDER_IDS_CTE}
-                        SELECT id, {near_sql} FROM discovery_pool
+                    f"""SELECT id, {near_sql} FROM discovery_pool
                         {self._POOL_WHERE}
                           {self._OWNED_CLAUSE}
                           {extra_where}""",
@@ -319,20 +347,20 @@ class PersonalizedPlaylistsService:
         'source',
     )
 
-    # Three uncorrelated NOT IN lists (one per ID space) over the `owned` CTE
-    # (_OWNED_PROVIDER_IDS_CTE, which every query using this clause puts in
-    # front) instead of one OR'd correlated NOT EXISTS: SQLite cannot index the
+    # Three uncorrelated NOT IN lists (one per ID space) over the owned id temp
+    # tables (_ensure_owned_ids, run on the connection first) instead of one
+    # OR'd correlated NOT EXISTS: SQLite cannot index the
     # OR'd subquery and scans every owned row for every discovery_pool row,
     # which pins the CPU for minutes on large pools (issue #1350). NULLs are
     # kept out of the lists (NOT IN with a NULL is never true) and a NULL pool
     # ID cannot match.
     _OWNED_CLAUSE = """
                   AND (discovery_pool.spotify_track_id IS NULL OR discovery_pool.spotify_track_id NOT IN (
-                      SELECT o.spotify_id FROM owned o WHERE o.spotify_id IS NOT NULL))
+                      SELECT v FROM temp.owned_spotify))
                   AND (discovery_pool.itunes_track_id IS NULL OR discovery_pool.itunes_track_id NOT IN (
-                      SELECT o.itunes_id FROM owned o WHERE o.itunes_id IS NOT NULL))
+                      SELECT v FROM temp.owned_itunes))
                   AND (discovery_pool.deezer_track_id IS NULL OR discovery_pool.deezer_track_id NOT IN (
-                      SELECT o.deezer_id FROM owned o WHERE o.deezer_id IS NOT NULL))"""
+                      SELECT v FROM temp.owned_deezer))"""
 
     # the gate every pool read shares: this source, this profile's pool, a
     # usable id, no artist this profile blocked. params: (source, profile, profile)
@@ -408,14 +436,12 @@ class PersonalizedPlaylistsService:
             columns = self._STANDARD_DISCOVERY_COLUMNS + tuple(extra_columns)
             select_cols = ",\n                        ".join(columns)
 
-            owned_cte = _OWNED_PROVIDER_IDS_CTE if exclude_owned else ""
             owned_clause = self._OWNED_CLAUSE if exclude_owned else ""
 
             # the pool is per profile: profile 2's hidden gems came out of
             # everyone's pool before
             profile = _blocklist_profile()
             query = f"""
-                {owned_cte}
                 SELECT
                         {select_cols}
                 FROM discovery_pool
@@ -428,6 +454,8 @@ class PersonalizedPlaylistsService:
             params = (source, profile, profile) + tuple(extra_params) + (fetch_limit,)
 
             with self.database._get_connection() as conn:
+                if exclude_owned:
+                    _ensure_owned_ids(conn)
                 cursor = conn.cursor()
                 cursor.execute(query, params)
                 rows = cursor.fetchall()
