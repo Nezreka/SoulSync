@@ -239,9 +239,13 @@ class ListeningStatsWorker:
         self._repair_history_once()
 
         client = self._engine.client(active_server) if self._engine else None
-        # SoulSync standalone has no listening data; only the three
-        # streaming servers contribute. Mirror the legacy guard here.
-        if active_server not in ('plex', 'jellyfin', 'navidrome'):
+        # Only a server that declares play history contributes (the
+        # standalone library and, for now, Music Assistant do not).
+        from core.media_server.contract import Capability
+        supports = getattr(self._engine, 'supports', None)
+        has_history = (supports(active_server, Capability.PLAY_HISTORY) if callable(supports)
+                       else active_server in ('plex', 'jellyfin', 'navidrome'))  # an engine stub without the query
+        if not has_history:
             client = None
 
         if not client:

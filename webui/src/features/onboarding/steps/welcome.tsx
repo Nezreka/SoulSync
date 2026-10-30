@@ -38,7 +38,7 @@ export function WelcomeStep({ onFinished }: { onFinished: () => void }) {
   const file = useRef<HTMLInputElement>(null);
   const [restoring, setRestoring] = useState<'idle' | 'busy' | string>('idle');
 
-  const server = (['plex', 'jellyfin', 'navidrome'] as const).find((k) => found[k]);
+  const server = (['plex', 'jellyfin', 'navidrome', 'music_assistant'] as const).find((k) => found[k]);
   const others = Object.keys(found).filter((k) => k !== server);
 
   async function restore(f: File) {

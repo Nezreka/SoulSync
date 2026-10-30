@@ -23,6 +23,7 @@ const SERVERS: {
   { id: 'plex', name: 'Plex', tint: '#e5a00d', glyph: 'P' },
   { id: 'jellyfin', name: 'Jellyfin', tint: '#a95ce0', glyph: 'J' },
   { id: 'navidrome', name: 'Navidrome', tint: '#4aa3df', glyph: 'N' },
+  { id: 'music_assistant', name: 'Music Assistant', tint: '#1976d2', glyph: 'M' },
 ];
 
 function LibraryPills({
@@ -330,6 +331,25 @@ export function ServerStep() {
                     type="password"
                     value={server.password}
                     onChange={(e) => set((x) => void (x.password = e.target.value))}
+                  />
+                </div>
+              ) : null}
+              {featured.id === 'music_assistant' ? (
+                <div className={s.grid2}>
+                  <Field
+                    id="ob-ma-url"
+                    label="Music Assistant address"
+                    placeholder="http://192.168.1.20:8095"
+                    value={server.url}
+                    onChange={(e) => set((x) => void (x.url = e.target.value))}
+                  />
+                  <Field
+                    id="ob-ma-token"
+                    label="Long-lived token"
+                    type="password"
+                    placeholder="Settings, Users, create token"
+                    value={server.token}
+                    onChange={(e) => set((x) => void (x.token = e.target.value))}
                   />
                 </div>
               ) : null}
