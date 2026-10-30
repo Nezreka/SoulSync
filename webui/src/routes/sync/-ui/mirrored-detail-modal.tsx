@@ -616,7 +616,7 @@ export function MirroredDetailModal({
       }}
     >
       <div className="mirrored-modal">
-        <div className="mm-hero">
+        <div className={`mm-hero${addOpen && editable ? ' mm-hero--adding' : ''}`}>
           {heroArt ? (
             <div className="mm-hero-bg" style={{ backgroundImage: `url('${heroArt}')` }} />
           ) : null}

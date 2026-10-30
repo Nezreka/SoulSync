@@ -76529,7 +76529,7 @@ body.src-modal-open { overflow: hidden; }
     display: flex;
     flex-direction: column;
     /* leaves the playlist itself a few rows of room underneath */
-    max-height: min(40vh, 400px);
+    max-height: min(62vh, 620px);
     margin: 14px 16px 4px;
     padding: 18px 18px 10px;
     border: 1px solid rgba(var(--accent-rgb), 0.22);
@@ -76616,6 +76616,35 @@ body.src-modal-open { overflow: hidden; }
     object-fit: cover;
     background: var(--white-a06);
     box-shadow: 0 4px 12px var(--black-a35);
+}
+/* the cover plays a sample (#1933) */
+.as-cover {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    cursor: pointer;
+}
+.as-cover > .as-art { display: block; }
+.as-play {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: var(--black-a55);
+    color: #fff;
+    opacity: 0;
+    transition: opacity var(--dur-fast) ease;
+}
+.as-row:hover .as-play,
+.as-cover:focus-visible .as-play { opacity: 1; }
+.as-cover:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: 2px; }
+@media (hover: none) {
+    .as-play { opacity: 0.85; background: var(--black-a35); }
 }
 .as-art--blank {
     display: grid;
@@ -77263,3 +77292,12 @@ body.src-modal-open { overflow: hidden; }
     transform: translateX(14px);
     background: rgb(var(--accent-light-rgb));
 }
+
+/* adding songs (#1933): the header steps back so the search gets the room */
+.mm-hero.mm-hero--adding { padding: 16px 34px 10px; }
+.mm-hero--adding .mm-hero-content { gap: 18px; align-items: center; }
+.mm-hero--adding .mm-cover { width: 76px; height: 76px; box-shadow: 0 8px 20px var(--black-a45); }
+.mm-hero--adding .mm-title { font-size: 24px; }
+.mm-hero--adding .mm-desc,
+.mm-hero--adding .mm-desc-edit,
+.mm-hero--adding .mm-eyebrow { display: none; }

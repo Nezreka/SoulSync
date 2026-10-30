@@ -4222,7 +4222,7 @@ body:has(.artist-map-container) #gsearch-bar {
     .mm-sortbar { padding: 8px 12px 0; flex-wrap: wrap; }
     .as-panel { margin: 10px 8px 4px; padding: 14px 12px 8px; max-height: 52vh; }
     .as-row { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; }
-    .as-art { width: 40px; height: 40px; }
+    .as-art, .as-cover { width: 40px; height: 40px; }
     .as-dur { display: none; }
     .as-add { min-width: 64px; padding: 0 12px; }
 }
