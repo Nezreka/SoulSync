@@ -3,14 +3,14 @@
 
 .overlay {
   position: fixed;
-  z-index: 10001;
+  z-index: var(--z-dialog-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
   background: var(--black-a75);
   inset: 0;
-  animation: fade-in 0.16s ease-out;
+  animation: fadeIn 0.16s ease-out;
 }
 
 .sheet {
@@ -185,7 +185,7 @@
 .primary {
   border: 1px solid rgba(var(--accent-rgb), 0.6);
   background: rgba(var(--accent-rgb), 0.85);
-  color: #fff;
+  color: var(--text-1);
 }
 
 .primary:hover,
@@ -209,7 +209,7 @@
   height: 14px;
   border: 2px solid var(--white-a14);
   border-top-color: rgb(var(--accent-rgb));
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   animation: spin 0.8s linear infinite;
 }
 
@@ -219,7 +219,7 @@
   }
 }
 
-@keyframes fade-in {
+@keyframes fadeIn {
   from {
     opacity: 0;
   }

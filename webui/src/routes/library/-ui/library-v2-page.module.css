@@ -24,7 +24,7 @@
   flex-wrap: nowrap;
   gap: 22px;
   padding-bottom: 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--white-a08);
 }
 
 .detailMeta {
@@ -46,19 +46,19 @@
   margin: 0;
   font-size: 28px;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-1);
   letter-spacing: -0.3px;
 }
 
 .subtitle {
   margin: 0;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
   font-size: 13px;
 }
 
 .genres {
   margin: 0;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   font-size: 12px;
 }
 
@@ -87,7 +87,7 @@
   flex-wrap: wrap;
   padding: 9px 0 16px;
   margin-bottom: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--white-a08);
 }
 
 .toolbarGroup {
@@ -99,7 +99,7 @@
   margin-right: 6px;
   margin-top: 4px;
   margin-bottom: 4px;
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  border-right: 1px solid var(--white-a10);
 }
 
 .toolbarGroup:last-child {
@@ -122,7 +122,7 @@
   border: 1px solid rgba(239, 68, 68, 0.45);
   border-radius: 7px;
   background: #2a1717;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 20px var(--black-a35);
   color: rgb(248, 113, 113);
   font-size: 11px;
   line-height: 1.25;
@@ -130,11 +130,11 @@
 
 .searchInput,
 .select {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--white-a05);
+  border: 1px solid var(--white-a12);
   border-radius: 10px;
   padding: 9px 13px;
-  color: #fff;
+  color: var(--text-1);
   font-size: 14px;
 }
 
@@ -144,7 +144,7 @@
 
 .select option {
   background: #171717;
-  color: #fff;
+  color: var(--text-1);
 }
 
 .searchInput {
@@ -162,12 +162,12 @@
   display: inline-flex;
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-a12);
 }
 
 .viewToggle button {
   background: transparent;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   border: none;
   padding: 8px 14px;
   cursor: pointer;
@@ -181,8 +181,8 @@
   border-radius: 8px;
   font-size: 12.5px;
   color: rgba(255, 255, 255, 0.62);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a08);
 }
 
 .scopeBadge {
@@ -197,7 +197,9 @@
   border: 1px solid rgba(250, 204, 21, 0.35);
 }
 
-.viewActive {
+/* the restyled segments further down (the index toggles, the releases
+   toggle) style their own active state, so they're left out here */
+.viewActive:not(:is(.page .viewToggle *, .detailView .releasesToggle *)) {
   background: rgba(var(--accent-rgb), 0.85) !important;
   color: #06140b !important;
   font-weight: 600;
@@ -220,9 +222,9 @@
 }
 
 .btnGhost {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.14);
-  color: #fff;
+  background: var(--white-a06);
+  border-color: var(--white-a14);
+  color: var(--text-1);
 }
 
 .btnPrimary:disabled,
@@ -271,7 +273,7 @@
 .iconAction:disabled {
   opacity: 0.35;
   cursor: default;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 .toolDanger {
@@ -322,7 +324,7 @@
   height: 26px;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--white-a30);
   cursor: pointer;
   padding: 2px;
   display: inline-flex;
@@ -377,7 +379,7 @@
   border: 1px solid rgba(239, 68, 68, 0.45);
   border-radius: 6px;
   background: #2a1717;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 20px var(--black-a35);
   color: rgb(248, 113, 113);
   font-size: 11px;
   line-height: 1.25;
@@ -386,12 +388,12 @@
 
 .qualityText {
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--white-a80);
   text-align: left;
 }
 
 .fileVersionGroupStart td {
-  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  border-top: 1px solid var(--white-a14);
 }
 
 .fileVersionTrack {
@@ -415,7 +417,7 @@
 .fileVersionCount {
   margin-left: 7px;
   color: rgba(255, 255, 255, 0.58);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
 }
 
 .fileVersionBadges {
@@ -457,7 +459,7 @@
 }
 
 .qualityPlaceholderDash {
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--white-a25);
   font-weight: 500;
 }
 
@@ -518,13 +520,13 @@
   border: 1px solid rgba(150, 180, 220, 0.3);
   border-radius: 3px;
   font-size: 0.85em;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--white-a80);
   white-space: nowrap;
   font-weight: 500;
 }
 
 .qualityMissing {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   font-style: italic;
 }
 
@@ -589,8 +591,8 @@ button.featureTag:disabled {
 }
 
 .albumBlock {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-a03);
+  border: 1px solid var(--white-a08);
   border-radius: 12px;
 }
 
@@ -649,7 +651,7 @@ button.featureTag:disabled {
 }
 
 .albumHeadTitleButton:hover {
-  color: #fff;
+  color: var(--text-1);
 }
 
 .albumDateBadge,
@@ -748,7 +750,7 @@ button.featureTag:disabled {
   height: 3px;
   border-radius: 2px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--white-a18);
   flex: 0 0 auto;
 }
 
@@ -777,7 +779,7 @@ button.featureTag:disabled {
 
 .chevron {
   display: inline-block;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   transition: transform 0.15s ease;
   font-size: 16px;
   flex: 0 0 auto;
@@ -793,7 +795,7 @@ button.featureTag:disabled {
   min-width: 0;
   max-width: 100%;
   background: rgba(0, 0, 0, 0.22);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--white-a06);
   padding: 4px 8px 8px;
   /* Tracks reflow into labelled rows when their columns no longer fit. */
 }
@@ -811,9 +813,9 @@ button.featureTag:disabled {
   position: relative;
   text-align: left;
   padding: 7px 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   font-weight: 600;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 1px solid var(--white-a07);
   white-space: nowrap;
   overflow: visible;
 }
@@ -849,7 +851,7 @@ button.featureTag:disabled {
   bottom: 20%;
   right: 0;
   width: 1px;
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--white-a12);
   transition:
     background 0.12s ease,
     box-shadow 0.12s ease;
@@ -880,7 +882,7 @@ button.featureTag:disabled {
 
 .trackTable td {
   padding: 6px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--white-a04);
   min-width: 0;
   max-width: 0;
   overflow: hidden;
@@ -890,7 +892,7 @@ button.featureTag:disabled {
 
 .inlineLoading {
   padding: 14px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 12.5px;
 }
 
@@ -903,41 +905,11 @@ button.featureTag:disabled {
 }
 
 .muted {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   font-style: italic;
 }
 
 /* --- artist cards --- */
-.cardGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 16px;
-}
-
-.artistCard {
-  position: relative;
-  padding: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  transition:
-    transform 0.15s ease,
-    border-color 0.15s ease;
-}
-
-.artistCardLink {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  text-align: left;
-  color: #f3f3f3;
-  font: inherit;
-}
 
 .mediaServerBadges {
   position: absolute;
@@ -997,31 +969,12 @@ button.featureTag:disabled {
   text-align: center;
 }
 
-.artistCard:hover,
-.artistCard:focus-within {
-  transform: translateY(-3px);
-  border-color: rgba(var(--accent-rgb), 0.5);
-}
-
-.artistCardLink:focus-visible {
-  outline: 2px solid rgba(var(--accent-rgb), 0.8);
-  outline-offset: 4px;
-  border-radius: 10px;
-}
-
-.artistThumb,
 .rowThumb,
 .detailThumb,
 .artPlaceholder {
   display: block;
   object-fit: cover;
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.artistThumb {
-  width: 100%;
-  aspect-ratio: 1;
-  border-radius: 10px;
+  background: var(--white-a06);
 }
 
 .cardMonitor {
@@ -1037,10 +990,10 @@ button.featureTag:disabled {
   background: rgba(15, 23, 42, 0.85); /* Slightly darker slate background for extra contrast */
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.2); /* Sharper border */
+  border: 1px solid var(--white-a20); /* Sharper border */
   border-radius: 50%;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); /* Stronger shadow */
-  color: rgba(255, 255, 255, 0.7); /* Brighter outline */
+  box-shadow: 0 4px 12px var(--black-a50); /* Stronger shadow */
+  color: var(--white-a70); /* Brighter outline */
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   padding: 0;
   display: inline-flex;
@@ -1060,7 +1013,7 @@ button.featureTag:disabled {
   border-color: rgba(var(--accent-rgb), 0.55);
   color: rgb(var(--accent-rgb));
   box-shadow:
-    0 4px 12px rgba(0, 0, 0, 0.5),
+    0 4px 12px var(--black-a50),
     0 0 8px rgba(var(--accent-rgb), 0.25); /* Added subtle accent glow */
 }
 
@@ -1069,7 +1022,7 @@ button.featureTag:disabled {
   border-color: rgba(var(--accent-rgb), 0.75);
   color: rgb(var(--accent-rgb));
   box-shadow:
-    0 4px 12px rgba(0, 0, 0, 0.5),
+    0 4px 12px var(--black-a50),
     0 0 12px rgba(var(--accent-rgb), 0.4);
 }
 
@@ -1077,7 +1030,7 @@ button.featureTag:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--white-a25);
   font-size: 26px;
 }
 
@@ -1095,74 +1048,10 @@ button.featureTag:disabled {
   font-size: 42px;
 }
 
-.artistInfo {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.artistName {
-  font-weight: 600;
-  font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.artistMeta {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 12px;
-}
-
 /* Two compact cards keep the artist overview useful on a phone. A single
    square cover consumed almost the entire viewport and hid the fact that this
    is a browseable collection. Names still truncate within their own card. */
 @media (max-width: 520px) {
-  .cardGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .artistCard {
-    min-width: 0;
-    padding: 8px;
-    border-radius: 12px;
-  }
-
-  .artistCardLink {
-    gap: 7px;
-  }
-
-  .artistName {
-    font-size: 13px;
-  }
-
-  .artistMeta {
-    gap: 4px;
-    font-size: 10px;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-  }
-
-  .artistCard > .cardMonitor {
-    top: 13px;
-    left: 13px;
-  }
-
-  .artistCard > .cardMonitor button {
-    width: 28px;
-    height: 28px;
-  }
-
-  .artistCard .mediaServerBadges {
-    top: 13px;
-    right: 13px;
-  }
-
   .page :global(.discography-sections .album-card-name) {
     display: -webkit-box;
     min-height: 2.4em;
@@ -1186,15 +1075,15 @@ button.featureTag:disabled {
 .table th {
   text-align: left;
   padding: 9px 12px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-weight: 600;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--white-a10);
   white-space: nowrap;
 }
 
 .table td {
   padding: 8px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--white-a05);
   vertical-align: middle;
 }
 
@@ -1332,7 +1221,7 @@ button.featureTag:disabled {
 /* Track title as the editor's door (table option): reads as text, underlined. */
 .titleEditLink {
   color: inherit;
-  text-decoration: underline dotted rgba(255, 255, 255, 0.35);
+  text-decoration: underline dotted var(--white-a35);
   text-underline-offset: 3px;
 }
 
@@ -1345,7 +1234,7 @@ button.featureTag:disabled {
 }
 
 .staticRow:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-a02);
 }
 
 /* --- sections --- */
@@ -1357,14 +1246,14 @@ button.featureTag:disabled {
   font-size: 16px;
   font-weight: 700;
   margin: 0 0 12px;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--white-a90);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .sectionCount {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   font-size: 13px;
   font-weight: 500;
 }
@@ -1386,8 +1275,8 @@ button.featureTag:disabled {
 }
 
 .statusNeutral {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.65);
+  background: var(--white-a08);
+  color: var(--white-a65);
 }
 
 button.statusOk,
@@ -1406,7 +1295,7 @@ button.statusWarn:disabled {
 }
 
 .metadataTagsTooltipPositioner {
-  z-index: 2147483647;
+  z-index: 999999;
   isolation: isolate;
   pointer-events: none;
 }
@@ -1423,7 +1312,7 @@ button.statusWarn:disabled {
   background-color: #050609 !important;
   background-image: none !important;
   box-shadow: 0 12px 38px rgba(0, 0, 0, 0.82);
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--white-a90);
   font-size: 11px;
   line-height: 1.45;
   opacity: 1 !important;
@@ -1443,7 +1332,7 @@ button.statusWarn:disabled {
 }
 
 .metadataTagsTooltipGroup strong {
-  color: #fff;
+  color: var(--text-1);
   font-size: 10px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1461,7 +1350,7 @@ button.statusWarn:disabled {
   display: block;
   margin-top: 9px;
   padding-top: 7px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--white-a10);
   color: rgba(255, 255, 255, 0.58);
 }
 
@@ -1483,12 +1372,12 @@ button.statusWarn:disabled {
   display: inline-flex;
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-a12);
 }
 
 .releasesToggle button {
   background: transparent;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   border: none;
   padding: 8px 14px;
   cursor: pointer;
@@ -1500,7 +1389,7 @@ button.statusWarn:disabled {
 
 .releasesHint {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 /* The shared legacy filter styling was sized for the old full-width page.
@@ -1567,9 +1456,9 @@ button.statusWarn:disabled {
   align-items: center;
   gap: 6px;
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--white-a14);
   border-radius: 8px;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--white-a65);
   font-size: 12px;
   padding: 4px 10px;
   cursor: pointer;
@@ -1577,7 +1466,7 @@ button.statusWarn:disabled {
 
 .sectionBulk:hover:not(:disabled) {
   border-color: rgba(var(--accent-rgb), 0.6);
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--white-a90);
 }
 
 .sectionBulk:disabled {
@@ -1606,7 +1495,7 @@ button.statusWarn:disabled {
   border: 1px solid rgba(239, 68, 68, 0.45);
   border-radius: 7px;
   background: #2a1717;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 20px var(--black-a35);
   color: rgb(248, 113, 113);
   font-size: 11px;
   font-weight: 400;
@@ -1616,13 +1505,13 @@ button.statusWarn:disabled {
 
 .qpManagedHint {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   white-space: nowrap;
 }
 
 .btnDanger {
   background: rgba(239, 68, 68, 0.85);
-  color: #fff;
+  color: var(--text-1);
   border: none;
   border-radius: 10px;
   padding: 8px 16px;
@@ -1642,12 +1531,12 @@ button.statusWarn:disabled {
   gap: 12px;
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--white-a08);
 }
 
 .editRow label {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   white-space: nowrap;
 }
 
@@ -1664,7 +1553,7 @@ button.statusWarn:disabled {
 }
 
 .mutationFeedback {
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
 }
 
 .mutationError {
@@ -1677,7 +1566,7 @@ button.statusWarn:disabled {
 
 .artistSettingsSection {
   padding: 16px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--white-a08);
 }
 
 .artistSettingsSection:first-of-type {
@@ -1698,7 +1587,7 @@ button.statusWarn:disabled {
   align-items: flex-start;
   gap: 20px;
   padding: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.025);
 }
@@ -1710,7 +1599,7 @@ button.statusWarn:disabled {
   border-radius: 50%;
   object-fit: cover;
   border: 3px solid rgba(var(--accent-rgb), 0.32);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 10px 28px var(--black-a35);
 }
 
 .artistSettingsIdentityBody {
@@ -1745,11 +1634,11 @@ button.statusWarn:disabled {
   gap: 5px;
   max-width: 280px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-a08);
   border-radius: 6px;
   padding: 2px 7px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.55);
+  background: var(--white-a06);
+  color: var(--white-a55);
   font-family: monospace;
   font-size: 10px;
   cursor: pointer;
@@ -1759,7 +1648,7 @@ button.statusWarn:disabled {
 
 .artistSettingsProviderIds :is(button, a):hover {
   border-color: rgba(var(--accent-rgb), 0.35);
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--white-a80);
 }
 
 .artistSettingsProviderIds :is(button, a) span {
@@ -1782,7 +1671,7 @@ button.statusWarn:disabled {
 .currentMatchReleases > span {
   display: block;
   margin-bottom: 5px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -1809,7 +1698,7 @@ button.statusWarn:disabled {
 }
 
 .artistSettingsToggle small {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
 }
 
 .artistSettingsFieldset {
@@ -1817,14 +1706,14 @@ button.statusWarn:disabled {
   grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
   gap: 9px 14px;
   margin: 14px 0;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-a08);
   border-radius: 10px;
   padding: 12px;
 }
 
 .artistSettingsFieldset legend {
   padding: 0 5px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   font-size: 12px;
 }
 
@@ -1838,7 +1727,7 @@ button.statusWarn:disabled {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   font-size: 12px;
 }
 
@@ -1871,7 +1760,7 @@ button.statusWarn:disabled {
 }
 
 .sortableTh:hover {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--white-a90);
 }
 
 .sortArrow {
@@ -1896,15 +1785,15 @@ button.statusWarn:disabled {
   justify-content: center;
   gap: 16px;
   margin-top: 24px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   font-size: 13px;
 }
 
 .pagination button {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--white-a06);
+  border: 1px solid var(--white-a12);
   border-radius: 10px;
-  color: #fff;
+  color: var(--text-1);
   padding: 6px 14px;
   cursor: pointer;
 }
@@ -1917,18 +1806,18 @@ button.statusWarn:disabled {
 .loading {
   padding: 60px 0;
   text-align: center;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
 }
 
 .emptyState {
   padding: 70px 24px;
   text-align: center;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
 }
 
 .emptyState h2 {
   margin: 0 0 8px;
-  color: #fff;
+  color: var(--text-1);
 }
 
 .importWrap {
@@ -1962,7 +1851,7 @@ button.statusWarn:disabled {
   right: 0;
   width: min(340px, calc(100vw - 32px));
   padding: 8px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-a12);
   border-radius: 8px;
   background: #191919;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42);
@@ -1973,7 +1862,7 @@ button.statusWarn:disabled {
 
 .importMsg {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
 }
 
 .importStatus {
@@ -2004,12 +1893,12 @@ button.statusWarn:disabled {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--black-a55);
 }
 
 .modal {
   width: min(460px, 100%);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-a12);
   border-radius: 8px;
   background: #171717;
   box-shadow: 0 18px 70px rgba(0, 0, 0, 0.42);
@@ -2092,12 +1981,12 @@ button.statusWarn:disabled {
   flex-direction: column;
   gap: 3px;
   padding: 7px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--white-a06);
   overflow-wrap: anywhere;
 }
 
 .fileDeleteList small {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
 }
 
 .fileDeleteConfirm {
@@ -2105,7 +1994,7 @@ button.statusWarn:disabled {
   gap: 8px;
   align-items: flex-start;
   margin-top: 12px;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--white-a75);
   font-size: 13px;
 }
 
@@ -2128,28 +2017,28 @@ button.statusWarn:disabled {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-a08);
   border-radius: 9px;
   padding: 9px 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 11px;
 }
 
 .fileRemovalSummary strong {
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--white-a90);
   font-size: 16px;
 }
 
 .fileRemovalPaths {
   margin: 10px 0 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-a08);
   border-radius: 9px;
   padding: 9px 11px;
 }
 
 .fileRemovalPaths summary {
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--white-a65);
   font-size: 12px;
 }
 
@@ -2196,7 +2085,7 @@ button.statusWarn:disabled {
   align-items: flex-start;
   gap: 9px;
   min-width: 0;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   border-radius: 10px;
   padding: 12px;
   cursor: pointer;
@@ -2210,7 +2099,7 @@ button.statusWarn:disabled {
 }
 
 .fileRemovalChoice small {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   line-height: 1.35;
 }
 
@@ -2275,7 +2164,7 @@ button.statusWarn:disabled {
 }
 .isAvailCell {
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--white-a65);
 }
 
 .grabAction {
@@ -2298,7 +2187,7 @@ button.statusWarn:disabled {
   height: 3px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-a10);
 }
 
 .grabProgress > span {
@@ -2353,8 +2242,8 @@ button.statusWarn:disabled {
 
 .filteredEmpty {
   padding: 8px 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.45);
+  border-top: 1px solid var(--white-a08);
+  color: var(--white-a45);
   font-size: 12px;
 }
 
@@ -2373,7 +2262,7 @@ button.statusWarn:disabled {
   gap: 16px;
   margin-bottom: 10px;
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-a70);
   flex-wrap: wrap;
 }
 
@@ -2385,7 +2274,7 @@ button.statusWarn:disabled {
 }
 
 .optionHint {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   font-size: 11.5px;
 }
 
@@ -2420,8 +2309,8 @@ button.statusWarn:disabled {
   flex-shrink: 0;
   margin: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: var(--white-a14);
+  border: 1px solid var(--white-a18);
   cursor: pointer;
   transition:
     background-color 0.15s ease,
@@ -2472,8 +2361,8 @@ button.statusWarn:disabled {
 
 .sourceChip {
   background: transparent;
-  color: rgba(255, 255, 255, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--white-a55);
+  border: 1px solid var(--white-a14);
   border-radius: 999px;
   padding: 5px 12px;
   font-size: 12px;
@@ -2544,7 +2433,7 @@ button.statusWarn:disabled {
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
 }
 
 @keyframes searchPulse {
@@ -2616,15 +2505,15 @@ button.statusWarn:disabled {
 .sourceBadge[data-tone='override'],
 .sourceBadge[data-tone='maintenance'],
 .sourceBadge[data-tone='info'] {
-  color: rgba(255, 255, 255, 0.6);
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--white-a60);
+  background: var(--white-a08);
 }
 
 .sourceDetail {
   display: block;
   margin-top: 4px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 .searchResultsToolbar {
@@ -2644,7 +2533,7 @@ button.statusWarn:disabled {
 
 .columnPicker summary {
   padding: 5px 9px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   border-radius: 7px;
   color: rgba(255, 255, 255, 0.68);
   cursor: pointer;
@@ -2653,7 +2542,7 @@ button.statusWarn:disabled {
 
 .columnPicker summary::after {
   content: ' ⌄';
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
 }
 
 .columnMenu {
@@ -2664,10 +2553,10 @@ button.statusWarn:disabled {
   display: grid;
   gap: 8px;
   padding: 11px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-a12);
   border-radius: 10px;
   background: #1c1c1c;
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 14px 40px var(--black-a45);
 }
 
 .columnMenu label {
@@ -2699,7 +2588,7 @@ button.statusWarn:disabled {
 .resultsWrap {
   flex: 1;
   overflow: auto;
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--white-a07);
   border-radius: 12px;
   min-height: 120px;
   background: rgba(0, 0, 0, 0.16);
@@ -2734,7 +2623,7 @@ button.statusWarn:disabled {
 .modalFootNote {
   margin-top: 10px;
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   line-height: 1.4;
 }
 
@@ -2781,20 +2670,20 @@ button.statusWarn:disabled {
   justify-content: space-between;
   gap: 8px 16px;
   padding: 7px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--white-a06);
   font-size: 13px;
 }
 
 .sourceInfoLabel {
   flex: 0 0 auto;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
 }
 
 .sourceInfoValue {
   min-width: 0;
   text-align: right;
   overflow-wrap: anywhere;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
 }
 
 /* Track-detail tag inspector. This mirrors the quarantine/download-audit
@@ -2809,7 +2698,7 @@ button.statusWarn:disabled {
 
 .fileTagChip {
   padding: 3px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--white-a09);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.045);
   color: rgba(255, 255, 255, 0.72);
@@ -2880,7 +2769,7 @@ button.statusWarn:disabled {
 .fileTagSourceCard {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--white-a06);
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.14);
 }
@@ -2905,7 +2794,7 @@ button.statusWarn:disabled {
 }
 
 .tagRowClickable:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-a04);
   border-bottom-color: rgba(var(--accent-rgb), 0.3);
 }
 
@@ -2937,8 +2826,8 @@ button.statusWarn:disabled {
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-a03);
+  border: 1px solid var(--white-a08);
   border-radius: 6px;
   margin: 4px 0;
 }
@@ -2954,7 +2843,7 @@ button.statusWarn:disabled {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 .tagEditForm {
@@ -2968,10 +2857,10 @@ button.statusWarn:disabled {
   flex: 1;
   min-width: 150px;
   background: #0d0d0d;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--white-a15);
   border-radius: 6px;
   padding: 6px 10px;
-  color: #fff;
+  color: var(--text-1);
   font-size: 13px;
   font-family: inherit;
 }
@@ -3005,9 +2894,9 @@ button.statusWarn:disabled {
 }
 
 .btnTagCancel {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.14);
-  color: #fff;
+  background: var(--white-a06);
+  border-color: var(--white-a14);
+  color: var(--text-1);
 }
 
 .btnTagDelete {
@@ -3023,7 +2912,7 @@ button.statusWarn:disabled {
 .tagAddBtnContainer {
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  border-top: 1px dashed var(--white-a08);
   display: flex;
   justify-content: flex-start;
 }
@@ -3037,23 +2926,23 @@ button.statusWarn:disabled {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.7);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a10);
+  color: var(--white-a70);
   transition: all 0.15s ease;
 }
 
 .btnTagAdd:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
   border-color: rgba(var(--accent-rgb), 0.4);
-  color: #fff;
+  color: var(--text-1);
 }
 
 .tagAddPanel {
   margin-top: 14px;
   padding: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-a02);
+  border: 1px solid var(--white-a08);
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -3063,7 +2952,7 @@ button.statusWarn:disabled {
 .tagAddTitle {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--white-a80);
 }
 
 .tagAddInputs {
@@ -3096,7 +2985,7 @@ button.statusWarn:disabled {
 .sourceInfoHistory {
   margin-top: 12px;
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 /* --- lyrics tab (§18.1) --- */
@@ -3104,7 +2993,7 @@ button.statusWarn:disabled {
   white-space: pre-wrap;
   line-height: 1.6;
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
 }
 
 /* --- metadata match chips (legacy Enhanced-View parity) --- */
@@ -3153,9 +3042,9 @@ button.statusWarn:disabled {
 }
 
 .matchPending {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.5);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--white-a06);
+  color: var(--white-a50);
+  border-color: var(--white-a12);
 }
 
 .trackMatchChips {
@@ -3186,11 +3075,11 @@ button.statusWarn:disabled {
   gap: 4px;
   font-size: 10.5px;
   font-weight: 600;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-a12);
   border-radius: 8px;
   padding: 2px 4px 2px 7px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.75);
+  background: var(--white-a06);
+  color: var(--white-a75);
 }
 
 .aliasChipRemove {
@@ -3211,17 +3100,17 @@ button.statusWarn:disabled {
 .aliasLinkButton {
   font-size: 10.5px;
   font-weight: 600;
-  border: 1px dashed rgba(255, 255, 255, 0.25);
+  border: 1px dashed var(--white-a25);
   border-radius: 8px;
   padding: 2px 7px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   cursor: pointer;
 }
 
 .aliasLinkButton:hover {
-  color: rgba(255, 255, 255, 0.9);
-  border-color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a90);
+  border-color: var(--white-a40);
 }
 
 .verificationBadge {
@@ -3264,8 +3153,8 @@ button.statusWarn:disabled {
 .mutedNotice {
   font-size: 12px;
   color: var(--text-secondary, #9aa3ad);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a08);
   border-radius: 6px;
   padding: 8px 10px;
 }
@@ -3289,7 +3178,7 @@ button.statusWarn:disabled {
 .albumMatchLabel {
   font-size: 11px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -3318,9 +3207,9 @@ button.statusWarn:disabled {
   justify-content: space-between;
   gap: 16px;
   padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-a08);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-a02);
   transition:
     border-color 0.15s ease,
     background 0.15s ease;
@@ -3341,7 +3230,7 @@ button.statusWarn:disabled {
   width: 84px;
   height: 84px;
   flex: 0 0 84px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   border-radius: 10px;
   object-fit: cover;
 }
@@ -3409,7 +3298,7 @@ button.statusWarn:disabled {
 
 .matchResultExtra {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
 }
 
 .matchResultId {
@@ -3419,14 +3308,14 @@ button.statusWarn:disabled {
   padding: 0;
   background: none;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   font-family: var(--font-mono, monospace);
   cursor: copy;
   text-align: left;
 }
 
 .matchResultId:hover {
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-a70);
 }
 
 .currentMatchCard {
@@ -3437,7 +3326,7 @@ button.statusWarn:disabled {
   padding: 16px;
   border: 1px solid rgba(52, 211, 153, 0.24);
   border-radius: 14px;
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(255, 255, 255, 0.02));
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), var(--white-a02));
 }
 
 .currentMatchBody {
@@ -3502,9 +3391,9 @@ button.statusWarn:disabled {
 .matchNoCurrent {
   margin-bottom: 12px;
   padding: 10px 12px;
-  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border: 1px dashed var(--white-a12);
   border-radius: 9px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-size: 12px;
 }
 
@@ -3621,7 +3510,7 @@ button.statusWarn:disabled {
   flex-wrap: wrap;
   gap: 4px;
   margin-bottom: 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--white-a10);
 }
 
 .detailTab {
@@ -3629,7 +3518,7 @@ button.statusWarn:disabled {
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 13px;
   font-weight: 600;
   padding: 7px 12px;
@@ -3637,18 +3526,18 @@ button.statusWarn:disabled {
 }
 
 .detailTab:hover {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--white-a80);
 }
 
 .detailTabActive {
-  color: #fff;
+  color: var(--text-1);
   border-bottom-color: rgb(196, 156, 250);
 }
 
 .trackHistoryWrap {
   margin-top: 14px;
   padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--white-a08);
 }
 
 /* --- track pipeline history (§52.9/§44): chronological search→grab→
@@ -3743,12 +3632,12 @@ button.statusWarn:disabled {
   border-radius: 10px;
   margin-bottom: 14px;
   font-size: 13px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-a12);
 }
 
 .grab_busy {
   background: rgba(var(--accent-rgb), 0.1);
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
 }
 
 .grab_ok {
@@ -3795,7 +3684,7 @@ button.statusWarn:disabled {
 .qpSubtitle {
   margin: 0 0 12px !important;
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.5) !important;
+  color: var(--white-a50) !important;
 }
 
 /* Profiles as a grid of cards: five or ten of them stay one glance, not a
@@ -3813,8 +3702,8 @@ button.statusWarn:disabled {
   text-align: left;
   padding: 11px 13px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--white-a10);
+  background: var(--white-a03);
   color: #eee;
   cursor: pointer;
 }
@@ -3848,7 +3737,7 @@ button.statusWarn:disabled {
 
 .qpDesc {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -3857,7 +3746,7 @@ button.statusWarn:disabled {
 
 .qpTargets {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3871,9 +3760,9 @@ button.statusWarn:disabled {
 
 .maintenanceSection {
   min-width: 0;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--white-a09);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-a02);
   padding: 12px;
 }
 
@@ -3936,7 +3825,7 @@ button.statusWarn:disabled {
 
 .qpPolicy {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 .qBelow {
@@ -3972,8 +3861,8 @@ button.statusWarn:disabled {
 }
 
 .qAcceptable {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.55);
+  background: var(--white-a08);
+  color: var(--white-a55);
 }
 
 .albumResultBadge {
@@ -3989,7 +3878,7 @@ button.statusWarn:disabled {
 }
 
 .albumGroupHeaderRow {
-  background: rgba(255, 255, 255, 0.03) !important;
+  background: var(--white-a03) !important;
 }
 
 .albumGroupHeader {
@@ -3997,7 +3886,7 @@ button.statusWarn:disabled {
   font-size: 0.95rem;
   color: rgba(255, 255, 255, 0.92);
   padding: 8px 12px !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--white-a08);
   text-align: left;
 }
 
@@ -4038,10 +3927,10 @@ button.statusWarn:disabled {
   left: 0;
   min-width: 170px;
   background: #191919;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-a12);
   border-radius: 9px;
   padding: 5px 0;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 24px var(--black-a45);
   display: flex;
   flex-direction: column;
   backdrop-filter: blur(8px);
@@ -4054,7 +3943,7 @@ button.statusWarn:disabled {
   padding: 8px 14px;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -4066,8 +3955,8 @@ button.statusWarn:disabled {
 }
 
 .enrichDropdownItem:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.07);
-  color: #fff;
+  background: var(--white-a07);
+  color: var(--text-1);
 }
 
 .enrichDropdownItem:disabled {
@@ -4099,10 +3988,10 @@ button.statusWarn:disabled {
   right: 0;
   min-width: 180px;
   background: #191919;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-a12);
   border-radius: 9px;
   padding: 5px 0;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 24px var(--black-a45);
   display: flex;
   flex-direction: column;
   backdrop-filter: blur(8px);
@@ -4115,7 +4004,7 @@ button.statusWarn:disabled {
   padding: 8px 14px;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -4128,8 +4017,8 @@ button.statusWarn:disabled {
 }
 
 .overflowMenuItem:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.07);
-  color: #fff;
+  background: var(--white-a07);
+  color: var(--text-1);
 }
 
 .overflowMenuItemDanger {
@@ -4171,8 +4060,8 @@ button.statusWarn:disabled {
   aspect-ratio: 1;
   object-fit: cover;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--white-a08);
+  background: var(--white-a03);
   transition:
     transform 0.15s ease,
     border-color 0.15s ease;
@@ -4185,7 +4074,7 @@ button.statusWarn:disabled {
 
 .artPickerBadge {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   text-align: center;
 }
 
@@ -4217,7 +4106,7 @@ button.statusWarn:disabled {
 }
 
 .sortableHeader:hover {
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--white-a75);
 }
 
 .sortIndicator {
@@ -4226,7 +4115,7 @@ button.statusWarn:disabled {
 
 .filePathCell {
   max-width: 260px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
   font-size: 11.5px;
 }
 
@@ -4254,7 +4143,7 @@ button.statusWarn:disabled {
   border: none;
   border-radius: 3px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   font-size: 11px;
   line-height: 1.4;
   cursor: pointer;
@@ -4270,8 +4159,8 @@ button.statusWarn:disabled {
 }
 
 .filePathCopy:hover {
-  color: rgba(255, 255, 255, 0.85);
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--white-a85);
+  background: var(--white-a08);
 }
 
 .fileSizeCell {
@@ -4308,7 +4197,7 @@ button.statusWarn:disabled {
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-a08);
   border-radius: 9px;
   background: rgba(255, 255, 255, 0.025);
   padding: 7px 0;
@@ -4334,7 +4223,7 @@ button.statusWarn:disabled {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 .tableOptionsItem {
@@ -4343,7 +4232,7 @@ button.statusWarn:disabled {
   gap: 8px;
   padding: 6px 14px;
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   cursor: pointer;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -4351,9 +4240,9 @@ button.statusWarn:disabled {
 
 .tableOptionsReset {
   margin: 7px 14px 4px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-a12);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-a04);
   color: rgba(255, 255, 255, 0.72);
   padding: 5px 8px;
   font: inherit;
@@ -4363,7 +4252,7 @@ button.statusWarn:disabled {
 
 .tableOptionsReset:hover:not(:disabled) {
   border-color: rgba(var(--accent-rgb), 0.5);
-  color: #fff;
+  color: var(--text-1);
 }
 
 .tableOptionsReset:disabled {
@@ -4372,7 +4261,7 @@ button.statusWarn:disabled {
 }
 
 .tableOptionsItem:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--white-a07);
 }
 
 .tableOptionsRow {
@@ -4383,7 +4272,7 @@ button.statusWarn:disabled {
 }
 
 .tableOptionsRow:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--white-a07);
 }
 
 .tableOptionsRow .tableOptionsItem {
@@ -4397,7 +4286,7 @@ button.statusWarn:disabled {
 
 .tableOptionsLocked {
   margin-left: auto;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   font-size: 10.5px;
   white-space: nowrap;
 }
@@ -4430,13 +4319,13 @@ button.statusWarn:disabled {
   margin: 0 0 6px;
   padding: 0 14px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
 }
 
 .tableOptionsExample {
   margin-left: auto;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
 }
 
 .tableOptionsChoices {
@@ -4449,7 +4338,7 @@ button.statusWarn:disabled {
   display: grid;
   gap: 3px;
   padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.025);
   cursor: pointer;
@@ -4473,7 +4362,7 @@ button.statusWarn:disabled {
 .tableOptionsChoiceTitle {
   font-size: 13px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--white-a90);
 }
 
 .tableOptionsChoiceActive .tableOptionsChoiceTitle {
@@ -4483,7 +4372,7 @@ button.statusWarn:disabled {
 .tableOptionsChoiceText {
   font-size: 12px;
   line-height: 1.4;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
 }
 
 @media (max-width: 780px) {
@@ -4502,7 +4391,7 @@ button.statusWarn:disabled {
 .reorderBtn {
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   cursor: pointer;
   padding: 0;
   font-size: 9px;
@@ -4517,7 +4406,7 @@ button.statusWarn:disabled {
 }
 
 .reorderBtn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-a10);
   color: rgb(var(--accent-rgb));
 }
 
@@ -4532,7 +4421,7 @@ button.statusWarn:disabled {
   justify-content: center;
   width: 16px;
   height: 18px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   font-size: 13px;
   line-height: 1;
   cursor: grab;
@@ -4561,15 +4450,15 @@ button.statusWarn:disabled {
 .bulkBarCount {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--white-a75);
   margin-right: 4px;
 }
 
 .bulkBarButton {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--white-a16);
   border-radius: 7px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--white-a80);
   font-size: 12px;
   padding: 5px 10px;
   cursor: pointer;
@@ -4577,7 +4466,7 @@ button.statusWarn:disabled {
 
 .bulkBarButton:hover:not(:disabled) {
   border-color: rgba(var(--accent-rgb), 0.6);
-  color: #fff;
+  color: var(--text-1);
 }
 
 .bulkBarButton:disabled {
@@ -4589,9 +4478,9 @@ button.statusWarn:disabled {
    the select reads as one of the bar's actions rather than a stray form field. */
 .bulkBarSelect select {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--white-a16);
   border-radius: 7px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--white-a80);
   font-size: 12px;
   padding: 5px 10px;
   cursor: pointer;
@@ -4599,7 +4488,7 @@ button.statusWarn:disabled {
 
 .bulkBarSelect select:hover:not(:disabled) {
   border-color: rgba(var(--accent-rgb), 0.6);
-  color: #fff;
+  color: var(--text-1);
 }
 
 .bulkBarSelect select:disabled {
@@ -4609,7 +4498,7 @@ button.statusWarn:disabled {
 
 .bulkBarSelect select option {
   background: #1a1a1f;
-  color: #fff;
+  color: var(--text-1);
 }
 
 .bulkBarButtonDanger {
@@ -4625,7 +4514,7 @@ button.statusWarn:disabled {
 .bulkBarClear {
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 12px;
   padding: 5px 6px;
   cursor: pointer;
@@ -4633,7 +4522,7 @@ button.statusWarn:disabled {
 }
 
 .bulkBarClear:hover {
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
 }
 
 .bulkBarError {
@@ -4654,7 +4543,7 @@ button.statusWarn:disabled {
 
 .modalActionsText {
   margin-right: auto;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-size: 13px;
 }
 
@@ -4666,7 +4555,7 @@ textarea.searchInput {
 }
 
 .diffCell {
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   font-size: 12px;
   white-space: normal;
   word-break: break-word;
@@ -4689,7 +4578,7 @@ textarea.searchInput {
 
 .retagManualField {
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--white-a90);
 }
 
 .retagManualNote {
@@ -4711,21 +4600,21 @@ textarea.searchInput {
 }
 
 .retagChoice {
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--white-a16);
   background: transparent;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
 }
 
 .retagChoice:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.35);
-  color: rgba(255, 255, 255, 0.9);
+  border-color: var(--white-a35);
+  color: var(--white-a90);
 }
 
 /* The side that is currently winning — stated, not implied by absence. */
 .retagChoiceActive {
   border: 1px solid rgba(99, 102, 241, 0.75);
   background: rgba(99, 102, 241, 0.22);
-  color: #fff;
+  color: var(--text-1);
   font-weight: 600;
   cursor: default;
 }
@@ -4743,7 +4632,7 @@ textarea.searchInput {
 
 .submenuChevron {
   margin-left: auto;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-size: 14px;
 }
 
@@ -4763,7 +4652,7 @@ textarea.searchInput {
 
 .enrichDivider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
   margin: 4px 0;
 }
 
@@ -4778,9 +4667,9 @@ textarea.searchInput {
   -webkit-appearance: none;
   width: 16px;
   height: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--white-a15);
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-a04);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -4799,8 +4688,8 @@ textarea.searchInput {
 .tableOptionsItem input[type='checkbox']:hover:not(:disabled),
 .stackedTrackControls input[type='checkbox']:hover:not(:disabled),
 .modal input[type='checkbox']:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--white-a30);
+  background: var(--white-a08);
 }
 
 .trackTable input[type='checkbox']:checked,
@@ -4838,8 +4727,8 @@ textarea.searchInput {
 .modal input[type='checkbox']:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  background: rgba(255, 255, 255, 0.02);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--white-a02);
+  border-color: var(--white-a10);
 }
 
 /* ldp-05: the legacy hero portrait. `.artist-image` in style.css is a bare
@@ -4934,7 +4823,7 @@ textarea.searchInput {
   border-radius: 8px;
   background: rgba(10, 10, 10, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.22);
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   transition:
     background 0.2s ease,
     border-color 0.2s ease,
@@ -4956,10 +4845,6 @@ textarea.searchInput {
 /* Artist cards share `cardMonitor` with the legacy release cards below.
  * Keep this override contextual: the bookmark moves inward symmetrically
  * with the server badge and their visual centres sit on the same line. */
-.artistCard > .cardMonitor {
-  top: 16px;
-  left: 18px;
-}
 
 /* Library audit: allow the shell and its content to fit laptop/tablet widths.
    The legacy shell's 1200px minimum applies to other pages unchanged. */
@@ -5034,7 +4919,7 @@ textarea.searchInput {
 
 .toolMenuDivider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.09);
+  background: var(--white-a09);
   margin: 6px 12px;
 }
 
@@ -5113,7 +4998,7 @@ textarea.searchInput {
 .toolDialogFooter {
   flex-shrink: 0;
   padding: 10px 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  border-top: 1px solid var(--white-a09);
 }
 
 .toolDialogFooter .modalActions {
@@ -5169,13 +5054,13 @@ textarea.searchInput {
 }
 
 .tagField {
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--white-a65);
   font-weight: 600;
   font-size: 12px;
 }
 
 .tagBefore {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
 }
 
 .tagAfter {
@@ -5183,7 +5068,7 @@ textarea.searchInput {
 }
 
 .tagArrow {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   text-align: center;
 }
 
@@ -5195,7 +5080,7 @@ textarea.searchInput {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  border-top: 1px solid var(--white-a09);
 }
 
 .historyColumns,
@@ -5205,7 +5090,7 @@ textarea.searchInput {
   align-items: center;
   gap: 14px;
   padding: 9px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--white-a08);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -5214,7 +5099,7 @@ textarea.searchInput {
   position: sticky;
   top: 0;
   background: #24262c;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 11px;
   z-index: 1;
 }
@@ -5253,7 +5138,7 @@ textarea.searchInput {
   display: flex;
   justify-content: flex-end;
   gap: 14px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   font-variant-numeric: tabular-nums;
 }
 .historyCount > span {
@@ -5273,7 +5158,7 @@ textarea.searchInput {
 .historyResults th {
   text-align: left;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-weight: 500;
 }
 .historyResults th:first-child {
@@ -5286,7 +5171,7 @@ textarea.searchInput {
 .historyResults td {
   padding: 7px 8px;
   vertical-align: top;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--white-a05);
   overflow-wrap: anywhere;
 }
 .historyResults td > strong {
@@ -5296,7 +5181,7 @@ textarea.searchInput {
 .historyResults td > span,
 .historyResults small {
   display: block;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
   line-height: 1.4;
 }
 .historyResults [data-status='mismatch'],
@@ -5312,17 +5197,6 @@ textarea.searchInput {
   display: block;
   margin-top: 3px;
   font-size: 11px;
-}
-
-.settingsFieldset {
-  min-width: 0;
-  border: 0;
-  padding: 16px 0 0;
-  margin: 18px 0 0;
-}
-
-.settingsFieldset legend {
-  font-weight: 600;
 }
 
 .reorganizeTable th:first-child {
@@ -5441,7 +5315,7 @@ textarea.searchInput {
   flex: 1;
   min-height: 100px;
   overflow: auto;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--white-a08);
 }
 
 .reorganizeRelease {
@@ -5450,7 +5324,7 @@ textarea.searchInput {
   align-items: center;
   gap: 12px;
   padding: 14px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--white-a08);
 }
 
 .reorganizeRelease > div {
@@ -5745,7 +5619,7 @@ textarea.searchInput {
 .monitorBtn.monitorProminent {
   width: 28px;
   height: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--white-a20);
   border-radius: 5px;
   background: transparent;
   color: rgba(255, 255, 255, 0.72);
@@ -5768,7 +5642,7 @@ textarea.searchInput {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-a08);
   border-radius: 8px;
 }
 .toolDialogBody :global(.arec-tabs) {
@@ -6536,7 +6410,7 @@ textarea.searchInput {
   max-width: 46ch;
   font-size: 13px;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
 }
 
 .releasesEmptyAction {
@@ -6544,15 +6418,15 @@ textarea.searchInput {
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--white-a90);
+  background: var(--white-a07);
+  border: 1px solid var(--white-a16);
   border-radius: 8px;
   cursor: pointer;
 }
 
 .releasesEmptyAction:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--white-a12);
 }
 
 /* Track editor Overview: source on the left, profile + recent activity right. */
@@ -6585,7 +6459,7 @@ textarea.searchInput {
   gap: 8px;
   padding: 5px 0;
   font-size: 12.5px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--white-a05);
 }
 
 .recentActivityRow + .linkButton,
@@ -6628,7 +6502,7 @@ textarea.searchInput {
 
 .fileVersionToggle:hover,
 .fileVersionToggle[aria-expanded='true'] {
-  color: #fff;
+  color: var(--text-1);
   background: rgba(var(--accent-rgb), 0.28);
 }
 
@@ -6786,7 +6660,7 @@ textarea.searchInput {
 .detailView .pageToolbar {
   position: sticky;
   top: 0;
-  z-index: var(--z-sticky);
+  z-index: 10;
   gap: 10px;
   margin: 0 0 18px;
   padding: 8px;
@@ -7438,11 +7312,11 @@ textarea.searchInput {
   color: var(--text-1);
 }
 
-/* .viewActive above fills with !important, so the segment has to answer it */
+/* .viewActive above leaves this segment out, so it fills its own */
 .detailView .releasesToggle .viewActive,
 .detailView .releasesToggle button.viewActive:hover {
-  background: var(--white-a14) !important;
-  color: var(--text-1) !important;
+  background: var(--white-a14);
+  color: var(--text-1);
   box-shadow: 0 1px 0 var(--white-a10) inset;
 }
 
@@ -7805,7 +7679,7 @@ textarea.searchInput {
   font-size: 12px;
 }
 
-@media (min-width: 701px) {
+@media (width > 700px) {
   .detailView .albumHeadFacts > span + span::before {
     content: '·';
     margin-right: 10px;
@@ -8466,8 +8340,8 @@ textarea.searchInput {
 }
 
 .page .viewToggle .viewActive {
-  background: var(--white-a14) !important;
-  color: var(--text-1) !important;
+  background: var(--white-a14);
+  color: var(--text-1);
 }
 
 .page > .toolbar .searchInput,
@@ -8684,9 +8558,9 @@ textarea.searchInput {
   min-height: 26px;
   border-radius: 999px;
   padding: 3px 11px;
-  background: var(--white-a06, rgba(255, 255, 255, 0.06));
-  border-color: rgba(255, 255, 255, 0.07);
-  color: rgba(255, 255, 255, 0.8);
+  background: var(--white-a06, var(--white-a06));
+  border-color: var(--white-a07);
+  color: var(--white-a80);
   font-size: 12px;
   font-weight: 500;
   backdrop-filter: blur(8px);
@@ -8717,7 +8591,7 @@ textarea.searchInput {
   border-radius: 999px;
   padding: 4px 10px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font: inherit;
   font-size: 11.5px;
   font-weight: 600;
@@ -8729,8 +8603,8 @@ textarea.searchInput {
 
 .enrichToggle:hover,
 .enrichToggle:focus-visible {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.85);
+  background: var(--white-a06);
+  color: var(--white-a85);
 }
 
 /* ══ the artist billboard: discover's recipe, applied to the artist ════════
@@ -8830,7 +8704,7 @@ textarea.searchInput {
   box-shadow:
     0 28px 60px var(--black-a60),
     0 0 0 1px var(--white-a15),
-    0 0 0 6px rgba(255, 255, 255, 0.04);
+    0 0 0 6px var(--white-a04);
 }
 
 .premierHero .heroImageOverlay {
@@ -8926,7 +8800,7 @@ textarea.searchInput {
   border-radius: 9999px;
   background: var(--white-a12);
   backdrop-filter: blur(12px);
-  color: #fff;
+  color: var(--text-1);
   font-size: 0.9rem;
   font-weight: 600;
 }
@@ -8979,16 +8853,14 @@ textarea.searchInput {
 }
 
 .bandPopular {
-  background:
-    linear-gradient(135deg, rgba(var(--accent-rgb), 0.1), rgba(255, 255, 255, 0.02) 55%), #11141c;
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.1), var(--white-a02) 55%), #11141c;
 }
 
 .bandCollection {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  background:
-    linear-gradient(140deg, rgba(162, 56, 255, 0.18), rgba(255, 255, 255, 0.02) 62%), #14131d;
+  background: linear-gradient(140deg, rgba(162, 56, 255, 0.18), var(--white-a02) 62%), #14131d;
 }
 
 .bandEyebrow,
@@ -9068,7 +8940,7 @@ textarea.searchInput {
   border: 1px solid var(--white-a18);
   border-radius: 9999px;
   background: var(--white-a08);
-  color: #fff;
+  color: var(--text-1);
   font-size: 0.85rem;
   font-weight: 650;
   letter-spacing: 0;
@@ -9109,7 +8981,7 @@ textarea.searchInput {
 
 .bandCollection :global(.collection-category .category-stats) {
   grid-area: stats;
-  color: #fff;
+  color: var(--text-1);
   font-size: 22px;
   font-weight: 850;
   letter-spacing: -0.02em;
@@ -9150,7 +9022,7 @@ textarea.searchInput {
 }
 
 .bandCollection :global(.artist-hero-stat .hero-stat-value) {
-  color: #fff;
+  color: var(--text-1);
   font-size: 30px;
   font-weight: 900;
   letter-spacing: -0.03em;

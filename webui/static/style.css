@@ -76636,7 +76636,7 @@ body.src-modal-open { overflow: hidden; }
     place-items: center;
     border-radius: 8px;
     background: var(--black-a55);
-    color: #fff;
+    color: var(--text-1);
     opacity: 0;
     transition: opacity var(--dur-fast) ease;
 }
