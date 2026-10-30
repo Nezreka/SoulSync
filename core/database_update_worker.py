@@ -848,7 +848,9 @@ class DatabaseUpdateWorker:
             try:
                 # Get stats for the specific server we're updating
                 if hasattr(self.database, 'get_database_info_for_server'):
-                    stats = self.database.get_database_info_for_server(self.server_type)
+                    # live counts, not the dashboard's minute-old copy
+                    live = getattr(self.database, '_database_info_for_server', None)
+                    stats = (live or self.database.get_database_info_for_server)(self.server_type)
                 else:
                     stats = self.database.get_database_info()
                 track_count = stats.get('tracks', 0)

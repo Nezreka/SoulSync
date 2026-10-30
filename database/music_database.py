@@ -19985,8 +19985,36 @@ class MusicDatabase:
                 'last_full_refresh': None
             }
     
+    # the dashboard's library card: counts that walk every track, for numbers
+    # that move only when a scan runs. kept a minute per server and library
+    # scope; scans read get_statistics_for_server directly, never this.
+    _DB_INFO_TTL = 60.0
+    _db_info_cache: Dict[Any, Any] = {}
+
     def get_database_info_for_server(self, server_source: str = None) -> Dict[str, Any]:
         """Get comprehensive database information filtered by server source"""
+        if server_source is None:
+            try:
+                from core.settings import config_manager
+                server_source = config_manager.get_active_media_server()
+            except Exception:  # noqa: BLE001 - the uncached path reports it
+                server_source = None
+        try:
+            from core.library2.sql_util import ANY_OWNER, ambient_scope
+            scope = ambient_scope()
+            scope_key = 'any' if scope is ANY_OWNER else repr(scope)
+        except Exception:  # noqa: BLE001 - no scope, no cache
+            scope_key = None
+        key = (str(self.database_path), server_source, scope_key)
+        hit = MusicDatabase._db_info_cache.get(key) if scope_key else None
+        if hit and time.monotonic() - hit[0] < self._DB_INFO_TTL:
+            return dict(hit[1])
+        info = self._database_info_for_server(server_source)
+        if scope_key:
+            MusicDatabase._db_info_cache[key] = (time.monotonic(), dict(info))
+        return info
+
+    def _database_info_for_server(self, server_source: str = None) -> Dict[str, Any]:
         try:
             # Import here to avoid circular imports
             from core.settings import config_manager
