@@ -51,7 +51,8 @@ _OWNED_ALBUMS_SQL_TEMPLATE = """
     SELECT al.title, ar.name
       FROM lib2_albums al
       JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-     WHERE EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+     WHERE al.primary_artist_id IN (SELECT value FROM json_each(?))
+       AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
                    ON f.track_id=t.id WHERE t.album_id=al.id
                    AND f.file_state='active' AND TRIM(f.path)<>''{owner})
 """
@@ -76,21 +77,25 @@ _TRACK_CREDIT_NAMES_SQL = """
     SELECT ta.track_id AS track_id, ar.name AS name, 0 AS name_rank
       FROM lib2_track_artists ta
       JOIN lib2_artists ar ON ar.id = ta.artist_id
-     WHERE TRIM(COALESCE(ar.name, '')) <> ''
+     WHERE ta.track_id IN (SELECT id FROM scoped)
+       AND TRIM(COALESCE(ar.name, '')) <> ''
     UNION ALL
     SELECT t.id, t.track_artist, 1
       FROM lib2_tracks t
-     WHERE TRIM(COALESCE(t.track_artist, '')) <> ''
+     WHERE t.id IN (SELECT id FROM scoped)
+       AND TRIM(COALESCE(t.track_artist, '')) <> ''
     UNION ALL
     SELECT t.id, ar.name, 2
       FROM lib2_tracks t
       JOIN lib2_albums al ON al.id = t.album_id
       JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-     WHERE TRIM(COALESCE(ar.name, '')) <> ''
+     WHERE t.id IN (SELECT id FROM scoped)
+       AND TRIM(COALESCE(ar.name, '')) <> ''
 """
 
 _OWNED_TRACKS_SQL_TEMPLATE = f"""
-    WITH track_credits AS ({_TRACK_CREDIT_NAMES_SQL})
+    WITH scoped(id) AS (SELECT value FROM json_each(?)),
+         track_credits AS ({_TRACK_CREDIT_NAMES_SQL})
     SELECT t.title, credit.name,
            COALESCE((SELECT m.server_id FROM lib2_media_server_mappings m
                       WHERE m.entity_type='track' AND m.entity_id=t.id
@@ -112,7 +117,8 @@ _OWNED_TRACKS_SQL_TEMPLATE = f"""
       FROM lib2_tracks t
       JOIN lib2_albums al ON al.id = t.album_id
       JOIN track_credits credit ON credit.track_id = t.id
-     WHERE EXISTS (SELECT 1 FROM lib2_track_files owned_f WHERE owned_f.track_id=t.id
+     WHERE t.id IN (SELECT id FROM scoped)
+       AND EXISTS (SELECT 1 FROM lib2_track_files owned_f WHERE owned_f.track_id=t.id
                    AND owned_f.file_state='active' AND TRIM(owned_f.path)<>''{{owner}})
      ORDER BY (EXISTS (SELECT 1 FROM lib2_media_server_mappings active_m
                         WHERE active_m.entity_type='track'
@@ -171,6 +177,41 @@ def _load_wishlist_keys(cursor, profile_id: int) -> set[str]:
 
 
 
+def _result_scope(cursor, names: list[str]) -> tuple[list[int], list[int]]:
+    """The catalogue artists and tracks a set of result credits could match.
+
+    Same fold as ``_presence_key`` (``normalize_key``), so an artist the key
+    comparison would accept is never left out: "AC/DC" finds "ACDC", "Bjork"
+    finds "Björk". Tracks are every way a credit reaches one: the album artist,
+    a relational track artist, and the per-track credit text (INT-03).
+    """
+    import json
+
+    from core.text.normalize import normalize_key
+
+    keys = sorted({normalize_key(n) for n in names if n} - {''})
+    if not keys:
+        return [], []
+    marks = ','.join('?' for _ in keys)
+    artist_ids = [r[0] for r in cursor.execute(
+        f"SELECT id FROM lib2_artists WHERE norm_key(name) IN ({marks})", keys)]
+    track_ids: set[int] = set()
+    if artist_ids:
+        ids_json = json.dumps(artist_ids)
+        track_ids.update(r[0] for r in cursor.execute(
+            """SELECT t.id FROM lib2_albums al JOIN lib2_tracks t ON t.album_id = al.id
+                WHERE al.primary_artist_id IN (SELECT value FROM json_each(?))
+               UNION
+               SELECT track_id FROM lib2_track_artists
+                WHERE artist_id IN (SELECT value FROM json_each(?))""",
+            (ids_json, ids_json)))
+    # the partial index on track_artist keeps this off a full scan
+    track_ids.update(r[0] for r in cursor.execute(
+        f"SELECT id FROM lib2_tracks WHERE track_artist IS NOT NULL "
+        f"AND norm_key(track_artist) IN ({marks})", keys))
+    return artist_ids, sorted(track_ids)
+
+
 def _owned_tracks_sql() -> str:
     """The tracks the CALLER owns, same reasoning as _owned_albums_sql."""
     from core.library2.sql_util import owner_clause
@@ -193,30 +234,38 @@ def check_library_presence(
       track metadata + resolved thumb URL; unmatched rows get
       `{in_library: False, in_wishlist: bool}`.
 
-    Ownership is read in one pass per call: two queries build the owned-album
-    and owned-track key sets, and every result row is then a dict lookup.
-
-    Upstream's 72749f414 replaced its own version of this with a per-artist
-    lookup cached by artist id, because its `tracks`/`albums` read really was
-    the whole library per search. That shape needs `artists.name_key` and an
-    `artists` table, both of which this branch replaced; the lib2 read here is
-    bounded by owned files rather than by catalogue rows, and the credit
-    fan-out above (INT-03) is what makes a single pass answer correctly for
-    compilations. What was taken from upstream is the featured-artist fallback
-    on the query side.
+    Ownership is read once per call, then every result row is a dict lookup.
+    The read is scoped to the artists the results credit (upstream 72749f414):
+    "bounded by owned files" is the whole library on a big install, and the
+    unscoped read was 731k rows, 18 seconds, on every search on a 310k library.
+    The credit fan-out (INT-03) and the key fold are unchanged, so the answers
+    are the same rows the full read gave for these artists.
     """
+    import json
+
+    names: list[str] = []
+    for row in (*albums, *tracks):
+        credit = _primary_artist(row.get('artist', ''))
+        names.extend((credit, _first_artist(credit)))
+
     conn = database._get_connection()
     try:
+        from core.text.normalize import normalize_key
+        conn.create_function("norm_key", 1, lambda x: normalize_key(x) if x else "",
+                             deterministic=True)
         cursor = conn.cursor()
-        cursor.execute(_owned_albums_sql())
-        owned_albums = {_presence_key(r[0], r[1]) for r in cursor.fetchall()}
+        artist_ids, track_ids = _result_scope(cursor, names)
+        owned_albums: set[str] = set()
+        if artist_ids:
+            cursor.execute(_owned_albums_sql(), (json.dumps(artist_ids),))
+            owned_albums = {_presence_key(r[0], r[1]) for r in cursor.fetchall()}
 
         active_server = getattr(
             config_manager, 'get_active_media_server',
             lambda: config_manager.get('media_server.type', 'plex'))()
         cursor.execute(
             _owned_tracks_sql(),
-            (active_server, active_server, active_server, active_server),
+            (json.dumps(track_ids), active_server, active_server, active_server, active_server),
         )
         owned_tracks: dict[str, dict] = {}
         for r in cursor.fetchall():

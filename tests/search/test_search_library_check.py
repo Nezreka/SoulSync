@@ -590,3 +590,46 @@ def test_band_names_do_not_match_partial_artist(db, stored, query):
     )
     assert result['albums'] == [False]
     assert result['tracks'][0]['in_library'] is False
+
+
+def test_the_read_is_scoped_to_the_artists_the_results_credit(db, monkeypatch):
+    """Upstream 72749f414, lost in the catalogue rewrite: the check read every
+    owned track on every call. On a 310k library that was 731k rows and 18
+    seconds per search. Only the credited artists' rows are read now."""
+    small = _seed_artist(db, 'Portishead')
+    big = _seed_artist(db, 'Someone With A Big Catalogue')
+    _seed_track(db, _seed_album(db, small, 'Dummy'), small, 'Sour Times')
+    big_album = _seed_album(db, big, 'Everything')
+    for n in range(60):
+        _seed_track(db, big_album, big, f'Song {n}')
+    keyed = []
+    real_key = library_check._presence_key
+    monkeypatch.setattr(library_check, '_presence_key',
+                        lambda title, artist: keyed.append(title) or real_key(title, artist))
+
+    out = library_check.check_library_presence(
+        db, _NoServerPlexClient(), _FakeConfigManager(), 1,
+        albums=[{'name': 'Dummy', 'artist': 'Portishead'}],
+        tracks=[{'name': 'Sour Times', 'artist': 'Portishead'}],
+    )
+
+    assert out['albums'] == [True]
+    assert out['tracks'][0]['in_library'] is True
+    assert not any(str(t).startswith('Song ') for t in keyed)
+
+
+def test_a_track_known_only_by_its_credit_text_is_found(db):
+    """INT-03's credit-text key survives the scoping: no artist row and no
+    relational credit, just the per-track credit on a compilation."""
+    va = _seed_artist(db, 'Various Artists')
+    album = _seed_album(db, va, 'Summer Hits', origin='library')
+    track = _seed_track(db, album, va, 'Feel Good Inc')
+    _lib2(db, "UPDATE lib2_tracks SET track_artist='Gorillaz' WHERE legacy_track_id=?", (track,))
+
+    out = library_check.check_library_presence(
+        db, _NoServerPlexClient(), _FakeConfigManager(), 1,
+        albums=[],
+        tracks=[{'name': 'Feel Good Inc', 'artist': 'Gorillaz'}],
+    )
+
+    assert out['tracks'][0]['in_library'] is True
