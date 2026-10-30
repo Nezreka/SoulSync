@@ -7572,7 +7572,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('artists', artistId));
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const artist = artistQuery.data;
-  const back = useArtistBack(artist?.name);
+  const back = useArtistBack(artist?.name, artistId);
   useEffect(() => {
     if (releasesMode !== 'all' || !artist?.name) return;
     window.loadSimilarArtists?.(artist.name);
@@ -7653,8 +7653,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     setDiscographyBusy(false);
   }
 
+  // a view switch is the same page: it replaces the history entry, so back
+  // (the browser's too) leaves the artist instead of undoing each switch
   function setReleasesMode(mode: 'library' | 'all') {
     void navigate({
+      replace: true,
       search: (p) => ({
         ...p,
         releases: mode,
@@ -7783,6 +7786,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       }
       onClick={() =>
         void navigate({
+          replace: true,
           search: (p) => ({
             ...p,
             header: headerMode === 'rich' ? 'compact' : 'rich',
@@ -8031,6 +8035,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   aria-pressed={releaseView === 'table'}
                   onClick={() =>
                     void navigate({
+                      replace: true,
                       search: (p) => ({ ...p, releaseView: 'table' }),
                     })
                   }
@@ -8043,6 +8048,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   aria-pressed={releaseView === 'cards'}
                   onClick={() =>
                     void navigate({
+                      replace: true,
                       search: (p) => ({ ...p, releaseView: 'cards' }),
                     })
                   }

@@ -963,6 +963,22 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(await screen.findByRole('button', { name: '← Back to Search' })).toBeInTheDocument();
   });
 
+  it('back to library leaves the artist, however often the view was switched', async () => {
+    const { router } = renderArtist('/library?section=albums');
+    await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/library'));
+    await act(() => router.navigate({ href: '/library?artist=1' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Discovery/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Table View' }));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ releases: 'all', releaseView: 'table' }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '← Back to Library' }));
+
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('artist'));
+    expect(router.state.location.search).toMatchObject({ section: 'albums' });
+  });
+
   it("is dev's styled back button, labelled with the page you came from", async () => {
     const { router } = renderArtist('/library');
     await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/library'));
