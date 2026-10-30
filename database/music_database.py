@@ -4260,6 +4260,22 @@ class MusicDatabase:
             logger.debug(f"ANALYZE skipped: {e}")
 
     @staticmethod
+    def _partial_index_has_rows(cursor, table: str, index: str) -> bool:
+        """does a partial index cover any row: its own WHERE, asked of the
+        table (which that same index answers). unknown counts as yes."""
+        row = cursor.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?",
+                             (index,)).fetchone()
+        sql = (row[0] if row else '') or ''
+        cut = sql.upper().rfind(' WHERE ')
+        if cut < 0:
+            return True
+        try:
+            return cursor.execute(
+                f'SELECT 1 FROM "{table}" WHERE {sql[cut + 7:]} LIMIT 1').fetchone() is not None
+        except Exception:  # noqa: BLE001 - a WHERE we can't replay: treat as covered
+            return True
+
+    @staticmethod
     def _tables_missing_planner_stats(cursor) -> list:
         """tables big enough to matter with an index sqlite has no statistics
         for (an index added after the last ANALYZE looks like the best way to
@@ -4277,9 +4293,18 @@ class MusicDatabase:
         for table in tables:
             # a WITHOUT ROWID table's primary key stats are filed under the
             # table's own name, not its sqlite_autoindex name
+            index_rows = cursor.execute(f'PRAGMA index_list("{table}")').fetchall()
             indexes = [table if r[3] == 'pk' and (table, table) in analyzed else r[1]
-                       for r in cursor.execute(f'PRAGMA index_list("{table}")')]
-            if not any((table, i) not in analyzed for i in indexes):
+                       for r in index_rows]
+            missing = [i for i in indexes if (table, i) not in analyzed]
+            # ANALYZE writes no row for a partial index that matches nothing
+            # (track_artist on a library without per-track credits): it is
+            # analyzed, it just has nothing to describe. counting it would
+            # re-analyze the table on every boot
+            partial = {r[1] for r in index_rows if len(r) > 4 and r[4]}
+            missing = [i for i in missing
+                       if i not in partial or MusicDatabase._partial_index_has_rows(cursor, table, i)]
+            if not missing:
                 continue
             big = cursor.execute(
                 f'SELECT 1 FROM "{table}" LIMIT 1 OFFSET {_PLANNER_STATS_MIN_ROWS - 1}').fetchone()

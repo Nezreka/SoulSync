@@ -127,3 +127,18 @@ def test_a_worker_without_a_database_finishes_quietly(monkeypatch):
     w.post_scan_hook = None
     w._emit_finished(0, 0, 0, 0, 0)
     assert warned == []
+
+
+def test_an_empty_partial_index_is_not_missing_stats(db):
+    """ANALYZE writes no row for a partial index that matches nothing; it must
+    not look unanalyzed forever and re-analyze the table on every boot."""
+    c = db._get_connection()
+    c.execute("CREATE INDEX idx_test_sparse ON lib2_tracks(track_artist) WHERE track_artist IS NOT NULL")
+    c.execute("ANALYZE lib2_tracks")
+    c.commit()
+    assert MusicDatabase._tables_missing_planner_stats(c.cursor()) == []
+    # once it covers rows and has no stats yet, it counts again
+    c.execute("UPDATE lib2_tracks SET track_artist='Guest' WHERE id=(SELECT MIN(id) FROM lib2_tracks)")
+    c.execute("DELETE FROM sqlite_stat1 WHERE idx='idx_test_sparse'")
+    c.commit()
+    assert "lib2_tracks" in MusicDatabase._tables_missing_planner_stats(c.cursor())
