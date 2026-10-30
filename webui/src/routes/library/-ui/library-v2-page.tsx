@@ -4574,27 +4574,30 @@ export function LibraryV2Page() {
   return (
     <LibraryV2CanWriteContext.Provider value={canWrite}>
       <LibraryV2CanWishContext.Provider value={canWish}>
-        <MirrorStatusBanner />
-        {!canWrite ? (
-          <div className={styles.accessNote} role="note">
-            {canWish
-              ? 'Your library: you can monitor and search here; other changes are up to the admin.'
-              : 'Read-only: library changes require the admin profile.'}
-          </div>
-        ) : null}
-        {search.album ? (
-          <AlbumDetailView albumId={search.album} />
-        ) : search.artist ? (
-          <ArtistDetailView artistId={search.artist} />
-        ) : search.section === 'wanted' ? (
-          <WantedIndexView />
-        ) : search.section === 'songs' ? (
-          <SongIndexView />
-        ) : search.section === 'albums' ? (
-          <AlbumIndexView />
-        ) : (
-          <ArtistIndexView />
-        )}
+        {/* no box of its own: it only tells mobile.css this page sizes its own buttons */}
+        <div className={styles.libraryRoot} data-library-v2="">
+          <MirrorStatusBanner />
+          {!canWrite ? (
+            <div className={styles.accessNote} role="note">
+              {canWish
+                ? 'Your library: you can monitor and search here; other changes are up to the admin.'
+                : 'Read-only: library changes require the admin profile.'}
+            </div>
+          ) : null}
+          {search.album ? (
+            <AlbumDetailView albumId={search.album} />
+          ) : search.artist ? (
+            <ArtistDetailView artistId={search.artist} />
+          ) : search.section === 'wanted' ? (
+            <WantedIndexView />
+          ) : search.section === 'songs' ? (
+            <SongIndexView />
+          ) : search.section === 'albums' ? (
+            <AlbumIndexView />
+          ) : (
+            <ArtistIndexView />
+          )}
+        </div>
       </LibraryV2CanWishContext.Provider>
     </LibraryV2CanWriteContext.Provider>
   );

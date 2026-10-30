@@ -5809,14 +5809,8 @@ textarea.searchInput {
   gap: 5px;
   font-size: 12px;
 }
-.trackTableStacked td[data-column]:not([data-column='title'])::before {
-  content: attr(data-label);
-  display: inline;
-  color: #ffffff60;
-  font-size: 11px;
-}
 .trackTableStacked td[data-column='title'] {
-  flex: 1 1 150px;
+  flex: 1 1 0;
   font-weight: 500;
 }
 .trackTableStacked td[data-column='file_path'] {
@@ -6004,6 +5998,30 @@ textarea.searchInput {
   content: '';
   order: 1;
   flex-basis: 100%;
+}
+/* under it only what a narrow row needs (credits, length, quality, check),
+   quiet and unlabelled; the rest is one tap away in the track editor */
+.trackTable.trackTableStacked
+  td:is(
+    [data-column='match'],
+    [data-column='file_size'],
+    [data-column='metadata'],
+    [data-column='features'],
+    [data-column='media_server'],
+    [data-column='profile'],
+    [data-column='bpm'],
+    [data-column='disc'],
+    [data-column='file_path'],
+    [data-column='play']
+  ) {
+  display: none;
+}
+.trackTableStacked tr > td[data-column]:not([data-column='title']) {
+  margin-left: 30px;
+  color: var(--white-a60);
+}
+.trackTableStacked tr > td[data-column]:not([data-column='title']) ~ td[data-column] {
+  margin-left: 6px;
 }
 .monitorBtn.monitorProminent {
   /* Override the legacy mobile rule with its long :not() selector. */
@@ -9243,5 +9261,79 @@ textarea.searchInput {
   .bandCollection :global(.collection-category .category-stats),
   .bandCollection :global(.artist-hero-stat .hero-stat-value) {
     font-size: 24px;
+  }
+}
+
+/* ── phone: one line per row, the controls their own size ─────────────── */
+
+.libraryRoot {
+  display: contents;
+}
+
+@media (max-width: 600px) {
+  /* the artist toolbar as one row of icons; each keeps its name for readers */
+  .detailView .pageToolbar {
+    gap: 4px;
+  }
+
+  .detailView .pageToolbar .toolButton {
+    padding: 0 10px;
+  }
+
+  .detailView .pageToolbar .toolButton > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* a folded biography: four lines, the fourth fading, "Read more" alone
+     under them (a mask, so the overflow the toggle is measured from stays) */
+  .premierHero
+    :global(.artist-hero-bio):not(:global(.expanded)):has(> :global(.artist-hero-bio-toggle))
+    :global(.bio-text) {
+    display: block;
+    mask-image: linear-gradient(to bottom, black calc(3 * 1.65em), transparent calc(4 * 1.65em));
+  }
+
+  /* the hero's actions: one size smaller, each on one line */
+  .premierHero :global(.artist-hero-actions) {
+    gap: 8px;
+  }
+
+  .premierHero :global(.artist-hero-actions) .toolButton,
+  .premierHero .heroSecondary,
+  .premierHero :global(.discog-download-btn),
+  .premierHero :global(.artist-hero-actions) .toolPrimary {
+    min-height: 36px;
+    padding: 0 14px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  /* a phone's tile is too narrow for dev's badge column; the artist and
+     album pages still carry every service link */
+  .page :global(.library-artist-card > .card-badge-container) {
+    display: none;
+  }
+
+  /* a dialog's labelled select takes the row instead of running off it */
+  .modal .checkOption:has(> select) {
+    display: flex;
+    width: 100%;
+  }
+
+  .modal .checkOption > select {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 13px;
+  }
+
+  /* a track row is its name and its actions */
+  .trackTable.trackTableStacked td[data-column]:not([data-column='title']),
+  .trackTableStacked tr::after {
+    display: none;
   }
 }

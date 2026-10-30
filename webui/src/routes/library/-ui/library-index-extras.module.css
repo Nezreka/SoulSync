@@ -355,3 +355,24 @@
   color: inherit;
   cursor: pointer;
 }
+
+/* a phone: the filter spans the row, the letters scroll in one line */
+@media (max-width: 600px) {
+  .searchWrap {
+    flex: 1 1 100%;
+  }
+
+  .searchWrap input {
+    width: 100%;
+  }
+
+  .alphabet {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .alphabet button {
+    flex: 0 0 auto;
+  }
+}
