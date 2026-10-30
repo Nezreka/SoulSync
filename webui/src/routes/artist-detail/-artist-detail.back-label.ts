@@ -41,7 +41,11 @@ function labels(): Record<string, string> {
 }
 
 export function backLabelStack(): BackLabelEntry[] {
-  return (window as { artistDetailLabelStack?: BackLabelEntry[] }).artistDetailLabelStack ?? [];
+  // created when missing, so a push before the vanilla globals load isn't
+  // made on a throwaway array
+  const w = window as { artistDetailLabelStack?: BackLabelEntry[] };
+  w.artistDetailLabelStack ??= [];
+  return w.artistDetailLabelStack;
 }
 
 /**

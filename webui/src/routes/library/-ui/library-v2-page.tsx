@@ -210,7 +210,7 @@ import {
 } from './library-songs';
 import styles from './library-v2-page.module.css';
 import { AlbumUpgradeButton } from './owned-album-upgrade';
-import { useArrivalBack } from './owned-artist-back';
+import { useArtistBack } from './owned-artist-back';
 import {
   OwnedArtistDiscographyButton,
   useReadOnlyProviderDiscography,
@@ -7459,7 +7459,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   // like every other Library V2 view setting.
   const releaseView = search.releaseView;
   const headerMode = search.header;
-  const arrivalBack = useArrivalBack(search.immersive);
   // the toolbar picks up a small name tag once the hero scrolls away
   const artistTopRef = useRef<HTMLDivElement>(null);
   const heroSentinelRef = useRef<HTMLDivElement>(null);
@@ -7495,6 +7494,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('artists', artistId));
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const artist = artistQuery.data;
+  const back = useArtistBack(artist?.name);
   useEffect(() => {
     if (releasesMode !== 'all' || !artist?.name) return;
     window.loadSimilarArtists?.(artist.name);
@@ -7714,14 +7714,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
 
   return (
     <div ref={artistTopRef} className={`${styles.page} ${styles.detailView}`}>
-      <BackLink
-        onClick={
-          arrivalBack?.onBack ??
-          (() => void navigate({ search: (p) => ({ ...p, artist: undefined }) }))
-        }
-      >
-        {arrivalBack?.label ?? '← All artists'}
-      </BackLink>
+      <BackLink onClick={back.onBack}>{back.label}</BackLink>
       {artistQuery.isError ? (
         // iss29-C04: without this branch `isLoading` false + `artist` undefined
         // fell through to "Loading…" forever — a stale bookmark to a deleted
@@ -13131,11 +13124,14 @@ export function TrackQualityProfileBadge({ track }: { track: LibraryV2Track }) {
   return null;
 }
 
+/** dev's page-header back button (style.css .back-btn), on the artist and album pages */
 function BackLink({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
-    <button type="button" className={styles.backLink} onClick={onClick}>
-      {children}
-    </button>
+    <div className={`page-header ${styles.backHeader}`}>
+      <button type="button" className="back-btn" onClick={onClick}>
+        <span>{children}</span>
+      </button>
+    </div>
   );
 }
 

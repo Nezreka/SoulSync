@@ -1770,15 +1770,6 @@ button.statusWarn:disabled {
 }
 
 /* --- misc --- */
-.backLink {
-  background: none;
-  border: none;
-  color: rgba(var(--accent-rgb), 0.9);
-  cursor: pointer;
-  font-size: 13px;
-  padding: 0 0 14px;
-}
-
 .pagination {
   display: flex;
   align-items: center;
@@ -6641,20 +6632,12 @@ textarea.searchInput {
 
 /* ── toolbar: one glass bar, sticky, one filled action ─────────────────── */
 
-.detailView .backLink {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 0 12px;
-  color: var(--text-2);
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  transition: color var(--dur-fast) ease;
-}
-
-.detailView .backLink:hover {
-  color: var(--text-1);
+/* dev's back button sits above the billboard: its page-header without the
+   rule underneath, which would cut across the hero */
+.detailView .backHeader {
+  margin-bottom: 18px;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .detailView .pageToolbar {

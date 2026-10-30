@@ -3,6 +3,7 @@ import { createRouter, type RouterHistory } from '@tanstack/react-router';
 import { RouterProvider } from '@tanstack/react-router';
 
 import { getShellBridge } from '@/platform/shell/bridge';
+import { noteNavigationFrom } from '@/platform/shell/last-navigation';
 import { LibrarySearchHost } from '@/routes/library/-ui/interactive-search-host';
 import { routeTree } from '@/routeTree.gen';
 
@@ -32,7 +33,7 @@ export function createAppRouter(
     },
   };
 
-  return createRouter({
+  const router = createRouter({
     routeTree,
     basepath:
       document.querySelector<HTMLMetaElement>('meta[name="soulsync-url-base"]')?.content || '/',
@@ -55,6 +56,12 @@ export function createAppRouter(
     defaultErrorComponent: DefaultErrorComponent,
     defaultNotFoundComponent: DefaultNotFoundComponent,
   });
+  // the artist page's back button labels itself with where you came from
+  noteNavigationFrom(undefined);
+  router.subscribe('onBeforeNavigate', (event) => {
+    if (event.fromLocation) noteNavigationFrom(event.fromLocation);
+  });
+  return router;
 }
 
 export function AppRouterProvider({

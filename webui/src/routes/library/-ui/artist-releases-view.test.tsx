@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -820,6 +820,14 @@ describe('Library V2 artist detail — All Releases views', () => {
       delete (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack;
     }
     renderArtist('/library?artist=1');
-    expect(await screen.findByText('← All artists')).toBeInTheDocument();
+    expect(await screen.findByText('← Back')).toBeInTheDocument();
+  });
+
+  it("is dev's styled back button, labelled with the page you came from", async () => {
+    const { router } = renderArtist('/library');
+    await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/library'));
+    await act(() => router.navigate({ href: '/library?artist=1' }));
+    const button = await screen.findByRole('button', { name: '← Back to Library' });
+    expect(button).toHaveClass('back-btn');
   });
 });
