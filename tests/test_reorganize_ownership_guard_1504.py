@@ -37,15 +37,22 @@ def profiles():
     album_pk = f'guard_album_{os.urandom(4).hex()}'
     conn = sqlite3.connect(os.environ['DATABASE_PATH'])
     try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (?, 'Guard Artist')", (artist_pk,))
+        # These endpoint fixtures are not enrichment work. The real server
+        # module starts its AudioDB worker during collection.
+        conn.execute("INSERT INTO artists (id, name, audiodb_match_status) VALUES (?, 'Guard Artist', 'skipped')", (artist_pk,))
         conn.execute(
-            "INSERT INTO albums (id, title, artist_id, owner_profile_id) VALUES (?, 'Guard Album', ?, ?)",
+            "INSERT INTO albums (id, title, artist_id, owner_profile_id, audiodb_match_status) VALUES (?, 'Guard Album', ?, ?, 'skipped')",
             (album_pk, artist_pk, sam),
         )
         conn.commit()
     finally:
         conn.close()
-    return sam, alex, album_pk
+    try:
+        yield sam, alex, album_pk
+    finally:
+        with sqlite3.connect(os.environ['DATABASE_PATH']) as conn:
+            conn.execute('DELETE FROM albums WHERE id=?', (album_pk,))
+            conn.execute('DELETE FROM artists WHERE id=?', (artist_pk,))
 
 
 def _login(client, pid):

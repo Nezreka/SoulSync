@@ -1,6 +1,7 @@
 import copy
 import json
 import sqlite3
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -41,6 +42,27 @@ class Server:
         return {'status': 'ok'}
 
 
+def test_replacement_waits_for_other_file_mutations(tmp_path):
+    from core.library.maintenance_lock import mutation_lock
+    entered, read = threading.Event(), threading.Event()
+    def connect():
+        read.set()
+        return sqlite3.connect(str(tmp_path / 'state.sqlite'))
+    worker = SimpleNamespace(db=SimpleNamespace(_get_connection=connect), transfer_folder=str(tmp_path))
+    def advance():
+        entered.set()
+        replacement.advance(worker)
+    thread = threading.Thread(target=advance)
+    with mutation_lock:
+        thread.start()
+        assert entered.wait(1)
+        was_blocked = not read.wait(.1)
+    thread.join(2)
+    assert not thread.is_alive()
+    assert was_blocked, 'Replacement validation raced an active file mutation'
+    assert read.is_set()
+
+
 def test_playlist_handoff_preserves_duplicates_order_identity_and_metadata():
     server = Server()
     before = copy.deepcopy(server.playlists['p'])
@@ -79,6 +101,25 @@ def test_playlist_retry_recovers_interruption_before_metadata_restore():
     server._make_request = original
     replacement.migrate_playlists(server, 'old', 'new', journal, lambda j: None)
     assert server.playlists['p']['comment'] == 'Keep this description'
+
+
+def test_playlist_retry_refuses_a_different_delivery():
+    server, journal = Server(), {}
+    original = server._make_request
+    def interrupted(method, args=None):
+        if method == 'updatePlaylist':
+            raise RuntimeError('connection lost')
+        return original(method, args)
+    server._make_request = interrupted
+    with pytest.raises(RuntimeError):
+        replacement.migrate_playlists(server, 'old', 'first-delivery', journal, lambda j: None)
+    server._make_request = original
+    before = copy.deepcopy(server.playlists)
+    # Another receipt/index row cannot authorize retiring the original while
+    # the journal still points playlists at the first (possibly missing) copy.
+    with pytest.raises(ValueError, match='replacement.*changed'):
+        replacement.migrate_playlists(server, 'old', 'second-delivery', journal, lambda j: None)
+    assert server.playlists == before
 
 
 @pytest.mark.parametrize('same_release', [True, False])

@@ -101,6 +101,29 @@ def test_commands_are_idempotent_and_revision_checked(tmp_path, monkeypatch):
         assert decisions.find_review(conn, key)[1] == next_revision
 
 
+def test_commands_through_old_links_write_to_the_current_case(tmp_path, monkeypatch):
+    album = build_album(tmp_path, monkeypatch, 'numbering_metadata_conflict')
+    case = scan_case(album)
+    old_key = case['case_id']
+    with album.db._get_connection() as conn:
+        migrate_album(conn, '10', '20')
+    current_key = resolve_case(album.db, old_key)
+    assert current_key != old_key
+    assert album.worker.get_review_case(old_key)['case_id'] == current_key
+
+    result = album.worker.apply_review_decision_group(old_key, 'numbering', action='fix')
+    assert result['success'], result
+    with album.db._get_connection() as conn:
+        assert decisions.numbering_choices(conn)[current_key] == 'fix'
+
+    result = album.worker.apply_review_decision_group(old_key, 'numbering', action='reset')
+    assert result['success'], result
+    with album.db._get_connection() as conn:
+        assert current_key not in decisions.numbering_choices(conn)
+        assert not conn.execute('SELECT 1 FROM reconcile_review_choices WHERE case_id=?',
+                                (current_key,)).fetchone()
+
+
 def test_upgrade_is_transactional_idempotent_and_does_not_accept_stale_votes(tmp_path, monkeypatch):
     album = build_album(tmp_path, monkeypatch, 'numbering_metadata_conflict')
     case = scan_case(album)

@@ -402,7 +402,7 @@ def test_artist_rewrite_removes_stale_separate_list(tmp_path):
     path=tmp_path/'song.flac'; _minimal_flac(path, {})
     tags=FLAC(path);tags['artist']='No Doubt';tags['artists']=['Fred the Godson','KIDD'];tags.save()
     assert read_release_evidence(str(path))['artists_list'] == ['Fred the Godson','KIDD']
-    assert write_tags_to_file(str(path),{'track_artist':'No Doubt'},embed_cover=False)['success']
+    assert write_tags_to_file(str(path),{'track_artist':'No Doubt', 'clear_artists_list': True},embed_cover=False)['success']
     tags=FLAC(path)
     assert tags['artist'] == ['No Doubt']
     assert not tags.get('artists')

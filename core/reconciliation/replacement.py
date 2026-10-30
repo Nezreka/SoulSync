@@ -12,6 +12,7 @@ from pathlib import Path
 
 from core.reconciliation.catalogue import connection
 from core.reconciliation.fulfillment import request_identity
+from core.library.maintenance_lock import maintenance_mutation
 
 
 def ensure_schema(conn):
@@ -90,6 +91,13 @@ def migrate_playlists(client, old_id, new_id, journal, persist):
     """Preserve every occurrence, order, playlist identity and editable metadata."""
     old_id, new_id = str(old_id), str(new_id)
     snapshots = journal.setdefault('playlists', {})
+    # A later download may replace the receipt while a handoff is interrupted.
+    # Never treat playlists pointing at that earlier delivery as verification
+    # of the new delivery. This also validates journals written before this guard.
+    for pair in snapshots.values():
+        expected = [new_id if item == old_id else item for item in pair['before']['tracks']]
+        if pair['after']['tracks'] != expected:
+            raise ValueError('The replacement delivery changed during handoff; both copies are retained for review')
     for current in _playlists(client):
         if old_id in current['tracks'] and current['id'] not in snapshots:
             after = {**current, 'tracks': [new_id if item == old_id else item for item in current['tracks']]}
@@ -153,6 +161,7 @@ def _delivery(conn, identity, details, resolve):
     return (receipt[0], tracks[0]) if len(tracks) == 1 else None
 
 
+@maintenance_mutation
 def advance(worker):
     """Only journaled Apply actions authorize a later retirement of the old copy."""
     from core.library.playlist_membership import _active_server_and_client, clear_cache

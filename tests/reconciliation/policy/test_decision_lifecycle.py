@@ -246,7 +246,7 @@ def test_grouped_title_convention_decision_stages_without_applying():
     case_id = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
-    worker._review_apply_lock = threading.Lock()
+    worker._review_apply_lock = threading.RLock()
     calls = []
     worker.start_bulk_fix = lambda **kwargs: calls.append(kwargs) or {
         'started': True, 'operation_id': 'durable-operation', 'total': 2}
@@ -269,7 +269,7 @@ def test_numbering_draft_keeps_independent_metadata_and_invalidates_on_change():
     key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
-    worker._review_apply_lock = threading.Lock()
+    worker._review_apply_lock = threading.RLock()
     assert worker.apply_review_decision_group(key, 'numbering', action='dismiss')['success']
     item = get_case(db, key)['items'][0]
     assert item['details']['db_data'] == {'musicbrainz_recording_id': 'recording'}
@@ -301,7 +301,7 @@ def test_numbering_choice_does_not_approve_other_metadata_and_survives_followup(
     }, job_id='library_reconciliation', kind='reconciliation_metadata')
     key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
     worker = RepairWorker.__new__(RepairWorker)
-    worker.db, worker._review_apply_lock = db, threading.Lock()
+    worker.db, worker._review_apply_lock = db, threading.RLock()
     assert worker.apply_review_decision_group(key, 'numbering', action=numbering)['success']
     case = get_case(db, key)
     item = case['items'][0]
@@ -335,7 +335,7 @@ def test_saved_legacy_flattening_requires_reanalysis_before_apply():
     }, job_id='library_reconciliation', kind='reconciliation_metadata')
     key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
     worker = RepairWorker.__new__(RepairWorker)
-    worker.db, worker._review_apply_lock = db, threading.Lock()
+    worker.db, worker._review_apply_lock = db, threading.RLock()
     assert worker.apply_review_decision_group(key, 'numbering', action='fix')['success']
     assert worker.apply_review_decision_group(key, 'metadata', action='fix')['success']
     item = get_case(db, key)['items'][0]
@@ -373,7 +373,7 @@ def test_saved_bulk_plan_is_bound_to_current_choices_and_evidence():
     key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
-    worker._review_apply_lock = threading.Lock()
+    worker._review_apply_lock = threading.RLock()
     calls = []
     worker.start_bulk_fix = lambda **kwargs: calls.append(kwargs) or {'started': True}
     before = get_case(db, key)
@@ -418,7 +418,7 @@ def test_saved_approval_readiness_agrees_after_evidence_is_reserialized():
     key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
-    worker._review_apply_lock = threading.Lock()
+    worker._review_apply_lock = threading.RLock()
     worker.apply_review_decision_group(key, 'numbering', action='fix')
     assert get_case(db, key)['plan']['ready'] == 1
     db.conn.execute('UPDATE repair_findings SET details_json=? WHERE id=1', (json.dumps(details, indent=2),))
@@ -437,7 +437,7 @@ def test_saved_file_choice_is_automatically_ready_and_revalidates_evidence():
     key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
-    worker._review_apply_lock = threading.Lock()
+    worker._review_apply_lock = threading.RLock()
     item = get_case(db, key)['items'][0]
     assert worker.apply_review_decision(key, 1, evidence_token=item['evidence_token'],
                                       action='fix', fix_action='quarantine')['success']

@@ -307,6 +307,7 @@ def plan_track(current_tags: Dict[str, Any], source_track: Any, album_meta: Dict
             and not artist_list_agrees):
         changes['artists_list'] = {'old': stored_credit, 'new': target_track_artist}
         db_data['track_artist'] = target_track_artist
+        db_data['clear_artists_list'] = True
 
     # Always carry track_count alongside a track_number write (writers want both).
     if 'track_number' in db_data and target.get('track_count'):

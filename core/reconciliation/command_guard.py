@@ -11,6 +11,9 @@ def review_plan_mutation(method):
         with self._review_apply_lock:
             bulk = getattr(self, '_bulk_fix_state', {})
             case = self.get_review_case(case_id)
+            # Reads follow verified relocations and identity merges. Commands
+            # must use that same key for SQL predicates, outbox work and revisions.
+            case_id = (case or {}).get('case_id') or case_id
             album_id = (case or {}).get('album_id')
             affected_albums = {str(snapshot.get('album_id')) for snapshot in
                                getattr(self, '_review_operation_snapshots', {}).values() if snapshot}
@@ -26,4 +29,3 @@ def review_plan_mutation(method):
                         album_decisions.touch(conn, case_id)
                 return result
     return guarded
-

@@ -342,6 +342,13 @@ class ReviewCommands:
             conn = self.db._get_connection()
             try:
                 review_choices.ensure_schema(conn)
+                conn.execute('BEGIN IMMEDIATE')
+                reset_ids = [row[0] for row in conn.execute('''SELECT finding_id FROM reconcile_review_choices
+                    WHERE case_id=? AND (category=? OR (?='numbering' AND numbering_choice!=''))''',
+                    (case_id, category, category))]
+                for finding_id in reset_ids:
+                    conn.execute('DELETE FROM reconcile_review_choices WHERE case_id=? AND fix_action=?',
+                                 (case_id, f'used_by:{finding_id}'))
                 if category == 'numbering':
                     album_decisions.clear(conn, case_id, 'numbering')
                     # Reopening numbering also revokes a later whole-proposal
@@ -353,9 +360,13 @@ class ReviewCommands:
                                  (case_id, category))
                     conn.execute('DELETE FROM reconcile_review_choices WHERE case_id=? AND category=?',
                                  (case_id, category))
+                from core.reconciliation.work import enqueue
+                enqueue(conn, case_id, case.get('folder') or '', kind='requests')
+                album_decisions.touch(conn, case_id)
                 conn.commit()
             finally:
                 conn.close()
+            self._sync_planned_replacement_requests(case_id)
             return {'success': True, 'message': 'Saved choice cleared. Review the proposal again.'}
         findings = [item for item in case['items']
                     if (item['id'] in selected_ids if selected_ids is not None else
@@ -383,6 +394,7 @@ class ReviewCommands:
         try:
             review_choices.ensure_schema(conn)
             conn.execute('BEGIN IMMEDIATE')
+            requests_changed = fix_action in ('replace', 'request_missing')
             if category == 'numbering':
                 album_decisions.save_numbering(conn, case_id, action)
             for item in findings:
@@ -399,6 +411,7 @@ class ReviewCommands:
                     return {'success': False, 'stale': True, 'error': 'The album plan changed'}
                 # Re-read the immutable scan proposal, not a projected prior choice.
                 previous = review_choices.load_choices(conn, item['id']).get(item['id'])
+                requests_changed |= bool(previous and previous[4] in ('replace', 'request_missing'))
                 numbering = ''
                 if previous and previous[0] == case_id and previous[1] == row[10]:
                     numbering = previous[3] if previous[2] == 'numbering' else previous[5]
@@ -419,9 +432,10 @@ class ReviewCommands:
                 # A newly reviewed choice may retry a failed apply. The file and
                 # release guards still run when the saved plan is applied.
                 conn.execute('UPDATE repair_findings SET last_error=NULL WHERE id=?', (item['id'],))
-            if fix_action in ('replace', 'request_missing'):
+            if requests_changed:
                 from core.reconciliation.work import enqueue
                 enqueue(conn, case_id, case.get('folder') or '', kind='requests')
+            album_decisions.touch(conn, case_id)
             conn.commit()
         finally:
             conn.close()
@@ -761,4 +775,3 @@ class ReviewCommands:
             conn.close()
         return {'success': True, 'action': 'reconciliation_assignment',
                 'message': 'Track assignment saved in the album plan.'}
-

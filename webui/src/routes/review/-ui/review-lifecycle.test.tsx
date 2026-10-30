@@ -216,6 +216,51 @@ it('keeps navigation on the new album when an earlier reanalysis request finishe
   expect(screen.queryByRole('heading', { name: 'First album' })).toBeNull();
 });
 
+it.each(['success', 'failure'] as const)(
+  'keeps the next album request alive when a previous decision returns %s',
+  async (outcome) => {
+    setup(reviewCaseFixture(false, { case_id: album.case_id, album: album.album }));
+    const read = fetchMock.getMockImplementation()!;
+    let finishSave!: () => void;
+    let finishNext!: () => void;
+    let nextSignal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(async (input: string, options?: RequestInit) => {
+      if (input.includes('/decisions/metadata/apply')) {
+        await new Promise<void>((resolve) => {
+          finishSave = resolve;
+        });
+        return reply({ success: outcome === 'success', error: 'Previous album failed' });
+      }
+      if (
+        decodeURIComponent(new URL(input, 'http://localhost').pathname).endsWith('/album:1:next')
+      ) {
+        nextSignal = options?.signal;
+        await new Promise<void>((resolve) => {
+          finishNext = resolve;
+        });
+        return reply(next);
+      }
+      return read(input, options);
+    });
+    render(<ReviewPage />);
+    await screen.findByRole('heading', { name: 'First album' });
+    fireEvent.click(screen.getByRole('button', { name: /Use 1 proposed change/ }));
+    await waitFor(() => expect(finishSave).toBeTypeOf('function'));
+    fireEvent.click(screen.getByRole('button', { name: /Another album/ }));
+    await waitFor(() => expect(finishNext).toBeTypeOf('function'));
+    await act(async () => {
+      finishSave();
+    });
+    expect(nextSignal?.aborted).toBe(false);
+    await act(async () => {
+      finishNext();
+    });
+    await screen.findByRole('heading', { name: 'Another album' });
+    expect(screen.queryByText(/Previous album failed/)).toBeNull();
+    expect(screen.queryByText('Album plan saved. Apply it when you are ready.')).toBeNull();
+  },
+);
+
 it('describes a single available release without implying competing editions', async () => {
   setup();
   render(<ReviewPage />);

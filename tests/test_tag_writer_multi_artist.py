@@ -173,3 +173,15 @@ def test_no_artists_list_legacy_callers_unchanged(flac_path):
     assert 'artists_multi' not in result['written_fields']
     audio = FLAC(flac_path)
     assert audio.get('artists') is None
+
+
+def test_unchanged_credit_preserves_existing_contributors(flac_path):
+    audio = FLAC(flac_path)
+    audio['artist'] = ['Artist A & Artist B']
+    audio['artists'] = ['Artist A', 'Artist B']
+    audio.save()
+    result = write_tags_to_file(flac_path, {
+        'title': 'Corrected title', 'track_artist': 'Artist A & Artist B',
+    }, embed_cover=False)
+    assert result['success']
+    assert FLAC(flac_path)['artists'] == ['Artist A', 'Artist B']

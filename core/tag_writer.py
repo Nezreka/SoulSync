@@ -586,11 +586,13 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
         if isinstance(audio.tags, ID3):
             written = _write_id3(audio, title, artist, album_artist, album,
                                  year, genre_str, track_num, total_tracks,
-                                 disc_num, bpm, artists_list=artists_list, total_discs=db_data.get('total_discs'))
+                                 disc_num, bpm, artists_list=artists_list, total_discs=db_data.get('total_discs'),
+                                 clear_artists_list=bool(db_data.get('clear_artists_list')))
         elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
             written = _write_vorbis(audio, title, artist, album_artist, album,
                                     year, genre_str, track_num, total_tracks,
-                                    disc_num, bpm, artists_list=artists_list, total_discs=db_data.get('total_discs'))
+                                    disc_num, bpm, artists_list=artists_list, total_discs=db_data.get('total_discs'),
+                                    clear_artists_list=bool(db_data.get('clear_artists_list')))
         elif isinstance(audio, MP4):
             written = _write_mp4(audio, title, artist, album_artist, album,
                                  year, genre_str, track_num, total_tracks,
@@ -704,17 +706,18 @@ def _date_to_write(existing: Optional[str], year) -> str:
 
 def _write_id3(audio, title, artist, album_artist, album, year, genre,
                track_num, total_tracks, disc_num, bpm,
-               artists_list: Optional[List[str]] = None, total_discs=None) -> List[str]:
+               artists_list: Optional[List[str]] = None, total_discs=None,
+               clear_artists_list=False) -> List[str]:
     written = []
     if title:
         audio.tags.delall('TIT2')
         audio.tags.add(TIT2(encoding=3, text=[title]))
         written.append('title')
     if artist:
+        if clear_artists_list or _id3_text(audio.tags, 'TPE1') != artist:
+            audio.tags.delall('TXXX:Artists')
         audio.tags.delall('TPE1')
         audio.tags.add(TPE1(encoding=3, text=[artist]))
-        # A corrected display credit must not retain contradictory Picard artists.
-        audio.tags.delall('TXXX:Artists')
         written.append('artist')
         # TPE1 stays as the joined display string. When the caller
         # supplied a multi-value list AND the user has the
@@ -748,10 +751,14 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
         trk_str = f"{track_num}/{total_tracks}" if total_tracks else str(track_num)
         audio.tags.add(TRCK(encoding=3, text=[trk_str]))
         written.append('track_number')
-    if disc_num is not None:
+    if disc_num is not None or total_discs is not None:
+        current = (_id3_text(audio.tags, 'TPOS') or '').split('/', 1)
+        number = disc_num if disc_num is not None else _parse_track_num(current[0])
+        total = total_discs if total_discs is not None else (_parse_track_num(current[1]) if len(current) > 1 else None)
         audio.tags.delall('TPOS')
-        audio.tags.add(TPOS(encoding=3, text=[f'{disc_num}/{total_discs}' if total_discs else str(disc_num)]))
-        written.append('disc_number')
+        audio.tags.add(TPOS(encoding=3, text=[f'{number or 0}/{total}' if total else str(number or 0)]))
+        written.extend(field for field, value in [('disc_number', disc_num), ('total_discs', total_discs)]
+                       if value is not None)
     stored_bpm = _stored_bpm(bpm)
     if stored_bpm is not None:
         audio.tags.delall('TBPM')
@@ -762,14 +769,16 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
 
 def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
                   track_num, total_tracks, disc_num, bpm,
-                  artists_list: Optional[List[str]] = None, total_discs=None) -> List[str]:
+                  artists_list: Optional[List[str]] = None, total_discs=None,
+                  clear_artists_list=False) -> List[str]:
     written = []
     if title:
         audio['title'] = [title]
         written.append('title')
     if artist:
+        if clear_artists_list or _vorbis_first(audio, 'artist') != artist:
+            audio.pop('artists', None)
         audio['artist'] = [artist]
-        audio.pop('artists', None)
         written.append('artist')
         # Vorbis-style multi-value: write the per-artist list to the
         # `artists` key (separate from `artist`, picard convention) when
@@ -850,9 +859,13 @@ def _write_mp4(audio, title, artist, album_artist, album, year, genre,
         total = total_tracks or 0
         audio['trkn'] = [(track_num, total)]
         written.append('track_number')
-    if disc_num is not None:
-        audio['disk'] = [(disc_num, total_discs or 0)]
-        written.append('disc_number')
+    if disc_num is not None or total_discs is not None:
+        current = (audio.get('disk') or [(0, 0)])[0]
+        number = disc_num if disc_num is not None else current[0]
+        total = total_discs if total_discs is not None else current[1]
+        audio['disk'] = [(number, total)]
+        written.extend(field for field, value in [('disc_number', disc_num), ('total_discs', total_discs)]
+                       if value is not None)
     stored_bpm = _stored_bpm(bpm)
     if stored_bpm is not None:
         audio['tmpo'] = [stored_bpm]

@@ -25,7 +25,7 @@ def test_review_http_api_returns_exact_case_and_rejects_stale_apply(monkeypatch)
            job_id='library_reconciliation', kind='reconciliation_metadata')
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
-    worker._review_apply_lock = threading.Lock()
+    worker._review_apply_lock = threading.RLock()
     worker.fix_finding = lambda *_args, **_kwargs: {'success': True}
     monkeypatch.setattr(repair, '_worker_getter', lambda: worker)
     app = Flask(__name__)

@@ -497,7 +497,7 @@ def test_bulk_progress_tallies_per_type(worker):
            entity_id='t8', file_path='/music/d.flac')
     ids = [r[0] for r in _rows(worker)]
 
-    worker._bulk_fix_state = {'running': True, 'total': len(ids), 'done': 0,
+    worker._bulk_fix_state = {'operation_id': 'per-type-progress', 'running': True, 'total': len(ids), 'done': 0,
                              'fixed': 0, 'failed': 0, 'stopped': False,
                              'errors': [], 'error': None, 'per_type': {}}
     worker._bulk_fix_stop_event = type('E', (), {'is_set': lambda self: False})()
@@ -506,5 +506,5 @@ def test_bulk_progress_tallies_per_type(worker):
 
     worker._run_bulk_fix(ids)
     per_type = worker._bulk_fix_state['per_type']
-    assert per_type['missing_lyrics'] == {'fixed': 1, 'failed': 0}
-    assert per_type['missing_cover_art'] == {'fixed': 0, 'failed': 1}
+    assert per_type['missing_lyrics'] == {'fixed': 1, 'failed': 0, 'blocked': 0, 'not_attempted': 0}
+    assert per_type['missing_cover_art'] == {'fixed': 0, 'failed': 1, 'blocked': 0, 'not_attempted': 0}

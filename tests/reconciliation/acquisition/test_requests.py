@@ -85,7 +85,7 @@ def test_requested_missing_track_stays_pending_without_reanalysis():
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
     worker._config_manager = None
-    worker._review_apply_lock = threading.Lock()
+    worker._review_apply_lock = threading.RLock()
     worker._fix_reconciliation_missing = lambda *args: {'success': True, 'action': 'wishlisted'}
     worker._schedule_review_refresh = lambda *args: (_ for _ in ()).throw(AssertionError('No rescan needed'))
     case = worker.get_review_case(case_id)
@@ -95,6 +95,21 @@ def test_requested_missing_track_stays_pending_without_reanalysis():
     assert updated['status'] != 'completed'
     assert updated['items'][0]['details']['fulfillment_state'] == 'wishlisted'
     assert updated['decisions'][0]['category'] == 'pending_fulfillment'
+
+
+def test_reset_file_decisions_clears_unsubmitted_replacement_requests(tmp_path, monkeypatch):
+    album = build_album(tmp_path, monkeypatch, 'recording_conflict')
+    case = scan_case(album)
+    item = next(row for row in case['items'] if row['details'].get('replacement_track'))
+    result = album.worker.apply_review_decision(case['case_id'], item['id'],
+        evidence_token=item['evidence_token'], action='fix', fix_action='replace')
+    assert result['success'], result
+    pending = album.worker.get_review_case(case['case_id'])
+    assert any(row['details'].get('replacement_for_finding') == item['id'] for row in pending['items'])
+    result = album.worker.apply_review_decision_group(case['case_id'], item['category'], action='reset')
+    assert result['success'], result
+    pending = album.worker.get_review_case(case['case_id'])
+    assert not any(row['details'].get('replacement_for_finding') == item['id'] for row in pending['items'])
 
 
 def test_missing_track_subset_rejects_foreign_stale_and_invalid_selections():

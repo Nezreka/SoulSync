@@ -110,6 +110,105 @@ def test_old_replan_cannot_acknowledge_new_work_and_retries_survive_restart(tmp_
         assert row[:2] == (second, 'retry later') and row[2] > 0
 
 
+def test_multiple_downloaded_albums_queue_without_nested_writer_lock(tmp_path, monkeypatch):
+    from core.reconciliation.fulfillment import record_request
+    album = build_album(tmp_path, monkeypatch, 'partial')
+    scan_case(album)
+    for index in range(2):
+        record_request(album.db, {'album_id': str(10 + index), 'profile_id': 1,
+            'album_folder': str(album.folder) + str(index), 'source': 'musicbrainz',
+            'release_id': 'release'}, {'source_track_id': str(index)})
+    with album.db._get_connection() as conn:
+        conn.execute("UPDATE reconcile_fulfillment SET refresh_needed=1")
+    original = album.db._get_connection
+    def short_timeout():
+        conn = original()
+        conn.execute('PRAGMA busy_timeout=50')
+        return conn
+    monkeypatch.setattr(album.db, '_get_connection', short_timeout)
+    scheduled = []
+    def schedule(key, folder, **kwargs):
+        with album.db._get_connection() as conn:
+            work.enqueue(conn, key, folder, scope='discovery')
+        scheduled.append(key)
+        return True
+    monkeypatch.setattr(album.worker, '_schedule_album_refresh', schedule)
+    album.worker._refresh_published_review_albums()
+    assert len(scheduled) == 2
+    with album.db._get_connection() as conn:
+        assert conn.execute('SELECT sum(refresh_needed) FROM reconcile_fulfillment').fetchone()[0] == 0
+        assert len(work.pending(conn)) == 2
+
+
+def test_download_refresh_survives_interruption_before_scheduling(tmp_path, monkeypatch):
+    from core.reconciliation.fulfillment import record_request
+    album = build_album(tmp_path, monkeypatch, 'partial')
+    case = scan_case(album)
+    record_request(album.db, {'album_id': '10', 'profile_id': 1,
+        'album_folder': str(album.folder), 'source': 'musicbrainz',
+        'release_id': 'release'}, {'source_track_id': 'wanted'})
+    with album.db._get_connection() as conn:
+        conn.execute('UPDATE reconcile_fulfillment SET refresh_needed=1')
+    monkeypatch.setattr(album.worker, '_schedule_album_refresh',
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError('interrupted')))
+    with pytest.raises(RuntimeError, match='interrupted'):
+        album.worker._refresh_published_review_albums()
+    with album.db._get_connection() as conn:
+        pending = work.pending(conn)
+        assert pending[0][0] == case['case_id']
+        assert pending[0][3] == 'discovery'
+
+
+def test_replacement_recovery_cannot_recreate_a_concurrently_reset_request(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    album = build_album(tmp_path, monkeypatch, 'recording_conflict')
+    case = scan_case(album)
+    item = next(row for row in case['items'] if row['details'].get('replacement_track'))
+    assert album.worker.apply_review_decision(case['case_id'], item['id'],
+        evidence_token=item['evidence_token'], action='fix', fix_action='replace')['success']
+    entered, resume, reset_done = threading.Event(), threading.Event(), threading.Event()
+    emit = album.worker._create_finding
+    def delayed_emit(**kwargs):
+        entered.set()
+        assert resume.wait(2)
+        return emit(**kwargs)
+    monkeypatch.setattr(album.worker, '_create_finding', delayed_emit)
+    def reset():
+        result = album.worker.apply_review_decision_group(case['case_id'], item['category'], action='reset')
+        reset_done.set()
+        return result
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        recovery = pool.submit(album.worker._sync_planned_replacement_requests, case['case_id'])
+        assert entered.wait(2)
+        command = pool.submit(reset)
+        was_serialized = not reset_done.wait(.1)
+        resume.set()
+        recovery.result(timeout=2)
+        assert command.result(timeout=2)['success']
+    assert was_serialized
+    current = album.worker.get_review_case(case['case_id'])
+    assert not any(row['details'].get('replacement_for_finding') == item['id'] for row in current['items'])
+
+
+def test_committed_choice_advances_revision_even_if_followup_is_interrupted(tmp_path, monkeypatch):
+    from core.reconciliation.publication import revisions, publish, StalePublication
+    album = build_album(tmp_path, monkeypatch, 'recording_conflict')
+    case = scan_case(album)
+    item = next(row for row in case['items'] if row['details'].get('replacement_track'))
+    with album.db._get_connection() as conn:
+        before = revisions(conn)
+    monkeypatch.setattr(album.worker, '_sync_planned_replacement_requests',
+        lambda *a: (_ for _ in ()).throw(RuntimeError('interrupted')))
+    with pytest.raises(RuntimeError, match='interrupted'):
+        album.worker.apply_review_decision(case['case_id'], item['id'],
+            evidence_token=item['evidence_token'], action='fix', fix_action='replace')
+    with album.db._get_connection() as conn:
+        assert work.pending(conn)[0][1] == 'requests'
+    with pytest.raises(StalePublication):
+        with publish(album.db, before, [case['case_id']]):
+            pytest.fail('An older scan could overwrite the committed decision')
+
+
 def test_state_readers_do_not_write_or_repair_data(tmp_path, monkeypatch):
     album = build_album(tmp_path, monkeypatch, 'partial')
     case = scan_case(album)

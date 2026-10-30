@@ -58,3 +58,18 @@ def test_reset_revokes_album_numbering_policy(tmp_path, monkeypatch):
     assert album.worker.apply_review_decision_group(case['case_id'], 'numbering', action='reset')['success']
     again = album.worker.get_review_case(case['case_id'])
     assert any('track_number' in row['details'].get('changes', {}) and not row['details'].get('numbering_choice') for row in again['items'])
+@pytest.mark.parametrize('kind', ['id3', 'mp4'])
+@pytest.mark.parametrize('disc,total,expected', [(2, None, (2, 3)), (None, 4, (1, 4)), (2, 4, (2, 4))])
+def test_partial_numbering_writes_preserve_the_unedited_component(kind, disc, total, expected):
+    from types import SimpleNamespace
+    from mutagen.id3 import ID3, TPOS
+    from core.tag_writer import _write_id3, _write_mp4
+    if kind == 'id3':
+        audio = SimpleNamespace(tags=ID3())
+        audio.tags.add(TPOS(encoding=3, text=['1/3']))
+        _write_id3(audio, None, None, None, None, None, None, None, None, disc, None, total_discs=total)
+        assert str(audio.tags['TPOS']) == f'{expected[0]}/{expected[1]}'
+    else:
+        audio = {'disk': [(1, 3)]}
+        _write_mp4(audio, None, None, None, None, None, None, None, None, disc, None, total_discs=total)
+        assert audio['disk'] == [expected]

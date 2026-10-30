@@ -18,7 +18,7 @@ def test_stale_review_action_cannot_run_fix():
     case_id = list_cases(db)['items'][0]['case_id']
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
-    worker._review_apply_lock = threading.Lock()
+    worker._review_apply_lock = threading.RLock()
     called = []
     worker.fix_finding = lambda *_args, **_kwargs: called.append(True) or {'success': True}
     result = worker.apply_review_decision(case_id, 1, evidence_token='old', action='fix')
@@ -33,7 +33,7 @@ def test_failed_fix_stays_in_same_case_with_error():
     token = get_case(db, case_id)['items'][0]['evidence_token']
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
-    worker._review_apply_lock = threading.Lock()
+    worker._review_apply_lock = threading.RLock()
     worker.fix_finding = lambda *_args, **_kwargs: {'success': False, 'error': 'file locked'}
     result = worker.apply_review_decision(case_id, 1, evidence_token=token, action='fix')
     assert result == {'success': False, 'error': 'file locked'}

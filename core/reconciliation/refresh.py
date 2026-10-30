@@ -21,19 +21,30 @@ class ReviewRefresh:
     def _refresh_published_review_albums(self):
         """Coalesce published downloads into one discovery refresh per album."""
         from core.reconciliation.fulfillment import ensure_schema
+        from core.reconciliation import work
         conn = self.db._get_connection()
         try:
             ensure_schema(conn)
-            rows = conn.execute("""SELECT case_id, album_folder, MAX(updated_at)
+            conn.execute('BEGIN IMMEDIATE')
+            rows = conn.execute("""SELECT case_id, album_folder
                 FROM reconcile_fulfillment WHERE refresh_needed=1
                 GROUP BY case_id, album_folder""").fetchall()
-            for key, folder, stamp in rows:
-                if self._schedule_album_refresh(key, folder, scope='discovery'):
-                    conn.execute("""UPDATE reconcile_fulfillment SET refresh_needed=0
-                        WHERE case_id=? AND updated_at<=?""", (key, stamp))
+            for key, folder in rows:
+                if not folder:
+                    continue
+                # Persist the follow-up and acknowledge these receipts together.
+                # Scheduling opens another writer connection, so it must happen
+                # after this transaction. New receipts cannot be cleared by an
+                # acknowledgement based on second-resolution timestamps.
+                work.enqueue(conn, key, folder, scope='discovery')
+                conn.execute('''UPDATE reconcile_fulfillment SET refresh_needed=0
+                    WHERE case_id=? AND album_folder=?''', (key, folder))
             conn.commit()
         finally:
             conn.close()
+        for key, folder in rows:
+            if folder:
+                self._schedule_album_refresh(key, folder, scope='discovery')
 
 
     def _resume_review_work(self):
@@ -194,6 +205,15 @@ class ReviewRefresh:
 
     def _sync_planned_replacement_requests(self, case_id):
         """Expose acquisition before apply without changing immutable file choices."""
+        from core.library.maintenance_lock import mutation_lock
+        # Recovery and scan callbacks use this path too. Keep their snapshot
+        # and derived requests together so a concurrent reset cannot be undone.
+        with self._review_apply_lock:
+            case = self.get_review_case(case_id, job_id='library_reconciliation')
+            with mutation_lock.planning((case or {}).get('album_id')):
+                self._sync_current_replacement_requests((case or {}).get('case_id') or case_id)
+
+    def _sync_current_replacement_requests(self, case_id):
         case = self.get_review_case(case_id, job_id='library_reconciliation')
         active = set()
         for item in (case or {}).get('items') or []:
@@ -234,4 +254,3 @@ class ReviewRefresh:
                 if (details.get('replacement_for_finding') and details['replacement_for_finding'] not in active
                         and details.get('fulfillment_state') not in ('wishlisted', 'downloading', 'downloaded')):
                     conn.execute("UPDATE repair_findings SET status='resolved',user_action='obsolete' WHERE id=?", (fid,))
-

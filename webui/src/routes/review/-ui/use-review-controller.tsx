@@ -480,6 +480,9 @@ export function useReviewController() {
   const refreshError = useRef<string | null>(null);
   const refresh = useCallback(async () => {
     const requestedId = caseId;
+    // A save for the previous album may finish after navigation. Do not let
+    // its refresh cancel the request loading the newly selected album.
+    if (selectedCaseRef.current !== requestedId) return true;
     const request = caseRequests.start();
     try {
       if (!requestedId) {
@@ -532,10 +535,9 @@ export function useReviewController() {
       }
       return true;
     } catch (cause) {
-      if (selectedCaseRef.current === requestedId && request.isCurrent()) {
-        refreshError.current = (cause as Error).message;
-        setError(refreshError.current);
-      }
+      if (selectedCaseRef.current !== requestedId || !request.isCurrent()) return true;
+      refreshError.current = (cause as Error).message;
+      setError(refreshError.current);
       return false;
     }
   }, [caseId, refreshQueue, queue, page]);
@@ -675,6 +677,7 @@ export function useReviewController() {
       const result = await response.json();
       if (!response.ok || !result.success)
         throw new Error(result.error || 'Could not preview the remaining folder changes');
+      if (selectedCaseRef.current !== caseId) return;
       const tracks = (result.tracks || []) as Array<{
         title: string;
         current_path: string;
@@ -711,7 +714,7 @@ export function useReviewController() {
           </>
         ),
       });
-      if (!accepted) return;
+      if (!accepted || selectedCaseRef.current !== caseId) return;
       const start = await fetch(
         `/api/repair/review-queue/${encodeURIComponent(reviewCase.case_id)}/retry-organization`,
         {
@@ -726,7 +729,7 @@ export function useReviewController() {
       rememberOperation(operation.operation_id, reviewCase.case_id);
       setApplyBusy(true);
     } catch (cause) {
-      setError((cause as Error).message);
+      if (selectedCaseRef.current === caseId) setError((cause as Error).message);
     } finally {
       setBusy(false);
     }
@@ -740,7 +743,7 @@ export function useReviewController() {
         'Keep the current tags, filenames, library album membership, and folders. This closes the current review without applying its planned changes. Existing download requests stay on the wishlist.',
       confirmText: 'Leave album entirely as-is',
     });
-    if (!accepted) return;
+    if (!accepted || selectedCaseRef.current !== caseId) return;
     setBusy(true);
     try {
       const response = await fetch(
@@ -753,10 +756,11 @@ export function useReviewController() {
       );
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Could not save this choice');
+      if (selectedCaseRef.current !== caseId) return;
       setNotice(result.message);
       await refresh();
     } catch (cause) {
-      setError((cause as Error).message);
+      if (selectedCaseRef.current === caseId) setError((cause as Error).message);
     } finally {
       setBusy(false);
     }
@@ -773,6 +777,7 @@ export function useReviewController() {
       );
       if (!response.ok) throw new Error('Could not load the ready album plans.');
       const preview = (await response.json()) as ReadyPreview;
+      if (scopeCaseId && selectedCaseRef.current !== scopeCaseId) return;
       if (!preview.action_count)
         throw new Error('No fully decided album plans are ready to apply.');
       let selection = {
@@ -795,7 +800,7 @@ export function useReviewController() {
         destructive: preview.file_actions > 0,
         confirmText: 'Apply selected plans',
       });
-      if (!confirmed) return;
+      if (!confirmed || (scopeCaseId && selectedCaseRef.current !== scopeCaseId)) return;
       setApplyBusy(true);
       const started = await startReadyChanges(preview.signature, scopeCaseId, organize, selection);
       if (!started.started) throw new Error(started.error || 'Could not start album changes');
@@ -833,7 +838,7 @@ export function useReviewController() {
       ),
       confirmText: `Request ${missingCount} track${missingCount === 1 ? '' : 's'}`,
     });
-    if (!confirmed) return;
+    if (!confirmed || selectedCaseRef.current !== caseId) return;
     setApplyBusy(true);
     setError('');
     setApplyProgress(`Requesting 0 of ${missingCount} missing tracks…`);
@@ -842,6 +847,7 @@ export function useReviewController() {
       if (started.success) {
         setApplyBusy(false);
         setApplyProgress('');
+        if (selectedCaseRef.current !== caseId) return;
         setNotice(
           `${started.requested || missingCount} tracks requested. Approved file changes can now be applied.`,
         );
@@ -855,7 +861,7 @@ export function useReviewController() {
     } catch (cause) {
       setApplyBusy(false);
       setApplyProgress('');
-      setError((cause as Error).message);
+      if (selectedCaseRef.current === caseId) setError((cause as Error).message);
     }
   };
 
@@ -867,15 +873,16 @@ export function useReviewController() {
       confirmText: 'Stop collecting this album',
       destructive: true,
     });
-    if (!accepted) return;
+    if (!accepted || selectedCaseRef.current !== caseId) return;
     setBusy(true);
     try {
       const result = await stopCollectingAlbum(reviewCase.case_id, reviewCase.plan_signature);
       if (!result.success) throw new Error(result.error || 'Could not update this album');
+      if (selectedCaseRef.current !== caseId) return;
       setNotice(result.message || 'Album collection stopped.');
       await refresh();
     } catch (error) {
-      setError((error as Error).message);
+      if (selectedCaseRef.current === caseId) setError((error as Error).message);
     } finally {
       setBusy(false);
     }
@@ -890,7 +897,7 @@ export function useReviewController() {
       if (!result.success) throw new Error(result.error || 'Could not undo this choice');
       await refresh();
     } catch (cause) {
-      setError((cause as Error).message);
+      if (selectedCaseRef.current === caseId) setError((cause as Error).message);
     } finally {
       setBusy(false);
     }
@@ -939,6 +946,7 @@ export function useReviewController() {
     setNotice('');
     try {
       const result = await applyReviewDecision(caseId, finding, action, fixAction);
+      if (selectedCaseRef.current !== caseId) return;
       if (!result.success && !result.partial) {
         await refresh();
         throw new Error(result.error || 'The action did not complete');
@@ -964,9 +972,9 @@ export function useReviewController() {
       }
       await refresh();
     } catch (cause) {
-      setError((cause as Error).message);
       // The backend may have updated the evidence or error on this finding.
       if (selectedCaseRef.current === caseId) {
+        setError((cause as Error).message);
         const request = caseRequests.start();
         void fetchReviewCase(caseId, request.signal)
           .then((result) => {
@@ -1065,9 +1073,10 @@ export function useReviewController() {
     try {
       const result = await applyReviewDecisionGroup(caseId, decision.category, action);
       if (result.started) {
-        rememberOperation(result.operation_id);
+        rememberOperation(result.operation_id, caseId);
         return;
       }
+      if (selectedCaseRef.current !== caseId) return;
       if (!result.success) {
         setError(
           `${result.applied == null ? 'The operation outcome could not be confirmed.' : `${result.applied} of ${result.total || decision.action_count} changes completed.`} ${result.error || 'Review the current operation status before retrying.'}`,
@@ -1081,7 +1090,7 @@ export function useReviewController() {
         );
       }
     } catch (cause) {
-      setError((cause as Error).message);
+      if (selectedCaseRef.current === caseId) setError((cause as Error).message);
     } finally {
       setBusy(false);
       setBusyDecision('');
@@ -1097,7 +1106,7 @@ export function useReviewController() {
       await resetAlbumScope(reviewCase.case_id);
       await refresh();
     } catch (cause) {
-      setError((cause as Error).message);
+      if (selectedCaseRef.current === caseId) setError((cause as Error).message);
     } finally {
       setBusy(false);
     }
