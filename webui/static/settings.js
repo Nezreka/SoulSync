@@ -6806,9 +6806,9 @@ async function saveSettings(quiet = false) {
             api_timeout: parseInt(document.getElementById('jellyfin-timeout').value) || 30
         },
         music_assistant: {
-            base_url: document.getElementById('music_assistant-url')?.value || '',
-            token: document.getElementById('music_assistant-token')?.value || '',
-            source_instance: document.getElementById('music_assistant-source')?.value || ''
+            base_url: _cfgStr('music_assistant-url', { trim: true }),
+            token: _cfgStr('music_assistant-token', { trim: true }),
+            source_instance: _cfgStr('music_assistant-source')
         },
         navidrome: {
             base_url: document.getElementById('navidrome-url').value,

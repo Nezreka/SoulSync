@@ -192,6 +192,8 @@ export function serverLabel(kind: Draft['server']['kind']): string {
       return 'Jellyfin';
     case 'navidrome':
       return 'Navidrome';
+    case 'music_assistant':
+      return 'Music Assistant';
     case 'soulsync':
       return 'SoulSync';
     default:
@@ -208,6 +210,8 @@ export function serverConfig(s: Draft['server']): Record<string, string> {
       return { base_url: s.url.trim(), api_key: s.apiKey.trim() };
     case 'navidrome':
       return { base_url: s.url.trim(), username: s.username.trim(), password: s.password };
+    case 'music_assistant':
+      return { base_url: s.url.trim(), token: s.token.trim() };
     default:
       return {};
   }

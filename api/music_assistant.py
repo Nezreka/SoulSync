@@ -51,12 +51,16 @@ def select_source():
     if client is None:
         return jsonify({"success": False, "error": "Music Assistant client not configured"}), 400
     data = request.get_json(silent=True) or {}
-    instance_id = str(data.get('instance_id') or '').strip()
-    if not instance_id:
+    wanted = str(data.get('instance_id') or data.get('source_name') or '').strip()
+    if not wanted:
         return jsonify({"success": False, "error": "instance_id required"}), 400
-    known = {s['key'] for s in client.get_sources()} if client.ensure_connection() else set()
-    if known and instance_id not in known:
-        return jsonify({"success": False, "error": f"'{instance_id}' is not a Local files or SMB source"}), 404
+    sources = client.get_sources() if client.ensure_connection() else []
+    by_key = {s['key']: s for s in sources}
+    by_title = {s['title'].strip().lower(): s for s in sources}
+    match = by_key.get(wanted) or by_title.get(wanted.lower())
+    if sources and match is None:
+        return jsonify({"success": False, "error": f"'{wanted}' is not a Local files or SMB source"}), 404
+    instance_id = match['key'] if match else wanted
     if not client.set_source_by_instance(instance_id):
         return jsonify({"success": False, "error": "Could not set the source"}), 500
     return jsonify({"success": True, "selected": instance_id, "folder": client.source_folder(instance_id)})
