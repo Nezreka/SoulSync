@@ -60,30 +60,91 @@ describe('the unmatched-imports banner', () => {
     );
     renderLibrary();
 
-    expect(await screen.findByText('3 tracks imported without a match')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Show them' })).toBeInTheDocument();
+    expect(await screen.findByText('3 tracks need a match')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Review' })).toBeInTheDocument();
   });
 
-  it('opens the Library-v2 artist holding them, not a legacy detail page', async () => {
-    // Upstream links at /artist-detail/library/<id>. That route does not exist
-    // here, and the id is a v2 id either way — the link has to stay in V2.
+  it('opens a review of the files, with the evidence and the fix for each', async () => {
+    // it used to open a made-up "Unknown Artist" page and leave the user to
+    // work out what each file was
     server.use(
       ...baseHandlers(),
       http.get('/api/library/unmatched-summary', () =>
         HttpResponse.json({ success: true, count: 2, artist_id: 42 }),
       ),
-      http.get('/api/library/v2/artists/42', () =>
-        HttpResponse.json({ success: false, error: 'not needed for this assertion' }),
+      http.get('/api/library/v2/unmatched', () =>
+        HttpResponse.json({
+          success: true,
+          tracks: [
+            {
+              track_id: 1,
+              file_id: 11,
+              album_id: 5,
+              artist_id: 42,
+              file_path: '/m/Kanye West/Donda 2/15 - Suzy (1).flac',
+              file_name: '15 - Suzy (1).flac',
+              folder: '/m/Kanye West/Donda 2',
+              format: 'FLAC',
+              bitrate: 900,
+              duration: 200,
+              title: 'Suzy (1)',
+              guess: {
+                title: 'Suzy',
+                track_number: 15,
+                album: 'Donda 2',
+                artist: 'Kanye West',
+                query: 'Suzy Kanye West Donda 2',
+                copy: true,
+              },
+              duplicate_of: {
+                track_id: 9,
+                title: 'Suzy',
+                album_id: 3,
+                album_title: 'Donda 2',
+                artist_id: 8,
+                artist_name: 'Kanye West',
+              },
+            },
+            {
+              track_id: 2,
+              file_id: 12,
+              album_id: 6,
+              artist_id: 42,
+              file_path: '/m/06 - Tongue.flac',
+              file_name: '06 - Tongue.flac',
+              folder: '/m',
+              format: 'FLAC',
+              bitrate: 900,
+              duration: null,
+              title: 'Tongue',
+              guess: {
+                title: 'Tongue',
+                track_number: 6,
+                album: null,
+                artist: null,
+                query: 'Tongue',
+                copy: false,
+              },
+              duplicate_of: null,
+            },
+          ],
+        }),
       ),
     );
     const { history } = renderLibrary();
 
-    const button = await screen.findByRole('button', { name: 'Show them' });
-    button.click();
+    (await screen.findByRole('button', { name: 'Review' })).click();
 
-    // The router serialises search into the URL; assert on that rather than a
-    // parsed object, so a change in how the param is encoded is visible here.
-    await waitFor(() => expect(String(history.location.search)).toContain('artist=42'));
+    expect(
+      await screen.findByRole('dialog', { name: 'Tracks without a match' }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText('15 - Suzy (1).flac')).toBeInTheDocument();
+    expect(screen.getByText(/second copy of “Suzy” on Donda 2 by Kanye West/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove duplicate' })).toBeInTheDocument();
+    expect(screen.getByText(/nothing to go on but the name/)).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Find match' })).toHaveLength(2);
+    // no detour through a fake artist page
+    expect(String(history.location.search)).not.toContain('artist=42');
   });
 
   it('uses the singular for one track', async () => {
@@ -94,7 +155,7 @@ describe('the unmatched-imports banner', () => {
       ),
     );
     renderLibrary();
-    expect(await screen.findByText('1 track imported without a match')).toBeInTheDocument();
+    expect(await screen.findByText('1 track needs a match')).toBeInTheDocument();
   });
 
   it('renders nothing for a clean library', async () => {

@@ -83,6 +83,7 @@ import {
   libraryV2MirrorStatusQueryOptions,
   libraryV2QualityProfilesQueryOptions,
   libraryV2UnmatchedQueryOptions,
+  type LibraryV2UnmatchedTrack,
   libraryV2QueueStatusQueryOptions,
   libraryV2TrackFileTagsQueryOptions,
   libraryV2TrackSourceInfoQueryOptions,
@@ -172,6 +173,7 @@ import { AppearsOnSection } from '../../artist-detail/-ui/appears-on-section';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
 import { ConcertsSection } from '../../artist-detail/-ui/concerts-section';
 import { ReassignModal } from '../../artist-detail/-ui/reassign-modal';
+import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
 import { SimilarArtistsSection } from '../../artist-detail/-ui/similar-artists-section';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
@@ -226,6 +228,7 @@ import { AlbumReorganizeModal, ArtistRenamePreviewModal } from './reorganize-mod
 import { RetagModal } from './retag-modal';
 import { StatusNotice } from './status-notice';
 import { LibraryToolDialog } from './tool-dialog';
+import { UnmatchedReviewModal } from './unmatched-review-modal';
 import { WatchAllModal } from './watch-all-modal';
 
 // not the route module: it imports this page, and the cycle only held while nothing
@@ -4665,43 +4668,74 @@ export function MirrorStatusBanner() {
  * the id it would carry is a v2 id either way.
  */
 function UnmatchedImportsBanner() {
-  const navigate = useNavigate();
   // matching an import is the admin's work, and the summary counts every
-  // library: a profile would be sent to an artist it cannot open (#1199)
+  // library: a profile would be sent to files it cannot touch (#1199)
   const canWrite = useLibraryV2CanWrite();
   const { data } = useQuery({
     ...libraryV2UnmatchedQueryOptions(),
     retry: false,
     enabled: canWrite,
   });
+  // the review, and the search it steps aside for: two dialogs never stack
+  const [reviewing, setReviewing] = useState(false);
+  const [identifying, setIdentifying] = useState<LibraryV2UnmatchedTrack | null>(null);
+  const queryClient = useQueryClient();
   const count = data?.count ?? 0;
-  if (count <= 0 || !data?.artist_id) return null;
-  const artistId = data.artist_id;
+  if (count <= 0 && !identifying && !reviewing) return null;
 
   return (
-    <div className="library-unmatched-banner" role="status">
-      <span className="library-unmatched-icon" aria-hidden="true">
-        ?
-      </span>
-      <div className="library-unmatched-text">
-        <strong>
-          {count} {count === 1 ? 'track' : 'tracks'} imported without a match
-        </strong>
-        <span>
-          Their tags could not be read, so they are filed under Unknown Artist instead of the album
-          they belong to. Open the artist and use Re-identify on a track to put it back.
-        </span>
-      </div>
-      <button
-        type="button"
-        className="library-unmatched-btn"
-        onClick={() =>
-          void navigate({ search: (prev) => ({ ...prev, artist: artistId, page: 1 }) })
-        }
-      >
-        Show them
-      </button>
-    </div>
+    <>
+      {count > 0 ? (
+        <div className="library-unmatched-banner" role="status">
+          <span className="library-unmatched-icon" aria-hidden="true">
+            ?
+          </span>
+          <div className="library-unmatched-text">
+            <strong>
+              {count} {count === 1 ? 'track needs' : 'tracks need'} a match
+            </strong>
+            <span>
+              SoulSync couldn’t tell what {count === 1 ? 'it is' : 'they are'} from the tags. Review
+              them to remove duplicates and file the rest where they belong.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="library-unmatched-btn"
+            onClick={() => setReviewing(true)}
+          >
+            Review
+          </button>
+        </div>
+      ) : null}
+      {reviewing ? (
+        <UnmatchedReviewModal
+          onClose={() => setReviewing(false)}
+          onFindMatch={(track) => {
+            setReviewing(false);
+            setIdentifying(track);
+          }}
+        />
+      ) : null}
+      {identifying ? (
+        <ReidentifyModal
+          trackId={identifying.track_id}
+          trackTitle={identifying.guess.title || identifying.title}
+          artistName={identifying.guess.artist ?? ''}
+          albumTitle={identifying.guess.album ?? ''}
+          imageUrl=""
+          initialQuery={identifying.guess.query}
+          onApplied={(message) => {
+            window.showToast?.(message, 'success');
+            void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+          }}
+          onClose={() => {
+            setIdentifying(null);
+            setReviewing(true);
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 

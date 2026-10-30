@@ -2344,6 +2344,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         res = write_embedded_tag(abs_path or file_row["path"], key, value)
         return jsonify(res)
 
+    @_route("/api/library/v2/unmatched")
+    def lib2_unmatched():
+        """The files filed under Unknown Artist, each with its best guess:
+        the album its folder holds, the title its name gives, and the
+        matched copy it duplicates (core/library2/unmatched_review)."""
+        from core.library2.unmatched_review import list_unmatched
+        with closing(_conn()) as conn:
+            tracks = list_unmatched(conn)
+        return jsonify({"success": True, "tracks": tracks})
+
     @_route("/api/library/v2/artists/<int:artist_id>/match-status")
     def lib2_artist_match_status(artist_id):
         """Per-provider metadata match chips for an artist (legacy parity)."""

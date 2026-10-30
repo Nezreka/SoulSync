@@ -2229,6 +2229,48 @@ export function libraryV2UnmatchedQueryOptions() {
   });
 }
 
+/** a file filed under Unknown Artist, with what its folder and name suggest */
+export interface LibraryV2UnmatchedTrack {
+  track_id: number;
+  file_id: number;
+  album_id: number;
+  artist_id: number;
+  file_path: string;
+  file_name: string;
+  folder: string;
+  format: string;
+  bitrate: number | null;
+  duration: number | null;
+  title: string;
+  guess: {
+    title: string;
+    track_number: number | null;
+    album: string | null;
+    artist: string | null;
+    query: string;
+    copy: boolean;
+  };
+  duplicate_of: {
+    track_id: number;
+    title: string;
+    album_id: number;
+    album_title: string;
+    artist_id: number;
+    artist_name: string;
+  } | null;
+}
+
+export function libraryV2UnmatchedTracksQueryOptions() {
+  return queryOptions({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'unmatched', 'tracks'] as const,
+    queryFn: () =>
+      lib2Json<Ok & { tracks: LibraryV2UnmatchedTrack[] }>(
+        apiClient.get('library/v2/unmatched'),
+        'Could not load the unmatched tracks',
+      ).then((data) => data.tracks),
+  });
+}
+
 export function libraryV2QualityProfilesQueryOptions() {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'quality-profiles'],

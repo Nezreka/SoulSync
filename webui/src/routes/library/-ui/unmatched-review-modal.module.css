@@ -1,0 +1,218 @@
+/* the review of files that imported without a match. the same raised sheet
+   on a dark scrim as the library's other dialogs. */
+
+.overlay {
+  position: fixed;
+  z-index: var(--z-dialog-backdrop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--black-a75);
+  inset: 0;
+}
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-xl);
+  background: var(--bg-raised);
+  box-shadow: 0 30px 80px var(--black-a60);
+  color: var(--text-bright);
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--white-a07);
+}
+
+.head h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.head p {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--white-a05);
+  color: var(--text-2);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.close:hover,
+.close:focus-visible {
+  background: var(--white-a10);
+  color: var(--text-1);
+}
+
+.body {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+}
+
+.state {
+  margin: 0;
+  padding: 40px 20px;
+  color: var(--text-3);
+  font-size: 13.5px;
+  text-align: center;
+}
+
+.list {
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px;
+  border-radius: var(--radius-lg);
+}
+
+.row + .row {
+  border-top: 1px solid var(--white-a05);
+}
+
+.play {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--radius-circle);
+  background: var(--white-a06);
+  color: var(--text-1);
+  cursor: pointer;
+  place-items: center;
+}
+
+.play:hover,
+.play:focus-visible {
+  background: rgba(var(--accent-rgb), 0.85);
+}
+
+.info {
+  min-width: 0;
+}
+
+.name,
+.meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.name {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.meta {
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.evidence {
+  margin-top: 6px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.duplicate {
+  color: var(--warning);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.primary,
+.secondary,
+.danger {
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  font-size: 12.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.primary {
+  border: 1px solid rgba(var(--accent-rgb), 0.6);
+  background: rgba(var(--accent-rgb), 0.85);
+  color: var(--text-1);
+}
+
+.primary:hover,
+.primary:focus-visible {
+  background: rgb(var(--accent-rgb));
+}
+
+.secondary {
+  border: 1px solid var(--white-a14);
+  background: var(--white-a05);
+  color: var(--text-1);
+}
+
+.secondary:hover,
+.secondary:focus-visible {
+  background: var(--white-a10);
+}
+
+.danger {
+  border: 1px solid rgba(var(--danger-rgb), 0.5);
+  background: rgba(var(--danger-rgb), 0.14);
+  color: var(--danger-light);
+}
+
+.danger:hover,
+.danger:focus-visible {
+  background: rgba(var(--danger-rgb), 0.24);
+}
+
+.danger:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+@media (max-width: 768px) {
+  .row {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .actions {
+    flex-direction: row;
+    grid-column: 1 / -1;
+  }
+}
