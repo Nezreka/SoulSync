@@ -1177,6 +1177,16 @@ def _soulseek_ownership_in_memory():
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _songs_search_index_in_the_foreground():
+    """no background songs-index thread in the suite: one outliving its test's
+    database would write into the next. tests build and flush it directly."""
+    from core.library2 import song_search
+    song_search.BACKGROUND = False
+    yield
+    song_search.BACKGROUND = True
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _inert_music_disk_guard():
     """Pin the music min-free-disk guard OFF for the whole suite.
 

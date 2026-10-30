@@ -1616,6 +1616,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 dupes=request.args.get("dupes") == "1",
                 quality=quality if quality in ("lossless", "upgradable") else "",
                 page=page, limit=limit, profile_id=_intent_profile())
+        # opening the tab builds (or catches up) the search index in the
+        # background, so it is ready by the time someone types
+        from core.library2.song_search import refresh_in_background
+        refresh_in_background(get_database())
         _song_payload(result["songs"])
         return jsonify({"success": True, **result})
 

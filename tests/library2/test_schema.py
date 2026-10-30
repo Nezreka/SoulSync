@@ -24,6 +24,11 @@ _EXPECTED_TABLES = {
     # Provider credit snapshots, linked when a guest artist joins (A04).
     "lib2_provider_credits",
     "lib2_catalogue_redirects", "lib2_catalogue_provider_aliases",
+    # The Songs tab's search index (upstream #1906 speed): the FTS5 table with
+    # its shadow tables, the dirty queue and the build/count state.
+    "lib2_song_search", "lib2_song_search_data", "lib2_song_search_idx",
+    "lib2_song_search_content", "lib2_song_search_docsize", "lib2_song_search_config",
+    "lib2_song_search_dirty", "lib2_song_search_state",
 }
 
 

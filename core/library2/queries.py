@@ -503,6 +503,29 @@ _SONG_SORTS = {
 }
 
 
+_song_count_cache: Dict[tuple, int] = {}
+
+
+def _unfiltered_song_count(conn, base: str, params: Dict[str, Any]) -> int:
+    """The whole library's song count: a pass over every track (~2s on 310k),
+    so it is kept until a live file changes (the file triggers bump
+    ``song_count_version``) or the caller's library scope differs."""
+    from .song_search import song_count_version
+    version = song_count_version(conn)
+    key = None
+    if version is not None:
+        db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+        key = (db_file, owner_clause(), version)
+        if key in _song_count_cache:
+            return _song_count_cache[key]
+    total = conn.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
+    if key is not None:
+        if len(_song_count_cache) > 64:
+            _song_count_cache.clear()
+        _song_count_cache[key] = total
+    return total
+
+
 def list_songs(conn, *, search: str = "", letter: str = "all", sort: str = "title",
                dupes: bool = False, quality: str = "", page: int = 1, limit: int = 75,
                profile_id: int = 1) -> Dict[str, Any]:
@@ -547,9 +570,18 @@ def list_songs(conn, *, search: str = "", letter: str = "all", sort: str = "titl
         fq = normalize_for_comparison(q) or q.lower()
         escaped = fq.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         params.update(q=fq, prefix=f"{escaped}%", like=f"%{escaped}%")
-        title = f"{_fold_sql('t.title')} LIKE :like ESCAPE '\\'"
-        where.append(f"({title} OR {_fold_sql('t.track_artist')} LIKE :like ESCAPE '\\'"
-                     f" OR {_fold_sql('ar.name')} LIKE :like ESCAPE '\\')")
+        # the search index answers the same rows without a pass over the
+        # catalogue; None means it can't (not built yet, or a query it can't
+        # serve exactly), and the folded scan below runs as before
+        from .song_search import matching_ids
+        hits = matching_ids(conn, fq)
+        if hits is not None:
+            params["hits"] = json.dumps(hits)
+            where.append("t.id IN (SELECT value FROM json_each(:hits))")
+        else:
+            title = f"{_fold_sql('t.title')} LIKE :like ESCAPE '\\'"
+            where.append(f"({title} OR {_fold_sql('t.track_artist')} LIKE :like ESCAPE '\\'"
+                         f" OR {_fold_sql('ar.name')} LIKE :like ESCAPE '\\')")
         # the hits carry their folded title (``ft``), read by the ranking
         # below instead of folding every hit again per ORDER BY term
         order = ("CASE WHEN t.ft = :q THEN 0 WHEN t.ft LIKE :prefix ESCAPE '\\' THEN 1"
@@ -558,9 +590,11 @@ def list_songs(conn, *, search: str = "", letter: str = "all", sort: str = "titl
                  " t.album_id, t.disc_number, t.track_number, t.id")
     base = f"{_SONG_FROM} WHERE {' AND '.join(where)}"
     filtered = bool(q) or (letter not in ("", "all")) or dupes or bool(quality)
-    total = conn.execute(
-        f"SELECT COUNT(*) FROM (SELECT 1 {base} LIMIT {SONGS_COUNT_CAP + 1})" if filtered
-        else f"SELECT COUNT(*) {base}", params).fetchone()[0]
+    if filtered:
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM (SELECT 1 {base} LIMIT {SONGS_COUNT_CAP + 1})", params).fetchone()[0]
+    else:
+        total = _unfiltered_song_count(conn, base, params)
     page_sql = (f"WITH hits AS MATERIALIZED (SELECT t.id, t.album_id, t.disc_number, t.track_number,"
                 f" {_fold_sql('t.title')} AS ft, {_alpha_key('t.title')} AS ak {base})"
                 f" SELECT t.id FROM hits t" if q else f"SELECT t.id {base}")

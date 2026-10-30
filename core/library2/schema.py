@@ -1411,6 +1411,10 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         ensure_media_mapping_schema(cursor)
     except Exception as e:  # noqa: BLE001
         logger.error("media-server mapping schema failed (will retry next start): %s", e)
+    # the Songs tab's A-Z index and search index (upstream #1906 speed). DDL
+    # only; the index fill runs in the background on first use.
+    from core.library2.song_search import ensure_schema as ensure_song_search_schema
+    ensure_song_search_schema(cursor)
     if run_backfills:
         run_library_v2_backfills(connection)
     logger.debug("Library v2 schema ensured")
