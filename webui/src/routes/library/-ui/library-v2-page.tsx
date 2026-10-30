@@ -218,7 +218,7 @@ import {
 import { OwnedArtistHeroExtras } from './owned-artist-hero-extras';
 import { openProviderRelease, ReleaseCardExtras } from './owned-artist-release-cards';
 import { OwnedArtistReorganizeQueue } from './owned-artist-reorganize-queue';
-import { OwnedTopTrackActions } from './owned-artist-top-tracks';
+import { OwnedTopTrackActions, OwnedTopTracksDownloadAll } from './owned-artist-top-tracks';
 import { AlbumUnlockMenuItem, OwnedTrackMoreMenu } from './owned-artist-track-actions';
 import { QualityProfilePicker } from './quality-profile-modal';
 import { reassignSubject } from './reassign';
@@ -6858,22 +6858,30 @@ function TopTracksSidebar({
         })}
       </div>
       {bookmarkable ? (
-        <button
-          type="button"
-          className={`hero-top-tracks-download-all ${styles.topTracksMonitorAll}`}
-          disabled={bulk !== null || unmonitored.length === 0}
-          title="Bookmark every top track: mark them all as wanted"
-          onClick={(e) => {
-            e.stopPropagation();
-            void monitorAll();
-          }}
-        >
-          {bulk
-            ? `Monitoring… ${bulk.done}/${bulk.total}`
-            : unmonitored.length === 0
-              ? 'All monitored'
-              : 'Monitor All'}
-        </button>
+        <div className={styles.topTracksBulk}>
+          <button
+            type="button"
+            className={`hero-top-tracks-download-all ${styles.topTracksMonitorAll}`}
+            disabled={bulk !== null || unmonitored.length === 0}
+            title="Bookmark every top track: mark them all as wanted"
+            onClick={(e) => {
+              e.stopPropagation();
+              void monitorAll();
+            }}
+          >
+            {bulk
+              ? `Monitoring… ${bulk.done}/${bulk.total}`
+              : unmonitored.length === 0
+                ? 'All monitored'
+                : 'Monitor All'}
+          </button>
+          <OwnedTopTracksDownloadAll
+            tracks={tracks}
+            source={trackSource}
+            artistName={artistName}
+            artistId={trackArtistId}
+          />
+        </div>
       ) : null}
     </div>
   );

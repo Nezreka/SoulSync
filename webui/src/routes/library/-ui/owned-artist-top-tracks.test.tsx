@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createShellBridge } from '@/test/shell-bridge';
 
-import { OwnedTopTrackActions } from './owned-artist-top-tracks';
+import { OwnedTopTrackActions, OwnedTopTracksDownloadAll } from './owned-artist-top-tracks';
 
 const track = {
   id: 'sp-t1',
@@ -67,9 +67,41 @@ describe('owned top tracks actions', () => {
   it('says Request for a profile that cannot download', () => {
     (window as unknown as { canDownload: () => boolean }).canDownload = () => false;
     render(
-      <OwnedTopTrackActions track={track} artistName="Portishead" artistId="sp-a" downloadable />,
+      <>
+        <OwnedTopTrackActions track={track} artistName="Portishead" artistId="sp-a" downloadable />
+        <OwnedTopTracksDownloadAll
+          tracks={[track]}
+          source="spotify"
+          artistName="Portishead"
+          artistId="sp-a"
+        />
+      </>,
     );
     expect(screen.getByRole('button', { name: 'Request Roads' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Request All' })).toBeInTheDocument();
+  });
+
+  it('opens the shared download modal for the whole list', () => {
+    const open = vi.fn();
+    window.openDownloadMissingModalForArtistAlbum = open;
+    render(
+      <OwnedTopTracksDownloadAll
+        tracks={[track]}
+        source="spotify"
+        artistName="Portishead"
+        artistId="sp-a"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Download All' }));
+    expect(open).toHaveBeenCalledWith(
+      'top_tracks_spotify_sp-a',
+      'Portishead — Top Tracks',
+      [track],
+      expect.objectContaining({ album_type: 'compilation' }),
+      expect.anything(),
+      true,
+      'playlist',
+    );
   });
 
   it('keeps last.fm rows to play and add to playlist only', () => {

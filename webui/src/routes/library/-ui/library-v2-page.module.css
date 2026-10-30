@@ -6740,3 +6740,14 @@ textarea.searchInput {
   opacity: 0.55;
   cursor: default;
 }
+
+/* the top tracks keep both bulk actions: Monitor All and Download All */
+.topTracksBulk {
+  display: flex;
+  gap: 8px;
+}
+
+.topTracksBulk > :global(.hero-top-tracks-download-all) {
+  flex: 1;
+  min-width: 0;
+}
