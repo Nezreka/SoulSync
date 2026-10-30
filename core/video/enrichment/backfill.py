@@ -115,6 +115,7 @@ class VideoBackfillWorker:
         self.stats = {"matched": 0, "not_found": 0, "errors": 0}
         self.note = None
         self._cooldown_until = 0.0
+        self._enabled_cache = None
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
     def start(self):
@@ -155,12 +156,26 @@ class VideoBackfillWorker:
         except Exception:
             logger.exception("video backfill: could not restore pause for %s", self.service)
 
+    # the enabled flag is a settings read (a fresh sqlite connection), and a
+    # dozen idle workers asking every second kept the cpu awake (#1922)
+    ENABLED_TTL = 5.0
+
     @property
     def enabled(self):
+        now = time.monotonic()
+        cached = self._enabled_cache
+        if cached is not None and now - cached[0] < self.ENABLED_TTL:
+            return cached[1]
         try:
-            return self._enabled()
+            value = bool(self._enabled())
         except Exception:
-            return False
+            value = False
+        self._enabled_cache = (now, value)
+        return value
+
+    def forget_enabled(self):
+        """Drop the cached enabled flag so a settings change shows at once."""
+        self._enabled_cache = None
 
     # ── subclass hooks ────────────────────────────────────────────────────────
     def _enabled(self) -> bool:
@@ -192,8 +207,11 @@ class VideoBackfillWorker:
     # ── loop ──────────────────────────────────────────────────────────────────
     def _run(self):
         while not self.should_stop:
-            if self.paused or not self.enabled:
+            if self.paused:
                 self._stop.wait(1.0)
+                continue
+            if not self.enabled:
+                self._stop.wait(self.ENABLED_TTL)
                 continue
             if self._cooldown_until > time.monotonic():
                 self.current_item = None

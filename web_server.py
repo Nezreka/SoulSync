@@ -24307,6 +24307,8 @@ def _emit_video_enrichment_status_loop():
     from core.video.enrichment.engine import peek_video_enrichment_engine
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
+        if not _has_connected_clients():
+            continue
         eng = peek_video_enrichment_engine()
         if eng is None:
             continue

@@ -402,6 +402,7 @@ def test_tvmaze_is_show_only_and_enabled_by_default(db):
     w = TVmazeWorker(db)
     assert w.enabled is True                              # keyless → on by default
     db.set_setting("tvmaze_enabled", "0")
+    w.forget_enabled()                                    # the settings save does this
     assert w.enabled is False
     # No movie entry in the backfill map → movies are never queued for tvmaze.
     mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
@@ -441,6 +442,7 @@ def test_anilist_off_by_default(db):
     w = AniListWorker(db)
     assert w.enabled is False                            # opt-in (anime-niche)
     db.set_setting("anilist_enabled", "1")
+    w.forget_enabled()                                    # the settings save does this
     assert w.enabled is True
 
 
@@ -515,3 +517,42 @@ def test_backfill_module_imports_nothing_from_music():
         s = line.strip()
         if s.startswith("import ") or s.startswith("from "):
             assert "music" not in s.lower(), f"music import leaked: {s!r}"
+
+
+# ── #1922: idle workers don't hit the settings table every second ─────────────
+def test_the_enabled_flag_is_read_once_per_ttl(db, monkeypatch):
+    w = RydWorker(db)
+    reads = []
+    real = db.get_setting
+    monkeypatch.setattr(db, "get_setting", lambda key, *a: reads.append(key) or real(key, *a))
+    for _ in range(20):
+        assert w.enabled is True
+    assert reads == ["ryd_enabled"]
+
+
+def test_saving_a_toggle_shows_at_once(db, monkeypatch):
+    import api.video.enrichment as routes
+
+    w = RydWorker(db)
+    assert w.enabled is True
+    db.set_setting("ryd_enabled", "0")
+    assert w.enabled is True                               # still cached
+    monkeypatch.setattr("core.video.enrichment.engine.peek_video_enrichment_engine",
+                        lambda: type("E", (), {"workers": {"ryd": w}})())
+    routes._forget_worker_enabled()
+    assert w.enabled is False
+
+
+def test_a_disabled_worker_sleeps_the_ttl_not_one_second(db):
+    w = RydWorker(db)
+    db.set_setting("ryd_enabled", "0")
+    waits = []
+
+    class _Stop:
+        def wait(self, seconds):
+            waits.append(seconds)
+            w.should_stop = True
+
+    w._stop = _Stop()
+    w._run()
+    assert waits == [w.ENABLED_TTL] and w.ENABLED_TTL >= 5
