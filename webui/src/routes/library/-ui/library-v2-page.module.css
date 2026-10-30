@@ -969,6 +969,21 @@ button.featureTag:disabled {
   text-align: center;
 }
 
+/* dev's grid: covers ease in from the dark tile once loaded, not a pop */
+.artFade {
+  transition: opacity var(--dur-slowest) ease-out;
+}
+
+.artFade[data-loaded='false'] {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artFade {
+    transition: none;
+  }
+}
+
 .rowThumb,
 .detailThumb,
 .artPlaceholder {

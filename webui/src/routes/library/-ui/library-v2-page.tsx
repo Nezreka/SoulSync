@@ -671,12 +671,16 @@ export function Artwork({
   // server: subscribe until the build is reported ready (render it) or
   // unavailable (the placeholder is final), instead of a fixed retry ladder
   // that expired before slow builds finished.
+  // a cdn stand-in that already painted stays for this view: swapping it
+  // for the freshly built local copy flashed a second, different picture
+  // under the user. the local copy is what the next load shows.
+  const remotePainted = useRef(false);
   useEffect(() => {
     if (!failed || !local) return;
     const target = parseArtworkTarget(base);
     if (!target) return;
     return watchPendingArtwork(target.kind, target.id, (readyVersion) => {
-      if (readyVersion == null) return;
+      if (readyVersion == null || remotePainted.current) return;
       setState((current) =>
         current.base === base
           ? {
@@ -694,6 +698,15 @@ export function Artwork({
   // failure is tracked separately, or falling back would re-trigger itself.
   const usingRemote = failed && !remoteFailed && Boolean(remote) && remote !== url;
   const shown = usingRemote ? (remote as string) : url;
+  // dev's grid: the picture eases in from the dark tile once its bytes have
+  // arrived instead of popping. a cached image can be complete before onLoad
+  // is wired, so it's read off the element too.
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  useEffect(() => {
+    const el = imgRef.current;
+    if (el && el.complete && el.naturalWidth > 0) setLoadedSrc(shown);
+  }, [shown]);
   const handleError = () => {
     const field = usingRemote ? 'remoteFailed' : 'failed';
     setState((current) => (current.base === base ? { ...current, [field]: true } : current));
@@ -707,11 +720,17 @@ export function Artwork({
   }
   return (
     <img
-      className={className}
+      ref={imgRef}
+      className={`${className} ${styles.artFade}`}
+      data-loaded={loadedSrc === shown ? 'true' : 'false'}
       src={shown}
       alt={alt}
       loading="lazy"
       referrerPolicy="no-referrer"
+      onLoad={() => {
+        if (usingRemote) remotePainted.current = true;
+        setLoadedSrc(shown);
+      }}
       onError={handleError}
     />
   );
