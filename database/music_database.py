@@ -18178,8 +18178,8 @@ class MusicDatabase:
                             """
                             SELECT 1 FROM lib2_albums al
                             JOIN lib2_artists ar ON al.primary_artist_id = ar.id
-                            WHERE LOWER(TRIM(ar.name)) = LOWER(TRIM(?))
-                              AND LOWER(TRIM(al.title)) = LOWER(TRIM(?))
+                            WHERE LOWER(ar.name) = LOWER(TRIM(?))
+                              AND LOWER(al.title) = LOWER(TRIM(?))
                               AND al.origin = 'library'
                               AND EXISTS (
                                   SELECT 1 FROM lib2_tracks t
@@ -23608,8 +23608,8 @@ class MusicDatabase:
                             SELECT al.image_url, ar.image_url
                             FROM lib2_albums al
                             JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                            WHERE LOWER(TRIM(ar.name)) = LOWER(TRIM(?))
-                              AND LOWER(TRIM(al.title)) = LOWER(TRIM(?))
+                            WHERE LOWER(ar.name) = LOWER(TRIM(?))
+                              AND LOWER(al.title) = LOWER(TRIM(?))
                               AND al.origin = 'library'
                             LIMIT 1
                             """,
@@ -23624,6 +23624,10 @@ class MusicDatabase:
                 # can be stale or server-authed and die in the browser, so the
                 # frontend needs a second image to fall to before the
                 # placeholder — not just a second choice server-side.
+                # names compare as LOWER(column) so idx_lib2_artists_name_lower /
+                # idx_lib2_albums_title_lower serve them; LOWER(TRIM(column))
+                # matched no index and read every artist per card. stored
+                # names carry no outer spaces, the looked-up one is trimmed.
                 def _artist_art(name):
                     """Exact name first, then the primary artist: history rows"""
                     # often carry 'A feat. B' / 'A, B' while the library row is
@@ -23637,7 +23641,7 @@ class MusicDatabase:
                     for candidate in candidates:
                         cursor.execute(
                             "SELECT image_url FROM lib2_artists"
-                            " WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))"
+                            " WHERE LOWER(name) = LOWER(TRIM(?))"
                             " AND canonical_artist_id IS NULL"
                             " AND image_url IS NOT NULL AND image_url != '' LIMIT 1",
                             (candidate,))
