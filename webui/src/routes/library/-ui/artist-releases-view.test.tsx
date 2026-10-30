@@ -659,6 +659,38 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(await screen.findByTitle('Bookmarked — this track is now wanted')).toBeInTheDocument();
   });
 
+  it('monitors every not-yet-wanted top track with Monitor All', async () => {
+    const monitored: unknown[] = [];
+    server.use(
+      http.get('/api/artist/:id/top-tracks', () =>
+        HttpResponse.json({
+          success: true,
+          tracks: [
+            { id: 'sp-t1', name: 'Glory Box', album: { id: 'sp-a1', name: 'Dummy' } },
+            { id: 'sp-t2', name: 'Roads', album: { id: 'sp-a1', name: 'Dummy' } },
+            { id: 'sp-t3', name: 'Sour Times', album: { id: 'sp-a1', name: 'Dummy' } },
+          ],
+        }),
+      ),
+      http.get('/api/library/v2/discovery/track-status', () =>
+        HttpResponse.json({
+          success: true,
+          statuses: { Roads: { track_id: 9, monitored: true } },
+        }),
+      ),
+      http.post('/api/library/v2/discovery/track', async ({ request }) => {
+        monitored.push(((await request.json()) as { track_title?: string }).track_title);
+        return HttpResponse.json({ success: true, track_id: monitored.length });
+      }),
+    );
+    renderArtist('/library?artist=1&header=rich');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Monitor All' }));
+    // the one already wanted is skipped
+    await waitFor(() => expect(monitored).toEqual(['Glory Box', 'Sour Times']));
+    expect(await screen.findByRole('button', { name: 'All monitored' })).toBeDisabled();
+  });
+
   it('uses the same bookmark glyph as every other monitor control', async () => {
     server.use(
       http.get('/api/artist/:id/top-tracks', () =>

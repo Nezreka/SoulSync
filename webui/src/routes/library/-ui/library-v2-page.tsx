@@ -218,7 +218,7 @@ import {
 import { OwnedArtistHeroExtras } from './owned-artist-hero-extras';
 import { openProviderRelease, ReleaseCardExtras } from './owned-artist-release-cards';
 import { OwnedArtistReorganizeQueue } from './owned-artist-reorganize-queue';
-import { OwnedTopTrackActions, OwnedTopTracksDownloadAll } from './owned-artist-top-tracks';
+import { OwnedTopTrackActions } from './owned-artist-top-tracks';
 import { AlbumUnlockMenuItem, OwnedTrackMoreMenu } from './owned-artist-track-actions';
 import { QualityProfilePicker } from './quality-profile-modal';
 import { reassignSubject } from './reassign';
@@ -6095,7 +6095,9 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
               ) : null}
             </div>
           </header>
-          <AlbumTrackTable albumId={album.id} onAction={handleAction} />
+          {/* the page's own query: one request, and the table sees the
+              tracklist build state (notice + polling) the page asked for */}
+          <AlbumTrackTable albumId={album.id} resolve onAction={handleAction} />
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
               initialQuery={buildSearchQuery(
@@ -6186,14 +6188,24 @@ function visibleReleases(
  *  is a per-mode-switch guard: without it, a genuinely-empty provider
  *  discography (count stays 0 after a completed fetch) would re-trigger on
  *  every `discographyBusy` false-transition — an infinite fetch loop. */
+/** A walked discography older than this is re-checked for new releases when
+ *  All Releases / Discovery opens (e.g. an artist found through Search). */
+export const DISCOGRAPHY_STALE_MS = 6 * 60 * 60 * 1000;
+
 export function shouldAutoFetchDiscography(params: {
   discographyCount: number | undefined;
   discographyBusy: boolean;
   alreadyAttempted: boolean;
+  /** the artist's `discography_synced_at` (UTC, SQLite format) */
+  syncedAt?: string | null;
+  now?: number;
 }): boolean {
   const { discographyCount, discographyBusy, alreadyAttempted } = params;
-  if (alreadyAttempted || discographyBusy) return false;
-  return discographyCount === 0;
+  if (alreadyAttempted || discographyBusy || discographyCount === undefined) return false;
+  if (discographyCount === 0) return true;
+  // never walked, or long enough ago that new releases may be out
+  const synced = params.syncedAt ? Date.parse(`${params.syncedAt.replace(' ', 'T')}Z`) : NaN;
+  return Number.isNaN(synced) || (params.now ?? Date.now()) - synced > DISCOGRAPHY_STALE_MS;
 }
 
 /** B4: artist-toolbar decluttering — Preview Retag/Reorganize All/repair tools/
@@ -6707,6 +6719,7 @@ function TopTracksSidebar({
 }) {
   const queryClient = useQueryClient();
   const [bookmarked, setBookmarked] = useState<Record<string, BookmarkState>>({});
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
   const topTracks = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'top-tracks', providerId, artistName],
     queryFn: () => fetchArtistTopTracks({ providerId, name: artistName }),
@@ -6781,6 +6794,22 @@ function TopTracksSidebar({
     }
   }
 
+  // Monitor All: every top track not wanted yet, one after another through
+  // the same bookmark as the row buttons (each may materialize its album).
+  const unmonitored = tracks.filter((track) => {
+    const state = stateOf(track)?.status;
+    return state !== 'done' && state !== 'busy';
+  });
+  async function monitorAll() {
+    const todo = unmonitored;
+    setBulk({ done: 0, total: todo.length });
+    for (const [index, track] of todo.entries()) {
+      await bookmark(track);
+      setBulk({ done: index + 1, total: todo.length });
+    }
+    setBulk(null);
+  }
+
   return (
     <div className="artist-hero-right">
       <div className="hero-sidebar-title">
@@ -6829,12 +6858,22 @@ function TopTracksSidebar({
         })}
       </div>
       {bookmarkable ? (
-        <OwnedTopTracksDownloadAll
-          tracks={tracks}
-          source={trackSource}
-          artistName={artistName}
-          artistId={trackArtistId}
-        />
+        <button
+          type="button"
+          className={`hero-top-tracks-download-all ${styles.topTracksMonitorAll}`}
+          disabled={bulk !== null || unmonitored.length === 0}
+          title="Bookmark every top track: mark them all as wanted"
+          onClick={(e) => {
+            e.stopPropagation();
+            void monitorAll();
+          }}
+        >
+          {bulk
+            ? `Monitoring… ${bulk.done}/${bulk.total}`
+            : unmonitored.length === 0
+              ? 'All monitored'
+              : 'Monitor All'}
+        </button>
       ) : null}
     </div>
   );
@@ -7339,13 +7378,17 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const artistName = artist?.name ?? '';
   const attemptedDiscographyFetchRef = useRef(false);
 
-  async function updateDiscography() {
+  /** `recheck`: the discography is there but stale; the page shows it while
+   *  the walk looks for releases that came out since. */
+  async function updateDiscography(recheck = false) {
     if (!canWish) return; // a read-only profile browses what is there
     setDiscographyBusy(true);
     await runBannerTask(async ({ sequence }) => {
       publishBanner(sequence, {
         tone: 'busy',
-        text: 'Fetching full discography…',
+        text: recheck
+          ? `Checking ${artistName || 'this artist'} for new releases…`
+          : 'Fetching full discography…',
       });
       try {
         // A provider catalogue walk runs as a background job: polling it means
@@ -7413,13 +7456,14 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
         discographyCount: artist?.discography_count,
         discographyBusy,
         alreadyAttempted: attemptedDiscographyFetchRef.current,
+        syncedAt: artist?.discography_synced_at,
       })
     ) {
       attemptedDiscographyFetchRef.current = true;
-      void updateDiscography();
+      void updateDiscography((artist?.discography_count ?? 0) > 0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [releasesMode, artist?.discography_count, discographyBusy]);
+  }, [releasesMode, artist?.discography_count, artist?.discography_synced_at, discographyBusy]);
 
   /** Route a toolbar/row action: Interactive Search opens the window;
    *  Automatic Search (any scope) / per-track Search run the scoped
@@ -10231,8 +10275,16 @@ export function AlbumTrackTable({
     }
   };
 
+  const tracklistStatus = album.tracklist_sync?.status;
   return (
     <div ref={setTableWrapElement} className={styles.trackTableWrap}>
+      {/* the provider tracklist is fetched in the background; the table polls
+          and fills in as soon as it lands, without reopening the album */}
+      {tracklistStatus === 'pending' ? (
+        <StatusNotice tone="busy" text={`Loading the tracklist of ${album.title}…`} />
+      ) : tracklistStatus === 'failed' && album.tracks.every((t) => !t.title) ? (
+        <StatusNotice tone="err" text={`No source had the tracklist of ${album.title}.`} />
+      ) : null}
       <div className={styles.trackTableToolbar}>
         {albumMatch.length > 0 ? (
           <div className={styles.albumMatchRow}>
@@ -10273,28 +10325,6 @@ export function AlbumTrackTable({
               onChange={() => setSelected(allSelected ? new Set() : new Set(selectableIds))}
             />
             Select all tracks
-          </label>
-          <label>
-            Sort{' '}
-            <select
-              aria-label="Sort tracks"
-              className={styles.select}
-              value={sort ? `${sort.key}:${sort.dir}` : ''}
-              onChange={(e) => {
-                const [key, dir] = e.target.value.split(':');
-                setSort(key ? { key: key as TrackSortKey, dir: dir as 'asc' | 'desc' } : null);
-              }}
-            >
-              <option value="">Track order</option>
-              <option value="title:asc">Title A–Z</option>
-              <option value="title:desc">Title Z–A</option>
-              <option value="duration:asc">Shortest first</option>
-              <option value="duration:desc">Longest first</option>
-              <option value="file_size:desc">Largest files first</option>
-              <option value="file_size:asc">Smallest files first</option>
-              <option value="bpm:asc">BPM ascending</option>
-              <option value="bpm:desc">BPM descending</option>
-            </select>
           </label>
         </div>
       ) : null}

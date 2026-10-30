@@ -15,9 +15,12 @@ function policyLabel(p: LibraryV2QualityProfile): string {
   if (p.upgrade_policy === 'none') return 'Upgrades disabled';
   if (p.upgrade_policy === 'until_top') return 'Upgrades until top quality';
   if (p.upgrade_policy === 'until_cutoff') {
-    return p.upgrade_cutoff_index > 0
-      ? `Upgrades until cutoff (target #${p.upgrade_cutoff_index + 1})`
-      : 'Upgrades until top quality';
+    if (p.upgrade_cutoff_index <= 0) return 'Upgrades until top quality';
+    // name the target the cutoff points at, not its position in the ladder
+    const cutoff = p.ranked_targets?.[p.upgrade_cutoff_index];
+    return cutoff?.label
+      ? `Upgrades until cutoff: ${cutoff.label}`
+      : `Upgrades until cutoff (target #${p.upgrade_cutoff_index + 1})`;
   }
   return 'No upgrades once acceptable';
 }

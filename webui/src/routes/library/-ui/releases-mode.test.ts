@@ -23,13 +23,28 @@ describe('shouldAutoFetchDiscography', () => {
     ).toBe(false);
   });
 
-  it('does not fetch when the discography already has entries', () => {
+  it('does not fetch when the discography already has entries walked recently', () => {
     expect(
       shouldAutoFetchDiscography({
         discographyCount: 5,
         discographyBusy: false,
         alreadyAttempted: false,
+        syncedAt: '2026-10-29 10:00:00',
+        now: Date.parse('2026-10-29T12:00:00Z'),
       }),
+    ).toBe(false);
+  });
+
+  it('re-checks a discography walked long ago, or never, for new releases', () => {
+    const base = { discographyCount: 5, discographyBusy: false, alreadyAttempted: false };
+    const now = Date.parse('2026-10-29T12:00:00Z');
+    expect(shouldAutoFetchDiscography({ ...base, syncedAt: '2026-10-29 05:00:00', now })).toBe(
+      true,
+    );
+    expect(shouldAutoFetchDiscography({ ...base, syncedAt: null, now })).toBe(true);
+    // once per visit: the attempt guard still holds
+    expect(
+      shouldAutoFetchDiscography({ ...base, alreadyAttempted: true, syncedAt: null, now }),
     ).toBe(false);
   });
 

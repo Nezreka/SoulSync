@@ -6,14 +6,13 @@ import type { ArtistDetailTrack } from '../../artist-detail/-artist-detail.types
 
 import {
   playTrackByMetadata,
-  topTracksBulkContext,
   trackArtistLabel,
   wishlistTrackBody,
 } from '../../artist-detail/-artist-detail.top-tracks';
 
-// dev's top-tracks row actions for the owned hero: play, add to playlist,
-// a real wishlist add (or a request), and download all. nick's bookmark
-// (monitor) stays next to them.
+// dev's top-tracks row actions for the owned hero: play, add to playlist and
+// a real wishlist add (or a request). nick's bookmark (monitor) stays next to
+// them; the list's bulk action is Monitor All, so there is no Download All.
 
 // nick's top-track rows and dev's share the provider track shape
 type TopTrack = { name?: string | null; artists?: Array<{ name?: string }> | null };
@@ -94,45 +93,5 @@ export function OwnedTopTrackActions({
         </button>
       ) : null}
     </>
-  );
-}
-
-export function OwnedTopTracksDownloadAll({
-  tracks,
-  source,
-  artistName,
-  artistId,
-}: {
-  tracks: TopTrack[];
-  source: string;
-  artistName: string;
-  artistId: unknown;
-}) {
-  if (!tracks.length) return null;
-  const asksFirst = profileAsksFirst();
-  return (
-    <button
-      type="button"
-      className="hero-top-tracks-download-all"
-      onClick={(e) => {
-        e.stopPropagation();
-        const context = topTracksBulkContext(
-          { source, title: '', tracks: tracks as ArtistDetailTrack[], downloadable: true },
-          artistName,
-          artistId,
-        );
-        void window.openDownloadMissingModalForArtistAlbum?.(
-          context.virtualPlaylistId,
-          context.playlistName,
-          tracks,
-          context.wrapperAlbum,
-          context.artist,
-          true,
-          'playlist',
-        );
-      }}
-    >
-      {asksFirst ? 'Request All' : 'Download All'}
-    </button>
   );
 }
