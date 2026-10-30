@@ -18,6 +18,10 @@ class CurationPolicyError(RuntimeError):
     """A persisted curation policy could not be read safely."""
 
 
+class CurationPolicyStale(CurationPolicyError):
+    """A curated operation no longer matches the persisted policy revision."""
+
+
 def effective_decision(explicit: Any, globally_rejected: bool) -> str:
     """Resolve one source track's effective decision.
 
@@ -62,9 +66,151 @@ def decorate_tracks(
     }
 
 
+def curated_tracks_for_operation(database, playlist_id: int, tracks, *, profile_id=None):
+    """Return the tracks allowed by one strict policy read and its snapshot.
+
+    Disabled playlists keep their original track list and return ``None`` for
+    the snapshot, which keeps all legacy call paths unchanged.
+    """
+    policy = database.get_mirrored_playlist_curation(
+        int(playlist_id), profile_id=profile_id
+    )
+    if policy is None:
+        raise CurationPolicyError(f"Mirrored playlist {playlist_id} was not found")
+    original = list(tracks or [])
+    if not policy["enabled"]:
+        return original, None
+    allowed = []
+    source_track_ids = []
+    rejected = policy["global_rejections"]
+    for track in original:
+        source_track_id = str(track.get("source_track_id") or "")
+        if effective_decision(
+            policy["decisions"].get(source_track_id),
+            source_track_id in rejected,
+        ) == "keep":
+            allowed.append(track)
+            source_track_ids.append(source_track_id)
+    return allowed, {
+        "playlist_id": int(policy["playlist_id"]),
+        "profile_id": int(policy["profile_id"]),
+        "revision": int(policy["revision"]),
+        "source_track_ids": source_track_ids,
+    }
+
+
+def verify_curation_snapshot(database, snapshot: Mapping[str, Any] | None) -> None:
+    """Fail closed when a curated run is stale or no longer all Keep."""
+    if not snapshot:
+        return
+    playlist_id = int(snapshot["playlist_id"])
+    policy = database.get_mirrored_playlist_curation(
+        playlist_id, profile_id=int(snapshot["profile_id"])
+    )
+    if policy is None or not policy["enabled"]:
+        raise CurationPolicyStale(
+            f"Curation policy changed while mirrored playlist {playlist_id} was running"
+        )
+    if int(policy["revision"]) != int(snapshot["revision"]):
+        raise CurationPolicyStale(
+            f"Curation policy changed while mirrored playlist {playlist_id} was running"
+        )
+    rejected = policy["global_rejections"]
+    for source_track_id in snapshot.get("source_track_ids") or []:
+        source_track_id = str(source_track_id or "")
+        if effective_decision(
+            policy["decisions"].get(source_track_id),
+            source_track_id in rejected,
+        ) != "keep":
+            raise CurationPolicyStale(
+                f"Track {source_track_id!r} is no longer approved for mirrored playlist {playlist_id}"
+            )
+
+
+def curation_origin(source_info: Any) -> dict[str, Any] | None:
+    """Extract the durable fields that identify one mirrored-track origin."""
+    if not isinstance(source_info, Mapping):
+        return None
+    playlist_id = source_info.get("mirrored_playlist_id")
+    source_track_id = str(source_info.get("source_track_id") or "").strip()
+    if playlist_id in (None, "") or not source_track_id:
+        return None
+    try:
+        playlist_id = int(playlist_id)
+    except (TypeError, ValueError):
+        return None
+    return {
+        "mirrored_playlist_id": playlist_id,
+        "source_track_id": source_track_id,
+    }
+
+
+def merge_playlist_origins(previous: Any, incoming: Any) -> list[dict[str, Any]]:
+    """Union playlist origins without losing older independent requests."""
+    origins: list[dict[str, Any]] = []
+    seen: set[tuple[int, str]] = set()
+    for context in (previous, incoming):
+        candidates = []
+        if isinstance(context, Mapping):
+            candidates.extend(context.get("playlist_origins") or [])
+            direct = curation_origin(context)
+            if direct:
+                candidates.append(direct)
+        for candidate in candidates:
+            origin = curation_origin(candidate)
+            if not origin:
+                continue
+            key = (origin["mirrored_playlist_id"], origin["source_track_id"])
+            if key not in seen:
+                seen.add(key)
+                origins.append(origin)
+    return origins
+
+
+def wishlist_track_allowed(database, track: Mapping[str, Any]) -> bool:
+    """Whether any durable origin still permits deferred acquisition.
+
+    Manual rows and legacy rows without durable mirrored provenance preserve
+    their historical behavior. Policy reads remain strict for curated origins.
+    """
+    if str(track.get("source_type") or "").lower() == "manual":
+        return True
+    source_info = track.get("source_info") or {}
+    origins = merge_playlist_origins({}, source_info)
+    if not origins:
+        return True
+    failures = []
+    for origin in origins:
+        try:
+            policy = database.get_mirrored_playlist_curation(
+                origin["mirrored_playlist_id"]
+            )
+            if policy is None:
+                continue
+            if not policy["enabled"]:
+                return True
+            source_track_id = origin["source_track_id"]
+            if effective_decision(
+                policy["decisions"].get(source_track_id),
+                source_track_id in policy["global_rejections"],
+            ) == "keep":
+                return True
+        except CurationPolicyError as exc:
+            failures.append(exc)
+    if failures:
+        raise failures[0]
+    return False
+
+
 __all__ = [
     "CURATION_DECISIONS",
     "CurationPolicyError",
+    "CurationPolicyStale",
+    "curated_tracks_for_operation",
+    "curation_origin",
     "decorate_tracks",
     "effective_decision",
+    "merge_playlist_origins",
+    "verify_curation_snapshot",
+    "wishlist_track_allowed",
 ]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from flask import Flask, g
 import pytest
 
@@ -218,3 +220,34 @@ def test_api_stages_decisions_enables_curation_and_projects_effective_state(db, 
     }
     assert [track["effective_decision"] for track in payload["tracks"]] == ["keep", "reject"]
     assert invalidated == [playlist_id, playlist_id, playlist_id]
+
+
+def test_concurrent_bulk_mutations_serialize_without_lost_revision(db):
+    playlist_id = _mirror(db)
+    barrier = threading.Barrier(3)
+    outcomes = []
+
+    def _write(source_track_id, decision):
+        barrier.wait()
+        outcomes.append(db.update_mirrored_playlist_decisions(
+            playlist_id,
+            [{"source_track_id": source_track_id, "decision": decision}],
+            profile_id=1,
+        ))
+
+    threads = [
+        threading.Thread(target=_write, args=("one", "keep")),
+        threading.Thread(target=_write, args=("two", "pending")),
+    ]
+    for thread in threads:
+        thread.start()
+    barrier.wait()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert len(outcomes) == 2
+    assert all(outcome["status"] == "ok" for outcome in outcomes)
+    assert db.get_mirrored_playlist_curation(playlist_id)["decisions"] == {
+        "one": "keep", "two": "pending",
+    }
+    assert db.get_mirrored_playlist(playlist_id)["curation_revision"] == 2

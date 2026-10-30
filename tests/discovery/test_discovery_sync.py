@@ -1258,3 +1258,84 @@ def test_plex_falls_back_to_url_when_no_local_cover_file(monkeypatch, patched_db
 
     assert plex.image_calls == [('Mine', 'https://img/mine.jpg')]
     assert plex.local_paths == [None]
+
+
+def _curation_policy_db(*, revision=4, decision='keep'):
+    class _PolicyDB:
+        def get_mirrored_playlist_curation(self, playlist_id, profile_id=None):
+            return {
+                'playlist_id': int(playlist_id),
+                'profile_id': int(profile_id or 1),
+                'source': 'spotify',
+                'enabled': True,
+                'revision': revision,
+                'decisions': {'source-one': decision},
+                'global_rejections': set(),
+            }
+    return _PolicyDB()
+
+
+def test_curated_failed_navidrome_write_never_records_fingerprint(
+        monkeypatch, patched_db):
+    policy_db = _curation_policy_db()
+    monkeypatch.setattr('database.music_database.get_database', lambda: policy_db)
+    status_calls = []
+    invalidated = []
+    result = _FakeSyncResult(
+        synced_tracks=0,
+        errors=['Navidrome playlist write failed or could not be verified'],
+    )
+    deps = _build_deps(
+        sync_service=_FakeSyncService(
+            media_client=_FakeMediaClient(), server_type='navidrome', sync_result=result,
+        ),
+        update_and_save_sync_status=lambda *a, **kw: status_calls.append((a, kw)),
+        invalidate_sync_fingerprint=invalidated.append,
+    )
+    snapshot = {
+        'playlist_id': 7, 'profile_id': 1, 'revision': 4,
+        'source_track_ids': ['source-one'],
+    }
+
+    ds.run_sync_task(
+        'auto_mirror_7', 'Curated', [_track()], deps=deps,
+        curation_snapshot=snapshot,
+    )
+
+    assert status_calls == []
+    assert invalidated == ['auto_mirror_7']
+
+
+def test_curated_stale_run_never_records_fingerprint(monkeypatch, patched_db):
+    reads = 0
+
+    class _ChangingPolicy:
+        def get_mirrored_playlist_curation(self, playlist_id, profile_id=None):
+            nonlocal reads
+            reads += 1
+            revision = 4 if reads == 1 else 5
+            return {
+                'playlist_id': 7, 'profile_id': 1, 'source': 'spotify',
+                'enabled': True, 'revision': revision,
+                'decisions': {'source-one': 'keep'}, 'global_rejections': set(),
+            }
+
+    monkeypatch.setattr('database.music_database.get_database', lambda: _ChangingPolicy())
+    status_calls = []
+    states = {}
+    deps = _build_deps(
+        sync_states=states,
+        update_and_save_sync_status=lambda *a, **kw: status_calls.append((a, kw)),
+    )
+    snapshot = {
+        'playlist_id': 7, 'profile_id': 1, 'revision': 4,
+        'source_track_ids': ['source-one'],
+    }
+
+    ds.run_sync_task(
+        'auto_mirror_7', 'Curated', [_track()], deps=deps,
+        curation_snapshot=snapshot,
+    )
+
+    assert status_calls == []
+    assert states['auto_mirror_7']['status'] == 'error'

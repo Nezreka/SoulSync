@@ -15303,6 +15303,29 @@ class MusicDatabase:
                     logger.error("Cannot add track to wishlist: missing track ID")
                     return self._wishlist_outcome("rejected", reason="missing track id")
 
+                # A mirrored origin carries enough durable identity to enforce
+                # curation at the queue boundary. Legacy playlist callers have
+                # no such origin and retain their existing behavior.
+                from core.playlists.curation import (
+                    CurationPolicyError,
+                    curation_origin,
+                    wishlist_track_allowed,
+                )
+                if curation_origin(source_info):
+                    try:
+                        if not wishlist_track_allowed(self, {
+                            'source_type': source_type,
+                            'source_info': source_info,
+                        }):
+                            return self._wishlist_outcome(
+                                "rejected", track_id, reason="curation_not_keep"
+                            )
+                    except CurationPolicyError as exc:
+                        logger.error("Wishlist curation policy read failed: %s", exc)
+                        return self._wishlist_outcome(
+                            "error", track_id, reason="curation_policy_unavailable"
+                        )
+
                 # Podcast guard: podcast items are not eligible for the music wishlist
                 _is_podcast = False
                 if source_type == 'podcast' or str(track_id).startswith('podcast-'):
@@ -15416,6 +15439,11 @@ class MusicDatabase:
 
                 # Convert data once; existing rows and inserts use the same
                 # newest payload/context.
+                from core.playlists.curation import merge_playlist_origins
+                if isinstance(source_info, dict):
+                    origins = merge_playlist_origins({}, source_info)
+                    if origins:
+                        source_info = {**source_info, 'playlist_origins': origins}
                 spotify_json = json.dumps(spotify_track_data)
                 source_json = json.dumps(source_info or {})
                 resolved_qp_id = self._resolve_quality_profile_id(
@@ -15437,7 +15465,7 @@ class MusicDatabase:
 
                 if not allow_duplicates:
                     cursor.execute("""
-                        SELECT id, spotify_track_id, spotify_data, source_type
+                        SELECT id, spotify_track_id, spotify_data, source_type, source_info
                         FROM wishlist_tracks
                         WHERE profile_id = ?
                     """, (profile_id,))
@@ -15464,10 +15492,25 @@ class MusicDatabase:
                             # Case-insensitive comparison of track name and primary artist
                             if (existing_name.lower() == track_name.lower() and
                                 existing_artist.lower() == artist_name.lower()):
+                                try:
+                                    previous_info = json.loads(existing['source_info'] or '{}')
+                                except (ValueError, TypeError):
+                                    previous_info = {}
+                                previous_origins = merge_playlist_origins({}, previous_info)
+                                origins = merge_playlist_origins(previous_info, source_info)
+                                origins_changed = origins != previous_origins
                                 # A caller carrying an explicit Quality Profile
                                 # is authoritative. Refresh the row rather than
                                 # dropping the request as a duplicate.
-                                if source_type == 'enhance' or quality_profile_id is not None:
+                                if (source_type in ('enhance', 'manual')
+                                        or quality_profile_id is not None
+                                        or origins_changed):
+                                    if origins:
+                                        source_info = {
+                                            **(source_info if isinstance(source_info, dict) else {}),
+                                            'playlist_origins': origins,
+                                        }
+                                        source_json = json.dumps(source_info)
                                     updates = [
                                         "spotify_data = ?", "failure_reason = ?",
                                     ]
@@ -15559,9 +15602,14 @@ class MusicDatabase:
                         previous_info = json.loads(previous_context[0] or '{}')
                     except (ValueError, TypeError):
                         previous_info = {}
+                    origins = merge_playlist_origins(previous_info, source_info)
+                    if origins:
+                        source_info = {**(source_info if isinstance(source_info, dict) else {}),
+                                       'playlist_origins': origins}
                     if isinstance(previous_info, dict) and previous_info.get('merged_wishlist_sources'):
                         source_info = {**(source_info if isinstance(source_info, dict) else {}),
                                        'merged_wishlist_sources': previous_info['merged_wishlist_sources']}
+                    if source_info:
                         source_json = json.dumps(source_info)
                     updates = ["spotify_data = ?"]
                     params: List[Any] = [spotify_json]
@@ -25731,6 +25779,7 @@ class MusicDatabase:
         params: List[Any] = []
         try:
             with self._get_connection() as conn:
+                conn.execute("BEGIN IMMEDIATE")
                 owner_sql, owner_params = self._mirror_owner_clause(profile_id)
                 current = conn.execute(
                     "SELECT curation_enabled FROM mirrored_playlists WHERE id=?" + owner_sql,
@@ -25865,6 +25914,7 @@ class MusicDatabase:
         """Apply a mixed decision batch atomically; ``None`` means Unreviewed."""
         normalized = self._validate_curation_updates(updates)
         with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             owner_sql, owner_params = self._mirror_owner_clause(profile_id)
             playlist = conn.execute(
                 "SELECT id, curation_revision FROM mirrored_playlists WHERE id=?" + owner_sql,
@@ -25947,6 +25997,7 @@ class MusicDatabase:
         ])
         wanted = [track_id for track_id, _decision in updates]
         with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             owner_sql, owner_params = self._mirror_owner_clause(profile_id)
             playlist = conn.execute(
                 "SELECT id, profile_id, source FROM mirrored_playlists WHERE id=?" + owner_sql,
