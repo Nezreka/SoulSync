@@ -35,6 +35,13 @@ def dependencies(details):
     tags = result.get('current_tags')
     if isinstance(tags, dict) and not tags.get('artists_list'):
         tags.pop('artists_list', None)
+    data = result.get('db_data')
+    if (isinstance(data, dict) and data.get('clear_artists_list') is True
+            and 'artists_list' in (result.get('changes') or {}) and data.get('track_artist')):
+        # This writer flag makes an already reviewed artist-list correction
+        # explicit. Keep signatures compatible with plans saved before the flag;
+        # an unexplained list removal remains a new effect requiring approval.
+        data.pop('clear_artists_list')
     return result
 
 

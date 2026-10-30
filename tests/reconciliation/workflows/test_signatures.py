@@ -52,3 +52,39 @@ def test_refreshing_display_text_does_not_stale_an_open_decision(tmp_path, monke
     result = album.worker.apply_review_decision(case['case_id'], item['id'],
         evidence_token=item['evidence_token'], action='fix')
     assert result['success'], result
+
+
+def test_saved_artist_list_correction_survives_explicit_writer_flag(tmp_path, monkeypatch):
+    from mutagen.flac import FLAC
+
+    album = build_album(tmp_path, monkeypatch, 'supported')
+    tags = FLAC(album.paths[0])
+    tags['artists'] = ['Unrelated Artist']
+    tags.save()
+    case = scan_case(album)
+    item = next(row for row in case['items'] if 'artists_list' in row['details'].get('changes', {}))
+    legacy = deepcopy(item['details'])
+    legacy['db_data'].pop('clear_artists_list')
+    with album.db._get_connection() as conn:
+        conn.execute('UPDATE repair_findings SET details_json=?,review_signature=? WHERE id=?',
+                     (json.dumps(legacy), signature(legacy), item['id']))
+    case = album.worker.get_review_case(case['case_id'])
+    item = next(row for row in case['items'] if row['id'] == item['id'])
+    assert album.worker.apply_review_decision(case['case_id'], item['id'],
+        evidence_token=item['evidence_token'], action='fix')['success']
+
+    refreshed = scan_case(album)
+    current = next(row for row in refreshed['items'] if row['id'] == item['id'])
+    assert current['details'].get('plan_approved'), 'Same artist correction must retain its saved approval'
+    assert signature(legacy) == signature({**legacy, 'db_data': {
+        **legacy['db_data'], 'clear_artists_list': True}})
+    changed = deepcopy(legacy)
+    changed['changes']['artists_list']['new'] = 'Different Artist'
+    assert signature(changed) != signature(legacy)
+
+
+def test_unexplained_artist_list_removal_remains_an_approval_dependency():
+    proposal = {'db_data': {'track_artist': 'Original Artist'}, 'changes': {}}
+    changed = deepcopy(proposal)
+    changed['db_data']['clear_artists_list'] = True
+    assert signature(proposal) != signature(changed)
