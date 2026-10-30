@@ -1578,6 +1578,8 @@ class MusicDatabase:
                     image_url TEXT,
                     track_count INTEGER DEFAULT 0,
                     profile_id INTEGER DEFAULT 1,
+                    curation_enabled INTEGER NOT NULL DEFAULT 0,
+                    curation_revision INTEGER NOT NULL DEFAULT 0,
                     is_request_list INTEGER NOT NULL DEFAULT 0,
                     auto_remove_fulfilled INTEGER NOT NULL DEFAULT 0,
                     upstream_playlist_id TEXT DEFAULT NULL,
@@ -1605,6 +1607,7 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mirrored_playlists_profile ON mirrored_playlists (profile_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mirrored_playlists_source ON mirrored_playlists (source, source_playlist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mirrored_tracks_playlist ON mirrored_playlist_tracks (playlist_id)")
+            self._add_mirrored_playlist_curation_schema(cursor)
 
             # Automations table — trigger → action scheduled tasks
             cursor.execute("""
@@ -2943,6 +2946,55 @@ class MusicDatabase:
                 logger.info("Added added_at column to mirrored_playlist_tracks table")
         except Exception as e:
             logger.error(f"Error adding added_at column to mirrored_playlist_tracks: {e}")
+
+    def _add_mirrored_playlist_curation_schema(self, cursor):
+        """Add opt-in mirrored-track decisions without touching existing behavior.
+
+        Decisions key on the source identity rather than the replaceable mirror
+        track row id, so refreshes and reorders cannot discard review work.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            columns = {column[1] for column in cursor.fetchall()}
+            if columns and 'curation_enabled' not in columns:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists "
+                    "ADD COLUMN curation_enabled INTEGER NOT NULL DEFAULT 0"
+                )
+            if columns and 'curation_revision' not in columns:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists "
+                    "ADD COLUMN curation_revision INTEGER NOT NULL DEFAULT 0"
+                )
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mirrored_playlist_track_decisions (
+                    playlist_id INTEGER NOT NULL,
+                    source_track_id TEXT NOT NULL,
+                    decision TEXT NOT NULL CHECK(decision IN ('keep', 'pending', 'reject')),
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (playlist_id, source_track_id),
+                    FOREIGN KEY (playlist_id) REFERENCES mirrored_playlists(id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mirrored_track_global_rejections (
+                    profile_id INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    source_track_id TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (profile_id, source, source_track_id)
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mirror_decisions_playlist "
+                "ON mirrored_playlist_track_decisions (playlist_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mirror_global_rejections_lookup "
+                "ON mirrored_track_global_rejections (profile_id, source)"
+            )
+        except Exception as e:
+            logger.error("Error adding mirrored-playlist curation schema: %s", e)
 
     def _add_mirrored_playlist_source_skipped_column(self, cursor):
         """add source_skipped: what the source never handed over (#1613).
@@ -25339,6 +25391,8 @@ class MusicDatabase:
             return None
         pl = dict(row)
         pl['organize_by_playlist'] = bool(pl.get('organize_by_playlist', 0))
+        pl['curation_enabled'] = bool(pl.get('curation_enabled', 0))
+        pl['curation_revision'] = int(pl.get('curation_revision') or 0)
         pl['is_request_list'] = bool(pl.get('is_request_list', 0))
         pl['auto_remove_fulfilled'] = bool(pl.get('auto_remove_fulfilled', 0))
         pl['custom_cover'] = bool(pl.get('custom_cover', 0))
@@ -25661,6 +25715,7 @@ class MusicDatabase:
         organize_by_playlist: Optional[bool] = None,
         quality_profile_id: Optional[int] = None,
         sync_mode: Optional[str] = None,
+        curation_enabled: Optional[bool] = None,
     ) -> str:
         """Atomically update the per-playlist download preferences.
 
@@ -25677,10 +25732,11 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 owner_sql, owner_params = self._mirror_owner_clause(profile_id)
-                if conn.execute(
-                    "SELECT 1 FROM mirrored_playlists WHERE id=?" + owner_sql,
+                current = conn.execute(
+                    "SELECT curation_enabled FROM mirrored_playlists WHERE id=?" + owner_sql,
                     [int(playlist_id), *owner_params],
-                ).fetchone() is None:
+                ).fetchone()
+                if current is None:
                     return 'not_found'
 
                 if quality_profile_id is not None:
@@ -25700,6 +25756,12 @@ class MusicDatabase:
                     assignments.append("sync_mode=?")
                     params.append(sync_mode or None)
 
+                if curation_enabled is not None:
+                    enabled_value = 1 if curation_enabled else 0
+                    if int(current['curation_enabled'] or 0) != enabled_value:
+                        assignments.extend(("curation_enabled=?", "curation_revision=curation_revision+1"))
+                        params.append(enabled_value)
+
                 if not assignments:
                     return 'ok'
 
@@ -25716,6 +25778,250 @@ class MusicDatabase:
                 "Error updating preferences for mirrored playlist %s: %s", playlist_id, e
             )
             return 'error'
+
+    def get_mirrored_playlist_curation(
+        self,
+        playlist_id: int,
+        *,
+        profile_id: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Read one mirror's complete policy, raising when it cannot be trusted."""
+        from core.playlists.curation import CurationPolicyError
+
+        try:
+            with self._get_connection() as conn:
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                playlist = conn.execute(
+                    "SELECT id, profile_id, source, curation_enabled, curation_revision "
+                    "FROM mirrored_playlists WHERE id=?" + owner_sql,
+                    [int(playlist_id), *owner_params],
+                ).fetchone()
+                if playlist is None:
+                    return None
+                decisions = {
+                    str(row['source_track_id']): str(row['decision'])
+                    for row in conn.execute(
+                        "SELECT source_track_id, decision "
+                        "FROM mirrored_playlist_track_decisions WHERE playlist_id=?",
+                        (int(playlist_id),),
+                    ).fetchall()
+                }
+                rejected = {
+                    str(row['source_track_id'])
+                    for row in conn.execute(
+                        "SELECT source_track_id FROM mirrored_track_global_rejections "
+                        "WHERE profile_id=? AND source=?",
+                        (int(playlist['profile_id'] or 1), str(playlist['source'] or '')),
+                    ).fetchall()
+                }
+                return {
+                    'playlist_id': int(playlist['id']),
+                    'profile_id': int(playlist['profile_id'] or 1),
+                    'source': str(playlist['source'] or ''),
+                    'enabled': bool(playlist['curation_enabled']),
+                    'revision': int(playlist['curation_revision'] or 0),
+                    'decisions': decisions,
+                    'global_rejections': rejected,
+                }
+        except CurationPolicyError:
+            raise
+        except Exception as exc:
+            raise CurationPolicyError(
+                f"Could not read curation policy for mirrored playlist {playlist_id}"
+            ) from exc
+
+    @staticmethod
+    def _validate_curation_updates(updates) -> list[tuple[str, Optional[str]]]:
+        from core.playlists.curation import CURATION_DECISIONS
+
+        normalized: list[tuple[str, Optional[str]]] = []
+        seen: set[str] = set()
+        for update in updates or []:
+            if not isinstance(update, dict):
+                raise ValueError("Each curation update must be an object")
+            source_track_id = str(update.get('source_track_id') or '').strip()
+            decision = update.get('decision')
+            if decision is not None:
+                decision = str(decision).strip().lower()
+            if not source_track_id:
+                raise ValueError("source_track_id is required")
+            if source_track_id in seen:
+                raise ValueError(f"Duplicate source_track_id: {source_track_id}")
+            if decision is not None and decision not in CURATION_DECISIONS:
+                raise ValueError(f"Invalid curation decision: {decision}")
+            seen.add(source_track_id)
+            normalized.append((source_track_id, decision))
+        if not normalized:
+            raise ValueError("At least one curation update is required")
+        return normalized
+
+    def update_mirrored_playlist_decisions(
+        self,
+        playlist_id: int,
+        updates,
+        *,
+        profile_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Apply a mixed decision batch atomically; ``None`` means Unreviewed."""
+        normalized = self._validate_curation_updates(updates)
+        with self._get_connection() as conn:
+            owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+            playlist = conn.execute(
+                "SELECT id, curation_revision FROM mirrored_playlists WHERE id=?" + owner_sql,
+                [int(playlist_id), *owner_params],
+            ).fetchone()
+            if playlist is None:
+                return {'status': 'not_found', 'changed': 0, 'affected_playlist_ids': []}
+            wanted = [track_id for track_id, _decision in normalized]
+            marks = ','.join('?' for _ in wanted)
+            members = {
+                str(row['source_track_id'])
+                for row in conn.execute(
+                    f"SELECT DISTINCT source_track_id FROM mirrored_playlist_tracks "
+                    f"WHERE playlist_id=? AND source_track_id IN ({marks})",
+                    [int(playlist_id), *wanted],
+                ).fetchall()
+            }
+            missing = [track_id for track_id in wanted if track_id not in members]
+            if missing:
+                return {
+                    'status': 'unknown_track', 'changed': 0,
+                    'source_track_ids': missing, 'affected_playlist_ids': [],
+                }
+            existing = {
+                str(row['source_track_id']): str(row['decision'])
+                for row in conn.execute(
+                    f"SELECT source_track_id, decision FROM mirrored_playlist_track_decisions "
+                    f"WHERE playlist_id=? AND source_track_id IN ({marks})",
+                    [int(playlist_id), *wanted],
+                ).fetchall()
+            }
+            changed = 0
+            for source_track_id, decision in normalized:
+                if decision is None:
+                    if source_track_id in existing:
+                        conn.execute(
+                            "DELETE FROM mirrored_playlist_track_decisions "
+                            "WHERE playlist_id=? AND source_track_id=?",
+                            (int(playlist_id), source_track_id),
+                        )
+                        changed += 1
+                elif existing.get(source_track_id) != decision:
+                    conn.execute("""
+                        INSERT INTO mirrored_playlist_track_decisions
+                            (playlist_id, source_track_id, decision, updated_at)
+                        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(playlist_id, source_track_id) DO UPDATE SET
+                            decision=excluded.decision,
+                            updated_at=CURRENT_TIMESTAMP
+                    """, (int(playlist_id), source_track_id, decision))
+                    changed += 1
+            if changed:
+                conn.execute(
+                    "UPDATE mirrored_playlists SET curation_revision=curation_revision+1, "
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (int(playlist_id),),
+                )
+            revision = int(conn.execute(
+                "SELECT curation_revision FROM mirrored_playlists WHERE id=?",
+                (int(playlist_id),),
+            ).fetchone()[0] or 0)
+            conn.commit()
+            return {
+                'status': 'ok', 'changed': changed, 'revision': revision,
+                'affected_playlist_ids': [int(playlist_id)] if changed else [],
+            }
+
+    def update_mirrored_global_rejections(
+        self,
+        playlist_id: int,
+        source_track_ids,
+        rejected: bool,
+        *,
+        profile_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Set profile/source rejection state and revise every affected mirror."""
+        updates = self._validate_curation_updates([
+            {'source_track_id': track_id, 'decision': 'reject'}
+            for track_id in (source_track_ids or [])
+        ])
+        wanted = [track_id for track_id, _decision in updates]
+        with self._get_connection() as conn:
+            owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+            playlist = conn.execute(
+                "SELECT id, profile_id, source FROM mirrored_playlists WHERE id=?" + owner_sql,
+                [int(playlist_id), *owner_params],
+            ).fetchone()
+            if playlist is None:
+                return {'status': 'not_found', 'changed': 0, 'affected_playlist_ids': []}
+            marks = ','.join('?' for _ in wanted)
+            members = {
+                str(row['source_track_id'])
+                for row in conn.execute(
+                    f"SELECT DISTINCT source_track_id FROM mirrored_playlist_tracks "
+                    f"WHERE playlist_id=? AND source_track_id IN ({marks})",
+                    [int(playlist_id), *wanted],
+                ).fetchall()
+            }
+            missing = [track_id for track_id in wanted if track_id not in members]
+            if missing:
+                return {
+                    'status': 'unknown_track', 'changed': 0,
+                    'source_track_ids': missing, 'affected_playlist_ids': [],
+                }
+            owner = int(playlist['profile_id'] or 1)
+            source = str(playlist['source'] or '')
+            existing = {
+                str(row['source_track_id'])
+                for row in conn.execute(
+                    f"SELECT source_track_id FROM mirrored_track_global_rejections "
+                    f"WHERE profile_id=? AND source=? AND source_track_id IN ({marks})",
+                    [owner, source, *wanted],
+                ).fetchall()
+            }
+            changed_ids = [
+                track_id for track_id in wanted
+                if (track_id not in existing) == bool(rejected)
+            ]
+            if rejected:
+                conn.executemany("""
+                    INSERT OR IGNORE INTO mirrored_track_global_rejections
+                        (profile_id, source, source_track_id, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                """, [(owner, source, track_id) for track_id in changed_ids])
+            elif changed_ids:
+                delete_marks = ','.join('?' for _ in changed_ids)
+                conn.execute(
+                    f"DELETE FROM mirrored_track_global_rejections "
+                    f"WHERE profile_id=? AND source=? AND source_track_id IN ({delete_marks})",
+                    [owner, source, *changed_ids],
+                )
+            affected: list[int] = []
+            if changed_ids:
+                changed_marks = ','.join('?' for _ in changed_ids)
+                affected = [
+                    int(row['id'])
+                    for row in conn.execute(
+                        f"SELECT DISTINCT mp.id FROM mirrored_playlists mp "
+                        f"JOIN mirrored_playlist_tracks mt ON mt.playlist_id=mp.id "
+                        f"WHERE mp.profile_id=? AND mp.source=? "
+                        f"AND mt.source_track_id IN ({changed_marks})",
+                        [owner, source, *changed_ids],
+                    ).fetchall()
+                ]
+                if affected:
+                    affected_marks = ','.join('?' for _ in affected)
+                    conn.execute(
+                        f"UPDATE mirrored_playlists SET "
+                        f"curation_revision=curation_revision+1, updated_at=CURRENT_TIMESTAMP "
+                        f"WHERE id IN ({affected_marks})",
+                        affected,
+                    )
+            conn.commit()
+            return {
+                'status': 'ok', 'changed': len(changed_ids),
+                'affected_playlist_ids': affected,
+            }
 
     def set_mirrored_playlist_custom_name(
         self,
