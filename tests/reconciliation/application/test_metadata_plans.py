@@ -408,6 +408,31 @@ def test_artist_rewrite_removes_stale_separate_list(tmp_path):
     assert not tags.get('artists')
 
 
+@pytest.mark.parametrize('file_only', [False, True])
+def test_existing_artist_list_proposal_still_applies_without_new_writer_flag(tmp_path, monkeypatch, file_only):
+    album = build_album(tmp_path, monkeypatch, 'supported')
+    path = album.paths[0]
+    tags = FLAC(path)
+    tags['artists'] = ['Unrelated Artist']
+    tags.save()
+    stat = path.stat()
+    details = {'album_id': '10', 'source': 'musicbrainz',
+               'release_id': album.db.get_album_canonical('10')['album_id'],
+               'size_bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns,
+               'file_identity': file_identity(stat),
+               'db_data': {'track_artist': 'Acceptance Artist'},
+               'changes': {'artists_list': {'old': 'Unrelated Artist', 'new': 'Acceptance Artist'}},
+               'file_only': file_only}
+    if file_only:
+        with album.db._get_connection() as conn:
+            conn.execute('DELETE FROM tracks WHERE id=1')
+    else:
+        details['track_id'] = 1
+    result = album.worker._fix_reconciliation_metadata('track', None if file_only else 1, str(path), details)
+    assert result['success'], result
+    assert not FLAC(path).get('artists')
+
+
 @pytest.mark.parametrize('stored,changed', [('The Steve Miller Band',False),('Fred the Godson',True)])
 def test_secondary_artist_list_ignores_article_spelling_but_corrects_other_artists(stored,changed):
     from core.library.retag_planner import plan_track

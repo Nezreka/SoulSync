@@ -157,6 +157,10 @@ class ReviewExecution:
     def _fix_reconciliation_metadata(self, entity_type, entity_id, file_path, details):
         if details.get('_fix_action') in ('quarantine', 'replace', 'request_missing') or str(details.get('_fix_action') or '').startswith('existing:'):
             return self._fix_reconciliation_extra(entity_type, entity_id, file_path, details)
+        if 'artists_list' in (details.get('changes') or {}) and details.get('db_data'):
+            # Previously saved plans express this correction in changes, before
+            # the writer gained an explicit flag. Preserve that reviewed intent.
+            details = {**details, 'db_data': {**details['db_data'], 'clear_artists_list': True}}
         if details.get('file_only'):
             return self._fix_reconciliation_file_tags(file_path, details)
         error = (self._reconciliation_file_guard(file_path, details) or
