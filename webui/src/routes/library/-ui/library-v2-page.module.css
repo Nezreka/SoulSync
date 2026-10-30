@@ -5120,7 +5120,7 @@ textarea.searchInput {
 .historyGroup > summary:hover {
   background: rgba(255, 255, 255, 0.025);
 }
-.historyGroup[open] .historyCount > span {
+.historyGroup[open] > summary .historyCount > span {
   transform: rotate(180deg);
 }
 .historyDate {
@@ -8203,6 +8203,31 @@ textarea.searchInput {
 
 .historyOutcome[data-tone='err']::before {
   background: var(--danger);
+}
+
+/* a track's pipeline in the history tree: grabbed → downloaded → … */
+.historySteps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.historyStep {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--white-a35);
+}
+
+.historyStep .historyOutcome {
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.trackHistoryWrap > .historySteps {
+  margin-bottom: 10px;
 }
 
 /* ── menus: tools and the release overflow ─────────────────────────────── */

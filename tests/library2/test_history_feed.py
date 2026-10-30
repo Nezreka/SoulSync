@@ -649,6 +649,9 @@ def test_track_download_surfaces_via_path_fallback_when_legacy_id_stale(imported
     history = scoped_history(imported_conn, scope="track", entity_id=drake["track_id"])
 
     assert any(e["event_type"] == "downloaded" for e in history)
+    # filed under its library track, so the artist history tree can place it
+    artist = scoped_history(imported_conn, scope="artist", entity_id=drake["artist_id"])
+    assert [e["track_id"] for e in artist if e["event_type"] == "downloaded"] == [drake["track_id"]]
 
 
 def test_track_download_history_accepts_text_legacy_id(imported_conn):
@@ -675,7 +678,8 @@ def test_track_download_history_accepts_text_legacy_id(imported_conn):
         imported_conn, scope="track", entity_id=drake["track_id"]
     )
 
-    assert any(e["event_type"] == "downloaded" for e in history)
+    assert [e.get("track_id") for e in history if e["event_type"] == "downloaded"] == [
+        drake["track_id"]]
 
 
 def test_unsupported_scope_raises(imported_conn):

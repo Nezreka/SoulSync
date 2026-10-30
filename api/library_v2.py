@@ -4756,9 +4756,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         try:
             limit = int(request.args.get("limit", 50))
         except (TypeError, ValueError):
-            return _fail("limit must be an integer between 1 and 200")
-        if not 1 <= limit <= 200:
-            return _fail("limit must be an integer between 1 and 200")
+            return _fail("limit must be an integer between 1 and 500")
+        if not 1 <= limit <= 500:
+            return _fail("limit must be an integer between 1 and 500")
         from core.library2.history_feed import scoped_history
         with closing(_conn()) as conn:
             artist = conn.execute(

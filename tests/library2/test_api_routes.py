@@ -2561,7 +2561,7 @@ def test_quality_profile_assignment_handles_invalid_stored_repair_settings(api):
         ).fetchone()[0] == 2
 
 
-@pytest.mark.parametrize("limit", ["abc", "0", "-1", "201"])
+@pytest.mark.parametrize("limit", ["abc", "0", "-1", "501"])
 def test_artist_history_rejects_invalid_limits(api, limit):
     client, _db, ids = api
     response = client.get(

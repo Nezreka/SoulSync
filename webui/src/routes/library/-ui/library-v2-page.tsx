@@ -190,8 +190,13 @@ import {
 import { EnhanceQualityModal } from './enhance-quality-modal';
 import { ExportArtistsModal } from './export-modal';
 import { FilePathCellBody } from './file-path-cell';
-import { HistoryEventList } from './history-event-list';
-import { groupHistoryEvents, summarizeRecentHistory } from './history-groups';
+import { HistoryEventList, HistorySteps, HistoryTree } from './history-event-list';
+import {
+  groupHistoryEvents,
+  historySteps,
+  historyTree,
+  summarizeRecentHistory,
+} from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
 import classic from './library-classic-cards.module.css';
 import {
@@ -2647,8 +2652,11 @@ export function HistoryModal({
   entityId: number;
   onClose: () => void;
 }) {
-  const [limit, setLimit] = useState(50);
-  const maxLimit = scope === 'artist' ? 200 : 500;
+  const maxLimit = 500;
+  const [byTrack, setByTrack] = useState(true);
+  // a track's row needs its whole story, not the newest 50 events of the artist
+  const [pageLimit, setLimit] = useState(50);
+  const limit = byTrack ? maxLimit : pageLimit;
   const historyQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'history', scope, entityId, limit],
     queryFn: () =>
@@ -2659,7 +2667,6 @@ export function HistoryModal({
   });
   const [category, setCategory] = useState<LibraryV2HistoryCategory | 'all'>('all');
   const [filter, setFilter] = useState('');
-  const [grouped, setGrouped] = useState(true);
   const allRows = historyQuery.data ?? [];
   const availableCategories = Array.from(new Set(allRows.map((h) => h.category)));
   const rows = allRows.filter(
@@ -2669,14 +2676,11 @@ export function HistoryModal({
         .toLowerCase()
         .includes(filter.trim().toLowerCase()),
   );
-  const groups = grouped
-    ? groupHistoryEvents(rows)
-    : rows.map((h, i) => ({ key: String(i), entries: [h] }));
   return (
     <LibraryToolDialog
       title="History"
       onClose={onClose}
-      description="Expand an activity to see the affected tracks and the reason for each result."
+      description="One row per track: what it went through. Expand it for every retry and check."
       footer={
         <div className={styles.modalActions}>
           <span className={styles.previewQuiet}>
@@ -2723,8 +2727,8 @@ export function HistoryModal({
           ))}
         </select>
         <label className={styles.checkOption}>
-          <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} />
-          Group similar
+          <input type="checkbox" checked={byTrack} onChange={(e) => setByTrack(e.target.checked)} />
+          Group by track
         </label>
       </div>
       <div className={styles.historyList}>
@@ -2747,8 +2751,10 @@ export function HistoryModal({
               ? 'No events match these filters.'
               : `No recorded history for this ${scope} yet.`}
           </div>
+        ) : byTrack ? (
+          <HistoryTree nodes={historyTree(rows)} />
         ) : (
-          <HistoryEventList groups={groups} />
+          <HistoryEventList groups={groupHistoryEvents(rows)} />
         )}
       </div>
     </LibraryToolDialog>
@@ -12773,27 +12779,13 @@ function TrackLifecycleSection({
   );
 }
 
-/** Backend sends the exact Check-badge label for a `verification_status_updated`
- *  event's Status cell (§45) — map it to the same tone class TrackCheckBadge
- *  uses so a "Mismatch" here is pixel-identical to a "Mismatch" in the Check
- *  column, not a second visual language for the same word. */
-const CHECK_STATUS_TONE: Record<string, string> = {
-  Verified: styles.verificationVerified,
-  Mismatch: styles.verificationMismatch,
-  Unverified: styles.verificationUnverified,
-  Skipped: styles.verificationForced,
-  'Human verified': styles.verificationHuman,
-  'File missing': styles.verificationUnverified,
-  'Not scanned': styles.verificationUnverified,
-};
-
-/** §52.9/§44: chronological search→grab→quality→quarantine→import→delete
- *  timeline for one track (`core.library2.history_feed.scoped_history`,
- *  scope='track'). Unlike the download-source list, this also surfaces
- *  attempts that were quarantined or failed before ever producing a
- *  `lib2_track_files` row, and a file this track lost to a delete. Newest
- *  first, same reading order as the album/artist History and everywhere
- *  else in the app that lists events. */
+/** §52.9/§44: what one track went through (`core.library2.history_feed.
+ *  scoped_history`, scope='track'), read like the album/artist History tree:
+ *  the pipeline on top (grabbed → downloaded → imported → metadata written →
+ *  the latest check), every event folded by kind underneath, newest first.
+ *  Unlike the download-source list, this also surfaces attempts that were
+ *  quarantined or failed before ever producing a `lib2_track_files` row, and a
+ *  file this track lost to a delete. */
 export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
   const query = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-history', trackId],
@@ -12813,56 +12805,16 @@ export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
     );
   }
   if (rows.length === 0) return null;
-  // Newest first — the backend already returns events this way. Same table
-  // shape as the album/artist History (Date/Event/Detail), with an extra
-  // Status column for the pass/skip/fail a track-level check can carry that
-  // a plain event category can't — Lidarr's own History reads as one table,
-  // this is that, not a separate visual language for tracks.
   return (
     <div className={styles.trackHistoryWrap}>
       <p className={styles.sourceInfoHistory}>
         Pipeline — {rows.length} event
         {rows.length === 1 ? '' : 's'}
       </p>
-      <table className={styles.trackTable}>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Event</th>
-            <th>Status</th>
-            <th>Detail</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((h, i) => (
-            <tr key={i}>
-              <td className={styles.muted}>
-                {h.date ? h.date.slice(0, 16).replace('T', ' ') : '—'}
-              </td>
-              <td>
-                <span className={styles.sourceBadge} data-tone={h.category}>
-                  {h.title ?? h.event_type}
-                </span>
-              </td>
-              <td>
-                {h.status && CHECK_STATUS_TONE[h.status] ? (
-                  <span className={`${styles.verificationBadge} ${CHECK_STATUS_TONE[h.status]}`}>
-                    {h.status}
-                    {h.status_basis === 'current_file' ? ' (current)' : ''}
-                  </span>
-                ) : h.status ? (
-                  <span className={styles.pipelineStatus} data-status={h.status}>
-                    {h.status.replace('_', ' ')}
-                  </span>
-                ) : (
-                  <span className={styles.muted}>—</span>
-                )}
-              </td>
-              <td>{h.detail ?? <span className={styles.muted}>—</span>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <HistorySteps steps={historySteps(rows)} />
+      <div className={styles.historyList}>
+        <HistoryEventList groups={groupHistoryEvents(rows, { byKind: true })} nested />
+      </div>
     </div>
   );
 }

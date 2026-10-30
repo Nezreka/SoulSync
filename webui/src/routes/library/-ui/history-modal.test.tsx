@@ -50,7 +50,11 @@ describe('Library history', () => {
         <HistoryModal scope="artist" entityId={7} onClose={vi.fn()} />
       </QueryClientProvider>,
     );
-    expect(await screen.findByText('Current file status')).toBeInTheDocument();
+    // one row per track, each still saying its verdict is today's file status;
+    // the tree loads the whole story at once
+    expect(await screen.findAllByText('Current file status')).toHaveLength(50);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Group by track' }));
+    expect(await screen.findByRole('button', { name: 'Load older events' })).toBeInTheDocument();
     fireEvent.change(screen.getByRole('textbox', { name: 'Search history' }), {
       target: { value: 'Earlier track' },
     });
@@ -58,7 +62,7 @@ describe('Library history', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Load older events' }));
     expect(await screen.findByText('Metadata edited')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Search history' })).toHaveValue('Earlier track');
-    expect(requested).toEqual([50, 100]);
+    expect(requested).toEqual([500, 50, 100]);
     expect(screen.queryByRole('button', { name: 'Load older events' })).not.toBeInTheDocument();
   });
 });
