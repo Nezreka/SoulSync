@@ -191,6 +191,53 @@ class TestListMissing:
 
 
 class TestListCutoffUnmet:
+    """the evaluated list is kept between pages while nothing it reads changed"""
+
+    @staticmethod
+    def _seed_unmet(tmp_path):
+        import core.library2.wanted_views as wv
+        wv._cutoff_cache.clear()
+        conn = _make_conn(tmp_path)
+        profile = _profile(conn, targets=[{"label": "FLAC", "format": "flac"}])
+        album = _album(conn, _artist(conn, "Drake"), "Views")
+        track = _track(conn, album, "One Dance")
+        _file(conn, track, format="mp3", bitrate=128)
+        _want(conn, track, effective_profile_id=profile)
+        conn.commit()
+        return conn, track
+
+    def test_the_next_page_reuses_the_evaluated_list(self, tmp_path, monkeypatch):
+        import core.library2.wanted_views as wv
+        conn, _track_id = self._seed_unmet(tmp_path)
+        runs = []
+        real = wv.iter_cutoff_unmet
+        monkeypatch.setattr(wv, "iter_cutoff_unmet", lambda *a, **k: runs.append(1) or real(*a, **k))
+
+        assert list_cutoff_unmet(conn, page=1)[1] == 1
+        assert list_cutoff_unmet(conn, page=2)[1] == 1
+        assert len(runs) == 1
+
+    def test_an_upgraded_file_drops_off_at_once(self, tmp_path):
+        conn, track = self._seed_unmet(tmp_path)
+        assert list_cutoff_unmet(conn)[1] == 1
+
+        conn.execute("UPDATE lib2_track_files SET format='flac', bit_depth=16, "
+                     "updated_at='2999-01-01 00:00:00' WHERE track_id=?", (track,))
+        conn.commit()
+
+        assert list_cutoff_unmet(conn)[1] == 0
+
+    def test_rows_handed_out_are_copies(self, tmp_path):
+        conn, _track_id = self._seed_unmet(tmp_path)
+        rows, _ = list_cutoff_unmet(conn)
+        rows[0]["track_title"] = "changed"
+        rows[0]["file"]["format"] = "changed"
+
+        again, _ = list_cutoff_unmet(conn)
+        assert again[0]["title"] == "One Dance"
+        assert again[0]["album"]["title"] == "Views"
+        assert again[0]["file"]["format"] == "mp3"
+
     def test_file_below_profile_is_cutoff_unmet(self, tmp_path):
         conn = _make_conn(tmp_path)
         profile = _profile(conn, targets=[{"label": "FLAC", "format": "flac"}])

@@ -12,6 +12,8 @@ per-album quality badges. Read-only; never raises.
 
 from __future__ import annotations
 
+import copy
+import time
 from typing import Any, Dict, Iterator, List, Tuple
 
 from core.library2 import ADMIN_PROFILE_ID
@@ -161,10 +163,44 @@ def list_cutoff_unmet(conn: Any, *, search: str = "", page: int = 1, limit: int 
     """
     page = max(1, int(page))
     limit = max(1, min(int(limit), 500))
-    unmet = list(iter_cutoff_unmet(conn, search=search, profile_id=profile_id))
+    unmet = _cutoff_unmet_cached(conn, search=search, profile_id=profile_id)
     total = len(unmet)
     offset = (page - 1) * limit
-    return unmet[offset:offset + limit], total
+    # copies: the cached rows outlive this request
+    return copy.deepcopy(unmet[offset:offset + limit]), total
+
+
+# every imported file is wanted, so the tab evaluates the whole library
+# (~300k files, ~19s) to show 75 rows, and did it again for every page. the
+# evaluated list is kept per profile and search while nothing it reads has
+# changed: the files (newest id, last update), the wanted flags and the
+# quality profiles. a minute at most either way.
+_CUTOFF_TTL = 60.0
+_cutoff_cache: Dict[Any, Tuple[float, Any, List[Dict[str, Any]]]] = {}
+
+
+def _cutoff_fingerprint(conn: Any, profile_id: int) -> Tuple[Any, ...]:
+    files = conn.execute(
+        "SELECT MAX(id), COUNT(*), MAX(updated_at) FROM lib2_track_files").fetchone()
+    wanted = conn.execute(
+        "SELECT COUNT(*), SUM(wanted), MAX(updated_at) FROM lib2_wanted_tracks "
+        "WHERE profile_id=?", (int(profile_id),)).fetchone()
+    profiles = conn.execute(
+        "SELECT group_concat(id || ':' || COALESCE(updated_at, '')) FROM quality_profiles"
+    ).fetchone()
+    return (*tuple(files), *tuple(wanted), profiles[0])
+
+
+def _cutoff_unmet_cached(conn: Any, *, search: str, profile_id: int) -> List[Dict[str, Any]]:
+    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+    key = (db_file, int(profile_id), search or "")
+    fingerprint = _cutoff_fingerprint(conn, profile_id)
+    hit = _cutoff_cache.get(key)
+    if hit and hit[1] == fingerprint and time.monotonic() - hit[0] < _CUTOFF_TTL:
+        return hit[2]
+    unmet = list(iter_cutoff_unmet(conn, search=search, profile_id=profile_id))
+    _cutoff_cache[key] = (time.monotonic(), fingerprint, unmet)
+    return unmet
 
 
 def iter_cutoff_unmet(conn: Any, *, search: str = "",
