@@ -177,3 +177,7 @@ class AutomationDeps:
     # findings (the "Apply Quality Upgrades" action). None when the repair
     # worker isn't running, and in fixtures that don't exercise it.
     bulk_fix_repair_findings: Optional[Callable[..., Any]] = None
+    # (playlist_name, profile_id) -> True / False, or None when the server
+    # can't say. an unchanged playlist still syncs when its server playlist
+    # is gone (#1930). None in fixtures that don't exercise it.
+    server_playlist_exists: Optional[Callable[..., Optional[bool]]] = None

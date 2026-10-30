@@ -1879,6 +1879,7 @@ def _register_automation_handlers():
             (lambda finding_ids, fix_action=None: repair_worker.bulk_fix_findings(
                 finding_ids=finding_ids, fix_action=fix_action))
             if repair_worker else None),
+        server_playlist_exists=_server_playlist_exists,
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -18949,6 +18950,26 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
 
     except Exception as e:
         logger.error(f"Error updating sync status for {playlist_id}: {e}")
+
+def _server_playlist_exists(playlist_name, profile_id=None):
+    """Whether the media server still has a playlist by this name. None when
+    it can't say (no client, a server without playlists, a failed read), so
+    the caller keeps its old behaviour (#1930)."""
+    service = globals().get('sync_service')
+    if not playlist_name or service is None:
+        return None
+    try:
+        client, server_type = service._get_active_media_client(profile_id)
+        if client is None or server_type == 'soulsync':
+            return None
+        lookup = getattr(client, 'get_playlist_by_name', None)
+        if lookup is None:
+            return None
+        return lookup(playlist_name) is not None
+    except Exception as e:
+        logger.debug("server playlist check for %r failed: %s", playlist_name, e)
+        return None
+
 
 def _invalidate_sync_fingerprint(playlist_id):
     """Drop the smart-skip fingerprint of a playlist whose sync failed.
