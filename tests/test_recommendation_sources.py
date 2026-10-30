@@ -118,3 +118,24 @@ def test_profile_scoping(tmp_path):
     db = MusicDatabase(path)
     assert db.get_recommendation_sources(["Rec X"], profile_id=1) == {}
     assert db.get_recommendation_sources(["Rec X"], profile_id=2) == {"Rec X": ["Mine"]}
+
+
+def test_external_ids_resolve_and_the_library_names_a_shared_id(tmp_path):
+    """the deezer / itunes ids live in external_ids; an id both a library and
+    a watchlist artist carry is named by the library artist, as the join did."""
+    path = str(tmp_path / "m.db")
+    MusicDatabase(path)
+    conn = sqlite3.connect(path)
+    conn.execute("INSERT INTO lib2_artists (name, external_ids) VALUES ('Air', '{\"deezer\": \"dz_air\"}')")
+    conn.execute("INSERT INTO lib2_artists (name, external_ids) VALUES ('Moby', '{\"itunes\": 4242}')")
+    conn.execute("INSERT INTO watchlist_artists (artist_name, deezer_artist_id, profile_id) "
+                 "VALUES ('Air (watched)', 'dz_air', 1)")
+    for sid, rec in (('dz_air', 'Zero 7'), ('4242', 'Fatboy Slim')):
+        conn.execute("INSERT INTO similar_artists (source_artist_id, similar_artist_name, profile_id) "
+                     "VALUES (?, ?, 1)", (sid, rec))
+    conn.commit()
+    conn.close()
+
+    out = MusicDatabase(path).get_recommendation_sources(["Zero 7", "Fatboy Slim"])
+
+    assert out == {"Zero 7": ["Air"], "Fatboy Slim": ["Moby"]}

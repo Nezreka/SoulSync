@@ -19273,36 +19273,24 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                placeholders = ','.join('?' for _ in names)
-                cursor.execute(f"""
-                    SELECT sa.similar_artist_name AS rec_name,
-                           COALESCE(a.name, wa.artist_name) AS source_name
-                    FROM similar_artists sa
-                    LEFT JOIN lib2_artists a ON (
-                        (a.spotify_id IS NOT NULL AND a.spotify_id = sa.source_artist_id)
-                        OR (a.musicbrainz_id IS NOT NULL AND a.musicbrainz_id = sa.source_artist_id)
-                        OR EXISTS (SELECT 1 FROM json_each(a.external_ids)
-                                   WHERE json_each.value = sa.source_artist_id)
-                    )
-                    LEFT JOIN watchlist_artists wa ON (
-                        wa.profile_id = ? AND (
-                            (wa.spotify_artist_id IS NOT NULL AND wa.spotify_artist_id = sa.source_artist_id)
-                            OR (wa.itunes_artist_id IS NOT NULL AND wa.itunes_artist_id = sa.source_artist_id)
-                            OR (wa.deezer_artist_id IS NOT NULL AND wa.deezer_artist_id = sa.source_artist_id)
-                            OR (wa.musicbrainz_artist_id IS NOT NULL AND wa.musicbrainz_artist_id = sa.source_artist_id)
-                        )
-                    )
-                    WHERE sa.profile_id = ? AND sa.similar_artist_name IN ({placeholders})
-                """, (profile_id, profile_id, *names))
+                edges = []
+                for start in range(0, len(names), 500):
+                    chunk = names[start:start + 500]
+                    cursor.execute(
+                        "SELECT similar_artist_name, source_artist_id FROM similar_artists "
+                        f"WHERE profile_id = ? AND similar_artist_name IN ({','.join('?' * len(chunk))})",
+                        (profile_id, *chunk))
+                    edges.extend((r[0], str(r[1])) for r in cursor.fetchall() if r[1] is not None)
+                library, watched = self._artist_names_by_provider_id(
+                    cursor, {sid for _, sid in edges}, profile_id)
 
-                # Collect distinct source names per recommendation, preserving
-                # nothing-special order then sorting for a deterministic result.
+                # a library artist names the source first, the watchlist only
+                # when no library artist carries the id (the old COALESCE)
                 buckets: Dict[str, set] = {}
-                for row in cursor.fetchall():
-                    src = row['source_name']
-                    if not src:
-                        continue
-                    buckets.setdefault(row['rec_name'], set()).add(src)
+                for rec, sid in edges:
+                    found = library.get(sid) or watched.get(sid)
+                    if found:
+                        buckets.setdefault(rec, set()).update(found)
 
                 return {
                     rec: sorted(srcs, key=lambda s: s.lower())[:max_per]
@@ -19311,6 +19299,48 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error resolving recommendation sources: {e}")
             return {}
+
+    @staticmethod
+    def _artist_names_by_provider_id(cursor, ids: set, profile_id: int):
+        """``({id: {library artist names}}, {id: {watchlist artist names}})``.
+
+        a similar_artists source id can be any provider's id. the lookup used to
+        be a join that matched every edge against every library artist through
+        json_each, rows times artists, and took minutes on a big library (the
+        discover page and the artist page both wait on it). one indexed lookup
+        per id column instead: the dedicated columns, then the indexed
+        external_ids of the providers a similar-artist row is keyed by
+        (spotify, itunes, deezer, musicbrainz).
+        """
+        from core.library2.provider_ids import external_id_sql
+
+        library: Dict[str, set] = {}
+        watched: Dict[str, set] = {}
+        wanted = sorted(i for i in ids if i)
+        if not wanted:
+            return library, watched
+        library_columns = ['spotify_id', 'musicbrainz_id'] + [
+            external_id_sql('external_ids', service)
+            for service in ('spotify', 'itunes', 'deezer', 'musicbrainz')]
+        watch_columns = ['spotify_artist_id', 'itunes_artist_id', 'deezer_artist_id',
+                         'musicbrainz_artist_id']
+        for start in range(0, len(wanted), 500):
+            chunk = wanted[start:start + 500]
+            marks = ','.join('?' * len(chunk))
+            for column in library_columns:
+                cursor.execute(
+                    f"SELECT {column}, name FROM lib2_artists WHERE {column} IN ({marks})", chunk)
+                for value, name in cursor.fetchall():
+                    if value is not None and name:
+                        library.setdefault(str(value), set()).add(name)
+            for column in watch_columns:
+                cursor.execute(
+                    f"SELECT {column}, artist_name FROM watchlist_artists "
+                    f"WHERE profile_id = ? AND {column} IN ({marks})", (profile_id, *chunk))
+                for value, name in cursor.fetchall():
+                    if value is not None and name:
+                        watched.setdefault(str(value), set()).add(name)
+        return library, watched
 
     def mark_artists_featured(self, artist_names: List[str]):
         """Update last_featured timestamp for artists shown in the hero slider"""
