@@ -13469,7 +13469,7 @@ export function ImportButton({
 
   const importState = importQuery.data;
   const running = importState?.running === true;
-  const artworkRunning = importState?.artwork_cache.running === true;
+  const artworkRunning = importState?.artwork_cache?.running === true;
   // The persisted migration may be running in a worker this browser session
   // never started, in which case pressing Import would only be refused.
   const migration = describeLibraryV2Migration(importState);
@@ -13515,7 +13515,7 @@ export function ImportButton({
         ? migration.text
         : artworkRunning && importState
           ? `${message ? `${message} ` : ''}${describeLibraryV2ArtworkCacheProgress(importState)}`
-          : importState?.artwork_cache.error
+          : importState?.artwork_cache?.error
             ? `${message ? `${message} ` : 'Library ready to browse. '}Artwork caching failed; covers will load on demand.`
             : message;
   const progress =
