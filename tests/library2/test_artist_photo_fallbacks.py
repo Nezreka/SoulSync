@@ -164,3 +164,67 @@ def test_a_portrait_borrowed_from_a_foreign_album_cover_is_dropped(
     assert not (tmp_path / f"artist_{guest}.jpg").exists()
     # The host fronts the release — a cover is a weak portrait but it is HIS.
     assert (tmp_path / f"artist_{host}.jpg").exists()
+
+
+DEEZER_SILHOUETTE = (
+    "https://cdn-images.dzcdn.net/images/artist/"
+    "e23066163f21176a822b54001ee648a2/1000x1000-000000-80-0-0.jpg"
+)
+
+
+def test_deezers_silhouette_under_its_own_hash_is_a_placeholder():
+    """the grey silhouette also comes under real-looking asset ids, shared by
+    dozens of unrelated artists; it showed on the library grid as their photo"""
+    assert is_placeholder_artist_image(DEEZER_SILHOUETTE) is True
+    assert is_placeholder_artist_image(DEEZER_SILHOUETTE.replace(
+        "e23066163f21176a822b54001ee648a2", "ebcf22e5c3a0eb3178b8a6f6bc1a5a6c")) is True
+    assert is_placeholder_artist_image(DEEZER_REAL) is False
+
+
+def test_a_stored_silhouette_is_no_stored_photo(imported_conn):
+    artist = _artist(imported_conn, "Faceless")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET image_url=? WHERE id=?", (DEEZER_SILHOUETTE, artist))
+
+    assert artwork._stored_image(imported_conn, "artist", artist) is None
+
+
+def test_the_first_build_drops_cached_silhouettes_once(imported_conn, monkeypatch, tmp_path):
+    from contextlib import contextmanager
+
+    faceless = _artist(imported_conn, "Faceless")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET image_url=? WHERE id=?", (DEEZER_SILHOUETTE, faceless))
+    imported_conn.commit()
+    monkeypatch.setattr(artwork, "artwork_dir", lambda _db: tmp_path)
+
+    class _DB:
+        database_path = str(tmp_path / "x.db")
+
+        def _get_connection(self):
+            return _Shared(imported_conn)
+
+    class _Shared:
+        def __init__(self, c):
+            self.c = c
+
+        def __getattr__(self, k):
+            return getattr(self.c, k)
+
+        def close(self):
+            pass
+
+    db = _DB()
+    cached = artwork.artwork_file(db, "artist", faceless)
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_bytes(b"silhouette")
+    artwork._placeholder_sweep_done.clear()
+
+    artwork._forget_placeholder_artist_art_once(db, imported_conn)
+
+    assert not cached.exists()
+    assert imported_conn.execute(
+        "SELECT image_url FROM lib2_artists WHERE id=?", (faceless,)).fetchone()["image_url"] is None
+    cached.write_bytes(b"rebuilt")
+    artwork._forget_placeholder_artist_art_once(db, imported_conn)
+    assert cached.exists(), "once per process: a rebuilt picture is left alone"

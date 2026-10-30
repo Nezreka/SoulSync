@@ -580,6 +580,11 @@ def _stored_image(conn, kind: str, entity_id: int) -> Optional[bytes]:
     url = str((row["image_url"] if row else "") or "").strip()
     if not url:
         return None
+    from core.metadata.artwork import is_placeholder_image_url
+    if is_placeholder_image_url(url):
+        # a provider's "no photo" picture is no picture: the folder, the
+        # provider walk and the artist's own covers come next
+        return None
     if url.startswith("http") and _public_remote_artwork_url(url):
         try:
             return _download_remote_artwork(url)
@@ -749,6 +754,45 @@ def manual_art_override_url(conn, kind: str, entity_id: int) -> Optional[str]:
     return _manual_art_override_url(conn, kind, entity_id)
 
 
+_placeholder_sweep_done: set = set()
+
+
+def _forget_placeholder_artist_art_once(database, conn) -> None:
+    """Once per process and database: an artist whose stored picture is a
+    provider placeholder (deezer's grey silhouette) loses that url, unless
+    someone picked it by hand, and its cached copy, so the next build finds a
+    real picture or shows the placeholder card. After the first run the urls
+    are gone, so later runs find nothing to do."""
+    key = str(getattr(database, "database_path", "") or id(database))
+    if key in _placeholder_sweep_done:
+        return
+    _placeholder_sweep_done.add(key)
+    try:
+        from contextlib import closing
+
+        from core.library2.native_enrich import clear_placeholder_artist_images
+        # its own connection: the caller's may be mid-transaction
+        opener = getattr(database, "_get_connection", None)
+        if opener is None:
+            return
+        with closing(opener()) as own:
+            ids = clear_placeholder_artist_images(own)["artist_ids"]
+            if not ids:
+                return
+            own.commit()
+        for artist_id in ids:
+            for path in (artwork_file(database, "artist", artist_id),
+                         thumb_file(database, "artist", artist_id)):
+                try:
+                    if path.exists():
+                        path.unlink()
+                except OSError:
+                    pass
+        logger.info("artwork: dropped provider placeholder pictures from %d artists", len(ids))
+    except Exception as e:  # noqa: BLE001 - a sweep that fails costs nothing
+        logger.debug("placeholder artist art sweep failed: %s", e)
+
+
 def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
                   *, force: bool = False) -> Optional[str]:
     """Resolve + cache artwork for an artist/album; return the on-disk jpg path.
@@ -758,6 +802,7 @@ def build_artwork(database, conn, config_manager, kind: str, entity_id: int,
     callers for the same database/entity are single-flighted so an immediate
     UI browse cannot duplicate a running background provider/NAS lookup.
     """
+    _forget_placeholder_artist_art_once(database, conn)
     with _build_lock(database, kind, entity_id):
         return _build_artwork_unlocked(
             database, conn, config_manager, kind, entity_id, force=force

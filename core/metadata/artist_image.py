@@ -29,6 +29,11 @@ _PLACEHOLDER_IMAGE_MARKERS = (
     # the wild. Add a marker here only for an asset id confirmed to be a
     # provider's stand-in, never a guessed one.
     "2a96cbd8b46e442fc41c2b86b821562f",
+    # deezer's grey silhouette under its own asset ids, not the empty-hash
+    # path below: confirmed by looking at both, and 31 and 16 unrelated artists
+    # on one library shared them as their "photo"
+    "e23066163f21176a822b54001ee648a2",
+    "ebcf22e5c3a0eb3178b8a6f6bc1a5a6c",
 )
 
 # Deezer does not use a magic asset id: when an artist has no photo it returns

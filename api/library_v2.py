@@ -410,6 +410,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         suffix = f"?v={version}" if version else ""
         return f"/api/library/v2/artwork/{kind}/{int(entity_id)}{suffix}"
 
+    from core.metadata.artist_image import is_placeholder_artist_image as _is_placeholder_image
+
     def _apply_artwork_urls(data: Any, kind: str, *, prefer_remote: bool = False) -> Any:
         """Point a serialized entity's ``image_url`` at the local artwork endpoint.
 
@@ -427,6 +429,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if isinstance(data, dict) and "id" in data:
             remote = data.get("image_url")
             if not (isinstance(remote, str) and remote.startswith(("http://", "https://"))):
+                remote = None
+            elif _is_placeholder_image(remote):
+                # a provider's "no photo" silhouette is not a stand-in worth painting
                 remote = None
             data["remote_image_url"] = remote
             if not (prefer_remote and remote):

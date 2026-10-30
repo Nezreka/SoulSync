@@ -145,6 +145,11 @@ PLACEHOLDER_IMAGE_MARKERS = (
     # the watchlist with a mic icon while their library rows had good plex
     # thumbs (upstream 62e/f86f7521a).
     'd41d8cd98f00b204e9800998ecf8427e',
+    # deezer's grey silhouette for an artist with no photo, served under its
+    # own hashes: shared by dozens of unrelated artists, and it showed on the
+    # library grid as if it were their picture
+    'e23066163f21176a822b54001ee648a2',
+    'ebcf22e5c3a0eb3178b8a6f6bc1a5a6c',
 )
 
 # deezer also answers with the hash simply MISSING from the path, which no

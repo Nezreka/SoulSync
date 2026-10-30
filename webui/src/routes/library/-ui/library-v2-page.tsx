@@ -626,11 +626,14 @@ export function Artwork({
   className,
   thumb: useThumbnail,
   remote,
+  fallback,
 }: {
   src: string;
   alt: string;
   className: string;
   thumb?: boolean;
+  /** what shows when there's no picture at all; the small note by default */
+  fallback?: ReactNode;
   /** ldp-07: the provider CDN cover for this entity. Painted instead of the
    *  placeholder while a cold local build is still running, so a first visit
    *  shows real artwork at CDN speed exactly like the legacy page did. */
@@ -712,6 +715,7 @@ export function Artwork({
     setState((current) => (current.base === base ? { ...current, [field]: true } : current));
   };
   if (!shown || (failed && !usingRemote)) {
+    if (fallback) return <>{fallback}</>;
     return (
       <div className={`${className} ${styles.artPlaceholder}`} aria-label={alt}>
         ♪
@@ -5145,6 +5149,11 @@ function AlbumListCard({
             alt={album.title}
             className=""
             thumb
+            fallback={
+              <div className="library-artist-image-fallback" aria-label={album.title}>
+                💿
+              </div>
+            }
           />
         </div>
         <div className="library-artist-info">
@@ -5761,6 +5770,12 @@ export function ArtistCard({
             alt={artist.name}
             className=""
             thumb
+            fallback={
+              // dev's tile: the note centred on the dark card, not a small one up top
+              <div className="library-artist-image-fallback" aria-label={artist.name}>
+                🎵
+              </div>
+            }
           />
         </div>
         <div className="library-artist-info">
