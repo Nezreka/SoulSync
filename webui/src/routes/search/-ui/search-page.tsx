@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useRouter } from '@tanstack/react-router';
+import { useRouter, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Skeleton } from '@/components/primitives';
@@ -28,6 +28,14 @@ import {
   streamSearchTrack,
 } from '../-search.actions';
 import { fetchLabels, lookupById } from '../-search.api';
+import {
+  browseCount,
+  browseHref,
+  browseTitle,
+  BROWSE_TILES,
+  type BrowseResult,
+  fetchBrowse,
+} from '../-search.browse';
 import {
   artistDetailPath,
   fallbackBannerText,
@@ -67,81 +75,6 @@ function LibraryTargetNote() {
     </p>
   );
 }
-
-/**
- * the idle page's browse tiles. quiet two-stop gradients, no emoji.
- *
- * each opens the real thing on Discover (#1935): the charts, the new releases
- * shelf, or a genre's deep dive. searching the word "Trending" only found
- * songs called trending. `query` is the fallback for a profile without
- * Discover.
- */
-const EXPLORE_CATEGORIES = [
-  {
-    id: 'trending',
-    label: 'Top trending',
-    href: '/discover?section=deezer-editorial,sin-charts',
-    query: 'Trending',
-    from: '#7a1f3d',
-    to: '#3b0f1f',
-  },
-  {
-    id: 'new_releases',
-    label: 'New releases',
-    href: '/discover?section=recent-releases,discover-zone-new-missing',
-    query: 'New Releases',
-    from: '#3a3a8c',
-    to: '#1c1c48',
-  },
-  {
-    id: 'electronic',
-    label: 'Electronic & dance',
-    href: '/discover?genre=electronic',
-    query: 'Electronic',
-    from: '#0f5e6e',
-    to: '#082f38',
-  },
-  {
-    id: 'rock',
-    label: 'Rock & alternative',
-    href: '/discover?genre=rock',
-    query: 'Rock',
-    from: '#7a4a12',
-    to: '#3d250a',
-  },
-  {
-    id: 'hiphop',
-    label: 'Hip-hop & rap',
-    href: '/discover?genre=hip%20hop',
-    query: 'Hip Hop',
-    from: '#5a2d8c',
-    to: '#2c1646',
-  },
-  {
-    id: 'chill',
-    label: 'Lo-fi & chill',
-    href: '/discover?genre=chill',
-    query: 'Chill',
-    from: '#1f6b4f',
-    to: '#0f3528',
-  },
-  {
-    id: 'jazz',
-    label: 'Jazz & soul',
-    href: '/discover?genre=jazz',
-    query: 'Jazz',
-    from: '#80305e',
-    to: '#401830',
-  },
-  {
-    id: 'soundtracks',
-    label: 'Soundtracks & score',
-    href: '/discover?genre=soundtrack',
-    query: 'Soundtrack',
-    from: '#284f8c',
-    to: '#142846',
-  },
-];
 
 /** Which of the dropdown's three bodies is showing. */
 type DropdownView = 'hidden' | 'loading' | 'empty' | 'results';
@@ -191,6 +124,26 @@ export function SearchPage() {
   const results = activeResults(state);
   const soulseekActive = state.activeSource === 'soulseek';
 
+  // a browse tile's view (/search?browse=genre:jazz). typing takes over from
+  // it, and clearing the box comes back to it.
+  const browseId = useRouterState({
+    select: (s) => new URLSearchParams(s.location.searchStr).get('browse'),
+  });
+  const browsing = Boolean(browseId) && !query.trim() && !soulseekActive;
+  const browseQuery = useQuery({
+    queryKey: ['search-browse', browseId],
+    queryFn: ({ signal }) => fetchBrowse(browseId ?? '', signal),
+    enabled: browsing,
+    staleTime: 5 * 60_000,
+  });
+  const [browseFilter, setBrowseFilter] = useState<ResultFilter>('all');
+  useEffect(() => {
+    setBrowseFilter('all');
+  }, [browseId]);
+  const browse: BrowseResult | undefined = browsing ? browseQuery.data : undefined;
+  // the cards' library badges and artist photos follow whatever is on screen
+  const shown = browse ?? results;
+
   // Catalog returns to the metadata source the user was last on, not the default
   const catalogRef = useRef('');
   if (modeOf(state.activeSource) === 'catalog') catalogRef.current = state.activeSource;
@@ -201,8 +154,12 @@ export function SearchPage() {
     setFilter('all');
   }, [state.query, state.activeSource]);
 
-  const ownership = useLibraryCheck(results.albums, results.tracks);
-  const artistImages = useArtistImages(results.db_artists, results.artists, state.activeSource);
+  const ownership = useLibraryCheck(shown.albums, shown.tracks);
+  const artistImages = useArtistImages(
+    shown.db_artists,
+    shown.artists,
+    browse ? (browse.artists[0]?.source ?? state.activeSource) : state.activeSource,
+  );
   const {
     progress: videoProgress,
     download: downloadVideo,
@@ -407,7 +364,7 @@ export function SearchPage() {
   const filesSource = basic.state.singleSource
     ? basic.state.sources[0]
     : basic.state.sources.find((source) => source.name === basic.state.activeSource);
-  const idle = !open && !soulseekActive && !query.trim();
+  const idle = !open && !soulseekActive && !query.trim() && !browsing;
 
   return (
     <div className="downloads-content">
@@ -511,28 +468,122 @@ export function SearchPage() {
                     <h2 className={styles.sectionTitle}>Browse</h2>
                   </div>
                   <div className={styles.explore}>
-                    {EXPLORE_CATEGORIES.map((cat) => (
+                    {BROWSE_TILES.map((tile) => (
                       <button
-                        key={cat.id}
+                        key={tile.id}
                         type="button"
                         className={styles.tile}
-                        style={{ background: `linear-gradient(135deg, ${cat.from}, ${cat.to})` }}
-                        onClick={() => {
-                          if (window.SoulSyncWebShellBridge?.isPageAllowed('discover') ?? true) {
-                            void router.navigate({ href: cat.href as `/${string}` });
-                            return;
-                          }
-                          setQuery(cat.query);
-                          runSearch(cat.query);
-                        }}
+                        style={{ background: `linear-gradient(135deg, ${tile.from}, ${tile.to})` }}
+                        onClick={() => void router.navigate({ href: browseHref(tile.id) })}
                       >
-                        <b>{cat.label}</b>
+                        <b>{tile.label}</b>
                       </button>
                     ))}
                   </div>
                 </section>
               ) : null}
             </div>
+          ) : null}
+
+          {browsing && browseId ? (
+            <section
+              className={styles.browse}
+              id="enh-browse-view"
+              aria-busy={browseQuery.isLoading || undefined}
+            >
+              <div className={styles.browseHead}>
+                <button
+                  type="button"
+                  className={styles.textLink}
+                  onClick={() => void router.navigate({ href: '/search' })}
+                >
+                  ← Browse
+                </button>
+                <h2 className={styles.browseTitle}>{browse?.title ?? browseTitle(browseId)}</h2>
+                {browse?.subtitle ? <p className={styles.browseSub}>{browse.subtitle}</p> : null}
+                {browse?.related.length ? (
+                  <div className={styles.chips}>
+                    {browse.related.map((genre) => (
+                      <span key={genre} className={styles.chip}>
+                        <button
+                          type="button"
+                          className={`${styles.chipLabel} ${styles.chipPlain}`}
+                          onClick={() =>
+                            void router.navigate({
+                              href: browseHref(`genre:${genre.toLowerCase()}`),
+                            })
+                          }
+                        >
+                          {genre}
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              {browseQuery.isLoading ? (
+                <div className={styles.skeletons} aria-hidden="true">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <Skeleton
+                      key={i}
+                      className={`${styles.skel}${i < 2 ? ` ${styles.skelRound}` : ''}`}
+                    />
+                  ))}
+                </div>
+              ) : browseQuery.isError ? (
+                <div className={styles.state}>
+                  <p className={styles.stateTitle}>Couldn’t load this right now</p>
+                  <p className={styles.stateText}>Try again in a moment, or search above.</p>
+                </div>
+              ) : browse && browseCount(browse) === 0 ? (
+                <div className={styles.state}>
+                  <p className={styles.stateTitle}>Nothing here yet</p>
+                  <p className={styles.stateText}>
+                    {browseId === 'new'
+                      ? 'New releases fill in as your watchlist and discovery scans run.'
+                      : 'This fills in as SoulSync learns more music. Try another tile, or search above.'}
+                  </p>
+                </div>
+              ) : browse ? (
+                <div className={styles.results}>
+                  <SearchResults
+                    activeSource={browse.artists[0]?.source ?? state.activeSource}
+                    dbArtists={[]}
+                    artists={browse.artists}
+                    albums={browse.albums}
+                    tracks={browse.tracks}
+                    playlists={browse.playlists}
+                    labels={[]}
+                    videos={[]}
+                    videoProgress={videoProgressForGrid}
+                    ownership={ownership}
+                    artistImages={artistImages}
+                    filter={browseFilter}
+                    onFilter={setBrowseFilter}
+                    onArtistHref={(artist, inLibrary) =>
+                      inLibrary
+                        ? inLibraryArtistPath(artist)
+                        : artistDetailPath(
+                            artist.id ?? '',
+                            artist.source ?? state.activeSource,
+                            artist.name,
+                          )
+                    }
+                    onLabelHref={onLabelHref}
+                    onAlbumClick={(album: SearchAlbum) =>
+                      void openSearchAlbum(album, album.source ?? state.activeSource)
+                    }
+                    onTrackClick={(track: SearchTrack) => void openSearchTrack(track)}
+                    onPlaylistClick={(playlist: SearchPlaylist) => setPreviewPlaylist(playlist)}
+                    onTrackPlay={(track: SearchTrack, row: LibraryCheckTrack | undefined) => {
+                      if (row) playOwnedTrack(row);
+                      else void streamSearchTrack(track);
+                    }}
+                    onVideoDownload={handleVideoAcquire}
+                  />
+                </div>
+              ) : null}
+            </section>
           ) : null}
 
           <div id="enhanced-dropdown" className={open ? undefined : 'hidden'}>

@@ -295,6 +295,37 @@
   gap: 28px;
 }
 
+/* a browse tile's view: the same result cards a search shows */
+.browse {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.browseHead {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.browseTitle {
+  margin: 4px 0 0;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.browseSub {
+  margin: -4px 0 4px;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+}
+
+.chipPlain {
+  padding: 7px 14px;
+}
+
 .sectionHead {
   display: flex;
   align-items: baseline;

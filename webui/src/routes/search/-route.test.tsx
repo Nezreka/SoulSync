@@ -15,7 +15,7 @@ function renderRoute(path: string) {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [path] });
   const router = createAppRouter({ history, queryClient });
-  return render(<AppRouterProvider router={router} queryClient={queryClient} />);
+  return { router, ...render(<AppRouterProvider router={router} queryClient={queryClient} />) };
 }
 
 /**
@@ -91,32 +91,49 @@ describe('the search route', () => {
     expect(screen.getByText('Top trending')).toBeInTheDocument();
   });
 
-  it('a browse tile opens Discover, not a search for its name (#1935)', async () => {
-    const queryClient = createTestQueryClient();
-    const history = createMemoryHistory({ initialEntries: ['/search'] });
-    const router = createAppRouter({ history, queryClient });
-    const navigate = vi.spyOn(router, 'navigate').mockResolvedValue(undefined);
-    render(<AppRouterProvider router={router} queryClient={queryClient} />);
+  it('a browse tile opens its browse view right here, not a search for its name (#1935)', async () => {
+    server.use(
+      http.get('/api/discover/genre-deep-dive', ({ request }) =>
+        HttpResponse.json({
+          success: true,
+          genre: new URL(request.url).searchParams.get('genre'),
+          artists: [{ name: 'Kavinsky', entity_id: 'a1', source: 'deezer' }],
+          albums: [{ name: 'OutRun', artist_name: 'Kavinsky', entity_id: 'al1', source: 'deezer' }],
+          tracks: [
+            { name: 'Nightcall', artist_name: 'Kavinsky', entity_id: 't1', source: 'deezer' },
+          ],
+          related_genres: [{ genre: 'Synthwave', count: 3 }],
+        }),
+      ),
+    );
+    const { router } = await renderRoute('/search');
     await settled();
 
     act(() => screen.getByText('Electronic & dance').click());
 
-    expect(navigate).toHaveBeenCalledWith({ href: '/discover?genre=electronic' });
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ browse: 'genre:electronic' }),
+    );
+    expect(await screen.findByRole('heading', { name: 'Electronic' })).toBeInTheDocument();
+    expect((await screen.findAllByText('Nightcall')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Synthwave' })).toBeInTheDocument();
     expect((document.getElementById('enhanced-search-input') as HTMLInputElement).value).toBe('');
+    expect(document.getElementById('enh-explore-section')).toBeNull();
   });
 
-  it('a browse tile still searches on a profile without Discover', async () => {
-    window.SoulSyncWebShellBridge = createShellBridge({
-      isPageAllowed: vi.fn((page: string) => page !== 'discover'),
-    });
-    await renderRoute('/search');
-    await settled();
-
-    act(() => screen.getByText('Electronic & dance').click());
-
-    expect((document.getElementById('enhanced-search-input') as HTMLInputElement).value).toBe(
-      'Electronic',
+  it('a browse url opens straight onto its view, and typing takes over', async () => {
+    server.use(
+      http.get('/api/discover/recent-releases', () =>
+        HttpResponse.json({
+          success: true,
+          source: 'deezer',
+          albums: [{ album_name: 'Fresh One', artist_name: 'New Artist', album_deezer_id: '9' }],
+        }),
+      ),
     );
+    await renderRoute('/search?browse=new');
+    expect((await screen.findAllByText('Fresh One')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'New releases' })).toBeInTheDocument();
   });
 
   it('renders #enhanced-main-results-area, where download bubbles land', async () => {
