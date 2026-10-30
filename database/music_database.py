@@ -1781,6 +1781,12 @@ class MusicDatabase:
                     cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
                     logger.info(f"Added {_col} column to library_history")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_origin ON library_history (origin, created_at DESC)")
+            # clearing the download history hides an origin-tagged row instead
+            # of deleting it: the download origin tab and the expired download
+            # cleaner still need it (#1931)
+            if 'cleared_at' not in lh_cols:
+                cursor.execute("ALTER TABLE library_history ADD COLUMN cleared_at TEXT")
+                logger.info("Added cleared_at column to library_history")
 
             # Migration (F-10): persistent acquisition correlation. The import
             # pipeline knows which request/candidate/download produced a row,
@@ -23394,8 +23400,15 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM library_history WHERE event_type IN ('download', 'podcast')")
+            cursor.execute("DELETE FROM library_history WHERE event_type IN ('download', 'podcast') "
+                           "AND origin IS NULL")
             removed = cursor.rowcount
+            # a download a watchlist or playlist triggered stays, hidden: the
+            # download origin tab lists it and the cleaner decides on it (#1931)
+            cursor.execute("UPDATE library_history SET cleared_at = CURRENT_TIMESTAMP "
+                           "WHERE event_type = 'download' AND origin IS NOT NULL "
+                           "AND cleared_at IS NULL")
+            removed += cursor.rowcount
             conn.commit()
             # The "why this file" records belong to the same history. Best
             # effort, after the commit: a missing table must never cost the
@@ -23462,6 +23475,7 @@ class MusicDatabase:
             for src in (exclude_download_sources or ()):
                 clauses.append("COALESCE(download_source, '') != ?")
                 params.append(src)
+            clauses.append("cleared_at IS NULL")  # cleared, kept for origins (#1931)
             where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
             cursor.execute(f"SELECT COUNT(*) as cnt FROM library_history {where}", params)
@@ -23499,7 +23513,8 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT * FROM library_history ORDER BY created_at DESC LIMIT 200")
+                    "SELECT * FROM library_history WHERE cleared_at IS NULL "
+                    "ORDER BY created_at DESC LIMIT 200")
                 rows = [dict(r) for r in cursor.fetchall()]
 
                 cards: list[dict] = []
@@ -23749,7 +23764,8 @@ class MusicDatabase:
             cursor = conn.cursor()
             cursor.execute(f"""
                 SELECT COUNT(*) FROM library_history
-                WHERE verification_status IN ('unverified', 'force_imported'){clause}
+                WHERE verification_status IN ('unverified', 'force_imported')
+                  AND cleared_at IS NULL{clause}
             """, params)
             return int(cursor.fetchone()[0] or 0)
         except Exception as e:
@@ -23835,7 +23851,8 @@ class MusicDatabase:
             cursor = conn.cursor()
             cursor.execute(f"""
                 SELECT * FROM library_history
-                WHERE verification_status IN ('unverified', 'force_imported'){clause}
+                WHERE verification_status IN ('unverified', 'force_imported')
+                  AND cleared_at IS NULL{clause}
                 ORDER BY created_at DESC
             """, params)
             return [dict(row) for row in cursor.fetchall()]
@@ -23953,7 +23970,8 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT event_type, COUNT(*) as cnt FROM library_history GROUP BY event_type")
+            cursor.execute("SELECT event_type, COUNT(*) as cnt FROM library_history "
+                           "WHERE cleared_at IS NULL GROUP BY event_type")
             stats = {'downloads': 0, 'imports': 0, 'podcasts': 0}
             for row in cursor.fetchall():
                 if row['event_type'] == 'download':
@@ -23969,6 +23987,7 @@ class MusicDatabase:
                 cursor.execute("""
                     SELECT download_source, COUNT(*) as cnt FROM library_history
                     WHERE event_type IN ('download', 'podcast') AND download_source IS NOT NULL AND download_source != ''
+                      AND cleared_at IS NULL
                     GROUP BY download_source ORDER BY cnt DESC
                 """)
                 for row in cursor.fetchall():
