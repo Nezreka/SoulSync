@@ -21738,6 +21738,10 @@ _DISCOVER_WARM_PATHS = [
     # not a shelf cache: asking is what turns the day over, so the new day's
     # mixes are built shortly after midnight instead of on the first visit
     '/api/discover/personalized/daily-mixes',
+    # not discover, but the same cold-start trap: the library's "could be
+    # better" filter grades every file once per library (~10s) and the first
+    # click used to pay it
+    '/api/library/v2/artists?sort=name&monitored=all&page=1&quality=upgradable',
 ]
 
 

@@ -6,9 +6,16 @@ owned file facts and the same live profile cascade/evaluator as acquisition.
 from __future__ import annotations
 
 import json
+import threading
+import time
+from contextlib import closing
 from typing import Any, Dict, List, Tuple
+
+from utils.logging_config import get_logger
 from .sql_util import intent_profile_id, monitored_sql, owner_clause, scope_visibility_sql
 from .track_files import primary_order
+
+logger = get_logger("library2.artist_reader")
 
 def artist_pagination(page: int, limit: int, total: int) -> Dict[str, Any]:
     page = max(1, int(page))
@@ -19,8 +26,14 @@ def artist_pagination(page: int, limit: int, total: int) -> Dict[str, Any]:
 
 
 def _upgradable_artist_ids(conn, predicate: str, params: Dict[str, Any]) -> set[int]:
-    """The artists matching ``predicate`` with at least one upgradable track."""
-    return set(upgradable_track_counts(conn, predicate, params))
+    """The artists matching ``predicate`` with at least one upgradable track.
+
+    the whole library's counts come from the cache below, so the filter is a
+    lookup and not a fresh evaluation of every file in the library"""
+    counts = library_upgradable_counts(conn)
+    where = f"WHERE {predicate}" if predicate else ""
+    return {int(row[0]) for row in conn.execute(
+        f"SELECT a.id FROM lib2_artists a {where}", params) if int(row[0]) in counts}
 
 
 def upgradable_track_counts(conn, predicate: str, params: Dict[str, Any]) -> Dict[int, int]:
@@ -33,13 +46,125 @@ def upgradable_track_counts(conn, predicate: str, params: Dict[str, Any]) -> Dic
     Profiles and file facts are batched; no Findings or stale wanted quality
     projections decide this filter.
     """
+    owner = owner_clause(column="f.owner_profile_id")
+    cached = _cached_counts(conn, owner)
+    if cached is not None:
+        where = f"WHERE {predicate}" if predicate else ""
+        ids = [int(row[0]) for row in conn.execute(
+            f"SELECT a.id FROM lib2_artists a {where}", params)]
+        return {i: cached[i] for i in ids if i in cached}
+    return _count_upgradable(conn, predicate, params, owner)
+
+
+# the filter used to evaluate every file in the library on every click (~310k
+# files, 26s on a big library, so the request timed out). the counts are kept
+# per library scope. what the user decides lands at once: a profile edit
+# changes the profiles' own rows, which are read every time (two rows), and an
+# assignment forgets the counts (assign_quality_profile). what the library
+# does on its own (imports, upgrades) is picked up by a background recheck once
+# the counts are older than this, so it shows on the next click.
+_UPGRADE_FRESH = 30.0
+_upgrade_cache: Dict[Any, Dict[str, Any]] = {}
+_upgrade_lock = threading.Lock()
+_upgrade_refreshing: set = set()
+
+
+def _upgrade_fingerprint(conn) -> Tuple[Any, ...]:
+    files = conn.execute(
+        "SELECT MAX(id), COUNT(*), MAX(updated_at) FROM lib2_track_files").fetchone()
+    tracks = conn.execute(
+        "SELECT COUNT(*), TOTAL(quality_profile_id) FROM lib2_tracks "
+        "WHERE quality_profile_explicit=1").fetchone()
+    albums = conn.execute(
+        "SELECT COUNT(*), TOTAL(quality_profile_id) FROM lib2_albums "
+        "WHERE quality_profile_explicit=1").fetchone()
+    artists = conn.execute(
+        "SELECT COUNT(*), TOTAL(quality_profile_id), TOTAL(quality_profile_explicit), "
+        "TOTAL(COALESCE(canonical_artist_id,0)) FROM lib2_artists").fetchone()
+    return (*tuple(files), *tuple(tracks), *tuple(albums), *tuple(artists))
+
+
+def _profiles_state(conn) -> Tuple[Any, ...]:
+    return tuple(tuple(row) for row in conn.execute("SELECT * FROM quality_profiles ORDER BY id"))
+
+
+def forget_upgradable_counts() -> None:
+    """Drop the cached counts, for a write that changes what they'd say."""
+    _upgrade_cache.clear()
+
+
+def _upgrade_key(conn, owner: str) -> Tuple[str, str]:
+    return (str(conn.execute("PRAGMA database_list").fetchone()[2]), owner)
+
+
+def _cached_counts(conn, owner: str) -> Dict[int, int] | None:
+    """the cached library-wide counts, or None when there are none yet"""
+    key = _upgrade_key(conn, owner)
+    hit = _upgrade_cache.get(key)
+    if hit is None or hit["profiles"] != _profiles_state(conn):
+        return None
+    if time.monotonic() - hit["at"] > _UPGRADE_FRESH:
+        _refresh_in_background(key, owner)
+    return hit["counts"]
+
+
+def library_upgradable_counts(conn) -> Dict[int, int]:
+    """Every artist's "could be better" count, from the cache when it has one."""
+    owner = owner_clause(column="f.owner_profile_id")
+    cached = _cached_counts(conn, owner)
+    if cached is not None:
+        return cached
+    fingerprint = _upgrade_fingerprint(conn)
+    profiles = _profiles_state(conn)
+    counts = _count_upgradable(conn, "", {}, owner)
+    _upgrade_cache[_upgrade_key(conn, owner)] = {
+        "at": time.monotonic(), "fingerprint": fingerprint, "profiles": profiles,
+        "counts": counts}
+    return counts
+
+
+def _refresh_in_background(key, owner: str) -> None:
+    with _upgrade_lock:
+        if key in _upgrade_refreshing:
+            return
+        _upgrade_refreshing.add(key)
+
+    def run():
+        try:
+            from database.music_database import get_database
+            with closing(get_database()._get_connection()) as conn:
+                if _upgrade_key(conn, owner) != key:
+                    return
+                fingerprint = _upgrade_fingerprint(conn)
+                profiles = _profiles_state(conn)
+                hit = _upgrade_cache.get(key)
+                if hit and hit["fingerprint"] == fingerprint and hit["profiles"] == profiles:
+                    hit["at"] = time.monotonic()
+                    return
+                counts = _count_upgradable(conn, "", {}, owner)
+                _upgrade_cache[key] = {
+                    "at": time.monotonic(), "fingerprint": fingerprint, "profiles": profiles,
+                    "counts": counts}
+        except Exception as exc:  # noqa: BLE001 - the old counts stay until the next try
+            logger.debug("could-be-better refresh failed: %s", exc)
+        finally:
+            with _upgrade_lock:
+                _upgrade_refreshing.discard(key)
+
+    threading.Thread(target=run, name="lib2-upgradable-refresh", daemon=True).start()
+
+
+def _count_upgradable(conn, predicate: str, params: Dict[str, Any], owner: str) -> Dict[int, int]:
     from .profile_lookup import default_quality_profile_id, resolve_profile_cascade
     from .quality_eval import evaluate_file, profile_targets
 
-    owner = owner_clause(column="f.owner_profile_id")
+    candidates = f"SELECT a.id FROM lib2_artists a WHERE {predicate}" if predicate \
+        else "SELECT a.id FROM lib2_artists a"
+    # only the columns the evaluator and the primary election read: f.* made
+    # every one of the library's file rows a wide copy
     rows = conn.execute(f"""
         WITH candidates AS MATERIALIZED (
-            SELECT a.id FROM lib2_artists a WHERE {predicate}
+            {candidates}
         ), members AS MATERIALIZED (
             SELECT a.id, COALESCE(a.canonical_artist_id,a.id) AS canonical_id
               FROM lib2_artists a
@@ -52,14 +177,18 @@ def upgradable_track_counts(conn, predicate: str, params: Dict[str, Any]) -> Dic
             SELECT m.canonical_id, ta.track_id
               FROM members m CROSS JOIN lib2_track_artists ta ON ta.artist_id=m.id
         ), ranked_files AS MATERIALIZED (
-            SELECT f.*, ROW_NUMBER() OVER (
+            SELECT f.track_id, f.format, f.bitrate, f.sample_rate, f.bit_depth,
+                   f.acquired_quality_json, f.retention_json,
+                   ROW_NUMBER() OVER (
                 PARTITION BY f.track_id ORDER BY {primary_order('f')}) AS file_rank
               FROM (SELECT DISTINCT track_id FROM artist_tracks) at
               CROSS JOIN lib2_track_files f ON f.track_id=at.track_id
              WHERE COALESCE(f.file_state,'active')='active'
                AND f.path IS NOT NULL AND TRIM(f.path)<>''{owner}
         )
-        SELECT f.*, at.artist_id, t.quality_profile_id AS tp,
+        SELECT f.track_id, f.format, f.bitrate, f.sample_rate, f.bit_depth,
+               f.acquired_quality_json, f.retention_json,
+               at.artist_id, t.quality_profile_id AS tp,
                t.quality_profile_explicit AS te, t.album_id,
                al.quality_profile_id AS ap, al.quality_profile_explicit AS ae,
                al.primary_artist_id, ar.quality_profile_id AS rp,
@@ -73,6 +202,9 @@ def upgradable_track_counts(conn, predicate: str, params: Dict[str, Any]) -> Dic
     profiles = {int(row['id']): dict(row) for row in conn.execute("SELECT * FROM quality_profiles")}
     settings = {}
     verdicts = {}
+    # a library has a few thousand distinct (profile, quality) pairs across its
+    # files, so each is judged once
+    judged: Dict[Tuple[Any, ...], bool] = {}
     result: Dict[int, int] = {}
     for row in rows:
         tid = int(row['track_id'])
@@ -83,10 +215,16 @@ def upgradable_track_counts(conn, predicate: str, params: Dict[str, Any]) -> Dic
                 ('artist', row['primary_artist_id'], row['rp'], row['re']),
             ), default_id)
             pid = resolved['id']
-            if pid not in settings:
-                settings[pid] = profile_targets(profiles.get(pid))
-            targets, policy, cutoff = settings[pid]
-            verdicts[tid] = evaluate_file(dict(row), targets, policy, cutoff)['upgrade_candidate'] is True
+            quality = (pid, row['format'], row['bitrate'], row['sample_rate'], row['bit_depth'],
+                       row['acquired_quality_json'], row['retention_json'])
+            verdict = judged.get(quality)
+            if verdict is None:
+                if pid not in settings:
+                    settings[pid] = profile_targets(profiles.get(pid))
+                targets, policy, cutoff = settings[pid]
+                verdict = evaluate_file(dict(row), targets, policy, cutoff)['upgrade_candidate'] is True
+                judged[quality] = verdict
+            verdicts[tid] = verdict
         if verdicts[tid]:
             aid = int(row['artist_id'])
             result[aid] = result.get(aid, 0) + 1

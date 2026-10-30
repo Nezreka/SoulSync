@@ -5,6 +5,7 @@ import json
 import pytest
 
 from core.library2 import queries
+from core.library2.artist_reader import forget_upgradable_counts
 from core.library2.schema import ensure_library_v2_schema
 from database.music_database import MusicDatabase
 from tests.lib2_seed import RowDb, artist, row_conn, track
@@ -141,6 +142,8 @@ def test_explicit_track_and_album_profiles_override_artist(catalogue):
     upgrade = conn.execute("SELECT quality_profile_id FROM lib2_artists WHERE name='Inherited low'").fetchone()[0]
     conn.execute("UPDATE lib2_tracks SET quality_profile_id=?,quality_profile_explicit=1 WHERE id=?", (upgrade, tid))
     conn.commit()
+    # a raw write: assign_quality_profile forgets the cached counts itself
+    forget_upgradable_counts()
     assert [a["name"] for a in MusicDatabase.get_library_artists(db, quality_filter="upgradable")["artists"]] == ["Inherited low"]
 
 
@@ -220,3 +223,33 @@ def test_source_filter_preserves_other_native_provider_namespaces(catalogue):
     assert [a["name"] for a in page["artists"]] == ["Bandcamp"]
     negative = MusicDatabase.get_library_artists(db, source_filter="!bandcamp", quality_filter="upgradable")
     assert [a["name"] for a in negative["artists"]] == ["Other"]
+
+
+def test_could_be_better_is_kept_and_an_assignment_lands_at_once(catalogue):
+    # the filter graded every file in the library on every click (26s, timed
+    # out). it's cached now, and what the user decides still shows at once
+    from core.library2.profile_lookup import assign_quality_profile
+
+    conn, db = catalogue
+    aid, tid = _seed(conn, "Low", ("mp3", None, 44100, 128))
+    conn.commit()
+    names = lambda: [a["name"] for a in MusicDatabase.get_library_artists(  # noqa: E731
+        db, quality_filter="upgradable")["artists"]]
+    assert names() == ["Low"]
+    # a file change on its own waits for the background recheck
+    conn.execute("UPDATE lib2_track_files SET format='flac',bit_depth=24,sample_rate=96000 WHERE track_id=?", (tid,))
+    conn.commit()
+    assert names() == ["Low"]
+    conn.execute("UPDATE lib2_track_files SET format='mp3',bit_depth=NULL,sample_rate=44100 WHERE track_id=?", (tid,))
+    off = conn.execute("INSERT INTO quality_profiles(name,upgrade_policy) VALUES('Off','none')").lastrowid
+    conn.commit()
+    assert names() == ["Low"]
+    assign_quality_profile(conn, "artists", aid, off)
+    conn.commit()
+    assert names() == []
+    # a profile's own settings are read every time
+    conn.execute("UPDATE quality_profiles SET upgrade_policy='until_cutoff', ranked_targets=? WHERE id=?",
+                 (json.dumps([{"format": "flac", "bit_depth": 16, "min_sample_rate": 44100}]), off))
+    conn.commit()
+    assert names() == ["Low"]
+

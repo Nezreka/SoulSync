@@ -1654,3 +1654,14 @@ def _isolated_cover_dir(monkeypatch):
     nothing."""
     monkeypatch.setenv('SOULSYNC_PLAYLIST_COVER_DIR',
                        _os.path.join(_COVER_ROOT, str(next(_cover_seq))))
+
+
+@pytest.fixture(autouse=True)
+def _fresh_upgradable_counts():
+    """the library's "could be better" counts are cached per process and keyed
+    by db file, and the test clients share one session db: one test's counts
+    would answer the next test's filter."""
+    from core.library2.artist_reader import forget_upgradable_counts
+    forget_upgradable_counts()
+    yield
+    forget_upgradable_counts()

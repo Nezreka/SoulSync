@@ -240,6 +240,9 @@ def assign_quality_profile(
     }[normalized]
     result["entity_explicit"] = result["source"] == current_source
     result["updated"] = updated
+    # the "could be better" counts read the assignments
+    from .artist_reader import forget_upgradable_counts
+    forget_upgradable_counts()
     return result
 
 
