@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useRouterState } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { takeArtistArrival } from '@/platform/shell/last-navigation';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { Discography, DiscographyBucket, DiscographyRelease } from '../-artist-detail.types';
@@ -15,7 +16,12 @@ import {
   settleOwnershipForSourceArtist,
   watchlistIdentity,
 } from '../-artist-detail.api';
-import { backButtonLabel, pushArtistOrigin, pushPageOrigin } from '../-artist-detail.back-label';
+import {
+  backButtonLabel,
+  backLabelStack,
+  pushArtistOrigin,
+  pushPageOrigin,
+} from '../-artist-detail.back-label';
 import { peekArtistEdit } from '../-artist-detail.edit-focus';
 import {
   readEnhancedViewMode,
@@ -216,7 +222,16 @@ export function ArtistDetailPage() {
    */
   const cameFrom = useRouterState({ select: (state) => state.resolvedLocation?.pathname });
   useEffect(() => {
-    pushPageOrigin(cameFrom);
+    // an arrival from outside the artist pages starts a fresh chain: the
+    // shared stack outlives every visit, so without this the first page ever
+    // recorded ("library") labelled the button for good
+    const arrival = takeArtistArrival();
+    if (arrival) {
+      backLabelStack().length = 0;
+      pushPageOrigin(arrival.pathname);
+    } else {
+      pushPageOrigin(cameFrom);
+    }
     setBackLabel(backButtonLabel());
     // Only on arrival: re-running as the chain grows would rewrite it.
     // eslint-disable-next-line react-hooks/exhaustive-deps

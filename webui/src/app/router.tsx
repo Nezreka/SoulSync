@@ -3,7 +3,7 @@ import { createRouter, type RouterHistory } from '@tanstack/react-router';
 import { RouterProvider } from '@tanstack/react-router';
 
 import { getShellBridge } from '@/platform/shell/bridge';
-import { noteNavigationFrom } from '@/platform/shell/last-navigation';
+import { noteNavigation, resetNavigationHistory } from '@/platform/shell/last-navigation';
 import { LibrarySearchHost } from '@/routes/library/-ui/interactive-search-host';
 import { routeTree } from '@/routeTree.gen';
 
@@ -57,9 +57,9 @@ export function createAppRouter(
     defaultNotFoundComponent: DefaultNotFoundComponent,
   });
   // the artist page's back button labels itself with where you came from
-  noteNavigationFrom(undefined);
+  resetNavigationHistory();
   router.subscribe('onBeforeNavigate', (event) => {
-    if (event.fromLocation) noteNavigationFrom(event.fromLocation);
+    if (event.fromLocation) noteNavigation(event.fromLocation, event.toLocation);
   });
   return router;
 }

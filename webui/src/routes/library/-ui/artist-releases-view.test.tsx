@@ -823,6 +823,28 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(await screen.findByText('← Back')).toBeInTheDocument();
   });
 
+  it('names the page of THIS visit, not the first one ever recorded', async () => {
+    // a visit from the library grid used to leave "library" in the shared
+    // chain for good, so an artist opened from search later still said
+    // "Back to Library"
+    (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack = [
+      { type: 'page', pageId: 'library' },
+    ];
+    const { router } = renderArtist('/search');
+    await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/search'));
+    await act(() => router.navigate({ href: '/library?artist=1' }));
+    expect(await screen.findByRole('button', { name: '← Back to Search' })).toHaveClass('back-btn');
+    delete (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack;
+  });
+
+  it('url tweaks after the page opens do not change where you came from', async () => {
+    const { router } = renderArtist('/search');
+    await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/search'));
+    await act(() => router.navigate({ href: '/library?artist=1' }));
+    await act(() => router.navigate({ href: '/library?artist=1&header=rich' }));
+    expect(await screen.findByRole('button', { name: '← Back to Search' })).toBeInTheDocument();
+  });
+
   it("is dev's styled back button, labelled with the page you came from", async () => {
     const { router } = renderArtist('/library');
     await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/library'));

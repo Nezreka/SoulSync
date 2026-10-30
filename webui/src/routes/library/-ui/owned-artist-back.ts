@@ -1,7 +1,7 @@
 import { useRouter } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 
-import { lastNavigationFrom } from '@/platform/shell/last-navigation';
+import { takeArtistArrival } from '@/platform/shell/last-navigation';
 
 import {
   backButtonLabel,
@@ -29,16 +29,14 @@ export function useArtistBack(artistName: string | undefined): {
   const previousName = useRef<string | null>(null);
 
   useEffect(() => {
-    // a cold load has no previous location: keep whatever chain vanilla's
-    // navigateToArtistDetail left for it
-    const cameFrom = lastNavigationFrom();
-    const params = new URLSearchParams(cameFrom?.searchStr ?? '');
-    const fromInsideArtist =
-      cameFrom?.pathname.endsWith('/library') && (params.has('album') || params.has('artist'));
-    if (cameFrom && !fromInsideArtist) {
+    // an arrival from outside the artist views starts a fresh chain with the
+    // page it came from. no arrival is a cold load, or coming back up from an
+    // album, and the chain stays as it was
+    const arrival = takeArtistArrival();
+    if (arrival) {
       // cleared in place: vanilla holds the same array
       backLabelStack().length = 0;
-      pushPageOrigin(cameFrom?.pathname);
+      pushPageOrigin(arrival.pathname);
     }
     setLabel(backButtonLabel());
     // only on arrival: re-running as the chain grows would rewrite it
