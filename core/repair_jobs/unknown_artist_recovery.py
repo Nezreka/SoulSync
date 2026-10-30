@@ -265,14 +265,15 @@ class UnknownArtistRecoveryJob(RepairJob):
         '2. The track\'s id on your metadata sources\n'
         '3. A title search as a last resort\n\n'
         'Fixing a finding files the track under the right artist and album (creating them '
-        'when needed) and can correct the file\'s tags. Run Library Reorganize afterwards to '
-        'move the files into the matching folders.\n\n'
+        'when needed), can correct the file\'s tags, and can move it into the matching folder.\n\n'
         'What counts as unknown: "Unknown Artist", "Unknown Artists", "Unknown", an empty '
         'name, and the bracketed forms servers write ("[Unknown Artist]"). Add your own '
         'spellings under Unknown names.\n\n'
         'Settings:\n'
         '- Dry Run: report findings to review (default); off applies the fixes on each run\n'
         '- Fix file tags: write the identified artist, album and title into the file\n'
+        '- Reorganize files: move a fixed file into its artist/album folder through Library '
+        'Reorganize. Only files in SoulSync\'s own folders move; a media server\'s files stay put\n'
         '- Unknown names: extra placeholder names, comma-separated'
     )
     icon = 'repair-icon-artist'
@@ -281,6 +282,8 @@ class UnknownArtistRecoveryJob(RepairJob):
     default_settings = {
         'dry_run': True,
         'fix_tags': True,
+        # upstream's setting, on by default there too
+        'reorganize_files': True,
         'unknown_names': '',
     }
     auto_fix = True
