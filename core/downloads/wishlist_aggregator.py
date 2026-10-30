@@ -144,16 +144,25 @@ def merge_wishlist_run_status(
     # re-indexed consistently.
     merged_results: List[Dict[str, Any]] = []
     track_index_remap: Dict[tuple, int] = {}
+    # a wishlist run's tracks carry their row in the modal as track_index
+    # (_original_index), unique across the siblings. renumbering them in
+    # sibling order put each status on another row (#1925), so they're kept;
+    # only siblings that each count from 0 are renumbered.
+    all_indexes = [int(r.get('track_index') or 0)
+                   for s in all_statuses for r in (s.get('analysis_results') or [])]
+    keep_indexes = len(all_indexes) == len(set(all_indexes))
     next_index = 0
     for s in all_statuses:
         batch_ref = id(s)
         for r in (s.get('analysis_results') or []):
             old_idx = int(r.get('track_index') or 0)
-            track_index_remap[(batch_ref, old_idx)] = next_index
+            new_idx = old_idx if keep_indexes else next_index
+            track_index_remap[(batch_ref, old_idx)] = new_idx
             new_r = dict(r)
-            new_r['track_index'] = next_index
+            new_r['track_index'] = new_idx
             merged_results.append(new_r)
             next_index += 1
+    merged_results.sort(key=lambda r: r.get('track_index', 0))
 
     # Tasks — concat + re-index using the remap above. Tasks
     # without a remapped entry keep their original track_index

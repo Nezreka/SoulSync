@@ -239,6 +239,23 @@ def test_start_manual_wishlist_download_batch_filters_track_ids_and_starts_batch
     assert any("Filtered to 1 specific tracks by ID" in msg for msg in logger.info_messages)
 
 
+def test_a_picked_track_keeps_its_modal_row_when_one_before_it_is_gone():
+    """#1925: the first picked track had already left the wishlist, the second
+    got renumbered to row 0, and its status showed on the first row."""
+    runtime, _service, _db, executor, *_rest = _build_runtime(
+        tracks=[{"id": "track-2", "name": "Song 2", "artists": [{"name": "Artist 2"}],
+                 "album": {"name": "Album 2", "album_type": "album"}}]
+    )
+
+    payload, _ = processing.start_manual_wishlist_download_batch(
+        runtime, track_ids=["track-gone", "track-2"], category=None)
+    _run_submitted_bg_job(executor)
+
+    args = _dispatched(executor, runtime)[0][1]
+    assert args[2][0]["id"] == "track-2"
+    assert args[2][0]["_original_index"] == 1
+
+
 def test_start_manual_wishlist_download_batch_does_not_run_library_cleanup():
     """Manual flow does NOT scan the library for already-owned tracks.
 

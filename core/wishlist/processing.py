@@ -1105,12 +1105,15 @@ def _prepare_and_run_manual_wishlist_batch(
 
             wishlist_tracks = filtered_tracks
             logger.info(f"[Manual-Wishlist] Filtered to {len(wishlist_tracks)} specific tracks by ID (preserving frontend display order)")
-        elif category:
-            wishlist_tracks, _ = filter_wishlist_tracks_by_category(wishlist_tracks, category)
-            logger.info(f"[Manual-Wishlist] Filtered to {len(wishlist_tracks)} tracks for category: {category}")
-
-        for i, track in enumerate(wishlist_tracks):
-            track['_original_index'] = i
+        else:
+            if category:
+                wishlist_tracks, _ = filter_wishlist_tracks_by_category(wishlist_tracks, category)
+                logger.info(f"[Manual-Wishlist] Filtered to {len(wishlist_tracks)} tracks for category: {category}")
+            for i, track in enumerate(wishlist_tracks):
+                track['_original_index'] = i
+        # a picked selection keeps each track's row in the modal: renumbering it
+        # after a track was dropped (a duplicate, one already gone) moved every
+        # later status up a row (#1925)
 
         runtime.add_activity_item("", "Wishlist Download Started", f"{len(wishlist_tracks)} tracks", "Now")
 
