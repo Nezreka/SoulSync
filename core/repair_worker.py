@@ -2821,6 +2821,7 @@ class RepairWorker:
             'quality_upgrade': self._fix_legacy_quality_upgrade,
             'missing_discography_track': self._fix_legacy_discography_track,
             'missing_discography_release': self._fix_discography_release,
+            'incomplete_album': self._fix_incomplete_album,
             'short_preview_track': self._fix_short_preview_track,
             'corrupt_audio': self._fix_corrupt_audio,
             'fake_lossless': self._fix_fake_lossless,
@@ -3430,6 +3431,45 @@ class RepairWorker:
             return {'success': True, 'action': 'added_to_wishlist'}
         except Exception as exc:
             return {'success': False, 'error': str(exc)}
+
+    def _fix_incomplete_album(self, entity_type, entity_id, file_path, details):
+        """Approve an Album Completeness review finding: monitor exactly the
+        missing tracks it listed, through the same projection as the Monitor
+        button, so Wanted and the Wishlist take it from there."""
+        album_id = _lib2_id(entity_id)
+        details = details or {}
+        try:
+            track_ids = [int(t) for t in details.get('track_ids') or []]
+            profile_id = int(details.get('profile_id') or 1)
+        except (TypeError, ValueError):
+            track_ids, profile_id = [], 1
+        if album_id is None or not track_ids:
+            return {'success': False, 'error': 'Nothing to fill on this finding; rerun Album Completeness'}
+        from core.library2.monitor_rules import PROVENANCE_USER, record_rules
+        from core.library2.mirror_outbox import drain, enqueue_projected_tracks
+        from core.library2.wanted import recompute_wanted
+        conn = self.db._get_connection()
+        try:
+            marks = ','.join('?' for _ in track_ids)
+            live = [int(r[0]) for r in conn.execute(
+                f"SELECT id FROM lib2_tracks WHERE album_id=? AND id IN ({marks})",
+                (album_id, *track_ids))]
+            if not live:
+                return {'success': False, 'error': 'Those tracks are no longer on this album; rerun Album Completeness'}
+            record_rules(conn, 'track', live, True, PROVENANCE_USER, profile_id=profile_id)
+            if profile_id == 1:
+                conn.executemany('UPDATE lib2_tracks SET monitored=1 WHERE id=?', [(t,) for t in live])
+            recompute_wanted(conn, profile_id=profile_id, track_ids=live)
+            enqueue_projected_tracks(conn, live, profile_id=profile_id, user_initiated=True)
+            conn.commit()
+        except Exception as exc:  # noqa: BLE001
+            conn.rollback()
+            return {'success': False, 'error': str(exc)}
+        finally:
+            conn.close()
+        drain(self.db)
+        return {'success': True, 'action': 'monitored_missing',
+                'message': f'Monitoring {len(live)} missing track{"s" if len(live) != 1 else ""}'}
 
     def _fix_discography_release(self, entity_type, entity_id, file_path, details):
         """Approve a native review-mode monitor-new-items release."""

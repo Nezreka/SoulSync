@@ -27,15 +27,25 @@ class AlbumCompletenessJob(RepairJob):
         'Browsing-only releases and hand-tagged albums are left alone. '
         'Dry Run loads metadata but does not change monitoring. '
         'Min Tracks For Check, Min Completion % and Min Owned Tracks can narrow '
-        'the selection; their defaults check every album in scope.'
+        'the selection. Min Owned Tracks defaults to 3: one or two playlist grabs '
+        'are not an album you are collecting (#1572); albums by monitored artists '
+        'are always checked.\n\n'
+        'Review (the default) files one finding per incomplete album and monitors '
+        'its missing tracks when you approve it. Automatic monitors them during '
+        'the scan. The Complete Incomplete Albums automation and a single-album '
+        'run always act directly.'
     )
     icon = 'repair-icon-completeness'
     default_enabled = False
     default_interval_hours = 168
     default_settings = {
         'min_tracks_for_check': 0, 'min_completion_pct': 0,
-        'min_owned_tracks': 0, 'dry_run': False,
+        # one or two playlist grabs are not an album the user is collecting (#1572)
+        'min_owned_tracks': 3, 'dry_run': False,
+        # dev filed incomplete albums for review; acting during the scan is opt-in
+        'mode': 'review',
     }
+    setting_options = {'mode': ['review', 'automatic']}
     auto_fix = True
     supports_artist_scope = True
     supports_file_scope = True
@@ -58,6 +68,10 @@ class AlbumCompletenessJob(RepairJob):
         scope = context.scope or {}
         target = str(scope.get('target_album_id') or '').removeprefix('lib2:')
         max_albums = scope.get('max_albums')
+        # an automation or a one-album run is the user asking for this album
+        # now; a scheduled sweep files findings unless set to automatic
+        review = (not target and max_albums is None
+                  and str(settings.get('mode') or 'review').strip().lower() != 'automatic')
         keys = hand_tagged_path_keys(context.db)
         subjects = active_file_subjects(context.db, context.config_manager, include_missing=True)
         selected = artist_scoped_subjects(context, subjects)
@@ -108,8 +122,10 @@ class AlbumCompletenessJob(RepairJob):
                         (*own, owner, album_id, edition_id, edition_id),
                     ).fetchall()
                     owned = sum(bool(t['owned']) for t in tracks)
+                    watched = bool(primary is not None and conn.execute(
+                        'SELECT monitored FROM lib2_artists WHERE id=?', (primary,)).fetchone()[0])
                     if (not tracks or len(tracks) < int(settings['min_tracks_for_check'])
-                            or owned < int(settings['min_owned_tracks'])
+                            or (owned < int(settings['min_owned_tracks']) and not target and not watched)
                             or 100 * owned / len(tracks) < float(settings['min_completion_pct'])):
                         result.skipped += 1
                         continue
@@ -121,7 +137,27 @@ class AlbumCompletenessJob(RepairJob):
                         "SELECT r.entity_id FROM lib2_monitor_rules r JOIN lib2_tracks t ON t.id=r.entity_id WHERE r.entity_type='track' "
                         'AND r.profile_id=? AND r.monitored=1 AND t.album_id=?', (profile_id, album_id))}
                     missing = [tid for tid in missing if tid not in existing]
-                    if missing and settings.get('dry_run') is not True:
+                    if missing and review and settings.get('dry_run') is not True:
+                        if context.create_finding:
+                            title = conn.execute('SELECT al.title, ar.name FROM lib2_albums al '
+                                                 'LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id '
+                                                 'WHERE al.id=?', (album_id,)).fetchone()
+                            created = context.create_finding(
+                                job_id=self.job_id, finding_type='incomplete_album', severity='info',
+                                entity_type='album', entity_id=f'lib2:{album_id}', file_path=None,
+                                title=f"Incomplete album: {title[1] or 'Unknown'} - {title[0]} "
+                                      f"({owned}/{len(tracks)})",
+                                description=f'{len(missing)} missing track(s). Approve to monitor them; '
+                                            'Wanted and the Wishlist take it from there.',
+                                details={'lib2_album_id': album_id, 'track_ids': missing,
+                                         'profile_id': profile_id, 'owned': owned,
+                                         'total': len(tracks)})
+                            if created:
+                                result.findings_created += 1
+                            else:
+                                result.findings_skipped_dedup += 1
+                        completed += 1
+                    elif missing and settings.get('dry_run') is not True:
                         # This job is an explicit opt-in to collect missing siblings.
                         # The common projection preserves profiles, pins and ignore rules.
                         record_rules(conn, 'track', missing, True, PROVENANCE_USER,

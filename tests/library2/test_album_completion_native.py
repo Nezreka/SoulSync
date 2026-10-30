@@ -25,11 +25,17 @@ def catalogue(tmp_path, monkeypatch):
     return db, aid, owned, missing, loads
 
 
-def run(db, *, settings=None, scope=None):
+def run(db, *, settings=None, scope=None, as_shipped=False, create_finding=None):
+    """These tests pin the automatic mode, the opt-in that acts during the
+    scan, with no owned-track floor. ``as_shipped`` runs the defaults instead."""
     from core.repair_jobs import get_all_jobs
     cls = get_all_jobs().get('album_completeness')
     assert cls is not None, 'The opt-in completion job must run on Library v2'
+    if not as_shipped:
+        settings = {'mode': 'automatic', 'min_owned_tracks': 0, **(settings or {})}
     cfg = SimpleNamespace(get=lambda key, default=None: settings if key.endswith('.settings') else default)
+    if create_finding is not None:
+        return cls().scan(JobContext(db, '/music', cfg, scope=scope, create_finding=create_finding))
     return cls().scan(JobContext(db, '/music', cfg, scope=scope))
 
 
@@ -166,3 +172,75 @@ def test_a_credit_to_the_album_artists_alias_is_the_artists_own(catalogue):
 
     run(db)
     assert [r[0] for r in rules(db)] == sorted([missing, aliased])
+
+
+def _collector():
+    found = []
+    return found, lambda **kw: found.append(kw) or True
+
+
+def _three_owned_one_missing(db):
+    with db._get_connection() as conn:
+        for n in (1, 2, 3):
+            lib2_seed.track(conn, 'Band', 'Record', f'Have {n}', track_number=n, disc_number=1, monitored=0)
+        gap = lib2_seed.track(conn, 'Band', 'Record', 'Gap', owned=False, track_number=4, disc_number=1, monitored=0)
+        aid = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (gap,)).fetchone()[0]
+        conn.commit()
+    return aid, gap
+
+
+def test_a_scheduled_run_files_a_finding_and_approval_monitors_the_gap(catalogue):
+    """dev filed incomplete albums for review; the scan itself queues nothing."""
+    db = catalogue[0]
+    aid, gap = _three_owned_one_missing(db)
+    found, create = _collector()
+
+    result = run(db, as_shipped=True, create_finding=create)
+
+    assert result.auto_fixed == 0 and rules(db) == []
+    finding, = [f for f in found if f['entity_id'] == f'lib2:{aid}']
+    assert finding['finding_type'] == 'incomplete_album'
+    assert finding['details']['track_ids'] == [gap]
+
+    from core.repair_worker import RepairWorker
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    fixed = worker._fix_incomplete_album('album', finding['entity_id'], None, finding['details'])
+
+    assert fixed['success'] is True
+    assert rules(db) == [(gap, 1, 1)]
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT wanted FROM lib2_wanted_tracks WHERE track_id=? AND profile_id=1',
+                            (gap,)).fetchone()[0] == 1
+
+
+def test_one_or_two_playlist_grabs_are_not_an_album_you_collect(catalogue):
+    """#1572: one owned track of a two-track album is a playlist grab."""
+    db = catalogue[0]
+    found, create = _collector()
+
+    run(db, as_shipped=True, create_finding=create)
+
+    assert found == [] and rules(db) == []
+
+
+def test_a_monitored_artists_album_is_checked_regardless_of_the_floor(catalogue):
+    db, aid, _, missing, _ = catalogue
+    with db._get_connection() as conn:
+        conn.execute('UPDATE lib2_artists SET monitored=1 WHERE id=(SELECT primary_artist_id FROM lib2_albums WHERE id=?)',
+                     (aid,))
+        conn.commit()
+    found, create = _collector()
+
+    run(db, as_shipped=True, create_finding=create)
+
+    assert [f['details']['track_ids'] for f in found] == [[missing]]
+
+
+def test_the_automation_still_acts_directly_as_shipped(catalogue):
+    db = catalogue[0]
+    _, gap = _three_owned_one_missing(db)
+
+    result = run(db, as_shipped=True, scope={'max_albums': 3})
+
+    assert result.auto_fixed == 1 and rules(db) == [(gap, 1, 1)]
