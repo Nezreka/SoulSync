@@ -250,12 +250,17 @@ def _pending_findings_for_files(conn, file_ids):
         for i in range(0, len(keys), 500):
             part = keys[i:i + 500]
             needs_no_path = part[0][2]
-            _take(conn.execute(
+            # "no path of its own" is checked here, not in the sql: there it
+            # steered sqlite onto the path index, which matches every pathless
+            # finding, instead of the entity index
+            found = conn.execute(
                 f"SELECT * FROM repair_findings WHERE status='pending' AND entity_type=? "
-                f"AND entity_id IN ({','.join('?' for _ in part)})"
-                + (" AND file_path IS NULL" if needs_no_path else ""),
-                [entity_type, *[k[1] for k in part]]).fetchall(),
-                lambda f, t=entity_type, n=needs_no_path: by_key.get((t, f['entity_id'], n), ()))
+                f"AND entity_id IN ({','.join('?' for _ in part)})",
+                [entity_type, *[k[1] for k in part]]).fetchall()
+            if needs_no_path:
+                found = [f for f in found if f['file_path'] is None]
+            _take(found,
+                  lambda f, t=entity_type, n=needs_no_path: by_key.get((t, f['entity_id'], n), ()))
     links = _json_file_links(conn)
     by_finding = {}
     for fid in file_ids:

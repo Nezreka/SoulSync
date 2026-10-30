@@ -803,9 +803,12 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                    ROW_NUMBER() OVER (
                        PARTITION BY tf.track_id ORDER BY {primary_order('tf')}
                    ) AS rank
+              -- CROSS JOIN: sqlite otherwise led with every file in the
+              -- library and joined this artist's albums onto it (~1s an
+              -- artist page). the small side has to lead.
               FROM artist_albums aa2
-              JOIN lib2_tracks t2 ON t2.album_id=aa2.album_id
-              JOIN lib2_track_files tf ON tf.track_id=t2.id
+              CROSS JOIN lib2_tracks t2 ON t2.album_id=aa2.album_id
+              CROSS JOIN lib2_track_files tf ON tf.track_id=t2.id
              WHERE COALESCE(tf.file_state, 'active') <> 'deleted'{tf_owner}
         ),
         -- I8: disk-space roll-up per album, computed separately from the
