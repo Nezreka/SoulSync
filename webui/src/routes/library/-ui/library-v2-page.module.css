@@ -791,6 +791,7 @@ button.featureTag:disabled {
 }
 
 .trackTableWrap {
+  container: track-table / inline-size;
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -6017,11 +6018,36 @@ textarea.searchInput {
   display: none;
 }
 .trackTableStacked tr > td[data-column]:not([data-column='title']) {
-  margin-left: 30px;
+  /* under the title: past the checkbox, bookmark and number */
+  margin-left: 90px;
   color: var(--white-a60);
 }
 .trackTableStacked tr > td[data-column]:not([data-column='title']) ~ td[data-column] {
   margin-left: 6px;
+}
+/* with room to spare those facts stay on the title's line, before the actions */
+@container track-table (min-width: 900px) {
+  .trackTableStacked tr::after {
+    display: none;
+  }
+  .trackTableStacked tr > td[data-column]:not([data-column='title']) {
+    margin-left: 12px;
+  }
+  .trackTableStacked .trackActions {
+    order: 3;
+    margin-left: 12px;
+  }
+  /* fixed widths, so the facts line up from row to row */
+  .trackTableStacked td[data-column='duration'] {
+    min-width: 36px;
+    justify-content: flex-end;
+  }
+  .trackTableStacked td[data-column='quality'] {
+    min-width: 150px;
+  }
+  .trackTableStacked td[data-column='acoustid'] {
+    min-width: 76px;
+  }
 }
 .monitorBtn.monitorProminent {
   /* Override the legacy mobile rule with its long :not() selector. */
