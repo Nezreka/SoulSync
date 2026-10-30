@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from core.reconciliation.fulfillment import (
     outstanding,
     published_wishlist_track,
@@ -9,6 +11,63 @@ from core.reconciliation.fulfillment import (
 from core.reconciliation.identity import review_case_key
 from core.repair_worker import RepairWorker
 from tests.reconciliation.support.acquisition import Database
+
+
+@pytest.mark.parametrize('exact_context', [False, True])
+@pytest.mark.parametrize('state', ['cancelled', 'untracked', 'fulfilled', 'published'])
+def test_late_publication_does_not_revive_or_replace_an_inactive_request(tmp_path, exact_context, state):
+    db = Database(tmp_path / 'late.db')
+    details = {'album_id': 2, 'profile_id': 1, 'album_folder': str(tmp_path),
+               'source': 'musicbrainz', 'release_id': 'release'}
+    record_request(db, details, {'source_track_id': 'slot'})
+    key = review_case_key(details, None)
+    audio = tmp_path / 'late.flac'
+    audio.write_bytes(b'late delivery')
+    payload = {'id': 'slot', 'provider': 'musicbrainz', 'album': {'id': 'release'}}
+    info = {'review_request': {'case_id': key, 'source': 'musicbrainz',
+                              'release_id': 'release', 'source_track_id': 'slot'}} if exact_context else {}
+    with db._get_connection() as conn:
+        conn.execute('ALTER TABLE wishlist_tracks ADD COLUMN source_info TEXT')
+        conn.execute('INSERT INTO wishlist_tracks VALUES(1,?,?,?)', ('slot', json.dumps(payload), json.dumps(info)))
+        conn.execute('UPDATE reconcile_fulfillment SET state=?,published_path=?,refresh_needed=0',
+                     (state, '/first-delivery.flac' if state in ('published', 'fulfilled') else ''))
+        before = conn.execute('SELECT * FROM reconcile_fulfillment').fetchall()
+    published_wishlist_track(db, 'slot', [1], str(audio))
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT * FROM reconcile_fulfillment').fetchall() == before
+
+
+@pytest.mark.parametrize('alias', ['current', 'redirect', 'stable'])
+def test_exact_publication_updates_only_its_requested_album(tmp_path, alias):
+    from core.reconciliation import decisions
+
+    db = Database(tmp_path / 'exact.db')
+    details = {'album_id': 2, 'profile_id': 1, 'album_folder': str(tmp_path / 'one'),
+               'source': 'musicbrainz', 'release_id': 'release'}
+    other = {**details, 'album_id': 3, 'album_folder': str(tmp_path / 'two')}
+    slot = {'source_track_id': 'slot'}
+    record_request(db, details, slot)
+    record_request(db, other, slot)
+    key, other_key = review_case_key(details, None), review_case_key(other, None)
+    requested_key = key if alias == 'current' else 'previous-case'
+    audio = tmp_path / 'delivered.flac'
+    audio.write_bytes(b'published audio')
+    with db._get_connection() as conn:
+        if alias == 'redirect':
+            conn.execute('CREATE TABLE reconcile_case_redirects(old_case_id TEXT PRIMARY KEY,new_case_id TEXT)')
+            conn.execute('INSERT INTO reconcile_case_redirects VALUES(?,?)', (requested_key, key))
+        elif alias == 'stable':
+            decisions.register_review(conn, requested_key, 2)
+            decisions.rebind_review(conn, requested_key, key, 2)
+        conn.execute('ALTER TABLE wishlist_tracks ADD COLUMN source_info TEXT')
+        conn.execute('INSERT INTO wishlist_tracks VALUES(1,?,?,?)', ('slot',
+            json.dumps({'id': 'slot', 'provider': 'musicbrainz', 'album': {'id': 'release'}}),
+            json.dumps({'review_request': {'case_id': requested_key, 'source': 'musicbrainz',
+                                          'release_id': 'release', 'source_track_id': 'slot'}})))
+    published_wishlist_track(db, 'slot', [1], str(audio))
+    with db._get_connection() as conn:
+        assert dict(conn.execute('SELECT case_id,state FROM reconcile_fulfillment')) == {
+            key: 'published', other_key: 'requested'}
 
 
 def test_published_request_survives_wishlist_removal_until_correct_assignment(tmp_path):

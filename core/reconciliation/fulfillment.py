@@ -106,6 +106,8 @@ def published_wishlist_track(db, stored_id, profiles, path):
     conn = db._get_connection()
     try:
         ensure_schema(conn)
+        # Identity relocation and cancellation cannot overtake this receipt.
+        conn.execute('BEGIN IMMEDIATE')
         has_info = 'source_info' in {r[1] for r in conn.execute('PRAGMA table_info(wishlist_tracks)')}
         rows = conn.execute('SELECT profile_id, spotify_data,' + ('source_info' if has_info else "'{}'") +
                             ' FROM wishlist_tracks WHERE spotify_track_id=?', (stored_id,)).fetchall()
@@ -115,11 +117,17 @@ def published_wishlist_track(db, stored_id, profiles, path):
             payload = json.loads(raw or '{}')
             identity = (json.loads(info_raw or '{}') or {}).get('review_request') or {}
             if identity.get('case_id'):
+                from core.reconciliation.redirects import resolve_case_on_connection
+                case = resolve_case_on_connection(conn, identity['case_id'])
                 conn.execute('''UPDATE reconcile_fulfillment SET state='published', published_path=?,
                     refresh_needed=1, updated_at=CURRENT_TIMESTAMP WHERE profile_id=? AND case_id=?
                     AND source=? AND release_id=? AND source_track_id=? AND state='requested' ''',
-                    (str(path), profile, identity['case_id'], identity.get('source'),
+                    (str(path), profile, case, identity.get('source'),
                      identity.get('release_id'), identity.get('source_track_id')))
+                # An exact request must not also publish another album's copy.
+                # A cancelled or already published request is a no-op, not a
+                # reason to fall back to a broader provider/release match.
+                continue
             track_id = str(payload.get('id') or str(stored_id).split('::')[0])
             release_id = str((payload.get('album') or {}).get('id') or '')
             source = str(payload.get('provider') or '')
@@ -128,7 +136,7 @@ def published_wishlist_track(db, stored_id, profiles, path):
             conn.execute('''UPDATE reconcile_fulfillment SET state='published',
                 published_path=?, refresh_needed=1, updated_at=CURRENT_TIMESTAMP
                 WHERE profile_id=? AND release_id=? AND source_track_id=? AND source=?
-                  AND state != 'fulfilled' ''', (str(path), profile, release_id, track_id, source))
+                  AND state = 'requested' ''', (str(path), profile, release_id, track_id, source))
         conn.commit()
     finally:
         conn.close()

@@ -741,6 +741,7 @@ class ReviewCommands:
                     (str(album_id), source, release_id, file_path))
                 from core.reconciliation.work import enqueue
                 enqueue(conn, review_case_key(details, file_path), details.get('album_folder') or os.path.dirname(file_path), scope='plan')
+                album_decisions.touch(conn, review_case_key(details, file_path))
                 conn.commit()
                 return {'success': True, 'action': 'reconciliation_assignment',
                         'message': 'Plan assignment reset to automatic matching.'}
@@ -768,6 +769,7 @@ class ReviewCommands:
                   details.get('fingerprint_key') or ''))
             from core.reconciliation.work import enqueue
             enqueue(conn, review_case_key(details, file_path), details.get('album_folder') or os.path.dirname(file_path), scope='plan')
+            album_decisions.touch(conn, review_case_key(details, file_path))
             conn.commit()
         except Exception as exc:
             return {'success': False, 'error': str(exc)}

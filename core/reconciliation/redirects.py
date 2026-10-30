@@ -4,18 +4,27 @@ import json
 def resolve_case(db, key: str) -> str:
     conn = db._get_connection()
     try:
-        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'reconcile_case_redirects'").fetchone():
-            return key
-        seen = set()
-        while key not in seen:
-            seen.add(key)
-            row = conn.execute('SELECT new_case_id FROM reconcile_case_redirects WHERE old_case_id = ?', (key,)).fetchone()
-            if not row:
-                break
-            key = row[0]
-        return key
+        return resolve_case_on_connection(conn, key)
     finally:
         conn.close()
+
+
+def resolve_case_on_connection(conn, key: str) -> str:
+    """Resolve verified aliases inside the caller's read/write transaction."""
+    from core.reconciliation.decisions import find_review
+    redirects = conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_case_redirects'").fetchone()
+    seen = set()
+    while key not in seen:
+        seen.add(key)
+        review = find_review(conn, key)
+        if review and review[4] != key:
+            key = review[4]
+            continue
+        row = conn.execute('SELECT new_case_id FROM reconcile_case_redirects WHERE old_case_id=?', (key,)).fetchone() if redirects else None
+        if not row:
+            break
+        key = row[0]
+    return key
 
 
 def record_relocation(db, old_folder: str, new_case: str) -> None:

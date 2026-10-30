@@ -152,3 +152,12 @@ The final browser pass covered 24 Plan/Release/Tracks views for LIVE, TRON, Blue
 Saved decision content was compared using sorted row hashes, excluding timestamps, before deployment and after startup, the warm scan, and the final scan. All hashes matched: 568 current choices, 15 album policies, and 1,285 accepted track decisions. The follow-up queue was empty. Queue totals remained 681 albums, 368 needing review, 313 ready albums, and 1,436 ready actions.
 
 The final pod was ready with zero restarts, and its startup/reconciliation logs contained no errors or tracebacks. Music and video automation were both enabled, matching their original settings. The feature image remains active and the SoulSync Flux Kustomization remains suspended for ongoing user review. No unreviewed album plans were applied during validation.
+
+### Second adversarial pass
+
+The follow-up audit found two additional transaction and acquisition defects:
+
+- A late wishlist publication could revive a cancelled or untracked acquisition, replace an existing delivery receipt, or publish the same delivery into another album's request. The exact-request branch incorrectly continued into its broad provider/release fallback. Publication now updates only active requests, stops after handling an exact identity, and resolves verified case aliases inside the same write transaction. The acquisition regressions cover inactive states, duplicate delivery, album isolation, and both stable and legacy aliases. Nine cases failed before the fix.
+- Saving or resetting a manual track assignment committed the override and recovery work before its decision revision. An interruption during follow-up scheduling could therefore let an older scan publish. Both paths now advance the revision in their assignment transaction. Two interruption regressions first reproduced stale publication, then passed after the fix.
+
+All **952 reconciliation tests** and **412 shared wishlist/atomic-publication tests** passed. The 13 new cases live in the existing acquisition and transaction suites. Acceptance documents did not change. The final navigation and playlist-reference audit found no further reproducible defect requiring a change.

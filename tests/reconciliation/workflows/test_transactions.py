@@ -230,6 +230,36 @@ def test_state_readers_do_not_write_or_repair_data(tmp_path, monkeypatch):
         assert not writes
 
 
+@pytest.mark.parametrize('reset', [False, True])
+def test_assignment_revision_commits_before_followup_scheduling(tmp_path, monkeypatch, reset):
+    from core.reconciliation.publication import StalePublication, publish, revisions
+
+    album = build_album(tmp_path, monkeypatch, 'recording_conflict')
+    case = scan_case(album)
+    item = next(row for row in case['items'] if row['details'].get('assignment_options'))
+    choice = 'assign:' + item['details']['assignment_options'][0]['key']
+    if reset:
+        assert album.worker.apply_review_decision(case['case_id'], item['id'],
+            evidence_token=item['evidence_token'], action='fix', fix_action=choice)['success']
+        case = album.worker.get_review_case(case['case_id'])
+        item = next(row for row in case['items'] if row['id'] == item['id'])
+        choice = 'assign:auto'
+    with album.db._get_connection() as conn:
+        before = revisions(conn)
+    monkeypatch.setattr(album.worker, '_schedule_review_refresh',
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError('interrupted')))
+    with pytest.raises(RuntimeError, match='interrupted'):
+        album.worker.apply_review_decision(case['case_id'], item['id'],
+            evidence_token=item['evidence_token'], action='fix', fix_action=choice)
+    with album.db._get_connection() as conn:
+        assignments = conn.execute('SELECT slot_key FROM reconcile_track_assignment').fetchall()
+        assert bool(assignments) is not reset
+        assert work.pending(conn)
+    with pytest.raises(StalePublication):
+        with publish(album.db, before, [case['case_id']]):
+            pytest.fail('An older scan could publish after the assignment was committed')
+
+
 def test_same_album_planning_waits_and_next_mutation_cannot_overtake_a_plan():
     from core.library.maintenance_lock import MaintenanceLock
     lock = MaintenanceLock()
