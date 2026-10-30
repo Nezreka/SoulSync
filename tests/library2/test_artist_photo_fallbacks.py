@@ -228,3 +228,35 @@ def test_the_first_build_drops_cached_silhouettes_once(imported_conn, monkeypatc
     cached.write_bytes(b"rebuilt")
     artwork._forget_placeholder_artist_art_once(db, imported_conn)
     assert cached.exists(), "once per process: a rebuilt picture is left alone"
+
+
+def test_a_picture_three_unrelated_artists_share_is_rebuilt(imported_conn, monkeypatch, tmp_path):
+    """a server's 'no picture' image cached before a real photo was stored"""
+    monkeypatch.setattr(artwork, "artwork_dir", lambda _db: tmp_path)
+
+    class _DB:
+        database_path = str(tmp_path / "x.db")
+
+    ids = [_artist(imported_conn, f"Faceless {n}") for n in range(3)]
+    own = _artist(imported_conn, "Has Its Own")
+    picked = _artist(imported_conn, "Hand Picked")
+    imported_conn.execute("UPDATE lib2_artists SET art_locked=1 WHERE id=?", (picked,))
+    for artist_id in ids + [picked]:
+        artwork.thumb_file(_DB(), "artist", artist_id).write_bytes(b"server silhouette")
+    artwork.thumb_file(_DB(), "artist", own).write_bytes(b"a real photo")
+
+    shared = artwork._shared_artist_pictures(_DB(), imported_conn)
+
+    assert sorted(shared) == sorted(ids)
+
+
+def test_two_artists_sharing_a_picture_are_left_alone(imported_conn, monkeypatch, tmp_path):
+    monkeypatch.setattr(artwork, "artwork_dir", lambda _db: tmp_path)
+
+    class _DB:
+        database_path = str(tmp_path / "x.db")
+
+    for name in ("Duo", "Duo (alias)"):
+        artwork.thumb_file(_DB(), "artist", _artist(imported_conn, name)).write_bytes(b"same photo")
+
+    assert artwork._shared_artist_pictures(_DB(), imported_conn) == []

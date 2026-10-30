@@ -30,7 +30,7 @@ from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, List, Optional
 from urllib.parse import urljoin, urlsplit
 
 from utils.logging_config import get_logger
@@ -757,12 +757,44 @@ def manual_art_override_url(conn, kind: str, entity_id: int) -> Optional[str]:
 _placeholder_sweep_done: set = set()
 
 
+_SHARED_PICTURE_MIN = 3
+
+
+def _shared_artist_pictures(database, conn) -> List[int]:
+    """Artists whose cached picture is byte for byte the same as two or more
+    other artists': a server or provider "no picture" image, built before a
+    real one was stored and never rebuilt. Unrelated artists don't share a
+    photo; a hand-picked picture is left alone."""
+    import hashlib
+
+    groups: Dict[str, List[int]] = {}
+    try:
+        for path in artwork_dir(database).glob("artist_*_t.jpg"):
+            try:
+                artist_id = int(path.name[len("artist_"):-len("_t.jpg")])
+                digest = hashlib.md5(path.read_bytes()).hexdigest()
+            except (ValueError, OSError):
+                continue
+            groups.setdefault(digest, []).append(artist_id)
+    except OSError:
+        return []
+    shared = [i for ids in groups.values() if len(ids) >= _SHARED_PICTURE_MIN for i in ids]
+    if not shared:
+        return []
+    marks = ",".join("?" * len(shared))
+    locked = {int(r[0]) for r in conn.execute(
+        f"SELECT id FROM lib2_artists WHERE id IN ({marks}) AND COALESCE(art_locked, 0)=1",
+        shared).fetchall()}
+    return [i for i in shared if i not in locked]
+
+
 def _forget_placeholder_artist_art_once(database, conn) -> None:
     """Once per process and database: an artist whose stored picture is a
     provider placeholder (deezer's grey silhouette) loses that url, unless
     someone picked it by hand, and its cached copy, so the next build finds a
-    real picture or shows the placeholder card. After the first run the urls
-    are gone, so later runs find nothing to do."""
+    real picture or shows the placeholder card. A cached picture shared by
+    unrelated artists goes too (_shared_artist_pictures). After the first run
+    there is nothing left to do."""
     key = str(getattr(database, "database_path", "") or id(database))
     if key in _placeholder_sweep_done:
         return
@@ -777,9 +809,11 @@ def _forget_placeholder_artist_art_once(database, conn) -> None:
             return
         with closing(opener()) as own:
             ids = clear_placeholder_artist_images(own)["artist_ids"]
-            if not ids:
-                return
-            own.commit()
+            if ids:
+                own.commit()
+            ids = sorted(set(ids) | set(_shared_artist_pictures(database, own)))
+        if not ids:
+            return
         for artist_id in ids:
             for path in (artwork_file(database, "artist", artist_id),
                          thumb_file(database, "artist", artist_id)):
@@ -788,7 +822,7 @@ def _forget_placeholder_artist_art_once(database, conn) -> None:
                         path.unlink()
                 except OSError:
                     pass
-        logger.info("artwork: dropped provider placeholder pictures from %d artists", len(ids))
+        logger.info("artwork: dropped placeholder pictures from %d artists", len(ids))
     except Exception as e:  # noqa: BLE001 - a sweep that fails costs nothing
         logger.debug("placeholder artist art sweep failed: %s", e)
 
