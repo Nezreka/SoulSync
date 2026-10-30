@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -106,7 +106,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     },
   );
 
-  it('hides the toolbar buttons this profile switched off and customizes them from Tools', async () => {
+  it('hides the toolbar buttons this profile switched off and opens View Settings from Tools', async () => {
     const saved: unknown[] = [];
     server.use(
       http.get('/api/library/v2/ui-preferences', () =>
@@ -128,15 +128,30 @@ describe('Library V2 artist detail — All Releases views', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'History' })).toBeNull());
 
     fireEvent.click(screen.getByRole('button', { name: 'Tools' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Customize Toolbar…' }));
-    const history = await screen.findByRole('checkbox', { name: 'History' });
+    fireEvent.click(screen.getByRole('button', { name: 'View Settings…' }));
+    // the dialog is the whole View Settings: give it time under a loaded run
+    const history = await screen.findByRole('checkbox', { name: 'History' }, { timeout: 5000 });
     expect(history).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Refresh & Scan' })).toBeChecked();
     fireEvent.click(history);
 
-    await waitFor(() => expect(saved).toEqual([{ artist_toolbar: { history: true } }]));
+    fireEvent.click(
+      within(
+        screen.getByRole('radiogroup', { name: 'From Search, Discover and elsewhere' }),
+      ).getByRole('radio', { name: /Compact header/ }),
+    );
+    await waitFor(
+      () =>
+        expect(saved).toEqual([
+          { artist_toolbar: { history: true } },
+          { artist_page: { header_elsewhere: 'compact' } },
+        ]),
+      { timeout: 5000 },
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(await screen.findByRole('button', { name: 'History' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: 'History' }, { timeout: 5000 }),
+    ).toBeInTheDocument();
   });
 
   it('keeps media-server sync in Tools and reports its background result', async () => {
@@ -662,7 +677,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     });
   });
 
-  it('opens a featured artist from the tracklist and keeps the release artist as text', async () => {
+  it('opens a featured artist from the tracklist in the header this profile picked', async () => {
     server.use(
       http.get('/api/library/v2/ui-preferences', () =>
         HttpResponse.json({
@@ -673,6 +688,7 @@ describe('Library V2 artist detail — All Releases views', () => {
               column_order: ['title', 'artists'],
               column_widths: {},
             },
+            artist_page: { header: 'compact' },
           },
         }),
       ),
@@ -707,7 +723,9 @@ describe('Library V2 artist detail — All Releases views', () => {
     // the tracklist loads after the page
     fireEvent.click(await screen.findByRole('button', { name: 'Beth Gibbons' }, { timeout: 3000 }));
 
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ artist: 2 }));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ artist: 2, header: 'compact' }),
+    );
     expect(router.state.location.search).not.toHaveProperty('album');
   });
 

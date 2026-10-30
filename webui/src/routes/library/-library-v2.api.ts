@@ -8,6 +8,7 @@ import { apiClient, readJson } from '@/app/api-client';
 
 import type {
   LibraryV2AlbumDetail,
+  LibraryV2ArtistPageHeader,
   LibraryV2ArtistAliasMember,
   LibraryV2ArtistDetail,
   LibraryV2ArtistSettings,
@@ -2349,6 +2350,7 @@ type UiPreferencesPatch = {
     column_order?: (keyof LibraryV2ArtistTableColumns)[];
   };
   artist_toolbar?: LibraryV2UiPreferences['artist_toolbar'];
+  artist_page?: LibraryV2UiPreferences['artist_page'];
 };
 
 export async function fetchLibraryV2UiPreferences(): Promise<LibraryV2UiPreferences> {
@@ -2377,6 +2379,18 @@ export function libraryV2UiPreferencesQueryOptions() {
     queryFn: fetchLibraryV2UiPreferences,
     staleTime: 60_000,
   });
+}
+
+/** The header an artist opens with when the visit comes from outside the
+ *  library (search, discover), as this profile picked it in View Settings.
+ *  For a route's redirect, which runs before any page has the preferences. */
+export async function artistHeaderFromElsewhere(
+  queryClient: QueryClient,
+): Promise<LibraryV2ArtistPageHeader> {
+  const prefs = await queryClient
+    .ensureQueryData(libraryV2UiPreferencesQueryOptions())
+    .catch(() => null);
+  return prefs?.artist_page?.header_elsewhere ?? 'rich';
 }
 
 // --- Mirror outbox (lib2 → legacy wishlist/watchlist, audit P0-04) -----------

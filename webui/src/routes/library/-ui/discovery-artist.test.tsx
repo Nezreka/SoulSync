@@ -157,6 +157,22 @@ describe('an artist the catalogue does not hold', () => {
     expect(materializeCalls).toHaveLength(0);
   });
 
+  it('opens a known artist in the header this profile picked for arrivals from elsewhere', async () => {
+    resolveResponse = 42;
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { artist_page: { header: 'rich', header_elsewhere: 'compact' } },
+        }),
+      ),
+    );
+    const { router } = renderAt(ARTIST_URL);
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ artist: 42, header: 'compact' }),
+    );
+  });
+
   it('opens a known artist in native Discovery', async () => {
     resolveResponse = 42;
     const { router } = renderAt(ARTIST_URL);

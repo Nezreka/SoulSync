@@ -216,3 +216,12 @@ def test_each_profile_keeps_its_own_artist_toolbar():
     # the table layout stays one, shared
     assert guest["track_table"]["columns"]["bpm"] is True
     assert "profiles" not in admin
+
+
+def test_each_profile_picks_how_an_artist_opens_from_the_library():
+    conn = _conn()
+    assert get_ui_preferences(conn)["artist_page"] == {"header": "rich", "header_elsewhere": "rich"}
+    update_ui_preferences(conn, {"artist_page": {"header": "compact"}}, profile_id=2)
+    assert get_ui_preferences(conn, profile_id=2)["artist_page"] == {
+        "header": "compact", "header_elsewhere": "rich"}
+    assert get_ui_preferences(conn)["artist_page"]["header"] == "rich"

@@ -518,10 +518,14 @@ export function artistDetailPath(
  * The artist-detail fallback stays for callers that pass an artist from
  * somewhere else — inventing a v2 id for one would 404 the page.
  */
-export function inLibraryArtistPath(artist: {
-  id?: string | number;
-  library_v2_id?: number | null;
-}): string {
+export function inLibraryArtistPath(
+  artist: {
+    id?: string | number;
+    library_v2_id?: number | null;
+  },
+  // the header this profile opens artists from search with (View Settings)
+  header: 'rich' | 'compact' = 'rich',
+): string {
   return artist.library_v2_id
     ? // ldp-05 (iss29-B05): arriving from a search result means landing on what
       // the legacy artist page showed — full discography, cards, rich header.
@@ -529,7 +533,7 @@ export function inLibraryArtistPath(artist: {
       // (My Library / table / compact), so the same artist looked different
       // depending on whether v2 had mapped it yet.
       `/library?artist=${encodeURIComponent(String(artist.library_v2_id))}` +
-        `&releases=all&releaseView=cards&header=rich&immersive=true`
+        `&releases=all&releaseView=cards&header=${header}&immersive=true`
     : artistDetailPath(artist.id ?? '');
 }
 

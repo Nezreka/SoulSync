@@ -857,12 +857,12 @@ describe('library v2 album track table', () => {
     await screen.findByRole('table');
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Table options — columns & match providers',
+        name: 'View Settings',
       }),
     );
 
     const dialog = screen.getByRole('dialog', {
-      name: 'Table options — columns & match providers',
+      name: 'View Settings',
     });
     expect(dialog).toBeInTheDocument();
     expect(container).not.toContainElement(dialog);
@@ -912,7 +912,7 @@ describe('library v2 album track table', () => {
 
     await screen.findByRole('table');
     const settings = screen.getByRole('button', {
-      name: 'Table options — columns & match providers',
+      name: 'View Settings',
     });
     expect(settings).toBeDisabled();
     expect(screen.queryByRole('separator', { name: /Resize/ })).not.toBeInTheDocument();

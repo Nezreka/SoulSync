@@ -806,7 +806,14 @@ export interface LibraryV2UiPreferences {
   };
   /** Which artist toolbar buttons this profile sees (Tools always shows). */
   artist_toolbar?: Partial<Record<ArtistToolbarButton, boolean>>;
+  /** Which header an artist opens with, from the library and from anywhere else. */
+  artist_page?: {
+    header?: LibraryV2ArtistPageHeader;
+    header_elsewhere?: LibraryV2ArtistPageHeader;
+  };
 }
+
+export type LibraryV2ArtistPageHeader = 'rich' | 'compact';
 
 export const ARTIST_TOOLBAR_BUTTONS = {
   automatic_search: 'Automatic Search',

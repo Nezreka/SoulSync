@@ -145,11 +145,17 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
         "history": True,
         "artist_settings": True,
     },
+    # Which header an artist opens with ("rich" / "compact"): coming from the
+    # library, and coming from anywhere else (search, discover, the dashboard).
+    "artist_page": {
+        "header": "rich",
+        "header_elsewhere": "rich",
+    },
 }
 
 # Sections each profile keeps for itself, stored in the same blob under
 # "profiles" -> "<profile id>"; everything else is the one shared layout.
-PROFILE_SECTIONS = frozenset({"artist_toolbar"})
+PROFILE_SECTIONS = frozenset({"artist_toolbar", "artist_page"})
 
 
 def ensure_ui_preferences_schema(cursor) -> None:

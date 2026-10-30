@@ -3,6 +3,7 @@ import { createFileRoute, redirect } from '@tanstack/react-router';
 import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import {
+  artistHeaderFromElsewhere,
   LIBRARY_V2_QUERY_KEY,
   resolveLibraryV2DiscoveryArtistOwnership,
   libraryV2AlbumQueryOptions,
@@ -76,7 +77,7 @@ export const Route = createFileRoute('/library')({
             discover: undefined,
             discoverName: undefined,
             view: 'discovery',
-            header: 'rich',
+            header: await artistHeaderFromElsewhere(context.queryClient),
             releases: 'all',
             releaseView: 'cards',
           },
