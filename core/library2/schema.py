@@ -1190,10 +1190,22 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
                 f"ON lib2_artists({external_id_sql('external_ids', service)})")
         # mirrored-playlist ownership matches a row's source id against the
         # provider the playlist came from (upstream 4c738a0c0)
+        #
+        # partial (only rows that carry the id): most tracks have no id for most
+        # services, and a full index's stats then describe one value shared by
+        # every row, so after a full ANALYZE the planner judged it useless and
+        # scanned the catalogue once per playlist row (the mirrored-count
+        # budget test). an id lookup "expr = ?" still uses the partial index.
         for service in ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes'):
+            name = f"idx_lib2_tracks_ext_{service}"
+            expression = external_id_sql('external_ids', service)
+            row = cursor.execute(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
+            if row and ' WHERE ' not in (row[0] or '').upper():
+                cursor.execute(f"DROP INDEX {name}")
             cursor.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_lib2_tracks_ext_{service} "
-                f"ON lib2_tracks({external_id_sql('external_ids', service)})")
+                f"CREATE INDEX IF NOT EXISTS {name} "
+                f"ON lib2_tracks({expression}) WHERE {expression} IS NOT NULL")
     except Exception as e:  # noqa: BLE001
         logger.error("external_ids index failed (will retry next start): %s", e)
     # iss29-D13 normalized artist key. Index first, then backfill — also AFTER
