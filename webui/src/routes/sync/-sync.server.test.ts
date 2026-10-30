@@ -196,6 +196,23 @@ describe('fetchMirroredMatches (158-171)', () => {
     vi.unstubAllGlobals();
   });
 
+  it("a playlist from My Playlists is its server playlist's mirror too (#1926)", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify([
+              { id: 4, name: 'Radar', source: 'spotify', sync_name: 'Radar' },
+              { id: 9, name: 'alternative', source: 'soulsync', sync_name: 'alternative' },
+            ]),
+          ),
+      ),
+    );
+    const matches = await fetchMirroredMatches('alternative', 'nd-1');
+    expect(matches.map((m) => [m.id, m.source])).toEqual([[9, 'soulsync']]);
+  });
+
   it('keeps only exact name matches, trimmed and case-insensitive', async () => {
     vi.stubGlobal(
       'fetch',
