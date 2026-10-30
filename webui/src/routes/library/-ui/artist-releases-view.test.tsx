@@ -9,6 +9,8 @@ import { createShellBridge } from '@/test/shell-bridge';
 
 import type { LibraryV2AlbumSummary } from '../-library-v2.types';
 
+import { lib2Track } from '../-library-v2.test-fixtures';
+
 function album(patch: Partial<LibraryV2AlbumSummary> & { id: number; title: string }) {
   return {
     album_type: 'album',
@@ -625,6 +627,89 @@ describe('Library V2 artist detail — All Releases views', () => {
       releaseView: 'cards',
       header: 'rich',
     });
+  });
+
+  it('opens a featured artist from the tracklist and keeps the release artist as text', async () => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: {
+              columns: { title: true, artists: true },
+              column_order: ['title', 'artists'],
+              column_widths: {},
+            },
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Dummy' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 1, name: 'Portishead' },
+            tracks: [
+              lib2Track({
+                artists: [
+                  { id: 1, name: 'Portishead', role: 'primary' },
+                  { id: 2, name: 'Beth Gibbons', role: 'featured' },
+                ],
+              }),
+            ],
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/albums/1/queue-status', () =>
+        HttpResponse.json({ success: true, tracks: {}, albums: {} }),
+      ),
+    );
+    const { router } = renderArtist('/library?artist=1&album=1');
+
+    // the tracklist loads after the page
+    fireEvent.click(await screen.findByRole('button', { name: 'Beth Gibbons' }, { timeout: 3000 }));
+
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ artist: 2 }));
+    expect(router.state.location.search).not.toHaveProperty('album');
+  });
+
+  it('keeps the page artist as text in the tracklist', async () => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: {
+              columns: { title: true, artists: true },
+              column_order: ['title', 'artists'],
+            },
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Dummy' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 1, name: 'Portishead' },
+            tracks: [lib2Track({ artists: [{ id: 1, name: 'Portishead', role: 'primary' }] })],
+          },
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&album=1');
+
+    expect(
+      await screen.findByRole('cell', { name: 'Portishead' }, { timeout: 3000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Portishead' })).toBeNull();
   });
 
   it('shows the legacy enrichment rings and keeps the V2 match chips', async () => {

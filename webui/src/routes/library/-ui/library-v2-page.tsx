@@ -10635,6 +10635,7 @@ export function AlbumTrackTable({
               }
               onAction={onAction}
               queueStatus={track.id != null ? queueTracks[track.id] : undefined}
+              openArtistId={album.primary_artist?.id}
             />
           ))}
         </tbody>
@@ -10872,7 +10873,29 @@ type TrackRowProps = {
   queueStatus?: LibraryV2QueueStatusEntry;
   /** One file of the track, shown as the track itself (a "N versions" row). */
   version?: boolean;
+  /** The release's own artist: named as text, every other credit is a link. */
+  openArtistId?: number;
 };
+
+/** A featured (or any other) artist in the Artists column, opening their
+ *  library entry. The artist whose page this is stays plain text. */
+function TrackArtistLink({ artist }: { artist: { id: number; name: string } }) {
+  const navigate = useNavigate();
+  if (Route.useSearch().artist === artist.id) return <>{artist.name}</>;
+  return (
+    <button
+      type="button"
+      className={`${styles.linkButton} ${styles.titleEditLink}`}
+      title={`Open ${artist.name} in the library`}
+      onClick={(e) => {
+        e.stopPropagation();
+        void navigate({ search: (p) => openArtistSearch(p, artist.id) });
+      }}
+    >
+      {artist.name}
+    </button>
+  );
+}
 
 /** Columns that describe the recording, not a file: blank on a version row. */
 const TRACK_LEVEL_COLUMNS = new Set<keyof LibraryV2TrackTableColumns>([
@@ -10902,6 +10925,7 @@ function TrackRow(props: TrackRowProps) {
     onAction,
     queueStatus,
     version = false,
+    openArtistId,
   } = props;
   const [showVersions, setShowVersions] = useState(false);
   const missing = track.file_status === 'missing';
@@ -10994,7 +11018,12 @@ function TrackRow(props: TrackRowProps) {
             key="artists"
             style={widthStyle('artists')}
           >
-            {track.artists.map((a) => a.name).join(', ')}
+            {track.artists.map((a, i) => (
+              <Fragment key={a.id}>
+                {i > 0 ? ', ' : null}
+                {a.id === openArtistId ? a.name : <TrackArtistLink artist={a} />}
+              </Fragment>
+            ))}
           </td>
         );
       case 'duration':
