@@ -1992,6 +1992,9 @@ def get_decade_playlist(decade):
 @bp.route('/api/discover/popular-picks', methods=['GET'])
 @bp.route('/api/discover/personalized/popular-picks', methods=['GET'])
 @_hide_blocked({'tracks': WORKS})
+# a draw over the whole pool, 10s+ of cpu: kept like the other shelves (and
+# warmed by web_server's discover warmer), not redrawn on every visit
+@_discover_shelf_cache()
 def get_popular_picks_playlist():
     """Get high popularity tracks from discovery pool"""
     try:
@@ -2014,6 +2017,9 @@ def get_popular_picks_playlist():
 @bp.route('/api/discover/hidden-gems', methods=['GET'])
 @bp.route('/api/discover/personalized/hidden-gems', methods=['GET'])
 @_hide_blocked({'tracks': WORKS})
+# a draw over the whole pool, 10s+ of cpu: kept like the other shelves (and
+# warmed by web_server's discover warmer), not redrawn on every visit
+@_discover_shelf_cache()
 def get_hidden_gems_playlist():
     """Get hidden gems (low popularity) from discovery pool"""
     try:
@@ -2136,6 +2142,9 @@ def get_mood_mixes():
 @bp.route('/api/discover/discovery-shuffle', methods=['GET'])
 @bp.route('/api/discover/personalized/discovery-shuffle', methods=['GET'])
 @_hide_blocked({'tracks': WORKS})
+# a draw over the whole pool, 10s+ of cpu: kept like the other shelves (and
+# warmed by web_server's discover warmer), not redrawn on every visit
+@_discover_shelf_cache()
 def get_discovery_shuffle():
     """Get Discovery Shuffle playlist - random tracks from discovery pool"""
     try:

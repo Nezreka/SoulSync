@@ -21730,6 +21730,11 @@ _DISCOVER_WARM_PATHS = [
     '/api/discover/decades/available',
     '/api/discover/moods',
     '/api/discover/for-you',
+    # the made-for-you draws: as the discover page asks for them (the shuffle
+    # with its limit), so the warmed answer is the one it reads
+    '/api/discover/personalized/popular-picks',
+    '/api/discover/personalized/hidden-gems',
+    '/api/discover/personalized/discovery-shuffle?limit=50',
     # not a shelf cache: asking is what turns the day over, so the new day's
     # mixes are built shortly after midnight instead of on the first visit
     '/api/discover/personalized/daily-mixes',
