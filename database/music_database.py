@@ -2691,8 +2691,10 @@ class MusicDatabase:
 
     def get_owned_album_count_by_artist_name(self, artist_name: str) -> int:
         """How many of this artist's albums are IN the library — the discover
-        hero's ownership meter. Case-insensitive exact name match, riding
-        idx_artists_name + idx_albums_artist_id."""
+        hero's ownership meter. Case-insensitive exact name match through
+        idx_lib2_artists_name_lower: ``name = ? COLLATE NOCASE`` can't use the
+        plain name index, so it walked every library album, a second per
+        artist on a big library."""
         if not (artist_name or '').strip():
             return 0
         conn = self._get_connection()
@@ -2702,7 +2704,7 @@ class MusicDatabase:
                 """SELECT COUNT(DISTINCT al.id)
                      FROM lib2_albums al
                      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                    WHERE ar.name = ? COLLATE NOCASE
+                    WHERE LOWER(ar.name) = LOWER(?)
                       AND al.origin = 'library'
                       AND EXISTS (
                           SELECT 1 FROM lib2_tracks t
