@@ -61,17 +61,233 @@
   font-weight: 750;
 }
 
-.toggleActive {
-  border-color: transparent;
-  background: var(--white-a14);
-  color: var(--text-1);
-  font-weight: 700;
+/* the filters, behind one button */
+.filterWrap {
+  position: relative;
+  display: inline-flex;
 }
 
-.count {
-  margin-left: 6px;
+.filterButton {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.filterOn {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--text-1);
+}
+
+.filterCount {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--accent-rgb));
+  color: var(--text-1);
   font-size: 11px;
-  opacity: 0.8;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  place-items: center;
+}
+
+.filterPanel {
+  position: absolute;
+  z-index: var(--z-menu);
+  top: calc(100% + 8px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 320px;
+  padding: 18px;
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: 0 24px 60px var(--black-a60);
+  animation: filterIn var(--dur-fast) var(--ease-out);
+}
+
+@keyframes filterIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .filterPanel {
+    animation: none;
+  }
+}
+
+.filterPanel section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filterPanel h4 {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-control);
+  background: var(--white-a05);
+}
+
+.segmented button {
+  padding: 7px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented button:hover {
+  color: var(--text-1);
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--white-a14);
+  color: var(--text-1);
+}
+
+.switchRow {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.switchRow strong {
+  display: block;
+  color: var(--text-1);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.switchRow small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.switch {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--white-a14);
+  transition: background var(--dur-fast) ease;
+}
+
+.switch::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-circle);
+  background: var(--text-1);
+  content: '';
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.switchRow[aria-checked='true'] .switch {
+  background: rgb(var(--accent-rgb));
+}
+
+.switchRow[aria-checked='true'] .switch::after {
+  transform: translateX(14px);
+}
+
+.switchRow:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
+
+.filterSelect {
+  width: 100%;
+}
+
+/* what's filtered, under the toolbar */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: -6px 0 16px;
+}
+
+.chipsCount {
+  margin-right: 4px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chip {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 10px 5px 12px;
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--text-1);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chip span {
+  color: var(--text-3);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.chip:hover span,
+.chip:focus-visible span {
+  color: var(--text-1);
+}
+
+.chipsClear {
+  padding: 5px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.chipsClear:hover {
+  color: var(--text-1);
 }
 
 .cardExtras {

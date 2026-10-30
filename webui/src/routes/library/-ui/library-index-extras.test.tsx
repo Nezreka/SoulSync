@@ -231,6 +231,7 @@ describe('filters', () => {
     renderPage();
     await screen.findByText('Aphex Twin');
     expect(lastList('artists').has('source')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
     fireEvent.change(screen.getByLabelText('Filter by metadata source'), {
       target: { value: '!spotify' },
     });
@@ -241,9 +242,41 @@ describe('filters', () => {
     const { router } = renderPage();
     await screen.findByText('Aphex Twin');
     expect(lastList('artists').has('quality')).toBe(false);
-    fireEvent.click(screen.getByText('Could be better'));
+    fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
+    fireEvent.click(screen.getByRole('switch', { name: /Could be better/ }));
     await waitFor(() => expect(lastList('artists').get('quality')).toBe('upgradable'));
     expect(router.state.location.search).toMatchObject({ quality: 'upgradable', page: 1 });
+    // what's on reads as a chip, which takes it off again
+    const chip = await screen.findByRole('button', { name: 'Remove filter: Could be better' });
+    expect(screen.getByRole('button', { name: /Filters/ }).textContent).toContain('1');
+    fireEvent.click(chip);
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ quality: '' }));
+  });
+
+  it('the filters menu closes on Escape and a click outside', async () => {
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    const button = screen.getByRole('button', { name: /Filters/ });
+    fireEvent.click(button);
+    expect(screen.getByRole('dialog', { name: 'Filters' })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Filters' })).toBeNull();
+    fireEvent.click(button);
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('dialog', { name: 'Filters' })).toBeNull();
+  });
+
+  it('monitoring lives in the filters menu', async () => {
+    const { router } = renderPage();
+    await screen.findByText('Aphex Twin');
+    fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Not monitored' }));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ monitored: 'unmonitored', page: 1 }),
+    );
+    expect(
+      await screen.findByRole('button', { name: 'Remove filter: Not monitored' }),
+    ).toBeInTheDocument();
   });
 
   it('ignores a made-up quality value in the url', async () => {

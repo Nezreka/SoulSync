@@ -195,13 +195,13 @@ import {
   AlbumCardPlayButton,
   ArtistCardPlayButton,
   ClassicCardBadges,
-  CouldBeBetterToggle,
+  LibraryActiveFilters,
   LibraryAlphabetBar,
   LibraryExportButton,
   LibraryRadioButton,
   LibrarySearchFallback,
   LibrarySearchInput,
-  LibrarySourceFilter,
+  LibraryFilterMenu,
   useUpgradableCounts,
 } from './library-index-extras';
 import {
@@ -4858,25 +4858,6 @@ function ArtistIndexView() {
           onChange={artistFilter.onChange}
         />
         <select
-          aria-label="Filter monitoring"
-          id="watchlist-filter"
-          className={styles.select}
-          value={search.monitored}
-          onChange={(e) =>
-            void navigate({
-              search: (p) => ({
-                ...p,
-                monitored: e.target.value as typeof p.monitored,
-                page: 1,
-              }),
-            })
-          }
-        >
-          <option value="all">All</option>
-          <option value="monitored">Monitored</option>
-          <option value="unmonitored">Unmonitored</option>
-        </select>
-        <select
           aria-label="Sort artists"
           id="library-sort"
           className={styles.select}
@@ -4896,8 +4877,7 @@ function ArtistIndexView() {
           <option value="albums">Album count</option>
           <option value="tracks">Track count</option>
         </select>
-        <LibrarySourceFilter />
-        <CouldBeBetterToggle count={pagination?.total_count} />
+        <LibraryFilterMenu />
         <div className={styles.viewToggle} id="library-view-toggle">
           <button
             type="button"
@@ -4918,6 +4898,8 @@ function ArtistIndexView() {
           <ArtistTableOptionsMenu columns={artistTableColumns} columnOrder={artistColumnOrder} />
         ) : null}
       </div>
+
+      <LibraryActiveFilters count={pagination?.total_count} />
 
       <LibraryAlphabetBar />
 
@@ -5054,20 +5036,6 @@ function AlbumIndexView() {
           onChange={albumFilter.onChange}
         />
         <select
-          aria-label="Filter monitoring"
-          className={styles.select}
-          value={search.monitored}
-          onChange={(e) =>
-            void navigate({
-              search: (p) => ({ ...p, monitored: e.target.value as typeof p.monitored, page: 1 }),
-            })
-          }
-        >
-          <option value="all">All</option>
-          <option value="monitored">Monitored</option>
-          <option value="unmonitored">Unmonitored</option>
-        </select>
-        <select
           aria-label="Sort albums"
           className={styles.select}
           value={search.albumSort}
@@ -5083,8 +5051,10 @@ function AlbumIndexView() {
             </option>
           ))}
         </select>
-        <LibrarySourceFilter albums />
+        <LibraryFilterMenu albums />
       </div>
+
+      <LibraryActiveFilters albums count={pagination?.total_count} />
 
       <LibraryAlphabetBar />
 

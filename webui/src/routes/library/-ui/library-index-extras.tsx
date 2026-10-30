@@ -1,6 +1,6 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getRouteApi } from '@tanstack/react-router';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { apiClient, readJson } from '@/app/api-client';
 import { useProfile } from '@/platform/shell/route-controllers';
@@ -21,7 +21,7 @@ import { LineIcon } from './line-icon';
 
 /**
  * The old library page's index tools, put back on the Library v2 page: the
- * alphabet bar, the has/no provider filter, "could be better", the search
+ * alphabet bar, the filters (has/no provider, "could be better"), the search
  * box's Escape and clear, Radio and Export in the header, the play buttons,
  * provider badges and upgradable count on the cards, the song matches above
  * a search, and "Search online" when a search finds nothing.
@@ -181,63 +181,203 @@ export function LibraryAlphabetBar() {
 }
 
 /** Has / No provider id. A key the list has no column for is left out. */
-export function LibrarySourceFilter({ albums = false }: { albums?: boolean }) {
+type LibraryFilterSearch = {
+  monitored: 'all' | 'monitored' | 'unmonitored';
+  source: string;
+  quality: '' | 'upgradable';
+  page: number;
+};
+
+const MONITORING_LABELS = {
+  all: 'All',
+  monitored: 'Monitored',
+  unmonitored: 'Not monitored',
+} as const;
+
+function sourceFilterLabel(value: string): string {
+  const missing = value.startsWith('!');
+  const label = SOURCE_LABELS[value.replace(/^!/, '')] ?? value.replace(/^!/, '');
+  return missing ? `No ${label} match` : `Has ${label}`;
+}
+
+/**
+ * The list's filters behind one button: monitoring, "could be better" and the
+ * metadata match. they were three bare selects and a toggle in the toolbar,
+ * one of them just reading "All". what's on shows as chips under the toolbar.
+ */
+export function LibraryFilterMenu({ albums = false }: { albums?: boolean }) {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const sources: readonly string[] = albums
     ? filterJiosaavnEntries(
         ALBUM_SOURCES.map((id) => ({ id })),
         'id',
       ).map((entry) => entry.id)
     : ARTIST_SOURCES;
+  const active =
+    (search.monitored !== 'all' ? 1 : 0) +
+    (search.source ? 1 : 0) +
+    (!albums && search.quality === 'upgradable' ? 1 : 0);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointer = (event: PointerEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const set = (patch: Partial<LibraryFilterSearch>) =>
+    void navigate({ search: (prev) => ({ ...prev, ...patch, page: 1 }) });
+
   return (
-    <select
-      aria-label="Filter by metadata source"
-      className={styles.select}
-      value={search.source}
-      onChange={(e) =>
-        void navigate({ search: (prev) => ({ ...prev, source: e.target.value, page: 1 }) })
-      }
-    >
-      <option value="">All sources</option>
-      <optgroup label="Unmatched to">
-        {sources.map((s) => (
-          <option key={`!${s}`} value={`!${s}`}>
-            No {SOURCE_LABELS[s]}
-          </option>
-        ))}
-      </optgroup>
-      <optgroup label="Matched to">
-        {sources.map((s) => (
-          <option key={s} value={s}>
-            Has {SOURCE_LABELS[s]}
-          </option>
-        ))}
-      </optgroup>
-    </select>
+    <div className={extras.filterWrap} ref={wrapRef}>
+      <button
+        type="button"
+        className={`${styles.btnGhost} ${extras.filterButton}${active ? ` ${extras.filterOn}` : ''}`}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <LineIcon name="filter" /> Filters
+        {active ? <span className={extras.filterCount}>{active}</span> : null}
+      </button>
+      {open ? (
+        <div className={extras.filterPanel} role="dialog" aria-label="Filters">
+          <section>
+            <h4>Monitoring</h4>
+            <div className={extras.segmented} role="group" aria-label="Filter monitoring">
+              {(Object.keys(MONITORING_LABELS) as (keyof typeof MONITORING_LABELS)[]).map(
+                (value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={search.monitored === value}
+                    onClick={() => set({ monitored: value })}
+                  >
+                    {MONITORING_LABELS[value]}
+                  </button>
+                ),
+              )}
+            </div>
+          </section>
+          {albums ? null : (
+            <section>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={search.quality === 'upgradable'}
+                className={extras.switchRow}
+                onClick={() =>
+                  set({ quality: search.quality === 'upgradable' ? '' : 'upgradable' })
+                }
+              >
+                <span>
+                  <strong>Could be better</strong>
+                  <small>Only artists with tracks below their quality profile</small>
+                </span>
+                <span className={extras.switch} aria-hidden="true" />
+              </button>
+            </section>
+          )}
+          <section>
+            <h4>Metadata match</h4>
+            <select
+              aria-label="Filter by metadata source"
+              className={`${styles.select} ${extras.filterSelect}`}
+              value={search.source}
+              onChange={(e) => set({ source: e.target.value })}
+            >
+              <option value="">Any</option>
+              <optgroup label="Missing a match">
+                {sources.map((s) => (
+                  <option key={`!${s}`} value={`!${s}`}>
+                    No {SOURCE_LABELS[s]}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Matched to">
+                {sources.map((s) => (
+                  <option key={s} value={s}>
+                    Has {SOURCE_LABELS[s]}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </section>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
-/** Artists with a track below its quality profile. */
-export function CouldBeBetterToggle({ count }: { count?: number }) {
+/** What's filtered, each one a chip that takes it off. */
+export function LibraryActiveFilters({
+  albums = false,
+  count,
+}: {
+  albums?: boolean;
+  count?: number;
+}) {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
-  const active = search.quality === 'upgradable';
+  const set = (patch: Partial<LibraryFilterSearch>) =>
+    void navigate({ search: (prev) => ({ ...prev, ...patch, page: 1 }) });
+  const chips: { key: string; label: string; clear: Partial<LibraryFilterSearch> }[] = [];
+  if (search.monitored !== 'all') {
+    chips.push({
+      key: 'monitored',
+      label: MONITORING_LABELS[search.monitored],
+      clear: { monitored: 'all' },
+    });
+  }
+  if (!albums && search.quality === 'upgradable') {
+    chips.push({ key: 'quality', label: 'Could be better', clear: { quality: '' } });
+  }
+  if (search.source) {
+    chips.push({ key: 'source', label: sourceFilterLabel(search.source), clear: { source: '' } });
+  }
+  if (chips.length === 0) return null;
   return (
-    <button
-      type="button"
-      className={`${styles.btnGhost}${active ? ` ${extras.toggleActive}` : ''}`}
-      aria-pressed={active}
-      title="Artists with tracks below their quality profile"
-      onClick={() =>
-        void navigate({
-          search: (prev) => ({ ...prev, quality: active ? ('' as const) : 'upgradable', page: 1 }),
-        })
-      }
-    >
-      Could be better
-      {active && count !== undefined ? <span className={extras.count}>{count}</span> : null}
-    </button>
+    <div className={extras.chips}>
+      {count !== undefined ? (
+        <span className={extras.chipsCount}>
+          {count.toLocaleString()} {albums ? 'album' : 'artist'}
+          {count === 1 ? '' : 's'}
+        </span>
+      ) : null}
+      {chips.map((chip) => (
+        <button
+          key={chip.key}
+          type="button"
+          className={extras.chip}
+          aria-label={`Remove filter: ${chip.label}`}
+          onClick={() => set(chip.clear)}
+        >
+          {chip.label}
+          <span aria-hidden="true">×</span>
+        </button>
+      ))}
+      {chips.length > 1 ? (
+        <button
+          type="button"
+          className={extras.chipsClear}
+          onClick={() => set({ monitored: 'all', source: '', quality: '' })}
+        >
+          Clear all
+        </button>
+      ) : null}
+    </div>
   );
 }
 
