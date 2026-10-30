@@ -133,9 +133,13 @@ def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
         "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url "
         "ELSE COALESCE(NULLIF(?, ''), image_url) END"
     )
-    genres_set = ("genres=CASE WHEN genres IS NULL OR genres IN ('', '[]') "
+    # genres_locked: SoulSync's genre jobs settled these (upstream 8f97aafbb)
+    genres_set = ("genres=CASE WHEN COALESCE(genres_locked,0)=1 THEN genres "
+                  "WHEN genres IS NULL OR genres IN ('', '[]') "
                   "THEN COALESCE(?, genres) ELSE genres END"
-                  if not overwrite else "genres=COALESCE(?, genres)")
+                  if not overwrite else
+                  "genres=CASE WHEN COALESCE(genres_locked,0)=1 THEN genres "
+                  "ELSE COALESCE(?, genres) END")
     cursor.execute(
         "UPDATE lib2_artists"
         "   SET name=?, name_key=?,"
@@ -269,7 +273,8 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
             "   SET primary_artist_id=?, title=?, year=COALESCE(?, year),"
             "       image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url "
             "                      ELSE COALESCE(NULLIF(?, ''), image_url) END,"
-            "       genres=COALESCE(?, genres),"
+            "       genres=CASE WHEN COALESCE(genres_locked,0)=1 THEN genres "
+            "                   ELSE COALESCE(?, genres) END,"
             "       track_count=COALESCE(?, track_count),"
             "       duration=COALESCE(?, duration),"
             "       origin='library', server_source=?, server_id=?,"

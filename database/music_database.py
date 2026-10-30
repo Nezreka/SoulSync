@@ -22385,7 +22385,8 @@ class MusicDatabase:
             if entity_type != 'artist':
                 item['metadata_locked'] = bool(hand_set)
             if entity_type != 'track':
-                item['genres_locked'] = 'genres' in hand_set
+                # a hand-set override, or genres SoulSync's genre jobs settled
+                item['genres_locked'] = 'genres' in hand_set or bool(item.get('genres_locked'))
             if entity_type == 'album':
                 item.update(artist_id=item.get('primary_artist_id'),
                             record_type=item.get('album_type'),

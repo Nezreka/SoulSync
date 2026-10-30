@@ -405,6 +405,12 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_artists ADD COLUMN art_locked INTEGER NOT NULL DEFAULT 0"),
     ("lib2_albums", "art_locked",
      "ALTER TABLE lib2_albums ADD COLUMN art_locked INTEGER NOT NULL DEFAULT 0"),
+    # upstream 8f97aafbb: genres SoulSync's genre jobs settled survive server
+    # scans and provider refreshes, the way art_locked keeps a chosen cover
+    ("lib2_artists", "genres_locked",
+     "ALTER TABLE lib2_artists ADD COLUMN genres_locked INTEGER NOT NULL DEFAULT 0"),
+    ("lib2_albums", "genres_locked",
+     "ALTER TABLE lib2_albums ADD COLUMN genres_locked INTEGER NOT NULL DEFAULT 0"),
     # The media-server link. lib2 had no way to say "this row is the server's
     # <id>", which is the only handle a play-count sync or an incremental scan
     # has — see §50.4.4.25. Both halves are needed: the id is only unique

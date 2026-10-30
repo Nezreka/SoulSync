@@ -492,3 +492,57 @@ def test_server_length_fills_a_missing_one_and_never_replaces_the_catalogues(cur
     assert sync(0) is None
     assert sync(237000) == 237000
     assert sync(136000) == 237000
+
+
+def test_genres_the_cleanup_settled_survive_a_server_scan(cur):
+    """upstream 8f97aafbb: the genre cleanup wrote the db, then the next scan
+    put back whatever the server read from the files, so it undid itself."""
+    artist, album, _track, _file = _imported(cur)
+    cur.execute("UPDATE lib2_artists SET genres='[\"Rock\"]', genres_locked=1 WHERE id=?", (artist,))
+    cur.execute("UPDATE lib2_albums SET genres='[\"Rock\"]', genres_locked=1 WHERE id=?", (album,))
+
+    upsert_artist(cur, server_source="soulsync", server_id="refresh-a", name="Muse",
+                  genres_json='["Rock", "Cremonies"]', allow_create=True)
+    upsert_album(cur, server_source="soulsync", server_id="refresh-al", artist_id=artist,
+                 title="Absolution", genres_json='["Rock", "Cremonies"]', allow_create=True)
+
+    assert cur.execute("SELECT genres FROM lib2_artists WHERE id=?", (artist,)).fetchone()[0] == '["Rock"]'
+    assert cur.execute("SELECT genres FROM lib2_albums WHERE id=?", (album,)).fetchone()[0] == '["Rock"]'
+
+
+def test_unlocked_genres_still_follow_the_server(cur):
+    artist, album, _track, _file = _imported(cur)
+
+    upsert_album(cur, server_source="soulsync", server_id="refresh-al", artist_id=artist,
+                 title="Absolution", genres_json='["Alternative"]', allow_create=True)
+
+    assert cur.execute("SELECT genres FROM lib2_albums WHERE id=?", (album,)).fetchone()[0] == '["Alternative"]'
+
+
+def test_a_provider_match_keeps_settled_genres(cur):
+    from core.library2.native_enrich import _persist_identity
+
+    artist, _album, _track, _file = _imported(cur)
+    cur.execute("UPDATE lib2_artists SET genres='[\"Rock\"]', genres_locked=1 WHERE id=?", (artist,))
+
+    _persist_identity(cur.connection, artist, source="deezer", provider_id="705",
+                      image_url=None, genres='["Rock", "Cremonies"]', existing_external_ids="{}")
+
+    assert cur.execute("SELECT genres FROM lib2_artists WHERE id=?", (artist,)).fetchone()[0] == '["Rock"]'
+
+
+def test_v1_reports_the_genres_lock(tmp_path):
+    from api.serializers import serialize_artist
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase(str(tmp_path / "v1.db"))
+    from tests import lib2_seed
+
+    with db._get_connection() as conn:
+        track = lib2_seed.track(conn, "Muse", "Absolution", "Hysteria")
+        artist = conn.execute("SELECT al.primary_artist_id FROM lib2_tracks t JOIN lib2_albums al "
+                              "ON al.id=t.album_id WHERE t.id=?", (track,)).fetchone()[0]
+        conn.execute("UPDATE lib2_artists SET genres_locked=1 WHERE id=?", (artist,))
+        conn.commit()
+
+    assert serialize_artist(db.api_get_artist(artist))["genres_locked"] is True

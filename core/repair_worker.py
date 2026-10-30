@@ -2961,7 +2961,9 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute(f"UPDATE {table} SET genres = ? WHERE id = ?", (value, row_id))  # noqa: S608 - table from fixed map
+            # locked: the next server scan or provider refresh must not put
+            # back what the cleanup removed (upstream 8f97aafbb)
+            cursor.execute(f"UPDATE {table} SET genres = ?, genres_locked = 1 WHERE id = ?", (value, row_id))  # noqa: S608 - table from fixed map
             if cursor.rowcount == 0:
                 conn.commit()
                 return {'success': False, 'error': f'{entity_type} {entity_id} no longer exists'}
@@ -3002,7 +3004,7 @@ class RepairWorker:
             for genre in additions:
                 if genre and _normalize_for_match(genre) not in seen:
                     current.append(genre); seen.add(_normalize_for_match(genre))
-            cur.execute(f"UPDATE {table} SET genres = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (json.dumps(current), native_id))
+            cur.execute(f"UPDATE {table} SET genres = ?, genres_locked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (json.dumps(current), native_id))
             conn.commit(); conn.close()
             return {'success': True, 'action': 'genres_applied'}
         except Exception as e:

@@ -206,7 +206,7 @@ def _persist_identity(
         )
         params.append(str(image_url))
     if genres:
-        assignments.append("genres=?")
+        assignments.append("genres=CASE WHEN COALESCE(genres_locked,0)=1 THEN genres ELSE ? END")
         params.append(genres)
 
     params.append(int(artist_id))
