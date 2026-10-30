@@ -91,6 +91,34 @@ describe('the search route', () => {
     expect(screen.getByText('Top trending')).toBeInTheDocument();
   });
 
+  it('a browse tile opens Discover, not a search for its name (#1935)', async () => {
+    const queryClient = createTestQueryClient();
+    const history = createMemoryHistory({ initialEntries: ['/search'] });
+    const router = createAppRouter({ history, queryClient });
+    const navigate = vi.spyOn(router, 'navigate').mockResolvedValue(undefined);
+    render(<AppRouterProvider router={router} queryClient={queryClient} />);
+    await settled();
+
+    act(() => screen.getByText('Electronic & dance').click());
+
+    expect(navigate).toHaveBeenCalledWith({ href: '/discover?genre=electronic' });
+    expect((document.getElementById('enhanced-search-input') as HTMLInputElement).value).toBe('');
+  });
+
+  it('a browse tile still searches on a profile without Discover', async () => {
+    window.SoulSyncWebShellBridge = createShellBridge({
+      isPageAllowed: vi.fn((page: string) => page !== 'discover'),
+    });
+    await renderRoute('/search');
+    await settled();
+
+    act(() => screen.getByText('Electronic & dance').click());
+
+    expect((document.getElementById('enhanced-search-input') as HTMLInputElement).value).toBe(
+      'Electronic',
+    );
+  });
+
   it('renders #enhanced-main-results-area, where download bubbles land', async () => {
     // showSearchDownloadBubbles renders into this id and silently returns
     // without it, so every download started from search would draw nowhere.

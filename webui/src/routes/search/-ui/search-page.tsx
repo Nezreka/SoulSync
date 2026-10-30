@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useRouter } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Skeleton } from '@/components/primitives';
@@ -67,12 +68,27 @@ function LibraryTargetNote() {
   );
 }
 
-/** the idle page's browse tiles. quiet two-stop gradients, no emoji */
+/**
+ * the idle page's browse tiles. quiet two-stop gradients, no emoji.
+ *
+ * each opens the real thing on Discover (#1935): the charts, the new releases
+ * shelf, or a genre's deep dive. searching the word "Trending" only found
+ * songs called trending. `query` is the fallback for a profile without
+ * Discover.
+ */
 const EXPLORE_CATEGORIES = [
-  { id: 'trending', label: 'Top trending', query: 'Trending', from: '#7a1f3d', to: '#3b0f1f' },
+  {
+    id: 'trending',
+    label: 'Top trending',
+    href: '/discover?section=deezer-editorial,sin-charts',
+    query: 'Trending',
+    from: '#7a1f3d',
+    to: '#3b0f1f',
+  },
   {
     id: 'new_releases',
     label: 'New releases',
+    href: '/discover?section=recent-releases,discover-zone-new-missing',
     query: 'New Releases',
     from: '#3a3a8c',
     to: '#1c1c48',
@@ -80,17 +96,47 @@ const EXPLORE_CATEGORIES = [
   {
     id: 'electronic',
     label: 'Electronic & dance',
+    href: '/discover?genre=electronic',
     query: 'Electronic',
     from: '#0f5e6e',
     to: '#082f38',
   },
-  { id: 'rock', label: 'Rock & alternative', query: 'Rock', from: '#7a4a12', to: '#3d250a' },
-  { id: 'hiphop', label: 'Hip-hop & rap', query: 'Hip Hop', from: '#5a2d8c', to: '#2c1646' },
-  { id: 'chill', label: 'Lo-fi & chill', query: 'Chill', from: '#1f6b4f', to: '#0f3528' },
-  { id: 'jazz', label: 'Jazz & soul', query: 'Jazz', from: '#80305e', to: '#401830' },
+  {
+    id: 'rock',
+    label: 'Rock & alternative',
+    href: '/discover?genre=rock',
+    query: 'Rock',
+    from: '#7a4a12',
+    to: '#3d250a',
+  },
+  {
+    id: 'hiphop',
+    label: 'Hip-hop & rap',
+    href: '/discover?genre=hip%20hop',
+    query: 'Hip Hop',
+    from: '#5a2d8c',
+    to: '#2c1646',
+  },
+  {
+    id: 'chill',
+    label: 'Lo-fi & chill',
+    href: '/discover?genre=chill',
+    query: 'Chill',
+    from: '#1f6b4f',
+    to: '#0f3528',
+  },
+  {
+    id: 'jazz',
+    label: 'Jazz & soul',
+    href: '/discover?genre=jazz',
+    query: 'Jazz',
+    from: '#80305e',
+    to: '#401830',
+  },
   {
     id: 'soundtracks',
     label: 'Soundtracks & score',
+    href: '/discover?genre=soundtrack',
     query: 'Soundtrack',
     from: '#284f8c',
     to: '#142846',
@@ -116,6 +162,7 @@ type DropdownView = 'hidden' | 'loading' | 'empty' | 'results';
 export function SearchPage() {
   // Seeded from the restored cache: coming back to results sitting above an
   // empty search box reads as a bug even when the results are right.
+  const router = useRouter();
   const [query, setQuery] = useState(getPersistedQuery);
   const [filter, setFilter] = useState<ResultFilter>('all');
   const [dismissed, setDismissed] = useState(false);
@@ -471,6 +518,10 @@ export function SearchPage() {
                         className={styles.tile}
                         style={{ background: `linear-gradient(135deg, ${cat.from}, ${cat.to})` }}
                         onClick={() => {
+                          if (window.SoulSyncWebShellBridge?.isPageAllowed('discover') ?? true) {
+                            void router.navigate({ href: cat.href as `/${string}` });
+                            return;
+                          }
                           setQuery(cat.query);
                           runSearch(cat.query);
                         }}
