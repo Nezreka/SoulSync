@@ -12,6 +12,8 @@ import {
 
 import type { LibrarySearch, LibrarySong } from '../-library-v2.songs';
 
+import { formatQuality, qualityParts } from '../-bitrate';
+import { libraryV2UiPreferencesQueryOptions } from '../-library-v2.api';
 import {
   deleteLibraryTrackRequest,
   librarySongsQueryOptions,
@@ -114,7 +116,8 @@ function SongRow({
       params: { source: 'library', id: String(song.artist_id) },
       search: album ? { album: String(song.album_id) } : {},
     });
-  const quality = [song.format, song.bitrate ? `${song.bitrate}k` : ''].filter(Boolean).join(' ');
+  const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
+  const quality = formatQuality(song, qualityParts(prefsQuery.data));
   const playable = Boolean(song.file_path);
 
   // the row plays; while songs are ticked it ticks instead, the way a
@@ -218,7 +221,13 @@ function SongRow({
           ) : null}
         </div>
       </div>
-      {quality ? <span className={styles.quality}>{quality}</span> : <span />}
+      {quality.label ? (
+        <span className={styles.quality} title={quality.title}>
+          {quality.label}
+        </span>
+      ) : (
+        <span />
+      )}
       <span className={styles.time}>{duration(song.duration)}</span>
       <div className={styles.actions}>
         <button

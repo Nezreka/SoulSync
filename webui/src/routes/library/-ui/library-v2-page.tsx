@@ -31,7 +31,7 @@ import { getShellBridge } from '@/platform/shell/bridge';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import { playLibraryV2ArtistRadio } from '../-artist-radio';
-import { bitrateKbps, formatBitrate } from '../-bitrate';
+import { bitrateKbps, formatBitrate, formatQuality, qualityParts } from '../-bitrate';
 import {
   analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
@@ -569,32 +569,18 @@ function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
     return <span className={styles.qualityPlaceholderDash}>—</span>;
   }
 
-  const showFormat = prefsQuery.data?.track_table.quality_show_format ?? true;
-  const showResolution = prefsQuery.data?.track_table.quality_show_resolution ?? true;
-  const showBitrate = prefsQuery.data?.track_table.quality_show_bitrate ?? true;
-
-  const fmt = showFormat ? (file.format ?? '').toUpperCase() || null : null;
-  const bitDepth = showResolution && file.bit_depth ? `${file.bit_depth}bit` : null;
-  const sampleRate =
-    showResolution && file.sample_rate
-      ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}kHz`
-      : null;
-  const resolution = [bitDepth, sampleRate].filter(Boolean).join('/');
   // An Opus/AAC bitrate is an average, not a setting — printed like a CBR
   // number it invites "this Opus is worse than that MP3", which is the
   // opposite of what it says.
-  const rate = showBitrate
-    ? formatBitrate(file.bitrate, file.format)
-    : { label: null, title: undefined };
-  const qualityBadge = [fmt, resolution || null, rate.label].filter(Boolean).join(' · ');
+  const quality = formatQuality(file, qualityParts(prefsQuery.data));
 
-  if (!qualityBadge) return null;
+  if (!quality.label) return null;
   const retention = retentionQualityInfo(file);
 
   return (
     <span className={styles.qualityDisplay}>
-      <span className={styles.qualityTag} title={rate.title}>
-        {qualityBadge}
+      <span className={styles.qualityTag} title={quality.title}>
+        {quality.label}
       </span>
       {retention ? (
         <span className={styles.retentionQualityBadge} title={retention.title}>
