@@ -136,6 +136,8 @@
 
 .action {
   display: inline-flex;
+  font: inherit;
+  cursor: pointer;
   align-items: center;
   gap: 7px;
   padding: 7px 15px;
@@ -149,6 +151,15 @@
   transition:
     background var(--dur-base) var(--ease-out),
     border-color var(--dur-base) var(--ease-out);
+}
+
+.action:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+}
+
+.action:disabled {
+  cursor: default;
 }
 
 .card:hover .action {

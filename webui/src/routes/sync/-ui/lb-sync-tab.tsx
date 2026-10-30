@@ -158,6 +158,7 @@ export function LbImportList({
                 if (target) void importer.importOrOpen(lbImportSpec(card, target));
               }}
               onCopy={target ? importer.copyAsMineFor(lbImportSpec(card, target)) : undefined}
+              loadPreview={target ? importer.previewFor(lbImportSpec(card, target)) : undefined}
               copying={target ? importer.copyingOf(target.source, target.sourcePlaylistId) : false}
             />
           );

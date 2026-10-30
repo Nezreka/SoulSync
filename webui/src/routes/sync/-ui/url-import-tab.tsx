@@ -297,6 +297,7 @@ function LinkTabShell({
                   status={importer.statusOf(spec.source, spec.sourceId)}
                   onAction={() => void importer.importOrOpen(spec)}
                   onCopy={importer.copyAsMineFor(spec)}
+                  loadPreview={importer.previewFor(spec)}
                   copying={importer.copyingOf(spec.source, spec.sourceId)}
                 />
               );
@@ -811,6 +812,7 @@ export function YouTubeTab({
                     status={importer.statusOf('youtube', urlHash)}
                     onAction={() => void importer.importOrOpen(youtubeSpec(p))}
                     onCopy={importer.copyAsMineFor(youtubeSpec(p))}
+                    loadPreview={importer.previewFor(youtubeSpec(p))}
                     copying={importer.copyingOf('youtube', urlHash)}
                   />
                 );

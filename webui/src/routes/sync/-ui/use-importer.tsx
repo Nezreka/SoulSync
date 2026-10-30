@@ -18,6 +18,7 @@ import {
   mirrorKey,
   type ImportSpec,
 } from '../-sync.importer';
+import { previewTrack, type PreviewTrack } from './import-preview-sheet';
 
 export interface ImportLanding {
   /** Show one imported playlist: the Mirrored tab, its window open. */
@@ -48,6 +49,8 @@ export interface Importer {
   /** Keep it as your own copy in My Playlists instead (#1913); undefined when
    *  the playlist can't be copied (it saves server-side). */
   copyAsMineFor: (spec: ImportSpec) => (() => void) | undefined;
+  /** The card's look-before-you-import songs (#1934); absent when it can't load them. */
+  previewFor: (spec: ImportSpec) => (() => Promise<PreviewTrack[]>) | undefined;
   /** A copy of this one is being made. */
   copyingOf: (source: string, sourceId: string | number) => boolean;
   landing: ImportLanding;
@@ -226,6 +229,15 @@ export function useImporter(): Importer {
     [copyAsMine],
   );
 
+  const previewFor = useCallback((spec: ImportSpec) => {
+    const { loadTracks, toMirrorTracks } = spec;
+    if (!loadTracks) return undefined;
+    return async () => {
+      const { tracks } = await loadTracks();
+      return (toMirrorTracks ? toMirrorTracks(tracks) : tracks).map(previewTrack);
+    };
+  }, []);
+
   const copyingOf = useCallback(
     (source: string, sourceId: string | number) => busy.has(`mine:${mirrorKey(source, sourceId)}`),
     [busy],
@@ -238,6 +250,7 @@ export function useImporter(): Importer {
     markImported,
     mirrorIdOf,
     copyAsMineFor,
+    previewFor,
     copyingOf,
     landing,
   };

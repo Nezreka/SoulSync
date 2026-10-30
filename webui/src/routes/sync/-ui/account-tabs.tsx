@@ -161,6 +161,7 @@ function AccountRowsTab({
                     status={importer.statusOf(source, id)}
                     onAction={() => void importer.importOrOpen(spec(row))}
                     onCopy={importer.copyAsMineFor(spec(row))}
+                    loadPreview={importer.previewFor(spec(row))}
                     copying={importer.copyingOf(source, id)}
                   />
                 );

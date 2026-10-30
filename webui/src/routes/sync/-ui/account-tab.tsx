@@ -147,6 +147,7 @@ function AccountImportTab({ chrome }: { chrome: AccountTabChrome }) {
                     status={importer.statusOf(chrome.base, sourceId)}
                     onAction={() => void importer.importOrOpen(accountImportSpec(chrome.base, p))}
                     onCopy={importer.copyAsMineFor(accountImportSpec(chrome.base, p))}
+                    loadPreview={importer.previewFor(accountImportSpec(chrome.base, p))}
                     copying={importer.copyingOf(chrome.base, sourceId)}
                   />
                 );
