@@ -28,6 +28,7 @@ from core.library.expired_cleanup import (
     path_suffix_key,
     select_expired,
 )
+from core.downloads.origin import is_hand_picked
 from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -405,6 +406,31 @@ class ExpiredDownloadCleanerJob(RepairJob):
             keys.update(_ID_KEY + tid for tid in _mirror_track_ids(t))
         return keys
 
+    @staticmethod
+    def _synced_playlist_names(context: JobContext) -> Optional[set]:
+        """Case-folded names of playlists a sync really ran for, or None when
+        that can't be read.
+
+        A playlist download whose playlist is no longer mirrored ages out, but
+        only when it really was a playlist: an album picked by hand, retried
+        through the wishlist, used to be recorded under the album's name as
+        its "playlist" (#1932). Those rows are still in history, and their
+        name was never a sync, so they are kept.
+        """
+        try:
+            with context.db._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT playlist_id, playlist_name, is_album_download FROM sync_history"
+                ).fetchall()
+        except Exception as e:
+            logger.debug("expired cleanup: sync history unreadable: %s", e)
+            return None
+        return {
+            str(name).strip().casefold()
+            for pid, name, album in rows
+            if name and not is_hand_picked(pid, name, album)
+        }
+
     def _protection_facts(self, context: JobContext):
         """(playlist_membership, watched artist names).
 
@@ -538,6 +564,7 @@ class ExpiredDownloadCleanerJob(RepairJob):
             return result
 
         playlist_membership, watched_names = self._protection_facts(context)
+        synced_names = None
 
         # Anything downloaded before the library database was last rebuilt is
         # permanently out of scope. A rebuild wipes tracks/albums/artists —
@@ -573,8 +600,11 @@ class ExpiredDownloadCleanerJob(RepairJob):
             if origin == 'playlist' and ctx:
                 entry = playlist_membership.get(ctx)
                 if entry is None:
-                    # origin playlist is not mirrored anywhere: nothing to keep it
-                    c['protected'] = False
+                    # origin playlist is not mirrored anywhere: nothing keeps
+                    # it, as long as a sync really ran under that name
+                    if synced_names is None:
+                        synced_names = self._synced_playlist_names(context) or set()
+                    c['protected'] = ctx not in synced_names
                 else:
                     key = normalize_track_key(c.get('artist_name'), c.get('title'))
                     tid = str(c.get('source_track_id') or '').strip()

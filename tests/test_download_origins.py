@@ -56,6 +56,30 @@ def test_manual_and_garbage_derive_none():
     assert derive_download_origin({'track_info': {'_dl_origin': 'aliens'}}) == (None, '')
 
 
+def test_a_hand_picked_download_retried_through_the_wishlist_is_not_a_playlist():
+    """#1932: a cancelled or failed search / artist-page download goes back to
+    the wishlist with its batch's made-up id and the album as its "playlist"."""
+    for si in (
+        {'playlist_name': 'Street Fighter OST', 'playlist_id': 'enhanced_search_album_1108109492',
+         'added_from': 'modal_cancellation'},
+        {'playlist_name': 'Signs', 'playlist_id': 'artist_album_508786_839958042',
+         'added_from': 'webui_modal', 'is_album_download': True},
+        {'playlist_name': 'One Week', 'playlist_id': 'enhanced_search_track_42'},
+        {'playlist_name': 'Unknown Playlist', 'playlist_id': None},
+    ):
+        assert derive_download_origin({'track_info': {'source_info': si}}) == (None, ''), si
+
+
+def test_a_real_playlist_retried_through_the_wishlist_still_counts():
+    si = {'playlist_name': 'Release Radar', 'playlist_id': 'auto_mirror_44',
+          'added_from': 'webui_modal'}
+    assert derive_download_origin({'track_info': {'source_info': si}}) == (
+        'playlist', 'Release Radar')
+    mine = {'playlist_name': 'road trip', 'playlist_id': '5101', 'added_from': 'webui_modal'}
+    assert derive_download_origin({'track_info': {'source_info': mine}}) == (
+        'playlist', 'road trip')
+
+
 # ── persistence ──────────────────────────────────────────────────────────────
 
 def _seed(db):

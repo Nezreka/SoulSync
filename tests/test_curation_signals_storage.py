@@ -34,6 +34,11 @@ def _download(db, hid=1, file_path=TRACK):
         "file_path, title, artist_name, created_at) VALUES (?,?,?,?,?,?,?,?)",
         (hid, "download", "playlist", "Discovery Weekly", file_path,
          "Track", "Artist", OLD))
+    # the playlist really was synced once (#1932)
+    conn.execute(
+        "INSERT INTO sync_history (batch_id, playlist_id, playlist_name, source, sync_type, "
+        "tracks_json) VALUES ('b', 'auto_mirror_9', 'Discovery Weekly', 'mirrored', "
+        "'playlist', '[]')")
     conn.commit()
 
 

@@ -8,6 +8,7 @@ and the two modes.
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -24,8 +25,13 @@ NEW = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:
 
 
 class _DB:
-    def __init__(self, candidates, mirrored=None, watched=None, mirror_tracks=None):
+    def __init__(self, candidates, mirrored=None, watched=None, mirror_tracks=None,
+                 synced=None):
         self._candidates = candidates
+        # sync_history rows (playlist_id, playlist_name, is_album_download).
+        # by default every candidate's playlist really was synced once
+        self._synced = synced if synced is not None else [
+            ('auto_mirror_1', c.get('origin_context'), 0) for c in candidates]
         self._mirrored = mirrored or []
         self._watched = watched or []
         # {playlist_id: [track dicts]} ; a None value means the read fails
@@ -37,6 +43,13 @@ class _DB:
 
     def get_all_profiles(self):
         return [{'id': 1}]
+
+    def _get_connection(self):
+        conn = sqlite3.connect(':memory:')
+        conn.execute("CREATE TABLE sync_history (playlist_id TEXT, playlist_name TEXT, "
+                     "is_album_download INTEGER)")
+        conn.executemany("INSERT INTO sync_history VALUES (?, ?, ?)", self._synced)
+        return conn
 
     def get_origin_cleanup_candidates(self):
         return [dict(c) for c in self._candidates]
@@ -272,6 +285,15 @@ def real_db(tmp_path):
     return _Real(str(tmp_path / 'm.db'))
 
 
+def _synced(db, name):
+    """a sync really ran under this name once (#1932)"""
+    with db._get_connection() as conn:
+        conn.execute(
+            "INSERT INTO sync_history (batch_id, playlist_id, playlist_name, source, sync_type, "
+            "tracks_json) VALUES ('b', 'auto_mirror_9', ?, 'mirrored', 'playlist', '[]')", (name,))
+        conn.commit()
+
+
 def _expired_ids(db):
     findings = []
     ctx = _ctx(db, {'playlist_retention': '2mo', 'watchlist_retention': '2mo',
@@ -287,6 +309,7 @@ def test_another_profiles_mirror_and_watchlist_protect_their_downloads(real_db):
     real_db.add_artist_to_watchlist('art-1', 'Kavinsky', profile_id=thomas)
     real_db.candidates = [_cand(1, ctx='Thomas Mix'), _cand(2, origin='watchlist', ctx='Kavinsky'),
                           _cand(3, ctx='Deleted Playlist')]
+    _synced(real_db, 'Deleted Playlist')
     assert _expired_ids(real_db) == {3}
 
 
@@ -312,6 +335,7 @@ def test_1416_membership_nonempty_other_profile_mirror_protects(real_db):
     real_db.candidates = [_cand(1, ctx='Thomas Mix'),
                           _cand(2, ctx='Thomas Mix'),
                           _cand(3, ctx='Deleted Playlist')]
+    _synced(real_db, 'Deleted Playlist')
     # candidate 2 is T2 — not in the mirror's track list → expires
     assert _expired_ids(real_db) == {2, 3}
 
@@ -401,3 +425,39 @@ def test_origin_cleanup_candidates_carry_source_track_id(tmp_path):
         conn.commit()
     rows = db.get_origin_cleanup_candidates()
     assert rows and rows[0]['source_track_id'] == '132123164'
+
+
+# ── #1932: a hand-picked download is not a playlist download ─────────────────
+
+def test_an_album_picked_by_hand_is_kept_even_with_an_old_playlist_label():
+    """rows recorded before the fix carry the album's name as their playlist.
+    that name was never a sync, so nothing proves it was a playlist: kept."""
+    db = _DB([_cand(1, ctx="Signs", created=OLD)],
+             synced=[('artist_album_508786_839958042', 'Signs', 1)])
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert findings == []
+
+
+def test_a_search_download_retried_through_the_wishlist_is_kept():
+    db = _DB([_cand(1, ctx="Street Fighter OST", created=OLD)],
+             synced=[('enhanced_search_album_1108109492', 'Street Fighter OST', 0)])
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert findings == []
+
+
+def test_a_name_no_sync_ever_ran_under_is_kept():
+    db = _DB([_cand(1, ctx="Unknown Playlist", created=OLD)], synced=[])
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert findings == []
+
+
+def test_unreadable_sync_history_keeps_everything_unmirrored():
+    db = _DB([_cand(1, ctx="Deleted Mix", created=OLD)])
+    db._get_connection = lambda: (_ for _ in ()).throw(RuntimeError("locked"))
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert findings == []
+
