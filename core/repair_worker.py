@@ -3478,7 +3478,7 @@ class RepairWorker:
         from core.library2.track_files import primary_file_row
         from core.library2.monitor_rules import record_rule, PROVENANCE_USER
         from core.library2.wanted import recompute_wanted, track_is_wanted
-        from core.library2.mirror_outbox import enqueue_projected_tracks, drain
+        from core.library2.mirror_outbox import enqueue_projected_tracks, drain, upgrade_opted_in
 
         conn = self.db._get_connection()
         try:
@@ -3516,6 +3516,12 @@ class RepairWorker:
                 if not track_is_wanted(conn, tid, profile_id=owner):
                     if scheduled:
                         return {'success': False, 'error': 'Track is no longer monitored; proposal left for manual review'}
+                    record_rule(conn, 'track', tid, True, PROVENANCE_USER, profile_id=owner)
+                elif scheduled and not upgrade_opted_in(conn, tid, owner):
+                    # wanted only because the upgrade imported it: the baseline
+                    # gate holds that off the wishlist and the next reconcile
+                    # would take it off again. the automation on an
+                    # until-cutoff profile is the person asking, so say so.
                     record_rule(conn, 'track', tid, True, PROVENANCE_USER, profile_id=owner)
                 # The audit never writes facts. Approval persists this fresh
                 # measurement so the shared mirror cannot decide on stale facts.

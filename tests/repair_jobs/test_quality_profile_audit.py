@@ -315,3 +315,36 @@ def test_a_skipped_mirror_add_is_not_reported_as_a_queued_upgrade(audit):
     assert result["success"] is False
     assert _findings(audit)[0]["status"] == "pending"
     assert audit.db.get_wishlist_count(profile_id=1) == 0
+
+
+def test_a_scheduled_upgrade_of_an_imported_track_queues_and_stays_queued(audit):
+    """The upgrade baseline (every imported file monitored as file_import) is
+    held back from the wishlist unless someone asked. A scheduled "Apply
+    Quality Upgrades" automation on an until-cutoff profile is someone asking:
+    its upgrade has to queue, and the next reconcile must not take it off."""
+    from core.automation.handlers.apply_quality_upgrades import auto_apply_quality_upgrades
+    from core.library2.mirror_outbox import drain, enqueue_projected_tracks
+    from core.library2.monitor_rules import PROVENANCE_FILE, record_rule
+    from core.library2.wanted import recompute_wanted
+
+    with audit.db._get_connection() as conn:
+        record_rule(conn, "track", audit.tid, True, PROVENANCE_FILE)
+        recompute_wanted(conn, track_ids=[audit.tid])
+        conn.commit()
+        assert conn.execute("SELECT reason FROM lib2_wanted_tracks WHERE track_id=? AND profile_id=1",
+                            (audit.tid,)).fetchone()[0] == "track_rule:file_import"
+    _scan(audit)
+    deps = SimpleNamespace(get_database=lambda: audit.db,
+                           bulk_fix_repair_findings=lambda ids, **kw: audit.worker.bulk_fix_findings(
+                               finding_ids=ids, **kw),
+                           get_current_profile_id=lambda: 1, update_progress=lambda *a, **kw: None)
+
+    result = auto_apply_quality_upgrades({"_profile_id": 1}, deps)
+
+    assert result["applied"] == 1
+    assert audit.db.get_wishlist_count(profile_id=1) == 1
+    with audit.db._get_connection() as conn:
+        enqueue_projected_tracks(conn, [audit.tid], profile_id=1)
+        conn.commit()
+    drain(audit.db)
+    assert audit.db.get_wishlist_count(profile_id=1) == 1
