@@ -58,4 +58,41 @@ describe('background activity notices', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification' }));
     expect(screen.queryByText('Wishlist sync failed')).not.toBeInTheDocument();
   });
+
+  it('sends events through the app notifications instead of its own card', () => {
+    const toast = vi.fn();
+    window.showToast = toast;
+    try {
+      const view = render(<StatusNotice tone="busy" text="Fetching full discography…" />);
+      view.rerender(<StatusNotice tone="busy" text="Fetching full discography…" />);
+      view.rerender(
+        <StatusNotice tone="ok" text="Discography updated from deezer: 29 new, 13 matched." />,
+      );
+      view.rerender(<StatusNotice tone="err" text="Discography refresh failed" />);
+      expect(toast.mock.calls).toEqual([
+        ['Fetching full discography…', 'info'],
+        ['Discography updated from deezer: 29 new, 13 matched.', 'success'],
+        ['Discography refresh failed', 'error'],
+      ]);
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    } finally {
+      delete window.showToast;
+    }
+  });
+
+  it('keeps a live status with its own controls as a card', () => {
+    const toast = vi.fn();
+    window.showToast = toast;
+    try {
+      render(
+        <StatusNotice tone="busy" text="3 wishlist sync operations pending…">
+          <button>Retry</button>
+        </StatusNotice>,
+      );
+      expect(toast).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    } finally {
+      delete window.showToast;
+    }
+  });
 });

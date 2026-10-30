@@ -19,6 +19,15 @@ export function StatusNotice({
   const [host, setHost] = useState<HTMLElement | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const identity = `${tone}:${text}`;
+  // an event (started, done, failed) goes through SoulSync's own toasts and
+  // the notification bell, like every other page. a notice with its own
+  // controls is a live status (the wishlist sync's Retry) and stays a card.
+  const toast = !children && typeof window !== 'undefined' ? window.showToast : undefined;
+
+  useEffect(() => {
+    if (!toast) return;
+    toast(text, tone === 'ok' ? 'success' : tone === 'err' ? 'error' : 'info');
+  }, [identity, toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useLayoutEffect(() => {
     let region = document.getElementById('library-status-notices');
@@ -42,7 +51,7 @@ export function StatusNotice({
     return () => window.clearTimeout(timer);
   }, [identity, tone]);
 
-  if (!host || dismissed) return null;
+  if (toast || !host || dismissed) return null;
   return createPortal(
     <div
       className={`${styles.notice} ${styles[tone]}`}
