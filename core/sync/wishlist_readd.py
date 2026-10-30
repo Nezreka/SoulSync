@@ -103,4 +103,38 @@ def reconstruct_sync_track_data(
     })
 
 
-__all__ = ["normalize_wishlist_track", "build_original_tracks_map", "reconstruct_sync_track_data"]
+def sync_history_curation_origin(
+    entry: Dict[str, Any],
+    track_results: Optional[List[Dict[str, Any]]],
+    track_index: int,
+) -> Optional[Dict[str, Any]]:
+    """Recover durable mirrored provenance for a sync-history wishlist retry.
+
+    Only synthetic mirror batch identifiers carry a mirrored-playlist primary
+    key. Bare numeric playlist identifiers can be upstream Deezer IDs, so they
+    deliberately remain legacy provenance instead of being guessed as mirrors.
+    """
+    playlist_ref = str((entry or {}).get('playlist_id') or '').strip()
+    if not playlist_ref.startswith(('auto_mirror_', 'mirrored_', 'youtube_mirrored_')):
+        return None
+    if not track_results or track_index < 0 or track_index >= len(track_results):
+        return None
+    source_track_id = str((track_results[track_index] or {}).get('source_track_id') or '').strip()
+    if not source_track_id:
+        return None
+    from core.playlists.source_refs import extract_mirrored_pk
+    mirrored_playlist_id = extract_mirrored_pk(playlist_ref)
+    if mirrored_playlist_id is None:
+        return None
+    return {
+        'mirrored_playlist_id': mirrored_playlist_id,
+        'source_track_id': source_track_id,
+    }
+
+
+__all__ = [
+    "normalize_wishlist_track",
+    "build_original_tracks_map",
+    "reconstruct_sync_track_data",
+    "sync_history_curation_origin",
+]

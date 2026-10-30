@@ -1339,3 +1339,74 @@ def test_curated_stale_run_never_records_fingerprint(monkeypatch, patched_db):
 
     assert status_calls == []
     assert states['auto_mirror_7']['status'] == 'error'
+
+
+def test_curated_cancelled_run_never_records_fingerprint(monkeypatch, patched_db):
+    monkeypatch.setattr(
+        'database.music_database.get_database', lambda: _curation_policy_db()
+    )
+    states = {}
+    status_calls = []
+
+    def cancel_when_sync_returns(coro):
+        result = _run_async_sync(coro)
+        states['auto_mirror_7'] = {'status': 'cancelled'}
+        return result
+
+    deps = _build_deps(
+        sync_states=states,
+        run_async=cancel_when_sync_returns,
+        update_and_save_sync_status=lambda *a, **kw: status_calls.append((a, kw)),
+    )
+    snapshot = {
+        'playlist_id': 7, 'profile_id': 1, 'revision': 4,
+        'source_track_ids': ['source-one'],
+    }
+
+    ds.run_sync_task(
+        'auto_mirror_7', 'Curated', [_track()], deps=deps,
+        curation_snapshot=snapshot,
+    )
+
+    assert states['auto_mirror_7']['status'] == 'cancelled'
+    assert status_calls == []
+
+
+def test_curated_unverifiable_run_never_records_fingerprint(monkeypatch, patched_db):
+    from core.playlists.curation import CurationPolicyError
+
+    reads = 0
+
+    class _UnreadablePolicy:
+        def get_mirrored_playlist_curation(self, playlist_id, profile_id=None):
+            nonlocal reads
+            reads += 1
+            if reads > 1:
+                raise CurationPolicyError('database unavailable')
+            return {
+                'playlist_id': 7, 'profile_id': 1, 'source': 'spotify',
+                'enabled': True, 'revision': 4,
+                'decisions': {'source-one': 'keep'}, 'global_rejections': set(),
+            }
+
+    monkeypatch.setattr(
+        'database.music_database.get_database', lambda: _UnreadablePolicy()
+    )
+    status_calls = []
+    states = {}
+    deps = _build_deps(
+        sync_states=states,
+        update_and_save_sync_status=lambda *a, **kw: status_calls.append((a, kw)),
+    )
+    snapshot = {
+        'playlist_id': 7, 'profile_id': 1, 'revision': 4,
+        'source_track_ids': ['source-one'],
+    }
+
+    ds.run_sync_task(
+        'auto_mirror_7', 'Curated', [_track()], deps=deps,
+        curation_snapshot=snapshot,
+    )
+
+    assert status_calls == []
+    assert states['auto_mirror_7']['status'] == 'error'

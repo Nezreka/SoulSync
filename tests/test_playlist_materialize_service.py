@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from core.playlists.curation import CurationPolicyError
 from core.playlists.materialize_service import (
     collect_batch_real_paths,
     materialize_playlist_from_batch,
@@ -279,6 +282,91 @@ def test_rebuild_from_db_only_organized_and_owned(tmp_path: Path):
     assert name == "Mix" and s.linked + s.copied == 1           # only A owned; Gone skipped
     assert (Path(s.playlist_dir) / "A.mp3").exists()
     assert not (tmp_path / "Playlists" / "Off").exists()
+
+
+def test_curated_rebuild_materializes_only_keeps_in_order_and_dedupes(tmp_path: Path):
+    """Folder rebuilds use effective Keep membership before path de-duplication."""
+    a, b, c, d, e = _mk(
+        tmp_path, "A.mp3", "B.mp3", "C.mp3", "D.mp3", "E.mp3"
+    )
+
+    class _CuratedDB(_RebuildDB):
+        def get_mirrored_playlists(self, profile_id=1):
+            return [{
+                "id": 1,
+                "name": "Mix",
+                "source": "spotify",
+                "source_playlist_id": "PL1",
+                "profile_id": 1,
+                "organize_by_playlist": True,
+                "curation_enabled": True,
+            }]
+
+        def get_mirrored_playlist_tracks(self, pid):
+            return [
+                {"track_name": "A", "artist_name": "x", "source_track_id": "keep-a"},
+                {"track_name": "B", "artist_name": "x", "source_track_id": "pending-b"},
+                {"track_name": "E", "artist_name": "x", "source_track_id": "reject-e"},
+                {"track_name": "A copy", "artist_name": "x", "source_track_id": "keep-copy"},
+                {"track_name": "D", "artist_name": "x", "source_track_id": "unreviewed-d"},
+                {"track_name": "C", "artist_name": "x", "source_track_id": "keep-c"},
+            ]
+
+        def get_mirrored_playlist_curation(self, playlist_id, profile_id=None):
+            return {
+                "playlist_id": 1,
+                "profile_id": 1,
+                "source": "spotify",
+                "enabled": True,
+                "revision": 4,
+                "decisions": {
+                    "keep-a": "keep",
+                    "pending-b": "pending",
+                    "reject-e": "reject",
+                    "keep-copy": "keep",
+                    "keep-c": "keep",
+                },
+                # Explicit Keep wins over this source-scoped global rejection.
+                "global_rejections": {"keep-a"},
+            }
+
+    db = _CuratedDB({
+        "A": a,
+        "B": b,
+        "C": c,
+        "D": d,
+        "E": e,
+        "A copy": a,
+    })
+    cfg = _Cfg(
+        str(tmp_path / "Playlists"), mode="copy", item_template="$position - $title"
+    )
+
+    [(name, summary)] = rebuild_organized_playlists_from_db(db, cfg, profile_id=1)
+
+    assert name == "Mix"
+    assert sorted(path.name for path in Path(summary.playlist_dir).iterdir()) == [
+        "01 - A.mp3",
+        "02 - C.mp3",
+    ]
+
+
+def test_curated_rebuild_policy_failure_does_not_touch_folder(tmp_path: Path):
+    class _UnreadablePolicyDB(_RebuildDB):
+        def get_mirrored_playlists(self, profile_id=1):
+            playlist = super().get_mirrored_playlists(profile_id)[0]
+            return [{**playlist, "profile_id": 1, "curation_enabled": True}]
+
+        def get_mirrored_playlist_curation(self, playlist_id, profile_id=None):
+            raise CurationPolicyError("database unavailable")
+
+    db = _UnreadablePolicyDB({"A": _mk(tmp_path, "A.mp3")[0]})
+    cfg = _Cfg(str(tmp_path / "Playlists"))
+
+    with pytest.raises(CurationPolicyError, match="database unavailable"):
+        rebuild_organized_playlists_from_db(db, cfg, profile_id=1)
+
+    assert not (tmp_path / "Playlists").exists()
 
 
 def test_playlist_item_template_renames_entries(tmp_path: Path):

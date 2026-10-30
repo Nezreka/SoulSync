@@ -267,11 +267,22 @@ def _rebuild_one_from_db(db, config_manager, playlist: dict, *, profile_id: int 
     # comes from the row, not from whoever happens to be calling
     from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
     library_root = library_root_for_profile(import_owner_id(playlist))
+    tracks = db.get_mirrored_playlist_tracks(playlist["id"]) or []
+    curation_snapshot = None
+    if playlist.get("curation_enabled"):
+        # Folder materialization is another projection of mirrored membership.
+        # Apply the same strict policy read as sync/acquisition so a rejected,
+        # pending, or unreviewed item cannot reappear after a download finishes.
+        from core.playlists.curation import curated_tracks_for_operation
+        tracks, curation_snapshot = curated_tracks_for_operation(
+            db, playlist["id"], tracks, profile_id=_profile(playlist, profile_id)
+        )
+
     resolved: List[dict] = []
     seen = set()
     _scope_token = set_library_scope(library_scope_for_profile(_profile(playlist, profile_id)))
     try:
-        for t in (db.get_mirrored_playlist_tracks(playlist["id"]) or []):
+        for t in tracks:
             title = (t.get("track_name") or "").strip()
             artist = (t.get("artist_name") or "").strip()
             if not title:
@@ -298,6 +309,12 @@ def _rebuild_one_from_db(db, config_manager, playlist: dict, *, profile_id: int 
         reset_library_scope(_scope_token)
 
     real_paths: List[str] = [r["real"] for r in resolved]
+
+    if curation_snapshot:
+        # Do not prune or rewrite a folder using a policy that changed while
+        # library paths were being resolved.
+        from core.playlists.curation import verify_curation_snapshot
+        verify_curation_snapshot(db, curation_snapshot)
 
     dest_names = None
     if item_template:

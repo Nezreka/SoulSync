@@ -201,6 +201,74 @@ def test_wishlist_keeps_release_aware_independent_playlist_origins(db):
     assert wishlist_track_allowed(db, row) is False
 
 
+def test_wishlist_keeps_distinct_album_releases_separate(db):
+    playlist_id = _mirror(db)
+    _enable(db, playlist_id, [{"source_track_id": "one", "decision": "keep"}])
+    first = _payload()
+    second = _payload()
+    second["album"] = {"name": "Other Release", "id": "release-two"}
+
+    for payload in (first, second):
+        outcome = db.add_to_wishlist_detailed(
+            spotify_track_data=payload,
+            source_type="playlist",
+            source_info=_origin(playlist_id),
+            profile_id=1,
+        )
+        assert outcome["applied"] is True
+
+    rows = db.get_wishlist_tracks(profile_id=1)
+    assert {row["spotify_track_id"] for row in rows} == {
+        "recording-one::release-one",
+        "recording-one::release-two",
+    }
+    assert all(
+        row["source_info"]["playlist_origins"] == [_origin(playlist_id)]
+        for row in rows
+    )
+
+
+def test_deleted_origin_does_not_authorize_but_other_keep_still_does(db):
+    deleted = _mirror(db, source_playlist_id="deleted")
+    approved = _mirror(db, source_playlist_id="approved")
+    _enable(db, deleted, [{"source_track_id": "one", "decision": "keep"}])
+    _enable(db, approved, [{"source_track_id": "one", "decision": "keep"}])
+
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_origins": [_origin(deleted), _origin(approved)]},
+    }
+    assert db.delete_mirrored_playlist(deleted, profile_id=1) is True
+    assert wishlist_track_allowed(db, track) is True
+
+    assert db.delete_mirrored_playlist(approved, profile_id=1) is True
+    assert wishlist_track_allowed(db, track) is False
+
+
+def test_manual_request_remains_eligible_when_shared_playlist_origin_is_rejected(db):
+    playlist_id = _mirror(db)
+    _enable(db, playlist_id, [{"source_track_id": "one", "decision": "keep"}])
+    assert db.add_to_wishlist_detailed(
+        spotify_track_data=_payload(),
+        source_type="playlist",
+        source_info=_origin(playlist_id),
+        profile_id=1,
+    )["applied"] is True
+    assert db.add_to_wishlist_detailed(
+        spotify_track_data=_payload(), source_type="manual", profile_id=1
+    )["applied"] is True
+
+    db.update_mirrored_playlist_decisions(
+        playlist_id,
+        [{"source_track_id": "one", "decision": "reject"}],
+        profile_id=1,
+    )
+    row = db.get_wishlist_tracks(profile_id=1)[0]
+    assert row["source_type"] == "manual"
+    assert row["source_info"]["playlist_origins"] == [_origin(playlist_id)]
+    assert wishlist_track_allowed(db, row) is True
+
+
 def test_rejected_origin_cannot_queue_but_manual_row_remains_eligible(db):
     playlist_id = _mirror(db)
     _enable(db, playlist_id, [{"source_track_id": "one", "decision": "reject"}])

@@ -7,10 +7,14 @@ original auto-add — including its album cover, album_type, and artist shape.
 
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
+
 from core.sync.wishlist_readd import (
     build_original_tracks_map,
     normalize_wishlist_track,
     reconstruct_sync_track_data,
+    sync_history_curation_origin,
 )
 
 
@@ -112,3 +116,54 @@ def test_refuses_wing_it_stub():
 def test_build_map_skips_idless_and_non_dicts():
     m = build_original_tracks_map([_full("a"), {"name": "no id"}, "garbage", None])
     assert set(m.keys()) == {"a"}
+
+
+def test_sync_history_readd_recovers_durable_mirror_origin():
+    results = [_tr(0, "source-track")]
+    assert sync_history_curation_origin(
+        {"playlist_id": "auto_mirror_42"}, results, 0
+    ) == {
+        "mirrored_playlist_id": 42,
+        "source_track_id": "source-track",
+    }
+
+
+def test_sync_history_readd_does_not_guess_numeric_upstream_id_as_mirror():
+    assert sync_history_curation_origin(
+        {"playlist_id": "908622995"}, [_tr(0, "source-track")], 0
+    ) is None
+
+
+def test_sync_history_route_forwards_curation_origin(monkeypatch):
+    import web_server
+    import core.wishlist_service as wishlist_service
+
+    entry = {
+        "playlist_id": "auto_mirror_42",
+        "playlist_name": "Curated",
+        "profile_id": 1,
+        "quality_profile_id": None,
+        "tracks_json": json.dumps([_full("source-track")]),
+        "track_results": json.dumps([_tr(0, "source-track")]),
+    }
+
+    class _HistoryDB:
+        def get_sync_history_entry(self, entry_id, profile_id=None):
+            return entry if entry_id == 7 else None
+
+    calls = []
+    service = SimpleNamespace(
+        add_spotify_track_to_wishlist=lambda **kwargs: calls.append(kwargs) or False
+    )
+    monkeypatch.setattr(web_server, "MusicDatabase", _HistoryDB)
+    monkeypatch.setattr(web_server, "get_current_profile_id", lambda: 1)
+    monkeypatch.setattr(wishlist_service, "get_wishlist_service", lambda: service)
+
+    response = web_server.app.test_client().post(
+        "/api/sync/history/7/track/0/wishlist"
+    )
+
+    assert response.status_code == 200
+    assert len(calls) == 1
+    assert calls[0]["source_context"]["mirrored_playlist_id"] == 42
+    assert calls[0]["source_context"]["source_track_id"] == "source-track"
