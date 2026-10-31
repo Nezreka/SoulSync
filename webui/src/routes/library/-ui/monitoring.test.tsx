@@ -42,9 +42,9 @@ describe('library v2 monitoring mutations', () => {
     );
 
     for (const name of [
-      /^Monitor all releases/,
-      /^Monitor missing only/,
-      /^Unmonitor everything/,
+      /^Add all releases to Wishlist/,
+      /^Add missing releases to Wishlist/,
+      /^Remove everything from Wishlist/,
     ]) {
       const button = screen.getByRole('button', { name });
       expect(button).toBeDisabled();
@@ -112,12 +112,10 @@ describe('library v2 monitoring mutations', () => {
 
     renderWithQueryClient(<MonitorToggle entity="tracks" id={42} monitored={false} />);
 
-    const toggle = screen.getByRole('button', { name: 'Start monitoring' });
+    const toggle = screen.getByRole('button', { name: 'Add to Wishlist' });
     fireEvent.click(toggle);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Update failed — click bookmark to retry',
-    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Update failed. Click to try again');
     expect(toggle).toBeEnabled();
     expect(screen.getByRole('alert')).toHaveAttribute('title', 'Wishlist mirror is unavailable');
 
@@ -154,7 +152,7 @@ describe('library v2 monitoring mutations', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
 
-    expect(await screen.findByText('Future-release monitoring saved.')).toBeInTheDocument();
+    expect(await screen.findByText('New-release setting saved.')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(attempts).toBe(2);
     expect(submitted).toEqual([{ monitor_new_items: 'new' }, { monitor_new_items: 'new' }]);
@@ -182,10 +180,10 @@ describe('library v2 monitoring mutations', () => {
 
     renderWithQueryClient(<MonitoringModal artistId={7} monitorNewItems="all" onClose={onClose} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Monitor missing only/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Add missing releases to Wishlist/ }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Wishlist mirror failed');
-    expect(screen.getByRole('button', { name: /Monitor missing only/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Add missing releases to Wishlist/ })).toBeEnabled();
     expect(onClose).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
@@ -229,10 +227,10 @@ describe('library v2 monitoring mutations', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /Monitor all/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Add all to Wishlist/ }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Album monitoring failed');
-    expect(screen.getByRole('button', { name: /Monitor all/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Add all to Wishlist/ })).toBeEnabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
 

@@ -113,9 +113,9 @@ describe('Library v2 Artist Settings', () => {
 
     for (const name of [
       'Save future-release settings',
-      'Monitor all',
-      'Monitor missing only',
-      'Unmonitor all',
+      'Wishlist all',
+      'Wishlist missing only',
+      'Remove all from Wishlist',
     ]) {
       const button = screen.getByRole('button', { name });
       expect(button).toBeDisabled();
@@ -186,9 +186,11 @@ describe('Library v2 Artist Settings', () => {
     );
 
     renderModal();
-    fireEvent.click(await screen.findByRole('button', { name: 'Monitor missing only' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Wishlist missing only' }));
 
-    expect(await screen.findByText('Monitor missing releases applied.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Add missing releases to Wishlist applied.'),
+    ).toBeInTheDocument();
     await waitFor(() => expect(submitted).toEqual([{ scope: 'missing', monitored: true }]));
   });
 });

@@ -227,6 +227,7 @@ import {
   songsStripQueryOptions,
 } from './library-songs';
 import styles from './library-v2-page.module.css';
+import { WatchlistIcon, WishlistIcon } from './list-icons';
 import { AlbumUpgradeButton } from './owned-album-upgrade';
 import { useArtistBack } from './owned-artist-back';
 import {
@@ -777,7 +778,7 @@ function useMonitorMutation() {
       let targetId = v.id;
       if (targetId == null && v.entity === 'tracks') {
         if (v.albumId == null || v.trackNumber == null) {
-          throw new Error('This track cannot be monitored yet');
+          throw new Error('This track cannot go on your Wishlist yet');
         }
         const created = await materializeLibraryV2MissingTrack(v.albumId, {
           track_number: v.trackNumber,
@@ -818,6 +819,18 @@ function QueryFailure({
 }
 
 /** Lidarr-style monitor toggle (filled bookmark = monitored). */
+/** dev's words: an artist is on the Watchlist, an album or a track on the
+ *  Wishlist. Library v2 called both "monitoring" behind one bookmark */
+export function listToggleLabel(
+  entity: 'artists' | 'albums' | 'tracks',
+  on: boolean,
+  pending = false,
+): string {
+  const list = entity === 'artists' ? 'Watchlist' : 'Wishlist';
+  if (pending) return `Updating your ${list}`;
+  return on ? `Remove from ${list}` : `Add to ${list}`;
+}
+
 export function MonitorToggle({
   entity,
   id,
@@ -846,23 +859,17 @@ export function MonitorToggle({
         type="button"
         className={`${styles.monitorBtn} ${monitored ? styles.monitorOn : ''} ${prominent ? styles.monitorProminent : ''}`}
         aria-pressed={monitored}
-        aria-label={
-          mutation.isPending
-            ? 'Updating monitoring'
-            : monitored
-              ? 'Stop monitoring'
-              : 'Start monitoring'
-        }
+        aria-label={listToggleLabel(entity, monitored, mutation.isPending)}
         title={
           mutation.isError
-            ? 'Monitoring update failed — click to retry'
+            ? `Could not update your ${entity === 'artists' ? 'Watchlist' : 'Wishlist'}. Click to try again`
             : entity === 'artists' && monitored
-              ? 'On the Watchlist — click to remove this artist (files and explicitly monitored tracks stay untouched)'
+              ? 'On your Watchlist. Click to remove this artist (files and wishlisted tracks stay as they are)'
               : entity === 'artists'
-                ? 'Not on the Watchlist — click to monitor this artist'
+                ? 'Add this artist to your Watchlist'
                 : monitored
-                  ? 'Monitored — click to stop'
-                  : 'Not monitored — click to monitor'
+                  ? 'On your Wishlist. Click to remove it'
+                  : 'Add to your Wishlist'
         }
         data-requires-write=""
         disabled={mutation.isPending || !canWrite}
@@ -879,17 +886,18 @@ export function MonitorToggle({
           });
         }}
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d={BOOKMARK_PATH} strokeLinejoin="round" />
-        </svg>
+        {entity === 'artists' ? <WatchlistIcon on={monitored} /> : <WishlistIcon on={monitored} />}
       </button>
       {mutation.isError ? (
         <span
           className={styles.monitorError}
           role="alert"
-          title={mutationErrorMessage(mutation.error, 'Monitoring update failed')}
+          title={mutationErrorMessage(
+            mutation.error,
+            `Could not update your ${entity === 'artists' ? 'Watchlist' : 'Wishlist'}`,
+          )}
         >
-          Update failed — click bookmark to retry
+          Update failed. Click to try again
         </span>
       ) : null}
     </span>
@@ -2104,7 +2112,7 @@ export function MonitoringModal({
       onClose();
     } catch (caught) {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-      setBulkError(mutationErrorMessage(caught, 'Bulk monitoring failed'));
+      setBulkError(mutationErrorMessage(caught, 'Could not update your Wishlist'));
       setFailedBulkAction({ scope, monitored, label });
       setBusy(null);
     }
@@ -2112,24 +2120,24 @@ export function MonitoringModal({
 
   const options: Array<{ label: string; desc: string; run: () => void }> = [
     {
-      label: 'Monitor all releases',
+      label: 'Add all releases to Wishlist',
       desc: 'Every album, EP and single becomes wanted (missing tracks queue for download).',
       run: () => void apply('all', true, 'all'),
     },
     {
-      label: 'Monitor missing only',
+      label: 'Add missing releases to Wishlist',
       desc: 'Only releases with missing tracks become wanted; complete ones stay untouched.',
       run: () => void apply('missing', true, 'missing'),
     },
     {
-      label: 'Unmonitor everything',
+      label: 'Remove everything from Wishlist',
       desc: 'Stop wanting all releases; wishlist entries are withdrawn.',
       run: () => void apply('all', false, 'none'),
     },
   ];
 
   return (
-    <ModalShell title="Artist Monitoring" onClose={onClose}>
+    <ModalShell title="Watchlist settings" onClose={onClose}>
       <div className={styles.qpList}>
         {options.map((o) => (
           <button
@@ -2174,9 +2182,9 @@ export function MonitoringModal({
             saveFutureReleases(value);
           }}
         >
-          <option value="all">Monitor new releases</option>
-          <option value="new">Monitor new releases (from now on)</option>
-          <option value="none">Don't monitor new releases</option>
+          <option value="all">Add new releases to Wishlist</option>
+          <option value="new">Add new releases to Wishlist (from now on)</option>
+          <option value="none">Don't add new releases to Wishlist</option>
         </select>
       </div>
       {futureReleasesMutation.isPending ? (
@@ -2188,7 +2196,7 @@ export function MonitoringModal({
           <span>
             {mutationErrorMessage(
               futureReleasesMutation.error,
-              'Future-release monitoring could not be saved',
+              'The new-release setting could not be saved',
             )}
           </span>
           <button
@@ -2205,7 +2213,7 @@ export function MonitoringModal({
         </div>
       ) : futureReleasesMutation.isSuccess ? (
         <div className={styles.mutationSuccess} role="status">
-          Future-release monitoring saved.
+          New-release setting saved.
         </div>
       ) : null}
     </ModalShell>
@@ -2269,7 +2277,7 @@ export function ArtistSettingsModal({
     } catch (caught) {
       setBulkMessage({
         tone: 'error',
-        text: mutationErrorMessage(caught, 'Existing-release monitoring failed'),
+        text: mutationErrorMessage(caught, 'Could not update your Wishlist'),
       });
     } finally {
       setBulkBusy(null);
@@ -2288,8 +2296,8 @@ export function ArtistSettingsModal({
       title="Artist Settings"
       description={
         artist.monitored
-          ? `${artist.name} · monitored, on the Watchlist`
-          : `${artist.name} · not monitored`
+          ? `${artist.name} · on your Watchlist`
+          : `${artist.name} · not on your Watchlist`
       }
       onClose={onClose}
       footer={
@@ -2473,9 +2481,9 @@ export function ArtistSettingsModal({
                         )
                       }
                     >
-                      <option value="all">Monitor newly discovered releases</option>
+                      <option value="all">Add newly found releases to Wishlist</option>
                       <option value="new">Only releases newer than the last sync</option>
-                      <option value="none">Do not monitor newly discovered releases</option>
+                      <option value="none">Don't add newly found releases to Wishlist</option>
                     </select>
                   </label>
                 </div>
@@ -2493,22 +2501,22 @@ export function ArtistSettingsModal({
                       [
                         'all',
                         true,
-                        'Monitor all existing releases',
-                        'Monitor all',
+                        'Add all existing releases to Wishlist',
+                        'Wishlist all',
                         styles.toolButton,
                       ],
                       [
                         'missing',
                         true,
-                        'Monitor missing releases',
-                        'Monitor missing only',
+                        'Add missing releases to Wishlist',
+                        'Wishlist missing only',
                         styles.toolButton,
                       ],
                       [
                         'all',
                         false,
-                        'Unmonitor existing releases',
-                        'Unmonitor all',
+                        'Remove existing releases from Wishlist',
+                        'Remove all from Wishlist',
                         styles.btnDanger,
                       ],
                     ] as const
@@ -3726,7 +3734,7 @@ export function MaintenanceModal({
         <section className={styles.maintenanceSection}>
           <div className={styles.maintenanceSectionHeader}>
             <div>
-              <strong>Catalog & monitoring</strong>
+              <strong>Catalog & Wishlist</strong>
               <span>Repair cross-system identities and acquisition intent.</span>
             </div>
             <span className={styles.maintenanceScopeBadge}>Entire library</span>
@@ -3788,7 +3796,7 @@ export function MaintenanceModal({
                   <span>
                     {scope === 'artist'
                       ? `Only files linked to ${artistName}.`
-                      : 'Potentially checks every monitored catalog entry.'}
+                      : 'Potentially checks every catalog entry on your Wishlist.'}
                   </span>
                 </div>
                 <span
@@ -4663,7 +4671,7 @@ export function LibraryV2Page() {
         {!canWrite ? (
           <div className={styles.accessNote} role="note">
             {canWish
-              ? 'Your library: you can monitor and search here; other changes are up to the admin.'
+              ? 'Your library: you can use your Watchlist and Wishlist and search here; other changes are up to the admin.'
               : 'Read-only: library changes require the admin profile.'}
           </div>
         ) : null}
@@ -4712,7 +4720,7 @@ export function MirrorStatusBanner() {
   if (!s || (s.pending === 0 && s.failed === 0)) return null;
   const label =
     s.failed > 0
-      ? `${s.failed} wishlist sync ${s.failed === 1 ? 'operation' : 'operations'} failed — monitoring shown here may not match what the pipeline searches.`
+      ? `${s.failed} wishlist sync ${s.failed === 1 ? 'operation' : 'operations'} failed, so the Wishlist shown here may not match what the pipeline searches.`
       : `${s.pending} wishlist sync ${s.pending === 1 ? 'operation' : 'operations'} pending…`;
   return (
     <StatusNotice tone={s.failed > 0 ? 'err' : 'busy'} text={label}>
@@ -5021,7 +5029,7 @@ function ArtistIndexView() {
           <h2>No artists match this view</h2>
           <p>
             {hasActiveArtistFilters
-              ? 'Try a different name or reset the monitoring filter.'
+              ? 'Try a different name or reset the filters.'
               : 'There are no artists on this page.'}
           </p>
           <SongMatchesNote />
@@ -5422,7 +5430,7 @@ function SongIndexView() {
     {
       label: 'Could be better',
       on: search.quality === 'upgradable',
-      title: 'Monitored songs below their quality profile (Wanted → Cutoff Unmet)',
+      title: 'Wishlisted songs below their quality profile (Wanted → Cutoff Unmet)',
       patch: { quality: search.quality === 'upgradable' ? '' : 'upgradable' },
     },
   ] as const;
@@ -5749,8 +5757,8 @@ function WantedIndexView() {
           <h2>Nothing here</h2>
           <p>
             {search.wantedKind === 'missing'
-              ? 'Every monitored track you want is already on disk.'
-              : 'Every monitored track on disk already meets its quality profile.'}
+              ? 'Every track on your Wishlist is already on disk.'
+              : 'Every Wishlist track on disk already meets its quality profile.'}
           </p>
         </div>
       ) : (
@@ -6941,7 +6949,7 @@ function TopTracksSidebar({
         ...s,
         [track.name]: {
           status: 'error',
-          message: mutationErrorMessage(error, 'Bookmark failed'),
+          message: mutationErrorMessage(error, 'Could not add it to your Wishlist'),
         },
       }));
     }
@@ -6995,15 +7003,15 @@ function TopTracksSidebar({
                     state?.status === 'error'
                       ? state.message
                       : state?.status === 'done'
-                        ? 'Bookmarked — this track is now wanted'
-                        : 'Bookmark — mark this track as wanted'
+                        ? 'On your Wishlist'
+                        : 'Add to Wishlist'
                   }
                   onClick={(e) => {
                     e.stopPropagation();
                     void bookmark(track);
                   }}
                 >
-                  {state?.status === 'done' ? '✓' : <SvgIcon name="monitor" filled />}
+                  <WishlistIcon on={state?.status === 'done'} />
                 </button>
               ) : null}
             </div>
@@ -7016,17 +7024,17 @@ function TopTracksSidebar({
             type="button"
             className={`hero-top-tracks-download-all ${styles.topTracksMonitorAll}`}
             disabled={bulk !== null || unmonitored.length === 0}
-            title="Bookmark every top track: mark them all as wanted"
+            title="Add every top track to your Wishlist"
             onClick={(e) => {
               e.stopPropagation();
               void monitorAll();
             }}
           >
             {bulk
-              ? `Monitoring… ${bulk.done}/${bulk.total}`
+              ? `Adding… ${bulk.done}/${bulk.total}`
               : unmonitored.length === 0
-                ? 'All monitored'
-                : 'Monitor All'}
+                ? 'All on Wishlist'
+                : 'Add All to Wishlist'}
           </button>
           <OwnedTopTracksDownloadAll
             tracks={tracks}
@@ -8334,7 +8342,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 <ActionButton
                   icon="settings"
                   label="Artist Settings"
-                  title="Quality profile, monitoring, future releases and audiobook filing"
+                  title="Quality profile, Watchlist, new releases and audiobook filing"
                   onClick={() => setShowArtistSettings(true)}
                 />
                 <ArtistToolsMenu
@@ -8484,8 +8492,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             ) : null}
             <span className={styles.releasesHint}>
               {releasesMode === 'all'
-                ? 'Full discography from the metadata provider — monitor a release to add it to Wanted.'
-                : 'Releases in your library (plus monitored ones).'}
+                ? 'Full discography from the metadata provider. Add a release to your Wishlist to get it.'
+                : 'Releases in your library, plus the ones on your Wishlist.'}
             </span>
           </div>
 
@@ -8737,7 +8745,7 @@ async function runScopedSearch(
     if (dispatchError) return { tone: 'err', text: `Search failed: ${dispatchError}` };
     return {
       tone: 'ok',
-      text: 'Search started for the monitored missing/upgradable tracks in scope — progress on the Downloads page.',
+      text: 'Search started for the missing and upgradable Wishlist tracks in scope. Progress is on the Downloads page.',
     };
   } catch (e) {
     return {
@@ -8871,13 +8879,13 @@ export function SectionBulkMonitorButton({
         disabled={busy || !canWish}
         title={
           allMonitored
-            ? `Stop monitoring all ${title.toLowerCase()}`
-            : `Monitor all ${title.toLowerCase()} (adds missing tracks to Wanted)`
+            ? `Remove all ${title.toLowerCase()} from your Wishlist`
+            : `Add all ${title.toLowerCase()} to your Wishlist`
         }
         onClick={() => void apply()}
       >
-        <SvgIcon name="monitor" filled={allMonitored} />
-        {busy ? 'Working…' : allMonitored ? 'Unmonitor all' : 'Monitor all'}
+        <WishlistIcon on={allMonitored} />
+        {busy ? 'Working…' : allMonitored ? 'Remove all from Wishlist' : 'Add all to Wishlist'}
       </button>
       {error ? (
         <span className={styles.sectionBulkError} role="alert">
@@ -10219,12 +10227,12 @@ export function TrackTableBulkBar({
         data-requires-write=""
         disabled={busy !== null || !canWish}
         onClick={() =>
-          void run('Monitor', () =>
-            fanOut('Monitor', trackIds, (id) => setLibraryV2Monitored('tracks', id, true)),
+          void run('Add to Wishlist', () =>
+            fanOut('Add to Wishlist', trackIds, (id) => setLibraryV2Monitored('tracks', id, true)),
           )
         }
       >
-        {busy === 'Monitor' ? 'Monitoring…' : 'Monitor'}
+        {busy === 'Add to Wishlist' ? 'Adding…' : 'Add to Wishlist'}
       </button>
       <button
         type="button"
@@ -10232,12 +10240,14 @@ export function TrackTableBulkBar({
         data-requires-write=""
         disabled={busy !== null || !canWish}
         onClick={() =>
-          void run('Unmonitor', () =>
-            fanOut('Unmonitor', trackIds, (id) => setLibraryV2Monitored('tracks', id, false)),
+          void run('Remove from Wishlist', () =>
+            fanOut('Remove from Wishlist', trackIds, (id) =>
+              setLibraryV2Monitored('tracks', id, false),
+            ),
           )
         }
       >
-        {busy === 'Unmonitor' ? 'Unmonitoring…' : 'Unmonitor'}
+        {busy === 'Remove from Wishlist' ? 'Removing…' : 'Remove from Wishlist'}
       </button>
       <button
         type="button"
@@ -13753,7 +13763,7 @@ export function describeLibraryV2ArtworkCacheProgress(state: LibraryV2ImportStat
  * one go, each of which then starts fetching a discography, and it sits one
  * pixel from a button people click routinely.
  *
- * "Monitor" is this page's word; the API and the tables still say watchlist.
+ * "Watch" is the word here too (dev's Watchlist); Library v2 had renamed it monitoring.
  */
 function MonitorAllUnmonitoredButton() {
   const canWrite = useLibraryV2CanWrite();
@@ -13772,11 +13782,11 @@ function MonitorAllUnmonitoredButton() {
         className={`${styles.btnGhost} ${styles.automaticSearchButton}`}
         data-requires-write=""
         disabled={!canWrite}
-        title="Start monitoring every artist in your library that isn't monitored yet"
+        title="Add every artist in your library to your Watchlist"
         onClick={() => setOpen(true)}
       >
-        <SvgIcon name="monitor" />
-        Monitor All
+        <WatchlistIcon />
+        Watch All
       </button>
       {open ? <WatchAllModal onClose={() => setOpen(false)} /> : null}
     </>
@@ -13822,7 +13832,7 @@ export function GlobalAutomaticSearchButton() {
         className={`${styles.btnGhost} ${styles.automaticSearchButton}`}
         data-requires-write=""
         disabled={busy || !canWrite}
-        title="Search all monitored missing tracks and all files below their quality-profile cutoff"
+        title="Search every missing Wishlist track and every file below its quality-profile cutoff"
         onClick={() => void runSearch()}
       >
         <SvgIcon name="automatic" />

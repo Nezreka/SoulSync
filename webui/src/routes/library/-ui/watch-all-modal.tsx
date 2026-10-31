@@ -17,7 +17,7 @@ import {
  * Closing after a successful add announces `ss:library-changed` so the React
  * list refreshes.
  *
- * "Monitor" is the LIBRARY's word for it. The feature, the API
+ * "Watch" is the word for it, dev's Watchlist. The feature, the API
  * (`/api/library/watchlist-all-unwatched`), the tables and every identifier
  * below stay `watchlist`/`watch` -- renaming those would be a migration, and
  * the Watchlist page still calls itself that. Only what the user reads on this
@@ -88,7 +88,7 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
       setResult(await watchAllUnwatchedRequest());
     } catch (error) {
       console.error('Error in watch all:', error);
-      window.showToast?.('Failed to start monitoring these artists', 'error');
+      window.showToast?.('Could not add these artists to your Watchlist', 'error');
       setAdding(false);
     }
   };
@@ -112,7 +112,7 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="Monitor all unmonitored artists"
+        aria-label="Add every artist to your Watchlist"
         className="watch-all-modal"
       >
         <div className="watch-all-header">
@@ -134,11 +134,11 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
             <div className="watch-all-results">
               <div className="watch-all-results-icon">✓</div>
               <div className="watch-all-results-title">
-                Now monitoring {result.added} artist{result.added !== 1 ? 's' : ''}
+                Added {result.added} artist{result.added !== 1 ? 's' : ''} to your Watchlist
               </div>
               {result.skipped_already > 0 ? (
                 <div className="watch-all-results-detail">
-                  {result.skipped_already} already monitored
+                  {result.skipped_already} already on it
                 </div>
               ) : null}
               {result.skipped_no_id > 0 ? (
@@ -173,14 +173,14 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
           ) : data.eligible.length === 0 && data.ineligible.length === 0 ? (
             <div className="watch-all-empty-state">
               <div className="watch-all-empty-icon">🎵</div>
-              <div>No unmonitored artists found</div>
+              <div>Every artist is already on your Watchlist</div>
             </div>
           ) : (
             <>
               <div className="watch-all-stats">
                 <div className="watch-all-stat-card eligible">
                   <div className="watch-all-stat-value">{data.eligible.length}</div>
-                  <div className="watch-all-stat-label">Ready to monitor</div>
+                  <div className="watch-all-stat-label">Ready to watch</div>
                 </div>
                 <div className="watch-all-stat-card ineligible">
                   <div className="watch-all-stat-value">{data.ineligible.length}</div>
@@ -219,7 +219,7 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
               ) : (
                 <div className="watch-all-empty-state">
                   <div className="watch-all-empty-icon">🔌</div>
-                  <div>None of your unmonitored artists have a {sourceName} ID yet</div>
+                  <div>None of the artists off your Watchlist have a {sourceName} ID yet</div>
                   <div className="watch-all-empty-hint">
                     The background enrichment worker will match them over time.
                   </div>
@@ -281,10 +281,10 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
               {adding
                 ? 'Adding...'
                 : !data || data.eligible.length === 0
-                  ? 'Monitor All'
+                  ? 'Watch All'
                   : armed
-                    ? `Yes, monitor ${data.eligible.length}`
-                    : `Monitor All (${data.eligible.length})`}
+                    ? `Yes, watch ${data.eligible.length}`
+                    : `Watch All (${data.eligible.length})`}
             </button>
           ) : null}
         </div>

@@ -33,8 +33,8 @@ it('groups the upgrades by album and enhances only the picked tracks', () => {
 
   expect(screen.getByText('Enhance Quality — Muse')).toBeInTheDocument();
   expect(screen.getByText('2 below profile')).toBeInTheDocument();
-  expect(screen.getByText('Monitored')).toBeInTheDocument();
-  expect(screen.getAllByText('Not monitored')).toHaveLength(2);
+  expect(screen.getByText('On Wishlist')).toBeInTheDocument();
+  expect(screen.getAllByText('Not on Wishlist')).toHaveLength(2);
 
   fireEvent.click(screen.getByLabelText('Enhance Song 2'));
   fireEvent.click(screen.getByRole('button', { name: 'Enhance (2)' }));

@@ -270,12 +270,12 @@ describe('filters', () => {
     const { router } = renderPage();
     await screen.findByText('Aphex Twin');
     fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Not monitored' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Not on Watchlist' }));
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({ monitored: 'unmonitored', page: 1 }),
     );
     expect(
-      await screen.findByRole('button', { name: 'Remove filter: Not monitored' }),
+      await screen.findByRole('button', { name: 'Remove filter: Not on Watchlist' }),
     ).toBeInTheDocument();
   });
 

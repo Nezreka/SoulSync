@@ -709,7 +709,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
     renderArtist('/library?artist=1&header=rich');
 
-    expect(await screen.findByTitle('Bookmarked — this track is now wanted')).toBeInTheDocument();
+    expect(await screen.findByTitle('On your Wishlist')).toBeInTheDocument();
   });
 
   it('monitors every not-yet-wanted top track with Monitor All', async () => {
@@ -739,10 +739,10 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
     renderArtist('/library?artist=1&header=rich');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Monitor All' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add All to Wishlist' }));
     // the one already wanted is skipped
     await waitFor(() => expect(monitored).toEqual(['Glory Box', 'Sour Times']));
-    expect(await screen.findByRole('button', { name: 'All monitored' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'All on Wishlist' })).toBeDisabled();
   });
 
   it.each([
@@ -763,7 +763,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
   });
 
-  it('uses the same bookmark glyph as every other monitor control', async () => {
+  it('draws a track with the Wishlist icon and the artist with the Watchlist icon', async () => {
     inLibrary();
     server.use(
       http.get('/api/artist/:id/top-tracks', () =>
@@ -784,15 +784,12 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
     renderArtist('/library?artist=1&header=rich');
 
-    const bookmark = await screen.findByTitle('Bookmark — mark this track as wanted');
-    // The monitor toggle by its own label, not "the first icon in the hero" —
-    // the hero actions gained a Play button in front of it, and a positional
-    // lookup silently compares against whatever happens to be leftmost.
-    // the artist's own toggle comes first; a release card carries one too
-    const monitor = screen
-      .getAllByLabelText(/^(Start|Stop) monitoring$/)[0]
-      .querySelector('svg path');
-    expect(bookmark.querySelector('svg path')?.getAttribute('d')).toBe(monitor?.getAttribute('d'));
+    // dev's two lists: a track goes on the Wishlist (the heart), the artist
+    // on the Watchlist (the eye). Library v2 drew both as one bookmark
+    const track = await screen.findByTitle('Add to Wishlist');
+    expect(track.querySelector('svg')?.getAttribute('data-list-icon')).toBe('wishlist');
+    const artist = screen.getAllByLabelText(/^(Add to|Remove from) Watchlist$/)[0];
+    expect(artist.querySelector('svg')?.getAttribute('data-list-icon')).toBe('watchlist');
   });
 
   it('lets a read-only profile browse the full provider discography without writing', async () => {

@@ -26,7 +26,7 @@ describe('Library v2 maintenance tools', () => {
     renderModal();
 
     expect(screen.getByRole('dialog', { name: 'Library Health & Repair' })).toBeInTheDocument();
-    expect(screen.getByText('Catalog & monitoring')).toBeInTheDocument();
+    expect(screen.getByText('Catalog & Wishlist')).toBeInTheDocument();
     expect(screen.getByText('Artist files & tags')).toBeInTheDocument();
     // no library-wide scan job is left, so that section is not drawn empty
     expect(screen.queryByText('Library-wide scans')).toBeNull();

@@ -337,6 +337,10 @@
 .monitorBtn svg {
   width: 16px;
   height: 16px;
+}
+
+/* the list icons (list-icons.tsx) draw their own on and off states */
+.monitorBtn svg:not([data-list-icon]) {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.6;
@@ -350,7 +354,7 @@
   color: rgb(var(--accent-rgb));
 }
 
-.monitorOn svg {
+.monitorOn svg:not([data-list-icon]) {
   fill: currentColor;
   stroke: none;
 }

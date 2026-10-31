@@ -10,6 +10,7 @@ import {
 } from '../-library-v2.api';
 import { artistDetailQueryOptions } from '../../artist-detail/-artist-detail.api';
 import styles from './library-v2-page.module.css';
+import { WishlistIcon } from './list-icons';
 
 /**
  * What Library v2 adds to upstream's artist page.
@@ -25,8 +26,6 @@ import styles from './library-v2-page.module.css';
  * Outside the provider (upstream's own tests, any other page that renders a
  * release card) the card is exactly upstream's.
  */
-
-const BOOKMARK_PATH = 'M5 3.5A1.5 1.5 0 0 1 6.5 2h11A1.5 1.5 0 0 1 19 3.5V22l-7-4.2L5 22V3.5z';
 
 interface ArtistPageLibrary {
   /** The route's source and provider id: the artist the page is about. */
@@ -146,7 +145,7 @@ function MonitorButton({
     } catch (error) {
       setState('idle');
       window.showToast?.(
-        `Could not monitor ${target.title || 'this release'}: ${(error as Error).message}`,
+        `Could not add ${target.title || 'this release'} to your Wishlist: ${(error as Error).message}`,
         'error',
       );
     }
@@ -157,21 +156,21 @@ function MonitorButton({
       <button
         type="button"
         className={`${styles.monitorBtn} ${monitored ? styles.monitorOn : ''}`}
-        aria-label={monitored ? 'Monitored' : busy ? 'Starting monitoring' : 'Start monitoring'}
+        aria-label={
+          monitored ? 'On your Wishlist' : busy ? 'Adding to Wishlist' : 'Add to Wishlist'
+        }
         aria-pressed={monitored}
         title={
           monitored
-            ? 'Monitored'
+            ? 'On your Wishlist'
             : canWish
-              ? 'Monitor this release'
-              : 'Monitoring needs Library access for this profile'
+              ? 'Add this release to your Wishlist'
+              : 'The Wishlist needs Library access for this profile'
         }
         disabled={!canWish || busy || monitored}
         onClick={() => void monitor()}
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d={BOOKMARK_PATH} strokeLinejoin="round" />
-        </svg>
+        <WishlistIcon on={monitored} />
       </button>
     </div>
   );

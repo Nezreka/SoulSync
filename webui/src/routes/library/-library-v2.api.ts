@@ -193,7 +193,7 @@ export async function setLibraryV2Monitored(
 ): Promise<void> {
   await lib2Json(
     apiClient.post(`library/v2/${entity}/${id}/monitor`, { json: { monitored } }),
-    'Failed to update monitoring',
+    'Could not update your list',
   );
 }
 
@@ -608,7 +608,7 @@ export async function monitorLibraryV2DiscoveryAlbum(input: {
         track_count: input.trackCount ?? null,
       },
     }),
-    'Could not monitor this release',
+    'Could not add this release to your Wishlist',
   );
   return { artistId: payload.artist_id, albumId: payload.album_id };
 }
@@ -663,7 +663,7 @@ export async function monitorLibraryV2DiscoveryTrack(input: {
         monitored: true,
       },
     }),
-    'Could not bookmark this track',
+    'Could not add this track to your Wishlist',
   );
   return payload.track_id;
 }
@@ -795,9 +795,9 @@ export async function bulkMonitorLibraryV2Releases(
     apiClient.post(`library/v2/artists/${artistId}/releases/monitor`, {
       json: { scope, monitored, ...(albumIds ? { album_ids: albumIds } : {}) },
     }),
-    'Bulk monitor failed',
+    'Could not update your Wishlist',
   );
-  if (!payload.job_id) throw new Error('Bulk monitor did not return a job id');
+  if (!payload.job_id) throw new Error('The Wishlist update did not start');
   return payload.job_id;
 }
 

@@ -126,7 +126,7 @@ describe('an artist the catalogue does not hold', () => {
     const { router } = renderAt(ARTIST_URL);
     await screen.findByText('Music Has the Right to Children');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start monitoring' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Wishlist' }));
 
     await waitFor(() => expect(monitoredAlbums).toHaveLength(1));
     expect(monitoredAlbums[0]).toMatchObject({
@@ -139,7 +139,7 @@ describe('an artist the catalogue does not hold', () => {
       album_type: 'album',
       track_count: 1,
     });
-    expect(await screen.findByRole('button', { name: 'Monitored' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'On your Wishlist' })).toBeDisabled();
     expect(router.state.location.pathname).toBe('/library');
     expect(screen.queryByRole('button', { name: 'My Library' })).not.toBeInTheDocument();
     // The bookmark is not a click on the card.

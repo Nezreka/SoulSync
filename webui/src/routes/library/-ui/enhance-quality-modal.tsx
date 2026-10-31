@@ -40,7 +40,7 @@ export function EnhanceQualityModal({
     <LibraryToolDialog
       title={`Enhance Quality — ${title}`}
       onClose={onClose}
-      description="Files below their quality profile. Picked tracks are monitored and searched now; when no better copy turns up, the Wishlist keeps looking."
+      description="Files below their quality profile. Picked tracks go on your Wishlist and are searched now; when no better copy turns up, the Wishlist keeps looking."
       footer={
         <div className={styles.modalActions}>
           <button type="button" className={styles.btnGhost} onClick={onClose}>
@@ -79,7 +79,7 @@ export function EnhanceQualityModal({
               <th>Title</th>
               <th>Current file</th>
               <th>Upgrade to</th>
-              <th>Monitoring</th>
+              <th>Wishlist</th>
             </tr>
           </thead>
           {albums.map((album) => (
@@ -112,7 +112,7 @@ export function EnhanceQualityModal({
                   </td>
                   <td className={styles.qualityText}>
                     <span className={t.monitored ? styles.statusOk : styles.statusNeutral}>
-                      {t.monitored ? 'Monitored' : 'Not monitored'}
+                      {t.monitored ? 'On Wishlist' : 'Not on Wishlist'}
                     </span>
                   </td>
                 </tr>
