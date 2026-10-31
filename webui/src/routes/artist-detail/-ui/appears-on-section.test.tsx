@@ -173,12 +173,32 @@ describe('collab albums', () => {
     expect(screen.getByText('1 album')).toBeTruthy();
   });
 
-  it('opens the album from its title, on the artist it is filed under', async () => {
-    // the cover plays it; the name goes to the release itself
+  it('opens the album from its title and its artist from the with line', async () => {
+    // the cover plays it; the name opens the release from this page, the
+    // artist it is filed under opens theirs
+    stub([], [WTT]);
+    const openAlbum = vi.fn();
+    const openArtist = vi.fn();
+    render(
+      <AppearsOnSection
+        artistId="6"
+        artistName="Kanye West"
+        onOpenAlbum={openAlbum}
+        onOpenArtist={openArtist}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Watch the Throne' }));
+    expect(openAlbum).toHaveBeenCalledWith(expect.objectContaining({ id: '30' }));
+    fireEvent.click(screen.getByRole('button', { name: 'JAY-Z' }));
+    expect(openArtist).toHaveBeenCalledWith('5');
+  });
+
+  it('keeps names as text where the page opens nothing', async () => {
     stub([], [WTT]);
     render(<AppearsOnSection artistId="6" artistName="Kanye West" />);
-    const link = await screen.findByRole('link', { name: /Watch the Throne/ });
-    expect(link.getAttribute('href')).toBe('/library?artist=5&album=30');
+    await screen.findByText('Watch the Throne');
+    expect(screen.queryByRole('button', { name: 'Watch the Throne' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'JAY-Z' })).toBeNull();
   });
 
   it('play all takes the albums first, then the songs', async () => {

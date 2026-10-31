@@ -868,6 +868,40 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(screen.queryByRole('button', { name: 'Portishead' })).toBeNull();
   });
 
+  it('goes back from a guest album to the artist it was opened from, in that header', async () => {
+    // Rockstar is Post Malone's; opened from 21 Savage's appears on, back
+    // read "Post Malone" and opened his page in the library's own header
+    server.use(
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Rockstar' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 2, name: 'Post Malone' },
+            tracks: [],
+          },
+        }),
+      ),
+      http.get('/api/library/v2/artists/:id', ({ params }) => {
+        const id = Number(params.id);
+        return HttpResponse.json({
+          success: true,
+          artist: portishead({ id, name: id === 1 ? '21 Savage' : 'Post Malone' }),
+        });
+      }),
+    );
+    const { router } = renderArtist('/library?artist=1&header=compact');
+    await screen.findByRole('heading', { name: '21 Savage' });
+    // the page's own search with the album added, as the appears-on name does
+    await act(() => router.navigate({ href: '/library?artist=1&header=compact&album=1' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: '← 21 Savage' }));
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('album'));
+    expect(router.state.location.search).toMatchObject({ artist: 1, header: 'compact' });
+  });
+
   it('links an album main artist when another artist page is open and returns there', async () => {
     server.use(
       http.get('/api/library/v2/ui-preferences', () =>

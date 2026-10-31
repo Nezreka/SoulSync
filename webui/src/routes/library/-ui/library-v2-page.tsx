@@ -6168,28 +6168,24 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
     runScoped(scope.entity, scope.id);
   }
 
-  // Back must return to the view you left. Clearing `releases` here dropped
-  // the user out of All Releases / Discover View into My Library on every
-  // back click, so getting back to the release they came from took three
-  // more clicks. The view settings are only reset when back leads to a
-  // DIFFERENT artist than the URL was showing — then they describe someone
-  // else's page and carrying them over would be the surprise instead.
-  const pageHeader = useQuery(libraryV2UiPreferencesQueryOptions()).data?.artist_page?.header;
-  const goBack = () => {
-    const artistId = album?.primary_artist?.id;
-    const switchesArtist = Boolean(artistId && previousArtist && artistId !== previousArtist);
-    return navigate({
-      search: (previous) =>
-        switchesArtist && artistId
-          ? openArtistSearch(previous, artistId, pageHeader)
-          : { ...previous, album: undefined, artist: artistId ?? previous.artist },
-    });
-  };
+  // Back must return to the view you left, the artist page the album was
+  // opened from with its view settings (Discover View, the header). A guest
+  // spot or a collaboration is filed under someone else: back to its main
+  // artist was a page you were never on, in the library's header instead of
+  // yours. With no artist in the url (the album list) it goes to its own.
+  const fromArtist = previousArtist ?? album?.primary_artist?.id;
+  const guestAlbum = fromArtist != null && fromArtist !== album?.primary_artist?.id;
+  const fromArtistName = useQuery({
+    ...libraryV2ArtistQueryOptions(fromArtist ?? 0),
+    enabled: guestAlbum,
+  }).data?.name;
+  const goBack = () =>
+    navigate({ search: (previous) => ({ ...previous, album: undefined, artist: fromArtist }) });
 
   return (
     <div className={`${styles.page} ${styles.detailView}`}>
       <BackLink onClick={() => void goBack()}>
-        ← {album?.primary_artist ? album.primary_artist.name : 'Library'}
+        ← {(guestAlbum ? fromArtistName : album?.primary_artist?.name) ?? 'Library'}
       </BackLink>
       {albumQuery.isError ? (
         <div className={styles.emptyState}>Album not found.</div>
@@ -8150,6 +8146,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const artist = artistQuery.data;
   const back = useArtistBack(artist?.name);
+  const openArtist = useOpenArtist();
   // suggestions are discovery: My Library is what you have, nothing else. it
   // runs once the page is up: the loader fills a section it finds in the DOM
   useEffect(() => {
@@ -8795,14 +8792,28 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <div className={styles.musicVideosPanel}>
                 <ArtistVideosSection artistName={artist.name} />
               </div>
-              <AppearsOnSection artistId={artist.id} artistName={artist.name} />
+              <AppearsOnSection
+                artistId={artist.id}
+                artistName={artist.name}
+                onOpenAlbum={(a) =>
+                  void navigate({ search: (p) => ({ ...p, album: Number(a.id) }) })
+                }
+                onOpenArtist={(id) => openArtist(Number(id))}
+              />
               <SimilarArtistsSection />
             </>
           ) : (
             <>
               {/* the artist's tracks on other artists' releases are in the
                   library too: a featured artist's My Library was empty */}
-              <AppearsOnSection artistId={artist.id} artistName={artist.name} />
+              <AppearsOnSection
+                artistId={artist.id}
+                artistName={artist.name}
+                onOpenAlbum={(a) =>
+                  void navigate({ search: (p) => ({ ...p, album: Number(a.id) }) })
+                }
+                onOpenArtist={(id) => openArtist(Number(id))}
+              />
             </>
           )}
           <ConcertsSection

@@ -48,13 +48,52 @@ function PendingCover({
 export interface AppearsOnSectionProps {
   artistId: string | number | undefined;
   artistName: string;
+  /** opens the release from this page, so back comes here again */
+  onOpenAlbum?: (album: AppearsOnAlbum) => void;
+  /** opens the artist the release is filed under */
+  onOpenArtist?: (artistId: string | number) => void;
+}
+
+/** "with Post Malone · 2018", the artist it is filed under as a link */
+function AlbumSub({
+  album,
+  artistName,
+  onOpenArtist,
+}: {
+  album: AppearsOnAlbum;
+  artistName: string;
+  onOpenArtist?: (artistId: string | number) => void;
+}) {
+  const text = albumSubLine(album, artistName);
+  const name = album.artist_name ?? '';
+  const at = name && onOpenArtist && album.artist_id != null ? text.indexOf(name) : -1;
+  if (at < 0) return <span className="artist-appears-on-sub">{text}</span>;
+  return (
+    <span className="artist-appears-on-sub">
+      {text.slice(0, at)}
+      <button
+        type="button"
+        className="artist-appears-on-link"
+        title={`Open ${name}`}
+        onClick={() => onOpenArtist?.(album.artist_id!)}
+      >
+        {name}
+      </button>
+      {text.slice(at + name.length)}
+    </span>
+  );
 }
 
 function countLabel(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-export function AppearsOnSection({ artistId, artistName }: AppearsOnSectionProps) {
+export function AppearsOnSection({
+  artistId,
+  artistName,
+  onOpenAlbum,
+  onOpenArtist,
+}: AppearsOnSectionProps) {
   const [data, setData] = useState<AppearsOnData>(EMPTY_APPEARS_ON);
   const [expanded, setExpanded] = useState(false);
 
@@ -113,8 +152,8 @@ export function AppearsOnSection({ artistId, artistName }: AppearsOnSectionProps
       {albums.length ? (
         <ul className="artist-appears-on-albums">
           {albums.map((a) => (
-            // the cover plays the album, its name opens it on the artist it
-            // is filed under
+            // the cover plays the album, its name opens it from this page and
+            // the artist it is filed under opens theirs
             <li key={String(a.id)} className="artist-appears-on-album">
               <button
                 type="button"
@@ -135,14 +174,19 @@ export function AppearsOnSection({ artistId, artistName }: AppearsOnSectionProps
                   />
                 )}
               </button>
-              <a
-                className="artist-appears-on-album-open"
-                href={`/library?artist=${a.artist_id}&album=${a.id}`}
-                title={`Open ${a.title ?? ''}`}
-              >
+              {onOpenAlbum ? (
+                <button
+                  type="button"
+                  className="artist-appears-on-name artist-appears-on-link"
+                  title={`Open ${a.title ?? ''}`}
+                  onClick={() => onOpenAlbum(a)}
+                >
+                  {a.title}
+                </button>
+              ) : (
                 <span className="artist-appears-on-name">{a.title}</span>
-                <span className="artist-appears-on-sub">{albumSubLine(a, artistName)}</span>
-              </a>
+              )}
+              <AlbumSub album={a} artistName={artistName} onOpenArtist={onOpenArtist} />
             </li>
           ))}
         </ul>

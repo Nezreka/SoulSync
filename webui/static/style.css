@@ -49577,15 +49577,16 @@ tr.tag-diff-same {
 .artist-appears-on-album-play:hover .artist-appears-on-album-art {
     filter: brightness(1.1);
 }
-.artist-appears-on-album-open {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    min-width: 0;
+.artist-appears-on-link {
+    padding: 0;
+    background: none;
+    border: 0;
     color: inherit;
-    text-decoration: none;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
 }
-.artist-appears-on-album-open:hover .artist-appears-on-name {
+.artist-appears-on-link:hover {
     text-decoration: underline;
 }
 .artist-appears-on-list {
