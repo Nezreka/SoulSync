@@ -173,6 +173,14 @@ describe('collab albums', () => {
     expect(screen.getByText('1 album')).toBeTruthy();
   });
 
+  it('opens the album from its title, on the artist it is filed under', async () => {
+    // the cover plays it; the name goes to the release itself
+    stub([], [WTT]);
+    render(<AppearsOnSection artistId="6" artistName="Kanye West" />);
+    const link = await screen.findByRole('link', { name: /Watch the Throne/ });
+    expect(link.getAttribute('href')).toBe('/library?artist=5&album=30');
+  });
+
   it('play all takes the albums first, then the songs', async () => {
     stub([{ ...WFL, id: '100' }], [WTT]);
     const play = vi.fn();

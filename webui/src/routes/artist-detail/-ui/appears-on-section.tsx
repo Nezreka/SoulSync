@@ -113,10 +113,12 @@ export function AppearsOnSection({ artistId, artistName }: AppearsOnSectionProps
       {albums.length ? (
         <ul className="artist-appears-on-albums">
           {albums.map((a) => (
-            <li key={String(a.id)}>
+            // the cover plays the album, its name opens it on the artist it
+            // is filed under
+            <li key={String(a.id)} className="artist-appears-on-album">
               <button
                 type="button"
-                className="artist-appears-on-album"
+                className="artist-appears-on-album-play"
                 title={`Play ${a.title ?? ''}`}
                 onClick={() => playAlbum(a)}
               >
@@ -132,9 +134,15 @@ export function AppearsOnSection({ artistId, artistName }: AppearsOnSectionProps
                     aria-hidden="true"
                   />
                 )}
+              </button>
+              <a
+                className="artist-appears-on-album-open"
+                href={`/library?artist=${a.artist_id}&album=${a.id}`}
+                title={`Open ${a.title ?? ''}`}
+              >
                 <span className="artist-appears-on-name">{a.title}</span>
                 <span className="artist-appears-on-sub">{albumSubLine(a, artistName)}</span>
-              </button>
+              </a>
             </li>
           ))}
         </ul>

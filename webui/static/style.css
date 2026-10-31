@@ -49566,8 +49566,27 @@ tr.tag-diff-same {
     margin-bottom: 5px;
     transition: filter var(--dur-fast) ease;
 }
-.artist-appears-on-album:hover .artist-appears-on-album-art {
+.artist-appears-on-album-play {
+    display: block;
+    width: 100%;
+    padding: 0;
+    background: none;
+    border: 0;
+    cursor: pointer;
+}
+.artist-appears-on-album-play:hover .artist-appears-on-album-art {
     filter: brightness(1.1);
+}
+.artist-appears-on-album-open {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+}
+.artist-appears-on-album-open:hover .artist-appears-on-name {
+    text-decoration: underline;
 }
 .artist-appears-on-list {
     list-style: none;
