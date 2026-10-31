@@ -6711,9 +6711,27 @@ textarea.searchInput {
 /* dev's back button sits above the billboard: its page-header without the
    rule underneath, which would cut across the hero */
 .detailView .backHeader {
-  margin-bottom: 18px;
+  margin-bottom: 10px;
   padding-bottom: 0;
   border-bottom: none;
+}
+
+/* a plain link above the toolbar, not a card of its own: the boxed button
+   took a whole band of the page before anything about the artist */
+.detailView .backHeader :global(.back-btn) {
+  padding: 2px 0;
+  border: none;
+  background: none;
+  backdrop-filter: none;
+  color: var(--white-a60);
+  font-size: 13px;
+}
+
+.detailView .backHeader :global(.back-btn):hover {
+  color: #fff;
+  background: none;
+  box-shadow: none;
+  transform: none;
 }
 
 .detailView .pageToolbar {

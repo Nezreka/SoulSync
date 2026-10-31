@@ -217,6 +217,42 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(walk).not.toHaveBeenCalled();
   });
 
+  it('suggests similar artists on Discovery only, never in My Library', async () => {
+    // My Library is what you have; suggestions belong to the discovery side
+    window.loadSimilarArtists = vi.fn();
+    window.cancelSimilarArtistsLoad = vi.fn();
+    inLibrary();
+    renderArtist('/library?artist=1&releases=library');
+    await screen.findByRole('button', { name: 'My Library' });
+    expect(screen.queryByText('Similar Artists')).not.toBeInTheDocument();
+    expect(window.loadSimilarArtists).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Discovery/ }));
+    expect(await screen.findByText('Similar Artists')).toBeInTheDocument();
+    await waitFor(() => expect(window.loadSimilarArtists).toHaveBeenCalledWith('Portishead'));
+  });
+
+  it('says a release on the wishlist is monitored, held to its quality profile', async () => {
+    // being on the wishlist is monitoring: it is what quality upgrades act on,
+    // and taking it off stops both
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            albums: [album({ id: 1, title: 'Dummy', monitored: true })],
+            album_count: 1,
+          }),
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&releases=library');
+
+    const title =
+      'Monitored: on your Wishlist and held to its quality profile. Click to stop monitoring';
+    await waitFor(() => expect(screen.getAllByTitle(title).length).toBeGreaterThan(0));
+  });
+
   it('keeps media-server sync in Tools and reports its background result', async () => {
     const sync = vi.fn();
     server.use(

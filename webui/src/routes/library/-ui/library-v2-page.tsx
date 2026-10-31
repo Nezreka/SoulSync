@@ -868,9 +868,10 @@ export function MonitorToggle({
               ? 'On your Watchlist. Click to remove this artist (files and wishlisted tracks stay as they are)'
               : entity === 'artists'
                 ? 'Add this artist to your Watchlist'
-                : monitored
-                  ? 'On your Wishlist. Click to remove it'
-                  : 'Add to your Wishlist'
+                : // the wishlist is monitoring: quality upgrades act on it too
+                  monitored
+                  ? 'Monitored: on your Wishlist and held to its quality profile. Click to stop monitoring'
+                  : 'Monitor: add to your Wishlist and hold it to its quality profile'
         }
         data-requires-write=""
         disabled={mutation.isPending || !canWrite}
@@ -8149,10 +8150,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const artist = artistQuery.data;
   const back = useArtistBack(artist?.name);
-  // in both views, the way dev's page always ended on similar artists. it
+  // suggestions are discovery: My Library is what you have, nothing else. it
   // runs once the page is up: the loader fills a section it finds in the DOM
   useEffect(() => {
-    if (!artist?.name) return;
+    if (releasesMode !== 'all' || !artist?.name) return;
     window.loadSimilarArtists?.(artist.name);
     return () => window.cancelSimilarArtistsLoad?.();
   }, [artist?.name, releasesMode]);
@@ -8802,7 +8803,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               {/* the artist's tracks on other artists' releases are in the
                   library too: a featured artist's My Library was empty */}
               <AppearsOnSection artistId={artist.id} artistName={artist.name} />
-              <SimilarArtistsSection />
             </>
           )}
           <ConcertsSection
