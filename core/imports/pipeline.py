@@ -2000,8 +2000,12 @@ def post_process_matched_download_with_verification(context_key, context, file_p
         # accounting stays owned by this wrapper. Stash it under a dedicated key
         # the redirect reads. Flag-gated so flag-off downloads are byte-identical
         # (no extra context key), and popped again before the wrapper continues.
-        if original_batch_id and config_manager.get('album_downloads.atomic_publish', False):
-            context['_atomic_publish_batch_id'] = original_batch_id
+        # The staging route (try_staging_match) never puts batch_id in its
+        # context, so the wrapper's argument is the fallback here too: without
+        # it, tracks claimed from an album-bundle staging folder skipped the
+        # redirect and landed one by one in the live library.
+        if (original_batch_id or batch_id) and config_manager.get('album_downloads.atomic_publish', False):
+            context['_atomic_publish_batch_id'] = original_batch_id or batch_id
         # the album-consistency registration needs the batch too. without it
         # no batched download ever reached the album pass (#1618).
         # the staging route never puts batch_id in its context, so the argument
