@@ -1472,6 +1472,11 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
                     </div>
                     <div class="download-tracks-table-container">
                         <table class="download-tracks-table">
+                            <!-- fixed layout sizes columns from here: the name takes the room, the rest stay put -->
+                            <colgroup>
+                                <col class="dmt-col-num"><col><col class="dmt-col-artist">
+                                <col class="dmt-col-status"><col class="dmt-col-status"><col class="dmt-col-actions">
+                            </colgroup>
                             <thead>
                                 <tr>
                                     <th>#</th>
@@ -1486,7 +1491,7 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
                                 ${tracks.map((track, index) => `
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${renderModalTrackPlaylistButton(playlistId, index)}${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${renderModalTrackPlaylistButton(playlistId, index)}<span class="track-name-text">${escapeHtml(track.name)}</span></td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${playlistId}-${index}">-</td>
@@ -2090,6 +2095,11 @@ function renderDownloadModalBody(playlistId, tracks, labels = ['Track', 'Artist'
                     </div>
                     <div class="download-tracks-table-container">
                         <table class="download-tracks-table">
+                            <!-- fixed layout sizes columns from here: the name takes the room, the rest stay put -->
+                            <colgroup>
+                                <col class="dmt-col-select"><col class="dmt-col-num"><col><col class="dmt-col-artist">
+                                <col class="dmt-col-duration"><col class="dmt-col-status"><col class="dmt-col-status"><col class="dmt-col-actions">
+                            </colgroup>
                             <thead>
                                 <tr>
                                     <th class="track-select-header">
@@ -2115,7 +2125,7 @@ function renderDownloadModalBody(playlistId, tracks, labels = ['Track', 'Artist'
                                                    onchange="updateTrackSelectionCount('${playlistId}')">
                                         </td>
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${renderModalTrackPlaylistButton(playlistId, index)}${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${renderModalTrackPlaylistButton(playlistId, index)}<span class="track-name-text">${escapeHtml(track.name)}</span></td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>

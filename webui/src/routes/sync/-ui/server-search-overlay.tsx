@@ -295,8 +295,15 @@ export function ServerSearchOverlay({ track, mode, onClose, onSelect }: ServerSe
                     )}
                   </div>
                   <div className="server-search-result-info">
-                    <div className="server-search-result-title">{searchTrack.title}</div>
-                    <div className="server-search-result-meta">
+                    <div className="server-search-result-title" title={searchTrack.title}>
+                      {searchTrack.title}
+                    </div>
+                    <div
+                      className="server-search-result-meta"
+                      title={[searchTrack.artist_name, searchTrack.album_title]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    >
                       {searchTrack.artist_name}
                       {searchTrack.album_title ? ` · ${searchTrack.album_title}` : ''}
                     </div>

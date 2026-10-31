@@ -23274,6 +23274,27 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 600;
     color: var(--text-primary);
     letter-spacing: -0.005em;
+    /* the whole name, wrapped: "You Make Me ..." six times told you nothing */
+    white-space: normal;
+    text-overflow: clip;
+    line-height: 1.35;
+}
+.download-missing-modal-content .download-tracks-table .track-name-text {
+    overflow-wrap: anywhere;
+}
+
+/* column widths: the name gets whatever the fixed columns leave */
+.download-missing-modal-content .download-tracks-table .dmt-col-select { width: 44px; }
+.download-missing-modal-content .download-tracks-table .dmt-col-num { width: 48px; }
+.download-missing-modal-content .download-tracks-table .dmt-col-artist { width: 18%; }
+.download-missing-modal-content .download-tracks-table .dmt-col-duration { width: 78px; }
+.download-missing-modal-content .download-tracks-table .dmt-col-status { width: 150px; }
+.download-missing-modal-content .download-tracks-table .dmt-col-actions { width: 112px; }
+
+/* a phone can't fit the fixed columns and a readable name: scroll sideways */
+@media (max-width: 768px) {
+    .download-missing-modal-content .download-tracks-table-container { overflow-x: auto; }
+    .download-missing-modal-content .download-tracks-table { min-width: 720px; }
 }
 
 /* Artist — dim, centered */
@@ -55879,7 +55900,8 @@ tr.tag-diff-same {
 .server-search-overlay.visible { opacity: 1; }
 
 .server-search-popover {
-    width: 580px;
+    /* wide enough for classical titles; long ones wrap below, never cut */
+    width: 760px;
     max-width: 95vw;
     max-height: 80vh;
     background: rgba(20, 20, 28, 0.98);
@@ -56058,19 +56080,26 @@ tr.tag-diff-same {
 .server-search-result-title {
     font-size: 13px;
     font-weight: 600;
+    line-height: 1.35;
     color: var(--white-a90);
-    white-space: nowrap;
+    /* two lines, not one: "Op. 8: I." and "Op. 8: VII." differed only in the cut-off part */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 
 .server-search-result-meta {
     font-size: 11px;
+    line-height: 1.35;
     color: var(--white-a35);
     margin-top: 2px;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 
 .server-search-result-details {
