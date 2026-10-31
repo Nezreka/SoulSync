@@ -221,6 +221,7 @@ import {
 } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
 import classic from './library-classic-cards.module.css';
+import { LibraryCover } from './library-cover';
 import {
   AlbumCardPlayButton,
   ArtistCardPlayButton,
@@ -6697,26 +6698,6 @@ function ArtistToolsMenu({
 // is only the plumbing: DOM mutation becomes React state, `getElementById`
 // becomes props/queries, and legacy action names become V2 semantics.
 
-/** Legacy's lazy background loader (`core.js:225-239`): covers only start
- *  downloading once their card is within 200px of the viewport. Reuses the
- *  shared IntersectionObserver when the legacy bundle is present, and paints
- *  directly when it is not, so this survives the legacy page's removal. */
-function useLazyBackgrounds(ref: { current: HTMLElement | null }, key: unknown) {
-  useEffect(() => {
-    const root = ref.current;
-    if (!root) return;
-    const observe = (globalThis as { observeLazyBackgrounds?: (c: Element) => void })
-      .observeLazyBackgrounds;
-    if (observe) {
-      observe(root);
-      return;
-    }
-    root.querySelectorAll<HTMLElement>('[data-bg-src]').forEach((el) => {
-      el.style.backgroundImage = `url('${el.dataset.bgSrc}')`;
-    });
-  }, [ref, key]);
-}
-
 function releaseYear(releaseDate: string | null | undefined, year: number | null | undefined) {
   const fromDate = /^(\d{4})/.exec(String(releaseDate ?? ''))?.[1];
   const parsed = Number(fromDate ?? year ?? 0);
@@ -6737,6 +6718,8 @@ interface DiscographyCard {
   albumType: string;
   year: string;
   imageUrl: string;
+  /** the provider's cover, painted while a cold local one is built */
+  remoteImageUrl?: string | null;
   explicit: boolean;
   /** `null` while ownership is undetermined — legacy's "checking" state. */
   owned: boolean | null;
@@ -6757,6 +6740,7 @@ function catalogueCard(album: LibraryV2AlbumSummary): DiscographyCard {
     // ldp-07: a pure discography row already carries the provider CDN url
     // here; an owned release carries its local cached cover.
     imageUrl: album.image_url ?? album.remote_image_url ?? '',
+    remoteImageUrl: album.remote_image_url ?? null,
     explicit: album.explicit === true,
     owned: album.tracks_present > 0,
     ownedTracks: album.tracks_present,
@@ -6816,11 +6800,9 @@ function ReleaseCardGrid({
   /** play button and musicbrainz link, dev's release card extras */
   extras?: (card: DiscographyCard) => ReactNode;
 }) {
-  const gridRef = useRef<HTMLDivElement>(null);
-  useLazyBackgrounds(gridRef, cards.map((c) => c.key).join('|'));
   if (cards.length === 0) return null;
   return (
-    <div className="releases-grid" ref={gridRef}>
+    <div className="releases-grid">
       {cards.map((card, index) => {
         const flags = classifyReleaseContent({
           title: card.title,
@@ -6839,7 +6821,19 @@ function ReleaseCardGrid({
             style={{ animation: cardFadeIn(index) }}
             onClick={onOpen ? () => onOpen(card) : undefined}
           >
-            <div className="album-card-image" data-bg-src={card.imageUrl || undefined} />
+            {/* an img, not legacy's lazy css background: a cover still being
+                built answers 404, and a background can't notice, so the tile
+                stayed empty for good */}
+            <div className="album-card-image">
+              {card.imageUrl ? (
+                <LibraryCover
+                  src={card.imageUrl}
+                  remote={card.remoteImageUrl}
+                  className={styles.releaseCardCover}
+                  fallback={null}
+                />
+              ) : null}
+            </div>
             {card.albumId ? (
               <div className={styles.cardMonitor} onClick={(e) => e.stopPropagation()}>
                 <MonitorToggle entity="albums" id={card.albumId} monitored={card.monitored} />

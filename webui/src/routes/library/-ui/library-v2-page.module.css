@@ -9438,3 +9438,11 @@ textarea.searchInput {
     display: none;
   }
 }
+
+/* a release card's cover, filling legacy's .album-card-image box */
+.releaseCardCover {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
