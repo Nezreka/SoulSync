@@ -861,13 +861,14 @@ def test_finally_clears_progress_callback(patched_db):
 
 
 def test_finally_drops_original_tracks_map(patched_db):
-    """finally block deletes _original_tracks_map attribute when present."""
+    """finally block deletes provider- and source-keyed payload maps."""
     svc = _FakeSyncService(media_client=_FakeMediaClient())
     deps = _build_deps(sync_service=svc)
 
     ds.run_sync_task('pTM', 'PTM', [_track()], deps=deps)
 
     assert not hasattr(svc, '_original_tracks_map')
+    assert not hasattr(svc, '_original_tracks_by_source')
 
 
 class TestRecordLibraryMembership:

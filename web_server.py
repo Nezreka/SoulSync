@@ -17123,7 +17123,9 @@ def readd_sync_track_to_wishlist(entry_id, track_index):
             'sync_type': 'automatic_sync',
             'timestamp': datetime.now().isoformat(),
         }
-        curation_origin = sync_history_curation_origin(entry, track_results, track_index)
+        curation_origin = sync_history_curation_origin(
+            entry, track_results, track_index, tracks
+        )
         if curation_origin:
             source_context.update(curation_origin)
 

@@ -11,6 +11,7 @@ import json
 from types import SimpleNamespace
 
 from core.sync.wishlist_readd import (
+    build_original_tracks_by_source,
     build_original_tracks_map,
     normalize_wishlist_track,
     reconstruct_sync_track_data,
@@ -19,10 +20,13 @@ from core.sync.wishlist_readd import (
 
 
 def _tr(index, sid, status='wishlist', **kw):
-    return {"index": index, "source_track_id": sid, "download_status": status,
-            "name": kw.get("name", ""), "artist": kw.get("artist", ""),
-            "album": kw.get("album", ""), "image_url": kw.get("image_url", ""),
-            "duration_ms": kw.get("duration_ms", 0)}
+    result = {"index": index, "source_track_id": sid, "download_status": status,
+              "name": kw.get("name", ""), "artist": kw.get("artist", ""),
+              "album": kw.get("album", ""), "image_url": kw.get("image_url", ""),
+              "duration_ms": kw.get("duration_ms", 0)}
+    if kw.get("mirrored_source_track_id"):
+        result["mirrored_source_track_id"] = kw["mirrored_source_track_id"]
+    return result
 
 
 def _full(sid, name="Song", with_images=True):
@@ -118,8 +122,75 @@ def test_build_map_skips_idless_and_non_dicts():
     assert set(m.keys()) == {"a"}
 
 
+def test_source_map_keeps_provider_id_collisions_separate():
+    first = {**_full("shared", name="First"), "source_track_id": "source-a"}
+    second = {**_full("shared", name="Second"), "source_track_id": "source-b"}
+
+    by_source = build_original_tracks_by_source([first, second])
+
+    assert by_source["source-a"]["name"] == "First"
+    assert by_source["source-b"]["name"] == "Second"
+    results = [
+        _tr(0, "shared", mirrored_source_track_id="source-a"),
+        _tr(1, "shared", mirrored_source_track_id="source-b"),
+    ]
+    assert reconstruct_sync_track_data(results, [first, second], 0)["name"] == "First"
+    assert reconstruct_sync_track_data(results, [first, second], 1)["name"] == "Second"
+
+
+def test_live_wishlist_uses_source_map_before_colliding_provider_map(monkeypatch):
+    from services.sync_service import PlaylistSyncService
+    import core.wishlist_service as wishlist_service
+
+    first = {
+        **_full("shared", name="First"),
+        "source_track_id": "source-a",
+        "_curation_origin": {"mirrored_playlist_id": 7, "source_track_id": "source-a"},
+    }
+    second = {
+        **_full("shared", name="Second"),
+        "source_track_id": "source-b",
+        "_curation_origin": {"mirrored_playlist_id": 7, "source_track_id": "source-b"},
+    }
+    service = PlaylistSyncService.__new__(PlaylistSyncService)
+    service._original_tracks_map = build_original_tracks_map([first, second])
+    service._original_tracks_by_source = build_original_tracks_by_source([first, second])
+    tracks = [
+        SimpleNamespace(
+            id="shared", source_track_id=source_id, name=name,
+            artists=["Artist"], album="Album", duration_ms=1,
+            popularity=0, preview_url=None, external_urls={},
+        )
+        for source_id, name in (("source-a", "First"), ("source-b", "Second"))
+    ]
+    calls = []
+    wishlist = SimpleNamespace(
+        database=None,
+        add_spotify_track_to_wishlist=lambda **kwargs: calls.append(kwargs) or {
+            "applied": True, "created": True,
+        },
+    )
+    monkeypatch.setattr(wishlist_service, "get_wishlist_service", lambda: wishlist)
+    monkeypatch.setattr("core.wishlist.library_match.find_owned_match", lambda *a, **k: None)
+
+    added = service._wishlist_unmatched(
+        SimpleNamespace(id="auto_mirror_7", name="Mirror"),
+        [SimpleNamespace(spotify_track=track) for track in tracks],
+    )
+
+    assert added == 2
+    assert [call["spotify_track_data"]["name"] for call in calls] == ["First", "Second"]
+    assert [call["source_context"]["source_track_id"] for call in calls] == [
+        "source-a", "source-b",
+    ]
+
+
 def test_sync_history_readd_recovers_durable_mirror_origin():
-    results = [_tr(0, "source-track")]
+    results = [_tr(
+        0,
+        "discovered-provider-track",
+        mirrored_source_track_id="source-track",
+    )]
     assert sync_history_curation_origin(
         {"playlist_id": "auto_mirror_42"}, results, 0
     ) == {
@@ -143,8 +214,13 @@ def test_sync_history_route_forwards_curation_origin(monkeypatch):
         "playlist_name": "Curated",
         "profile_id": 1,
         "quality_profile_id": None,
-        "tracks_json": json.dumps([_full("source-track")]),
-        "track_results": json.dumps([_tr(0, "source-track")]),
+        "tracks_json": json.dumps([{
+            **_full("discovered-provider-track"),
+            "source_track_id": "original-deezer-track",
+        }]),
+        # This models a history row written before mirrored_source_track_id was
+        # added: indexed tracks_json provenance recovers the original safely.
+        "track_results": json.dumps([_tr(0, "discovered-provider-track")]),
     }
 
     class _HistoryDB:
@@ -166,4 +242,4 @@ def test_sync_history_route_forwards_curation_origin(monkeypatch):
     assert response.status_code == 200
     assert len(calls) == 1
     assert calls[0]["source_context"]["mirrored_playlist_id"] == 42
-    assert calls[0]["source_context"]["source_track_id"] == "source-track"
+    assert calls[0]["source_context"]["source_track_id"] == "original-deezer-track"

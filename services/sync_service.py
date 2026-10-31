@@ -1145,6 +1145,14 @@ class PlaylistSyncService:
                     'matched_track': None,
                     'download_status': 'wishlist' if not _is_found else None,
                 }
+                mirrored_source_track_id = str(
+                    getattr(t, 'source_track_id', None) or ''
+                ).strip()
+                if mirrored_source_track_id:
+                    # Keep source_track_id as the discovered provider identity:
+                    # existing history consumers key on it. This separate field
+                    # carries the mirror's own durable identity for curation.
+                    detail['mirrored_source_track_id'] = mirrored_source_track_id
                 if mr.plex_track:
                     detail['matched_track'] = {
                         'title': getattr(mr.plex_track, 'title', ''),
@@ -1280,8 +1288,18 @@ class PlaylistSyncService:
 
                 # Check if we have original track data with full album objects
                 original_track_data = None
+                source_track_id = str(
+                    getattr(spotify_track, 'source_track_id', None) or ''
+                ).strip()
+                if source_track_id:
+                    source_map = getattr(self, '_original_tracks_by_source', None)
+                    if source_map:
+                        original_track_data = source_map.get(source_track_id)
                 if hasattr(self, '_original_tracks_map') and self._original_tracks_map:
-                    original_track_data = self._original_tracks_map.get(spotify_track.id)
+                    original_track_data = (
+                        original_track_data
+                        or self._original_tracks_map.get(spotify_track.id)
+                    )
 
                 # Use original data if available (preserves album images), otherwise convert
                 if original_track_data:

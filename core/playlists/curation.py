@@ -8,6 +8,8 @@ paths all answer eligibility the same way.
 from __future__ import annotations
 
 from collections import Counter
+import hashlib
+import json
 from typing import Any, Iterable, Mapping
 
 
@@ -20,6 +22,13 @@ class CurationPolicyError(RuntimeError):
 
 class CurationPolicyStale(CurationPolicyError):
     """A curated operation no longer matches the persisted policy revision."""
+
+
+def mirrored_membership_fingerprint(tracks: Iterable[Mapping[str, Any]]) -> str:
+    """Stable identity for ordered mirrored membership, including duplicates."""
+    source_track_ids = [str(track.get("source_track_id") or "") for track in tracks]
+    payload = json.dumps(source_track_ids, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def effective_decision(explicit: Any, globally_rejected: bool) -> str:
@@ -96,6 +105,7 @@ def curated_tracks_for_operation(database, playlist_id: int, tracks, *, profile_
         "profile_id": int(policy["profile_id"]),
         "revision": int(policy["revision"]),
         "source_track_ids": source_track_ids,
+        "membership_fingerprint": mirrored_membership_fingerprint(original),
     }
 
 
@@ -115,6 +125,13 @@ def verify_curation_snapshot(database, snapshot: Mapping[str, Any] | None) -> No
         raise CurationPolicyStale(
             f"Curation policy changed while mirrored playlist {playlist_id} was running"
         )
+    expected_membership = snapshot.get("membership_fingerprint")
+    if expected_membership is not None:
+        current_tracks = database.get_mirrored_playlist_tracks(playlist_id)
+        if mirrored_membership_fingerprint(current_tracks or []) != expected_membership:
+            raise CurationPolicyStale(
+                f"Mirrored playlist {playlist_id} membership changed while sync was running"
+            )
     rejected = policy["global_rejections"]
     for source_track_id in snapshot.get("source_track_ids") or []:
         source_track_id = str(source_track_id or "")
@@ -194,7 +211,17 @@ def wishlist_track_allowed(database, track: Mapping[str, Any]) -> bool:
                 policy["decisions"].get(source_track_id),
                 source_track_id in policy["global_rejections"],
             ) == "keep":
-                return True
+                # Decisions deliberately survive refresh, but a retained Keep
+                # for a track that left the mirror must not keep authorizing
+                # deferred acquisition. Disabled curation still returns above.
+                current_tracks = database.get_mirrored_playlist_tracks(
+                    origin["mirrored_playlist_id"]
+                )
+                if any(
+                    str(track.get("source_track_id") or "") == source_track_id
+                    for track in (current_tracks or [])
+                ):
+                    return True
         except CurationPolicyError as exc:
             failures.append(exc)
     if failures:
@@ -211,6 +238,7 @@ __all__ = [
     "decorate_tracks",
     "effective_decision",
     "merge_playlist_origins",
+    "mirrored_membership_fingerprint",
     "verify_curation_snapshot",
     "wishlist_track_allowed",
 ]

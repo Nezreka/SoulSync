@@ -509,8 +509,12 @@ def run_sync_task(
         # Store original track data with full album objects (for wishlist with cover art).
         # Shared with the sync-detail "re-add to wishlist" action so both build the
         # IDENTICAL payload (album→dict + images, artists→dicts). Copy-safe.
-        from core.sync.wishlist_readd import build_original_tracks_map
+        from core.sync.wishlist_readd import (
+            build_original_tracks_by_source,
+            build_original_tracks_map,
+        )
         original_tracks_map = build_original_tracks_map(tracks_json)
+        original_tracks_by_source = build_original_tracks_by_source(tracks_json)
 
         tracks = []
         for i, t in enumerate(tracks_json):
@@ -673,6 +677,7 @@ def run_sync_task(
 
         # Attach original tracks map to sync_service for wishlist with album images
         sync_service._original_tracks_map = original_tracks_map
+        sync_service._original_tracks_by_source = original_tracks_by_source
 
         # skip_wishlist_add skips wishlisting entirely for this sync. Its
         # callers: organize-by-playlist (batch failure handling covers the
@@ -1047,4 +1052,6 @@ def run_sync_task(
             # Clean up original tracks map
             if hasattr(sync_service, '_original_tracks_map'):
                 del sync_service._original_tracks_map
+            if hasattr(sync_service, '_original_tracks_by_source'):
+                del sync_service._original_tracks_by_source
         logger.info(f"Cleanup completed for {playlist_id}")

@@ -15,15 +15,19 @@ from core.playlists.curation import (
     verify_curation_snapshot,
     wishlist_track_allowed,
 )
+from core.sync.wishlist_readd import (
+    reconstruct_sync_track_data,
+    sync_history_curation_origin,
+)
 from core.playlists.organize_download import run_playlist_organize_download
 from core.wishlist.processing import _run_wishlist_cycle
 from database.music_database import MusicDatabase
 from services.sync_service import PlaylistSyncService
 
 
-def _mirror(db, *, source_playlist_id="mix"):
+def _mirror(db, *, source="spotify", source_playlist_id="mix"):
     return db.mirror_playlist(
-        source="spotify",
+        source=source,
         source_playlist_id=source_playlist_id,
         name="Mix",
         tracks=[
@@ -137,6 +141,29 @@ def test_policy_revision_change_invalidates_in_flight_snapshot(db):
         verify_curation_snapshot(db, snapshot)
 
 
+def test_membership_refresh_invalidates_snapshot_without_policy_revision_change(db):
+    playlist_id = _mirror(db)
+    _enable(db, playlist_id, [{"source_track_id": "one", "decision": "keep"}])
+    _tracks, snapshot = curated_tracks_for_operation(
+        db, playlist_id, db.get_mirrored_playlist_tracks(playlist_id), profile_id=1
+    )
+    revision = db.get_mirrored_playlist(playlist_id)["curation_revision"]
+
+    db.mirror_playlist(
+        source="spotify",
+        source_playlist_id="mix",
+        name="Mix",
+        tracks=[
+            {"track_name": "Two", "artist_name": "Artist", "source_track_id": "two"}
+        ],
+        profile_id=1,
+    )
+
+    assert db.get_mirrored_playlist(playlist_id)["curation_revision"] == revision
+    with pytest.raises(CurationPolicyStale, match="membership changed"):
+        verify_curation_snapshot(db, snapshot)
+
+
 def test_organize_download_zero_keep_does_not_create_batch(db):
     playlist_id = _mirror(db)
     _enable(db, playlist_id)
@@ -201,6 +228,90 @@ def test_wishlist_keeps_release_aware_independent_playlist_origins(db):
     assert wishlist_track_allowed(db, row) is False
 
 
+def test_non_spotify_history_readd_uses_original_mirrored_source_id(db):
+    playlist_id = _mirror(db, source="deezer", source_playlist_id="deezer-mix")
+    _enable(db, playlist_id, [{"source_track_id": "one", "decision": "keep"}])
+    provider_payload = {
+        **_payload(),
+        "id": "spotify-discovered-id",
+        "source_track_id": "one",
+    }
+    history = [{
+        "index": 0,
+        "source_track_id": "spotify-discovered-id",
+        "mirrored_source_track_id": "one",
+        "download_status": "wishlist",
+    }]
+
+    restored = reconstruct_sync_track_data(history, [provider_payload], 0)
+    origin = sync_history_curation_origin(
+        {"playlist_id": f"auto_mirror_{playlist_id}"},
+        history,
+        0,
+        [provider_payload],
+    )
+
+    assert restored["id"] == "spotify-discovered-id"
+    assert origin == _origin(playlist_id)
+    outcome = db.add_to_wishlist_detailed(
+        spotify_track_data=restored,
+        source_type="playlist",
+        source_info=origin,
+        profile_id=1,
+    )
+    assert outcome["applied"] is True
+    assert wishlist_track_allowed(db, db.get_wishlist_tracks(profile_id=1)[0]) is True
+
+
+def test_colliding_provider_id_keeps_each_source_origin_independent(db):
+    playlist_id = _mirror(db)
+    _enable(db, playlist_id, [
+        {"source_track_id": "one", "decision": "keep"},
+        {"source_track_id": "two", "decision": "keep"},
+    ])
+    tracks = [
+        {**_payload(), "id": "shared-provider", "name": "First", "source_track_id": "one"},
+        {**_payload(), "id": "shared-provider", "name": "Second", "source_track_id": "two"},
+    ]
+    history = [
+        {"index": 0, "source_track_id": "shared-provider",
+         "mirrored_source_track_id": "one", "download_status": "wishlist"},
+        {"index": 1, "source_track_id": "shared-provider",
+         "mirrored_source_track_id": "two", "download_status": "wishlist"},
+    ]
+
+    for index, expected_name in enumerate(("First", "Second")):
+        restored = reconstruct_sync_track_data(history, tracks, index)
+        origin = sync_history_curation_origin(
+            {"playlist_id": f"auto_mirror_{playlist_id}"},
+            history,
+            index,
+            tracks,
+        )
+        assert restored["name"] == expected_name
+        assert origin == _origin(playlist_id) | {"source_track_id": ("one", "two")[index]}
+        assert db.add_to_wishlist_detailed(
+            spotify_track_data=restored,
+            source_type="playlist",
+            source_info=origin,
+            profile_id=1,
+        )["applied"] is True
+
+    [row] = db.get_wishlist_tracks(profile_id=1)
+    assert row["source_info"]["playlist_origins"] == [
+        _origin(playlist_id),
+        {"mirrored_playlist_id": playlist_id, "source_track_id": "two"},
+    ]
+    db.update_mirrored_playlist_decisions(
+        playlist_id, [{"source_track_id": "one", "decision": "reject"}], profile_id=1
+    )
+    assert wishlist_track_allowed(db, row) is True
+    db.update_mirrored_playlist_decisions(
+        playlist_id, [{"source_track_id": "two", "decision": "reject"}], profile_id=1
+    )
+    assert wishlist_track_allowed(db, row) is False
+
+
 def test_wishlist_keeps_distinct_album_releases_separate(db):
     playlist_id = _mirror(db)
     _enable(db, playlist_id, [{"source_track_id": "one", "decision": "keep"}])
@@ -242,6 +353,26 @@ def test_deleted_origin_does_not_authorize_but_other_keep_still_does(db):
     assert wishlist_track_allowed(db, track) is True
 
     assert db.delete_mirrored_playlist(approved, profile_id=1) is True
+    assert wishlist_track_allowed(db, track) is False
+
+
+def test_removed_member_no_longer_authorizes_deferred_wishlist(db):
+    playlist_id = _mirror(db)
+    _enable(db, playlist_id, [{"source_track_id": "one", "decision": "keep"}])
+    track = {"source_type": "playlist", "source_info": _origin(playlist_id)}
+    assert wishlist_track_allowed(db, track) is True
+
+    db.mirror_playlist(
+        source="spotify",
+        source_playlist_id="mix",
+        name="Mix",
+        tracks=[
+            {"track_name": "Two", "artist_name": "Artist", "source_track_id": "two"}
+        ],
+        profile_id=1,
+    )
+
+    assert db.get_mirrored_playlist_curation(playlist_id)["decisions"]["one"] == "keep"
     assert wishlist_track_allowed(db, track) is False
 
 
@@ -408,6 +539,46 @@ def test_stale_policy_blocks_direct_missing_track_download(db, monkeypatch):
     assert downloaded == []
     assert client.writes == []
     assert any("policy changed" in error.lower() for error in result.errors)
+
+
+def test_membership_refresh_blocks_stale_acquisition_and_server_write(db, monkeypatch):
+    playlist_id = _mirror(db)
+    _enable(db, playlist_id, [{"source_track_id": "one", "decision": "keep"}])
+    _tracks, snapshot = curated_tracks_for_operation(
+        db, playlist_id, db.get_mirrored_playlist_tracks(playlist_id), profile_id=1
+    )
+    db.mirror_playlist(
+        source="spotify",
+        source_playlist_id="mix",
+        name="Mix",
+        tracks=[
+            {"track_name": "Two", "artist_name": "Artist", "source_track_id": "two"}
+        ],
+        profile_id=1,
+    )
+    monkeypatch.setattr("database.music_database.get_database", lambda: db)
+    client = _MediaClient()
+    service = PlaylistSyncService(None, None)
+    service._get_active_media_client = lambda *a, **k: (client, "navidrome")
+    downloaded = []
+
+    async def _missing(*args, **kwargs):
+        return None, 0.0
+
+    async def _download(rows):
+        downloaded.extend(rows)
+        return len(rows)
+
+    service._find_track_in_media_server = _missing
+    service._download_missing_tracks = _download
+    result = asyncio.run(service.sync_playlist(
+        _service_playlist(), download_missing=True, profile_id=1,
+        curation_snapshot=snapshot,
+    ))
+
+    assert downloaded == []
+    assert client.writes == []
+    assert any("membership changed" in error.lower() for error in result.errors)
 
 
 def test_stale_policy_blocks_media_server_write(db, monkeypatch):
