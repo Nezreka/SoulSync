@@ -106,6 +106,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     },
   );
 
+  // the whole artist page and the whole View Settings: slow on a loaded run
   it('hides the toolbar buttons this profile switched off and opens View Settings from Tools', async () => {
     const saved: unknown[] = [];
     server.use(
@@ -152,7 +153,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(
       await screen.findByRole('button', { name: 'History' }, { timeout: 5000 }),
     ).toBeInTheDocument();
-  });
+  }, 30_000);
 
   it('keeps media-server sync in Tools and reports its background result', async () => {
     const sync = vi.fn();

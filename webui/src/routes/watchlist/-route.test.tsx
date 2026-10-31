@@ -1223,6 +1223,24 @@ describe('watchlist route', () => {
     expect(calls.some((url) => url.includes('/api/watchlist/remove'))).toBe(false);
   });
 
+  it('opens an artist the library holds there: the name, and View Discography in its discovery view', async () => {
+    stubFetch({
+      library: { artist_id: 77, album_count: 4, track_count: 52, recent_albums: [] },
+    });
+    const { router } = renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    // the library part arrives with the panel's payload
+    await screen.findByText('4 albums · 52 tracks');
+    fireEvent.click(screen.getByRole('button', { name: 'View Discography' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/library'));
+    expect(router.state.location.search).toMatchObject({ artist: 77, releases: 'all' });
+
+    await act(() => router.navigate({ href: '/watchlist?detailId=sp-aphex' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Aphex Twin' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/library'));
+    expect(router.state.location.search).toMatchObject({ artist: 77 });
+  });
+
   it('disables View Discography for an artist with no provider ids', async () => {
     stubFetch({ configProviderIds: false });
     renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);

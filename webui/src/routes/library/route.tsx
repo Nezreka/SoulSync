@@ -1,5 +1,6 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 
+import { lastNavigationFrom } from '@/platform/shell/last-navigation';
 import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import {
@@ -18,7 +19,7 @@ import { LibraryV2Page } from './-ui/library-v2-page';
 
 export const Route = createFileRoute('/library')({
   validateSearch: libraryV2SearchSchema,
-  beforeLoad: async ({ context, search }) => {
+  beforeLoad: async ({ context, search, location, cause }) => {
     // Resolve provider-qualified identities without materializing catalogue rows.
     const discover = search.discover ?? '';
     const split = discover.indexOf(':');
@@ -96,6 +97,19 @@ export const Route = createFileRoute('/library')({
         },
         replace: true,
       });
+    }
+    // an artist reached from another page (the wishlist, the watchlist, search,
+    // the dashboard) opens in the header this profile picked for arrivals from
+    // elsewhere; inside the library ('stay') its own links pick the library's.
+    // a header written in the url of a cold load (a bookmark, a reload) stays
+    if (search.artist && cause === 'enter') {
+      const coldWithHeader = !lastNavigationFrom() && /[?&]header=/.test(location.searchStr);
+      const header = coldWithHeader
+        ? search.header
+        : await artistHeaderFromElsewhere(context.queryClient);
+      if (header !== search.header) {
+        throw redirect({ to: '/library', search: { ...search, header }, replace: true });
+      }
     }
   },
   loaderDeps: ({ search }) => ({
