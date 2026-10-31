@@ -28,6 +28,10 @@ import tempfile as _tempfile
 import atexit as _atexit
 import shutil as _shutil
 
+# the mirrored list reuses its status counts for a few seconds in production;
+# a test writes then reads straight away (api/mirrored_playlists.py)
+_os.environ.setdefault('SOULSYNC_STATUS_COUNTS_TTL', '0')
+
 # Under pytest-xdist, workers inherit the controller's environment, so the
 # guards below would see the controller's temp paths and skip: every worker
 # then shares ONE set of temp DBs. That collides at runtime, and a worker

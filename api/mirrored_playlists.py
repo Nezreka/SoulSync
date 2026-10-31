@@ -28,6 +28,48 @@ from utils.logging_config import get_logger
 
 logger = get_logger("web_server")
 
+# the list's per-playlist status counts: ~0.6s on a 10k-track mirror set with
+# nothing else running, and the dashboard band, the sync page and the cards
+# each ask, often at the same moment. concurrent asks share one computation
+# and the answer is reused this long; a count a few seconds old on a card is
+# fine, four of them stacked behind a sync's writes was not
+# (the test suite sets it to 0: a test writes then reads straight away)
+STATUS_COUNTS_TTL = float(os.environ.get('SOULSYNC_STATUS_COUNTS_TTL', '5'))
+_status_counts_lock = threading.Lock()
+_status_counts_cache: dict = {}   # key -> (computed_at, counts)
+_status_counts_inflight: dict = {}  # key -> threading.Event
+
+
+def _status_counts(database, profile_id):
+    key = (str(getattr(database, 'database_path', id(database))), profile_id)
+    while True:
+        with _status_counts_lock:
+            hit = _status_counts_cache.get(key)
+            if hit and time.monotonic() - hit[0] < STATUS_COUNTS_TTL:
+                return hit[1]
+            waiting = _status_counts_inflight.get(key)
+            if waiting is None:
+                done = threading.Event()
+                _status_counts_inflight[key] = done
+                break
+        # someone else is computing it; their answer is ours
+        if not waiting.wait(60):
+            break
+        with _status_counts_lock:
+            hit = _status_counts_cache.get(key)
+            if hit:
+                return hit[1]
+    try:
+        counts = database.get_all_mirrored_playlist_status_counts(profile_id=profile_id)
+        with _status_counts_lock:
+            _status_counts_cache[key] = (time.monotonic(), counts)
+        return counts
+    finally:
+        with _status_counts_lock:
+            event = _status_counts_inflight.pop(key, None)
+        if event is not None:
+            event.set()
+
 # injected by configure()
 get_database = None
 config_manager = None
@@ -139,7 +181,7 @@ def get_mirrored_playlists_endpoint():
         # Single batched query instead of N per-playlist round-trips. Used to
         # take ~50ms per playlist (new connection + 4 sub-queries) — at 30
         # playlists that's 1.5s of modal load time just for status counts.
-        batch_counts = database.get_all_mirrored_playlist_status_counts(profile_id=profile_id)
+        batch_counts = _status_counts(database, profile_id)
         # the name each one lands on the server under, when two mirrors share a name
         try:
             from core.playlists.sync_names import all_sync_names
