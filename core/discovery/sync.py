@@ -442,7 +442,18 @@ def _sync_cover_is_users(playlist_id, profile_id) -> bool:
     return bool(row) and (row.get('source') == 'soulsync' or bool(row.get('custom_cover')))
 
 
-def run_sync_task(
+def run_sync_task(*args, **kwargs):
+    """The actual sync function that runs in the background thread.
+
+    Holds the background workers paused for the whole run, the way a library
+    scan does: they write in bursts all day, and a sync queued behind every
+    one of them (a 75-track playlist took 20+ minutes next to them)."""
+    from core import background_pause
+    with background_pause.paused_for("playlist sync"):
+        return _run_sync_task(*args, **kwargs)
+
+
+def _run_sync_task(
     playlist_id,
     playlist_name,
     tracks_json,

@@ -36,7 +36,6 @@ logger = get_logger("web_server")
 # the callbacks tag their progress with
 db_update_worker = None
 _db_update_automation_id = None
-_workers_paused_by_scan = {}
 # H16: epoch of the DB-update task currently on the executor. Bumped at every
 # run start (automation handler, manual endpoints); the finished/error
 # callbacks only commit for the current epoch, so a stale worker finishing
@@ -347,44 +346,33 @@ def _check_db_update_stall():
         logger.debug(f"[DB Update Watchdog] resume workers failed: {e}")
     return True
 
-_workers_paused_by_scan = set()  # Track which workers WE paused (don't resume manually-paused ones)
+def _background_workers():
+    """the enrichment and maintenance workers a scan or a sync pauses."""
+    return {
+        'mb': _mb_worker(), 'spotify': _spotify_enrichment_worker(), 'itunes': _itunes_enrichment_worker(),
+        'deezer': _deezer_worker(), 'audiodb': _audiodb_worker(), 'discogs': _discogs_worker(), 'lastfm': _lastfm_worker(),
+        'genius': _genius_worker(), 'tidal': _tidal_enrichment_worker(), 'qobuz': _qobuz_enrichment_worker(),
+        'amazon': _amazon_worker(), 'repair': _repair_worker(), 'soulid': _soulid_worker(), 'jiosaavn': _jiosaavn_worker(),
+        'bandcamp': _bandcamp_worker(),
+    }
+
+
+# a playlist sync takes the same hold (core/discovery/sync.py), so the two
+# share one count: neither resumes workers the other still needs paused
+from core import background_pause as _background_pause  # noqa: E402
+
+_background_pause.register_workers(_background_workers)
+
 
 def _pause_workers_for_scan():
     """Pause all enrichment and maintenance workers during database scans to reduce lock contention."""
-    global _workers_paused_by_scan
-    _workers_paused_by_scan = set()
-    workers = {
-        'mb': _mb_worker(), 'spotify': _spotify_enrichment_worker(), 'itunes': _itunes_enrichment_worker(),
-        'deezer': _deezer_worker(), 'audiodb': _audiodb_worker(), 'discogs': _discogs_worker(), 'lastfm': _lastfm_worker(),
-        'genius': _genius_worker(), 'tidal': _tidal_enrichment_worker(), 'qobuz': _qobuz_enrichment_worker(),
-        'amazon': _amazon_worker(), 'repair': _repair_worker(), 'soulid': _soulid_worker(), 'jiosaavn': _jiosaavn_worker(),
-        'bandcamp': _bandcamp_worker(),
-    }
-    for name, w in workers.items():
-        if w and hasattr(w, 'pause') and not getattr(w, 'paused', True):
-            w.pause()
-            _workers_paused_by_scan.add(name)
-    if _workers_paused_by_scan:
-        logger.warning(f"Paused {len(_workers_paused_by_scan)} workers during database scan: {', '.join(_workers_paused_by_scan)}")
+    _background_pause.hold("database scan")
+
 
 def _resume_workers_after_scan():
     """Resume only the workers that WE paused (don't resume manually-paused ones)."""
-    global _workers_paused_by_scan
-    workers = {
-        'mb': _mb_worker(), 'spotify': _spotify_enrichment_worker(), 'itunes': _itunes_enrichment_worker(),
-        'deezer': _deezer_worker(), 'audiodb': _audiodb_worker(), 'discogs': _discogs_worker(), 'lastfm': _lastfm_worker(),
-        'genius': _genius_worker(), 'tidal': _tidal_enrichment_worker(), 'qobuz': _qobuz_enrichment_worker(),
-        'amazon': _amazon_worker(), 'repair': _repair_worker(), 'soulid': _soulid_worker(), 'jiosaavn': _jiosaavn_worker(),
-        'bandcamp': _bandcamp_worker(),
-    }
-    resumed = 0
-    for name, w in workers.items():
-        if name in _workers_paused_by_scan and w and hasattr(w, 'resume'):
-            w.resume()
-            resumed += 1
-    if resumed:
-        logger.info(f"Resumed {resumed} workers after database scan")
-    _workers_paused_by_scan = set()
+    _background_pause.release("database scan")
+
 
 def _run_soulsync_full_refresh():
     """Re-index the standalone output folder through the native import writer.
