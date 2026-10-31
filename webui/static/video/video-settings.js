@@ -551,6 +551,81 @@
         return Array.from(host.querySelectorAll('input')).map(function (input) { return input.value.trim(); }).filter(Boolean);
     }
 
+    // ── the drive map: where soulsync reaches each of the server's drives ────
+    // (core/video/drive_map). each drive the library's files sit on, with a
+    // box for its local folder and a check that finds a sample of its files.
+    var DRIVES_URL = '/api/video/libraries/drives';
+    var _driveTimers = {};
+    function driveRowHtml(d) {
+        return '<div class="video-drive-row" data-server="' + esc(d.server) + '">' +
+            '<div class="video-drive-server"><code>' + esc(d.server) + '</code>' +
+            '<span class="video-drive-count">' + (d.files ? Number(d.files).toLocaleString() + ' files' : 'no files') + '</span></div>' +
+            '<input type="text" class="video-drive-local" value="' + esc(d.local || '') + '" ' +
+            'placeholder="Where SoulSync reaches it, e.g. \\\\nas\\' + esc(String(d.server).split('/').pop() || 'drive') + '" ' +
+            'aria-label="Where SoulSync reaches ' + esc(d.server) + '">' +
+            '<div class="video-drive-status" aria-live="polite"></div></div>';
+    }
+    function checkDrive(row) {
+        var input = row.querySelector('.video-drive-local');
+        var status = row.querySelector('.video-drive-status');
+        var local = (input.value || '').trim();
+        status.className = 'video-drive-status';
+        if (!local) { status.textContent = 'Not mapped: managed the way it is today'; return; }
+        status.textContent = 'Checking…';
+        fetch(DRIVES_URL + '/check', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server: row.getAttribute('data-server'), local: local }),
+        }).then(function (r) { return r.json(); }).then(function (res) {
+            if ((input.value || '').trim() !== local) return;   // typed on meanwhile
+            status.textContent = (res.ok ? '✓ ' : '✗ ') + (res.message || '');
+            status.classList.add(res.ok ? 'is-ok' : 'is-bad');
+        }).catch(function () { status.textContent = 'The check failed'; status.classList.add('is-bad'); });
+    }
+    function renderDriveMap(drives) {
+        var host = document.getElementById('video-drive-map');
+        if (!host) return;
+        if (!drives || !drives.length) {
+            host.innerHTML = '<div class="setting-help-text">No library files yet: scan your libraries first.</div>';
+            return;
+        }
+        host.innerHTML = drives.map(driveRowHtml).join('');
+        Array.from(host.querySelectorAll('.video-drive-row')).forEach(function (row) {
+            var input = row.querySelector('.video-drive-local');
+            input.addEventListener('input', function () {
+                var key = row.getAttribute('data-server');
+                clearTimeout(_driveTimers[key]);
+                _driveTimers[key] = setTimeout(function () { checkDrive(row); }, 600);
+            });
+            checkDrive(row);
+        });
+    }
+    function loadDriveMap() {
+        return fetch(DRIVES_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) renderDriveMap(d.drives || []); })
+            .catch(function () {});
+    }
+    function saveDriveMap() {
+        var host = document.getElementById('video-drive-map');
+        if (!host) return;
+        var map = Array.from(host.querySelectorAll('.video-drive-row')).map(function (row) {
+            return { server: row.getAttribute('data-server'),
+                     local: (row.querySelector('.video-drive-local').value || '').trim() };
+        });
+        fetch(DRIVES_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ map: map }),
+        }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (res) {
+                if (!res.ok) { toast(res.j.error || 'Could not save the drives', 'error'); return; }
+                toast('Drives saved: ' + (res.j.map || []).length + ' mapped', 'success');
+                renderDriveMap(res.j.drives || []);
+            }).catch(function () { toast('Could not save the drives', 'error'); });
+    }
+    document.addEventListener('click', function (e) {
+        if (e.target && e.target.id === 'video-drive-map-save') saveDriveMap();
+    });
+
     function loadDownloads() {
         return fetch(DOWNLOADS_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -570,6 +645,7 @@
                 setC('video-tv-4k-enabled', d.tv_4k_enabled);
                 setP('video-tv-4k-path', d.tv_4k_path);
                 refreshVideoFolders();
+                loadDriveMap();
                 _videoMode = d.download_mode || 'soulseek';
                 _videoHybrid = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : ['soulseek'];
                 var ms = document.getElementById('video-download-mode');

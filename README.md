@@ -265,6 +265,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - A 16-tier ladder with upgrade-until-cutoff and Sonarr-style **custom formats**.
   - Codec, HDR and audio preferences, **audio language** (prefer or require a dubbed / MULTI release), size limits and minimum seeders.
   - **Optional 4K libraries**: a separate Movies 4K and TV 4K folder, off until you switch them on. A profile set to save to the 4K library files new titles there.
+  - **Your server's drives**: SoulSync lists every drive your Plex / Jellyfin library sits on; tell it where it reaches each one (checked against a sample of real files) and every file on it can be managed from SoulSync.
   - A separate YouTube profile.
 - **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames (with `$audiolangs` / `$sublangs` for `[JA+EN]` style names), NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
 - **Downloads page**: Downloads / Review / Clients views with live batches, a review queue and download-client management — the same setup as the music side.

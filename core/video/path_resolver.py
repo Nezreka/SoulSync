@@ -15,6 +15,7 @@ not the template location SoulSync would have chosen for a fresh import.
 from __future__ import annotations
 
 import os
+import re
 from typing import Callable, Optional
 
 # How many trailing path segments to re-root (file, its folder, a parent…).
@@ -23,17 +24,33 @@ _PROBE_DEPTH = 4
 
 def video_base_dirs(db) -> list:
     """The local folders video files can live under, per the user's settings:
-    primary and additional library roots + the transfer folder. Blanks skipped."""
+    primary and additional library roots, the drive map's local folders and the
+    transfer folder. Blanks skipped."""
+    from core.video import drive_map
     from core.video.library_roots import library_roots
     dirs = library_roots(db)
+    for entry in drive_map.load(db):
+        if entry["local"] not in dirs:
+            dirs.append(entry["local"])
     transfer = db.get_setting("transfer_path")
     if transfer and transfer not in dirs:
         dirs.append(str(transfer))
     return dirs
 
 
+def _mapped(stored_path, drive_map):
+    """the drive map's exact translation of a server path, or None"""
+    from core.video import drive_map as dm
+    try:
+        entries = dm.current() if drive_map is None else drive_map
+        return dm.map_path(entries, stored_path) if entries else None
+    except Exception:   # noqa: BLE001 - the map is a shortcut, never a failure
+        return None
+
+
 def resolve_video_dir(stored_path, base_dirs, *, min_segments: int = 1,
-                      isdir: Callable[[str], bool] = os.path.isdir) -> Optional[str]:
+                      isdir: Callable[[str], bool] = os.path.isdir,
+                      drive_map=None) -> Optional[str]:
     """The folder a DB-stored file path sits in, re-rooted HERE -- for when the
     file itself no longer resolves because it was renamed in place since the
     server last reported it (a rename pass, a manual tidy). The folder still says
@@ -51,6 +68,12 @@ def resolve_video_dir(stored_path, base_dirs, *, min_segments: int = 1,
     raw = os.path.dirname(stored_path)
     if raw and isdir(raw):
         return raw
+    # the drive map says exactly where the server's drive is from here
+    mapped = _mapped(stored_path, drive_map)
+    if mapped:
+        mapped_dir = re.sub(r"[\\/][^\\/]*$", "", mapped)   # either separator
+        if mapped_dir and isdir(mapped_dir):
+            return mapped_dir
     floor = max(1, int(min_segments or 1))
     for k in range(min(_PROBE_DEPTH, len(parts)), floor - 1, -1):
         for base in (base_dirs or []):
@@ -65,7 +88,8 @@ def resolve_video_dir(stored_path, base_dirs, *, min_segments: int = 1,
 
 def resolve_video_file_path(stored_path, base_dirs, *, size_bytes=None,
                             exists: Callable[[str], bool] = os.path.exists,
-                            getsize: Callable[[str], int] = os.path.getsize) -> Optional[str]:
+                            getsize: Callable[[str], int] = os.path.getsize,
+                            drive_map=None) -> Optional[str]:
     """Resolve a DB-stored (server-view) file path to a file that exists HERE.
 
     Tries the raw path first, then joins the path's last N..1 segments onto
@@ -93,6 +117,11 @@ def resolve_video_file_path(stored_path, base_dirs, *, size_bytes=None,
             return int(getsize(cand)) == int(size_bytes)
         except Exception:   # noqa: BLE001 - unreadable size → can't prove identity
             return False
+
+    # the drive map first: an exact translation of the server's path
+    mapped = _mapped(stored_path, drive_map)
+    if mapped and exists(mapped) and _same_file(mapped):
+        return mapped
 
     # Prefer specific folder matches across ALL drives before a bare filename.
     for k in range(min(_PROBE_DEPTH, len(parts)), 0, -1):

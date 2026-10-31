@@ -8187,6 +8187,27 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def media_file_paths(self, prefix: str | None = None, limit: int | None = None) -> list:
+        """the server paths of library files, every one or those on one drive
+        (``prefix``, forward or back slashes), for the drive map"""
+        conn = self._get_connection()
+        try:
+            if prefix:
+                p = str(prefix).replace("\\", "/").rstrip("/")
+                sql = ("SELECT relative_path FROM media_files WHERE "
+                       "REPLACE(relative_path, '\\', '/') = ? OR REPLACE(relative_path, '\\', '/') LIKE ? ESCAPE '!' "
+                       "ORDER BY id")
+                like = p.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "/%"
+                args = [p, like]
+            else:
+                sql, args = "SELECT relative_path FROM media_files", []
+            if limit:
+                sql += " LIMIT ?"
+                args.append(int(limit))
+            return [r[0] for r in conn.execute(sql, args).fetchall() if r[0]]
+        finally:
+            conn.close()
+
     def media_files_unprobed(self, limit: int = 300) -> list:
         """owned movie/episode files soulsync hasn't read the languages of yet
         (audio_languages NULL), biggest first so a run covers the most

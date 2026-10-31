@@ -75638,6 +75638,28 @@ body.src-modal-open { overflow: hidden; }
 @media (max-width: 600px) {
     #settings-page .video-4k-path { margin-left: 0; }
 }
+/* the drive map: each server drive, where soulsync reaches it, its check */
+#settings-page .video-drive-map { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 12px; }
+#settings-page .video-drive-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+    gap: 4px 12px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--white-a08);
+    border-radius: 10px;
+    background: var(--white-a03);
+}
+#settings-page .video-drive-server { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#settings-page .video-drive-server code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#settings-page .video-drive-count { color: var(--text-secondary); font-size: 12px; }
+#settings-page .video-drive-status { grid-column: 2; color: var(--text-secondary); font-size: 12px; }
+#settings-page .video-drive-status.is-ok { color: var(--success); }
+#settings-page .video-drive-status.is-bad { color: var(--danger-light); }
+@media (max-width: 600px) {
+    #settings-page .video-drive-row { grid-template-columns: minmax(0, 1fr); }
+    #settings-page .video-drive-status { grid-column: 1; }
+}
 
 
 /* ════════════════════════════════════════════════════════════════════════

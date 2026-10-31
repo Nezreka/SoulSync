@@ -103,6 +103,13 @@ The engine routes each finished download to the library path matching its type.
 
 In Docker, Movies, TV and YouTube start on \`/media/movies\`, \`/media/tv\` and \`/media/youtube\` when the container has those mapped (the default compose file does), the way Music starts on \`/app/Transfer\`. Like the Music folders, each is locked: hit **Unlock** to change one. A folder you've cleared or set yourself is never reset.
 
+## Your media server's drives
+
+Plex and Jellyfin report every file at the path *they* see it under, like \`/mnt/easystore3/TV SHOWS/...\`. When SoulSync sees your drives somewhere else (a network share, another Docker mount, a drive letter), it can only reach the files on drives that happen to be one of its folders. Settings > Folders > Video > **Your media server's drives** lists every drive your library sits on, with how many files are on it. Type where SoulSync reaches each one and it checks a sample of that drive's files right away (**48 of 50 sample files found**).
+
+- Every file on a mapped drive can then be renamed, upgraded, checked for languages and managed from SoulSync.
+- A drive left blank works the way it always did.
+
 ## 4K libraries
 
 To keep 4K copies apart, like a separate **Movies 4K** library in Plex, switch on **Separate 4K movies folder** and / or **Separate 4K TV folder** under Settings > Folders > Video > 4K libraries and give each a folder. Then set **Save to: 4K library** on the [quality profile](#vdl-quality) those titles use.
