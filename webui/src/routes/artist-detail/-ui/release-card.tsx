@@ -13,6 +13,7 @@ import {
 import { releaseFlags } from '../-artist-detail.filters';
 import { gapSourceLabel } from '../-artist-detail.gap-fill';
 import { ReleaseMonitorButton } from '../../library/-ui/artist-page-release-actions';
+import { cardFadeIn } from '../../library/-ui/card-fade';
 
 interface Props {
   release: DiscographyRelease;
@@ -22,6 +23,8 @@ interface Props {
   onOpen: (release: DiscographyRelease) => void;
   /** Resolve the release tracklist and replace the player queue with it. */
   onPlay: (release: DiscographyRelease) => void | Promise<void>;
+  /** its place in the grid, for the staggered fade-in */
+  index?: number;
 }
 
 /**
@@ -33,7 +36,14 @@ interface Props {
  * both select on them, and dropping them would change the page's appearance
  * without changing any behaviour a test would notice.
  */
-export function ReleaseCard({ release, isMusicBrainz, isSourceArtist, onOpen, onPlay }: Props) {
+export function ReleaseCard({
+  release,
+  isMusicBrainz,
+  isSourceArtist,
+  onOpen,
+  onPlay,
+  index = 0,
+}: Props) {
   const [playPending, setPlayPending] = useState(false);
   const flags = releaseFlags(release, isMusicBrainz);
   const overlay = completionOverlay(release, isSourceArtist);
@@ -55,6 +65,7 @@ export function ReleaseCard({ release, isMusicBrainz, isSourceArtist, onOpen, on
       data-is-live={String(flags.isLive)}
       data-is-compilation={String(flags.isCompilation)}
       data-is-featured={String(flags.isFeatured)}
+      style={{ animation: cardFadeIn(index) }}
       onClick={() => onOpen(release)}
     >
       {/* data-bg-src, not a style: an IntersectionObserver swaps it in, so a

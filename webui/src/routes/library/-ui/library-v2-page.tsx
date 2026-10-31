@@ -200,6 +200,7 @@ import { WatchlistAddModal } from '../../artist-detail/-ui/watchlist-add-modal';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
 import { ArtistPageLibraryProvider, ReleaseMonitorButton } from './artist-page-release-actions';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
+import { cardFadeIn } from './card-fade';
 import {
   classifyReleaseContent,
   DEFAULT_DISCOGRAPHY_FILTERS,
@@ -5236,11 +5237,6 @@ function AlbumIndexView() {
   );
 }
 
-/** stagger for a card's fade-in, capped so a long page doesn't trail off (dev's curve) */
-function cardDelay(index: number): number {
-  return Math.min(index, 20) * 30;
-}
-
 /** dev's card frame: the classes its css styles, the fade-in it animated with */
 const CARD_FRAME = {
   position: 'relative',
@@ -5273,7 +5269,7 @@ function AlbumListCard({
       data-album-id={String(album.id)}
       style={{
         ...CARD_FRAME,
-        animation: `cardFadeIn 0.35s cubic-bezier(0.4,0,0.2,1) ${cardDelay(index)}ms both`,
+        animation: cardFadeIn(index),
       }}
     >
       <button
@@ -5894,7 +5890,7 @@ export function ArtistCard({
       data-artist-name={artist.name}
       style={{
         ...CARD_FRAME,
-        animation: `cardFadeIn 0.35s cubic-bezier(0.4,0,0.2,1) ${cardDelay(index)}ms both`,
+        animation: cardFadeIn(index),
       }}
     >
       <button
@@ -6824,7 +6820,7 @@ function ReleaseCardGrid({
   if (cards.length === 0) return null;
   return (
     <div className="releases-grid" ref={gridRef}>
-      {cards.map((card) => {
+      {cards.map((card, index) => {
         const flags = classifyReleaseContent({
           title: card.title,
           album_type: card.albumType,
@@ -6839,6 +6835,7 @@ function ReleaseCardGrid({
             data-is-compilation={String(flags.isCompilation)}
             data-is-featured={String(flags.isFeatured)}
             title={onOpen ? openTitle : card.title}
+            style={{ animation: cardFadeIn(index) }}
             onClick={onOpen ? () => onOpen(card) : undefined}
           >
             <div className="album-card-image" data-bg-src={card.imageUrl || undefined} />
