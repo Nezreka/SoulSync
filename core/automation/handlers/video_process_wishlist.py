@@ -688,6 +688,40 @@ def _default_anime_dir() -> str:
         return ""
 
 
+def _routing_type_for(item: Dict[str, Any]) -> Optional[str]:
+    """``_default_route_type`` for an item that may not come from a wishlist
+    query (a repair grab carries only ``show_tmdb_id``): the library's rule
+    first -- set by hand, an anime-marked library, or a stored hint, never the
+    genre -- and TMDB only for a show in no library with no stored type."""
+    st = item.get("route_series_type")
+    if st:
+        return st
+    tmdb = item.get("show_tmdb_id")
+    if not tmdb:
+        return None
+    try:
+        from api.video import get_video_db
+        st = get_video_db().routing_series_type(tmdb_id=tmdb)
+    except Exception:   # noqa: BLE001 - routing falls back to the TV folder
+        st = None
+    if st and st != "standard":
+        return st
+    return _default_route_type(item)
+
+
+def grab_target_dir(item: Dict[str, Any], media_type: str, root: str) -> str:
+    """``item_target_dir`` for the grab paths that are not the drain or RSS
+    sync (wishlist search now, repair grabs): reads the anime and 4K folders
+    itself, so an anime show's episode goes to the anime folder and a title
+    whose profile says 4K goes to the 4K folder from these paths too."""
+    if not root:
+        return root
+    anime_root = _default_anime_dir() if media_type == "episode" else ""
+    return item_target_dir(item, media_type, root, anime_root,
+                           _default_four_k_dir(media_type),
+                           _routing_type_for, _default_profile_library)
+
+
 def _extto_hits_for_context(ctx: Dict[str, Any]) -> tuple:
     from core.video.extto_search import extto_search
     from core.video.slskd_search import build_query

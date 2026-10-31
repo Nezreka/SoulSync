@@ -18,6 +18,17 @@ from utils.logging_config import get_logger
 logger = get_logger("video.repair.grab")
 
 
+def _title_profile_id(kind: str, *, tmdb_id=None, library_id=None):
+    """The title's own quality-profile id (None = Default) -- the one the
+    Quality Upgrade scan judged it by, so the grab searches, picks and files
+    under the same profile. A failed lookup grabs under the Default, as before."""
+    try:
+        from api.video import get_video_db
+        return get_video_db().quality_profile_id_for(kind, tmdb_id=tmdb_id, library_id=library_id)
+    except Exception:   # noqa: BLE001 - fall back to the Default profile
+        return None
+
+
 def grab_movie(details: dict) -> dict:
     """Search + enqueue one movie. Returns the music fix-handler contract:
     {'success', 'action', 'message'|'error'}."""
@@ -25,6 +36,8 @@ def grab_movie(details: dict) -> dict:
             "year": details.get("year"), "poster_url": details.get("poster_url")}
     if not item["tmdb_id"] or not item["title"]:
         return {"success": False, "error": "movie is not TMDB-matched yet"}
+    item["quality_profile_id"] = _title_profile_id(
+        "movie", tmdb_id=item["tmdb_id"], library_id=details.get("movie_id"))
     try:
         from core.automation.handlers import video_process_wishlist as vpw
         # _default_search returns (candidates, error): candidates is None when
@@ -37,7 +50,7 @@ def grab_movie(details: dict) -> dict:
             return {"success": False,
                     "error": "no release matched your quality profile — finding stays pending"}
         ok = vpw._default_enqueue(item, best, candidates, "movie",
-                                  vpw._default_target_dir("movie"))
+                                  vpw.grab_target_dir(item, "movie", vpw._default_target_dir("movie")))
         if not ok:
             return {"success": False, "error": "slskd did not accept the download"}
         name = best.get("quality") or best.get("resolution") or "release"
@@ -58,6 +71,7 @@ def grab_episode(details: dict) -> dict:
         return {"success": False, "error": "show is not TMDB-matched yet"}
     if item["season_number"] is None or item["episode_number"] is None:
         return {"success": False, "error": "episode number is not known"}
+    item["quality_profile_id"] = _title_profile_id("show", tmdb_id=item["show_tmdb_id"])
     try:
         from core.automation.handlers import video_process_wishlist as vpw
         candidates, err = vpw._default_search(item, "episode")
@@ -68,7 +82,8 @@ def grab_episode(details: dict) -> dict:
             return {"success": False,
                     "error": "no release matched your quality profile — finding stays pending"}
         outcome = vpw.enqueue_outcome(vpw._default_enqueue(
-            item, best, candidates, "episode", vpw._default_target_dir("episode")))
+            item, best, candidates, "episode",
+            vpw.grab_target_dir(item, "episode", vpw._default_target_dir("episode"))))
         if not outcome["ok"]:
             return {"success": False, "error": outcome.get("error") or "download client did not accept the release"}
         name = best.get("quality") or best.get("resolution") or "release"
