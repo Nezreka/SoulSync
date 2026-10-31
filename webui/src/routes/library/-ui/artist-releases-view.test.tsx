@@ -745,6 +745,24 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(await screen.findByRole('button', { name: 'All monitored' })).toBeDisabled();
   });
 
+  it.each([
+    [{ singles: [album(OWNED_SINGLE)] }, 'In your library', true],
+    // only guest verses on other artists' music: in the library, but not theirs
+    [{ guest_track_count: 6, guest_release_count: 6 }, 'Featured in your library', true],
+    [{}, 'Not in your library', false],
+  ])('labels the artist by what the library holds: %#', async (patch, label, myLibrary) => {
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({ success: true, artist: portishead(patch) }),
+      ),
+    );
+    renderArtist('/library?artist=1&header=rich');
+    expect(await screen.findByText(label)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(Boolean(screen.queryByRole('button', { name: 'My Library' }))).toBe(myLibrary),
+    );
+  });
+
   it('uses the same bookmark glyph as every other monitor control', async () => {
     inLibrary();
     server.use(

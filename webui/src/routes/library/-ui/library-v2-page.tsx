@@ -7519,13 +7519,14 @@ function CatalogueArtistHero({
 
 /** the quiet line the hero sets above the artist's name */
 function artistEyebrow(artist: LibraryV2ArtistDetail) {
-  // a guest verse you have counts: 2 chainz with 62 tracks, all of them
-  // features on other artists' albums, is in your library
-  const owned =
-    [...artist.albums, ...(artist.eps ?? []), ...artist.singles].some(
-      (a) => a.tracks_present > 0,
-    ) || (artist.guest_track_count ?? 0) > 0;
-  return owned ? 'In your library' : 'Artist';
+  const ownMusic = [...artist.albums, ...(artist.eps ?? []), ...artist.singles].some(
+    (a) => a.tracks_present > 0,
+  );
+  if (ownMusic) return 'In your library';
+  // only guest verses on other artists' music (jpegmafia on 6 releases):
+  // they are in the library, but none of their own music is
+  if ((artist.guest_track_count ?? 0) > 0) return 'Featured in your library';
+  return 'Not in your library';
 }
 
 /** "Plus 62 tracks on 40 releases by other artists" under the collection
@@ -7990,7 +7991,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   // My Library is there only for an artist with files here, the way dev
   // offered its library view only for an artist in the library. a watched or
   // discography-only artist opens on its discography
-  const inLibrary = artist ? artistEyebrow(artist) === 'In your library' : true;
+  const inLibrary = artist ? artistEyebrow(artist) !== 'Not in your library' : true;
   useEffect(() => {
     if (artist && !inLibrary && releasesMode !== 'all') {
       void navigate({ search: (p) => ({ ...p, releases: 'all' }), replace: true });
