@@ -56,6 +56,7 @@ function loadAdd(processes: Record<string, Proc>, preview: (id: string) => Promi
     'getDownloadModalQualityProfileId',
     'closeDownloadMissingModal',
     'wishlistAddLabel',
+    'WISHLIST_ADD_LABEL',
     'announceWishlistRequest',
     '_withLockedAlbumType',
     [
@@ -70,6 +71,7 @@ function loadAdd(processes: Record<string, Proc>, preview: (id: string) => Promi
     () => null,
     async () => {},
     () => 'Add to Wishlist',
+    'Add to Wishlist',
     () => false,
     (a: unknown) => a,
   ) as (id: string) => Promise<void>;
