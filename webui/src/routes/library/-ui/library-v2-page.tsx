@@ -7683,11 +7683,14 @@ function ProviderArtistView({
     enabled: Boolean(artistName),
     staleTime: 30 * 60_000,
   });
+  // only once the page has rendered: the name is known from the URL before
+  // the provider answers, and the loader found no section to fill
+  const pageReady = Boolean(payload) && payload?.success !== false;
   useEffect(() => {
-    if (!artistName) return;
+    if (!artistName || !pageReady) return;
     window.loadSimilarArtists?.(artistName);
     return () => window.cancelSimilarArtistsLoad?.();
-  }, [artistName]);
+  }, [artistName, pageReady]);
 
   // a provider ?album= link opens that release once the page is up
   const openedAlbum = useRef<string | null>(null);
@@ -7991,8 +7994,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const artist = artistQuery.data;
   const back = useArtistBack(artist?.name);
+  // in both views, the way dev's page always ended on similar artists. it
+  // runs once the page is up: the loader fills a section it finds in the DOM
   useEffect(() => {
-    if (releasesMode !== 'all' || !artist?.name) return;
+    if (!artist?.name) return;
     window.loadSimilarArtists?.(artist.name);
     return () => window.cancelSimilarArtistsLoad?.();
   }, [artist?.name, releasesMode]);
@@ -8607,9 +8612,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <SimilarArtistsSection />
             </>
           ) : (
-            // the artist's tracks on other artists' releases are in the
-            // library too: a featured artist's My Library was empty
-            <AppearsOnSection artistId={artist.id} artistName={artist.name} />
+            <>
+              {/* the artist's tracks on other artists' releases are in the
+                  library too: a featured artist's My Library was empty */}
+              <AppearsOnSection artistId={artist.id} artistName={artist.name} />
+              <SimilarArtistsSection />
+            </>
           )}
           <ConcertsSection
             artistName={artist.name}
