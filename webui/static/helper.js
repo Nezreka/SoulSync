@@ -106,7 +106,7 @@ const HELPER_CONTENT = {
         tips: [
             'Filter by status: Active, Queued, Completed, Failed',
             'Badge on the nav button shows active download count from any page',
-            'Clear Completed button removes finished items from the list'
+            'The ⋯ menu clears finished rows, failed rows, or everything (only Clear everything also empties the Review queue); a failed row\'s ⋯ has Remove from list'
         ]
     },
     '.nav-button[data-page="playlist-explorer"]': {

@@ -247,6 +247,11 @@ export interface AdlRowProps {
    * May return a promise. the row locks its button until it settles.
    */
   onCancel?: (dl: AdlDownload) => void | Promise<void>;
+  /**
+   * Remove from list: offered on live failed / not-found / cancelled rows
+   * only. takes the row off the page, retries nothing.
+   */
+  onRemove?: (dl: AdlDownload) => void | Promise<void>;
   /** Rendered only for queued rows; moves the track to the next unstarted slot. */
   onDownloadNext?: (dl: AdlDownload) => void | Promise<void>;
   /** Group rows: no batch line, the group header already says it. */
@@ -264,6 +269,7 @@ export interface AdlRowProps {
 export function AdlRow({
   dl,
   onCancel,
+  onRemove,
   onDownloadNext,
   compact,
   numbered,
@@ -323,6 +329,11 @@ export function AdlRow({
     (dl.status === 'failed' || dl.status === 'not_found') &&
     !dl.is_persistent_history;
   const historyId = dl.status === 'completed' ? verificationHistoryId(dl) : null;
+  // failed rows live only in memory, so a history row is never one of them
+  const removable =
+    Boolean(onRemove) &&
+    !dl.is_persistent_history &&
+    ['failed', 'not_found', 'cancelled'].includes(String(dl.status));
   const file = dl.file_path || detail?.file_path || '';
 
   const downloading = dl.status === 'downloading';
@@ -378,6 +389,9 @@ export function AdlRow({
       : []),
     ...(file
       ? [{ key: 'copy', label: 'Copy file path', onSelect: () => copyText(file, 'Path copied') }]
+      : []),
+    ...(removable && onRemove
+      ? [{ key: 'remove', label: 'Remove from list', onSelect: () => void onRemove(dl) }]
       : []),
   ];
 
@@ -503,7 +517,9 @@ export function AdlRow({
               {DlIcon.x}
             </button>
           ) : null}
-          {!search ? <DlMore items={menu} /> : null}
+          {/* a failed row's Search button takes the menu's place; Remove from
+              list still needs a way in */}
+          <DlMore items={search ? menu.filter((item) => item.key === 'remove') : menu} />
         </div>
 
         {downloading && pct > 0 ? (
@@ -529,7 +545,7 @@ export function AdlRow({
           factsTitle="Details"
           facts={sheetFacts(dl, detail, Boolean(compact))}
           actions={
-            play || search || historyId || (cancellable && onCancel) ? (
+            play || search || historyId || (cancellable && onCancel) || removable ? (
               <>
                 {play ? (
                   <DlButton primary icon={DlIcon.play} onClick={play}>
@@ -551,6 +567,9 @@ export function AdlRow({
                   <DlButton disabled={cancelling} onClick={cancel}>
                     Cancel download
                   </DlButton>
+                ) : null}
+                {removable && onRemove ? (
+                  <DlButton onClick={() => void onRemove(dl)}>Remove from list</DlButton>
                 ) : null}
               </>
             ) : null

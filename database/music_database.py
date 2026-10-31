@@ -23452,28 +23452,38 @@ class MusicDatabase:
             'created_at': row['created_at'],
         }
 
-    def clear_completed_download_history(self) -> int:
+    def clear_completed_download_history(self, keep_review: bool = False) -> int:
         """Delete the persisted completed-download history shown on the Downloads
         page (every event_type='download' row). This also clears the verification
         review queue, since those unverified/force_imported rows ARE download-history
-        rows — that's intended: 'Clear Completed' empties the list. It only removes
-        HISTORY rows; the actual files and their `tracks` entries are untouched, so
-        nothing in the library is lost — only the 'needs verification' review flags.
-        Returns the number of rows removed."""
+        rows — that's intended for Clear everything: it empties the list. It only
+        removes HISTORY rows; the actual files and their `tracks` entries are
+        untouched, so nothing in the library is lost — only the 'needs verification'
+        review flags.
+
+        ``keep_review=True`` is Clear finished: rows still waiting in the review
+        queue stay (they leave through the Review tab), and the "why this file"
+        decisions are left alone too, since live failed rows that the clear keeps
+        still read theirs. Returns the number of rows removed."""
+        keep = (" AND (verification_status IS NULL "
+                "OR verification_status NOT IN ('unverified', 'force_imported'))"
+                if keep_review else "")
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("DELETE FROM library_history WHERE event_type IN ('download', 'podcast') "
-                           "AND origin IS NULL")
+                           "AND origin IS NULL" + keep)
             removed = cursor.rowcount
             # a download a watchlist or playlist triggered stays, hidden: the
             # download origin tab lists it and the cleaner decides on it (#1931)
             cursor.execute("UPDATE library_history SET cleared_at = CURRENT_TIMESTAMP "
                            "WHERE event_type = 'download' AND origin IS NOT NULL "
-                           "AND cleared_at IS NULL")
+                           "AND cleared_at IS NULL" + keep)
             removed += cursor.rowcount
             conn.commit()
+            if keep_review:
+                return removed
             # The "why this file" records belong to the same history. Best
             # effort, after the commit: a missing table must never cost the
             # clear the user asked for.

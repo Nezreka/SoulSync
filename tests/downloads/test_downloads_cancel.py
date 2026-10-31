@@ -224,3 +224,87 @@ def test_clear_completed_keeps_batch_locks_for_surviving_batches():
 
 def test_clear_completed_returns_zero_on_empty_state():
     assert cancel.clear_completed_local() == 0
+
+
+# ---------------------------------------------------------------------------
+# Clear finished / Clear failed / Remove from list
+# ---------------------------------------------------------------------------
+
+def _all_terminal():
+    for tid, status in (('c', 'completed'), ('s', 'skipped'), ('o', 'already_owned'),
+                        ('f', 'failed'), ('n', 'not_found'), ('x', 'cancelled'),
+                        ('d', 'downloading')):
+        download_tasks[tid] = {'status': status}
+
+
+def test_clear_finished_takes_completed_rows_only():
+    """Clear finished used to take failed rows too, so the only way to keep a
+    failure in view was never to clear anything."""
+    _all_terminal()
+    cleared = cancel.clear_completed_local(cancel.FINISHED_STATUSES)
+    assert cleared == 3
+    assert set(download_tasks) == {'f', 'n', 'x', 'd'}
+
+
+def test_clear_failed_takes_failed_rows_only():
+    _all_terminal()
+    cleared = cancel.clear_completed_local(cancel.FAILED_STATUSES)
+    assert cleared == 3
+    assert set(download_tasks) == {'c', 's', 'o', 'd'}
+
+
+def test_clear_failed_keeps_a_running_batch_intact():
+    download_tasks['t1'] = {'status': 'failed'}
+    download_tasks['t2'] = {'status': 'downloading'}
+    download_batches['b1'] = {'queue': ['t1', 't2']}
+    assert cancel.clear_completed_local(cancel.FAILED_STATUSES) == 0
+    assert download_batches['b1']['queue'] == ['t1', 't2']
+
+
+def test_a_status_outside_the_terminal_groups_is_never_cleared():
+    download_tasks['t1'] = {'status': 'downloading'}
+    assert cancel.clear_completed_local({'downloading'}) == 0
+    assert set(download_tasks) == {'t1'}
+
+
+@pytest.mark.parametrize("status", ["failed", "not_found", "cancelled"])
+def test_remove_takes_one_failed_row_and_nothing_else(status):
+    download_tasks['t1'] = {'status': status}
+    download_tasks['t2'] = {'status': 'failed'}
+    download_batches['b1'] = {'queue': ['t1', 't2']}
+
+    assert cancel.remove_local_task('t1') == 'removed'
+    assert set(download_tasks) == {'t2'}
+    assert download_batches['b1']['queue'] == ['t2']
+
+
+def test_remove_drops_the_batch_it_empties():
+    import threading
+    download_tasks['t1'] = {'status': 'failed'}
+    download_batches['b1'] = {'queue': ['t1']}
+    batch_locks['b1'] = threading.Lock()
+
+    assert cancel.remove_local_task('t1') == 'removed'
+    assert 'b1' not in download_batches
+    assert 'b1' not in batch_locks
+
+
+@pytest.mark.parametrize("status", ["completed", "skipped", "already_owned",
+                                    "downloading", "queued", "searching", "post_processing"])
+def test_remove_refuses_rows_that_are_finished_or_still_going(status):
+    download_tasks['t1'] = {'status': status}
+    assert cancel.remove_local_task('t1') == 'not_removable'
+    assert 't1' in download_tasks
+
+
+def test_remove_waits_for_a_running_batch():
+    download_tasks['t1'] = {'status': 'failed'}
+    download_tasks['t2'] = {'status': 'downloading'}
+    download_batches['b1'] = {'queue': ['t1', 't2']}
+
+    assert cancel.remove_local_task('t1') == 'batch_running'
+    assert set(download_tasks) == {'t1', 't2'}
+
+
+def test_remove_missing_task():
+    assert cancel.remove_local_task('nope') == 'missing'

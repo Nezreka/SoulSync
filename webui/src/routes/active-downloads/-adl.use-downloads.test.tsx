@@ -258,12 +258,52 @@ describe('header counts', () => {
       queued: 1,
       failed: 0,
       total: 4,
+      failedClearable: 0,
+      finished: 1,
       completedOrFailed: 1,
     });
   });
 
-  it('counts failed rows toward Clear Completed', async () => {
-    // clear-completed also wipes the persisted history tail, so after a
+  it('counts completed rows waiting in review toward Clear everything only', async () => {
+    // Clear finished leaves review rows for the Review tab, so its count
+    // must not promise them.
+    stubDownloads([
+      row({ task_id: 'a', status: 'completed', verification_status: 'verified' }),
+      row({ task_id: 'b', status: 'completed', verification_status: 'unverified' }),
+      row({ task_id: 'c', status: 'completed', verification_status: 'force_imported' }),
+      row({ task_id: 'd', status: 'failed' }),
+    ]);
+    const { result } = await mounted();
+    expect(result.current.counts.finished).toBe(1);
+    expect(result.current.counts.completedOrFailed).toBe(4);
+  });
+
+  it('leaves rows of a still-running batch out of every clear count', async () => {
+    // the server keeps a running batch's rows until it ends; counting them
+    // made Clear failed (1) clear nothing
+    stubDownloads(
+      [
+        row({ task_id: 'a', status: 'failed', batch_id: 'live' }),
+        row({ task_id: 'b', status: 'completed', batch_id: 'live' }),
+        row({ task_id: 'c', status: 'downloading', batch_id: 'live' }),
+        row({ task_id: 'd', status: 'failed', batch_id: 'done' }),
+        row({ task_id: 'e', status: 'completed', batch_id: 'done' }),
+        row({ task_id: 'f', status: 'failed', batch_id: '' }),
+      ],
+      [
+        { batch_id: 'live', phase: 'downloading' },
+        { batch_id: 'done', phase: 'complete' },
+      ],
+    );
+    const { result } = await mounted();
+    expect(result.current.counts.failed).toBe(3);
+    expect(result.current.counts.failedClearable).toBe(2);
+    expect(result.current.counts.finished).toBe(1);
+    expect(result.current.counts.completedOrFailed).toBe(3);
+  });
+
+  it('counts failed rows toward Clear everything', async () => {
+    // clear everything also wipes the persisted history tail, so after a
     // restart the list can be all completed/failed and the button must show.
     stubDownloads([
       row({ task_id: 'a', status: 'failed' }),

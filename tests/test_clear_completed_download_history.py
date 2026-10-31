@@ -87,6 +87,21 @@ def test_clears_all_completed_download_rows_including_unverified():
     assert db._statuses() == []
 
 
+def test_clear_finished_keeps_the_review_queue():
+    """Clear finished (keep_review) takes the completed tail but leaves rows
+    still waiting in the review queue -- they leave through Review. Clear
+    everything (the default, above) still takes them."""
+    db = _InMemoryDB()
+    db._add("download", "verified")
+    db._add("download", "human_verified")
+    db._add("download", None)
+    db._add("download", "unverified")
+    db._add("download", "force_imported")
+    removed = db.clear_completed_download_history(keep_review=True)
+    assert removed == 3
+    assert db._statuses() == ["unverified", "force_imported"]
+
+
 def test_does_not_touch_non_download_history():
     """Only event_type='download' rows are the Downloads-page tail; imports etc. stay."""
     db = _InMemoryDB()
@@ -140,3 +155,20 @@ def test_a_second_clear_counts_nothing_new(tmp_path):
 
     assert db.clear_completed_download_history() == 0
 
+
+
+def test_clear_finished_keeps_an_origin_row_in_review_visible(tmp_path):
+    """A watchlist download still waiting in review is not hidden by Clear
+    finished; one that is not waiting is, as #1931 does."""
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        for title, status in (("Waiting", "unverified"), ("Done", "verified")):
+            conn.execute(
+                "INSERT INTO library_history (event_type, title, artist_name, origin, "
+                "origin_context, verification_status) VALUES ('download', ?, 'A', "
+                "'watchlist', 'Drake', ?)", (title, status))
+        conn.commit()
+
+    assert db.clear_completed_download_history(keep_review=True) == 1
+
+    assert [e["title"] for e in db.get_library_history_unverified()] == ["Waiting"]

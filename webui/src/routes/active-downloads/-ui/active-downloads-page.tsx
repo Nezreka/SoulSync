@@ -12,6 +12,7 @@ import {
   downloadBatchNext,
   downloadTaskNext,
   fetchMusicHistoryCount,
+  removeDownload,
   setDeletedRetention,
 } from '../-adl.api';
 import { batchSummary, isTerminalPhase } from '../-adl.batch';
@@ -184,11 +185,47 @@ export function ActiveDownloadsPage() {
     },
     [refresh],
   );
-  const onClearCompleted = useCallback(async () => {
+  /**
+   * Clear finished takes completed rows and their history tail; failed rows
+   * and the review queue stay. Clear failed takes failed rows, which live only
+   * in memory, so it is instant. Clear everything is upstream's clear-all:
+   * the review queue goes too, so it is the one that asks first.
+   */
+  const runClear = useCallback(
+    async (scope: 'finished' | 'failed' | undefined) => {
+      try {
+        const data = await clearCompleted(scope);
+        if (data.success) {
+          toast(`Cleared ${data.total_cleared ?? data.cleared ?? 0} downloads`, 'success');
+          refresh();
+        } else toast(data.error || 'Failed to clear downloads', 'error');
+      } catch {
+        toast('Failed to clear downloads', 'error');
+      }
+    },
+    [refresh],
+  );
+
+  const onClearFinished = useCallback(async () => {
+    const confirmed = await window.showConfirmDialog?.({
+      title: 'Clear Finished',
+      message:
+        'Remove completed downloads from the list and history? ' +
+        'Failed downloads and anything waiting in Review stay. ' +
+        'Your files stay in the library — only the download-history rows are removed.',
+      confirmText: 'Clear',
+    });
+    if (!confirmed) return;
+    await runClear('finished');
+  }, [runClear]);
+
+  const onClearFailed = useCallback(() => runClear('failed'), [runClear]);
+
+  const onClearEverything = useCallback(async () => {
     // This also wipes the persisted history tail and the review queue, so it
     // is confirmed rather than instant.
     const confirmed = await window.showConfirmDialog?.({
-      title: 'Clear Completed',
+      title: 'Clear Everything',
       message:
         'Remove ALL completed and failed downloads from the list and history? ' +
         'This also clears unverified items from the verification queue. ' +
@@ -197,16 +234,27 @@ export function ActiveDownloadsPage() {
       destructive: true,
     });
     if (!confirmed) return;
-    try {
-      const data = await clearCompleted();
-      if (data.success) {
-        toast(`Cleared ${data.total_cleared ?? data.cleared ?? 0} downloads`, 'success');
-        refresh();
+    await runClear(undefined);
+  }, [runClear]);
+
+  /** One failed row off the list. Nothing is retried. */
+  const onRemoveRow = useCallback(
+    async (dl: AdlDownload) => {
+      try {
+        const data = await removeDownload(dl.task_id);
+        if (data.success) {
+          toast('Removed from the list', 'success');
+          refresh();
+        } else toast(data.error || 'Could not remove that download', 'error');
+      } catch (err) {
+        toast(
+          err instanceof Error && err.message ? err.message : 'Could not remove that download',
+          'error',
+        );
       }
-    } catch {
-      toast('Failed to clear downloads', 'error');
-    }
-  }, [refresh]);
+    },
+    [refresh],
+  );
 
   const onCancelBatch = useCallback(
     async (batch: AdlBatch) => {
@@ -391,7 +439,9 @@ export function ActiveDownloadsPage() {
             onOpenHistory={() => window.openLibraryHistoryModal?.()}
             onFilter={downloads.setFilter}
             onCancelAll={() => void onCancelAll()}
-            onClearCompleted={() => void onClearCompleted()}
+            onClearFinished={() => void onClearFinished()}
+            onClearFailed={() => void onClearFailed()}
+            onClearEverything={() => void onClearEverything()}
             cancelAllPending={cancelAllPending}
           />
 
@@ -603,6 +653,7 @@ export function ActiveDownloadsPage() {
               }
               onOpenFullHistory={() => window.openLibraryHistoryModal?.()}
               onCancelRow={onCancelRow}
+              onRemoveRow={onRemoveRow}
               onDownloadNext={onDownloadNext}
               onDownloadBatchNext={onDownloadBatchNext}
               // The empty-state links are in-app routes; the router owns those,
