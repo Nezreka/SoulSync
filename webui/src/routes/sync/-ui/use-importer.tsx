@@ -27,6 +27,8 @@ export interface ImportLanding {
   showList: () => void;
   /** A copy kept as your own (#1913): My Playlists, its window open. */
   landMine?: (playlistId: number, name: string) => void;
+  /** An imported one's copy on the server, in the server editor. */
+  openEditor?: (mirrorId: number, name?: string) => Promise<boolean>;
 }
 
 const NO_LANDING: ImportLanding = { land: () => {}, showList: () => {} };
@@ -53,6 +55,12 @@ export interface Importer {
   previewFor: (spec: ImportSpec) => (() => Promise<PreviewTrack[]>) | undefined;
   /** A copy of this one is being made. */
   copyingOf: (source: string, sourceId: string | number) => boolean;
+  /** Open an imported one's server copy in the editor; undefined until it's in. */
+  editorFor: (
+    source: string,
+    sourceId: string | number,
+    name?: string,
+  ) => (() => Promise<boolean>) | undefined;
   landing: ImportLanding;
 }
 
@@ -243,6 +251,16 @@ export function useImporter(): Importer {
     [busy],
   );
 
+  const { openEditor } = landing;
+  const editorFor = useCallback(
+    (source: string, sourceId: string | number, name?: string) => {
+      const mirrorId = index?.get(mirrorKey(source, sourceId));
+      if (mirrorId === undefined || !openEditor) return undefined;
+      return () => openEditor(mirrorId, name);
+    },
+    [index, openEditor],
+  );
+
   return {
     statusOf,
     importOrOpen,
@@ -252,6 +270,7 @@ export function useImporter(): Importer {
     copyAsMineFor,
     previewFor,
     copyingOf,
+    editorFor,
     landing,
   };
 }

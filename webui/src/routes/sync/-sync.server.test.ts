@@ -1123,3 +1123,74 @@ describe('applyUnmatchedTrack', () => {
     expect(canUnmatch({ ...PAIR, server_track: { title: 'no id' } })).toBe(false);
   });
 });
+
+describe('a mirror finds its copy on the server (open editor from anywhere)', () => {
+  const lists = [
+    { id: '10', name: 'Road Trip' },
+    { id: '11', name: 'road trip (spotify)' },
+    { id: '12', name: 'Gym' },
+  ];
+
+  it('follows the link when it is for this server, even after a rename', async () => {
+    const { findMirrorServerPlaylist } = await import('./-sync.server');
+    const mirror = { id: 1, name: 'Old', server_playlist_id: '12', server_type: 'plex' };
+    expect(findMirrorServerPlaylist(mirror, lists, 'plex')?.id).toBe('12');
+  });
+
+  it("ignores another server's link and falls back to the sync name first", async () => {
+    const { findMirrorServerPlaylist } = await import('./-sync.server');
+    const mirror = {
+      id: 1,
+      name: 'Road Trip',
+      sync_name: 'Road Trip (Spotify)',
+      server_playlist_id: '12',
+      server_type: 'navidrome',
+    };
+    expect(findMirrorServerPlaylist(mirror, lists, 'plex')?.id).toBe('11');
+  });
+
+  it('a stale link falls back to the names, alias before upstream', async () => {
+    const { findMirrorServerPlaylist } = await import('./-sync.server');
+    const mirror = {
+      id: 1,
+      name: 'Gym',
+      display_name: ' road trip ',
+      server_playlist_id: 'gone',
+      server_type: 'plex',
+    };
+    expect(findMirrorServerPlaylist(mirror, lists, 'plex')?.id).toBe('10');
+  });
+
+  it('never synced is no match', async () => {
+    const { findMirrorServerPlaylist } = await import('./-sync.server');
+    expect(findMirrorServerPlaylist({ id: 1, name: 'Nope' }, lists, 'plex')).toBeNull();
+  });
+
+  it('locates through the two lists and tells a missing copy from an error', async () => {
+    const { locateMirrorOnServer } = await import('./-sync.server');
+    const respond = (server: unknown, mirrors: unknown) =>
+      vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async (url) =>
+          (typeof url === 'string' ? url : '').startsWith('/api/server/playlists')
+            ? new Response(JSON.stringify(server))
+            : new Response(JSON.stringify(mirrors)),
+        );
+    const server = { success: true, server_type: 'plex', playlists: lists };
+    respond(server, [{ id: 7, name: 'Gym', sync_name: 'Gym' }]);
+    const found = await locateMirrorOnServer(7);
+    expect(found.status === 'found' && found.playlist.id).toBe('12');
+    vi.restoreAllMocks();
+
+    respond(server, [{ id: 7, name: 'Fresh import' }]);
+    expect((await locateMirrorOnServer(7)).status).toBe('not-synced');
+    vi.restoreAllMocks();
+
+    respond({ success: false, error: 'plex not connected' }, []);
+    expect(await locateMirrorOnServer(7)).toEqual({
+      status: 'error',
+      message: 'plex not connected',
+    });
+    vi.restoreAllMocks();
+  });
+});

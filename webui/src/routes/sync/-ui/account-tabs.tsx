@@ -163,6 +163,7 @@ function AccountRowsTab({
                     onCopy={importer.copyAsMineFor(spec(row))}
                     loadPreview={importer.previewFor(spec(row))}
                     copying={importer.copyingOf(source, id)}
+                    onEdit={importer.editorFor(source, id, row.name)}
                   />
                 );
               })}

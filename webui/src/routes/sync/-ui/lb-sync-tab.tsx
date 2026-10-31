@@ -160,6 +160,11 @@ export function LbImportList({
               onCopy={target ? importer.copyAsMineFor(lbImportSpec(card, target)) : undefined}
               loadPreview={target ? importer.previewFor(lbImportSpec(card, target)) : undefined}
               copying={target ? importer.copyingOf(target.source, target.sourcePlaylistId) : false}
+              onEdit={
+                target
+                  ? importer.editorFor(target.source, target.sourcePlaylistId, card.title)
+                  : undefined
+              }
             />
           );
         })}

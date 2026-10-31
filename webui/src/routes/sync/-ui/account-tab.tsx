@@ -149,6 +149,7 @@ function AccountImportTab({ chrome }: { chrome: AccountTabChrome }) {
                     onCopy={importer.copyAsMineFor(accountImportSpec(chrome.base, p))}
                     loadPreview={importer.previewFor(accountImportSpec(chrome.base, p))}
                     copying={importer.copyingOf(chrome.base, sourceId)}
+                    onEdit={importer.editorFor(chrome.base, sourceId, asString(p.name))}
                   />
                 );
               })}

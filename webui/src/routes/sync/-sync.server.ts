@@ -158,6 +158,8 @@ export interface MirroredMatch {
   sync_name?: string;
   /** The server playlist this mirror was last opened against, once linked. */
   server_playlist_id?: string | null;
+  /** which server that id belongs to; an id from another server means nothing here */
+  server_type?: string | null;
   source?: string;
   source_ref?: string;
   owner?: string;
@@ -218,6 +220,66 @@ export async function fetchMirroredMatches(
 export async function fetchMirroredPlaylistById(mirroredId: number): Promise<MirroredMatch> {
   const response = await fetch(`/api/mirrored-playlists/${mirroredId}`);
   return (await response.json()) as MirroredMatch;
+}
+
+/**
+ * A mirror's copy on the server, the other way round from fetchMirroredMatches:
+ * the playlist the mirror links to when that link is for this server, else the
+ * one named what sync writes it as, else its alias, else its upstream name.
+ * Names compare trimmed and case-insensitive. Only the profile's own playlists
+ * count, which is where sync writes.
+ */
+export function findMirrorServerPlaylist(
+  mirror: MirroredMatch,
+  playlists: readonly ServerPlaylist[],
+  serverType: string | undefined,
+): ServerPlaylist | null {
+  const linked = mirror.server_playlist_id ? String(mirror.server_playlist_id) : '';
+  if (linked && (!mirror.server_type || mirror.server_type === serverType)) {
+    const hit = playlists.find((p) => p.id === linked);
+    if (hit) return hit;
+  }
+  const norm = (value: string | null | undefined) => (value ?? '').trim().toLowerCase();
+  for (const name of [mirror.sync_name, mirror.display_name, mirror.name]) {
+    const key = norm(name);
+    if (!key) continue;
+    const hit = playlists.find((p) => norm(p.name) === key);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+export type MirrorServerLookup =
+  | { status: 'found'; playlist: ServerPlaylist; mirror: MirroredMatch; serverType?: string }
+  | { status: 'not-synced'; mirror: MirroredMatch | null; serverType?: string }
+  | { status: 'error'; message: string };
+
+/** Where a mirror sits on the server, for opening the server editor from it. */
+export async function locateMirrorOnServer(mirrorId: number): Promise<MirrorServerLookup> {
+  try {
+    const [serverRes, mirroredRes] = await Promise.all([
+      fetch('/api/server/playlists'),
+      fetch('/api/mirrored-playlists'),
+    ]);
+    const data = (await serverRes.json()) as ServerPlaylistsResponse;
+    if (!data.success || !data.playlists) {
+      return { status: 'error', message: data.error || 'Could not reach your media server' };
+    }
+    const rows = (await mirroredRes.json()) as unknown;
+    const mirror = Array.isArray(rows)
+      ? ((rows as MirroredMatch[]).find((r) => r.id === mirrorId) ?? null)
+      : null;
+    if (!mirror) return { status: 'not-synced', mirror: null, serverType: data.server_type };
+    const playlist = findMirrorServerPlaylist(mirror, data.playlists, data.server_type);
+    return playlist
+      ? { status: 'found', playlist, mirror, serverType: data.server_type }
+      : { status: 'not-synced', mirror, serverType: data.server_type };
+  } catch (error) {
+    return {
+      status: 'error',
+      message: error instanceof Error ? error.message : 'Could not reach your media server',
+    };
+  }
 }
 
 /* ── The compare editor (247-354, 356-383, 490-583) ───────────────────────── */
