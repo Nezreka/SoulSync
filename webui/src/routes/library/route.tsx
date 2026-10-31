@@ -1,9 +1,10 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 
-import { lastNavigationFrom } from '@/platform/shell/last-navigation';
+import { isArtistView, lastNavigationFrom } from '@/platform/shell/last-navigation';
 import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import {
+  artistHeaderFromLibrary,
   artistHeaderFromElsewhere,
   LIBRARY_V2_QUERY_KEY,
   resolveLibraryV2DiscoveryArtistOwnership,
@@ -102,10 +103,18 @@ export const Route = createFileRoute('/library')({
     // the dashboard) opens in the header this profile picked for arrivals from
     // elsewhere; inside the library ('stay') its own links pick the library's.
     // a header written in the url of a cold load (a bookmark, a reload) stays
-    if (search.artist && cause === 'enter') {
-      const coldWithHeader = !lastNavigationFrom() && /[?&]header=/.test(location.searchStr);
-      const header = coldWithHeader
-        ? search.header
+    const transitionFrom = lastNavigationFrom();
+    const enteredFromOutside = Boolean(transitionFrom && !isArtistView(transitionFrom));
+    const startedAtTarget =
+      transitionFrom?.pathname === location.pathname &&
+      transitionFrom.searchStr === location.searchStr;
+    const coldWithoutHeader =
+      cause === 'enter' && (!transitionFrom || startedAtTarget) && search.header === undefined;
+    if (search.artist && (enteredFromOutside || coldWithoutHeader)) {
+      const fromLibrary =
+        transitionFrom?.pathname.replace(/\/+$/, '').endsWith('/library') ?? false;
+      const header = fromLibrary
+        ? await artistHeaderFromLibrary(context.queryClient)
         : await artistHeaderFromElsewhere(context.queryClient);
       if (header !== search.header) {
         throw redirect({ to: '/library', search: { ...search, header }, replace: true });

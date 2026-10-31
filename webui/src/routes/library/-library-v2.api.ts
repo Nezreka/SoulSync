@@ -2433,6 +2433,16 @@ export async function artistHeaderFromElsewhere(
   return prefs?.artist_page?.header_elsewhere ?? 'rich';
 }
 
+/** The header an artist opens with when the visit starts in the library. */
+export async function artistHeaderFromLibrary(
+  queryClient: QueryClient,
+): Promise<LibraryV2ArtistPageHeader> {
+  const prefs = await queryClient
+    .ensureQueryData(libraryV2UiPreferencesQueryOptions())
+    .catch(() => null);
+  return prefs?.artist_page?.header ?? 'rich';
+}
+
 // --- Mirror outbox (lib2 → legacy wishlist/watchlist, audit P0-04) -----------
 
 export interface LibraryV2MirrorStatus {

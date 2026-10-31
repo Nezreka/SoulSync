@@ -2,6 +2,7 @@ import { Tooltip } from '@base-ui/react/tooltip';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import {
   getRouteApi,
+  useRouter,
   useNavigate as useRouterNavigate,
   type UseNavigateResult,
 } from '@tanstack/react-router';
@@ -28,6 +29,7 @@ import {
 import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
+import { artistNavigationOrigin } from '@/platform/shell/last-navigation';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import { playLibraryV2ArtistRadio } from '../-artist-radio';
@@ -171,6 +173,7 @@ import {
   type LibraryV2WantedRow,
 } from '../-library-v2.types';
 import { computeTrackEditValues } from '../-metadata-edit';
+import { ensurePageOrigin, pushArtistOrigin } from '../../artist-detail/-artist-detail.back-label';
 import { announceWatchlistFollow } from '../../artist-detail/-artist-detail.enrich-match';
 import { syncResultMessage } from '../../artist-detail/-artist-detail.meta';
 import { AppearsOnSection } from '../../artist-detail/-ui/appears-on-section';
@@ -6005,6 +6008,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
   const navigate = useNavigate();
   const canWish = useLibraryV2CanWish();
   const previousArtist = Route.useSearch().artist;
+  const openTrackArtist = useOpenTrackArtist();
   // `resolve` materializes the provider tracklist for a release that has no
   // track rows yet. The inline expand always did this; opening the same
   // release as its own page did not, so a discography-only release (a
@@ -6152,7 +6156,13 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
           </header>
           {/* the page's own query: one request, and the table sees the
               tracklist build state (notice + polling) the page asked for */}
-          <AlbumTrackTable albumId={album.id} resolve onAction={handleAction} />
+          <AlbumTrackTable
+            albumId={album.id}
+            resolve
+            onAction={handleAction}
+            currentArtistId={previousArtist}
+            onOpenArtist={openTrackArtist}
+          />
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
               initialQuery={buildSearchQuery(
@@ -7632,7 +7642,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   // is are view settings, carried in the URL next to `releases` and `view`
   // like every other Library V2 view setting.
   const releaseView = search.releaseView;
-  const headerMode = search.header;
+  const headerMode = search.header ?? 'rich';
   // the toolbar picks up a small name tag once the hero scrolls away
   const artistTopRef = useRef<HTMLDivElement>(null);
   const heroSentinelRef = useRef<HTMLDivElement>(null);
@@ -7668,7 +7678,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('artists', artistId));
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const artist = artistQuery.data;
-  const back = useArtistBack(artist?.name, artistId);
+  const back = useArtistBack(artist?.name);
   useEffect(() => {
     if (releasesMode !== 'all' || !artist?.name) return;
     window.loadSimilarArtists?.(artist.name);
@@ -8647,6 +8657,7 @@ function AlbumGroup({
           <AlbumBlock
             key={album.id}
             album={album}
+            artistId={artistId}
             artistName={artistName}
             queueRollup={queueStatusByAlbum[album.id]}
             queueStatusTracks={queueStatusTracks}
@@ -8660,12 +8671,14 @@ function AlbumGroup({
 
 function AlbumBlock({
   album,
+  artistId,
   artistName,
   queueRollup,
   onAction,
   queueStatusTracks,
 }: {
   album: LibraryV2AlbumSummary;
+  artistId: number;
   /** Who the album is filed under today — the reassign modal says so, and the
    *  summary row itself has no artist on it. */
   artistName: string;
@@ -8675,6 +8688,7 @@ function AlbumBlock({
   queueStatusTracks: Record<number, LibraryV2QueueStatusEntry>;
 }) {
   const navigate = useNavigate();
+  const openTrackArtist = useOpenTrackArtist();
   const [open, setOpen] = useState(false);
   // Browser `dblclick` can span changing descendants (title, cover, empty row space) and its click
   // counter carries surprising state across rerenders. A timestamp owned by THIS album makes the
@@ -8814,6 +8828,8 @@ function AlbumBlock({
           resolve
           onAction={onAction}
           queueStatusTracks={queueStatusTracks}
+          currentArtistId={artistId}
+          onOpenArtist={openTrackArtist}
         />
       ) : null}
     </div>
@@ -10266,6 +10282,8 @@ export function AlbumTrackTable({
   resolve,
   onAction,
   queueStatusTracks,
+  currentArtistId,
+  onOpenArtist,
 }: {
   albumId: number;
   /** Discography-only releases materialize their provider tracklist on expand. */
@@ -10281,6 +10299,10 @@ export function AlbumTrackTable({
    * which has no artist-scope query) this component still polls for itself.
    */
   queueStatusTracks?: Record<number, LibraryV2QueueStatusEntry>;
+  /** Artist page this table belongs to; that artist stays plain text. */
+  currentArtistId?: number;
+  /** Supplied by route-owned pages; omitted in standalone table surfaces. */
+  onOpenArtist?: OpenTrackArtist;
 }) {
   const canWrite = useLibraryV2CanWrite();
   const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId, { resolve }));
@@ -10819,7 +10841,8 @@ export function AlbumTrackTable({
               }
               onAction={onAction}
               queueStatus={track.id != null ? queueTracks[track.id] : undefined}
-              openArtistId={album.primary_artist?.id}
+              currentArtistId={currentArtistId}
+              onOpenArtist={onOpenArtist}
             />
           ))}
         </tbody>
@@ -11057,15 +11080,55 @@ type TrackRowProps = {
   queueStatus?: LibraryV2QueueStatusEntry;
   /** One file of the track, shown as the track itself (a "N versions" row). */
   version?: boolean;
-  /** The release's own artist: named as text, every other credit is a link. */
-  openArtistId?: number;
+  currentArtistId?: number;
+  onOpenArtist?: OpenTrackArtist;
 };
+
+type TrackArtist = { id: number; name: string };
+type OpenTrackArtist = (artist: TrackArtist, currentArtistName?: string) => void | Promise<void>;
+
+/** Route-owned artist navigation for track credits. Keeping it outside the
+ * reusable table lets previews and unit tests render the table without a
+ * TanStack Router provider. */
+function useOpenTrackArtist(): OpenTrackArtist {
+  const openArtist = useOpenArtist();
+  const search = Route.useSearch();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  return async (artist, currentArtistName) => {
+    if (search.album && search.artist) {
+      const origin = artistNavigationOrigin();
+      if (origin) ensurePageOrigin(origin.pathname, origin.searchStr);
+      const previousName =
+        currentArtistName ??
+        (await queryClient
+          .ensureQueryData(libraryV2ArtistQueryOptions(search.artist))
+          .then((previous) => previous.name)
+          .catch(() => undefined));
+      const href = router.buildLocation({
+        to: '/library',
+        search: { ...search, album: undefined, artist: search.artist },
+      }).href;
+      pushArtistOrigin(previousName, href);
+    }
+    openArtist(artist.id);
+  };
+}
 
 /** A featured (or any other) artist in the Artists column, opening their
  *  library entry. The artist whose page this is stays plain text. */
-function TrackArtistLink({ artist }: { artist: { id: number; name: string } }) {
-  const openArtist = useOpenArtist();
-  if (Route.useSearch().artist === artist.id) return <>{artist.name}</>;
+function TrackArtistLink({
+  artist,
+  currentArtistId,
+  currentArtistName,
+  onOpenArtist,
+}: {
+  artist: TrackArtist;
+  currentArtistId?: number;
+  currentArtistName?: string;
+  onOpenArtist?: OpenTrackArtist;
+}) {
+  if (currentArtistId === artist.id || !onOpenArtist) return <>{artist.name}</>;
   return (
     <button
       type="button"
@@ -11073,7 +11136,7 @@ function TrackArtistLink({ artist }: { artist: { id: number; name: string } }) {
       title={`Open ${artist.name} in the library`}
       onClick={(e) => {
         e.stopPropagation();
-        openArtist(artist.id);
+        void onOpenArtist(artist, currentArtistName);
       }}
     >
       {artist.name}
@@ -11109,7 +11172,8 @@ function TrackRow(props: TrackRowProps) {
     onAction,
     queueStatus,
     version = false,
-    openArtistId,
+    currentArtistId,
+    onOpenArtist,
   } = props;
   const [showVersions, setShowVersions] = useState(false);
   const missing = track.file_status === 'missing';
@@ -11119,6 +11183,7 @@ function TrackRow(props: TrackRowProps) {
     ...(track.id ? { trackId: track.id } : {}),
   };
   const [detailTab, setDetailTab] = useState<TrackDetailTab | null>(null);
+  const currentArtistName = track.artists.find((artist) => artist.id === currentArtistId)?.name;
   const widthStyle = (key: string) => {
     const raw = columnWidths[key];
     if (raw == null) return undefined;
@@ -11205,7 +11270,12 @@ function TrackRow(props: TrackRowProps) {
             {track.artists.map((a, i) => (
               <Fragment key={a.id}>
                 {i > 0 ? ', ' : null}
-                {a.id === openArtistId ? a.name : <TrackArtistLink artist={a} />}
+                <TrackArtistLink
+                  artist={a}
+                  currentArtistId={currentArtistId}
+                  currentArtistName={currentArtistName}
+                  onOpenArtist={onOpenArtist}
+                />
               </Fragment>
             ))}
           </td>

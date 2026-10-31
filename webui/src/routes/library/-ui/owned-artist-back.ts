@@ -1,15 +1,14 @@
-import { useRouter } from '@tanstack/react-router';
+import { useRouter, useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 
-import { takeArtistArrival } from '@/platform/shell/last-navigation';
-import { getShellRouteByPageId, type ShellPageId } from '@/platform/shell/route-manifest';
+import { artistNavigationOrigin } from '@/platform/shell/last-navigation';
 
 import {
+  backOriginHref,
   backButtonLabel,
-  backLabelStack,
+  ensurePageOrigin,
   popBackOrigin,
   pushArtistOrigin,
-  pushPageOrigin,
 } from '../../artist-detail/-artist-detail.back-label';
 
 /**
@@ -27,31 +26,22 @@ import {
  * between the album and its artist). each entry carries where it leads; one
  * the vanilla pushed goes to its page, an empty chain to the library.
  */
-export function useArtistBack(
-  artistName: string | undefined,
-  artistId?: number,
-): {
+export function useArtistBack(artistName: string | undefined): {
   label: string;
   onBack: () => void;
 } {
   const router = useRouter();
   const [label, setLabel] = useState(() => backButtonLabel());
   const previousName = useRef<string | null>(null);
-  const previousId = useRef<number | undefined>(undefined);
+  const previousHref = useRef<string | null>(null);
+  const currentHref = useRouterState({ select: (state) => state.location.href });
 
   useEffect(() => {
     // an arrival from outside the artist views starts a fresh chain with the
     // page it came from. no arrival is a cold load, or coming back up from an
     // album, and the chain stays as it was
-    const arrival = takeArtistArrival();
-    if (arrival) {
-      // cleared in place: vanilla holds the same array
-      backLabelStack().length = 0;
-      pushPageOrigin(arrival.pathname);
-      const query = arrival.searchStr.replace(/^\?/, '');
-      const top = backLabelStack().at(-1);
-      if (top) top.href = query ? `${arrival.pathname}?${query}` : arrival.pathname;
-    }
+    const arrival = artistNavigationOrigin();
+    if (arrival) ensurePageOrigin(arrival.pathname, arrival.searchStr);
     setLabel(backButtonLabel());
     // only on arrival: re-running as the chain grows would rewrite it
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -60,30 +50,22 @@ export function useArtistBack(
   useEffect(() => {
     if (!artistName) return;
     if (previousName.current && previousName.current !== artistName) {
-      // a step back down the chain pushes nothing, and neither does its link
-      const links = backLabelStack().length;
-      pushArtistOrigin(previousName.current);
-      if (backLabelStack().length > links && previousId.current) {
-        backLabelStack().at(-1)!.href = `/library?artist=${previousId.current}`;
-      }
+      // A step back down the chain pushes nothing. A forward hop stores the
+      // complete prior view, including header, discovery mode, and filters.
+      pushArtistOrigin(previousName.current, previousHref.current ?? undefined);
     }
     previousName.current = artistName;
-    previousId.current = artistId;
+    previousHref.current = currentHref;
     setLabel(backButtonLabel());
-    // the name arrives with the artist's data, the id with the url: the pair
-    // is taken when the name changes
+    // `currentHref` belongs to the artist whose name just resolved. Do not
+    // update it while the next artist is still loading.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artistName]);
 
   return {
     label,
     onBack: () => {
-      const entry = popBackOrigin();
-      const page =
-        entry?.type === 'page' && entry.pageId
-          ? getShellRouteByPageId(entry.pageId as ShellPageId)?.path
-          : undefined;
-      void router.navigate({ href: entry?.href ?? page ?? '/library' });
+      void router.navigate({ href: backOriginHref(popBackOrigin()) });
     },
   };
 }

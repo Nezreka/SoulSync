@@ -7,6 +7,7 @@ import {
   type ShellProfileContext,
   type ShellPageId,
 } from '@/platform/shell/bridge';
+import { lastNavigationFrom } from '@/platform/shell/last-navigation';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
@@ -160,6 +161,25 @@ describe('createAppRouter', () => {
     await waitFor(() => {
       expect(screen.getByTestId('issues-board')).toBeInTheDocument();
     });
+  });
+
+  it('keeps noting where navigations came from after a redirect', async () => {
+    // TanStack keeps the last redirect in its store, and onBeforeNavigate is
+    // skipped while one is there: the back button stopped seeing every page
+    // after the library's first header redirect
+    window.SoulSyncWebShellBridge = createShellBridge({
+      getProfileHomePage: vi.fn<() => ShellPageId>(() => 'settings'),
+    });
+    const queryClient = createTestQueryClient();
+    const history = createMemoryHistory({ initialEntries: ['/'] });
+    const router = createAppRouter({ history, queryClient });
+    render(<AppRouterProvider router={router} queryClient={queryClient} />);
+    await waitFor(() => expect(history.location.pathname).toBe('/settings'));
+
+    await router.navigate({ to: '/help' });
+    expect(lastNavigationFrom()?.pathname).toBe('/settings');
+    await router.navigate({ to: '/chat' });
+    expect(lastNavigationFrom()?.pathname).toBe('/help');
   });
 
   it('redirects the root route to the profile home page', async () => {

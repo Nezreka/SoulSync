@@ -1,11 +1,13 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
+
+import { resetGoingBackForTests } from '../../artist-detail/-artist-detail.back-label';
 
 /** Unknown artists keep the original provider page and native monitoring. */
 function renderAt(entry: string) {
@@ -27,6 +29,8 @@ describe('an artist the catalogue does not hold', () => {
   let monitoredAlbums: unknown[];
 
   beforeEach(() => {
+    window.artistDetailLabelStack = [];
+    resetGoingBackForTests();
     window.SoulSyncWebShellBridge = createShellBridge();
     window.showToast = vi.fn();
     window.loadSimilarArtists = vi.fn();
@@ -54,10 +58,15 @@ describe('an artist the catalogue does not hold', () => {
         monitoredAlbums.push(await request.json());
         return HttpResponse.json({ success: true, artist_id: 55, album_id: 77 });
       }),
-      http.get('/api/artist-detail/:id', () =>
-        HttpResponse.json({
+      http.get('/api/artist-detail/:id', ({ params }) => {
+        const secondArtist = params.id === 'sp-2';
+        return HttpResponse.json({
           success: true,
-          artist: { id: 'sp-1', name: 'Boards of Canada', image_url: 'https://cdn.test/a.jpg' },
+          artist: {
+            id: secondArtist ? 'sp-2' : 'sp-1',
+            name: secondArtist ? 'Tycho' : 'Boards of Canada',
+            image_url: 'https://cdn.test/a.jpg',
+          },
           discography: {
             albums: [
               {
@@ -72,8 +81,8 @@ describe('an artist the catalogue does not hold', () => {
             singles: [],
             source: 'spotify',
           },
-        }),
-      ),
+        });
+      }),
       http.get('/api/album/:id/tracks', () =>
         HttpResponse.json({
           success: true,
@@ -115,6 +124,40 @@ describe('an artist the catalogue does not hold', () => {
     // Read-only until the user asks for something (issues §28.6 question 1).
     expect(materializeCalls).toHaveLength(0);
     expect(monitoredAlbums).toHaveLength(0);
+  });
+
+  it('returns an unowned artist to its exact source without browser history', async () => {
+    (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack = [
+      { type: 'page', pageId: 'discover', href: '/discover' },
+    ];
+    const { router, history } = renderAt('/search?q=Boards%20of%20Canada');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
+    await act(async () => router.navigate({ href: ARTIST_URL }));
+
+    const back = vi.spyOn(router.history, 'back');
+    fireEvent.click(await screen.findByRole('button', { name: '← Back to Search' }));
+
+    expect(back).not.toHaveBeenCalled();
+    await waitFor(() => expect(history.location.pathname).toBe('/search'));
+    expect(history.location.search).toBe('?q=Boards+of+Canada');
+  });
+
+  it('walks artist hops back to the previous artist and then the exact source', async () => {
+    (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack = [];
+    const { router, history } = renderAt('/search?q=Boards%20of%20Canada');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
+    await act(async () => router.navigate({ href: ARTIST_URL }));
+    await screen.findByText('Boards of Canada');
+
+    await act(async () => router.navigate({ href: '/artist-detail/spotify/sp-2?name=Tycho' }));
+    fireEvent.click(await screen.findByRole('button', { name: '← Back to Boards of Canada' }));
+
+    await waitFor(() => expect(history.location.pathname).toBe('/artist-detail/spotify/sp-1'));
+    expect(history.location.search).toBe('?name=Boards+of+Canada');
+    fireEvent.click(await screen.findByRole('button', { name: '← Back to Search' }));
+
+    await waitFor(() => expect(history.location.pathname).toBe('/search'));
+    expect(history.location.search).toBe('?q=Boards+of+Canada');
   });
 
   it('monitors a release from the bookmark on its card', async () => {
@@ -168,6 +211,48 @@ describe('an artist the catalogue does not hold', () => {
       ),
     );
     const { router } = renderAt(ARTIST_URL);
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ artist: 42, header: 'compact' }),
+    );
+  });
+
+  it('uses the elsewhere header when arriving from Wishlist without a header in the URL', async () => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { artist_page: { header: 'rich', header_elsewhere: 'compact' } },
+        }),
+      ),
+    );
+    const { router } = renderAt('/wishlist');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/wishlist'));
+
+    await act(async () => {
+      await router.navigate({ href: '/library?artist=42&view=discovery&immersive=true' });
+    });
+
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ artist: 42, header: 'compact' }),
+    );
+  });
+
+  it('uses the library header setting when opening an artist from the library index', async () => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { artist_page: { header: 'compact', header_elsewhere: 'rich' } },
+        }),
+      ),
+    );
+    const { router } = renderAt('/library');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/library'));
+
+    await act(async () => {
+      await router.navigate({ href: '/library?artist=42&view=discovery&immersive=true' });
+    });
+
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({ artist: 42, header: 'compact' }),
     );

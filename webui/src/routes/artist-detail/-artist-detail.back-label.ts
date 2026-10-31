@@ -9,7 +9,12 @@
  * pushes onto that stack, so React reads the SAME array rather than guessing.
  */
 
-import { getShellRouteByPath, normalizeShellPath } from '@/platform/shell/route-manifest';
+import {
+  getShellRouteByPageId,
+  getShellRouteByPath,
+  normalizeShellPath,
+  type ShellPageId,
+} from '@/platform/shell/route-manifest';
 
 export interface BackLabelEntry {
   type: 'page' | 'artist';
@@ -84,13 +89,19 @@ export function markGoingBack(): void {
  * nothing else pushes for these hops, and after three of them the button would
  * still be offering the page you originally came from.
  */
-export function pushArtistOrigin(previousArtistName: string | null | undefined): void {
+export function pushArtistOrigin(
+  previousArtistName: string | null | undefined,
+  href?: string,
+): void {
   if (goingBack) {
     goingBack = false;
     return;
   }
   if (!previousArtistName) return;
-  backLabelStack().push({ type: 'artist', name: previousArtistName });
+  const stack = backLabelStack();
+  const top = stack.at(-1);
+  if (top?.type === 'artist' && top.name === previousArtistName) return;
+  stack.push({ type: 'artist', name: previousArtistName, href });
 }
 
 /**
@@ -121,10 +132,34 @@ export function pushPageOrigin(pathname: string | undefined | null): void {
   backLabelStack().push({ type: 'page', pageId: route.pageId });
 }
 
+/** Put the route that started this artist chain at its base. Re-reading the
+ * same origin after a redirect or an album hop keeps artist steps above it. */
+export function ensurePageOrigin(pathname: string, searchStr = ''): void {
+  const query = searchStr.replace(/^\?/, '');
+  const href = query ? `${pathname}?${query}` : pathname;
+  const stack = backLabelStack();
+  if (stack.length > 0 && backOriginHref(stack[0]) === href) return;
+  stack.length = 0;
+  pushPageOrigin(pathname);
+  const first = stack[0];
+  if (first) first.href = href;
+}
+
 /** Back navigation pops, so the label follows you back down the chain. */
 export function popBackOrigin(): BackLabelEntry | undefined {
-  markGoingBack();
-  return backLabelStack().pop();
+  const entry = backLabelStack().pop();
+  if (entry?.type === 'artist') markGoingBack();
+  else goingBack = false;
+  return entry;
+}
+
+/** The exact URL named by a Back entry, with Library as the cold-load fallback. */
+export function backOriginHref(entry: BackLabelEntry | undefined): `/${string}` {
+  const page =
+    entry?.type === 'page' && entry.pageId
+      ? getShellRouteByPageId(entry.pageId as ShellPageId)?.path
+      : undefined;
+  return (entry?.href ?? page ?? '/library') as `/${string}`;
 }
 
 /** Test seam: the flag is module state and has to be resettable. */
