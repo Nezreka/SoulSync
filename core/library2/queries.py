@@ -16,7 +16,8 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from .metadata_overrides import project_metadata, project_metadata_many
 from .paths import library_relative_path
 from .sql_util import (
-    intent_profile_id, monitored_sql, owner_clause, pick, scoped_monitored, scope_visibility_sql,
+    intent_profile_id, library_member_sql, monitored_sql, owner_clause, pick, scoped_monitored,
+    scope_visibility_sql,
 )
 from .status import compute_metadata_gaps, file_status, metadata_scan_status, quality_tier, _coerce_tags
 from .track_files import primary_order
@@ -983,6 +984,11 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         # releases' own counts are every track on them (810 for 2 chainz,
         # whose 62 tracks are guest verses)
         **_guest_track_counts(conn, group, [e["id"] for e in appears_on]),
+        # the artist list's own rule: one outside it is browsed, its
+        # discography read from the provider rather than written in
+        "in_library": conn.execute(
+            f"SELECT 1 FROM lib2_artists a WHERE a.id = ? AND {library_member_sql('a')}",
+            (canonical_id,)).fetchone() is not None,
         "album_count": _in_library(albums) + _in_library(eps),
         "single_count": _in_library(singles),
         "discography_count": sum(1 for e in albums + eps + singles if e["origin"] == "discography"),

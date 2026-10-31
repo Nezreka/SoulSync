@@ -1,7 +1,7 @@
 import { useRouter, useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 
-import { artistNavigationOrigin } from '@/platform/shell/last-navigation';
+import { artistNavigationOrigin, type NavigationFrom } from '@/platform/shell/last-navigation';
 
 import {
   backOriginHref,
@@ -29,13 +29,10 @@ import {
 // the artist last shown, across views: an artist the library has (its row)
 // and one it has never heard of (read from the provider) are two components,
 // and a hop between them must still name and lead back to the artist you came
-// from. tied to the chain's origin, so a new chain starts clean
-let lastShown: { name: string; href: string; origin: string } | null = null;
-
-function originKey(): string {
-  const origin = artistNavigationOrigin();
-  return origin ? `${origin.pathname}?${origin.searchStr}` : '';
-}
+// from. tied to the chain's origin, so a new chain starts clean: the origin
+// itself, not its url. two arrivals from the same grid have the same url, and
+// the second one read "Back to <the first artist>"
+let lastShown: { name: string; href: string; origin: NavigationFrom | null } | null = null;
 
 export function useArtistBack(artistName: string | undefined): {
   label: string;
@@ -53,7 +50,7 @@ export function useArtistBack(artistName: string | undefined): {
     // album, and the chain stays as it was
     const arrival = artistNavigationOrigin();
     if (arrival) ensurePageOrigin(arrival.pathname, arrival.searchStr);
-    if (lastShown && lastShown.origin !== originKey()) lastShown = null;
+    if (lastShown && lastShown.origin !== arrival) lastShown = null;
     setLabel(backButtonLabel());
     // only on arrival: re-running as the chain grows would rewrite it
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -70,7 +67,7 @@ export function useArtistBack(artistName: string | undefined): {
     }
     previousName.current = artistName;
     previousHref.current = currentHref;
-    lastShown = { name: artistName, href: currentHref, origin: originKey() };
+    lastShown = { name: artistName, href: currentHref, origin: artistNavigationOrigin() };
     setLabel(backButtonLabel());
     // `currentHref` belongs to the artist whose name just resolved. Do not
     // update it while the next artist is still loading.

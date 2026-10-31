@@ -317,6 +317,9 @@ export interface LibraryV2ArtistDetail {
    *  many releases */
   guest_track_count?: number;
   guest_release_count?: number;
+  /** the artist list's rule: files, or a watch or wish of its own. One
+   *  outside it is browsed, its discography read from the provider. */
+  in_library?: boolean;
   album_count: number;
   single_count: number;
   /** Provider-only releases currently persisted for this artist. */

@@ -140,8 +140,12 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
     - **An alias is not an entry.** §40 alias members fold into their
       canonical artist, spelled as ``library2.queries.list_artists`` spells it
       (iss29-D04) so the membership test stays index-servable.
+
+    Only the library's artists, by the artist list's rule: a row that is a
+    guest credit or a looked-up discography is a found artist, opened from
+    the provider, not something you have.
     """
-    from core.library2.sql_util import scope_visibility_sql
+    from core.library2.sql_util import library_member_sql, scope_visibility_sql
     from core.text.normalize import normalize_for_comparison
 
     # "Your" library is the one you are looking at (#1199): an artist that only
@@ -166,6 +170,7 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
                               OR (member.canonical_artist_id IS NULL
                                   AND member.id = a.id))
                          AND unidecode_lower(member.name) LIKE :needle)
+                  AND {library_member_sql('a')}
                   {in_scope}
                 ORDER BY a.name COLLATE NOCASE, a.id
                 LIMIT 10""",

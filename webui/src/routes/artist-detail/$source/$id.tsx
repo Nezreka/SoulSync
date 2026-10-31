@@ -80,10 +80,12 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
             }),
         })
         .catch(() => null);
-      // only an artist with files here leaves the artist page. a watchlisted,
-      // bookmarked or discography-only row keeps the original page. a
-      // media-server id has no provider page, so any catalogue row will do.
-      if (found?.artistId) known = found.artistId;
+      // a row the library holds (files, or a watch or wish of its own) opens
+      // the library page. a guest credit or a looked-up discography is read
+      // from the provider like one never heard of: opening the library page
+      // wrote its whole discography in. a media-server id has no provider
+      // page, so any catalogue row will do.
+      if (found?.artistId && (isLibrary || found.inLibrary)) known = found.artistId;
       owned = isLibrary || found?.owned === true;
       // a provider ?album= keeps its focus when the release is catalogued here
       if (found?.albumId) focusAlbum = found.albumId;

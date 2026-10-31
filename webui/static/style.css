@@ -49566,8 +49566,28 @@ tr.tag-diff-same {
     margin-bottom: 5px;
     transition: filter var(--dur-fast) ease;
 }
-.artist-appears-on-album:hover .artist-appears-on-album-art {
+.artist-appears-on-album-play {
+    display: block;
+    width: 100%;
+    padding: 0;
+    background: none;
+    border: 0;
+    cursor: pointer;
+}
+.artist-appears-on-album-play:not(:disabled):hover .artist-appears-on-album-art {
     filter: brightness(1.1);
+}
+.artist-appears-on-link {
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.artist-appears-on-link:hover {
+    text-decoration: underline;
 }
 .artist-appears-on-list {
     list-style: none;
@@ -49592,7 +49612,14 @@ tr.tag-diff-same {
     cursor: pointer;
     transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
-.artist-appears-on-row:hover {
+.artist-appears-on-row:disabled,
+.artist-appears-on-album-play:disabled {
+    cursor: default;
+}
+.artist-appears-on-row:disabled .artist-appears-on-time {
+    color: rgb(var(--accent-rgb));
+}
+.artist-appears-on-row:not(:disabled):hover {
     background: var(--white-a07);
     border-color: var(--white-a10);
 }

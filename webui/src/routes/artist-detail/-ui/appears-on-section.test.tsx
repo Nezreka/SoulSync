@@ -173,6 +173,47 @@ describe('collab albums', () => {
     expect(screen.getByText('1 album')).toBeTruthy();
   });
 
+  it('opens the album from its title and its artist from the with line', async () => {
+    // the cover plays it; the name opens the release from this page, the
+    // artist it is filed under opens theirs
+    stub([], [WTT]);
+    const openAlbum = vi.fn();
+    const openArtist = vi.fn();
+    render(
+      <AppearsOnSection
+        artistId="6"
+        artistName="Kanye West"
+        onOpenAlbum={openAlbum}
+        onOpenArtist={openArtist}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Watch the Throne' }));
+    expect(openAlbum).toHaveBeenCalledWith(expect.objectContaining({ id: '30' }));
+    fireEvent.click(screen.getByRole('button', { name: 'JAY-Z' }));
+    expect(openArtist).toHaveBeenCalledWith('5');
+  });
+
+  it('keeps names as text where the page opens nothing', async () => {
+    stub([], [WTT]);
+    render(<AppearsOnSection artistId="6" artistName="Kanye West" />);
+    await screen.findByText('Watch the Throne');
+    expect(screen.queryByRole('button', { name: 'Watch the Throne' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'JAY-Z' })).toBeNull();
+  });
+
+  it('lists a wanted guest track that is not here yet, with nothing to play', async () => {
+    // Rockwell on a monitored Michael Jackson compilation: the wish is what
+    // puts him in the library, so his page shows it
+    stub([{ ...WFL, file_path: null, wanted: true }]);
+    const play = vi.fn();
+    window.playTrackList = play;
+    render(<AppearsOnSection artistId="6" artistName="Rihanna" />);
+    const row = await screen.findByRole('button', { name: /We Found Love/ });
+    expect(row).toBeDisabled();
+    expect(screen.getByText('Wanted')).toBeTruthy();
+    expect(screen.queryByLabelText('Play all')).toBeNull();
+  });
+
   it('play all takes the albums first, then the songs', async () => {
     stub([{ ...WFL, id: '100' }], [WTT]);
     const play = vi.fn();

@@ -188,6 +188,76 @@ describe('Library V2 artist detail — All Releases views', () => {
     ).toBeInTheDocument();
   }, 30_000);
 
+  it.each(['cards', 'table'])(
+    'reads the discography of an artist the library does not hold, writing nothing (%s)',
+    async (view) => {
+      // a guest credit opened from a search or a track's artist column: the
+      // discography walk wrote 70 releases of someone you only looked at. the
+      // provider's list is cards only, so a table url still shows it
+      const walk = vi.fn();
+      server.use(
+        http.get('/api/library/v2/artists/1', () =>
+          HttpResponse.json({
+            success: true,
+            artist: portishead({ in_library: false, albums: [], discography_count: 0 }),
+          }),
+        ),
+        http.post('/api/library/v2/artists/1/discography/refresh', () => {
+          walk();
+          return HttpResponse.json({ success: true, job_id: 'walk-1' });
+        }),
+        http.get('/api/artist-detail/:id', () =>
+          HttpResponse.json({
+            success: true,
+            artist: { id: 'sp-1', name: 'Portishead' },
+            discography: { albums: [{ id: 'al-3', title: 'Third' }], source: 'spotify' },
+          }),
+        ),
+      );
+      renderArtist(`/library?artist=1&releases=all&releaseView=${view}`);
+
+      expect(await screen.findByText('Third')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Table View' })).not.toBeInTheDocument();
+      expect(walk).not.toHaveBeenCalled();
+    },
+  );
+
+  it('suggests similar artists on Discovery only, never in My Library', async () => {
+    // My Library is what you have; suggestions belong to the discovery side
+    window.loadSimilarArtists = vi.fn();
+    window.cancelSimilarArtistsLoad = vi.fn();
+    inLibrary();
+    renderArtist('/library?artist=1&releases=library');
+    await screen.findByRole('button', { name: 'My Library' });
+    expect(screen.queryByText('Similar Artists')).not.toBeInTheDocument();
+    expect(window.loadSimilarArtists).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Discovery/ }));
+    expect(await screen.findByText('Similar Artists')).toBeInTheDocument();
+    await waitFor(() => expect(window.loadSimilarArtists).toHaveBeenCalledWith('Portishead'));
+  });
+
+  it('says a release on the wishlist is monitored, held to its quality profile', async () => {
+    // being on the wishlist is monitoring: it is what quality upgrades act on,
+    // and taking it off stops both
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            albums: [album({ id: 1, title: 'Dummy', monitored: true })],
+            album_count: 1,
+          }),
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&releases=library');
+
+    const title =
+      'Monitored: on your Wishlist and held to its quality profile. Click to stop monitoring';
+    await waitFor(() => expect(screen.getAllByTitle(title).length).toBeGreaterThan(0));
+  });
+
   it('keeps media-server sync in Tools and reports its background result', async () => {
     const sync = vi.fn();
     server.use(
@@ -803,6 +873,40 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(screen.queryByRole('button', { name: 'Portishead' })).toBeNull();
   });
 
+  it('goes back from a guest album to the artist it was opened from, in that header', async () => {
+    // Rockstar is Post Malone's; opened from 21 Savage's appears on, back
+    // read "Post Malone" and opened his page in the library's own header
+    server.use(
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Rockstar' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 2, name: 'Post Malone' },
+            tracks: [],
+          },
+        }),
+      ),
+      http.get('/api/library/v2/artists/:id', ({ params }) => {
+        const id = Number(params.id);
+        return HttpResponse.json({
+          success: true,
+          artist: portishead({ id, name: id === 1 ? '21 Savage' : 'Post Malone' }),
+        });
+      }),
+    );
+    const { router } = renderArtist('/library?artist=1&header=compact');
+    await screen.findByRole('heading', { name: '21 Savage' });
+    // the page's own search with the album added, as the appears-on name does
+    await act(() => router.navigate({ href: '/library?artist=1&header=compact&album=1' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: '← 21 Savage' }));
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('album'));
+    expect(router.state.location.search).toMatchObject({ artist: 1, header: 'compact' });
+  });
+
   it('links an album main artist when another artist page is open and returns there', async () => {
     server.use(
       http.get('/api/library/v2/ui-preferences', () =>
@@ -961,6 +1065,12 @@ describe('Library V2 artist detail — All Releases views', () => {
     [{ singles: [album(OWNED_SINGLE)] }, 'In your library', true],
     // only guest verses on other artists' music: in the library, but not theirs
     [{ guest_track_count: 6, guest_release_count: 6 }, 'Featured in your library', true],
+    // nothing on disk yet, but a wishlisted track or a watch: monitored, so its
+    // releases and their quality profile live in My Library
+    [{ in_library: true, monitored: true }, 'Monitored in your library', true],
+    // only credited on wanted tracks of other artists (Rockwell on a Michael
+    // Jackson compilation): featured, its appears on is its My Library
+    [{ in_library: true, monitored: false }, 'Featured in your library', true],
     [{}, 'Not in your library', false],
   ])('labels the artist by what the library holds: %#', async (patch, label, myLibrary) => {
     server.use(
@@ -1180,6 +1290,30 @@ describe('Library V2 artist detail — All Releases views', () => {
 
     await waitFor(() => expect(router.state.location.search).not.toHaveProperty('artist'));
     expect(router.state.location.search).toMatchObject({ section: 'albums' });
+  });
+
+  it('a second artist opened from the same grid goes back to the library, not the first', async () => {
+    // the grid's url is the same both times, so "the artist last shown" was
+    // still the first one: the second read "Back to 21 Savage" and led there
+    server.use(
+      http.get('/api/library/v2/artists/:id', ({ params }) => {
+        const id = Number(params.id);
+        return HttpResponse.json({
+          success: true,
+          artist: portishead({ id, name: id === 1 ? '21 Savage' : 'Nicki Minaj' }),
+        });
+      }),
+    );
+    const { router } = renderArtist('/library?section=artists');
+    await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/library'));
+    await act(() => router.navigate({ href: '/library?section=artists&artist=1' }));
+    await screen.findByRole('heading', { name: '21 Savage' });
+    fireEvent.click(screen.getByRole('button', { name: '← Back to Library' }));
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('artist'));
+
+    await act(() => router.navigate({ href: '/library?section=artists&artist=2' }));
+    await screen.findByRole('heading', { name: 'Nicki Minaj' });
+    expect(screen.getByRole('button', { name: '← Back to Library' })).toBeInTheDocument();
   });
 
   it('back never walks into the album it came up from', async () => {

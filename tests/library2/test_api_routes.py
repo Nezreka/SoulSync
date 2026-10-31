@@ -3542,6 +3542,28 @@ def test_discovery_reports_owned_only_for_live_files(api):
     assert watched["owned"] is False
 
 
+def test_discovery_reports_whether_the_library_holds_the_artist(api):
+    """a watched artist is in the library and opens there; a row that is only
+    a guest credit is not, and stays on the provider page, writing nothing."""
+    client, db, _ids = api
+    with closing(_conn(db)) as conn:
+        conn.execute("INSERT INTO lib2_artists(name, sort_name, spotify_id, monitored) "
+                     "VALUES('Watched Only','Watched Only','sp-watched',1),"
+                     "('Guest Only','Guest Only','sp-guest',0)")
+        conn.commit()
+
+    def lookup(provider_id, name):
+        return client.get("/api/library/v2/discovery/artist",
+                          query_string={"source": "spotify", "provider_id": provider_id,
+                                        "name": name}).get_json()
+
+    assert lookup("sp-drake", "Drake")["in_library"] is True
+    assert lookup("sp-watched", "Watched Only")["in_library"] is True
+    guest = lookup("sp-guest", "Guest Only")
+    assert guest["artist_id"] is not None
+    assert guest["in_library"] is False
+
+
 def _ids_artist(db, name: str) -> int:
     with closing(_conn(db)) as conn:
         return conn.execute(

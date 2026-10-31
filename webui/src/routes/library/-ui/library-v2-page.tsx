@@ -868,9 +868,10 @@ export function MonitorToggle({
               ? 'On your Watchlist. Click to remove this artist (files and wishlisted tracks stay as they are)'
               : entity === 'artists'
                 ? 'Add this artist to your Watchlist'
-                : monitored
-                  ? 'On your Wishlist. Click to remove it'
-                  : 'Add to your Wishlist'
+                : // the wishlist is monitoring: quality upgrades act on it too
+                  monitored
+                  ? 'Monitored: on your Wishlist and held to its quality profile. Click to stop monitoring'
+                  : 'Monitor: add to your Wishlist and hold it to its quality profile'
         }
         data-requires-write=""
         disabled={mutation.isPending || !canWrite}
@@ -6167,28 +6168,24 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
     runScoped(scope.entity, scope.id);
   }
 
-  // Back must return to the view you left. Clearing `releases` here dropped
-  // the user out of All Releases / Discover View into My Library on every
-  // back click, so getting back to the release they came from took three
-  // more clicks. The view settings are only reset when back leads to a
-  // DIFFERENT artist than the URL was showing — then they describe someone
-  // else's page and carrying them over would be the surprise instead.
-  const pageHeader = useQuery(libraryV2UiPreferencesQueryOptions()).data?.artist_page?.header;
-  const goBack = () => {
-    const artistId = album?.primary_artist?.id;
-    const switchesArtist = Boolean(artistId && previousArtist && artistId !== previousArtist);
-    return navigate({
-      search: (previous) =>
-        switchesArtist && artistId
-          ? openArtistSearch(previous, artistId, pageHeader)
-          : { ...previous, album: undefined, artist: artistId ?? previous.artist },
-    });
-  };
+  // Back must return to the view you left, the artist page the album was
+  // opened from with its view settings (Discover View, the header). A guest
+  // spot or a collaboration is filed under someone else: back to its main
+  // artist was a page you were never on, in the library's header instead of
+  // yours. With no artist in the url (the album list) it goes to its own.
+  const fromArtist = previousArtist ?? album?.primary_artist?.id;
+  const guestAlbum = fromArtist != null && fromArtist !== album?.primary_artist?.id;
+  const fromArtistName = useQuery({
+    ...libraryV2ArtistQueryOptions(fromArtist ?? 0),
+    enabled: guestAlbum,
+  }).data?.name;
+  const goBack = () =>
+    navigate({ search: (previous) => ({ ...previous, album: undefined, artist: fromArtist }) });
 
   return (
     <div className={`${styles.page} ${styles.detailView}`}>
       <BackLink onClick={() => void goBack()}>
-        ← {album?.primary_artist ? album.primary_artist.name : 'Library'}
+        ← {(guestAlbum ? fromArtistName : album?.primary_artist?.name) ?? 'Library'}
       </BackLink>
       {albumQuery.isError ? (
         <div className={styles.emptyState}>Album not found.</div>
@@ -7318,7 +7315,10 @@ function LegacyArtistHero({
   eyebrow,
   facts,
   collectionNote,
+  video = true,
 }: {
+  /** the backdrop clip, looked up on YouTube: only for the rich header */
+  video?: boolean;
   /** the quiet line above the name */
   eyebrow?: ReactNode;
   /** one line under the collection meters */
@@ -7416,7 +7416,7 @@ function LegacyArtistHero({
         ) : (
           <div className={styles.billboardGlow} aria-hidden="true" />
         )}
-        <ArtistHeroVideo name={name} providerId={providerId} />
+        {video ? <ArtistHeroVideo name={name} providerId={providerId} /> : null}
         <div className={styles.billboardScrim} aria-hidden="true" />
         <div className="artist-hero-content">
           <div
@@ -7683,6 +7683,17 @@ function artistEyebrow(artist: LibraryV2ArtistDetail) {
   // only guest verses on other artists' music (jpegmafia on 6 releases):
   // they are in the library, but none of their own music is
   if ((artist.guest_track_count ?? 0) > 0) return 'Featured in your library';
+  // nothing on disk yet, but a wishlisted release or a watch of its own: the
+  // library is waiting for it, and its quality profile applies
+  const ownIntent =
+    artist.monitored ||
+    [...artist.albums, ...(artist.eps ?? []), ...artist.singles].some(
+      (a) => a.monitored || (a.monitored_tracks ?? 0) > 0,
+    );
+  if (artist.in_library && ownIntent) return 'Monitored in your library';
+  // in only through a wanted track of another artist's (Rockwell on a
+  // Michael Jackson compilation): appears on lists it
+  if (artist.in_library) return 'Featured in your library';
   return 'Not in your library';
 }
 
@@ -7806,6 +7817,13 @@ function ProviderArtistView({
   const info = payload?.artist;
   const artistName = String(info?.name || name || '');
   const back = useArtistBack(artistName || undefined);
+  // reached from search or discover: the header this profile picked for
+  // arrivals from elsewhere decides whether the backdrop video plays, and
+  // nothing plays (or is looked up) before that is known
+  const prefs = useQuery(libraryV2UiPreferencesQueryOptions());
+  const heroHeader =
+    search.header ??
+    (prefs.isSuccess ? (prefs.data?.artist_page?.header_elsewhere ?? 'rich') : undefined);
   const { filters, setFilters } = useDiscographyFilters();
   const providerIds = { [source]: providerId };
   const discography = useReadOnlyProviderDiscography({
@@ -7891,6 +7909,7 @@ function ProviderArtistView({
         ) : (
           <>
             <LegacyArtistHero
+              video={heroHeader === 'rich'}
               name={artistName}
               imageUrl={String(info?.image_url || '')}
               genres={(info?.genres ?? []).map(String)}
@@ -8128,9 +8147,16 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     source: artistProviderIds.spotify ? 'spotify' : artistProviderIds.deezer ? 'deezer' : null,
   };
   // a read-only profile cannot fetch the discography into the catalogue, so
-  // it reads the provider's list directly, writing nothing
+  // it reads the provider's list directly, writing nothing. neither does an
+  // artist the library doesn't hold (a guest credit, one opened from a
+  // search): looking at them must not write their discography in
+  const heldHere = artistQuery.data?.in_library !== false;
+  const writesDiscography = canWish && heldHere;
+  // the provider's list is drawn as cards only: for an artist read from it,
+  // Table View listed nothing at all
+  const tableView = releaseView === 'table' && heldHere;
   const readOnlyDiscography = useReadOnlyProviderDiscography({
-    enabled: !canWish && releasesMode === 'all',
+    enabled: !writesDiscography && releasesMode === 'all',
     artistName: artistQuery.data?.name ?? '',
     providerIds: artistProviderIds,
     catalogueTitles: [
@@ -8143,16 +8169,17 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const artist = artistQuery.data;
   const back = useArtistBack(artist?.name);
-  // in both views, the way dev's page always ended on similar artists. it
+  const openArtist = useOpenArtist();
+  // suggestions are discovery: My Library is what you have, nothing else. it
   // runs once the page is up: the loader fills a section it finds in the DOM
   useEffect(() => {
-    if (!artist?.name) return;
+    if (releasesMode !== 'all' || !artist?.name) return;
     window.loadSimilarArtists?.(artist.name);
     return () => window.cancelSimilarArtistsLoad?.();
   }, [artist?.name, releasesMode]);
-  // My Library is there only for an artist with files here, the way dev
-  // offered its library view only for an artist in the library. a watched or
-  // discography-only artist opens on its discography
+  // My Library is there for an artist in the library, the way dev offered
+  // its library view only for an artist in the library: files here, or a
+  // watch or wish of its own. one only looked at opens on its discography
   const inLibrary = artist ? artistEyebrow(artist) !== 'Not in your library' : true;
   useEffect(() => {
     if (artist && !inLibrary && releasesMode !== 'all') {
@@ -8305,7 +8332,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       return;
     }
     if (
-      canWish &&
+      writesDiscography &&
       shouldAutoFetchDiscography({
         discographyCount: artist?.discography_count,
         discographyBusy,
@@ -8317,7 +8344,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       void updateDiscography((artist?.discography_count ?? 0) > 0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [releasesMode, artist?.discography_count, artist?.discography_synced_at, discographyBusy]);
+  }, [
+    releasesMode,
+    writesDiscography,
+    artist?.discography_count,
+    artist?.discography_synced_at,
+    discographyBusy,
+  ]);
 
   /** Route a toolbar/row action: Interactive Search opens the window;
    *  Automatic Search (any scope) / per-track Search run the scoped
@@ -8639,7 +8672,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 ) : null}
               </button>
             </div>
-            {releasesMode === 'all' ? (
+            {releasesMode === 'all' && heldHere ? (
               <div className={styles.releasesToggle}>
                 <button
                   type="button"
@@ -8686,7 +8719,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             />
           ) : null}
 
-          {releasesMode === 'all' && releaseView === 'cards' ? (
+          {releasesMode === 'all' && !tableView ? (
             <DiscographySections>
               {(
                 [
@@ -8769,8 +8802,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   releasesOf(artist.albums, 'albums').length > 0 ||
                   releasesOf(artist.eps ?? [], 'eps').length > 0 ||
                   releasesOf(artist.singles, 'singles').length > 0 ||
-                  // only guest spots here: Appears On below lists them
-                  (releasesMode !== 'all' && guestCollectionNote(artist) !== null)
+                  // only guest spots here, on disk or wanted: Appears On below lists them
+                  (releasesMode !== 'all' && artistEyebrow(artist) === 'Featured in your library')
                 }
                 mode={releasesMode}
                 onShowAll={() => setReleasesMode('all')}
@@ -8782,15 +8815,28 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <div className={styles.musicVideosPanel}>
                 <ArtistVideosSection artistName={artist.name} />
               </div>
-              <AppearsOnSection artistId={artist.id} artistName={artist.name} />
+              <AppearsOnSection
+                artistId={artist.id}
+                artistName={artist.name}
+                onOpenAlbum={(a) =>
+                  void navigate({ search: (p) => ({ ...p, album: Number(a.id) }) })
+                }
+                onOpenArtist={(id) => openArtist(Number(id))}
+              />
               <SimilarArtistsSection />
             </>
           ) : (
             <>
               {/* the artist's tracks on other artists' releases are in the
                   library too: a featured artist's My Library was empty */}
-              <AppearsOnSection artistId={artist.id} artistName={artist.name} />
-              <SimilarArtistsSection />
+              <AppearsOnSection
+                artistId={artist.id}
+                artistName={artist.name}
+                onOpenAlbum={(a) =>
+                  void navigate({ search: (p) => ({ ...p, album: Number(a.id) }) })
+                }
+                onOpenArtist={(id) => openArtist(Number(id))}
+              />
             </>
           )}
           <ConcertsSection
