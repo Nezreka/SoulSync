@@ -24,6 +24,10 @@ logger = get_logger("music_database")
 
 # A file row confirmed at a configured path. Missing/deleted rows remain as
 # history (ADR-03), but are not ownership evidence.
+# the most ids a fold_index match is put back through sql as; a needle that
+# broad (one or two letters) keeps the plain LIKE
+_FOLD_IN_MAX = 2000
+
 _LIVE_FILE = ("COALESCE(f.file_state, 'active') = 'active' "
               "AND f.path IS NOT NULL AND TRIM(f.path) <> ''")
 
@@ -11449,17 +11453,17 @@ class MusicDatabase:
         exact returns None when no artist has that name."""
         from core.library2.importer import normalize_name
         if wide:
+            from database import fold_index
             norm = self._normalize_for_comparison(artist)
-            cursor.execute("SELECT id FROM lib2_artists WHERE unidecode_lower(name) LIKE ?",
-                           (f"%{norm}%",))
-            ids = [int(r[0]) for r in cursor.fetchall()]
+            ids = fold_index.matching_ids(cursor.connection, str(self.database_path),
+                                          fold_index.ARTIST_NAMES, norm)
             if not ids:
                 # "ACDC" for "AC/DC": the same artist once punctuation is gone
                 from core.text.normalize import normalize_key
                 key = normalize_key(artist)
                 if key:
-                    cursor.execute("SELECT id FROM lib2_artists WHERE norm_key(name) = ?", (key,))
-                    ids = [int(r[0]) for r in cursor.fetchall()]
+                    ids = fold_index.ids_with_key(cursor.connection, str(self.database_path),
+                                                  fold_index.ARTIST_KEYS, key)
         else:
             cursor.execute("SELECT id FROM lib2_artists WHERE name_key = ?",
                            (normalize_name(artist),))
@@ -11477,11 +11481,10 @@ class MusicDatabase:
         if wide:
             # per-track credit text ("A feat. B" filed under A). resolved once
             # here, through the partial index, instead of in every strategy
-            cursor.execute(
-                "SELECT id FROM lib2_tracks WHERE track_artist IS NOT NULL "
-                "AND unidecode_lower(track_artist) LIKE ?",
-                (f"%{self._normalize_for_comparison(artist)}%",))
-            credited = [int(r[0]) for r in cursor.fetchall()]
+            from database import fold_index
+            credited = fold_index.matching_ids(
+                cursor.connection, str(self.database_path), fold_index.TRACK_CREDITS,
+                self._normalize_for_comparison(artist))
             if credited:
                 parts.append(f"tracks.id IN ({','.join('?' for _ in credited)})")
                 params.extend(credited)
@@ -11826,13 +11829,38 @@ class MusicDatabase:
             where_conditions = []
             params = []
             
+            # the contains-matches come from the folded titles kept in memory
+            # (database/fold_index): unidecode_lower in the WHERE folded all
+            # 72k titles on every call. a needle too broad for an id list
+            # keeps the old clause
+            from database import fold_index
+            db_key = str(self.database_path)
             if title:
-                where_conditions.append("unidecode_lower(albums.title) LIKE ?")
-                params.append(f"%{self._normalize_for_comparison(title)}%")
+                needle = self._normalize_for_comparison(title)
+                ids = fold_index.matching_ids(conn, db_key, fold_index.ALBUM_TITLES, needle,
+                                              limit=_FOLD_IN_MAX + 1)
+                if not ids:
+                    return []
+                if len(ids) > _FOLD_IN_MAX:
+                    where_conditions.append("unidecode_lower(albums.title) LIKE ?")
+                    params.append(f"%{needle}%")
+                else:
+                    where_conditions.append(f"albums.id IN ({','.join('?' for _ in ids)})")
+                    params.extend(ids)
 
             if artist:
-                where_conditions.append("unidecode_lower(artists.name) LIKE ?")
-                params.append(f"%{self._normalize_for_comparison(artist)}%")
+                needle = self._normalize_for_comparison(artist)
+                ids = fold_index.matching_ids(conn, db_key, fold_index.ARTIST_NAMES, needle,
+                                              limit=_FOLD_IN_MAX + 1)
+                if not ids:
+                    return []
+                if len(ids) > _FOLD_IN_MAX:
+                    where_conditions.append("unidecode_lower(artists.name) LIKE ?")
+                    params.append(f"%{needle}%")
+                else:
+                    where_conditions.append(
+                        f"albums.primary_artist_id IN ({','.join('?' for _ in ids)})")
+                    params.extend(ids)
 
             if server_source:
                 where_conditions.append(
@@ -11970,22 +11998,18 @@ class MusicDatabase:
                 if kept:
                     return kept
                 # punctuation/accent-only differences ("ACDC" for "AC/DC",
-                # "Bjork" for "Björk") are the same artist: compare folded keys
-                # inside the name_key ranges that can hold them (the key's first
-                # letter, plus names starting outside ASCII) -- index ranges,
-                # not a table scan
+                # "Bjork" for "Björk") are the same artist: compare folded keys.
+                # every artist's key is kept in memory (database/fold_index);
+                # folding the candidates here cost ~0.4s per miss
                 from core.text.normalize import normalize_key
+                from database import fold_index
                 for form in forms:
-                    key = normalize_key(form)
-                    if not key:
-                        continue
-                    for (name,) in conn.execute(
-                            f"SELECT a.name FROM lib2_artists a WHERE ((a.name_key >= ? AND a.name_key < ?)"
-                            f" OR a.name_key >= ?) AND {owned}",
-                            (key[0], chr(ord(key[0]) + 1), chr(128))):
-                        if normalize_key(name) == key:
-                            kept.append(form)
-                            break
+                    ids = fold_index.ids_with_key(conn, str(self.database_path),
+                                                  fold_index.ARTIST_KEYS, normalize_key(form))
+                    if ids and conn.execute(
+                            f"SELECT 1 FROM lib2_artists a WHERE a.id IN "
+                            f"({','.join('?' for _ in ids)}) AND {owned} LIMIT 1", ids).fetchone():
+                        kept.append(form)
                 return kept
             finally:
                 conn.close()
@@ -12898,9 +12922,12 @@ class MusicDatabase:
                 return []
 
             placeholders = ','.join('?' for _ in artist_ids)
-            where = (f"(al.primary_artist_id IN ({placeholders}) OR t.id IN "
-                     f"(SELECT ta.track_id FROM lib2_track_artists ta "
-                     f"WHERE ta.artist_id IN ({placeholders})))")
+            # one id set from two indexed lookups. an OR across the album and
+            # the credit table made sqlite walk every album (56ms vs 9ms)
+            where = (f"t.id IN (SELECT t2.id FROM lib2_tracks t2 JOIN lib2_albums a2 "
+                     f"ON a2.id = t2.album_id WHERE a2.primary_artist_id IN ({placeholders}) "
+                     f"UNION SELECT ta.track_id FROM lib2_track_artists ta "
+                     f"WHERE ta.artist_id IN ({placeholders}))")
             params: list = list(artist_ids) * 2
             if server_source:
                 where += (" AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "

@@ -1077,6 +1077,18 @@ def shared_state():
     }
 
 
+@pytest.fixture(autouse=True)
+def _fresh_fold_index():
+    """the folded-text index (database/fold_index) lives per database path for
+    the process. tests reseed the same path, so each one starts with it empty."""
+    from database import fold_index
+    fold_index.clear()
+    # a test writes then reads straight away; ask the table every time
+    saved, fold_index.CHECK_SECONDS = fold_index.CHECK_SECONDS, 0.0
+    yield
+    fold_index.CHECK_SECONDS = saved
+
+
 @pytest.fixture(autouse=True, scope='session')
 def _inert_youtube_date_enricher():
     """Neuter the YouTube date-enricher SINGLETON for the whole suite.
