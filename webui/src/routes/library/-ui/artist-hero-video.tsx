@@ -93,7 +93,12 @@ export function ArtistHeroVideo({ name, providerId }: { name: string; providerId
 
   return (
     <>
-      <div ref={slot.ref} className={styles.layer} aria-hidden="true">
+      <div
+        ref={slot.ref}
+        className={styles.layer}
+        data-live={live && slot.playing}
+        aria-hidden="true"
+      >
         {candidate ? (
           <BackdropVideo
             videoId={candidate}

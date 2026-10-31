@@ -6,6 +6,23 @@
   overflow: hidden;
   inset: 0;
   pointer-events: none;
+  transition: background-color 1.4s ease;
+}
+
+/* once the video plays, the photo under it goes dark: at discover's 0.9 the
+   photo showed through the video */
+.layer[data-live='true'] {
+  background-color: var(--bg-raised);
+}
+
+.layer[data-live='true'] :global([class~='dsc-backdrop-video'][class~='ready']) {
+  opacity: 1;
+}
+
+/* the hero is far wider than 16:9, so a video's own black side bars (4:3,
+   pillarboxed uploads) landed on its right edge. zoomed past them */
+.layer :global([class~='dsc-backdrop-video'] iframe) {
+  transform: translate(-50%, -50%) scale(1.36);
 }
 
 .sound {
