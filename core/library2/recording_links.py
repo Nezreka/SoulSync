@@ -132,10 +132,12 @@ def reference_owners(conn: Any, track_ids: Iterable[int]) -> Dict[int, Dict[str,
                 SELECT me.id, other.id FROM subjects me JOIN lib2_tracks other
                     ON other.canonical_track_id=COALESCE(me.canonical_track_id,me.id)
                 UNION
+                -- cross joins keep the planner on the subjects first. left
+                -- free it scans every release track (1.6s an album)
                 SELECT me.id, other.id FROM subjects me
-                JOIN lib2_release_tracks mine ON mine.track_id=me.id
-                JOIN lib2_release_tracks theirs ON theirs.recording_id=mine.recording_id
-                JOIN lib2_tracks other ON other.id=theirs.track_id
+                CROSS JOIN lib2_release_tracks mine ON mine.track_id=me.id
+                CROSS JOIN lib2_release_tracks theirs ON theirs.recording_id=mine.recording_id
+                CROSS JOIN lib2_tracks other ON other.id=theirs.track_id
                 WHERE {title_match}
             )
             SELECT me.id            AS track_id,

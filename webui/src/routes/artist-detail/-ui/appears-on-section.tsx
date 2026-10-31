@@ -24,6 +24,56 @@ import {
 
 const COLLAPSED = 8;
 
+// a cover soulsync hasn't built yet answers 404 and is built in the background;
+// it was a broken image until the next visit, so a reload of the same artist
+// sometimes had covers and sometimes not. it's asked again for a while, the
+// provider's own cover showing meanwhile
+const COVER_RETRIES = [1500, 3000, 6000, 12000];
+
+function PendingCover({
+  src,
+  remote,
+  className,
+}: {
+  src: string;
+  remote?: string | null;
+  className: string;
+}) {
+  const [attempt, setAttempt] = useState(0);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setAttempt(0);
+    setFailed(false);
+  }, [src]);
+  useEffect(() => {
+    if (!failed || attempt >= COVER_RETRIES.length) return;
+    const timer = setTimeout(() => {
+      setAttempt((n) => n + 1);
+      setFailed(false);
+    }, COVER_RETRIES[attempt]);
+    return () => clearTimeout(timer);
+  }, [failed, attempt]);
+  const url = attempt ? `${src}${src.includes('?') ? '&' : '?'}retry=${attempt}` : src;
+  const showRemote = failed && remote;
+  if (failed && !remote && attempt >= COVER_RETRIES.length) {
+    return <span className={`${className} artist-appears-on-art-empty`} aria-hidden="true" />;
+  }
+  return (
+    <>
+      {showRemote ? <img className={className} src={remote} alt="" loading="lazy" /> : null}
+      <img
+        key={url}
+        className={className}
+        src={url}
+        alt=""
+        loading="lazy"
+        style={failed ? { display: 'none' } : undefined}
+        onError={() => setFailed(true)}
+      />
+    </>
+  );
+}
+
 export interface AppearsOnSectionProps {
   artistId: string | number | undefined;
   artistName: string;
@@ -100,11 +150,10 @@ export function AppearsOnSection({ artistId, artistName }: AppearsOnSectionProps
                 onClick={() => playAlbum(a)}
               >
                 {a.thumb_url ? (
-                  <img
+                  <PendingCover
                     className="artist-appears-on-album-art"
                     src={a.thumb_url}
-                    alt=""
-                    loading="lazy"
+                    remote={a.thumb_remote_url}
                   />
                 ) : (
                   <span
@@ -131,11 +180,10 @@ export function AppearsOnSection({ artistId, artistName }: AppearsOnSectionProps
                 onClick={() => playFrom(i)}
               >
                 {t.album_thumb_url ? (
-                  <img
+                  <PendingCover
                     className="artist-appears-on-art"
                     src={t.album_thumb_url}
-                    alt=""
-                    loading="lazy"
+                    remote={t.album_thumb_remote_url}
                   />
                 ) : (
                   <span

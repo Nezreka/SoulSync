@@ -192,3 +192,30 @@ describe('collab albums', () => {
     expect(screen.queryByText('Watch the Throne')).toBeNull();
   });
 });
+
+describe('a cover still being built', () => {
+  it('shows the provider cover and asks again until the local one is ready', async () => {
+    stub([
+      {
+        ...WFL,
+        album_thumb_url: '/api/library/v2/artwork/album/10',
+        album_thumb_remote_url: 'https://cdn.test/18.jpg',
+      },
+    ]);
+    render(<AppearsOnSection artistId={7} artistName="Rihanna" />);
+    await screen.findByText('We Found Love');
+    const local = () =>
+      [...document.querySelectorAll('img')].find((img) =>
+        img.getAttribute('src')?.startsWith('/api/library/v2/artwork/album/10'),
+      )!;
+    // the endpoint answers 404 while it builds the cover
+    fireEvent.error(local());
+    await waitFor(() =>
+      expect(document.querySelector('img[src="https://cdn.test/18.jpg"]')).not.toBeNull(),
+    );
+    // asked again, with a fresh url so the browser doesn't reuse the 404
+    await waitFor(() => expect(local().getAttribute('src')).toContain('retry=1'), {
+      timeout: 3000,
+    });
+  });
+});

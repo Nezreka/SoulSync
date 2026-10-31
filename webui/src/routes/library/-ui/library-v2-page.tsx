@@ -3193,11 +3193,23 @@ function useFloatingMenuPosition(
 export function AlbumOverflowMenu({
   album,
   onDeleted,
+  onOpenPage,
 }: {
   album: AlbumDetailTarget;
   onDeleted?: () => void;
+  /** the album's own page; left out on that page itself */
+  onOpenPage?: () => void;
 }) {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const copyLink = () => {
+    const href = router.buildLocation({ to: '/library', search: { album: album.id } }).href;
+    const url = new URL(href, window.location.origin).toString();
+    void navigator.clipboard
+      ?.writeText(url)
+      .then(() => window.showToast?.('Album link copied', 'success'))
+      .catch(() => window.showToast?.('Could not copy the link', 'error'));
+  };
   const canWrite = useLibraryV2CanWrite();
   const [open, setOpen] = useState(false);
   const [showSubmenu, setShowSubmenu] = useState(false);
@@ -3251,6 +3263,28 @@ export function AlbumOverflowMenu({
               style={menuPosition}
               onClick={(e) => e.stopPropagation()}
             >
+              {onOpenPage ? (
+                <button
+                  type="button"
+                  className={styles.overflowMenuItem}
+                  onClick={() => {
+                    setOpen(false);
+                    onOpenPage();
+                  }}
+                >
+                  Open album page
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={styles.overflowMenuItem}
+                onClick={() => {
+                  setOpen(false);
+                  copyLink();
+                }}
+              >
+                Copy link
+              </button>
               <button
                 type="button"
                 className={styles.overflowMenuItem}
@@ -9199,7 +9233,7 @@ function AlbumBlock({
     <div className={`${styles.albumBlock} ${open ? styles.albumBlockOpen : ''}`}>
       <div
         className={styles.albumHead}
-        title="Click to expand or collapse · Double-click to open album detail"
+        title="Click to expand or collapse · Double-click to open the album page"
         onClick={handleAlbumClick}
       >
         <span className={`${styles.chevron} ${open ? styles.chevronOpen : ''}`}>›</span>
@@ -9215,7 +9249,7 @@ function AlbumBlock({
           <button
             type="button"
             className={styles.albumHeadTitleButton}
-            title="Click to expand or collapse · Double-click to open album detail"
+            title="Click to expand or collapse · Double-click to open the album page"
             aria-expanded={open}
             onClick={(event) => {
               event.stopPropagation();
@@ -9293,6 +9327,7 @@ function AlbumBlock({
               image_url: album.image_url,
               owns_files: album.tracks_present > 0,
             }}
+            onOpenPage={openAlbumDetail}
           />
         </span>
       </div>

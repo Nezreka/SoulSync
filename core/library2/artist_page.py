@@ -29,6 +29,9 @@ def appears_on_payload(conn, artist_id):
         # library card. the stored image_url can be a media server's own path
         # ("/library/metadata/570524/thumb/...") the browser can't load
         cover = f"/api/library/v2/artwork/album/{int(album['id'])}"
+        # the provider's own cover, painted while a cold local one is built
+        stored = str(album.get('image_url') or '')
+        remote = stored if stored.startswith(('http://', 'https://')) else None
         if primary.get('id') in group:
             continue
         whole_album = album['id'] in credited_albums
@@ -43,13 +46,15 @@ def appears_on_payload(conn, artist_id):
                 **{k: track.get(k) for k in ('id', 'title', 'track_number', 'disc_number', 'duration')},
                 'lib2_track_id': track['id'], 'file_path': file['path'],
                 'album_id': album['id'], 'album_title': album['title'],
-                'album_thumb_url': cover, 'year': album['year'],
+                'album_thumb_url': cover, 'album_thumb_remote_url': remote,
+                'year': album['year'],
                 'artist_id': primary.get('id'), 'artist_name': primary.get('name'),
                 'credits': [a['name'] for a in track.get('artists', [])],
             })
         if whole_album and rows:
             albums.append({'id': album['id'], 'title': album['title'],
-                           'thumb_url': cover, 'year': album['year'],
+                           'thumb_url': cover, 'thumb_remote_url': remote,
+                           'year': album['year'],
                            'artist_id': primary.get('id'), 'artist_name': primary.get('name'),
                            'tracks': rows})
         elif rows:
