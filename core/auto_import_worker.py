@@ -173,7 +173,8 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
         # AIFF/WAV carry raw ID3 the easy view can't map (#1919)
         from core.metadata.easy_tags import open_easy
         audio = open_easy(file_path)
-        if audio:
+        # an untagged file is falsy to mutagen; its duration still counts (#1920)
+        if audio is not None:
             # Audio length comes off audio.info, not tags. Mutagen returns
             # seconds as a float; convert to int milliseconds to match the
             # metadata-source convention (Spotify/Deezer/iTunes all return

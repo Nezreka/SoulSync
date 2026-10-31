@@ -20,11 +20,12 @@ from mutagen.apev2 import APEv2, APENoHeaderError
 
 logger = logging.getLogger("tag_writer")
 
-# Supported extensions
+# Write support is deliberately narrower than read support.
 SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}
-# read_file_tags also reads AIFF: its tags are plain ID3 (#1919). writing
+# read_file_tags also reads AIFF and WAV: their tags are plain ID3 (#1919,
+# #1920). writing
 # stays on SUPPORTED_EXTENSIONS.
-READABLE_EXTENSIONS = SUPPORTED_EXTENSIONS | {'.aiff', '.aif'}
+READABLE_EXTENSIONS = SUPPORTED_EXTENSIONS | {'.aiff', '.aif', '.wav'}
 
 # File-field vocabulary shared by repairs. A selected-field write never
 # derives a second field (for example ALBUMARTIST) from an ARTIST change.
@@ -229,7 +230,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             result['duration_ms'] = int(length * 1000)
 
         if isinstance(audio.tags, ID3):
-            # MP3
+            # ID3 (MP3 / AIFF / WAV)
             result['title'] = _id3_text(audio.tags, 'TIT2')
             result['artist'] = _id3_text(audio.tags, 'TPE1')
             result['album_artist'] = _id3_text(audio.tags, 'TPE2')

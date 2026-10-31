@@ -96,8 +96,9 @@ def read_embedded_track_number(file_path: str) -> Optional[int]:
     if not file_path:
         return None
     try:
-        from mutagen import File as MutagenFile
-        audio = MutagenFile(file_path, easy=True)
+        # AIFF/WAV carry raw ID3 the easy view can't map (#1920)
+        from core.metadata.easy_tags import open_easy
+        audio = open_easy(file_path)
         if audio is None:
             return None
         raw = audio.get('tracknumber')
@@ -127,8 +128,9 @@ def read_embedded_album(file_path: str) -> Optional[str]:
     if not file_path:
         return None
     try:
-        from mutagen import File as MutagenFile
-        audio = MutagenFile(file_path, easy=True)
+        # AIFF/WAV carry raw ID3 the easy view can't map (#1920)
+        from core.metadata.easy_tags import open_easy
+        audio = open_easy(file_path)
         if audio is None:
             return None
         raw = audio.get('album')
@@ -154,8 +156,9 @@ def read_embedded_album_artist(file_path: str) -> Optional[str]:
     if not file_path:
         return None
     try:
-        from mutagen import File as MutagenFile
-        audio = MutagenFile(file_path, easy=True)
+        # AIFF/WAV carry raw ID3 the easy view can't map (#1920)
+        from core.metadata.easy_tags import open_easy
+        audio = open_easy(file_path)
         if audio is None:
             return None
         for key in ('albumartist', 'album artist'):

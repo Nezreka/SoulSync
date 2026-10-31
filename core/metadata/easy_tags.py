@@ -40,7 +40,9 @@ def easy_frames(id3: Any) -> Dict[str, List[str]]:
     out = _EasyFrames()
     for key, frame_id in _FRAMES.items():
         frame = id3.get(frame_id)
-        texts = [str(t) for t in getattr(frame, 'text', None) or [] if str(t).strip()]
+        # TCON's .genres turns id3v1 codes ("(17)") into names (#1920)
+        values = getattr(frame, 'genres' if frame_id == 'TCON' else 'text', None) or []
+        texts = [str(t).strip() for t in values if str(t).strip()]
         if texts:
             out[key] = texts
     for frame in id3.getall('TXXX'):
