@@ -103,13 +103,15 @@ The engine routes each finished download to the library path matching its type.
 
 In Docker, Movies, TV and YouTube start on \`/media/movies\`, \`/media/tv\` and \`/media/youtube\` when the container has those mapped (the default compose file does), the way Music starts on \`/app/Transfer\`. Like the Music folders, each is locked: hit **Unlock** to change one. A folder you've cleared or set yourself is never reset.
 
-## Your media server's drives
+## Your library's folders
 
-Plex and Jellyfin report every file at the path *they* see it under, like \`/mnt/easystore3/TV SHOWS/...\`. When SoulSync sees your drives somewhere else (a network share, another Docker mount, a drive letter), it can only reach the files on drives that happen to be one of its folders. Settings > Folders > Video > **Your media server's drives** lists every drive your library sits on, with how many files are on it. Type where SoulSync reaches each one and it checks a sample of that drive's files right away (**48 of 50 sample files found**).
+Plex and Jellyfin report every file at the path *they* see it under, like \`/mnt/easystore3/PLEX/MOVIES/...\`. Settings > Folders > Video > **Your library's folders** lists every folder your libraries read (asked from the server itself), each marked Movies or TV with how many files are in it.
 
-- Every file on a mapped drive can then be found: upgrades replace the right copy, deletes go to that drive's own recycle bin, and its languages get read.
-- Renaming to your templates needs the folder the files are named under, so add the drive's movie or TV folder under **More movie / TV folders** too. Until then mass rename leaves those files alone.
-- A drive left blank works the way it always did.
+- The folders SoulSync already reaches, like your Movies and TV output folders, are recognised from their files and ticked. You never type them twice.
+- For the rest, type where SoulSync reaches each one. It checks a sample of that folder's real files right away (**48 of 50 sample files found**).
+- A reached folder is a full library folder of its kind: every file in it is found, renamed to your templates, recycled on delete (into that drive's own recycle bin) and has its languages read. New downloads still go to your output folders.
+- **Folders your server doesn't list** (in the same section) is for a collection SoulSync should manage that your server doesn't read.
+- A folder left blank works the way it always did.
 
 ## 4K libraries
 

@@ -18,17 +18,18 @@ logger = get_logger("video_api.libraries")
 
 
 def register_routes(bp):
-    # the drive map (core/video/drive_map): where soulsync reaches each of the
-    # server's drives. under /libraries so the admin-only guard covers it.
+    # your library's folders (core/video/drive_map): every folder the server's
+    # libraries read and where soulsync reaches it. under /libraries so the
+    # admin-only guard covers it.
     @bp.route("/libraries/drives", methods=["GET"])
     def video_server_drives():
         from . import get_video_db
         from core.video import drive_map
         try:
-            return jsonify({"drives": drive_map.server_drives(get_video_db())})
+            return jsonify({"folders": drive_map.server_folders(get_video_db())})
         except Exception:
-            logger.exception("Failed to list the server's drives")
-            return jsonify({"error": "Failed to list the server's drives"}), 500
+            logger.exception("Failed to list the library's folders")
+            return jsonify({"error": "Failed to list the library's folders"}), 500
 
     @bp.route("/libraries/drives", methods=["POST"])
     def video_save_drive_map():
@@ -39,9 +40,9 @@ def register_routes(bp):
             saved = drive_map.save(get_video_db(), data.get("map"))
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
-        logger.info("video drive map saved: %d drive(s) mapped", len(saved))
+        logger.info("video library folders saved: %d reached", len(saved))
         return jsonify({"success": True, "map": saved,
-                        "drives": drive_map.server_drives(get_video_db())})
+                        "folders": drive_map.server_folders(get_video_db())})
 
     @bp.route("/libraries/drives/check", methods=["POST"])
     def video_check_drive():

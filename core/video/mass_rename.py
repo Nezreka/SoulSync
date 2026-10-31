@@ -125,12 +125,13 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
     db = get_video_db()
     settings = organization.load(db)
     base_dirs = video_base_dirs(db)
-    # a mapped drive reaches a file; it isn't a library folder to name it
-    # under. a file found only through the map, under no library folder, is
-    # left alone: renaming it from the drive root (or its own folder) would
-    # pull it out of the MOVIES / TV folder it lives in
+    # a mapped Movies / TV folder is a library folder (library_roots) and
+    # names its files like any other. a mapping with no kind (a whole drive,
+    # the server unreachable when it was saved) only REACHES files: one found
+    # through it, under no library folder, is left alone, since renaming from
+    # the drive root (or its own folder) would pull it out of its MOVIES folder
     from core.video import drive_map
-    mapped = [e["local"] for e in drive_map.load(db)]
+    mapped = [e["local"] for e in drive_map.load(db) if not e.get("kind")]
     name_bases = [d for d in base_dirs if d not in mapped]
     entries: List[Dict[str, Any]] = []
     unresolved = 0

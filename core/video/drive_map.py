@@ -1,4 +1,4 @@
-"""The drive map: where SoulSync reaches each of the media server's drives.
+"""Your library's folders: where SoulSync reaches each folder the server reads.
 
 Plex and Jellyfin report a file by the path THEY see it under
 (``/mnt/easystore3/TV SHOWS/...``). SoulSync usually sees the same file
@@ -14,9 +14,14 @@ translated exactly (longest server prefix wins). The resolver tries the map
 first and keeps its old guess as the fallback, so an unmapped drive behaves
 the way it always did.
 
-The drives are found in the library itself, from the paths the server already
-reported, so this works for Plex and Jellyfin without asking either.
-Stored in video settings as ``drive_map``: [{"server": ..., "local": ...}].
+The folders come from the server itself: every folder the libraries SoulSync
+scans read (Plex section locations, Jellyfin virtual folders), each a Movies
+or TV folder. A folder SoulSync already reaches (your output folders, an
+extra folder) is recognised and ticked; the rest each get one box. A filled
+in folder is a full library folder of its kind (library_roots): found,
+renamed to the templates, recycled on delete. When the server can't be asked
+the drives are worked out from the library's own paths instead.
+Stored in video settings as ``drive_map``: [{"server", "local", "kind"}].
 """
 
 from __future__ import annotations
@@ -63,7 +68,8 @@ def normalize(entries: Any) -> List[Dict[str, str]]:
         if key in seen:
             raise ValueError(f"{server} is mapped twice")
         seen.add(key)
-        out.append({"server": server, "local": local.rstrip("/\\") or local})
+        kind = e.get("kind") if e.get("kind") in ("movie", "episode") else None
+        out.append({"server": server, "local": local.rstrip("/\\") or local, "kind": kind})
     return out
 
 
@@ -143,23 +149,128 @@ def drive_root(server_path: Any) -> Optional[str]:
     return "/" + "/".join(parts[:2])
 
 
-def server_drives(db) -> List[Dict[str, Any]]:
-    """every drive the library's files sit on, biggest first, with how many
-    files and the mapping saved for it"""
-    counts: Dict[str, int] = {}
-    for path in db.media_file_paths():
-        root = drive_root(path)
-        if root:
-            counts[root] = counts.get(root, 0) + 1
-    saved = {e["server"]: e["local"] for e in load(db)}
-    out = [{"server": root, "files": n, "local": saved.get(root, "")}
-           for root, n in counts.items()]
-    # a mapping saved for a drive no file is on any more stays visible
-    for server, local in saved.items():
-        if server not in counts:
-            out.append({"server": server, "files": 0, "local": local})
+_FOLDERS_TTL = 600.0
+_folders_cache: Dict[str, Any] = {"at": 0.0, "folders": None}
+
+
+def _server_folders_cached(fetch: Optional[Callable[[], Any]] = None):
+    """the server's library folders, asked at most every 10 minutes"""
+    now = time.monotonic()
+    if fetch is None and _folders_cache["at"] and now - _folders_cache["at"] < _FOLDERS_TTL:
+        return _folders_cache["folders"]
+    if fetch is None:
+        from core.video.sources import server_library_folders as fetch
+    try:
+        folders = fetch()
+    except Exception:   # noqa: BLE001 - an unreachable server: fall back to paths
+        folders = None
+    _folders_cache.update(at=now, folders=folders)
+    return folders
+
+
+def _configured_roles(db) -> List[tuple]:
+    """(local folder, what it is) for every folder set in Settings"""
+    from core.video.library_roots import additional_paths, four_k_path
+    roles = []
+    for key, label in (("movies_path", "your Movies folder"), ("tv_path", "your TV folder"),
+                       ("anime_path", "your anime folder")):
+        v = str(db.get_setting(key) or "").strip()
+        if v:
+            roles.append((v, label))
+    for kind, label in (("movie", "your 4K movies folder"), ("episode", "your 4K TV folder")):
+        v = four_k_path(db, kind)
+        if v:
+            roles.append((v, label))
+    for key, label in (("movies_additional_paths", "an extra movie folder"),
+                       ("tv_additional_paths", "an extra TV folder")):
+        for v in additional_paths(db, key):
+            roles.append((v, label))
+    return roles
+
+
+def _same_dir(a: str, b: str) -> bool:
+    na = os.path.normcase(os.path.normpath(str(a or "")))
+    nb = os.path.normcase(os.path.normpath(str(b or "")))
+    return bool(na) and na == nb
+
+
+def _recognise(db, folder: str, sample_paths: List[str], roles: List[tuple]) -> Optional[Dict[str, str]]:
+    """a folder SoulSync already reaches through a folder set in Settings:
+    its local path and what it is, worked out from a few of its files"""
+    from core.video.path_resolver import resolve_video_file_path
+    bases = [r[0] for r in roles]
+    if not bases:
+        return None
+    for p in sample_paths[:5]:
+        real = resolve_video_file_path(p, bases, drive_map=[])
+        if not real:
+            continue
+        rest = _norm_server(p)[len(folder):].strip("/")
+        tail = rest.replace("/", os.sep)
+        local = real[:-len(tail)].rstrip("/\\") if tail and real.replace("\\", "/").endswith(rest) else None
+        if not local:
+            continue
+        for path, label in roles:
+            if _same_dir(local, path):
+                return {"local": path, "role": label}
+        return {"local": local, "role": "a folder SoulSync already reaches"}
+    return None
+
+
+def server_folders(db, *, fetch: Optional[Callable[[], Any]] = None) -> List[Dict[str, Any]]:
+    """every folder the server's libraries read, Movies or TV, biggest first,
+    with how many library files are in it and where SoulSync reaches it"""
+    listed = _server_folders_cached(fetch)
+    by_server: Dict[str, Dict[str, Any]] = {}
+    if listed:
+        for f in listed:
+            server = _norm_server(f.get("server"))
+            if server and server not in by_server:
+                by_server[server] = {"server": server, "kind": f.get("kind"),
+                                     "library": f.get("library")}
+    # the library's own files: counts, and the drives when the server can't say
+    paths = db.media_file_paths()
+    if not by_server:
+        for p in paths:
+            root = drive_root(p)
+            if root and root not in by_server:
+                by_server[root] = {"server": root, "kind": None, "library": None}
+    order = sorted(by_server, key=len, reverse=True)
+    counts: Dict[str, int] = {k: 0 for k in by_server}
+    samples: Dict[str, List[str]] = {k: [] for k in by_server}
+    for p in paths:
+        n = _norm_server(p)
+        for k in order:
+            if n == k or n.startswith(k.rstrip("/") + "/"):
+                counts[k] += 1
+                if len(samples[k]) < 5:
+                    samples[k].append(p)
+                break
+    saved = {e["server"]: e for e in load(db)}
+    roles = _configured_roles(db)
+    out = []
+    for server, f in by_server.items():
+        row = {**f, "files": counts[server], "local": "", "auto": False, "role": None}
+        if server in saved:
+            row["local"] = saved[server]["local"]
+            row["kind"] = row["kind"] or saved[server].get("kind")
+        else:
+            known = _recognise(db, server, samples[server], roles)
+            if known:
+                row.update(local=known["local"], auto=True, role=known["role"])
+        out.append(row)
+    # a folder saved earlier that the server no longer lists stays visible
+    for server, e in saved.items():
+        if server not in by_server:
+            out.append({"server": server, "kind": e.get("kind"), "library": None, "files": 0,
+                        "local": e["local"], "auto": False, "role": None})
     out.sort(key=lambda d: (-d["files"], d["server"]))
     return out
+
+
+def server_drives(db) -> List[Dict[str, Any]]:
+    """kept for callers of the first drive-level version"""
+    return server_folders(db)
 
 
 def check(db, server: Any, local: Any, *, sample: int = 40,

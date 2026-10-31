@@ -6415,41 +6415,38 @@
                                             </div>
 
                                             <div class="settings-group" data-stg="library">
-                                                <h3>Collections on other drives</h3>
+                                                <h3>Your library's folders</h3>
                                                 <div class="setting-help-text">
-                                                    Extra folders SoulSync scans and manages but never downloads into,
-                                                    for an existing collection on another drive. Add them to your
-                                                    Plex / Jellyfin scan too. No need to repeat the main folder.
+                                                    Every folder your Plex / Jellyfin libraries read, Movies or TV.
+                                                    The ones SoulSync already reaches are ticked. Tell it where it
+                                                    reaches the rest and every file in them is found, renamed to
+                                                    your templates, recycled on delete and kept track of. New
+                                                    downloads still go to the folders above. Leave one blank and it
+                                                    works the way it does today.
+                                                </div>
+                                                <div id="video-drive-map" class="video-drive-map"></div>
+                                                <button type="button" class="test-button" id="video-drive-map-save">Save
+                                                    folders</button>
+
+                                                <h4 class="video-extra-heading">Folders your server doesn't list</h4>
+                                                <div class="setting-help-text">
+                                                    A collection SoulSync should manage that your server doesn't
+                                                    read. New downloads never go here.
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>More movie folders:</label>
+                                                    <label>Movie folders:</label>
                                                     <div id="video-movies-additional-paths"
                                                         data-video-extra-kind="movies"></div>
                                                     <button type="button" class="test-button"
                                                         data-video-add-path="movies">+ Add folder</button>
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>More TV folders:</label>
+                                                    <label>TV folders:</label>
                                                     <div id="video-tv-additional-paths" data-video-extra-kind="tv">
                                                     </div>
                                                     <button type="button" class="test-button" data-video-add-path="tv">+
                                                         Add folder</button>
                                                 </div>
-                                            </div>
-
-                                            <div class="settings-group" data-stg="library">
-                                                <h3>Your media server's drives</h3>
-                                                <div class="setting-help-text">
-                                                    Plex and Jellyfin see every file at their own path. Tell SoulSync
-                                                    where it reaches each drive and it finds every file on it: upgrades
-                                                    replace the right copy, deletes go to that drive's recycle bin and
-                                                    each file's languages get read. To rename files to your templates,
-                                                    add the drive's movie or TV folder under More folders above. A drive
-                                                    left blank works the way it does today.
-                                                </div>
-                                                <div id="video-drive-map" class="video-drive-map"></div>
-                                                <button type="button" class="test-button" id="video-drive-map-save">Save
-                                                    drives</button>
                                             </div>
 
                                             <div class="settings-group" data-stg="library" data-video-compose hidden>

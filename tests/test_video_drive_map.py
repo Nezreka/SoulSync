@@ -18,10 +18,14 @@ def db(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def _fresh_cache():
+def _fresh_cache(monkeypatch):
     drive_map.forget()
+    drive_map._folders_cache.update(at=0.0, folders=None)
+    # never ask a real server: the server's folder list is injected per test
+    monkeypatch.setattr("core.video.sources.server_library_folders", lambda: None)
     yield
     drive_map.forget()
+    drive_map._folders_cache.update(at=0.0, folders=None)
 
 
 def _movie(db, sid, path, size=1):
@@ -58,7 +62,8 @@ def test_the_drives_come_from_the_library_itself(db):
     _movie(db, "b", "/mnt/easystore30/MOVIES/B.mkv")
     _movie(db, "c", "D:\\Movies\\C.mkv")
     drive_map.save(db, [{"server": "/mnt/easystore3", "local": "E:\\es3"}])
-    drives = drive_map.server_drives(db)
+    # the server can't be asked: the drives come from the library's own paths
+    drives = drive_map.server_folders(db, fetch=lambda: None)
     assert [(d["server"], d["files"], d["local"]) for d in drives] == [
         ("/mnt/easystore3", 3, "E:\\es3"), ("/mnt/easystore30", 1, ""), ("D:", 1, "")]
 
@@ -112,11 +117,12 @@ def _client(db, monkeypatch, *, is_admin=True):
 def test_the_api_lists_saves_and_checks_and_is_admin_only(db, monkeypatch, tmp_path):
     _movie(db, "a", "/mnt/easystore3/MOVIES/A.mkv")
     c = _client(db, monkeypatch)
-    assert c.get("/api/video/libraries/drives").get_json()["drives"][0]["server"] == "/mnt/easystore3"
+    assert c.get("/api/video/libraries/drives").get_json()["folders"][0]["server"] == "/mnt/easystore3"
     r = c.post("/api/video/libraries/drives", json={"map": [
         {"server": "/mnt/easystore3", "local": str(tmp_path)}]})
     assert r.status_code == 200 and r.get_json()["map"][0]["local"] == str(tmp_path)
-    assert drive_map.load(db) == [{"server": "/mnt/easystore3", "local": str(tmp_path).rstrip(os.sep)}]
+    assert drive_map.load(db) == [{"server": "/mnt/easystore3", "local": str(tmp_path).rstrip(os.sep),
+                                   "kind": None}]
     assert c.post("/api/video/libraries/drives", json={"map": "x"}).status_code == 400
     assert c.post("/api/video/libraries/drives/check",
                   json={"server": "/mnt/easystore3", "local": str(tmp_path)}).status_code == 200
@@ -162,3 +168,49 @@ def test_mass_rename_leaves_a_file_on_a_mapped_drive_outside_a_library_folder(db
     proposed = [os.path.basename(e["proposed"]) for e in mass_rename.preview()["entries"]]
     # the library folder's file is renamed as before; the mapped one is left alone
     assert proposed == ["Ronin (1998).mkv"]
+
+
+SERVER_FOLDERS = [
+    {"server": "/mnt/plex_20tb/PLEX/MOVIES", "kind": "movie", "library": "Movies"},
+    {"server": "/mnt/easystore3/MOVIES", "kind": "movie", "library": "Movies"},
+    {"server": "/mnt/easystore3/TV SHOWS", "kind": "episode", "library": "TV Shows"},
+]
+
+
+def test_the_servers_folders_come_with_their_kind_and_the_output_folder_is_ticked(db, tmp_path):
+    # the movies output folder is the server's /mnt/plex_20tb/PLEX/MOVIES:
+    # recognised from its files, never typed in again
+    out = tmp_path / "share" / "PLEX" / "MOVIES"
+    (out / "Heat (1995)").mkdir(parents=True)
+    (out / "Heat (1995)" / "Heat.mkv").write_bytes(b"x" * 5)
+    db.set_setting("movies_path", str(out))
+    _movie(db, "h", "/mnt/plex_20tb/PLEX/MOVIES/Heat (1995)/Heat.mkv", 5)
+    _movie(db, "a", "/mnt/easystore3/MOVIES/Akira (1988)/Akira.mkv")
+    _movie(db, "b", "/mnt/easystore3/MOVIES/Ran (1985)/Ran.mkv")
+    folders = {f["server"]: f for f in drive_map.server_folders(db, fetch=lambda: SERVER_FOLDERS)}
+    out_row = folders["/mnt/plex_20tb/PLEX/MOVIES"]
+    assert out_row["auto"] and out_row["local"] == str(out) and out_row["role"] == "your Movies folder"
+    es3 = folders["/mnt/easystore3/MOVIES"]
+    assert (es3["kind"], es3["files"], es3["local"], es3["auto"]) == ("movie", 2, "", False)
+    assert folders["/mnt/easystore3/TV SHOWS"]["kind"] == "episode"
+
+
+def test_a_reached_movies_folder_is_a_library_folder_names_and_all(db, tmp_path, monkeypatch):
+    from api import video as videoapi
+    from core.video import mass_rename, organization
+    from core.video.library_roots import library_roots
+    folder = tmp_path / "es3" / "MOVIES"
+    (folder / "Akira (1988)").mkdir(parents=True)
+    f = folder / "Akira (1988)" / "akira.1988.mkv"
+    f.write_bytes(b"z" * 4)
+    organization.save(db, {"movie_template": "$title ($year)/$title ($year)"})
+    _movie(db, "a", "/mnt/easystore3/MOVIES/Akira (1988)/akira.1988.mkv", 4)
+    db.upsert_movie("plex", {"server_id": "a", "title": "Akira", "year": 1988, "file": {
+        "relative_path": "/mnt/easystore3/MOVIES/Akira (1988)/akira.1988.mkv", "size_bytes": 4}})
+    drive_map.save(db, [{"server": "/mnt/easystore3/MOVIES", "local": str(folder), "kind": "movie"}])
+    assert str(folder) in library_roots(db, "movie")
+    assert str(folder) not in library_roots(db, "episode")
+    monkeypatch.setattr(videoapi, "_video_db", db)
+    proposed = [e["proposed"] for e in mass_rename.preview()["entries"]]
+    # named inside its own MOVIES folder, never pulled out of it
+    assert proposed == [str(folder / "Akira (1988)" / "Akira (1988).mkv")]

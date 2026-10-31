@@ -432,6 +432,19 @@ def video_server_has_item(media_type, item) -> bool:
         return False
 
 
+def server_library_folders():
+    """the folders the picked server libraries read, as the server sees them,
+    or None when the server can't be asked right now"""
+    src = scan_video_source()        # the picked libraries, as a scan reads them
+    if src is None or not hasattr(src, "library_folders"):
+        return None
+    try:
+        return src.library_folders()
+    except Exception:   # noqa: BLE001 - an unreachable server: the caller falls back
+        logger.debug("could not list the server's library folders", exc_info=True)
+        return None
+
+
 def list_video_libraries():
     """Discover the active server's video libraries for the mapping UI:
     {'server', 'movies': [{'title'}], 'tv': [{'title'}]} or None."""
@@ -593,6 +606,17 @@ class PlexVideoSource:
             "movies": [{"title": s.title} for s in self._sections("movie")],
             "tv": [{"title": s.title} for s in self._sections("show")],
         }
+
+    def library_folders(self) -> list:
+        """every folder the picked libraries read, the way plex sees it:
+        [{server, kind ('movie' | 'episode'), library}]"""
+        out = []
+        for kind, plex_kind, name in (("movie", "movie", self._movies_lib),
+                                      ("episode", "show", self._tv_lib)):
+            for s in self._scan_sections(plex_kind, name):
+                for loc in getattr(s, "locations", None) or []:
+                    out.append({"server": str(loc), "kind": kind, "library": s.title})
+        return out
 
     def counts(self, incremental=False) -> dict:
         """Cheap item totals (no full fetch) for the progress bar."""
@@ -1384,6 +1408,22 @@ class JellyfinVideoSource:
             "movies": [{"title": v.get("Name")} for v in self._views("movies")],
             "tv": [{"title": v.get("Name")} for v in self._views("tvshows")],
         }
+
+    def library_folders(self) -> list:
+        """every folder the picked libraries read, the way jellyfin sees it
+        (/Library/VirtualFolders): [{server, kind, library}]"""
+        movies, tv = set(_title_list(self._movies_lib)), set(_title_list(self._tv_lib))
+        out = []
+        for v in self._req("/Library/VirtualFolders") or []:
+            if not isinstance(v, dict):
+                continue
+            name = v.get("Name")
+            kind = "movie" if name in movies else "episode" if name in tv else None
+            if not kind:
+                continue
+            for loc in v.get("Locations") or []:
+                out.append({"server": str(loc), "kind": kind, "library": name})
+        return out
 
     def refresh_sections(self, media_type="all") -> dict:
         """Ask Jellyfin to rescan the selected video libraries (POST /Items/{id}/Refresh)

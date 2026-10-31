@@ -75656,6 +75656,12 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .video-drive-status { grid-column: 2; color: var(--text-secondary); font-size: 12px; }
 #settings-page .video-drive-status.is-ok { color: var(--success); }
 #settings-page .video-drive-status.is-bad { color: var(--danger-light); }
+#settings-page .video-drive-row.is-auto { background: transparent; }
+#settings-page .video-drive-known {
+    overflow: hidden; color: var(--text-secondary); font-size: 13px;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+#settings-page .video-extra-heading { margin: 18px 0 4px; font-size: 14px; }
 @media (max-width: 600px) {
     #settings-page .video-drive-row { grid-template-columns: minmax(0, 1fr); }
     #settings-page .video-drive-status { grid-column: 1; }
