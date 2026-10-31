@@ -27,6 +27,8 @@ export interface VdlHeaderProps {
   onRetryAll: () => void;
   onClearFinished: () => void;
   onClearFailed: () => void;
+  /** completed, failed and cancelled rows; import failures stay for Manual import. */
+  onClearEverything: () => void;
   retryAllPending: boolean;
 }
 
@@ -50,6 +52,7 @@ export function VdlHeader({
   onRetryAll,
   onClearFinished,
   onClearFailed,
+  onClearEverything,
   retryAllPending,
 }: VdlHeaderProps) {
   const chipCounts = videoChipCounts(downloads);
@@ -76,6 +79,17 @@ export function VdlHeader({
   }
   if (finished > 0) {
     menu.push({ key: 'clear', label: `Clear finished (${finished})`, onSelect: onClearFinished });
+  }
+  const everything = counts.completed + counts.removable;
+  if (everything > 0) {
+    menu.push({
+      key: 'clear-all',
+      label: `Clear everything (${everything})`,
+      title:
+        'Clear finished and failed downloads together. Import failures stay for Manual import.',
+      danger: true,
+      onSelect: onClearEverything,
+    });
   }
   if (hasRunningWork) {
     menu.push({

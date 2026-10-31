@@ -1331,7 +1331,7 @@ Base path: \`/api/video\`. Download *triggers* require \`can_download\`; config 
 | GET | \`/downloads/active\`, \`/downloads/status\`, \`/downloads/history\` | Live queue & history | video |
 | POST | \`/downloads/search\`, \`/downloads/evaluate\` | Find & rank releases | video |
 | POST | \`/downloads/grab\`, \`/downloads/grab-pack\`, \`/downloads/retry\` | Queue a grab / retry | can_download |
-| POST | \`/downloads/cancel\`, \`/downloads/clear\` | Cancel / clear queue items (\`{scope: "failed"}\` clears only failed + cancelled) | video |
+| POST | \`/downloads/cancel\`, \`/downloads/clear\` | Cancel / clear queue items (\`{scope: "failed"}\` clears only failed + cancelled; \`{scope: "everything"}\` clears completed + failed + cancelled; import failures always stay for Manual import) | video |
 | POST | \`/downloads/remove\` | Take one failed or cancelled row off the list, no retry | video |
 | GET/POST | \`/downloads/quality\`, \`/downloads/quality/profiles\`, \`/downloads/quality/formats\` | Quality profiles & custom formats | admin (write) |
 | GET/POST | \`/downloads/config\`, \`/downloads/config/import-lists\` | Download & import-list config | admin (write) |

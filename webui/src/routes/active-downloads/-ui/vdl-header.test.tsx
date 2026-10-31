@@ -31,6 +31,7 @@ const props = (over: Partial<VdlHeaderProps> = {}): VdlHeaderProps => ({
   onRetryAll: vi.fn(),
   onClearFinished: vi.fn(),
   onClearFailed: vi.fn(),
+  onClearEverything: vi.fn(),
   retryAllPending: false,
   ...over,
 });
@@ -67,6 +68,25 @@ describe('video header actions', () => {
     openMenu(container);
     expect(screen.queryByRole('menuitem', { name: /^Clear finished/ })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: 'Clear failed (3)' })).not.toBeNull();
+  });
+
+  it('offers Clear everything for completed + failed rows, not import failures', () => {
+    // 54 completed, 44 failed or cancelled, 1 import failure that stays
+    const p = props({ counts: { ...counts, completed: 54, failed: 45, removable: 44, total: 99 } });
+    const { container } = render(<VdlHeader {...p} />);
+    openMenu(container);
+    const everything = screen.getByRole('menuitem', { name: 'Clear everything (98)' });
+    expect(everything.className).toContain('danger');
+    fireEvent.click(everything);
+    expect(p.onClearEverything).toHaveBeenCalledTimes(1);
+    expect(p.onClearFinished).not.toHaveBeenCalled();
+    expect(p.onClearFailed).not.toHaveBeenCalled();
+  });
+
+  it('hides Clear everything when only import failures are left', () => {
+    const p = props({ counts: { ...counts, failed: 2, removable: 0, total: 2 } });
+    const { container } = render(<VdlHeader {...p} />);
+    expect(container.querySelector('.dlc-more')).toBeNull();
   });
 
   it('hides Clear failed when only import failures are left', () => {

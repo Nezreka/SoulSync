@@ -15,6 +15,7 @@ import type { VdlDownload, VdlFilter, VdlMeta, VdlView, VdlYtMeta } from './-vdl
 import {
   blockVideoRelease,
   cancelVideoDownload,
+  clearEverythingVideoDownloads,
   clearFailedVideoDownloads,
   clearVideoDownloads,
   fetchVideoDownloads,
@@ -101,6 +102,7 @@ export interface VdlDownloadsController {
   retryAllFailed: () => Promise<void>;
   clearFinished: () => Promise<void>;
   clearFailed: () => Promise<void>;
+  clearEverything: () => Promise<void>;
   retryAllPending: boolean;
 }
 
@@ -372,6 +374,14 @@ export function useVideoDownloads(): VdlDownloadsController {
     await refresh();
   }, [refresh]);
 
+  const clearEverything = useCallback(async () => {
+    const res = await clearEverythingVideoDownloads();
+    const n = Number(res?.cleared) || 0;
+    if (res) toast(`Cleared ${n} download${n === 1 ? '' : 's'}`, 'success');
+    else toast('Could not clear downloads', 'error');
+    await refresh();
+  }, [refresh]);
+
   const visible = downloads.filter((d) => vdlMatchesFilter(d.status, filter));
 
   const counts = {
@@ -415,6 +425,7 @@ export function useVideoDownloads(): VdlDownloadsController {
     retryAllFailed,
     clearFinished,
     clearFailed,
+    clearEverything,
     retryAllPending,
   };
 }

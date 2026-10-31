@@ -134,6 +134,23 @@ def test_clear_finished_takes_completed_rows_only(client):
     assert retries == []
 
 
+def test_clear_everything_keeps_import_failed_and_live_rows(client):
+    """Clear everything takes completed, failed and cancelled rows together,
+    and still leaves import_failed rows for Manual import."""
+    c, db, retries = client
+    kept = _row(db, "import_failed")
+    for s in ("completed", "failed", "cancelled", "downloading", "queued"):
+        _row(db, s)
+
+    r = c.post("/api/video/downloads/clear", json={"scope": "everything"})
+
+    assert r.get_json() == {"cleared": 3}
+    assert _statuses(db) == ["downloading", "import_failed", "queued"]
+    assert retries == []
+    items = c.get("/api/video/import/failed").get_json()["items"]
+    assert [item["id"] for item in items] == [kept]
+
+
 def test_clear_finished_leaves_import_failed_for_manual_import(client):
     """Clear finished used to delete import_failed rows too, stranding their
     files in the download area with nothing left pointing at them."""

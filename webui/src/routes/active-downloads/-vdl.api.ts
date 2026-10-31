@@ -182,6 +182,11 @@ export function clearFailedVideoDownloads(): Promise<VdlResult | null> {
   return post('video/downloads/clear', { scope: 'failed' });
 }
 
+/** Clear completed, failed and cancelled rows; import failures stay for Manual import. */
+export function clearEverythingVideoDownloads(): Promise<VdlResult | null> {
+  return post('video/downloads/clear', { scope: 'everything' });
+}
+
 /** Take one failed or cancelled download off the list, no retry. */
 export function removeVideoDownload(id: number): Promise<VdlResult | null> {
   return post('video/downloads/remove', { id });

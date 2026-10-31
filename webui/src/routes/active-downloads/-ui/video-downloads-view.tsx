@@ -87,6 +87,7 @@ export function VideoDownloadsView() {
             onRetryAll={() => void dl.retryAllFailed()}
             onClearFinished={() => void dl.clearFinished()}
             onClearFailed={() => void dl.clearFailed()}
+            onClearEverything={() => void dl.clearEverything()}
             retryAllPending={dl.retryAllPending}
           />
 

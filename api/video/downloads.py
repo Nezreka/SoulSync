@@ -1662,13 +1662,18 @@ def register_routes(bp):
 
     @bp.route("/downloads/clear", methods=["POST"])
     def video_downloads_clear():
-        """Clear finished rows. ``scope: "failed"`` clears only failed and
-        cancelled rows, leaving completed ones on the list."""
+        """Clear finished (completed) rows. ``scope: "failed"`` clears only
+        failed and cancelled rows; ``scope: "everything"`` clears both.
+        import_failed rows are never cleared here -- they leave through
+        Manual import."""
         from . import get_video_db
         body = request.get_json(silent=True) or {}
         db = get_video_db()
-        if body.get("scope") == "failed":
+        scope = body.get("scope")
+        if scope == "failed":
             return jsonify({"cleared": db.clear_failed_video_downloads()})
+        if scope == "everything":
+            return jsonify({"cleared": db.clear_everything_video_downloads()})
         return jsonify({"cleared": db.clear_finished_video_downloads()})
 
     @bp.route("/downloads/youtube-quality", methods=["GET"])

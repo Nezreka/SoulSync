@@ -7,6 +7,7 @@ import {
   blockVideoRelease,
   cancelVideoDownload,
   stopVideoWishlistSearches,
+  clearEverythingVideoDownloads,
   clearFailedVideoDownloads,
   clearVideoBlocklist,
   clearVideoDownloads,
@@ -179,6 +180,13 @@ describe('the mutations hit the right endpoints with the right bodies', () => {
     expect(seen).toHaveLength(1);
     expect(JSON.parse(seen[0].body)).toEqual({ scope: 'failed' });
     expect(r?.cleared).toBe(3);
+  });
+
+  it('clearEverythingVideoDownloads posts {scope: everything} to /clear', async () => {
+    const seen = capture('post', '/api/video/downloads/clear', { cleared: 5 });
+    const r = await clearEverythingVideoDownloads();
+    expect(JSON.parse(seen[0].body)).toEqual({ scope: 'everything' });
+    expect(r?.cleared).toBe(5);
   });
 
   it('removeVideoDownload posts {id} to /remove', async () => {

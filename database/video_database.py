@@ -4173,6 +4173,21 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def clear_everything_video_downloads(self) -> int:
+        """Clear everything: completed, failed and cancelled rows together.
+        import_failed rows still stay -- each is Manual import's only pointer
+        to a file in the download area, and deleting it strands that file."""
+        statuses = ("completed",) + self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM video_downloads WHERE status IN (%s)"
+                % ",".join("?" * len(statuses)), statuses)
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
     # ── download history (permanent archive; survives the queue cleanup) ───────
     @staticmethod
     def _parse_resolution(*texts) -> str | None:
