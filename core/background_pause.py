@@ -55,7 +55,14 @@ def hold(reason: str) -> None:
         paused = []
         for name, worker in _current_workers().items():
             try:
-                if hasattr(worker, "pause") and not getattr(worker, "paused", True):
+                # a worker with an in-memory hold gets that: its pause() saves
+                # a setting (repair's master toggle), which a restart mid-hold
+                # would leave switched off
+                if hasattr(worker, "hold_for_foreground"):
+                    worker.hold_for_foreground()
+                    _paused_by_us.add(name)
+                    paused.append(name)
+                elif hasattr(worker, "pause") and not getattr(worker, "paused", True):
                     worker.pause()
                     _paused_by_us.add(name)
                     paused.append(name)
@@ -82,7 +89,10 @@ def release(reason: str) -> None:
         for name in sorted(_paused_by_us):
             worker = workers.get(name)
             try:
-                if worker is not None and hasattr(worker, "resume"):
+                if worker is not None and hasattr(worker, "release_foreground"):
+                    worker.release_foreground()
+                    resumed.append(name)
+                elif worker is not None and hasattr(worker, "resume"):
                     worker.resume()
                     resumed.append(name)
             except Exception as exc:  # noqa: BLE001

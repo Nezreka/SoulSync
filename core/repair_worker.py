@@ -505,6 +505,10 @@ class RepairWorker:
         # Worker state
         self.running = False
         self.enabled = False  # Master toggle (replaces 'paused')
+        # a library scan or a playlist sync holding the worker quiet
+        # (core/background_pause). in memory only: pause() saves the master
+        # toggle to config, and a restart mid-hold left repair switched off
+        self._held = False
         self.should_stop = False
         self._stop_event = threading.Event()
         # Per-job cancel: stopping ONE running job without tearing down the whole
@@ -1066,6 +1070,16 @@ class RepairWorker:
         except Exception as e:
             logger.debug("Could not bridge master toggle to engine metadata: %s", e)
 
+    def hold_for_foreground(self):
+        """Start no job and pause the running one at its next batch, without
+        touching the saved master toggle. Applies to Run Now jobs too: the
+        quality backfill is queued that way and probed 300k files through a
+        sync."""
+        self._held = True
+
+    def release_foreground(self):
+        self._held = False
+
     # Backward compatibility
     def pause(self):
         self.set_enabled(False)
@@ -1169,6 +1183,12 @@ class RepairWorker:
 
         while not self._stop_event.is_set():
             try:
+                # a scan or a sync holds the worker quiet; queued jobs wait
+                if self._held:
+                    if self._sleep_or_stop(1):
+                        break
+                    continue
+
                 # Check force-run queue even when disabled (user explicitly requested)
                 forced_job = None
                 with self._force_run_lock:
@@ -1341,7 +1361,7 @@ class RepairWorker:
             create_finding=self._create_finding,
             should_stop=lambda: self.should_stop or self._cancel_current_job.is_set(),
             stop_event=self._stop_event,
-            is_paused=(lambda: False) if forced else (lambda: not self.enabled),
+            is_paused=(lambda: self._held) if forced else (lambda: not self.enabled or self._held),
             # update_progress feeds the Tools page; report_progress feeds
             # the notification centre's card. They were two separate calls a
             # job had to remember to make BOTH of, and three jobs only ever

@@ -88,3 +88,45 @@ def test_run_sync_task_holds_the_pause(workers, monkeypatch):
     monkeypatch.setattr(sync, "_run_sync_task", body)
     assert sync.run_sync_task("p", "n", []) == "done"
     assert seen["paused"] is True and not workers["mb"].paused
+
+
+class _HoldWorker(_Worker):
+    """repair's shape: pause() saves a setting, so the hold uses its own."""
+
+    def __init__(self, paused=False):
+        super().__init__(paused)
+        self.held = False
+
+    def hold_for_foreground(self):
+        self.held = True
+        self.calls.append("hold")
+
+    def release_foreground(self):
+        self.held = False
+        self.calls.append("release")
+
+
+def test_a_worker_with_its_own_hold_never_has_its_setting_touched():
+    background_pause._reset_for_tests()
+    # switched off by its owner, yet Run Now jobs still run on it: held anyway
+    repair = _HoldWorker(paused=True)
+    background_pause.register_workers(lambda: {"repair": repair})
+    with background_pause.paused_for("playlist sync"):
+        assert repair.held
+    assert not repair.held
+    assert repair.calls == ["hold", "release"], "pause()/resume() would save the master toggle"
+    background_pause._reset_for_tests()
+
+
+def test_the_repair_worker_hold_is_in_memory_and_pauses_run_now_jobs(monkeypatch):
+    from core.repair_worker import RepairWorker
+    saved = []
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.enabled = False
+    worker._held = False
+    worker._config_manager = type("C", (), {"set": lambda self, k, v: saved.append((k, v))})()
+    worker.hold_for_foreground()
+    assert worker._held and saved == []
+    assert worker.enabled is False, "the master toggle is the user's"
+    worker.release_foreground()
+    assert not worker._held and saved == []
