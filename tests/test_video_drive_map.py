@@ -123,3 +123,42 @@ def test_the_api_lists_saves_and_checks_and_is_admin_only(db, monkeypatch, tmp_p
     guest = _client(db, monkeypatch, is_admin=False)
     assert guest.get("/api/video/libraries/drives").status_code == 403
     assert guest.post("/api/video/libraries/drives", json={"map": []}).status_code == 403
+
+
+def test_a_delete_on_a_mapped_drive_goes_to_that_drives_recycle_bin(db, tmp_path):
+    # under no library folder it used to be deleted for good
+    from core.video import recycle
+    drive = tmp_path / "easystore3"
+    (drive / "MOVIES").mkdir(parents=True)
+    f = drive / "MOVIES" / "Heat.mkv"
+    f.write_bytes(b"x")
+    drive_map.save(db, [{"server": "/mnt/easystore3", "local": str(drive)}])
+    res = recycle.discard(str(f), {"recycle_deletes": True}, db, reason="test")
+    assert res["ok"] and res["recycled"]
+    assert res["trash_path"].startswith(str(drive / recycle.TRASH_DIRNAME))
+    assert os.path.exists(res["trash_path"]) and not f.exists()
+
+
+def test_mass_rename_leaves_a_file_on_a_mapped_drive_outside_a_library_folder(db, tmp_path, monkeypatch):
+    # renaming from the drive root would pull it out of its MOVIES folder
+    from api import video as videoapi
+    from core.video import mass_rename, organization
+    drive = tmp_path / "easystore3"
+    (drive / "MOVIES" / "Heat (1995)").mkdir(parents=True)
+    f = drive / "MOVIES" / "Heat (1995)" / "heat.1995.1080p.mkv"
+    f.write_bytes(b"x" * 9)
+    library = tmp_path / "Movies"
+    (library / "Ronin (1998)").mkdir(parents=True)
+    g_ = library / "Ronin (1998)" / "ronin.mkv"
+    g_.write_bytes(b"y" * 7)
+    db.set_setting("movies_path", str(library))
+    organization.save(db, {"movie_template": "$title ($year)/$title ($year)"})
+    db.upsert_movie("plex", {"server_id": "h", "title": "Heat", "year": 1995, "file": {
+        "relative_path": "/mnt/easystore3/MOVIES/Heat (1995)/heat.1995.1080p.mkv", "size_bytes": 9}})
+    db.upsert_movie("plex", {"server_id": "r", "title": "Ronin", "year": 1998, "file": {
+        "relative_path": str(g_), "size_bytes": 7}})
+    drive_map.save(db, [{"server": "/mnt/easystore3", "local": str(drive)}])
+    monkeypatch.setattr(videoapi, "_video_db", db)
+    proposed = [os.path.basename(e["proposed"]) for e in mass_rename.preview()["entries"]]
+    # the library folder's file is renamed as before; the mapped one is left alone
+    assert proposed == ["Ronin (1998).mkv"]

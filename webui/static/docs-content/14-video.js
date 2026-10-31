@@ -107,7 +107,8 @@ In Docker, Movies, TV and YouTube start on \`/media/movies\`, \`/media/tv\` and 
 
 Plex and Jellyfin report every file at the path *they* see it under, like \`/mnt/easystore3/TV SHOWS/...\`. When SoulSync sees your drives somewhere else (a network share, another Docker mount, a drive letter), it can only reach the files on drives that happen to be one of its folders. Settings > Folders > Video > **Your media server's drives** lists every drive your library sits on, with how many files are on it. Type where SoulSync reaches each one and it checks a sample of that drive's files right away (**48 of 50 sample files found**).
 
-- Every file on a mapped drive can then be renamed, upgraded, checked for languages and managed from SoulSync.
+- Every file on a mapped drive can then be found: upgrades replace the right copy, deletes go to that drive's own recycle bin, and its languages get read.
+- Renaming to your templates needs the folder the files are named under, so add the drive's movie or TV folder under **More movie / TV folders** too. Until then mass rename leaves those files alone.
 - A drive left blank works the way it always did.
 
 ## 4K libraries

@@ -125,6 +125,13 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
     db = get_video_db()
     settings = organization.load(db)
     base_dirs = video_base_dirs(db)
+    # a mapped drive reaches a file; it isn't a library folder to name it
+    # under. a file found only through the map, under no library folder, is
+    # left alone: renaming it from the drive root (or its own folder) would
+    # pull it out of the MOVIES / TV folder it lives in
+    from core.video import drive_map
+    mapped = [e["local"] for e in drive_map.load(db)]
+    name_bases = [d for d in base_dirs if d not in mapped]
     entries: List[Dict[str, Any]] = []
     unresolved = 0
 
@@ -163,7 +170,11 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
         if not local or not os.path.exists(local):
             unresolved += 1
             return
-        base = _base_dir_of(local, base_dirs) or os.path.dirname(local)
+        base = _base_dir_of(local, name_bases)
+        if base is None:
+            if mapped and _base_dir_of(local, mapped):
+                return              # on a mapped drive, in no library folder
+            base = os.path.dirname(local)
         ext = os.path.splitext(local)[1]
         fields = dict(fields, quality=file_quality(fields.get("quality"), local))
         proposed = organization.render_path(kind, base, fields, settings, ext)["path"]
