@@ -435,14 +435,17 @@ def test_get_artist_groups_albums_and_singles(imported_conn):
 
 def test_featured_artist_detail_includes_its_library_appearance(imported_conn):
     """A credited artist must not be an empty/dead detail page while its
-    overview card already counts the credited track."""
+    overview card already counts the credited track. A release they only
+    guest on is reached, but as an appearance: putting it in their albums
+    filed SZA's SOS and Taylor Swift's 1989 among Kendrick Lamar's own."""
     wizkid_id = imported_conn.execute(
         "SELECT id FROM lib2_artists WHERE name='Wizkid'"
     ).fetchone()[0]
 
     data = Q.get_artist(imported_conn, wizkid_id)
 
-    assert [album["title"] for album in data["albums"]] == ["Views"]
+    assert data["albums"] == []
+    assert [album["title"] for album in data["appears_on"]] == ["Views"]
 
 
 def test_featured_artist_read_model_repairs_pre_fix_missing_album_junction(imported_conn):
@@ -461,7 +464,7 @@ def test_featured_artist_read_model_repairs_pre_fix_missing_album_junction(impor
     data = Q.get_artist(imported_conn, wizkid_id)
 
     assert wizkid["album_count"] == 1
-    assert [album["title"] for album in data["albums"]] == ["Views"]
+    assert [album["title"] for album in data["appears_on"]] == ["Views"]
 
 
 # --- §40 alias registry -------------------------------------------------------
@@ -1172,3 +1175,35 @@ def test_list_artists_folds_only_page_aliases(imported_conn):
     )
     assert "IN (SELECT id FROM page_artists)" in rollup_sql
     assert artists[0]["album_count"] == 1
+
+
+def test_a_guest_spot_is_an_appearance_and_a_collaboration_is_their_own(imported_conn):
+    """Kendrick Lamar's page listed every album he guests on as his own. The
+    album junction files each non-main track artist as "featured", the
+    co-headliner of a collaboration and a one-verse guest alike, so the
+    track credits decide: leading at least half the tracks is their own."""
+    from tests import lib2_seed
+    host = lib2_seed.artist(imported_conn, 'Host')
+    guest = lib2_seed.artist(imported_conn, 'Guest')
+    for n in range(4):
+        tid = lib2_seed.track(imported_conn, 'Host', 'Hosted', f'Song {n}', track_number=n + 1)
+        if n == 0:
+            imported_conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                                  "VALUES (?, ?, 'featured', 1)", (tid, guest))
+    for n in range(2):
+        tid = lib2_seed.track(imported_conn, 'Host', 'Together', f'Duet {n}', track_number=n + 1)
+        imported_conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                              "VALUES (?, ?, 'primary', 1)", (tid, guest))
+    from core.library2.importer import _rebuild_album_artist_credits
+    albums = {r[0] for r in imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title IN ('Hosted', 'Together')")}
+    _rebuild_album_artist_credits(imported_conn.cursor(), albums)
+
+    data = Q.get_artist(imported_conn, guest)
+
+    assert [a["title"] for a in data["albums"]] == ["Together"]
+    assert [a["title"] for a in data["appears_on"]] == ["Hosted"]
+    # and the host's page is untouched
+    host_view = Q.get_artist(imported_conn, host)
+    assert {a["title"] for a in host_view["albums"]} >= {"Hosted", "Together"}
+

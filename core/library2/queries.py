@@ -881,7 +881,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         entity_type="release_group",
         provider_fields={int(row["id"]): dict(row) for row in album_rows},
     )
-    albums, eps, singles = [], [], []
+    own_ids = _own_release_ids(conn, album_rows, group)
+    albums, eps, singles, appears_on = [], [], [], []
     for r in album_rows:
         effective, overrides = projected_albums[int(r["id"])]
         album_owns_profile = bool(r["quality_profile_explicit"])
@@ -930,7 +931,9 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "total_size_bytes": r["total_size_bytes"] or 0,
             "user_overrides": overrides,
         }
-        if effective["album_type"] == "single":
+        if int(r["id"]) not in own_ids:
+            appears_on.append(entry)
+        elif effective["album_type"] == "single":
             singles.append(entry)
         elif effective["album_type"] == "ep":
             eps.append(entry)
@@ -969,6 +972,9 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "albums": albums,
         "eps": eps,
         "singles": singles,
+        # releases the artist is credited on but not the album artist of
+        # (core/library2/artist_page.appears_on_payload reads these)
+        "appears_on": appears_on,
         "album_count": _in_library(albums) + _in_library(eps),
         "single_count": _in_library(singles),
         "discography_count": sum(1 for e in albums + eps + singles if e["origin"] == "discography"),
@@ -980,6 +986,48 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "total_size_bytes": sum(e["total_size_bytes"] for e in albums + eps + singles),
         "user_overrides": artist_overrides,
     }
+
+
+def _own_release_ids(conn, album_rows, group) -> set:
+    """The releases that are the artist's own, out of every one they're
+    credited on. A release they only guest on (SZA's SOS, the 1989 deluxe,
+    a soundtrack with one verse) belongs under Appears On, not in the
+    discography beside their own albums.
+
+    The album junction can't tell: it files every track artist who isn't the
+    release's main artist as "featured", the co-headliner of a collaboration
+    and a one-verse guest alike. The track credits can. A release is theirs
+    when they are its main artist, or the lead credit on at least half its
+    tracks (a collaboration). One the library holds no tracks of yet (a
+    provider discography entry) goes by its album credit."""
+    group = [int(g) for g in group]
+    own = {int(r["id"]) for r in album_rows if r["primary_artist_id"] in group}
+    rest = [int(r["id"]) for r in album_rows if int(r["id"]) not in own]
+    if not rest:
+        return own
+    marks = ",".join("?" for _ in group)
+    led = {}
+    for row in conn.execute(
+        f"""SELECT t.album_id, COUNT(DISTINCT t.id) AS total,
+                   COUNT(DISTINCT CASE WHEN x.artist_id IN ({marks})
+                                        AND COALESCE(x.role, 'primary') = 'primary'
+                                       THEN t.id END) AS led
+              FROM lib2_tracks t
+              LEFT JOIN lib2_track_artists x ON x.track_id = t.id
+             WHERE t.album_id IN (SELECT value FROM json_each(?))
+             GROUP BY t.album_id""",
+        (*group, json.dumps(rest)),
+    ):
+        led[int(row["album_id"])] = (int(row["total"] or 0), int(row["led"] or 0))
+    for album_id in rest:
+        total, lead = led.get(album_id, (0, 0))
+        if total and lead * 2 >= total:
+            own.add(album_id)
+        elif not total and conn.execute(
+                f"SELECT 1 FROM lib2_album_artists WHERE album_id=? AND artist_id IN ({marks})",
+                (album_id, *group)).fetchone():
+            own.add(album_id)
+    return own
 
 
 def _track_artists(conn, track_id: int) -> List[Dict[str, Any]]:

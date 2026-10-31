@@ -17,13 +17,18 @@ def appears_on_payload(conn, artist_id):
     native = get_artist(conn, int(artist_id))
     if native is None:
         return {'success': True, 'albums': [], 'tracks': []}
-    for summary in (*native['albums'], *native['eps'], *native['singles']):
+    for summary in (*native['albums'], *native['eps'], *native['singles'],
+                    *native.get('appears_on', [])):
         # The native summary already applied ownership/recording-link scope.
         # Do not load every provider-only album's tracks just to discard it.
         if not summary['tracks_present']:
             continue
         album = get_album(conn, summary['id'])
         primary = album.get('primary_artist') or {}
+        # the cover through soulsync's own artwork endpoint, like every other
+        # library card. the stored image_url can be a media server's own path
+        # ("/library/metadata/570524/thumb/...") the browser can't load
+        cover = f"/api/library/v2/artwork/album/{int(album['id'])}"
         if primary.get('id') in group:
             continue
         whole_album = album['id'] in credited_albums
@@ -38,13 +43,13 @@ def appears_on_payload(conn, artist_id):
                 **{k: track.get(k) for k in ('id', 'title', 'track_number', 'disc_number', 'duration')},
                 'lib2_track_id': track['id'], 'file_path': file['path'],
                 'album_id': album['id'], 'album_title': album['title'],
-                'album_thumb_url': album['image_url'], 'year': album['year'],
+                'album_thumb_url': cover, 'year': album['year'],
                 'artist_id': primary.get('id'), 'artist_name': primary.get('name'),
                 'credits': [a['name'] for a in track.get('artists', [])],
             })
         if whole_album and rows:
             albums.append({'id': album['id'], 'title': album['title'],
-                           'thumb_url': album['image_url'], 'year': album['year'],
+                           'thumb_url': cover, 'year': album['year'],
                            'artist_id': primary.get('id'), 'artist_name': primary.get('name'),
                            'tracks': rows})
         elif rows:
