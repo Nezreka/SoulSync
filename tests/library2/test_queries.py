@@ -111,6 +111,26 @@ def test_list_artists_stats(imported_conn):
     assert drake["total_size_bytes"] == 10000
 
 
+def test_list_artists_skips_a_guest_on_someone_elses_missing_track(imported_conn):
+    # Akon credited on a monitored Michael Jackson album he has no file of:
+    # nothing of his is here and nothing of his is monitored, so he is not in
+    # the library. A guest on a file that is here (Wizkid) still is.
+    hotline = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE title='Hotline Bling'").fetchone()[0]
+    guest = imported_conn.execute(
+        "INSERT INTO lib2_artists(name) VALUES('Rihanna')").lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id, role, position)"
+        " VALUES(?, ?, 'featured', 1)", (hotline, guest))
+    imported_conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (hotline,))
+    imported_conn.execute("DELETE FROM lib2_wanted_tracks WHERE track_id=?", (hotline,))
+
+    names = {a["name"] for a in Q.list_artists(imported_conn)[0]}
+
+    assert "Rihanna" not in names
+    assert {"Drake", "Wizkid"} <= names
+
+
 def test_queries_project_media_server_recognition_badges(imported_conn):
     artist = imported_conn.execute(
         "SELECT id FROM lib2_artists WHERE name='Drake'"

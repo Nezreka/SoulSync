@@ -249,7 +249,7 @@ def entity_visible(conn: Any, entity_type: str, entity_id: int, *, scope=_AMBIEN
 
 
 def library_artist_sql(alias: str) -> str:
-    """Library membership: live files or monitoring intent, across alias groups and credits.
+    """Library membership: live files (any credit) or monitoring intent on the own releases.
 
     The wanted arms are correlated EXISTS, asked only of an artist the owned
     and monitored arms didn't already admit. They used to be one IN list of
@@ -265,7 +265,12 @@ def library_artist_sql(alias: str) -> str:
 def library_artist_ids_sql() -> str:
     """The canonical ids of every library artist, as a SELECT: the body of
     library_artist_sql's IN list, for a caller that evaluates it once and
-    reads the result twice (the artist list's count and its page)."""
+    reads the result twice (the artist list's count and its page).
+
+    Intent counts on the artist's own releases only. A credit on someone
+    else's monitored release (Akon on a Michael Jackson album, Diana Ross on
+    his Love Songs) is not this artist in the library until its file is here,
+    which the owned arm already covers for every credit."""
     intent = intent_profile_id()
     wanted = f"COALESCE(w.wanted, {monitored_sql('track', 't')})=1"
     wanted_join = f"LEFT JOIN lib2_wanted_tracks w ON w.track_id=t.id AND w.profile_id={intent}"
@@ -273,8 +278,6 @@ def library_artist_ids_sql() -> str:
             f"{owned_sql('artist', 'va')} OR {monitored_sql('artist', 'va')}=1 "
             f"OR EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t ON t.album_id=al.id "
             f"{wanted_join} WHERE al.primary_artist_id=va.id AND {wanted}) "
-            f"OR EXISTS (SELECT 1 FROM lib2_track_artists ta JOIN lib2_tracks t ON t.id=ta.track_id "
-            f"{wanted_join} WHERE ta.artist_id=va.id AND {wanted}) "
             f"OR EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_monitor_rules r ON r.entity_type='album' "
             f"AND r.entity_id=al.id AND r.profile_id={intent} AND r.monitored=1 "
             f"WHERE al.primary_artist_id=va.id)")
