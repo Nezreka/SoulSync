@@ -81,11 +81,18 @@ function useSyncBand() {
   const [fadingIds, setFadingIds] = useState<Set<number | string>>(new Set());
   const [liveSyncs, setLiveSyncs] = useState<Record<string, LiveSync>>({});
   const mountedRef = useRef(true);
+  // one load at a time. while a sync runs the band reloads every 4s, and on a
+  // busy server one load took longer than that, so they stacked up and added
+  // to the load the sync was already under
+  const scheduleInFlight = useRef(false);
+  const historyInFlight = useRef(false);
 
   const loadSchedule = useCallback(async () => {
     // Same app-locked guard as the history cycle — every endpoint here is
     // auth-gated, and a locked tab shouldn't probe any of them.
     if (document.body.classList.contains('app-locked')) return;
+    if (scheduleInFlight.current) return;
+    scheduleInFlight.current = true;
     try {
       const [playlistsRes, automationsRes, historyRes] = await Promise.all([
         fetch('/api/mirrored-playlists'),
@@ -108,13 +115,22 @@ function useSyncBand() {
       setSeamPhase('ready');
     } catch {
       if (mountedRef.current) setSeamPhase('error');
+    } finally {
+      scheduleInFlight.current = false;
     }
   }, []);
 
   const loadHistory = useCallback(async () => {
     // The vanilla guard: don't poll the auth-gated endpoint while locked.
     if (document.body.classList.contains('app-locked')) return;
-    const result = await fetchDashboardSyncHistory();
+    if (historyInFlight.current) return;
+    historyInFlight.current = true;
+    let result: Awaited<ReturnType<typeof fetchDashboardSyncHistory>>;
+    try {
+      result = await fetchDashboardSyncHistory();
+    } finally {
+      historyInFlight.current = false;
+    }
     if (result.status === 'unauthorized') {
       if (result.loginRequired && window.showLoginScreen) window.showLoginScreen();
       else window.showLaunchPinScreen?.();
