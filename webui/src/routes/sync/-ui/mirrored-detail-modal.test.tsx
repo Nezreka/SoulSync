@@ -173,6 +173,109 @@ describe('MirroredDetailModal', () => {
   });
 });
 
+describe('MirroredDetailModal — curation', () => {
+  const data = {
+    name: 'Review me',
+    source: 'spotify',
+    curation_enabled: false,
+    curation_counts: { keep: 1, pending: 0, reject: 0, unreviewed: 1 },
+    tracks: [
+      {
+        position: 1,
+        source_track_id: 'one',
+        track_name: 'One',
+        artist_name: 'A',
+        curation_decision: 'keep' as const,
+        effective_decision: 'keep' as const,
+        globally_rejected: true,
+      },
+      {
+        position: 2,
+        source_track_id: 'two',
+        track_name: 'Two',
+        artist_name: 'B',
+        curation_decision: null,
+        effective_decision: 'unreviewed' as const,
+        globally_rejected: false,
+      },
+    ],
+  };
+
+  it('shows staged decisions, effective precedence and counts while disabled', () => {
+    renderModal(data);
+    expect(
+      screen.getByText('Decisions are staged; current sync behavior is unchanged.'),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Review decision for One')).toHaveValue('keep');
+    expect(screen.getByLabelText('Review decision for Two')).toHaveValue('');
+    expect(document.querySelector('.mm-curation-counts')).toHaveTextContent('1 Keep');
+    expect(document.querySelector('.mm-curation-counts')).toHaveTextContent('1 Unreviewed');
+    expect(screen.getAllByRole('button', { name: 'Global' })[0]).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('applies one decision and refreshes through the existing modal callback', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: true })));
+    vi.stubGlobal('fetch', fetchMock);
+    const handlers = renderModal(data);
+
+    fireEvent.change(screen.getByLabelText('Review decision for Two'), {
+      target: { value: 'pending' },
+    });
+
+    await waitFor(() => expect(handlers.onRefresh).toHaveBeenCalled());
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/mirrored-playlists/3/curation/decisions',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          updates: [{ source_track_id: 'two', decision: 'pending' }],
+        }),
+      }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it('bulk reviews selected source tracks atomically', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: true })));
+    vi.stubGlobal('fetch', fetchMock);
+    const handlers = renderModal(data);
+    fireEvent.click(screen.getByLabelText('Select One for review'));
+    fireEvent.click(screen.getByLabelText('Select Two for review'));
+    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+
+    await waitFor(() => expect(handlers.onRefresh).toHaveBeenCalled());
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/mirrored-playlists/3/curation/decisions',
+      expect.objectContaining({
+        body: JSON.stringify({
+          updates: [
+            { source_track_id: 'one', decision: 'reject' },
+            { source_track_id: 'two', decision: 'reject' },
+          ],
+        }),
+      }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it('enables enforcement through the existing preferences endpoint', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: true })));
+    vi.stubGlobal('fetch', fetchMock);
+    const handlers = renderModal(data);
+    fireEvent.click(screen.getByLabelText('Require Keep approval before sync and download'));
+
+    await waitFor(() => expect(handlers.onRefresh).toHaveBeenCalled());
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/mirrored-playlists/3/preferences',
+      expect.objectContaining({ body: JSON.stringify({ curation_enabled: true }) }),
+    );
+    vi.unstubAllGlobals();
+  });
+});
+
 describe('MirroredDetailModal — a user playlist', () => {
   const MINE = {
     name: 'Late night',

@@ -13,8 +13,8 @@ to drive the entire playlist-sync workflow:
    record sync history (with re-sync vs new-sync branching), emit
    `playlist_synced` event for automation engine, and persist sync status with a
    tracks_hash for smart-skip on the next scheduled sync.
-7. On exception → mark error in sync_states + automation; finally clear progress
-   callback + drop `_original_tracks_map` from sync_service.
+7. On exception → mark error in sync_states + automation; finally clear the
+   progress callback. Original payload maps travel as task-local sync arguments.
 
 Lifted verbatim from web_server.py. Wide dependency surface (sync_service,
 sync_states, plex/jellyfin clients, automation engine, multiple helper funcs)
@@ -456,11 +456,17 @@ def run_sync_task(
     user_initiated: bool | None = None,
     is_request_list: bool = False,
     auto_remove_fulfilled: bool = False,
+    curation_snapshot=None,
 ):
     """The actual sync function that runs in the background thread."""
     sync_states = deps.sync_states
     sync_lock = deps.sync_lock
     sync_service = deps.sync_service
+
+    if curation_snapshot:
+        from core.playlists.curation import verify_curation_snapshot
+        from database.music_database import get_database
+        verify_curation_snapshot(get_database(), curation_snapshot)
 
     task_start_time = time.time()
     logger.info(f"[TIMING] _run_sync_task STARTED for playlist '{playlist_name}' at {time.strftime('%H:%M:%S')}")
@@ -503,8 +509,12 @@ def run_sync_task(
         # Store original track data with full album objects (for wishlist with cover art).
         # Shared with the sync-detail "re-add to wishlist" action so both build the
         # IDENTICAL payload (album→dict + images, artists→dicts). Copy-safe.
-        from core.sync.wishlist_readd import build_original_tracks_map
+        from core.sync.wishlist_readd import (
+            build_original_tracks_by_source,
+            build_original_tracks_map,
+        )
         original_tracks_map = build_original_tracks_map(tracks_json)
+        original_tracks_by_source = build_original_tracks_by_source(tracks_json)
 
         tracks = []
         for i, t in enumerate(tracks_json):
@@ -665,9 +675,6 @@ def run_sync_task(
         logger.info(f"⏱️ [TIMING] Setup completed at {time.strftime('%H:%M:%S')} (took {setup_duration:.1f}ms)")
         logger.info("Starting actual sync process with run_async()...")
 
-        # Attach original tracks map to sync_service for wishlist with album images
-        sync_service._original_tracks_map = original_tracks_map
-
         # skip_wishlist_add skips wishlisting entirely for this sync. Its
         # callers: organize-by-playlist (batch failure handling covers the
         # missing tracks separately) and pipeline runs whose resolved
@@ -728,6 +735,9 @@ def run_sync_task(
             'profile_id': profile_id,
             'sync_mode': sync_mode,
             'user_initiated': not bool(automation_id) if user_initiated is None else user_initiated,
+            'curation_snapshot': curation_snapshot,
+            'original_tracks_map': original_tracks_map,
+            'original_tracks_by_source': original_tracks_by_source,
         }
         if is_request_list:
             sync_kwargs['is_request_list'] = is_request_list
@@ -910,6 +920,14 @@ def run_sync_task(
                     _fingerprint_sync_id(playlist_id, _resync_entry_id))
             return
 
+        if curation_snapshot:
+            # A decision can change after matching or even while a server call
+            # is returning. The service verifies before its write; this final
+            # check protects follow-ups and the successful smart-skip record.
+            from core.playlists.curation import verify_curation_snapshot
+            from database.music_database import get_database
+            verify_curation_snapshot(get_database(), curation_snapshot)
+
         # Record which tracks are actually IN THE LIBRARY, per track.
         #
         # The matcher has just answered this for every track, correctly — it
@@ -1003,6 +1021,8 @@ def run_sync_task(
         )
         if _mirror_tracks_hash is not None:
             _status_kwargs['mirror_tracks_hash'] = _mirror_tracks_hash
+        if curation_snapshot:
+            _status_kwargs['curation_revision'] = curation_snapshot['revision']
         deps.update_and_save_sync_status(playlist_id, playlist_name, playlist.owner, snapshot_id, **_status_kwargs)
 
     except Exception as e:
@@ -1027,7 +1047,4 @@ def run_sync_task(
         # Clean up the callback
         if sync_service:
             sync_service.clear_progress_callback(playlist.name)
-            # Clean up original tracks map
-            if hasattr(sync_service, '_original_tracks_map'):
-                del sync_service._original_tracks_map
         logger.info(f"Cleanup completed for {playlist_id}")

@@ -17099,7 +17099,10 @@ def readd_sync_track_to_wishlist(entry_id, track_index):
         tracks = json.loads(entry['tracks_json']) if entry.get('tracks_json') else []
         track_results = json.loads(entry['track_results']) if entry.get('track_results') else []
 
-        from core.sync.wishlist_readd import reconstruct_sync_track_data
+        from core.sync.wishlist_readd import (
+            reconstruct_sync_track_data,
+            sync_history_curation_origin,
+        )
         spotify_track_data = reconstruct_sync_track_data(track_results, tracks, track_index)
         if not spotify_track_data:
             return jsonify({"success": False, "error": "This track can't be re-added to the wishlist"}), 400
@@ -17114,17 +17117,24 @@ def readd_sync_track_to_wishlist(entry_id, track_index):
             else spotify_track_data.get('quality_profile_id')
         )
 
+        source_context = {
+            'playlist_name': entry.get('playlist_name'),
+            'playlist_id': entry.get('playlist_id'),
+            'sync_type': 'automatic_sync',
+            'timestamp': datetime.now().isoformat(),
+        }
+        curation_origin = sync_history_curation_origin(
+            entry, track_results, track_index, tracks
+        )
+        if curation_origin:
+            source_context.update(curation_origin)
+
         from core.wishlist_service import get_wishlist_service
         added = get_wishlist_service().add_spotify_track_to_wishlist(
             spotify_track_data=spotify_track_data,
             failure_reason='Missing from media server after sync',
             source_type='playlist',
-            source_context={
-                'playlist_name': entry.get('playlist_name'),
-                'playlist_id': entry.get('playlist_id'),
-                'sync_type': 'automatic_sync',
-                'timestamp': datetime.now().isoformat(),
-            },
+            source_context=source_context,
             profile_id=readd_profile_id,
             quality_profile_id=readd_quality_profile_id,
         )

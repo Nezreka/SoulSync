@@ -551,13 +551,49 @@ export interface MirroredPlaylistDetail {
   is_request_list?: boolean;
   auto_remove_fulfilled?: boolean;
   upstream_playlist_id?: string | null;
+  curation_enabled?: boolean;
+  curation_revision?: number;
+  curation_counts?: Record<'keep' | 'pending' | 'reject' | 'unreviewed', number>;
 }
+
+export type MirroredCurationDecision = 'keep' | 'pending' | 'reject' | null;
 
 /** GET /api/mirrored-playlists/<id> (1069). */
 export async function fetchMirroredPlaylist(
   playlistId: number | string,
 ): Promise<MirroredPlaylistDetail> {
   return readJson(await fetch(`/api/mirrored-playlists/${playlistId}`));
+}
+
+/** Apply a mixed Keep/Pending/Reject/Unreviewed batch atomically. */
+export async function patchMirroredCurationDecisions(
+  playlistId: number | string,
+  updates: { source_track_id: string; decision: MirroredCurationDecision }[],
+): Promise<void> {
+  const response = await fetch(`/api/mirrored-playlists/${playlistId}/curation/decisions`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updates }),
+  });
+  const data = await readJson<{ error?: string }>(response);
+  if (!response.ok || data.error)
+    throw new Error(data.error || 'Failed to update review decisions');
+}
+
+/** Set or clear the profile/source-wide rejection for these source tracks. */
+export async function patchMirroredGlobalRejections(
+  playlistId: number | string,
+  sourceTrackIds: string[],
+  rejected: boolean,
+): Promise<void> {
+  const response = await fetch(`/api/mirrored-playlists/${playlistId}/curation/global-rejections`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source_track_ids: sourceTrackIds, rejected }),
+  });
+  const data = await readJson<{ error?: string }>(response);
+  if (!response.ok || data.error)
+    throw new Error(data.error || 'Failed to update global rejections');
 }
 
 /**

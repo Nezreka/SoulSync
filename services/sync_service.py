@@ -131,6 +131,10 @@ _sync_is_request_list: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "sync_is_request_list", default=False)
 _sync_auto_remove_fulfilled: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "sync_auto_remove_fulfilled", default=False)
+_sync_original_tracks_map: "contextvars.ContextVar[Optional[Dict[str, Dict[str, Any]]]]" = contextvars.ContextVar(
+    "sync_original_tracks_map", default=None)
+_sync_original_tracks_by_source: "contextvars.ContextVar[Optional[Dict[str, Dict[str, Any]]]]" = contextvars.ContextVar(
+    "sync_original_tracks_by_source", default=None)
 
 # the sync ids a mirrored playlist syncs under. bare digits don't count: a
 # deezer playlist id is all digits and would land on a random mirror
@@ -612,7 +616,9 @@ class PlaylistSyncService:
         )
 
     async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace',
-                            user_initiated: bool = False, is_request_list: bool = False, auto_remove_fulfilled: bool = False) -> SyncResult:
+                            user_initiated: bool = False, is_request_list: bool = False, auto_remove_fulfilled: bool = False,
+                            curation_snapshot=None, original_tracks_map=None,
+                            original_tracks_by_source=None) -> SyncResult:
         # scoped to this task, not the shared instance (see _sync_profile_id).
         # the library scope rides along: "do we own this" is answered through
         # the profile's library, not the app account's (#1199)
@@ -621,18 +627,33 @@ class PlaylistSyncService:
         _user_token = _sync_user_initiated.set(bool(user_initiated))
         _req_token = _sync_is_request_list.set(bool(is_request_list))
         _rm_token = _sync_auto_remove_fulfilled.set(bool(auto_remove_fulfilled))
+        _original_token = _sync_original_tracks_map.set(original_tracks_map)
+        _source_token = _sync_original_tracks_by_source.set(original_tracks_by_source)
         _scope_token = set_library_scope(library_scope_for_profile(profile_id))
         try:
-            return await self._sync_playlist(playlist, download_missing, profile_id, sync_mode)
+            if curation_snapshot:
+                return await self._sync_playlist(
+                    playlist,
+                    download_missing,
+                    profile_id,
+                    sync_mode,
+                    curation_snapshot=curation_snapshot,
+                )
+            return await self._sync_playlist(
+                playlist, download_missing, profile_id, sync_mode
+            )
         finally:
             reset_library_scope(_scope_token)
+            _sync_original_tracks_by_source.reset(_source_token)
+            _sync_original_tracks_map.reset(_original_token)
             _sync_auto_remove_fulfilled.reset(_rm_token)
             _sync_is_request_list.reset(_req_token)
             _sync_user_initiated.reset(_user_token)
             _sync_profile_id.reset(_profile_token)
 
     async def _sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool, profile_id, sync_mode: str,
-                             is_request_list: bool = None, auto_remove_fulfilled: bool = None) -> SyncResult:
+                             is_request_list: bool = None, auto_remove_fulfilled: bool = None,
+                             curation_snapshot=None) -> SyncResult:
         if is_request_list is None:
             is_request_list = _sync_is_request_list.get()
         if auto_remove_fulfilled is None:
@@ -739,6 +760,10 @@ class PlaylistSyncService:
             
             downloaded_tracks = 0
             if download_missing and unmatched_tracks:
+                if curation_snapshot:
+                    from core.playlists.curation import verify_curation_snapshot
+                    from database.music_database import get_database
+                    verify_curation_snapshot(get_database(), curation_snapshot)
                 if self._is_cancelled(playlist.name):
                     return self._create_error_result(playlist.name, ["Sync cancelled"])
                 self._update_progress(playlist.name, "Downloading missing tracks", "", 70, 5, 4, 
@@ -749,6 +774,11 @@ class PlaylistSyncService:
             
             if self._is_cancelled(playlist.name):
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
+
+            if curation_snapshot:
+                from core.playlists.curation import verify_curation_snapshot
+                from database.music_database import get_database
+                verify_curation_snapshot(get_database(), curation_snapshot)
             
             media_client, server_type = self._get_active_media_client()
             unmatched_count = len(unmatched_tracks)
@@ -877,6 +907,10 @@ class PlaylistSyncService:
                             # the guard's drop record, so it takes the
                             # same write lock as a sync dispatch (#1754)
                             with _playlist_write_lock(server_type):
+                                if curation_snapshot:
+                                    from core.playlists.curation import verify_curation_snapshot
+                                    from database.music_database import get_database
+                                    verify_curation_snapshot(get_database(), curation_snapshot)
                                 return media_client.create_playlist(
                                     playlist.name, [])
                         _created = await run_blocking(_create_empty)
@@ -932,6 +966,10 @@ class PlaylistSyncService:
                         # sync's write cannot reset or replace it between
                         # this write and its readback (#1754).
                         with _playlist_write_lock(server_type):
+                            if curation_snapshot:
+                                from core.playlists.curation import verify_curation_snapshot
+                                from database.music_database import get_database
+                                verify_curation_snapshot(get_database(), curation_snapshot)
                             if sync_mode == 'append':
                                 ok = media_client.append_to_playlist(
                                     playlist.name, plex_tracks, **_navidrome_id_kw,
@@ -1116,6 +1154,14 @@ class PlaylistSyncService:
                     'matched_track': None,
                     'download_status': 'wishlist' if not _is_found else None,
                 }
+                mirrored_source_track_id = str(
+                    getattr(t, 'source_track_id', None) or ''
+                ).strip()
+                if mirrored_source_track_id:
+                    # Keep source_track_id as the discovered provider identity:
+                    # existing history consumers key on it. This separate field
+                    # carries the mirror's own durable identity for curation.
+                    detail['mirrored_source_track_id'] = mirrored_source_track_id
                 if mr.plex_track:
                     detail['matched_track'] = {
                         'title': getattr(mr.plex_track, 'title', ''),
@@ -1251,8 +1297,25 @@ class PlaylistSyncService:
 
                 # Check if we have original track data with full album objects
                 original_track_data = None
-                if hasattr(self, '_original_tracks_map') and self._original_tracks_map:
-                    original_track_data = self._original_tracks_map.get(spotify_track.id)
+                source_track_id = str(
+                    getattr(spotify_track, 'source_track_id', None) or ''
+                ).strip()
+                if source_track_id:
+                    source_map = _sync_original_tracks_by_source.get()
+                    if source_map is None:
+                        # Backward compatibility for direct legacy callers.
+                        source_map = getattr(self, '_original_tracks_by_source', None)
+                    if source_map:
+                        original_track_data = source_map.get(source_track_id)
+                provider_map = _sync_original_tracks_map.get()
+                if provider_map is None:
+                    # Backward compatibility for direct legacy callers.
+                    provider_map = getattr(self, '_original_tracks_map', None)
+                if provider_map:
+                    original_track_data = (
+                        original_track_data
+                        or provider_map.get(spotify_track.id)
+                    )
 
                 # Use original data if available (preserves album images), otherwise convert
                 if original_track_data:
@@ -1280,7 +1343,12 @@ class PlaylistSyncService:
                         'playlist_name': playlist.name,
                         'playlist_id': playlist.id,
                         'sync_type': 'automatic_sync',
-                        'timestamp': datetime.now().isoformat()
+                        'timestamp': datetime.now().isoformat(),
+                        **(
+                            original_track_data.get('_curation_origin', {})
+                            if isinstance(original_track_data, dict)
+                            else {}
+                        ),
                     },
                     profile_id=_sync_profile_id.get() or 1,
                     user_initiated=_sync_user_initiated.get(),

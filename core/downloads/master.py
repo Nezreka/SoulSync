@@ -671,6 +671,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
 
         from database.music_database import MusicDatabase
         db = MusicDatabase()
+        with tasks_lock:
+            curation_snapshot = (
+                download_batches.get(batch_id, {}).get('curation_snapshot')
+            )
+        if curation_snapshot:
+            from core.playlists.curation import verify_curation_snapshot
+            verify_curation_snapshot(db, curation_snapshot)
         active_server = deps.config_manager.get_active_media_server()
         analysis_results = []
 
@@ -939,6 +946,29 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 missing_tracks = _bl_kept
             except Exception as _bl_err:
                 logger.debug("blocklist queue filter skipped: %s", _bl_err)
+
+        # A queued wishlist track may have been rejected after this worker
+        # started, and an organize batch may have changed revision during its
+        # library scan. Re-check at the acquisition boundary.
+        from core.playlists.curation import (
+            CurationPolicyError,
+            verify_curation_snapshot,
+            wishlist_track_allowed,
+        )
+        if curation_snapshot:
+            verify_curation_snapshot(db, curation_snapshot)
+        _curation_kept = []
+        for res in missing_tracks:
+            try:
+                if wishlist_track_allowed(
+                    db, res.get('track', {}), profile_id=batch_profile_id
+                ):
+                    _curation_kept.append(res)
+            except CurationPolicyError as exc:
+                logger.error(
+                    "Blocking download because curation policy is unavailable: %s", exc
+                )
+        missing_tracks = _curation_kept
 
         with tasks_lock:
             if batch_id in download_batches:
