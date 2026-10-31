@@ -220,7 +220,13 @@ def _run_wishlist_cycle(
     eligible_tracks = []
     for track in tracks:
         try:
-            if wishlist_track_allowed(policy_database, track):
+            if wishlist_track_allowed(
+                policy_database,
+                track,
+                profile_id=int(
+                    track.get('profile_id') or getattr(runtime, 'profile_id', 1) or 1
+                ),
+            ):
                 eligible_tracks.append(track)
         except CurationPolicyError as exc:
             logger.error("Blocking deferred wishlist track: curation policy unavailable: %s", exc)

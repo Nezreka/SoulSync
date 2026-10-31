@@ -860,8 +860,8 @@ def test_finally_clears_progress_callback(patched_db):
     assert 'PCB' in svc.cleared_callbacks
 
 
-def test_finally_drops_original_tracks_map(patched_db):
-    """finally block deletes provider- and source-keyed payload maps."""
+def test_original_payload_maps_are_passed_without_mutating_service(patched_db):
+    """Payload maps are task arguments, not shared service attributes."""
     svc = _FakeSyncService(media_client=_FakeMediaClient())
     deps = _build_deps(sync_service=svc)
 
@@ -869,6 +869,8 @@ def test_finally_drops_original_tracks_map(patched_db):
 
     assert not hasattr(svc, '_original_tracks_map')
     assert not hasattr(svc, '_original_tracks_by_source')
+    assert svc.extra_kwargs['original_tracks_map']['id1']['id'] == 'id1'
+    assert svc.extra_kwargs['original_tracks_by_source'] == {}
 
 
 class TestRecordLibraryMembership:

@@ -25,7 +25,7 @@ from database.music_database import MusicDatabase
 from services.sync_service import PlaylistSyncService
 
 
-def _mirror(db, *, source="spotify", source_playlist_id="mix"):
+def _mirror(db, *, source="spotify", source_playlist_id="mix", profile_id=1):
     return db.mirror_playlist(
         source=source,
         source_playlist_id=source_playlist_id,
@@ -34,7 +34,7 @@ def _mirror(db, *, source="spotify", source_playlist_id="mix"):
             {"track_name": "One", "artist_name": "Artist", "source_track_id": "one"},
             {"track_name": "Two", "artist_name": "Artist", "source_track_id": "two"},
         ],
-        profile_id=1,
+        profile_id=profile_id,
     )
 
 
@@ -43,11 +43,13 @@ def db(tmp_path):
     return MusicDatabase(str(tmp_path / "music.db"))
 
 
-def _enable(db, playlist_id, updates=()):
+def _enable(db, playlist_id, updates=(), *, profile_id=1):
     if updates:
-        db.update_mirrored_playlist_decisions(playlist_id, list(updates), profile_id=1)
+        db.update_mirrored_playlist_decisions(
+            playlist_id, list(updates), profile_id=profile_id
+        )
     assert db.update_mirrored_playlist_preferences(
-        playlist_id, profile_id=1, curation_enabled=True
+        playlist_id, profile_id=profile_id, curation_enabled=True
     ) == "ok"
 
 
@@ -226,6 +228,53 @@ def test_wishlist_keeps_release_aware_independent_playlist_origins(db):
         second, [{"source_track_id": "one", "decision": "reject"}], profile_id=1
     )
     assert wishlist_track_allowed(db, row) is False
+
+
+def test_wishlist_origin_cannot_inherit_another_profiles_approval(db):
+    profile_b = db.create_profile(name="Profile B")
+    profile_a_mirror = _mirror(db, source_playlist_id="profile-a")
+    _enable(
+        db,
+        profile_a_mirror,
+        [{"source_track_id": "one", "decision": "keep"}],
+    )
+    foreign_origin = _origin(profile_a_mirror)
+    profile_b_track = {
+        "profile_id": profile_b,
+        "source_type": "playlist",
+        "source_info": foreign_origin,
+    }
+
+    assert wishlist_track_allowed(
+        db, profile_b_track, profile_id=profile_b
+    ) is False
+    rejected = db.add_to_wishlist_detailed(
+        spotify_track_data=_payload(),
+        source_type="playlist",
+        source_info=foreign_origin,
+        profile_id=profile_b,
+    )
+    assert rejected["reason"] == "curation_not_keep"
+
+    profile_b_mirror = _mirror(
+        db, source_playlist_id="profile-b", profile_id=profile_b
+    )
+    _enable(
+        db,
+        profile_b_mirror,
+        [{"source_track_id": "one", "decision": "keep"}],
+        profile_id=profile_b,
+    )
+    own_origin = _origin(profile_b_mirror)
+    accepted = db.add_to_wishlist_detailed(
+        spotify_track_data=_payload(),
+        source_type="playlist",
+        source_info=own_origin,
+        profile_id=profile_b,
+    )
+    assert accepted["applied"] is True
+    [row] = db.get_wishlist_tracks(profile_id=profile_b)
+    assert wishlist_track_allowed(db, row, profile_id=profile_b) is True
 
 
 def test_non_spotify_history_readd_uses_original_mirrored_source_id(db):

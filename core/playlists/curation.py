@@ -184,7 +184,12 @@ def merge_playlist_origins(previous: Any, incoming: Any) -> list[dict[str, Any]]
     return origins
 
 
-def wishlist_track_allowed(database, track: Mapping[str, Any]) -> bool:
+def wishlist_track_allowed(
+    database,
+    track: Mapping[str, Any],
+    *,
+    profile_id: int | None = None,
+) -> bool:
     """Whether any durable origin still permits deferred acquisition.
 
     Manual rows and legacy rows without durable mirrored provenance preserve
@@ -192,6 +197,8 @@ def wishlist_track_allowed(database, track: Mapping[str, Any]) -> bool:
     """
     if str(track.get("source_type") or "").lower() == "manual":
         return True
+    if profile_id is None and track.get("profile_id") is not None:
+        profile_id = int(track["profile_id"])
     source_info = track.get("source_info") or {}
     origins = merge_playlist_origins({}, source_info)
     if not origins:
@@ -200,7 +207,7 @@ def wishlist_track_allowed(database, track: Mapping[str, Any]) -> bool:
     for origin in origins:
         try:
             policy = database.get_mirrored_playlist_curation(
-                origin["mirrored_playlist_id"]
+                origin["mirrored_playlist_id"], profile_id=profile_id
             )
             if policy is None:
                 continue
@@ -215,7 +222,7 @@ def wishlist_track_allowed(database, track: Mapping[str, Any]) -> bool:
                 # for a track that left the mirror must not keep authorizing
                 # deferred acquisition. Disabled curation still returns above.
                 current_tracks = database.get_mirrored_playlist_tracks(
-                    origin["mirrored_playlist_id"]
+                    origin["mirrored_playlist_id"], profile_id=profile_id
                 )
                 if any(
                     str(track.get("source_track_id") or "") == source_track_id

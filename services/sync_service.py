@@ -131,6 +131,10 @@ _sync_is_request_list: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "sync_is_request_list", default=False)
 _sync_auto_remove_fulfilled: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "sync_auto_remove_fulfilled", default=False)
+_sync_original_tracks_map: "contextvars.ContextVar[Optional[Dict[str, Dict[str, Any]]]]" = contextvars.ContextVar(
+    "sync_original_tracks_map", default=None)
+_sync_original_tracks_by_source: "contextvars.ContextVar[Optional[Dict[str, Dict[str, Any]]]]" = contextvars.ContextVar(
+    "sync_original_tracks_by_source", default=None)
 
 # the sync ids a mirrored playlist syncs under. bare digits don't count: a
 # deezer playlist id is all digits and would land on a random mirror
@@ -613,7 +617,8 @@ class PlaylistSyncService:
 
     async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace',
                             user_initiated: bool = False, is_request_list: bool = False, auto_remove_fulfilled: bool = False,
-                            curation_snapshot=None) -> SyncResult:
+                            curation_snapshot=None, original_tracks_map=None,
+                            original_tracks_by_source=None) -> SyncResult:
         # scoped to this task, not the shared instance (see _sync_profile_id).
         # the library scope rides along: "do we own this" is answered through
         # the profile's library, not the app account's (#1199)
@@ -622,6 +627,8 @@ class PlaylistSyncService:
         _user_token = _sync_user_initiated.set(bool(user_initiated))
         _req_token = _sync_is_request_list.set(bool(is_request_list))
         _rm_token = _sync_auto_remove_fulfilled.set(bool(auto_remove_fulfilled))
+        _original_token = _sync_original_tracks_map.set(original_tracks_map)
+        _source_token = _sync_original_tracks_by_source.set(original_tracks_by_source)
         _scope_token = set_library_scope(library_scope_for_profile(profile_id))
         try:
             if curation_snapshot:
@@ -637,6 +644,8 @@ class PlaylistSyncService:
             )
         finally:
             reset_library_scope(_scope_token)
+            _sync_original_tracks_by_source.reset(_source_token)
+            _sync_original_tracks_map.reset(_original_token)
             _sync_auto_remove_fulfilled.reset(_rm_token)
             _sync_is_request_list.reset(_req_token)
             _sync_user_initiated.reset(_user_token)
@@ -1292,13 +1301,20 @@ class PlaylistSyncService:
                     getattr(spotify_track, 'source_track_id', None) or ''
                 ).strip()
                 if source_track_id:
-                    source_map = getattr(self, '_original_tracks_by_source', None)
+                    source_map = _sync_original_tracks_by_source.get()
+                    if source_map is None:
+                        # Backward compatibility for direct legacy callers.
+                        source_map = getattr(self, '_original_tracks_by_source', None)
                     if source_map:
                         original_track_data = source_map.get(source_track_id)
-                if hasattr(self, '_original_tracks_map') and self._original_tracks_map:
+                provider_map = _sync_original_tracks_map.get()
+                if provider_map is None:
+                    # Backward compatibility for direct legacy callers.
+                    provider_map = getattr(self, '_original_tracks_map', None)
+                if provider_map:
                     original_track_data = (
                         original_track_data
-                        or self._original_tracks_map.get(spotify_track.id)
+                        or provider_map.get(spotify_track.id)
                     )
 
                 # Use original data if available (preserves album images), otherwise convert

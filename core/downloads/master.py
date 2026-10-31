@@ -960,7 +960,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         _curation_kept = []
         for res in missing_tracks:
             try:
-                if wishlist_track_allowed(db, res.get('track', {})):
+                if wishlist_track_allowed(
+                    db, res.get('track', {}), profile_id=batch_profile_id
+                ):
                     _curation_kept.append(res)
             except CurationPolicyError as exc:
                 logger.error(

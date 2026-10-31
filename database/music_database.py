@@ -15316,7 +15316,7 @@ class MusicDatabase:
                         if not wishlist_track_allowed(self, {
                             'source_type': source_type,
                             'source_info': source_info,
-                        }):
+                        }, profile_id=profile_id):
                             return self._wishlist_outcome(
                                 "rejected", track_id, reason="curation_not_keep"
                             )

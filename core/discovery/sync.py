@@ -13,8 +13,8 @@ to drive the entire playlist-sync workflow:
    record sync history (with re-sync vs new-sync branching), emit
    `playlist_synced` event for automation engine, and persist sync status with a
    tracks_hash for smart-skip on the next scheduled sync.
-7. On exception → mark error in sync_states + automation; finally clear progress
-   callback + drop `_original_tracks_map` from sync_service.
+7. On exception → mark error in sync_states + automation; finally clear the
+   progress callback. Original payload maps travel as task-local sync arguments.
 
 Lifted verbatim from web_server.py. Wide dependency surface (sync_service,
 sync_states, plex/jellyfin clients, automation engine, multiple helper funcs)
@@ -675,10 +675,6 @@ def run_sync_task(
         logger.info(f"⏱️ [TIMING] Setup completed at {time.strftime('%H:%M:%S')} (took {setup_duration:.1f}ms)")
         logger.info("Starting actual sync process with run_async()...")
 
-        # Attach original tracks map to sync_service for wishlist with album images
-        sync_service._original_tracks_map = original_tracks_map
-        sync_service._original_tracks_by_source = original_tracks_by_source
-
         # skip_wishlist_add skips wishlisting entirely for this sync. Its
         # callers: organize-by-playlist (batch failure handling covers the
         # missing tracks separately) and pipeline runs whose resolved
@@ -740,6 +736,8 @@ def run_sync_task(
             'sync_mode': sync_mode,
             'user_initiated': not bool(automation_id) if user_initiated is None else user_initiated,
             'curation_snapshot': curation_snapshot,
+            'original_tracks_map': original_tracks_map,
+            'original_tracks_by_source': original_tracks_by_source,
         }
         if is_request_list:
             sync_kwargs['is_request_list'] = is_request_list
@@ -1049,9 +1047,4 @@ def run_sync_task(
         # Clean up the callback
         if sync_service:
             sync_service.clear_progress_callback(playlist.name)
-            # Clean up original tracks map
-            if hasattr(sync_service, '_original_tracks_map'):
-                del sync_service._original_tracks_map
-            if hasattr(sync_service, '_original_tracks_by_source'):
-                del sync_service._original_tracks_by_source
         logger.info(f"Cleanup completed for {playlist_id}")
