@@ -6,6 +6,7 @@ def appears_on_payload(conn, artist_id):
     """Guest appearances using the shared alias, metadata and file projection."""
     from core.library2.artist_aliases import resolve_alias_group
     from core.library2.queries import get_album
+    from core.library2.sql_util import intent_profile_id, monitored_sql
     group = resolve_alias_group(conn, int(artist_id))
     marks = ','.join('?' for _ in group)
     albums = []
@@ -14,6 +15,16 @@ def appears_on_payload(conn, artist_id):
         f'SELECT track_id FROM lib2_track_artists WHERE artist_id IN ({marks})', group)}
     credited_albums = {r[0] for r in conn.execute(
         f'SELECT album_id FROM lib2_album_artists WHERE artist_id IN ({marks})', group)}
+    # releases with a wanted track of this artist's, wanted as the library
+    # counts it (a track, album or artist rule): that is what puts a guest in
+    # the library before the file is. the summary's monitored_tracks reads the
+    # track's own flag only, and counts everyone's tracks
+    wanted_albums = {r[0] for r in conn.execute(
+        f"SELECT DISTINCT t.album_id FROM lib2_tracks t "
+        f"LEFT JOIN lib2_wanted_tracks w ON w.track_id=t.id AND w.profile_id={intent_profile_id()} "
+        f"WHERE (t.id IN (SELECT track_id FROM lib2_track_artists WHERE artist_id IN ({marks})) "
+        f"OR t.album_id IN (SELECT album_id FROM lib2_album_artists WHERE artist_id IN ({marks}))) "
+        f"AND COALESCE(w.wanted, {monitored_sql('track', 't')})=1", (*group, *group))}
     native = get_artist(conn, int(artist_id))
     if native is None:
         return {'success': True, 'albums': [], 'tracks': []}
@@ -21,9 +32,8 @@ def appears_on_payload(conn, artist_id):
                     *native.get('appears_on', [])):
         # The native summary already applied ownership/recording-link scope.
         # Do not load every provider-only album's tracks just to discard it.
-        # A wanted track counts too: it is what puts a guest in the library
-        # before the file is here.
-        if not summary['tracks_present'] and not summary.get('monitored_tracks'):
+        # A wanted track counts too (see wanted_albums).
+        if not summary['tracks_present'] and summary['id'] not in wanted_albums:
             continue
         album = get_album(conn, summary['id'])
         primary = album.get('primary_artist') or {}

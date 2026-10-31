@@ -188,34 +188,39 @@ describe('Library V2 artist detail — All Releases views', () => {
     ).toBeInTheDocument();
   }, 30_000);
 
-  it('reads the discography of an artist the library does not hold, writing nothing', async () => {
-    // a guest credit opened from a search or a track's artist column: the
-    // discography walk wrote 70 releases of someone you only looked at
-    const walk = vi.fn();
-    server.use(
-      http.get('/api/library/v2/artists/1', () =>
-        HttpResponse.json({
-          success: true,
-          artist: portishead({ in_library: false, albums: [], discography_count: 0 }),
+  it.each(['cards', 'table'])(
+    'reads the discography of an artist the library does not hold, writing nothing (%s)',
+    async (view) => {
+      // a guest credit opened from a search or a track's artist column: the
+      // discography walk wrote 70 releases of someone you only looked at. the
+      // provider's list is cards only, so a table url still shows it
+      const walk = vi.fn();
+      server.use(
+        http.get('/api/library/v2/artists/1', () =>
+          HttpResponse.json({
+            success: true,
+            artist: portishead({ in_library: false, albums: [], discography_count: 0 }),
+          }),
+        ),
+        http.post('/api/library/v2/artists/1/discography/refresh', () => {
+          walk();
+          return HttpResponse.json({ success: true, job_id: 'walk-1' });
         }),
-      ),
-      http.post('/api/library/v2/artists/1/discography/refresh', () => {
-        walk();
-        return HttpResponse.json({ success: true, job_id: 'walk-1' });
-      }),
-      http.get('/api/artist-detail/:id', () =>
-        HttpResponse.json({
-          success: true,
-          artist: { id: 'sp-1', name: 'Portishead' },
-          discography: { albums: [{ id: 'al-3', title: 'Third' }], source: 'spotify' },
-        }),
-      ),
-    );
-    renderArtist('/library?artist=1&releases=all');
+        http.get('/api/artist-detail/:id', () =>
+          HttpResponse.json({
+            success: true,
+            artist: { id: 'sp-1', name: 'Portishead' },
+            discography: { albums: [{ id: 'al-3', title: 'Third' }], source: 'spotify' },
+          }),
+        ),
+      );
+      renderArtist(`/library?artist=1&releases=all&releaseView=${view}`);
 
-    expect(await screen.findByText('Third')).toBeInTheDocument();
-    expect(walk).not.toHaveBeenCalled();
-  });
+      expect(await screen.findByText('Third')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Table View' })).not.toBeInTheDocument();
+      expect(walk).not.toHaveBeenCalled();
+    },
+  );
 
   it('suggests similar artists on Discovery only, never in My Library', async () => {
     // My Library is what you have; suggestions belong to the discovery side

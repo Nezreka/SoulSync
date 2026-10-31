@@ -101,6 +101,23 @@ def test_appears_on_lists_a_wanted_guest_track_that_is_not_here_yet(tmp_path):
         (wanted, None, True)]
 
 
+def test_appears_on_lists_a_guest_track_wanted_through_its_album(tmp_path):
+    # the album (or its artist) is monitored, not the track: the projection
+    # wants it, which is what puts the guest in the library, so his page lists it
+    from core.library2.artist_page import appears_on_payload
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    with db._get_connection() as conn:
+        tid = lib2_seed.track(conn, 'Host', 'Scream', 'Wanted song', owned=False, monitored=0)
+        guest = lib2_seed.artist(conn, 'Guest')
+        conn.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role) VALUES (?,?,'featured')",
+                     (tid, guest))
+        conn.execute("INSERT INTO lib2_wanted_tracks(profile_id,track_id,wanted,reason,projection_version) "
+                     "VALUES (1,?,1,'album_rule:user',1)", (tid,))
+        conn.commit()
+        result = appears_on_payload(conn, guest)
+    assert [(t['lib2_track_id'], t['wanted']) for t in result['tracks']] == [(tid, True)]
+
+
 def test_appears_on_route_includes_collaborative_album_and_manual_projection(tmp_path, monkeypatch):
     from flask import Flask
     from api import artist_detail

@@ -8150,7 +8150,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   // it reads the provider's list directly, writing nothing. neither does an
   // artist the library doesn't hold (a guest credit, one opened from a
   // search): looking at them must not write their discography in
-  const writesDiscography = canWish && artistQuery.data?.in_library !== false;
+  const heldHere = artistQuery.data?.in_library !== false;
+  const writesDiscography = canWish && heldHere;
+  // the provider's list is drawn as cards only: for an artist read from it,
+  // Table View listed nothing at all
+  const tableView = releaseView === 'table' && heldHere;
   const readOnlyDiscography = useReadOnlyProviderDiscography({
     enabled: !writesDiscography && releasesMode === 'all',
     artistName: artistQuery.data?.name ?? '',
@@ -8668,7 +8672,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 ) : null}
               </button>
             </div>
-            {releasesMode === 'all' ? (
+            {releasesMode === 'all' && heldHere ? (
               <div className={styles.releasesToggle}>
                 <button
                   type="button"
@@ -8715,7 +8719,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             />
           ) : null}
 
-          {releasesMode === 'all' && releaseView === 'cards' ? (
+          {releasesMode === 'all' && !tableView ? (
             <DiscographySections>
               {(
                 [
