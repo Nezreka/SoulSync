@@ -1744,7 +1744,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     (provider_id,)).fetchone()
                 artist_id = row["id"] if row else None
             known = artist_id is not None
-            if artist_id is None and name:
+            # the provider id alone is enough to find a row: a similar-artist
+            # bubble links /artist-detail/deezer/<id> with no name, and an
+            # owned artist (a$ap rocky, deezer id on the row) opened the
+            # provider page instead of the library one
+            if artist_id is None and (name or (provider_id and not legacy)):
                 artist_id = find_or_create_artist(
                     conn, name,
                     spotify_id=None if legacy else (provider_id or None),

@@ -3351,6 +3351,23 @@ def test_discovery_resolve_is_read_only_and_finds_an_existing_artist(api):
         ).fetchone()[0] == 0
 
 
+def test_discovery_resolve_finds_an_artist_by_provider_id_alone(api):
+    """a similar-artist bubble links /artist-detail/deezer/<id> with no name.
+    the provider id must still find the artist's row, or an owned artist
+    opens the provider page instead of the library one."""
+    client, db, _ids = api
+
+    found = client.get("/api/library/v2/discovery/artist",
+                       query_string={"source": "spotify", "provider_id": "sp-drake",
+                                     "name": ""}).get_json()
+    nobody = client.get("/api/library/v2/discovery/artist",
+                        query_string={"source": "spotify", "provider_id": "sp-nobody",
+                                      "name": ""}).get_json()
+
+    assert found["artist_id"] == _ids_artist(db, "Drake")
+    assert nobody["artist_id"] is None
+
+
 def test_discovery_materialize_creates_the_artist_once(api):
     """The bookmark/monitor action is the first write — and it is idempotent."""
     client, db, _ids = api
