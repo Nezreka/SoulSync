@@ -5262,8 +5262,8 @@ class RepairWorker:
         """
         # Deezer-sourced BPM respects the deezer.tags.bpm setting.
         # Locally-analyzed BPM always writes (explicit user action).
-        if bpm_source == 'deezer':
-            if self._config_manager and self._config_manager.get('deezer.tags.bpm', True) is False:
+        if bpm_source in ('deezer', 'beatport'):
+            if self._config_manager and self._config_manager.get(f'{bpm_source}.tags.bpm', True) is False:
                 return ' (BPM tags are off in settings, file not changed)'
         try:
             bpm = float(bpm)

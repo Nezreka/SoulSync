@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from utils.logging_config import get_logger
 
@@ -91,7 +92,36 @@ def persist_tag_cache(conn, file_id: int, file_tags: Dict[str, Any], config_mana
     from core.library2.compilation_credits import heal_compilation_credit
     heal_compilation_credit(conn, int(file_id), file_tags)
     persist_validation(conn, file_id, validation)
+    adopt_file_bpm(conn, int(file_id), file_tags.get("bpm"))
     return True
+
+
+def plausible_bpm(value: Any) -> Optional[float]:
+    """a tempo worth keeping, or None (0, junk text, 9999 from a broken tagger)"""
+    try:
+        bpm = float(value)
+    except (TypeError, ValueError):
+        return None
+    return bpm if math.isfinite(bpm) and 20 <= bpm <= 400 else None
+
+
+def adopt_file_bpm(conn, file_id: int, value: Any) -> bool:
+    """The library takes a track's bpm from its file when it has none (#1939).
+
+    a re-tag that pulled beatport's bpm into the file, a file tagged elsewhere:
+    the tempo sat in the file and the library showed nothing. only ever fills
+    an empty bpm from the track's primary file, so a backfilled or hand-set
+    value is never replaced by a tag."""
+    bpm = plausible_bpm(value)
+    if bpm is None:
+        return False
+    cur = conn.execute(
+        """UPDATE lib2_tracks SET bpm=?, updated_at=CURRENT_TIMESTAMP
+            WHERE id=(SELECT track_id FROM lib2_track_files WHERE id=? AND is_primary=1)
+              AND (bpm IS NULL OR bpm=0)""",
+        (round(bpm, 1), int(file_id)),
+    )
+    return cur.rowcount > 0
 
 
 def read_tag_snapshot(path: str) -> Dict[str, Any]:

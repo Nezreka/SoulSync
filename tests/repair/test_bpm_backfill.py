@@ -26,6 +26,8 @@ def test_job_metadata():
     assert job.default_enabled is False
     assert job.default_interval_hours == 168
     assert job.default_settings == {
+        'use_file_tags': True,
+        'use_beatport': True,
         'use_deezer': True,
         'use_local_analysis': True,
     }
@@ -89,3 +91,107 @@ def test_scan_reports_deezer_bpm_on_the_lib2_track(monkeypatch):
     assert finding['entity_id'] == 'lib2:7'
     assert finding['details']['found_fields'] == {'bpm': 128.0}
     assert finding['details']['library_v2']['track_id'] == 7
+
+
+# --- #1939: the file's own bpm, and beatport -----------------------------------
+
+
+def _file_context(monkeypatch, tmp_path, subjects, settings):
+    """a context whose db hands out fresh connections to one file"""
+    import sqlite3
+    from types import SimpleNamespace
+    from core.repair_jobs.base import JobContext
+
+    db_path = str(tmp_path / 'm.db')
+    setup = sqlite3.connect(db_path)
+    setup.execute("CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT, "
+                  "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    setup.execute("CREATE TABLE lib2_tracks(id INTEGER PRIMARY KEY, bpm REAL, updated_at TIMESTAMP)")
+    for subject in subjects:
+        setup.execute("INSERT INTO lib2_tracks(id, bpm) VALUES (?, ?)",
+                      (subject['track_id'], subject.get('bpm')))
+    setup.commit()
+    setup.close()
+    monkeypatch.setattr('core.repair_jobs.bpm_backfill.active_file_subjects',
+                        lambda _db, _config: subjects)
+    monkeypatch.setattr('core.repair_jobs.bpm_backfill.get_client_for_source', lambda source: None)
+    findings, changes = [], []
+    context = JobContext(
+        db=SimpleNamespace(_get_connection=lambda: sqlite3.connect(db_path)),
+        transfer_folder='',
+        config_manager=SimpleNamespace(get=lambda key, default=None:
+                                       settings if key.endswith('.settings') else default),
+        create_finding=lambda **kw: findings.append(kw) or True,
+        report_change=lambda **kw: changes.append(kw),
+    )
+    context.sleep_or_stop = lambda _seconds: False
+    return context, findings, changes, db_path
+
+
+def _bpm_of(db_path, track_id):
+    import sqlite3
+    return sqlite3.connect(db_path).execute(
+        "SELECT bpm FROM lib2_tracks WHERE id=?", (track_id,)).fetchone()[0]
+
+
+def test_a_bpm_the_file_carries_is_taken_straight_in(monkeypatch, tmp_path):
+    # the reporter's 184 tracks: bpm in the file, none in soulsync
+    audio = tmp_path / 'a.flac'
+    audio.write_bytes(b'x')
+    monkeypatch.setattr('core.tag_writer.read_file_tags', lambda path: {'bpm': 174.0})
+    context, findings, changes, db_path = _file_context(
+        monkeypatch, tmp_path, [_subject(5, path=str(audio))],
+        {'use_beatport': False, 'use_deezer': False, 'use_local_analysis': False})
+
+    result = BpmBackfillJob().scan(context)
+
+    assert _bpm_of(db_path, 5) == 174.0
+    assert result.auto_fixed == 1 and findings == []
+    assert changes[0]['details'] == {'bpm': 174.0, 'bpm_source': 'file'}
+
+
+def test_junk_in_the_file_is_not_taken(monkeypatch, tmp_path):
+    audio = tmp_path / 'a.flac'
+    audio.write_bytes(b'x')
+    monkeypatch.setattr('core.tag_writer.read_file_tags', lambda path: {'bpm': 0})
+    context, _, _, db_path = _file_context(
+        monkeypatch, tmp_path, [_subject(5, path=str(audio))],
+        {'use_beatport': False, 'use_deezer': False, 'use_local_analysis': False})
+    BpmBackfillJob().scan(context)
+    assert _bpm_of(db_path, 5) is None
+
+
+def test_beatport_answers_by_isrc_before_deezer(monkeypatch, tmp_path):
+    calls = []
+
+    def lookup(isrc, artist='', title='', allow_search=True, scraper=None):
+        calls.append((isrc, allow_search))
+        return {'bpm': 125} if isrc == 'GBUM71234567' else None
+
+    monkeypatch.setattr('core.beatport.enrich.lookup', lookup)
+    context, findings, _, _ = _file_context(
+        monkeypatch, tmp_path,
+        [_subject(9, isrc='GBUM71234567', album_genres='["Tech House"]', path='/gone/9.flac')],
+        {'use_file_tags': True, 'use_deezer': True, 'use_local_analysis': False})
+
+    BpmBackfillJob().scan(context)
+
+    # an electronic genre lets beatport search; the label's bpm is offered
+    assert calls == [('GBUM71234567', True)]
+    assert findings[0]['details']['bpm_source'] == 'beatport'
+    assert findings[0]['details']['found_fields'] == {'bpm': 125.0}
+
+
+def test_beatport_does_not_search_for_a_track_that_isnt_electronic(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr('core.beatport.enrich.lookup',
+                        lambda isrc, artist='', title='', allow_search=True, scraper=None:
+                        calls.append(allow_search))
+    context, _, _, _ = _file_context(
+        monkeypatch, tmp_path,
+        [_subject(9, isrc='USUM71234567', album_genres='["Folk"]', path='/gone/9.flac')],
+        {'use_deezer': False, 'use_local_analysis': False})
+    BpmBackfillJob().scan(context)
+    # the metadata cache is still asked; beatport's search is not
+    assert calls == [False]
+
