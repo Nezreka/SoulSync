@@ -271,16 +271,30 @@ def library_artist_ids_sql() -> str:
     else's monitored release (Akon on a Michael Jackson album, Diana Ross on
     his Love Songs) is not this artist in the library until its file is here,
     which the owned arm already covers for every credit."""
+    return (f"SELECT COALESCE(va.canonical_artist_id,va.id) FROM lib2_artists va "
+            f"WHERE {_member_row_sql('va')}")
+
+
+def library_member_sql(alias: str) -> str:
+    """``alias`` (a canonical artist) is in the library, by the same rule as
+    library_artist_ids_sql: asked of one row and its alias members, for a
+    caller that checks a handful of artists rather than listing all of them."""
+    if not _VALID_IDENTIFIER.match(alias):
+        raise ValueError(f'Invalid alias: {alias!r}')
+    return (f"({_member_row_sql(alias)} OR EXISTS (SELECT 1 FROM lib2_artists am "
+            f"WHERE am.canonical_artist_id={alias}.id AND {_member_row_sql('am')}))")
+
+
+def _member_row_sql(alias: str) -> str:
     intent = intent_profile_id()
     wanted = f"COALESCE(w.wanted, {monitored_sql('track', 't')})=1"
     wanted_join = f"LEFT JOIN lib2_wanted_tracks w ON w.track_id=t.id AND w.profile_id={intent}"
-    return (f"SELECT COALESCE(va.canonical_artist_id,va.id) FROM lib2_artists va WHERE "
-            f"{owned_sql('artist', 'va')} OR {monitored_sql('artist', 'va')}=1 "
+    return (f"({owned_sql('artist', alias)} OR {monitored_sql('artist', alias)}=1 "
             f"OR EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t ON t.album_id=al.id "
-            f"{wanted_join} WHERE al.primary_artist_id=va.id AND {wanted}) "
+            f"{wanted_join} WHERE al.primary_artist_id={alias}.id AND {wanted}) "
             f"OR EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_monitor_rules r ON r.entity_type='album' "
             f"AND r.entity_id=al.id AND r.profile_id={intent} AND r.monitored=1 "
-            f"WHERE al.primary_artist_id=va.id)")
+            f"WHERE al.primary_artist_id={alias}.id))")
 
 
 def intent_profile_id(scope=_AMBIENT) -> int:
@@ -417,6 +431,6 @@ def scoped_primary_file_join(track_alias: str, file_alias: str, *, scope=_AMBIEN
             f" ORDER BY {primary_order('pf')} LIMIT 1)")
 
 
-__all__ = ["ANY_OWNER", "in_library_sql", "owned_in_library_sql", "intent_profile_id", "library_artist_sql", "monitored_sql", "owned_sql",
+__all__ = ["ANY_OWNER", "in_library_sql", "owned_in_library_sql", "intent_profile_id", "library_artist_sql", "library_member_sql", "monitored_sql", "owned_sql",
            "owner_clause", "scoped_primary_file_join",
            "scope_visibility_sql", "scoped_monitored", "select_existing_ids"]

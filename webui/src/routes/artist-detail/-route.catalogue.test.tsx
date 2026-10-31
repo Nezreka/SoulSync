@@ -22,6 +22,7 @@ function renderAt(entry: string) {
 describe('artist-detail route on a Library v2 catalogue', () => {
   let resolved: number | null;
   let owned: boolean;
+  let inLibrary: boolean;
   let resolveFails: boolean;
   let lookups: URL[];
   let detailRequests: URL[];
@@ -34,6 +35,7 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     window.observeLazyBackgrounds = vi.fn();
     resolved = null;
     owned = true;
+    inLibrary = true;
     resolveFails = false;
     lookups = [];
     detailRequests = [];
@@ -46,6 +48,7 @@ describe('artist-detail route on a Library v2 catalogue', () => {
           success: true,
           artist_id: resolved,
           owned,
+          in_library: inLibrary,
           album_id: albumLink === 'al-dummy' ? 55 : null,
         });
       }),
@@ -158,7 +161,7 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     expect(detailRequests[0]?.searchParams.get('name')).toBe('311');
   });
 
-  it('opens a catalogued but not owned provider artist on its library page, on Discovery', async () => {
+  it('opens a watched provider artist without files on its library page, on Discovery', async () => {
     resolved = 7;
     owned = false;
     const { router } = renderAt('/artist-detail/deezer/2481?name=Aphex%20Twin');
@@ -201,7 +204,7 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     expect(await screen.findByText('Drukqs')).toBeInTheDocument();
   });
 
-  it('sends an in-app link to a catalogued but unowned artist to its library page', async () => {
+  it('sends an in-app link to a watched artist without files to its library page', async () => {
     resolved = 7;
     owned = false;
     const { router } = renderAt(
@@ -212,6 +215,20 @@ describe('artist-detail route on a Library v2 catalogue', () => {
       expect(router.state.location.search).toMatchObject({ artist: 7, releases: 'all' }),
     );
     expect(router.state.location.pathname).toBe('/library');
+  });
+
+  it('reads a catalogued artist the library does not hold from the provider', async () => {
+    // a guest credit or a looked-up discography has a row, but nothing of
+    // yours: its library page wrote the whole discography in on opening
+    resolved = 7;
+    owned = false;
+    inLibrary = false;
+    const { router } = renderAt('/artist-detail/deezer/2481?name=Aphex%20Twin');
+
+    expect(await screen.findByText('Drukqs')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/library');
+    expect(router.state.location.search).toMatchObject({ discover: 'deezer:2481' });
+    expect(router.state.location.search).not.toHaveProperty('artist');
   });
 
   it('sends an in-app artist link from a search-only profile to the artist page', async () => {

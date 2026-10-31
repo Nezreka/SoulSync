@@ -1793,16 +1793,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if create and artist_id is None:
             return _fail("Could not materialize this artist")
         owned = False
+        in_library = False
         focus_album_id = None
         album_provider_id = str(request.args.get("album_provider_id") or "").strip()
         if artist_id is not None:
             # owned = a live file in this library. a watchlisted, bookmarked or
             # discography-only row is catalogued but not owned.
-            from core.library2.sql_util import owned_sql
+            # in_library = the artist list's rule (files, or a watch or wish of
+            # its own): only those open the library page, the rest are browsed
+            from core.library2.sql_util import library_member_sql, owned_sql
             with closing(_conn()) as oconn:
                 owned = oconn.execute(
                     f"SELECT 1 FROM lib2_artists a WHERE a.id=? AND {owned_sql('artist', 'a')}",
                     (artist_id,)).fetchone() is not None
+                in_library = owned or oconn.execute(
+                    "SELECT 1 FROM lib2_artists a WHERE a.id = (SELECT COALESCE("
+                    "canonical_artist_id, id) FROM lib2_artists WHERE id=?) "
+                    f"AND {library_member_sql('a')}", (artist_id,)).fetchone() is not None
                 if album_provider_id and not legacy:
                     # a provider album link (?album=) focuses that release here too
                     from core.library2.provider_ids import parse_external_ids
@@ -1815,7 +1822,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                             focus_album_id = row["id"]
                             break
         return jsonify({"success": True, "artist_id": artist_id,
-                        "monitored": monitor, "owned": owned,
+                        "monitored": monitor, "owned": owned, "in_library": in_library,
                         "album_id": focus_album_id})
 
     @_route("/api/library/v2/discovery/album", methods=["POST"])

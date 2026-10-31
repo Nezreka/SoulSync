@@ -7683,6 +7683,9 @@ function artistEyebrow(artist: LibraryV2ArtistDetail) {
   // only guest verses on other artists' music (jpegmafia on 6 releases):
   // they are in the library, but none of their own music is
   if ((artist.guest_track_count ?? 0) > 0) return 'Featured in your library';
+  // nothing on disk yet, but a wishlisted track or a watch of its own: the
+  // library is waiting for it, and its quality profile applies
+  if (artist.in_library) return 'Monitored in your library';
   return 'Not in your library';
 }
 
@@ -8128,9 +8131,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     source: artistProviderIds.spotify ? 'spotify' : artistProviderIds.deezer ? 'deezer' : null,
   };
   // a read-only profile cannot fetch the discography into the catalogue, so
-  // it reads the provider's list directly, writing nothing
+  // it reads the provider's list directly, writing nothing. neither does an
+  // artist the library doesn't hold (a guest credit, one opened from a
+  // search): looking at them must not write their discography in
+  const writesDiscography = canWish && artistQuery.data?.in_library !== false;
   const readOnlyDiscography = useReadOnlyProviderDiscography({
-    enabled: !canWish && releasesMode === 'all',
+    enabled: !writesDiscography && releasesMode === 'all',
     artistName: artistQuery.data?.name ?? '',
     providerIds: artistProviderIds,
     catalogueTitles: [
@@ -8150,9 +8156,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     window.loadSimilarArtists?.(artist.name);
     return () => window.cancelSimilarArtistsLoad?.();
   }, [artist?.name, releasesMode]);
-  // My Library is there only for an artist with files here, the way dev
-  // offered its library view only for an artist in the library. a watched or
-  // discography-only artist opens on its discography
+  // My Library is there for an artist in the library, the way dev offered
+  // its library view only for an artist in the library: files here, or a
+  // watch or wish of its own. one only looked at opens on its discography
   const inLibrary = artist ? artistEyebrow(artist) !== 'Not in your library' : true;
   useEffect(() => {
     if (artist && !inLibrary && releasesMode !== 'all') {
@@ -8305,7 +8311,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       return;
     }
     if (
-      canWish &&
+      writesDiscography &&
       shouldAutoFetchDiscography({
         discographyCount: artist?.discography_count,
         discographyBusy,
@@ -8317,7 +8323,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       void updateDiscography((artist?.discography_count ?? 0) > 0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [releasesMode, artist?.discography_count, artist?.discography_synced_at, discographyBusy]);
+  }, [
+    releasesMode,
+    writesDiscography,
+    artist?.discography_count,
+    artist?.discography_synced_at,
+    discographyBusy,
+  ]);
 
   /** Route a toolbar/row action: Interactive Search opens the window;
    *  Automatic Search (any scope) / per-track Search run the scoped

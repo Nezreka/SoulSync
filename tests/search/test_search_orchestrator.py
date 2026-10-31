@@ -137,14 +137,15 @@ class _Lib2DB(_DB):
         finally:
             conn.close()
 
-    def artist(self, name, *, image_url=None, alias_of=None) -> int:
+    def artist(self, name, *, image_url=None, alias_of=None, monitored=True) -> int:
+        """A watched artist by default: the bucket lists library artists only."""
         from core.library2.importer import normalize_name
         conn = self._get_connection()
         try:
             artist_id = conn.execute(
                 "INSERT INTO lib2_artists(name, name_key, image_url,"
-                "                         canonical_artist_id) VALUES(?,?,?,?)",
-                (name, normalize_name(name), image_url, alias_of),
+                "                         canonical_artist_id, monitored) VALUES(?,?,?,?,?)",
+                (name, normalize_name(name), image_url, alias_of, int(monitored)),
             ).lastrowid
             conn.commit()
             return int(artist_id)
@@ -649,6 +650,17 @@ def test_fanout_hydrabase_worker_skipped_in_prod_mode():
     )
     orchestrator.run_enhanced_search('pink floyd', '', deps)
     assert worker.enqueued == []
+
+
+def test_db_artists_leave_out_a_row_the_library_does_not_hold(tmp_path):
+    # a guest credit or a bookmark-free discography row is a catalogue row,
+    # not your library: opening it from "In your library" filled in the
+    # whole discography of an artist you only looked up
+    db = _Lib2DB(tmp_path / 'members.sqlite')
+    db.artist('Gunna', monitored=False)
+    db.artist('Gunnar Watched')
+    result = orchestrator.run_enhanced_search('gunna', '', _build_deps(database=db))
+    assert [a['name'] for a in result['db_artists']] == ['Gunnar Watched']
 
 
 def test_fanout_db_artists_get_image_url_fixed(tmp_path):

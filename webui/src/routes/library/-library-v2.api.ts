@@ -560,9 +560,19 @@ export async function resolveLibraryV2DiscoveryArtistOwnership(input: {
   name: string;
   /** a provider album id from an ?album= link, resolved to its release here */
   albumProviderId?: string;
-}): Promise<{ artistId: number | null; owned: boolean; albumId: number | null }> {
+}): Promise<{
+  artistId: number | null;
+  owned: boolean;
+  inLibrary: boolean;
+  albumId: number | null;
+}> {
   const payload = await lib2Json<
-    Ok & { artist_id: number | null; owned?: boolean; album_id?: number | null }
+    Ok & {
+      artist_id: number | null;
+      owned?: boolean;
+      in_library?: boolean;
+      album_id?: number | null;
+    }
   >(
     apiClient.get('library/v2/discovery/artist', {
       searchParams: {
@@ -577,6 +587,7 @@ export async function resolveLibraryV2DiscoveryArtistOwnership(input: {
   return {
     artistId: payload.artist_id,
     owned: payload.owned === true,
+    inLibrary: payload.in_library === true || payload.owned === true,
     albumId: payload.album_id ?? null,
   };
 }

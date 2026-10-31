@@ -129,6 +129,11 @@ def test_list_artists_skips_a_guest_on_someone_elses_missing_track(imported_conn
 
     assert "Rihanna" not in names
     assert {"Drake", "Wizkid"} <= names
+    # the artist page asks the same question: one outside the library is read
+    # from the provider instead of having its discography written in
+    assert Q.get_artist(imported_conn, guest)["in_library"] is False
+    drake = imported_conn.execute("SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()[0]
+    assert Q.get_artist(imported_conn, drake)["in_library"] is True
 
 
 def test_queries_project_media_server_recognition_badges(imported_conn):

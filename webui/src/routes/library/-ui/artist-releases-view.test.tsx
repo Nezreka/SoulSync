@@ -188,6 +188,35 @@ describe('Library V2 artist detail — All Releases views', () => {
     ).toBeInTheDocument();
   }, 30_000);
 
+  it('reads the discography of an artist the library does not hold, writing nothing', async () => {
+    // a guest credit opened from a search or a track's artist column: the
+    // discography walk wrote 70 releases of someone you only looked at
+    const walk = vi.fn();
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({ in_library: false, albums: [], discography_count: 0 }),
+        }),
+      ),
+      http.post('/api/library/v2/artists/1/discography/refresh', () => {
+        walk();
+        return HttpResponse.json({ success: true, job_id: 'walk-1' });
+      }),
+      http.get('/api/artist-detail/:id', () =>
+        HttpResponse.json({
+          success: true,
+          artist: { id: 'sp-1', name: 'Portishead' },
+          discography: { albums: [{ id: 'al-3', title: 'Third' }], source: 'spotify' },
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&releases=all');
+
+    expect(await screen.findByText('Third')).toBeInTheDocument();
+    expect(walk).not.toHaveBeenCalled();
+  });
+
   it('keeps media-server sync in Tools and reports its background result', async () => {
     const sync = vi.fn();
     server.use(
@@ -961,6 +990,9 @@ describe('Library V2 artist detail — All Releases views', () => {
     [{ singles: [album(OWNED_SINGLE)] }, 'In your library', true],
     // only guest verses on other artists' music: in the library, but not theirs
     [{ guest_track_count: 6, guest_release_count: 6 }, 'Featured in your library', true],
+    // nothing on disk yet, but a wishlisted track or a watch: monitored, so its
+    // releases and their quality profile live in My Library
+    [{ in_library: true }, 'Monitored in your library', true],
     [{}, 'Not in your library', false],
   ])('labels the artist by what the library holds: %#', async (patch, label, myLibrary) => {
     server.use(
