@@ -15,6 +15,8 @@ export interface BackLabelEntry {
   type: 'page' | 'artist';
   pageId?: string;
   name?: string;
+  /** where the library's artist page goes back to for this entry */
+  href?: string;
 }
 
 /** Mirrors _ARTIST_DETAIL_BACK_LABELS; unknown pages fall back to Library. */

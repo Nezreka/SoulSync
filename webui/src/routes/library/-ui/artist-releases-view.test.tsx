@@ -997,6 +997,59 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(router.state.location.search).toMatchObject({ section: 'albums' });
   });
 
+  it('back never walks into the album it came up from', async () => {
+    // a cold load straight onto a release, then up to its artist: the chain
+    // is empty, and stepping back through history went into the album again,
+    // and from there to the artist, round and round
+    server.use(
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Dummy' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 1, name: 'Portishead' },
+            tracks: [],
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/albums/1/queue-status', () =>
+        HttpResponse.json({ success: true, tracks: {}, albums: {} }),
+      ),
+    );
+    const { router } = renderArtist('/library?artist=1&album=1');
+    fireEvent.click(await screen.findByRole('button', { name: /Portishead/ }));
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('album'));
+
+    fireEvent.click(await screen.findByRole('button', { name: /^← Back/ }));
+
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('artist'));
+    expect(router.state.location.pathname).toBe('/library');
+  });
+
+  it('an artist link from outside the library opens in the header picked for that', async () => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { artist_page: { header: 'rich', header_elsewhere: 'compact' } },
+        }),
+      ),
+    );
+    // the wishlist's way in: the shell's artist link, from another page
+    const { router } = renderArtist('/wishlist');
+    await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/wishlist'));
+    await act(() => router.navigate({ href: '/library?view=discovery&immersive=true&artist=1' }));
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ header: 'compact' }));
+    // inside the library a switch of the header is the user's and stays
+    await act(() => router.navigate({ href: '/library?artist=1&header=rich' }));
+    expect(router.state.location.search).toMatchObject({ header: 'rich' });
+  });
+
   it("is dev's styled back button, labelled with the page you came from", async () => {
     const { router } = renderArtist('/library');
     await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/library'));
