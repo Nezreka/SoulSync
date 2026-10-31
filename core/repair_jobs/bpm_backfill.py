@@ -93,10 +93,12 @@ class BpmBackfillJob(RepairJob):
 
         local_available = False
         if use_local:
-            try:
-                from core.sample.analyze import analyze_track  # noqa: F401
+            # librosa loads only in the analysis process (core.sample.isolated);
+            # importing core.sample.analyze here never checked it was installed
+            import importlib.util
+            if importlib.util.find_spec("librosa") is not None:
                 local_available = True
-            except ImportError:
+            else:
                 logger.warning("BPM backfill: librosa not available, local analysis disabled")
 
         if not (use_file_tags or beatport_on or deezer_client or local_available):
