@@ -18,10 +18,10 @@ useful action there is removing the copy, not filing it twice.
 
 from __future__ import annotations
 
+import json
 import os
 import re
-import threading
-import time
+import sqlite3
 from difflib import SequenceMatcher
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -38,10 +38,10 @@ _LENGTH_CLOSE_S = 3
 _LENGTH_FAR_S = 10
 _MAX_CANDIDATES = 6
 
-_cache: Dict[Tuple[Any, ...], Tuple[float, Dict[str, Any]]] = {}
-_cache_lock = threading.Lock()
-_CACHE_TTL = 3600.0
-_CACHE_MAX = 256
+# what the fingerprint said, kept with each result: a file AcoustID couldn't
+# be asked about is asked again once it can be
+RETRY_WHEN_AVAILABLE = ("unavailable", "no_backend")
+RETRY_LATER = ("error",)
 
 _BRACKETS = re.compile(r"\s*[\(\[][^)\]]*[\)\]]")
 
@@ -150,6 +150,23 @@ def _seconds(value: Any) -> Optional[float]:
     return number / 1000 if number > 10_000 else number
 
 
+def _file_length(path: Optional[str]) -> Optional[float]:
+    """the file's own length, for a row the catalogue holds none for"""
+    if not path:
+        return None
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(path)
+        return _seconds(getattr(getattr(audio, "info", None), "length", None))
+    except Exception:  # noqa: BLE001 - unreadable: the length just doesn't count
+        return None
+
+
+def _clock(seconds: float) -> str:
+    s = int(round(seconds))
+    return f"{s // 60}:{s % 60:02d}"
+
+
 def _score(candidate: Dict[str, Any], *, heard: Optional[Dict[str, Any]],
            entry: Dict[str, Any], length_s: Optional[float]) -> Tuple[float, List[str]]:
     guess = entry["guess"]
@@ -180,6 +197,7 @@ def _score(candidate: Dict[str, Any], *, heard: Optional[Dict[str, Any]],
             reasons.append("Same length")
         elif gap > _LENGTH_FAR_S:
             score -= 0.25
+            reasons.append(f"Length differs ({_clock(length_s)} vs {_clock(cand_s)})")
     number = candidate.get("track_number")
     if guess.get("track_number") and number and int(number) == int(guess["track_number"]):
         score += 0.05
@@ -187,18 +205,108 @@ def _score(candidate: Dict[str, Any], *, heard: Optional[Dict[str, Any]],
     return max(0.0, min(0.99, score)), reasons
 
 
-def _file_key(row: Dict[str, Any], path: Optional[str]) -> Tuple[Any, ...]:
+def ensure_unmatched_match_schema(cursor) -> None:
+    """the identifications, one per unmatched file, so a restart keeps them"""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS lib2_unmatched_matches (
+            file_id INTEGER PRIMARY KEY,
+            file_key TEXT NOT NULL,
+            status TEXT NOT NULL,
+            fingerprint_status TEXT,
+            best_confidence REAL,
+            result_json TEXT NOT NULL,
+            identified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+
+
+def _stored_rows(conn, file_ids: List[int]) -> Dict[int, Any]:
+    if not file_ids:
+        return {}
+    marks = ",".join("?" for _ in file_ids)
     try:
-        stat = os.stat(path) if path else None
-    except OSError:
-        stat = None
-    return (row["file_id"], row["file_path"], stat.st_size if stat else None,
-            int(stat.st_mtime) if stat else None)
+        rows = conn.execute(
+            f"SELECT file_id, file_key, status, fingerprint_status, best_confidence, "
+            f"result_json, identified_at FROM lib2_unmatched_matches WHERE file_id IN ({marks})",
+            [int(i) for i in file_ids]).fetchall()
+    except sqlite3.OperationalError:
+        # a read never creates the table: nothing identified yet
+        return {}
+    return {int(r["file_id"]): r for r in rows}
 
 
-def forget_identifications() -> None:
-    with _cache_lock:
-        _cache.clear()
+def stored_results(conn, entries: List[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
+    """the stored identification of each entry whose file hasn't changed since"""
+    rows = _stored_rows(conn, [int(e["file_id"]) for e in entries])
+    out = {}
+    for entry in entries:
+        row = rows.get(int(entry["file_id"]))
+        if row is not None and row["file_key"] == entry["file_key"]:
+            out[int(entry["file_id"])] = json.loads(row["result_json"])
+    return out
+
+
+def stale_entries(conn, entries: List[Dict[str, Any]], *, acoustid_ready: bool,
+                  retry_after_s: float = 3600.0) -> List[Dict[str, Any]]:
+    """the entries that need identifying: never done, changed since, or done
+    without a fingerprint that can be had now"""
+    rows = _stored_rows(conn, [int(e["file_id"]) for e in entries])
+    out = []
+    for entry in entries:
+        row = rows.get(int(entry["file_id"]))
+        if row is None or row["file_key"] != entry["file_key"]:
+            out.append(entry)
+        elif acoustid_ready and row["fingerprint_status"] in RETRY_WHEN_AVAILABLE:
+            out.append(entry)
+        elif row["fingerprint_status"] in RETRY_LATER and _age_s(row["identified_at"]) > retry_after_s:
+            out.append(entry)
+    return out
+
+
+def _age_s(stamp: Any) -> float:
+    from datetime import datetime, timezone
+    try:
+        then = datetime.strptime(str(stamp)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return float("inf")
+    return (datetime.now(timezone.utc) - then).total_seconds()
+
+
+def _store(conn, entry: Dict[str, Any], result: Dict[str, Any], fingerprint_status: str) -> None:
+    ensure_unmatched_match_schema(conn.cursor())
+    best = result["candidates"][0]["confidence"] if result["candidates"] else None
+    conn.execute(
+        "INSERT OR REPLACE INTO lib2_unmatched_matches(file_id, file_key, status, "
+        "fingerprint_status, best_confidence, result_json, identified_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+        (int(entry["file_id"]), entry["file_key"], result["status"], fingerprint_status,
+         best, json.dumps(result)))
+    conn.commit()
+
+
+def strong_matches_ready(conn, *, at: float = 0.85) -> int:
+    """how many unmatched files have a strong match waiting to be accepted.
+    one count for the library banner: no per-file work"""
+    from .unmatched_review import UNKNOWN_ARTISTS_CTE
+    query = UNKNOWN_ARTISTS_CTE + """
+        SELECT COUNT(*)
+          FROM unknown u
+          CROSS JOIN lib2_albums al ON al.primary_artist_id = u.id
+          JOIN lib2_tracks t ON t.album_id = al.id
+          JOIN lib2_track_files f ON f.track_id = t.id
+          JOIN lib2_unmatched_matches m ON m.file_id = f.id
+         WHERE COALESCE(f.file_state, 'active') = 'active'
+           AND m.file_key = f.path || '|' || COALESCE(f.size, '') || '|' || COALESCE(f.content_hash, '')
+           AND m.status = 'matched' AND m.best_confidence >= ?
+           {waiting}
+    """
+    waiting = ("AND NOT EXISTS (SELECT 1 FROM rematch_hints h WHERE h.status = 'pending' "
+               "AND h.replace_track_id = t.id)")
+    for clause in (waiting, ""):
+        try:
+            return int(conn.execute(query.format(waiting=clause), (at,)).fetchone()[0])
+        except sqlite3.OperationalError:
+            continue
+    return 0
 
 
 def identify_file(
@@ -209,41 +317,41 @@ def identify_file(
     search: Optional[Callable[[str, str, str, str], List[Dict[str, Any]]]] = None,
     source: Optional[str] = None,
     resolve: Optional[Callable[[str], Optional[str]]] = None,
+    refresh: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """The ranked releases this unmatched file could be, or None when the file
-    isn't one of the unmatched (matched since, or not a file at all)."""
+    isn't one of the unmatched (matched since, or not a file at all). The
+    answer is stored; a stored one for the unchanged file is returned as is
+    unless ``refresh``."""
     entry = unmatched_entry(conn, int(file_id))
     if entry is None:
         return None
+    if not refresh:
+        stored = stored_results(conn, [entry]).get(int(entry["file_id"]))
+        if stored is not None:
+            return stored
     if resolve is None:
         from core.library2.paths import resolve_lib2_path
         resolve = resolve_lib2_path
     path = entry["file_path"] if os.path.isfile(entry["file_path"]) else resolve(entry["file_path"])
-    key = _file_key(entry, path)
-    with _cache_lock:
-        hit = _cache.get(key)
-    if hit and time.monotonic() - hit[0] < _CACHE_TTL:
-        return hit[1]
-
-    result = _identify(conn, entry, path, lookup=lookup or _default_lookup,
-                       search=search or _default_search, source=source)
-    if result["status"] not in ("error",):
-        with _cache_lock:
-            if len(_cache) >= _CACHE_MAX:
-                _cache.pop(next(iter(_cache)))
-            _cache[key] = (time.monotonic(), result)
+    result, fingerprint_status = _identify(conn, entry, path, lookup=lookup or _default_lookup,
+                                           search=search or _default_search, source=source)
+    # a missing file may come back; nothing about it is worth keeping
+    if result["status"] != "missing":
+        _store(conn, entry, result, fingerprint_status)
     return result
 
 
 def _identify(conn, entry: Dict[str, Any], path: Optional[str], *,
-              lookup, search, source: Optional[str]) -> Dict[str, Any]:
+              lookup, search, source: Optional[str]) -> Tuple[Dict[str, Any], str]:
     guess = entry["guess"]
-    length_s = _seconds(entry.get("duration"))
+    # an unmatched row usually has no length: the file has one
+    length_s = _seconds(entry.get("duration")) or _file_length(path)
     result: Dict[str, Any] = {"status": "no_match", "method": "name", "heard": None,
                               "candidates": [], "already_have": None, "message": ""}
     if not path:
         result.update(status="missing", message="The file isn’t on disk any more.")
-        return result
+        return result, "missing"
 
     heard: List[Dict[str, Any]] = []
     fingerprint_note = ""
@@ -337,4 +445,4 @@ def _identify(conn, entry: Dict[str, Any], path: Optional[str], *,
                                  "Play it, then search.").strip()
     if heard or result["status"] != "no_match":
         result["message"] = result["message"] or fingerprint_note
-    return result
+    return result, str(status or "error")

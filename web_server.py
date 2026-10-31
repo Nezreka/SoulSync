@@ -9309,7 +9309,21 @@ def get_library_unmatched_summary():
     'Unknown Artist' rows, no per-track work.
     """
     try:
-        return jsonify({"success": True, **get_database().get_unmatched_import_summary()})
+        database = get_database()
+        summary = database.get_unmatched_import_summary()
+        # how many of them have a strong match waiting: one count, no per-file work
+        summary["ready"] = 0
+        if summary.get("count"):
+            try:
+                from core.library2.unmatched_identify import strong_matches_ready
+                conn = database._get_connection()
+                try:
+                    summary["ready"] = strong_matches_ready(conn)
+                finally:
+                    conn.close()
+            except Exception as e:  # noqa: BLE001 - the count still stands
+                logger.debug(f"unmatched ready count failed: {e}")
+        return jsonify({"success": True, **summary})
     except Exception as e:
         logger.error(f"Error fetching unmatched import summary: {e}")
         return jsonify({"success": False, "error": str(e), "count": 0, "artist_id": None}), 500
@@ -21840,6 +21854,27 @@ def _start_discover_warmer():
 import sys as _sys
 if 'pytest' not in _sys.modules and os.environ.get('SOULSYNC_NO_DISCOVER_WARMUP', '0') != '1':
     _start_discover_warmer()
+
+
+def _start_library_background():
+    """the unmatched files' matcher, and the watch that tells it (and the
+    "could be better" counts) when new files have landed"""
+    from core.library2.artist_reader import refresh_upgradable_counts
+    from core.library2.library_watch import on_files_arrived, start_library_watch
+    from core.library2.unmatched_matcher import start_unmatched_matcher
+    connect = lambda: get_database()._get_connection()  # noqa: E731
+    matcher = start_unmatched_matcher(connect)
+    on_files_arrived(refresh_upgradable_counts)
+    on_files_arrived(matcher.nudge)
+    start_library_watch(connect)
+
+
+# never under pytest, for the same reason as the warmer
+if 'pytest' not in _sys.modules and os.environ.get('SOULSYNC_NO_LIBRARY_BACKGROUND', '0') != '1':
+    try:
+        _start_library_background()
+    except Exception as _e:  # noqa: BLE001 - the library works without it
+        logger.warning(f"library background workers did not start: {_e}")
 
 _init_download_validation(
     matching_engine_obj=matching_engine,

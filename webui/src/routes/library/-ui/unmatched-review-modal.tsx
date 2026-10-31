@@ -16,7 +16,7 @@
  * every file plays, so an untagged one can be heard before deciding.
  */
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useAccessibleModal } from '@/components/dialog';
@@ -27,6 +27,8 @@ import {
   identifyUnmatchedTrack,
   LIBRARY_V2_QUERY_KEY,
   libraryV2UnmatchedTracksQueryOptions,
+  nudgeUnmatchedMatcher,
+  retryUnmatchedFiling,
   type LibraryV2UnmatchedCandidate,
   type LibraryV2UnmatchedIdentify,
   type LibraryV2UnmatchedTrack,
@@ -109,6 +111,7 @@ function Cover({ url }: { url: string }) {
 type RowState =
   | { kind: 'identifying' }
   | { kind: 'filing'; album: string }
+  | { kind: 'stuck'; album: string; reason: string; retryId: number | null }
   | { kind: 'result'; result: LibraryV2UnmatchedIdentify }
   | { kind: 'failed'; message: string };
 
@@ -119,6 +122,7 @@ function UnmatchedRow({
   onAccept,
   onRemove,
   onSearch,
+  onRetry,
 }: {
   track: LibraryV2UnmatchedTrack;
   state: RowState;
@@ -126,6 +130,7 @@ function UnmatchedRow({
   onAccept: (candidate: LibraryV2UnmatchedCandidate) => void;
   onRemove: (already: { title: string; album_title: string }) => void;
   onSearch: () => void;
+  onRetry: (retryId: number) => void;
 }) {
   const [more, setMore] = useState(false);
   const [fileAnyway, setFileAnyway] = useState(false);
@@ -148,6 +153,26 @@ function UnmatchedRow({
       <div className={`${styles.panel} ${styles.filing}`} aria-live="polite">
         <span aria-hidden="true">✓</span> Filing under {state.album}. It leaves this list after the
         next import pass.
+      </div>
+    );
+  } else if (state.kind === 'stuck') {
+    panel = (
+      <div className={`${styles.panel} ${styles.duplicate}`}>
+        <p>
+          <strong>Couldn’t file it under {state.album}.</strong> {state.reason}
+        </p>
+        <div className={styles.panelActions}>
+          {state.retryId !== null ? (
+            <button
+              type="button"
+              className={styles.primary}
+              disabled={busy}
+              onClick={() => onRetry(state.retryId as number)}
+            >
+              {busy ? 'Trying…' : 'Try again'}
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   } else if (state.kind === 'failed') {
@@ -310,33 +335,65 @@ export function UnmatchedReviewModal({
   onFindMatch: (track: LibraryV2UnmatchedTrack) => void;
 }) {
   const queryClient = useQueryClient();
-  const query = useQuery(libraryV2UnmatchedTracksQueryOptions());
+  // while the background matcher works, its answers land in the list
+  const query = useQuery({
+    ...libraryV2UnmatchedTracksQueryOptions(),
+    refetchInterval: (q) => {
+      const data = q.state.data;
+      if (!data?.matcher) return false;
+      const waiting = data.tracks.some((t) => !t.identified && !t.filing);
+      return data.matcher.running || waiting ? 3000 : false;
+    },
+  });
   const [busy, setBusy] = useState<Set<number>>(() => new Set());
   // accepted this visit: the list still has them until the import pass
   const [filed, setFiled] = useState<Record<number, string>>({});
   const close = useCallback(() => onClose(), [onClose]);
   const { ref, onBackdropClick } = useAccessibleModal<HTMLDivElement>(close);
 
-  const tracks = query.data ?? [];
+  const tracks = query.data?.tracks ?? [];
+  const matcher = query.data?.matcher ?? null;
+  const background = query.isSuccess && matcher !== null;
   const needsLookup = (track: LibraryV2UnmatchedTrack) =>
-    !track.filing && filed[track.file_id] === undefined;
-  // one lookup at a time, in list order: fingerprinting is CPU on the server
-  // and AcoustID allows three requests a second
+    !track.filing && !track.identified && filed[track.file_id] === undefined;
+
+  // files nothing has looked at yet (they just landed): the matcher is woken
+  // once rather than waiting for its next round
+  const nudged = useRef(false);
+  useEffect(() => {
+    if (!background || nudged.current || matcher?.running) return;
+    if (!tracks.some(needsLookup)) return;
+    nudged.current = true;
+    void nudgeUnmatchedMatcher().catch(() => undefined);
+  });
+
+  // a server without the background matcher: the review looks them up
+  // itself, one at a time in list order (AcoustID allows three a second)
   const lookups = useQueries({
     queries: tracks.map((track) => ({ ...identifyQuery(track.file_id), enabled: false })),
   });
-  const firstPending = tracks.findIndex(
-    (track, n) => needsLookup(track) && lookups[n] && lookups[n].isPending,
-  );
+  const firstPending =
+    query.isSuccess && matcher === null
+      ? tracks.findIndex((track, n) => needsLookup(track) && lookups[n] && lookups[n].isPending)
+      : -1;
   const active = firstPending >= 0 ? tracks[firstPending] : null;
   useQuery({ ...identifyQuery(active?.file_id ?? -1), enabled: active !== null });
 
   const stateOf = (track: LibraryV2UnmatchedTrack, n: number): RowState => {
+    if (track.filing?.failed) {
+      return {
+        kind: 'stuck',
+        album: track.filing.album_name,
+        reason: track.filing.failed,
+        retryId: track.filing.retry_id,
+      };
+    }
     if (track.filing) return { kind: 'filing', album: track.filing.album_name };
     if (filed[track.file_id] !== undefined) return { kind: 'filing', album: filed[track.file_id] };
-    // the folder already says it's a copy: no need to listen first
+    if (track.identified) return { kind: 'result', result: track.identified };
     const lookup = lookups[n];
     if (lookup?.data) return { kind: 'result', result: lookup.data };
+    // the folder already says it's a copy: no need to listen first
     if (track.duplicate_of) {
       return {
         kind: 'result',
@@ -387,6 +444,19 @@ export function UnmatchedReviewModal({
     } catch (error) {
       window.showToast?.(error instanceof Error ? error.message : 'Could not file it', 'error');
       return false;
+    } finally {
+      mark(track.file_id, false);
+    }
+  };
+
+  const retry = async (track: LibraryV2UnmatchedTrack, retryId: number) => {
+    mark(track.file_id, true);
+    try {
+      await retryUnmatchedFiling(retryId);
+      window.showToast?.('Trying again. It updates after the import pass.', 'success');
+      void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+    } catch (error) {
+      window.showToast?.(error instanceof Error ? error.message : 'Could not try again', 'error');
     } finally {
       mark(track.file_id, false);
     }
@@ -489,6 +559,21 @@ export function UnmatchedReviewModal({
           </div>
         </header>
 
+        {matcher?.running && matcher.total > 0 ? (
+          <div className={styles.progress} role="status">
+            <span>
+              Matching in the background · {Math.min(matcher.done, matcher.total)} of{' '}
+              {matcher.total}
+            </span>
+            <span className={styles.progressTrack} aria-hidden="true">
+              <span
+                className={styles.progressFill}
+                style={{ width: `${(100 * matcher.done) / matcher.total}%` }}
+              />
+            </span>
+          </div>
+        ) : null}
+
         <div className={styles.body} aria-busy={query.isLoading || undefined}>
           {query.isLoading ? (
             <p className={styles.state}>Looking at the files…</p>
@@ -516,6 +601,7 @@ export function UnmatchedReviewModal({
                   }
                   onRemove={(already) => void remove(track, already)}
                   onSearch={() => onFindMatch(track)}
+                  onRetry={(retryId) => void retry(track, retryId)}
                 />
               ))}
             </ul>

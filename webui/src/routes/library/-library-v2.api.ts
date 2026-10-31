@@ -2209,6 +2209,8 @@ export interface LibraryV2UnmatchedSummary {
   count: number;
   /** The catalogue artist holding the most of them, for the link. */
   artist_id: number | null;
+  /** how many have a strong match waiting, found in the background */
+  ready?: number;
 }
 
 /**
@@ -2259,7 +2261,40 @@ export interface LibraryV2UnmatchedTrack {
     artist_name: string;
   } | null;
   /** re-identified and waiting for the import pass: the release it goes to */
-  filing: { album_name: string; artist_name: string } | null;
+  filing: {
+    album_name: string;
+    artist_name: string;
+    /** the import pass turned the staged copy down: why */
+    failed: string | null;
+    /** the import inbox row to retry it with */
+    retry_id: number | null;
+  } | null;
+  /** what the background matcher found, null until it has looked */
+  identified: LibraryV2UnmatchedIdentify | null;
+}
+
+/** the background matcher's progress through the files */
+export interface LibraryV2UnmatchedMatcher {
+  running: boolean;
+  done: number;
+  total: number;
+}
+
+export interface LibraryV2UnmatchedList {
+  tracks: LibraryV2UnmatchedTrack[];
+  /** null when the background matcher isn't running on this server */
+  matcher: LibraryV2UnmatchedMatcher | null;
+}
+
+/** send a re-file the import turned down through the import again */
+export async function retryUnmatchedFiling(retryId: number): Promise<void> {
+  const data = await readJson<Ok>(apiClient.post(`auto-import/retry/${retryId}`));
+  if (!data.success) throw new Error(data.error || 'Could not try again');
+}
+
+/** wake the background matcher now */
+export async function nudgeUnmatchedMatcher(): Promise<void> {
+  await lib2Json(apiClient.post('library/v2/unmatched/match'), 'Could not start matching');
 }
 
 /** one release the file could be, ranked by what backs it */
@@ -2309,10 +2344,15 @@ export function libraryV2UnmatchedTracksQueryOptions() {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'unmatched', 'tracks'] as const,
     queryFn: () =>
-      lib2Json<Ok & { tracks: LibraryV2UnmatchedTrack[] }>(
+      lib2Json<Ok & LibraryV2UnmatchedList>(
         apiClient.get('library/v2/unmatched'),
         'Could not load the unmatched tracks',
-      ).then((data) => data.tracks),
+      ).then(
+        (data): LibraryV2UnmatchedList => ({
+          tracks: data.tracks,
+          matcher: data.matcher ?? null,
+        }),
+      ),
   });
 }
 

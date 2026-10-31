@@ -20137,16 +20137,20 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                # the Unknown Artist rows first, then out from them: left to
+                # itself the planner scanned every album (2s per library load)
                 cursor.execute("""
-                    SELECT ar.id AS artist_id, COUNT(DISTINCT t.id) AS track_count
-                    FROM lib2_artists ar
-                    JOIN lib2_albums al ON al.primary_artist_id = ar.id
+                    WITH unknown AS MATERIALIZED (
+                        SELECT id FROM lib2_artists
+                         WHERE LOWER(TRIM(name)) = 'unknown artist')
+                    SELECT u.id AS artist_id, COUNT(DISTINCT t.id) AS track_count
+                    FROM unknown u
+                    CROSS JOIN lib2_albums al ON al.primary_artist_id = u.id
                     JOIN lib2_tracks t ON t.album_id = al.id
                     JOIN lib2_track_files f ON f.track_id = t.id
-                    WHERE LOWER(TRIM(ar.name)) = 'unknown artist'
-                      AND f.path IS NOT NULL AND TRIM(f.path) <> ''
+                    WHERE f.path IS NOT NULL AND TRIM(f.path) <> ''
                       AND COALESCE(f.file_state, 'active') = 'active'
-                    GROUP BY ar.id
+                    GROUP BY u.id
                 """)
                 rows = cursor.fetchall()
 
