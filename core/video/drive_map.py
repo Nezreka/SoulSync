@@ -201,7 +201,7 @@ def _recognise(db, folder: str, sample_paths: List[str], roles: List[tuple]) -> 
     bases = [r[0] for r in roles]
     if not bases:
         return None
-    for p in sample_paths[:5]:
+    for p in sample_paths[:2]:   # each is a stat over the network
         real = resolve_video_file_path(p, bases, drive_map=[])
         if not real:
             continue
@@ -217,6 +217,55 @@ def _recognise(db, folder: str, sample_paths: List[str], roles: List[tuple]) -> 
     return None
 
 
+_COUNTS_TTL = 600.0
+_counts_cache: Dict[str, Any] = {}
+
+
+def _fast_norm(path: str) -> str:
+    """_norm_server for the hot loop: separators only (123k paths, no regex)"""
+    return path.replace("\\", "/").rstrip("/")
+
+
+def _drive_roots_cached(db) -> List[str]:
+    key = (str(getattr(db, "database_path", id(db))), "roots")
+    hit = _counts_cache.get(key)
+    if hit and time.monotonic() - hit[0] < _COUNTS_TTL:
+        return hit[1]
+    roots = sorted({r for r in (drive_root(p) for p in db.media_file_paths()) if r})
+    _counts_cache[key] = (time.monotonic(), roots)
+    return roots
+
+
+def _counts_cached(db, folders: tuple):
+    """(files per folder, a few sample paths per folder), one pass over the
+    library's paths, kept 10 minutes: the settings page asks on every open and
+    every save, and the library has 100k+ files"""
+    key = (str(getattr(db, "database_path", id(db))), folders)
+    hit = _counts_cache.get(key)
+    if hit and time.monotonic() - hit[0] < _COUNTS_TTL:
+        return hit[1], hit[2]
+    depth_of = {f: len([x for x in f.split("/") if x]) for f in folders}
+    depths = sorted(set(depth_of.values()), reverse=True)   # deepest wins
+    wanted = set(folders)
+    counts: Dict[str, int] = {f: 0 for f in folders}
+    samples: Dict[str, List[str]] = {f: [] for f in folders}
+    for p in db.media_file_paths():
+        n = _fast_norm(p)
+        lead = "//" if n.startswith("//") else ("/" if n.startswith("/") else "")
+        parts = [x for x in n.split("/") if x]
+        for d in depths:
+            if len(parts) < d:
+                continue
+            folder = "//" + "/".join(parts[:d]) if lead == "//" else lead + "/".join(parts[:d])
+            if folder in wanted:
+                counts[folder] += 1
+                if len(samples[folder]) < 2:
+                    samples[folder].append(p)
+                break
+    _counts_cache[key] = (time.monotonic(), counts, samples)
+    return counts, samples
+
+
 def server_folders(db, *, fetch: Optional[Callable[[], Any]] = None) -> List[Dict[str, Any]]:
     """every folder the server's libraries read, Movies or TV, biggest first,
     with how many library files are in it and where SoulSync reaches it"""
@@ -229,23 +278,10 @@ def server_folders(db, *, fetch: Optional[Callable[[], Any]] = None) -> List[Dic
                 by_server[server] = {"server": server, "kind": f.get("kind"),
                                      "library": f.get("library")}
     # the library's own files: counts, and the drives when the server can't say
-    paths = db.media_file_paths()
     if not by_server:
-        for p in paths:
-            root = drive_root(p)
-            if root and root not in by_server:
-                by_server[root] = {"server": root, "kind": None, "library": None}
-    order = sorted(by_server, key=len, reverse=True)
-    counts: Dict[str, int] = {k: 0 for k in by_server}
-    samples: Dict[str, List[str]] = {k: [] for k in by_server}
-    for p in paths:
-        n = _norm_server(p)
-        for k in order:
-            if n == k or n.startswith(k.rstrip("/") + "/"):
-                counts[k] += 1
-                if len(samples[k]) < 5:
-                    samples[k].append(p)
-                break
+        for root in _drive_roots_cached(db):
+            by_server[root] = {"server": root, "kind": None, "library": None}
+    counts, samples = _counts_cached(db, tuple(sorted(by_server)))
     saved = {e["server"]: e for e in load(db)}
     roles = _configured_roles(db)
     out = []

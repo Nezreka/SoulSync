@@ -21,11 +21,13 @@ def db(tmp_path):
 def _fresh_cache(monkeypatch):
     drive_map.forget()
     drive_map._folders_cache.update(at=0.0, folders=None)
+    drive_map._counts_cache.clear()
     # never ask a real server: the server's folder list is injected per test
     monkeypatch.setattr("core.video.sources.server_library_folders", lambda: None)
     yield
     drive_map.forget()
     drive_map._folders_cache.update(at=0.0, folders=None)
+    drive_map._counts_cache.clear()
 
 
 def _movie(db, sid, path, size=1):
@@ -214,3 +216,17 @@ def test_a_reached_movies_folder_is_a_library_folder_names_and_all(db, tmp_path,
     proposed = [e["proposed"] for e in mass_rename.preview()["entries"]]
     # named inside its own MOVIES folder, never pulled out of it
     assert proposed == [str(folder / "Akira (1988)" / "Akira (1988).mkv")]
+
+
+def test_the_folder_counts_are_read_once_not_on_every_open_and_save(db, monkeypatch):
+    # 100k+ library paths: a save used to take minutes rebuilding the list
+    for i in range(3):
+        _movie(db, f"m{i}", f"/mnt/easystore3/MOVIES/M{i}.mkv")
+    calls = []
+    real = db.media_file_paths
+    monkeypatch.setattr(db, "media_file_paths", lambda *a, **k: calls.append(1) or real(*a, **k))
+    folders = [{"server": "/mnt/easystore3/MOVIES", "kind": "movie", "library": "Movies"}]
+    first = drive_map.server_folders(db, fetch=lambda: folders)
+    again = drive_map.server_folders(db, fetch=lambda: folders)
+    assert first[0]["files"] == again[0]["files"] == 3
+    assert len(calls) == 1
