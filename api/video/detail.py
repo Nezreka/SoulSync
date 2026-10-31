@@ -209,14 +209,19 @@ def register_routes(bp):
     @bp.route("/detail/<kind>/<int:item_id>/watched", methods=["POST"])
     def video_set_watched(kind, item_id):
         """Played/unplayed toggle — local watch state + server markPlayed. An
-        episode or season id marks just that one."""
+        episode or season id marks just that one. Only the admin's click goes to
+        the server: the server account is the admin's, so a member marking
+        something watched would land in the admin's history (#1941)."""
+        from flask import g
+
         from core.video import metadata as med
 
         from . import get_video_db
         if kind not in ("movie", "show", "episode", "season"):
             return jsonify({"error": "bad kind"}), 400
         watched = bool((request.get_json(silent=True) or {}).get("watched"))
-        res = med.set_watched(get_video_db(), kind, item_id, watched)
+        is_admin = bool(getattr(g, "is_admin", getattr(g, "profile_id", 1) == 1))
+        res = med.set_watched(get_video_db(), kind, item_id, watched, push=is_admin)
         if not res.get("ok"):
             return jsonify({"error": res.get("error", "not found")}), 404
         return jsonify(res)

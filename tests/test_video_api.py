@@ -2116,3 +2116,20 @@ def test_acquisition_state_does_not_count_specials_or_unaired_as_missing(tmp_pat
         assert body["specials_missing"] == 1 and body["upcoming"] == 1
     finally:
         videoapi._video_db = None
+
+
+def test_only_the_admins_watched_click_goes_to_the_server(tmp_path, monkeypatch):
+    """#1941: the server account is the admin's. A member's watched click stays
+    local; it would otherwise land in the admin's plex history."""
+    from core.video import metadata as med
+    calls = []
+
+    def fake_set_watched(db, kind, item_id, watched, source=None, push=True):
+        calls.append(push)
+        return {"ok": True, "watched": watched, "pushed": False}
+    monkeypatch.setattr(med, "set_watched", fake_set_watched)
+    for is_admin in (False, True):
+        c = _client_as(tmp_path, is_admin=is_admin)
+        r = c.post("/api/video/detail/movie/1/watched", json={"watched": True})
+        assert r.status_code == 200
+    assert calls == [False, True]
