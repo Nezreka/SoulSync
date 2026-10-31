@@ -8,6 +8,7 @@ import { fetchLibraryArtistIdentity } from '../-artist-detail.api';
 import { artistDetailSearchSchema } from '../-artist-detail.types';
 import { ArtistDetailPage } from '../-ui/artist-detail-page';
 import {
+  artistHeaderFromElsewhere,
   LIBRARY_V2_QUERY_KEY,
   resolveLibraryV2DiscoveryArtistOwnership,
 } from '../../library/-library-v2.api';
@@ -97,6 +98,7 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
           album: focusAlbum,
           view: 'discovery',
           immersive: true,
+          header: await artistHeaderFromElsewhere(context.queryClient),
           ...(owned ? {} : { releases: 'all' as const }),
         },
         replace: true,

@@ -2,6 +2,7 @@ import { Tooltip } from '@base-ui/react/tooltip';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import {
   getRouteApi,
+  useRouter,
   useNavigate as useRouterNavigate,
   type UseNavigateResult,
 } from '@tanstack/react-router';
@@ -31,12 +32,13 @@ import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
 import { profileAsksFirst } from '@/platform/shell/download-rights';
+import { artistNavigationOrigin } from '@/platform/shell/last-navigation';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { ArtistDetailResponse } from '../../artist-detail/-artist-detail.types';
 
 import { playLibraryV2ArtistRadio } from '../-artist-radio';
-import { bitrateKbps, formatBitrate } from '../-bitrate';
+import { bitrateKbps, formatBitrate, formatQuality, qualityParts } from '../-bitrate';
 import {
   analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
@@ -144,7 +146,10 @@ import {
   songQueueTrack,
 } from '../-library-v2.songs';
 import {
+  ARTIST_TOOLBAR_BUTTONS,
+  type ArtistToolbarButton,
   LIBRARY_V2_WANTED_KINDS,
+  type LibraryV2ArtistPageHeader,
   type LibraryV2AlbumDetail,
   type LibraryV2AlbumListItem,
   type LibraryV2AlbumSort,
@@ -168,6 +173,7 @@ import {
   type LibraryV2Track,
   type LibraryV2TrackFile,
   type LibraryV2TrackTableColumns,
+  type LibraryV2UiPreferences,
   type LibraryV2WantedKind,
   type LibraryV2WantedRow,
 } from '../-library-v2.types';
@@ -176,6 +182,7 @@ import {
   artistDetailQueryOptions,
   watchlistIdentity,
 } from '../../artist-detail/-artist-detail.api';
+import { ensurePageOrigin, pushArtistOrigin } from '../../artist-detail/-artist-detail.back-label';
 import { announceWatchlistFollow } from '../../artist-detail/-artist-detail.enrich-match';
 import { syncResultMessage } from '../../artist-detail/-artist-detail.meta';
 import {
@@ -203,8 +210,13 @@ import {
 import { EnhanceQualityModal } from './enhance-quality-modal';
 import { ExportArtistsModal } from './export-modal';
 import { FilePathCellBody } from './file-path-cell';
-import { HistoryEventList } from './history-event-list';
-import { groupHistoryEvents, summarizeRecentHistory } from './history-groups';
+import { HistoryEventList, HistorySteps, HistoryTree } from './history-event-list';
+import {
+  groupHistoryEvents,
+  historySteps,
+  historyTree,
+  summarizeRecentHistory,
+} from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
 import classic from './library-classic-cards.module.css';
 import {
@@ -587,32 +599,18 @@ function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
     return <span className={styles.qualityPlaceholderDash}>—</span>;
   }
 
-  const showFormat = prefsQuery.data?.track_table.quality_show_format ?? true;
-  const showResolution = prefsQuery.data?.track_table.quality_show_resolution ?? true;
-  const showBitrate = prefsQuery.data?.track_table.quality_show_bitrate ?? true;
-
-  const fmt = showFormat ? (file.format ?? '').toUpperCase() || null : null;
-  const bitDepth = showResolution && file.bit_depth ? `${file.bit_depth}bit` : null;
-  const sampleRate =
-    showResolution && file.sample_rate
-      ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}kHz`
-      : null;
-  const resolution = [bitDepth, sampleRate].filter(Boolean).join('/');
   // An Opus/AAC bitrate is an average, not a setting — printed like a CBR
   // number it invites "this Opus is worse than that MP3", which is the
   // opposite of what it says.
-  const rate = showBitrate
-    ? formatBitrate(file.bitrate, file.format)
-    : { label: null, title: undefined };
-  const qualityBadge = [fmt, resolution || null, rate.label].filter(Boolean).join(' · ');
+  const quality = formatQuality(file, qualityParts(prefsQuery.data));
 
-  if (!qualityBadge) return null;
+  if (!quality.label) return null;
   const retention = retentionQualityInfo(file);
 
   return (
     <span className={styles.qualityDisplay}>
-      <span className={styles.qualityTag} title={rate.title}>
-        {qualityBadge}
+      <span className={styles.qualityTag} title={quality.title}>
+        {quality.label}
       </span>
       {retention ? (
         <span className={styles.retentionQualityBadge} title={retention.title}>
@@ -2683,8 +2681,11 @@ export function HistoryModal({
   entityId: number;
   onClose: () => void;
 }) {
-  const [limit, setLimit] = useState(50);
-  const maxLimit = scope === 'artist' ? 200 : 500;
+  const maxLimit = 500;
+  const [byTrack, setByTrack] = useState(true);
+  // a track's row needs its whole story, not the newest 50 events of the artist
+  const [pageLimit, setLimit] = useState(50);
+  const limit = byTrack ? maxLimit : pageLimit;
   const historyQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'history', scope, entityId, limit],
     queryFn: () =>
@@ -2695,7 +2696,6 @@ export function HistoryModal({
   });
   const [category, setCategory] = useState<LibraryV2HistoryCategory | 'all'>('all');
   const [filter, setFilter] = useState('');
-  const [grouped, setGrouped] = useState(true);
   const allRows = historyQuery.data ?? [];
   const availableCategories = Array.from(new Set(allRows.map((h) => h.category)));
   const rows = allRows.filter(
@@ -2705,14 +2705,11 @@ export function HistoryModal({
         .toLowerCase()
         .includes(filter.trim().toLowerCase()),
   );
-  const groups = grouped
-    ? groupHistoryEvents(rows)
-    : rows.map((h, i) => ({ key: String(i), entries: [h] }));
   return (
     <LibraryToolDialog
       title="History"
       onClose={onClose}
-      description="Expand an activity to see the affected tracks and the reason for each result."
+      description="One row per track: what it went through. Expand it for every retry and check."
       footer={
         <div className={styles.modalActions}>
           <span className={styles.previewQuiet}>
@@ -2759,8 +2756,8 @@ export function HistoryModal({
           ))}
         </select>
         <label className={styles.checkOption}>
-          <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} />
-          Group similar
+          <input type="checkbox" checked={byTrack} onChange={(e) => setByTrack(e.target.checked)} />
+          Group by track
         </label>
       </div>
       <div className={styles.historyList}>
@@ -2783,8 +2780,10 @@ export function HistoryModal({
               ? 'No events match these filters.'
               : `No recorded history for this ${scope} yet.`}
           </div>
+        ) : byTrack ? (
+          <HistoryTree nodes={historyTree(rows)} />
         ) : (
-          <HistoryEventList groups={groups} />
+          <HistoryEventList groups={groupHistoryEvents(rows)} />
         )}
       </div>
     </LibraryToolDialog>
@@ -4667,32 +4666,35 @@ export function LibraryV2Page() {
   return (
     <LibraryV2CanWriteContext.Provider value={canWrite}>
       <LibraryV2CanWishContext.Provider value={canWish}>
-        <MirrorStatusBanner />
-        {!canWrite ? (
-          <div className={styles.accessNote} role="note">
-            {canWish
-              ? 'Your library: you can use your Watchlist and Wishlist and search here; other changes are up to the admin.'
-              : 'Read-only: library changes require the admin profile.'}
-          </div>
-        ) : null}
-        {search.album ? (
-          <AlbumDetailView albumId={search.album} />
-        ) : search.artist ? (
-          <ArtistDetailView artistId={search.artist} />
-        ) : providerArtist(search.discover) ? (
-          <ProviderArtistView
-            {...(providerArtist(search.discover) as { source: string; providerId: string })}
-            name={search.discoverName ?? ''}
-          />
-        ) : search.section === 'wanted' ? (
-          <WantedIndexView />
-        ) : search.section === 'songs' ? (
-          <SongIndexView />
-        ) : search.section === 'albums' ? (
-          <AlbumIndexView />
-        ) : (
-          <ArtistIndexView />
-        )}
+        {/* no box of its own: it only tells mobile.css this page sizes its own buttons */}
+        <div className={styles.libraryRoot} data-library-v2="">
+          <MirrorStatusBanner />
+          {!canWrite ? (
+            <div className={styles.accessNote} role="note">
+              {canWish
+                ? 'Your library: you can use your Watchlist and Wishlist and search here; other changes are up to the admin.'
+                : 'Read-only: library changes require the admin profile.'}
+            </div>
+          ) : null}
+          {search.album ? (
+            <AlbumDetailView albumId={search.album} />
+          ) : search.artist ? (
+            <ArtistDetailView artistId={search.artist} />
+          ) : providerArtist(search.discover) ? (
+            <ProviderArtistView
+              {...(providerArtist(search.discover) as { source: string; providerId: string })}
+              name={search.discoverName ?? ''}
+            />
+          ) : search.section === 'wanted' ? (
+            <WantedIndexView />
+          ) : search.section === 'songs' ? (
+            <SongIndexView />
+          ) : search.section === 'albums' ? (
+            <AlbumIndexView />
+          ) : (
+            <ArtistIndexView />
+          )}
+        </div>
       </LibraryV2CanWishContext.Provider>
     </LibraryV2CanWriteContext.Provider>
   );
@@ -5087,6 +5089,7 @@ const ALBUM_SORT_LABELS: Record<LibraryV2AlbumSort, string> = {
 function AlbumIndexView() {
   const search = Route.useSearch();
   const navigate = useNavigate();
+  const openArtist = useOpenArtist();
   const canWrite = useLibraryV2CanWrite();
   const albumFilter = useUrlSyncedFilter(
     search.q,
@@ -5185,9 +5188,7 @@ function AlbumIndexView() {
               index={index}
               album={album}
               onOpen={() => void navigate({ search: (p) => ({ ...p, album: album.id }) })}
-              onOpenArtist={(artistId) =>
-                void navigate({ search: (p) => openArtistSearch(p, artistId) })
-              }
+              onOpenArtist={openArtist}
             />
           ))}
         </div>
@@ -5917,7 +5918,7 @@ export function ArtistCard({
 }
 
 function ArtistCards({ artists }: { artists: LibraryV2ArtistSummary[] }) {
-  const navigate = useNavigate();
+  const openArtist = useOpenArtist();
   const upgradable = useUpgradableCounts(artists);
   return (
     <div className="library-artists-grid" id="library-artists-grid">
@@ -5927,7 +5928,7 @@ function ArtistCards({ artists }: { artists: LibraryV2ArtistSummary[] }) {
           index={index}
           artist={artist}
           upgradable={upgradable.get(artist.id)}
-          onOpen={(artistId) => void navigate({ search: (p) => openArtistSearch(p, artistId) })}
+          onOpen={openArtist}
         />
       ))}
     </div>
@@ -5945,7 +5946,7 @@ function ArtistTable({
   columnOrder: (keyof LibraryV2ArtistTableColumns)[];
   profileNameById: Map<number, string>;
 }) {
-  const navigate = useNavigate();
+  const openArtist = useOpenArtist();
 
   const defaultOrder: (keyof LibraryV2ArtistTableColumns)[] = [
     'quality_profile',
@@ -6042,11 +6043,7 @@ function ArtistTable({
         </thead>
         <tbody>
           {artists.map((artist) => (
-            <tr
-              key={artist.id}
-              className={styles.tableRow}
-              onClick={() => void navigate({ search: (p) => openArtistSearch(p, artist.id) })}
-            >
+            <tr key={artist.id} className={styles.tableRow} onClick={() => openArtist(artist.id)}>
               <td>
                 <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
               </td>
@@ -6104,6 +6101,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
   const navigate = useNavigate();
   const canWish = useLibraryV2CanWish();
   const previousArtist = Route.useSearch().artist;
+  const openTrackArtist = useOpenTrackArtist();
   // `resolve` materializes the provider tracklist for a release that has no
   // track rows yet. The inline expand always did this; opening the same
   // release as its own page did not, so a discography-only release (a
@@ -6143,22 +6141,15 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
   // more clicks. The view settings are only reset when back leads to a
   // DIFFERENT artist than the URL was showing — then they describe someone
   // else's page and carrying them over would be the surprise instead.
+  const pageHeader = useQuery(libraryV2UiPreferencesQueryOptions()).data?.artist_page?.header;
   const goBack = () => {
     const artistId = album?.primary_artist?.id;
     const switchesArtist = Boolean(artistId && previousArtist && artistId !== previousArtist);
     return navigate({
-      search: (previous) => ({
-        ...previous,
-        album: undefined,
-        artist: artistId ?? previous.artist,
-        ...(switchesArtist
-          ? {
-              releases: 'library' as const,
-              releaseView: undefined,
-              header: 'rich' as const,
-            }
-          : {}),
-      }),
+      search: (previous) =>
+        switchesArtist && artistId
+          ? openArtistSearch(previous, artistId, pageHeader)
+          : { ...previous, album: undefined, artist: artistId ?? previous.artist },
     });
   };
 
@@ -6258,7 +6249,13 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
           </header>
           {/* the page's own query: one request, and the table sees the
               tracklist build state (notice + polling) the page asked for */}
-          <AlbumTrackTable albumId={album.id} resolve onAction={handleAction} />
+          <AlbumTrackTable
+            albumId={album.id}
+            resolve
+            onAction={handleAction}
+            currentArtistId={previousArtist}
+            onOpenArtist={openTrackArtist}
+          />
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
               initialQuery={buildSearchQuery(
@@ -6318,15 +6315,28 @@ function useUrlSyncedFilter(
  *  My Library, rich header, with discovery back on its cards default, regardless of what the previous
  *  artist's URL happened to carry. Coming from search is the opposite case
  *  and is set by the artist-detail route. */
-function openArtistSearch<T extends Record<string, unknown>>(previous: T, artistId: number) {
+function openArtistSearch<T extends Record<string, unknown>>(
+  previous: T,
+  artistId: number,
+  header: LibraryV2ArtistPageHeader = 'rich',
+) {
   return {
     ...previous,
     artist: artistId,
     album: undefined,
     releases: 'library' as const,
     releaseView: undefined,
-    header: 'rich' as const,
+    header,
   };
+}
+
+/** Open an artist from inside the library, in the header this profile picked
+ *  for that (Tools → Customize Artist Page). */
+function useOpenArtist() {
+  const navigate = useNavigate();
+  const header = useQuery(libraryV2UiPreferencesQueryOptions()).data?.artist_page?.header;
+  return (artistId: number) =>
+    void navigate({ search: (p) => openArtistSearch(p, artistId, header) });
 }
 
 function visibleReleases(
@@ -6374,6 +6384,114 @@ export function shouldAutoFetchDiscography(params: {
  *  one dropdown instead of five separate buttons next to the Lidarr-core
  *  primary bar (Refresh & Scan/Automatic Search/Interactive Search/Update
  *  Discography). */
+/** The ui-preference sections each profile keeps for itself (the server's
+ *  PROFILE_SECTIONS); a profile may change those without admin rights. */
+const PROFILE_SECTIONS = new Set(['artist_toolbar', 'artist_page']);
+
+/** View Settings' artist page part, kept per profile: which toolbar buttons
+ *  show and which header an artist opens with. Each pick saves at once. */
+function ArtistPageOptions({ prefs }: { prefs: LibraryV2UiPreferences | undefined }) {
+  const mutation = useUiPreferencesMutation();
+  const headerChoice = (key: 'header' | 'header_elsewhere', label: string) => {
+    const current = prefs?.artist_page?.[key] ?? 'rich';
+    return (
+      <>
+        <p className={styles.tableOptionsHint}>{label}</p>
+        <div className={styles.tableOptionsChoicePair} role="radiogroup" aria-label={label}>
+          {(
+            [
+              ['rich', 'Rich header', 'Photo, bio and top tracks.'],
+              ['compact', 'Compact header', 'A slim bar, straight to the releases.'],
+            ] as const
+          ).map(([value, title, text]) => (
+            <label
+              key={value}
+              className={`${styles.tableOptionsChoice} ${current === value ? styles.tableOptionsChoiceActive : ''}`}
+            >
+              <input
+                type="radio"
+                name={`artist-page-${key}`}
+                className={styles.srOnly}
+                checked={current === value}
+                onChange={() => mutation.mutate({ artist_page: { [key]: value } })}
+              />
+              <span className={styles.tableOptionsChoiceTitle}>{title}</span>
+              <span className={styles.tableOptionsChoiceText}>{text}</span>
+            </label>
+          ))}
+        </div>
+      </>
+    );
+  };
+  return (
+    <>
+      <section className={styles.tableOptionsSection}>
+        <div className={styles.tableOptionsGroupLabel}>Artist toolbar</div>
+        <p className={styles.tableOptionsHint}>
+          The buttons this profile sees on an artist page. Tools always stays.
+        </p>
+        {Object.entries(ARTIST_TOOLBAR_BUTTONS).map(([key, label]) => {
+          const checked = prefs?.artist_toolbar?.[key as ArtistToolbarButton] !== false;
+          return (
+            <label key={key} className={styles.tableOptionsItem}>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => mutation.mutate({ artist_toolbar: { [key]: !checked } })}
+              />
+              {label}
+              {key === 'enhance_quality' ? (
+                <span className={styles.tableOptionsExample}>when files can be upgraded</span>
+              ) : null}
+            </label>
+          );
+        })}
+      </section>
+      <section className={styles.tableOptionsSection}>
+        <div className={styles.tableOptionsGroupLabel}>Artist header</div>
+        {headerChoice('header', 'Opening an artist from the library')}
+        {headerChoice('header_elsewhere', 'From Search, Discover and elsewhere')}
+      </section>
+    </>
+  );
+}
+
+/** Tools → View Settings: the track table's gear dialog, opened without a
+ *  table. A profile without admin rights changes only its artist page part
+ *  (the table layout is the admin's), so that is all it gets. */
+function ViewSettingsDialog({ onClose }: { onClose: () => void }) {
+  const canWrite = useLibraryV2CanWrite();
+  const prefs = useQuery(libraryV2UiPreferencesQueryOptions()).data;
+  const mutation = useUiPreferencesMutation();
+  if (!canWrite) {
+    return (
+      <ModalShell title="View Settings" description="For this profile." onClose={onClose}>
+        <div className={styles.tableOptionsStack}>
+          <ArtistPageOptions prefs={prefs} />
+        </div>
+      </ModalShell>
+    );
+  }
+  const table = prefs?.track_table;
+  const columnWidths = table?.column_widths ?? DEFAULT_TRACK_TABLE_COLUMN_WIDTHS;
+  return (
+    <TrackTableOptionsMenu
+      onClose={onClose}
+      columns={{ ...(table?.columns ?? DEFAULT_TRACK_TABLE_COLUMNS), title: true }}
+      columnOrder={mergeTrackColumnOrder(table?.column_order, TRACK_COLUMN_ORDER)}
+      showAllProviders={table?.show_all_match_providers ?? false}
+      columnWidths={columnWidths}
+      onResetColumnWidths={() =>
+        mutation.mutate({
+          track_table: {
+            column_widths: Object.fromEntries(Object.keys(columnWidths).map((key) => [key, null])),
+          },
+        })
+      }
+    />
+  );
+}
+
 function ArtistToolsMenu({
   artistId,
   artistName,
@@ -6387,6 +6505,7 @@ function ArtistToolsMenu({
   onUpdateDiscography,
   onServerSync,
   onDelete,
+  onViewSettings,
   discographyBusy,
 }: {
   artistId: number;
@@ -6401,6 +6520,7 @@ function ArtistToolsMenu({
   onUpdateDiscography: () => void;
   onServerSync?: () => void;
   onDelete: () => void;
+  onViewSettings: () => void;
   discographyBusy: boolean;
 }) {
   const canWrite = useLibraryV2CanWrite();
@@ -6524,6 +6644,8 @@ function ArtistToolsMenu({
             () => window.showReportIssueModal?.('artist', artistId, artistName, ''),
             false,
           )}
+          <div className={styles.toolMenuHeading}>Page</div>
+          {item('View Settings…', 'settings', onViewSettings, false)}
           <div className={styles.toolMenuDivider} />
           {item('Delete Artist…', 'delete', onDelete, true, true)}
         </div>
@@ -7957,7 +8079,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   // is are view settings, carried in the URL next to `releases` and `view`
   // like every other Library V2 view setting.
   const releaseView = search.releaseView;
-  const headerMode = search.header;
+  const headerMode = search.header ?? 'rich';
   // the toolbar picks up a small name tag once the hero scrolls away
   const artistTopRef = useRef<HTMLDivElement>(null);
   const heroSentinelRef = useRef<HTMLDivElement>(null);
@@ -8016,6 +8138,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     entity?: Lib2EntityRef;
   } | null>(null);
   const [showArtistSettings, setShowArtistSettings] = useState(false);
+  const [showViewSettings, setShowViewSettings] = useState(false);
+  const toolbarButtons = useQuery(libraryV2UiPreferencesQueryOptions()).data?.artist_toolbar;
   const [showHistory, setShowHistory] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
   const [showManageTracks, setShowManageTracks] = useState(false);
@@ -8083,8 +8207,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     setDiscographyBusy(false);
   }
 
+  // a view switch is the same page: it replaces the history entry, so back
+  // (the browser's too) leaves the artist instead of undoing each switch
   function setReleasesMode(mode: 'library' | 'all') {
     void navigate({
+      replace: true,
       search: (p) => ({
         ...p,
         releases: mode,
@@ -8242,6 +8369,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       }
       onClick={() =>
         void navigate({
+          replace: true,
           search: (p) => ({
             ...p,
             header: headerMode === 'rich' ? 'compact' : 'rich',
@@ -8288,8 +8416,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 </button>
               ) : null}
               <div className={styles.toolbarGroup}>
-                {/* The primary bar as named actions, so a setting can later
-                    pick which of them show. Tools and the rest stay. */}
+                {/* The bar as named actions: View Settings (in Tools) picks
+                    which of them show. Tools itself always stays. */}
                 {(
                   [
                     [
@@ -8331,26 +8459,43 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                       />,
                     ],
                   ] as const
-                ).map(([id, action]) => (
-                  <Fragment key={id}>{action}</Fragment>
-                ))}
+                )
+                  .filter(([id]) => toolbarButtons?.[id] !== false)
+                  .map(([id, action]) => (
+                    <Fragment key={id}>{action}</Fragment>
+                  ))}
               </div>
               <div className={styles.toolbarGroup}>
-                <ArtistRefreshButton artistId={artistId} />
-                <ActionButton
-                  icon="history"
-                  label="History"
-                  title="Recent activity for this artist"
-                  requiresWrite={false}
-                  onClick={() => setShowHistory(true)}
-                />
-                <ActionButton
-                  icon="settings"
-                  label="Artist Settings"
-                  title="Quality profile, Watchlist, new releases and audiobook filing"
-                  onClick={() => setShowArtistSettings(true)}
-                />
+                {(
+                  [
+                    ['refresh_scan', <ArtistRefreshButton artistId={artistId} />],
+                    [
+                      'history',
+                      <ActionButton
+                        icon="history"
+                        label="History"
+                        title="Recent activity for this artist"
+                        requiresWrite={false}
+                        onClick={() => setShowHistory(true)}
+                      />,
+                    ],
+                    [
+                      'artist_settings',
+                      <ActionButton
+                        icon="settings"
+                        label="Artist Settings"
+                        title="Quality profile, Watchlist, new releases and audiobook filing"
+                        onClick={() => setShowArtistSettings(true)}
+                      />,
+                    ],
+                  ] as const
+                )
+                  .filter(([id]) => toolbarButtons?.[id] !== false)
+                  .map(([id, action]) => (
+                    <Fragment key={id}>{action}</Fragment>
+                  ))}
                 <ArtistToolsMenu
+                  onViewSettings={() => setShowViewSettings(true)}
                   artistId={artistId}
                   artistName={artistName}
                   onRetag={() =>
@@ -8475,6 +8620,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   aria-pressed={releaseView === 'table'}
                   onClick={() =>
                     void navigate({
+                      replace: true,
                       search: (p) => ({ ...p, releaseView: 'table' }),
                     })
                   }
@@ -8487,6 +8633,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   aria-pressed={releaseView === 'cards'}
                   onClick={() =>
                     void navigate({
+                      replace: true,
                       search: (p) => ({ ...p, releaseView: 'cards' }),
                     })
                   }
@@ -8634,6 +8781,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           ) : null}
           {showArtistSettings ? (
             <ArtistSettingsModal artist={artist} onClose={() => setShowArtistSettings(false)} />
+          ) : null}
+          {showViewSettings ? (
+            <ViewSettingsDialog onClose={() => setShowViewSettings(false)} />
           ) : null}
           {showHistory ? (
             <HistoryModal
@@ -8987,6 +9137,7 @@ function AlbumGroup({
           <AlbumBlock
             key={album.id}
             album={album}
+            artistId={artistId}
             artistName={artistName}
             queueRollup={queueStatusByAlbum[album.id]}
             queueStatusTracks={queueStatusTracks}
@@ -9000,12 +9151,14 @@ function AlbumGroup({
 
 function AlbumBlock({
   album,
+  artistId,
   artistName,
   queueRollup,
   onAction,
   queueStatusTracks,
 }: {
   album: LibraryV2AlbumSummary;
+  artistId: number;
   /** Who the album is filed under today — the reassign modal says so, and the
    *  summary row itself has no artist on it. */
   artistName: string;
@@ -9015,6 +9168,7 @@ function AlbumBlock({
   queueStatusTracks: Record<number, LibraryV2QueueStatusEntry>;
 }) {
   const navigate = useNavigate();
+  const openTrackArtist = useOpenTrackArtist();
   const [open, setOpen] = useState(false);
   // Browser `dblclick` can span changing descendants (title, cover, empty row space) and its click
   // counter carries surprising state across rerenders. A timestamp owned by THIS album makes the
@@ -9154,6 +9308,8 @@ function AlbumBlock({
           resolve
           onAction={onAction}
           queueStatusTracks={queueStatusTracks}
+          currentArtistId={artistId}
+          onOpenArtist={openTrackArtist}
         />
       ) : null}
     </div>
@@ -9733,7 +9889,9 @@ function useUiPreferencesMutation() {
   const settledRef = useRef(0);
   return useMutation({
     mutationFn: async (patch: Parameters<typeof updateLibraryV2UiPreferences>[0]) => {
-      if (!canWrite) throw new Error('Library changes require the admin profile');
+      // a profile's own artist page is its to change; the shared layout is the admin's
+      if (!canWrite && Object.keys(patch).some((key) => !PROFILE_SECTIONS.has(key)))
+        throw new Error('Library changes require the admin profile');
       const sequence = ++sequenceRef.current;
       const preferences = await updateLibraryV2UiPreferences(patch);
       return { sequence, preferences };
@@ -9784,6 +9942,7 @@ function ColumnsOptionsMenu<K extends string>({
   extra,
   columnsFooter,
   workspace = false,
+  onClose,
 }: {
   title: string;
   columnLabels: Record<K, string>;
@@ -9798,8 +9957,11 @@ function ColumnsOptionsMenu<K extends string>({
   /** The size of the other library workspaces (Preview Retag, Rename,
    *  History), sections side by side, so nothing needs scrolling. */
   workspace?: boolean;
+  /** Opened from elsewhere (Tools → View Settings): no gear, open until closed. */
+  onClose?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [gearOpen, setOpen] = useState(false);
+  const open = Boolean(onClose) || gearOpen;
   const [dragKey, setDragKey] = useState<K | null>(null);
 
   const columnKeys = columnOrder ?? (Object.keys(columnLabels) as K[]);
@@ -9817,19 +9979,21 @@ function ColumnsOptionsMenu<K extends string>({
 
   return (
     <span className={styles.overflowWrap} onClick={(e) => e.stopPropagation()}>
-      <IconActionButton
-        icon="settings"
-        title={title}
-        requiresWrite
-        onClick={() => setOpen((v) => !v)}
-      />
+      {onClose ? null : (
+        <IconActionButton
+          icon="settings"
+          title={title}
+          requiresWrite
+          onClick={() => setOpen((v) => !v)}
+        />
+      )}
       {open ? (
         <ModalShell
           title={title}
           settings={!workspace}
           wide={workspace}
           className={workspace ? styles.toolWorkspace : undefined}
-          onClose={() => setOpen(false)}
+          onClose={onClose ?? (() => setOpen(false))}
         >
           <div className={styles.tableOptionsDialogBody}>
             <div
@@ -9938,6 +10102,7 @@ function TrackTableOptionsMenu({
   availableProviders,
   columnWidths,
   onResetColumnWidths,
+  onClose,
 }: {
   columns: LibraryV2TrackTableColumns;
   columnOrder: (keyof LibraryV2TrackTableColumns)[];
@@ -9945,6 +10110,7 @@ function TrackTableOptionsMenu({
   availableProviders?: Set<string> | null;
   columnWidths: Record<string, number | null>;
   onResetColumnWidths: () => void;
+  onClose?: () => void;
 }) {
   const mutation = useUiPreferencesMutation();
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
@@ -9956,7 +10122,8 @@ function TrackTableOptionsMenu({
 
   return (
     <ColumnsOptionsMenu
-      title="Table options — columns & match providers"
+      title="View Settings"
+      onClose={onClose}
       columnLabels={TRACK_TABLE_COLUMN_LABELS}
       columns={columns}
       onToggle={(key) => {
@@ -10045,52 +10212,59 @@ function TrackTableOptionsMenu({
                 ))}
               </div>
             </section>
+
+            <section className={styles.tableOptionsSection}>
+              <div className={styles.tableOptionsGroupLabel}>Match providers</div>
+              <p className={styles.tableOptionsHint}>
+                Which provider chips the Match column shows.
+              </p>
+              <label className={styles.tableOptionsItem}>
+                <input
+                  type="checkbox"
+                  checked={showAllProviders}
+                  onChange={() =>
+                    mutation.mutate({
+                      track_table: {
+                        show_all_match_providers: !showAllProviders,
+                      },
+                    })
+                  }
+                />
+                Show every provider
+              </label>
+              <div className={styles.tableOptionsProviderGrid}>
+                {PROVIDERS.filter(
+                  (provider) => !availableProviders || availableProviders.has(provider.key),
+                ).map((provider) => {
+                  const isVisible = visibleProviders[provider.key] ?? true;
+                  return (
+                    <label key={provider.key} className={styles.tableOptionsItem}>
+                      <input
+                        type="checkbox"
+                        checked={isVisible}
+                        onChange={() =>
+                          mutation.mutate({
+                            track_table: {
+                              visible_match_providers: {
+                                ...visibleProviders,
+                                [provider.key]: !isVisible,
+                              },
+                            },
+                          })
+                        }
+                      />
+                      {provider.label}
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
           </div>
 
-          <section className={styles.tableOptionsSection}>
-            <div className={styles.tableOptionsGroupLabel}>Match providers</div>
-            <p className={styles.tableOptionsHint}>Which provider chips the Match column shows.</p>
-            <label className={styles.tableOptionsItem}>
-              <input
-                type="checkbox"
-                checked={showAllProviders}
-                onChange={() =>
-                  mutation.mutate({
-                    track_table: {
-                      show_all_match_providers: !showAllProviders,
-                    },
-                  })
-                }
-              />
-              Show every provider
-            </label>
-            <div className={styles.tableOptionsProviderGrid}>
-              {PROVIDERS.filter(
-                (provider) => !availableProviders || availableProviders.has(provider.key),
-              ).map((provider) => {
-                const isVisible = visibleProviders[provider.key] ?? true;
-                return (
-                  <label key={provider.key} className={styles.tableOptionsItem}>
-                    <input
-                      type="checkbox"
-                      checked={isVisible}
-                      onChange={() =>
-                        mutation.mutate({
-                          track_table: {
-                            visible_match_providers: {
-                              ...visibleProviders,
-                              [provider.key]: !isVisible,
-                            },
-                          },
-                        })
-                      }
-                    />
-                    {provider.label}
-                  </label>
-                );
-              })}
-            </div>
-          </section>
+          {/* the artist page's own part, kept per profile */}
+          <div className={styles.tableOptionsStack}>
+            <ArtistPageOptions prefs={prefsQuery.data} />
+          </div>
         </div>
       }
     />
@@ -10566,11 +10740,32 @@ export function BulkEditTracksModal({
   );
 }
 
+/** The track table's columns in their default order. */
+const TRACK_COLUMN_ORDER: (keyof LibraryV2TrackTableColumns)[] = [
+  'title',
+  'disc',
+  'artists',
+  'duration',
+  'bpm',
+  'match',
+  'profile',
+  'file_size',
+  'quality',
+  'acoustid',
+  'metadata',
+  'features',
+  'play',
+  'file_path',
+  'media_server',
+];
+
 export function AlbumTrackTable({
   albumId,
   resolve,
   onAction,
   queueStatusTracks,
+  currentArtistId,
+  onOpenArtist,
 }: {
   albumId: number;
   /** Discography-only releases materialize their provider tracklist on expand. */
@@ -10586,6 +10781,10 @@ export function AlbumTrackTable({
    * which has no artist-scope query) this component still polls for itself.
    */
   queueStatusTracks?: Record<number, LibraryV2QueueStatusEntry>;
+  /** Artist page this table belongs to; that artist stays plain text. */
+  currentArtistId?: number;
+  /** Supplied by route-owned pages; omitted in standalone table surfaces. */
+  onOpenArtist?: OpenTrackArtist;
 }) {
   const canWrite = useLibraryV2CanWrite();
   const albumQuery = useQuery(libraryV2AlbumQueryOptions(albumId, { resolve }));
@@ -10616,26 +10815,9 @@ export function AlbumTrackTable({
   const utilityColumnWidth = UTILITY_COLUMN_WIDTH_BASE + actionColumnWidth;
   const columnWidths =
     prefsQuery.data?.track_table.column_widths ?? DEFAULT_TRACK_TABLE_COLUMN_WIDTHS;
-  const defaultOrder: (keyof LibraryV2TrackTableColumns)[] = [
-    'title',
-    'disc',
-    'artists',
-    'duration',
-    'bpm',
-    'match',
-    'profile',
-    'file_size',
-    'quality',
-    'acoustid',
-    'metadata',
-    'features',
-    'play',
-    'file_path',
-    'media_server',
-  ];
   const orderedKeys = mergeTrackColumnOrder(
     prefsQuery.data?.track_table.column_order,
-    defaultOrder,
+    TRACK_COLUMN_ORDER,
   );
   const visibleColumnKeys = orderedKeys.filter((key) => columns[key]);
   const visibleMatchProviderPreferences =
@@ -11141,6 +11323,8 @@ export function AlbumTrackTable({
               }
               onAction={onAction}
               queueStatus={track.id != null ? queueTracks[track.id] : undefined}
+              currentArtistId={currentArtistId}
+              onOpenArtist={onOpenArtist}
             />
           ))}
         </tbody>
@@ -11378,7 +11562,69 @@ type TrackRowProps = {
   queueStatus?: LibraryV2QueueStatusEntry;
   /** One file of the track, shown as the track itself (a "N versions" row). */
   version?: boolean;
+  currentArtistId?: number;
+  onOpenArtist?: OpenTrackArtist;
 };
+
+type TrackArtist = { id: number; name: string };
+type OpenTrackArtist = (artist: TrackArtist, currentArtistName?: string) => void | Promise<void>;
+
+/** Route-owned artist navigation for track credits. Keeping it outside the
+ * reusable table lets previews and unit tests render the table without a
+ * TanStack Router provider. */
+function useOpenTrackArtist(): OpenTrackArtist {
+  const openArtist = useOpenArtist();
+  const search = Route.useSearch();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  return async (artist, currentArtistName) => {
+    if (search.album && search.artist) {
+      const origin = artistNavigationOrigin();
+      if (origin) ensurePageOrigin(origin.pathname, origin.searchStr);
+      const previousName =
+        currentArtistName ??
+        (await queryClient
+          .ensureQueryData(libraryV2ArtistQueryOptions(search.artist))
+          .then((previous) => previous.name)
+          .catch(() => undefined));
+      const href = router.buildLocation({
+        to: '/library',
+        search: { ...search, album: undefined, artist: search.artist },
+      }).href;
+      pushArtistOrigin(previousName, href);
+    }
+    openArtist(artist.id);
+  };
+}
+
+/** A featured (or any other) artist in the Artists column, opening their
+ *  library entry. The artist whose page this is stays plain text. */
+function TrackArtistLink({
+  artist,
+  currentArtistId,
+  currentArtistName,
+  onOpenArtist,
+}: {
+  artist: TrackArtist;
+  currentArtistId?: number;
+  currentArtistName?: string;
+  onOpenArtist?: OpenTrackArtist;
+}) {
+  if (currentArtistId === artist.id || !onOpenArtist) return <>{artist.name}</>;
+  return (
+    <button
+      type="button"
+      className={`${styles.linkButton} ${styles.titleEditLink}`}
+      title={`Open ${artist.name} in the library`}
+      onClick={(e) => {
+        e.stopPropagation();
+        void onOpenArtist(artist, currentArtistName);
+      }}
+    >
+      {artist.name}
+    </button>
+  );
+}
 
 /** Columns that describe the recording, not a file: blank on a version row. */
 const TRACK_LEVEL_COLUMNS = new Set<keyof LibraryV2TrackTableColumns>([
@@ -11408,6 +11654,8 @@ function TrackRow(props: TrackRowProps) {
     onAction,
     queueStatus,
     version = false,
+    currentArtistId,
+    onOpenArtist,
   } = props;
   const [showVersions, setShowVersions] = useState(false);
   const missing = track.file_status === 'missing';
@@ -11417,6 +11665,7 @@ function TrackRow(props: TrackRowProps) {
     ...(track.id ? { trackId: track.id } : {}),
   };
   const [detailTab, setDetailTab] = useState<TrackDetailTab | null>(null);
+  const currentArtistName = track.artists.find((artist) => artist.id === currentArtistId)?.name;
   const widthStyle = (key: string) => {
     const raw = columnWidths[key];
     if (raw == null) return undefined;
@@ -11500,7 +11749,17 @@ function TrackRow(props: TrackRowProps) {
             key="artists"
             style={widthStyle('artists')}
           >
-            {track.artists.map((a) => a.name).join(', ')}
+            {track.artists.map((a, i) => (
+              <Fragment key={a.id}>
+                {i > 0 ? ', ' : null}
+                <TrackArtistLink
+                  artist={a}
+                  currentArtistId={currentArtistId}
+                  currentArtistName={currentArtistName}
+                  onOpenArtist={onOpenArtist}
+                />
+              </Fragment>
+            ))}
           </td>
         );
       case 'duration':
@@ -13192,27 +13451,13 @@ function TrackLifecycleSection({
   );
 }
 
-/** Backend sends the exact Check-badge label for a `verification_status_updated`
- *  event's Status cell (§45) — map it to the same tone class TrackCheckBadge
- *  uses so a "Mismatch" here is pixel-identical to a "Mismatch" in the Check
- *  column, not a second visual language for the same word. */
-const CHECK_STATUS_TONE: Record<string, string> = {
-  Verified: styles.verificationVerified,
-  Mismatch: styles.verificationMismatch,
-  Unverified: styles.verificationUnverified,
-  Skipped: styles.verificationForced,
-  'Human verified': styles.verificationHuman,
-  'File missing': styles.verificationUnverified,
-  'Not scanned': styles.verificationUnverified,
-};
-
-/** §52.9/§44: chronological search→grab→quality→quarantine→import→delete
- *  timeline for one track (`core.library2.history_feed.scoped_history`,
- *  scope='track'). Unlike the download-source list, this also surfaces
- *  attempts that were quarantined or failed before ever producing a
- *  `lib2_track_files` row, and a file this track lost to a delete. Newest
- *  first, same reading order as the album/artist History and everywhere
- *  else in the app that lists events. */
+/** §52.9/§44: what one track went through (`core.library2.history_feed.
+ *  scoped_history`, scope='track'), read like the album/artist History tree:
+ *  the pipeline on top (grabbed → downloaded → imported → metadata written →
+ *  the latest check), every event folded by kind underneath, newest first.
+ *  Unlike the download-source list, this also surfaces attempts that were
+ *  quarantined or failed before ever producing a `lib2_track_files` row, and a
+ *  file this track lost to a delete. */
 export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
   const query = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-history', trackId],
@@ -13232,56 +13477,16 @@ export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
     );
   }
   if (rows.length === 0) return null;
-  // Newest first — the backend already returns events this way. Same table
-  // shape as the album/artist History (Date/Event/Detail), with an extra
-  // Status column for the pass/skip/fail a track-level check can carry that
-  // a plain event category can't — Lidarr's own History reads as one table,
-  // this is that, not a separate visual language for tracks.
   return (
     <div className={styles.trackHistoryWrap}>
       <p className={styles.sourceInfoHistory}>
         Pipeline — {rows.length} event
         {rows.length === 1 ? '' : 's'}
       </p>
-      <table className={styles.trackTable}>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Event</th>
-            <th>Status</th>
-            <th>Detail</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((h, i) => (
-            <tr key={i}>
-              <td className={styles.muted}>
-                {h.date ? h.date.slice(0, 16).replace('T', ' ') : '—'}
-              </td>
-              <td>
-                <span className={styles.sourceBadge} data-tone={h.category}>
-                  {h.title ?? h.event_type}
-                </span>
-              </td>
-              <td>
-                {h.status && CHECK_STATUS_TONE[h.status] ? (
-                  <span className={`${styles.verificationBadge} ${CHECK_STATUS_TONE[h.status]}`}>
-                    {h.status}
-                    {h.status_basis === 'current_file' ? ' (current)' : ''}
-                  </span>
-                ) : h.status ? (
-                  <span className={styles.pipelineStatus} data-status={h.status}>
-                    {h.status.replace('_', ' ')}
-                  </span>
-                ) : (
-                  <span className={styles.muted}>—</span>
-                )}
-              </td>
-              <td>{h.detail ?? <span className={styles.muted}>—</span>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <HistorySteps steps={historySteps(rows)} />
+      <div className={styles.historyList}>
+        <HistoryEventList groups={groupHistoryEvents(rows, { byKind: true })} nested />
+      </div>
     </div>
   );
 }
@@ -13933,7 +14138,7 @@ export function ImportButton({
 
   const importState = importQuery.data;
   const running = importState?.running === true;
-  const artworkRunning = importState?.artwork_cache.running === true;
+  const artworkRunning = importState?.artwork_cache?.running === true;
   // The persisted migration may be running in a worker this browser session
   // never started, in which case pressing Import would only be refused.
   const migration = describeLibraryV2Migration(importState);
@@ -13979,7 +14184,7 @@ export function ImportButton({
         ? migration.text
         : artworkRunning && importState
           ? `${message ? `${message} ` : ''}${describeLibraryV2ArtworkCacheProgress(importState)}`
-          : importState?.artwork_cache.error
+          : importState?.artwork_cache?.error
             ? `${message ? `${message} ` : 'Library ready to browse. '}Artwork caching failed; covers will load on demand.`
             : message;
   const progress =

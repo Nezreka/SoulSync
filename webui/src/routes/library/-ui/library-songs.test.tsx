@@ -40,7 +40,14 @@ function song(over: Partial<LibrarySong> & { id: number | string }): LibrarySong
 }
 
 const PROOF = [
-  song({ id: 1, title: 'You Proof', album_title: 'Dangerous', copies: 2 }),
+  song({
+    id: 1,
+    title: 'You Proof',
+    album_title: 'Dangerous',
+    copies: 2,
+    bit_depth: 24,
+    sample_rate: 96000,
+  }),
   song({
     id: 2,
     title: 'You Proof',
@@ -164,7 +171,9 @@ describe('the Songs view', () => {
     expect(screen.getByText('Dangerous')).toBeTruthy();
     expect(screen.getByText('Dangerous: The Double Album')).toBeTruthy();
     expect(screen.getAllByText('2 copies')).toHaveLength(2);
-    expect(screen.getByText('FLAC 900k')).toBeTruthy();
+    // the quality reads the way the track table prints it
+    expect(screen.getByText('FLAC · 24bit/96kHz · 900 kbps')).toBeTruthy();
+    expect(screen.getByText('MP3 · 320 kbps')).toBeTruthy();
     const params = new URL(songCalls().at(-1)!.url, 'http://x').searchParams;
     expect(params.get('search')).toBe('you proof');
     expect(screen.getByText('2 matches')).toBeTruthy();

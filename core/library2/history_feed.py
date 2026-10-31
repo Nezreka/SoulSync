@@ -698,7 +698,7 @@ def _track_download_events(
         if legacy_ids:
             legacy_rows = _rows(
                 conn,
-                f"""SELECT id, track_id, track_title, track_album, source_service,
+                f"""SELECT id, track_id, file_path, track_title, track_album, source_service,
                            status, created_at
                       FROM track_downloads WHERE track_id IN ({_in_clause(legacy_ids)})
                      ORDER BY id DESC LIMIT ?""",
@@ -718,7 +718,8 @@ def _track_download_events(
         try:
             path_rows = _rows(
                 conn,
-                f"""SELECT id, track_title, track_album, source_service, status, created_at
+                f"""SELECT id, track_id, file_path, track_title, track_album, source_service,
+                           status, created_at
                       FROM track_downloads WHERE file_path IN ({_in_clause(fallback_paths)})
                      ORDER BY id DESC LIMIT ?""",
                 (*fallback_paths, limit),
@@ -734,7 +735,15 @@ def _track_download_events(
         deduped.setdefault(r["id"], r)
     ordered = sorted(deduped.values(), key=lambda r: r["id"], reverse=True)[:limit]
     matched_ids = {r["id"] for r in ordered}
-    return _track_downloads_to_events(ordered), matched_ids
+    events = _track_downloads_to_events(ordered)
+    # the library track each download belongs to, so the history can file it there
+    by_legacy = {str(r["legacy_id"]): r["track_id"] for r in link_rows if r["legacy_id"] is not None}
+    by_path = {r["file_path"]: r["track_id"] for r in link_rows if r["file_path"]}
+    for event, r in zip(events, ordered, strict=True):
+        track_id = by_legacy.get(str(r["track_id"])) or by_path.get(r["file_path"])
+        if track_id:
+            event["track_id"] = track_id
+    return events, matched_ids
 
 
 def _artist_name_fallback_events(

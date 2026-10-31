@@ -53,7 +53,10 @@ import { useArtistImages } from '../-search.use-artist-images';
 import { activeResults, getPersistedQuery, useSearchController } from '../-search.use-controller';
 import { useLibraryCheck } from '../-search.use-library-check';
 import { useVideoDownloads } from '../-search.use-video-downloads';
-import { libraryScopesQueryOptions } from '../../library/-library-v2.api';
+import {
+  libraryScopesQueryOptions,
+  libraryV2UiPreferencesQueryOptions,
+} from '../../library/-library-v2.api';
 import { BasicSearch } from './basic-search';
 import { PlaylistPreviewModal } from './playlist-preview-modal';
 import { SearchBar } from './search-bar';
@@ -345,9 +348,14 @@ export function SearchPage() {
    * route still checks the catalogue first, so an artist this result list did
    * not recognise lands in Library V2 all the same.
    */
+  // a library artist opens in the header this profile picked for arrivals from
+  // outside the library (View Settings); no preferences yet means the rich one
+  const headerFromSearch =
+    useQuery({ ...libraryV2UiPreferencesQueryOptions(), retry: false }).data?.artist_page
+      ?.header_elsewhere ?? 'rich';
   const onArtistHref = (artist: SearchArtist, inLibrary: boolean) =>
     inLibrary
-      ? inLibraryArtistPath(artist)
+      ? inLibraryArtistPath(artist, headerFromSearch)
       : artistDetailPath(artist.id ?? '', state.activeSource, artist.name);
 
   const onLabelHref = (label: SearchLabel) => labelDetailPath(label.id ?? '', label.name);
@@ -564,7 +572,7 @@ export function SearchPage() {
                     onFilter={setBrowseFilter}
                     onArtistHref={(artist, inLibrary) =>
                       inLibrary
-                        ? inLibraryArtistPath(artist)
+                        ? inLibraryArtistPath(artist, headerFromSearch)
                         : artistDetailPath(
                             artist.id ?? '',
                             artist.source ?? state.activeSource,

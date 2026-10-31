@@ -348,6 +348,15 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
       artistName: name,
     });
   };
+  // an artist the library holds opens there (its discovery view for the
+  // discography), in the header this profile picked for outside arrivals.
+  // no onClose: it rewrites the watchlist url and would win over this
+  const openInLibrary = (discography: boolean) => {
+    if (!library) return;
+    void navigate({
+      href: `/library?artist=${library.artist_id}${discography ? '&releases=all' : ''}`,
+    });
+  };
   const metaTags = [artist?.style, artist?.mood, artist?.label].filter((value): value is string =>
     Boolean(value),
   );
@@ -365,7 +374,18 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
   const headText = (
     <div className="wap-head-text">
       <h2 className="wap-name" title={name}>
-        {name || 'Loading…'}
+        {library && name ? (
+          <button
+            type="button"
+            className="wap-name-link"
+            title={`Open ${name} in the library`}
+            onClick={() => openInLibrary(false)}
+          >
+            {name}
+          </button>
+        ) : (
+          name || 'Loading…'
+        )}
       </h2>
       <span className="wap-sub">
         {config ? (
@@ -632,19 +652,22 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
             <button
               type="button"
               className="wl-chip wl-chip--cta wap-discog"
-              disabled={!discography}
+              disabled={!discography && !library}
               title={
-                payload && !discography
+                payload && !discography && !library
                   ? 'This artist is only matched on disabled metadata sources. ' +
                     'Match it to your active source under Sources.'
                   : undefined
               }
               onClick={() => {
+                if (library) return openInLibrary(true);
                 if (!discography) return;
                 onClose();
                 void navigate({
                   to: '/artist-detail/$source/$id',
                   params: { source: discography.source, id: discography.id },
+                  // the name lets the library find an artist without this id
+                  search: { name },
                 });
               }}
             >

@@ -126,8 +126,6 @@ const libraryV2SearchWithLegacy = z.preprocess(
 
 export const libraryV2SearchSchema = libraryV2SearchWithLegacy.transform((value) => ({
   ...value,
-  // one hero everywhere; compact is an opt-in (?header=compact)
-  header: value.header ?? ('rich' as const),
   releases:
     value.releases ?? (value.view === 'discovery' ? ('all' as const) : ('library' as const)),
   // the discovery tab opens on the cards view. table is an explicit choice.
@@ -813,4 +811,23 @@ export interface LibraryV2UiPreferences {
     columns: LibraryV2ArtistTableColumns;
     column_order: (keyof LibraryV2ArtistTableColumns)[];
   };
+  /** Which artist toolbar buttons this profile sees (Tools always shows). */
+  artist_toolbar?: Partial<Record<ArtistToolbarButton, boolean>>;
+  /** Which header an artist opens with, from the library and from anywhere else. */
+  artist_page?: {
+    header?: LibraryV2ArtistPageHeader;
+    header_elsewhere?: LibraryV2ArtistPageHeader;
+  };
 }
+
+export type LibraryV2ArtistPageHeader = 'rich' | 'compact';
+
+export const ARTIST_TOOLBAR_BUTTONS = {
+  automatic_search: 'Automatic Search',
+  interactive_search: 'Interactive Search',
+  enhance_quality: 'Enhance Quality',
+  refresh_scan: 'Refresh & Scan',
+  history: 'History',
+  artist_settings: 'Artist Settings',
+} as const;
+export type ArtistToolbarButton = keyof typeof ARTIST_TOOLBAR_BUTTONS;

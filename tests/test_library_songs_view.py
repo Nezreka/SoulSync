@@ -84,6 +84,12 @@ def test_a_row_says_which_album_and_counts_its_copies(conn):
     assert one['file_ids'] and one['track_id'] == one['id']
 
 
+def test_a_row_carries_the_resolution_the_library_prints(conn):
+    conn.execute("UPDATE lib2_track_files SET sample_rate = 96000, bit_depth = 24 WHERE path = '/m/3.flac'")
+    boots = next(s for s in songs(conn)['songs'] if s['title'] == 'Sand in My Boots')
+    assert (boots['format'], boots['bit_depth'], boots['sample_rate']) == ('FLAC', 24, 96000)
+
+
 def test_search_finds_titles_first_then_artists(conn):
     # "Arcadia" matches through its artist, Love Arcade
     assert titles(songs(conn, search='love')) == ['Whole Lotta Love', 'Arcadia']

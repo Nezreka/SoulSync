@@ -626,7 +626,7 @@ def song_rows(conn, track_ids: List[int], *, per_file: bool = False) -> List[Dic
         f"""SELECT t.id, t.title, t.track_number, t.disc_number, t.duration, t.play_count,
                    t.track_artist, t.album_id, al.title AS album_title, al.image_url, al.year,
                    COALESCE(ar.canonical_artist_id, ar.id) AS artist_id, ar.name AS artist_name,
-                   f.id AS file_id, f.path, f.bitrate, f.size,
+                   f.id AS file_id, f.path, f.bitrate, f.sample_rate, f.bit_depth, f.size,
                    (SELECT json_group_array(owned_f.id) {_song_files_sql('t')}) AS file_ids,
                    {_song_copies_sql()} AS copies
               {_SONG_FROM} {files_join}
@@ -649,6 +649,7 @@ def song_rows(conn, track_ids: List[int], *, per_file: bool = False) -> List[Dic
             "year": r["year"], "track_number": r["track_number"],
             "disc_number": r["disc_number"], "duration": r["duration"],
             "bitrate": _bitrate_kbps(r["bitrate"]),
+            "sample_rate": r["sample_rate"], "bit_depth": r["bit_depth"],
             "format": ext if 1 < len(ext) <= 5 else "", "file_path": path,
             "play_count": r["play_count"] or 0, "file_size": r["size"],
             "copies": max(1, int(r["copies"] or 0)),

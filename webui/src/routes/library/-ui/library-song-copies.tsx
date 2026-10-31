@@ -5,6 +5,7 @@ import { DialogFrame } from '@/components/dialog';
 
 import type { LibrarySong } from '../-library-v2.songs';
 
+import { formatQuality } from '../-bitrate';
 import { deleteLibraryTrackRequest, fetchSongCopies, songQueueTrack } from '../-library-v2.songs';
 import { SmartDeleteDialog, TRACK_DELETE_COPY } from '../../artist-detail/-ui/smart-delete-dialog';
 import styles from './library-songs.module.css';
@@ -113,12 +114,7 @@ export function SongCopiesDialog({
                     ) : null}
                   </div>
                   <div className={styles.copySpecs}>
-                    {[
-                      copy.format,
-                      copy.bitrate ? `${copy.bitrate} kbps` : '',
-                      size(copy.file_size),
-                      duration(copy.duration),
-                    ]
+                    {[formatQuality(copy).label, size(copy.file_size), duration(copy.duration)]
                       .filter(Boolean)
                       .join(' · ')}
                   </div>

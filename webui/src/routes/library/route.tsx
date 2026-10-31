@@ -1,8 +1,11 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 
+import { isArtistView, lastNavigationFrom } from '@/platform/shell/last-navigation';
 import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import {
+  artistHeaderFromLibrary,
+  artistHeaderFromElsewhere,
   LIBRARY_V2_QUERY_KEY,
   resolveLibraryV2DiscoveryArtistOwnership,
   libraryV2AlbumQueryOptions,
@@ -17,7 +20,7 @@ import { LibraryV2Page } from './-ui/library-v2-page';
 
 export const Route = createFileRoute('/library')({
   validateSearch: libraryV2SearchSchema,
-  beforeLoad: async ({ context, search }) => {
+  beforeLoad: async ({ context, search, location, cause }) => {
     // Resolve provider-qualified identities without materializing catalogue rows.
     const discover = search.discover ?? '';
     const split = discover.indexOf(':');
@@ -76,12 +79,33 @@ export const Route = createFileRoute('/library')({
             discover: undefined,
             discoverName: undefined,
             view: 'discovery',
-            header: 'rich',
+            header: await artistHeaderFromElsewhere(context.queryClient),
             releases: known.owned || source === 'library' ? (search.releases ?? 'all') : 'all',
             releaseView: 'cards',
           },
           replace: true,
         });
+    }
+    // an artist reached from another page (the wishlist, the watchlist, search,
+    // the dashboard) opens in the header this profile picked for arrivals from
+    // elsewhere; inside the library ('stay') its own links pick the library's.
+    // a header written in the url of a cold load (a bookmark, a reload) stays
+    const transitionFrom = lastNavigationFrom();
+    const enteredFromOutside = Boolean(transitionFrom && !isArtistView(transitionFrom));
+    const startedAtTarget =
+      transitionFrom?.pathname === location.pathname &&
+      transitionFrom.searchStr === location.searchStr;
+    const coldWithoutHeader =
+      cause === 'enter' && (!transitionFrom || startedAtTarget) && search.header === undefined;
+    if (search.artist && (enteredFromOutside || coldWithoutHeader)) {
+      const fromLibrary =
+        transitionFrom?.pathname.replace(/\/+$/, '').endsWith('/library') ?? false;
+      const header = fromLibrary
+        ? await artistHeaderFromLibrary(context.queryClient)
+        : await artistHeaderFromElsewhere(context.queryClient);
+      if (header !== search.header) {
+        throw redirect({ to: '/library', search: { ...search, header }, replace: true });
+      }
     }
   },
   loaderDeps: ({ search }) => ({

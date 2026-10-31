@@ -1,3 +1,5 @@
+import type { LibraryV2UiPreferences } from './-library-v2.types';
+
 /**
  * One place that decides whether a bitrate number is bits/s or kbit/s.
  *
@@ -108,4 +110,47 @@ export function formatBitrate(
     return { label: `~${kbps} kbps`, title: 'Average bitrate (VBR)' };
   }
   return { label: `${kbps} kbps`, title: undefined };
+}
+
+/**
+ * The library's quality badge, "FLAC · 24bit/96kHz · 1411 kbps": the track
+ * table's cell, the Songs rows and their copies all print it this way. `show`
+ * is the table's quality options; a part they switch off is left out.
+ */
+export function formatQuality(
+  file: {
+    format?: string | null;
+    bit_depth?: number | null;
+    sample_rate?: number | null;
+    bitrate?: number | null;
+  },
+  show: { format?: boolean; resolution?: boolean; bitrate?: boolean } = {},
+): { label: string; title: string | undefined } {
+  const rate = show.bitrate === false ? null : formatBitrate(file.bitrate, file.format);
+  const resolution =
+    show.resolution === false
+      ? ''
+      : [
+          file.bit_depth ? `${file.bit_depth}bit` : '',
+          file.sample_rate
+            ? `${Number((file.sample_rate / 1000).toFixed(file.sample_rate % 1000 === 0 ? 0 : 1))}kHz`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('/');
+  const format = show.format === false ? '' : (file.format ?? '').toUpperCase();
+  return {
+    label: [format, resolution, rate?.label].filter(Boolean).join(' · '),
+    title: rate?.title,
+  };
+}
+
+/** The track table's quality options, as `formatQuality` reads them. */
+export function qualityParts(prefs: LibraryV2UiPreferences | undefined) {
+  const table = prefs?.track_table;
+  return {
+    format: table?.quality_show_format,
+    resolution: table?.quality_show_resolution,
+    bitrate: table?.quality_show_bitrate,
+  };
 }
