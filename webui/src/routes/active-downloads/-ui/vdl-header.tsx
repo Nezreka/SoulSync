@@ -53,7 +53,9 @@ export function VdlHeader({
   retryAllPending,
 }: VdlHeaderProps) {
   const chipCounts = videoChipCounts(downloads);
-  const finished = counts.completed + counts.failed;
+  // Clear finished takes completed rows only; failed rows go through Clear
+  // failed, import failures through Manual import
+  const finished = counts.completed;
   const menu: ActionMenuItem[] = [];
   if (retryableCount > 0) {
     menu.push({

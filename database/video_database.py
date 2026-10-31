@@ -4161,9 +4161,13 @@ class VideoDatabase:
             conn.close()
 
     def clear_finished_video_downloads(self) -> int:
+        """Delete completed rows only. Failed and cancelled rows stay until
+        Clear failed or Remove from list takes them; import_failed rows stay
+        until Manual import places or dismisses them -- each is the only
+        pointer to a file still sitting in the download area."""
         conn = self._get_connection()
         try:
-            cur = conn.execute("DELETE FROM video_downloads WHERE status IN ('completed', 'failed', 'cancelled', 'import_failed')")
+            cur = conn.execute("DELETE FROM video_downloads WHERE status = 'completed'")
             conn.commit()
             return cur.rowcount
         finally:

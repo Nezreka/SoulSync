@@ -54,6 +54,21 @@ describe('video header actions', () => {
     expect(p.onClearFinished).not.toHaveBeenCalled();
   });
 
+  it('counts Clear finished as completed rows only, which is all it clears', () => {
+    const p = props({ counts: { ...counts, completed: 54, failed: 45, removable: 44, total: 99 } });
+    const { container } = render(<VdlHeader {...p} />);
+    openMenu(container);
+    expect(screen.getByRole('menuitem', { name: 'Clear finished (54)' })).not.toBeNull();
+  });
+
+  it('hides Clear finished when nothing has completed', () => {
+    const p = props({ counts: { ...counts, failed: 3, removable: 3, total: 3 } });
+    const { container } = render(<VdlHeader {...p} />);
+    openMenu(container);
+    expect(screen.queryByRole('menuitem', { name: /^Clear finished/ })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Clear failed (3)' })).not.toBeNull();
+  });
+
   it('hides Clear failed when only import failures are left', () => {
     const p = props({ counts: { ...counts, completed: 2, failed: 1, removable: 0, total: 3 } });
     const { container } = render(<VdlHeader {...p} />);

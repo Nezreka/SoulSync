@@ -120,12 +120,31 @@ def test_clear_failed_scope_keeps_completed_and_import_failed(client):
     assert retries == []
 
 
-def test_clear_with_no_body_still_clears_finished_rows(client):
-    c, db, _ = client
-    for s in ("failed", "cancelled", "completed", "downloading"):
+def test_clear_finished_takes_completed_rows_only(client):
+    """Clear finished used to take failed and cancelled rows too, so the only
+    way to keep a failed row in view was never to clear anything."""
+    c, db, retries = client
+    for s in ("failed", "cancelled", "completed", "completed", "downloading"):
         _row(db, s)
 
     r = c.post("/api/video/downloads/clear")
 
-    assert r.get_json()["cleared"] == 3
-    assert _statuses(db) == ["downloading"]
+    assert r.get_json()["cleared"] == 2
+    assert _statuses(db) == ["cancelled", "downloading", "failed"]
+    assert retries == []
+
+
+def test_clear_finished_leaves_import_failed_for_manual_import(client):
+    """Clear finished used to delete import_failed rows too, stranding their
+    files in the download area with nothing left pointing at them."""
+    c, db, _ = client
+    kept = _row(db, "import_failed")
+    _row(db, "completed")
+    _row(db, "failed")
+
+    r = c.post("/api/video/downloads/clear")
+
+    assert r.get_json()["cleared"] == 1
+    assert _statuses(db) == ["failed", "import_failed"]
+    items = c.get("/api/video/import/failed").get_json()["items"]
+    assert [item["id"] for item in items] == [kept]
