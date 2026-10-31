@@ -9,7 +9,9 @@ Reference: https://sabnzbd.org/wiki/configuration/4.3/api
 
 from __future__ import annotations
 
-from typing import List, Optional, Union
+import threading
+import time
+from typing import Dict, List, Optional, Tuple, Union
 
 import requests as http_requests
 
@@ -51,6 +53,23 @@ _SAB_QUEUE_STATE_MAP = {
 
 def _map_state(sab_state: str) -> str:
     return _SAB_QUEUE_STATE_MAP.get((sab_state or "").lower(), "error")
+
+
+# Slot states that mean "waiting its turn behind other jobs" -- nothing has
+# been asked of the news server yet. Grabbing and Propagating also map to
+# ``queued`` but are NOT in here: they are work in progress and can hang.
+_SAB_WAITING_STATES = {"queued", "idle"}
+
+# SAB does not reliably say a job is waiting: a live SAB 4.x reported EVERY
+# slot as 'Downloading', the five behind the active job included, at 0%. What
+# does tell is the queue ORDER -- SAB works the queue top down -- but a lookup
+# by nzo_ids renumbers the one slot it returns to index 0, so the order has to
+# come from the full queue. get_active_adapter() builds a new adapter per call,
+# so the full queue is cached here at module level, per SAB URL, briefly: one
+# full-queue call per poll cycle however many jobs are polled.
+_QUEUE_ORDER_TTL = 2.0
+_queue_order_cache: Dict[str, Tuple[float, Optional[List[Tuple[str, str]]]]] = {}
+_queue_order_lock = threading.Lock()
 
 
 class SABnzbdAdapter:
@@ -196,7 +215,13 @@ class SABnzbdAdapter:
         if queue and isinstance(queue.get('queue'), dict):
             for slot in queue['queue'].get('slots', []) or []:
                 if str(slot.get('nzo_id') or '') == job_id:
-                    return self._parse_queue_slot(slot)
+                    status = self._parse_queue_slot(slot)
+                    # nothing downloaded yet and another job ahead of it: it is
+                    # waiting its turn, whatever SAB calls its status
+                    if not status.waiting_in_queue and status.progress <= 0 \
+                            and status.state != 'paused':
+                        status.waiting_in_queue = self._behind_another_job(job_id)
+                    return status
         history = self._call_sync('history', nzo_ids=job_id)
         if history and isinstance(history.get('history'), dict):
             for slot in history['history'].get('slots', []) or []:
@@ -210,6 +235,38 @@ class SABnzbdAdapter:
             if status.id == job_id:
                 return status
         return None
+
+    def _queue_order(self) -> Optional[List[Tuple[str, str]]]:
+        """The full queue as (nzo_id, lowercase status) in SAB's own order,
+        or None when SAB could not be read. Cached briefly (see above)."""
+        key = str(self._url or '')
+        now = time.monotonic()
+        with _queue_order_lock:
+            hit = _queue_order_cache.get(key)
+            if hit and now - hit[0] < _QUEUE_ORDER_TTL:
+                return hit[1]
+        data = self._call_sync('queue')
+        order: Optional[List[Tuple[str, str]]] = None
+        if data and isinstance(data.get('queue'), dict):
+            order = [(str(s.get('nzo_id') or ''), str(s.get('status') or '').lower())
+                     for s in data['queue'].get('slots', []) or []]
+        with _queue_order_lock:
+            _queue_order_cache[key] = (now, order)
+        return order
+
+    def _behind_another_job(self, job_id: str) -> bool:
+        """True when an unpaused job sits ahead of this one in SAB's queue.
+        SAB skips paused jobs, so they do not hold anything back. The job at
+        the head of the queue is never 'waiting': if it does not move, that is
+        a real stall. Unknown (SAB unreadable, job not listed) -> False, so the
+        stall clock keeps running."""
+        order = self._queue_order()
+        if not order:
+            return False
+        ids = [nzo for nzo, _ in order]
+        if job_id not in ids:
+            return False
+        return any(st != 'paused' for _, st in order[:ids.index(job_id)])
 
     async def get_all(self) -> List[UsenetStatus]:
         return await run_control(self._get_all_sync)
@@ -251,6 +308,7 @@ class SABnzbdAdapter:
             download_speed=0,  # queue endpoint doesn't include per-slot speed
             eta=eta,
             category=slot.get('cat'),
+            waiting_in_queue=(slot.get('status') or '').lower() in _SAB_WAITING_STATES,
         )
 
     def _parse_history_slot(self, slot: dict) -> UsenetStatus:
