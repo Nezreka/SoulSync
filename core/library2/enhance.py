@@ -44,7 +44,8 @@ def enhance_candidates(conn: Any, entity: str, entity_id: int, *,
     out = []
     for row in conn.execute(
             "SELECT t.id, t.title, t.disc_number, t.track_number, al.id AS album_id,"
-            "       al.title AS album_title"
+            "       al.title AS album_title, al.year AS album_year,"
+            "       al.album_type AS album_type, al.image_url AS album_image"
             "  FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id"
             " WHERE t.id IN (SELECT value FROM json_each(?))"
             " ORDER BY al.title COLLATE NOCASE, t.disc_number, t.track_number",
@@ -53,9 +54,15 @@ def enhance_candidates(conn: Any, entity: str, entity_id: int, *,
         if profile["id"] not in targets:
             targets[profile["id"]] = target_label(profile)
         quality = audio_quality_from_file(files.get(row["id"]))
+        # the cover through soulsync's artwork endpoint; the provider's own
+        # stands in while a cold one builds
+        stored = str(row["album_image"] or "")
         out.append({
             "track_id": row["id"], "title": row["title"],
             "album_id": row["album_id"], "album_title": row["album_title"],
+            "album_year": row["album_year"], "album_type": row["album_type"],
+            "album_image_url": f"/api/library/v2/artwork/album/{int(row['album_id'])}",
+            "album_remote_image_url": stored if stored.startswith(("http://", "https://")) else None,
             "disc_number": row["disc_number"], "track_number": row["track_number"],
             "current": quality.label() if quality else None,
             "profile": profile["name"], "target": targets[profile["id"]],

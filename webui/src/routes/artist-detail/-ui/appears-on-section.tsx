@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 
+import { LibraryCover } from '@/routes/library/-ui/library-cover';
+
 import {
   type AppearsOnAlbum,
   type AppearsOnData,
@@ -24,12 +26,6 @@ import {
 
 const COLLAPSED = 8;
 
-// a cover soulsync hasn't built yet answers 404 and is built in the background;
-// it was a broken image until the next visit, so a reload of the same artist
-// sometimes had covers and sometimes not. it's asked again for a while, the
-// provider's own cover showing meanwhile
-const COVER_RETRIES = [1500, 3000, 6000, 12000];
-
 function PendingCover({
   src,
   remote,
@@ -39,38 +35,13 @@ function PendingCover({
   remote?: string | null;
   className: string;
 }) {
-  const [attempt, setAttempt] = useState(0);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    setAttempt(0);
-    setFailed(false);
-  }, [src]);
-  useEffect(() => {
-    if (!failed || attempt >= COVER_RETRIES.length) return;
-    const timer = setTimeout(() => {
-      setAttempt((n) => n + 1);
-      setFailed(false);
-    }, COVER_RETRIES[attempt]);
-    return () => clearTimeout(timer);
-  }, [failed, attempt]);
-  const url = attempt ? `${src}${src.includes('?') ? '&' : '?'}retry=${attempt}` : src;
-  const showRemote = failed && remote;
-  if (failed && !remote && attempt >= COVER_RETRIES.length) {
-    return <span className={`${className} artist-appears-on-art-empty`} aria-hidden="true" />;
-  }
   return (
-    <>
-      {showRemote ? <img className={className} src={remote} alt="" loading="lazy" /> : null}
-      <img
-        key={url}
-        className={className}
-        src={url}
-        alt=""
-        loading="lazy"
-        style={failed ? { display: 'none' } : undefined}
-        onError={() => setFailed(true)}
-      />
-    </>
+    <LibraryCover
+      src={src}
+      remote={remote}
+      className={className}
+      fallback={<span className={`${className} artist-appears-on-art-empty`} aria-hidden="true" />}
+    />
   );
 }
 

@@ -194,7 +194,7 @@ describe('collab albums', () => {
 });
 
 describe('a cover still being built', () => {
-  it('shows the provider cover and asks again until the local one is ready', async () => {
+  it('shows the provider cover while the local one is still being built', async () => {
     stub([
       {
         ...WFL,
@@ -204,18 +204,11 @@ describe('a cover still being built', () => {
     ]);
     render(<AppearsOnSection artistId={7} artistName="Rihanna" />);
     await screen.findByText('We Found Love');
-    const local = () =>
-      [...document.querySelectorAll('img')].find((img) =>
-        img.getAttribute('src')?.startsWith('/api/library/v2/artwork/album/10'),
-      )!;
+    const local = document.querySelector('img[src="/api/library/v2/artwork/album/10"]')!;
     // the endpoint answers 404 while it builds the cover
-    fireEvent.error(local());
+    fireEvent.error(local);
     await waitFor(() =>
       expect(document.querySelector('img[src="https://cdn.test/18.jpg"]')).not.toBeNull(),
     );
-    // asked again, with a fresh url so the browser doesn't reuse the 404
-    await waitFor(() => expect(local().getAttribute('src')).toContain('retry=1'), {
-      timeout: 3000,
-    });
   });
 });

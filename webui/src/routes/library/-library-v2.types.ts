@@ -165,6 +165,12 @@ export interface LibraryV2EnhanceTrack {
   title: string;
   album_id: number;
   album_title: string;
+  album_year?: number | null;
+  album_type?: string | null;
+  /** soulsync's artwork endpoint for the release */
+  album_image_url?: string;
+  /** the provider's cover, painted while a cold local one builds */
+  album_remote_image_url?: string | null;
   disc_number: number | null;
   track_number: number | null;
   current: string | null;

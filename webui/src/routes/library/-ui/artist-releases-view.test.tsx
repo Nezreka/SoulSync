@@ -1072,7 +1072,9 @@ describe('Library V2 artist detail — All Releases views', () => {
     renderArtist('/library?artist=1');
 
     fireEvent.click(await screen.findByRole('button', { name: 'Upgrade 2' }));
-    expect(await screen.findByText('Enhance Quality — Dummy')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('dialog', { name: 'Enhance Quality — Dummy' }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^Enhance/ }));
     await waitFor(() => expect(posts).toEqual([{ track_ids: [1, 2] }]));
   });
