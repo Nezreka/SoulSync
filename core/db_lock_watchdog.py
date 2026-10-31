@@ -93,11 +93,28 @@ def report_blocked_writer(*, log: Optional[Callable[..., None]] = None) -> None:
     emit = log or (lambda message: logger.error("%s", message))
     emit(
         f"SQLite write lock is held longer than {PROBE_TIMEOUT_MS}ms, so every "
-        "other writer in this process is queued behind it. Dumping all thread "
-        "stacks — the holder is the thread parked inside a database call, or "
-        "inside a network/filesystem call it made after writing:\n"
+        "other writer in this process is queued behind it.\n"
+        + format_open_transactions()
+        + "Dumping all thread stacks — the holder is the thread parked inside a "
+        "database call, or inside a network/filesystem call it made after writing:\n"
         + format_thread_stacks()
     )
+
+
+def format_open_transactions() -> str:
+    """The pooled connections holding a transaction open right now, oldest
+    first. The oldest one is almost always the holder; its thread's stack
+    below says what it is doing while it holds it."""
+    try:
+        from database.connection_pool import open_transactions
+        holders = open_transactions()
+    except Exception as exc:  # noqa: BLE001 - diagnostics never break the app
+        return f"Open transactions: unavailable ({exc})\n"
+    if not holders:
+        return ("Open transactions: none on pooled connections (the holder opened "
+                "its own connection, or another process has the file)\n")
+    lines = [f"  {h['thread']}: open {h['age_s']}s on {h['path']}" for h in holders]
+    return "Open transactions, oldest first (the first is the likely holder):\n" + "\n".join(lines) + "\n"
 
 
 def run_watchdog(
@@ -156,6 +173,7 @@ __all__ = [
     "DUMP_COOLDOWN_SECONDS",
     "PROBE_INTERVAL_SECONDS",
     "PROBE_TIMEOUT_MS",
+    "format_open_transactions",
     "format_thread_stacks",
     "probe_write_lock",
     "report_blocked_writer",

@@ -44,6 +44,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+import time
 import weakref
 from collections import OrderedDict
 from typing import Any, Callable, List, Optional
@@ -68,6 +69,10 @@ _idle: "OrderedDict[str, List[_Slot]]" = OrderedDict()
 # next one: insert_or_update_media_track drops busy_timeout to 10s, the planner
 # stats refresh sets analysis_limit
 _RESET_PRAGMAS = ("busy_timeout", "analysis_limit")
+
+# every proxy handed out and not yet given back, so the lock watchdog can name
+# the thread sitting on an open write transaction instead of dumping every stack
+_checked_out: "weakref.WeakSet[PooledConnection]" = weakref.WeakSet()
 
 # plain counters for diagnostics and tests; not locked on purpose, approximate is fine
 stats = {"hits": 0, "misses": 0, "discarded": 0, "kept_by_cursor": 0, "overflow_closed": 0}
@@ -114,13 +119,19 @@ def _close_quietly(raw: sqlite3.Connection) -> None:
 class PooledConnection:
     """What ``_get_connection`` returns. Looks like a sqlite3.Connection to callers."""
 
-    __slots__ = ("_slot", "_path", "_cursors", "_released", "__weakref__")
+    __slots__ = ("_slot", "_path", "_cursors", "_released", "_owner", "_since", "__weakref__")
 
     def __init__(self, slot: _Slot, path: str):
         object.__setattr__(self, "_slot", slot)
         object.__setattr__(self, "_path", path)
         object.__setattr__(self, "_cursors", [])
         object.__setattr__(self, "_released", False)
+        object.__setattr__(self, "_owner", threading.current_thread().name)
+        object.__setattr__(self, "_since", time.monotonic())
+        try:
+            _checked_out.add(self)
+        except TypeError:  # pragma: no cover - a WeakSet always takes a slotted proxy
+            pass
 
     # -- delegation ----------------------------------------------------------
     def _raw(self) -> sqlite3.Connection:
@@ -273,6 +284,25 @@ def acquire(path: Any, opener: Callable[[bool], sqlite3.Connection]):
     stats["misses"] += 1
     raw = opener(False)
     return PooledConnection(_Slot(raw, ident), p)
+
+
+def open_transactions(min_age: float = 0.0) -> List[dict]:
+    """checked-out connections with a transaction open, oldest first: the
+    thread that took the connection, how long ago, and the file. a write
+    transaction here is what every other writer is queued behind."""
+    now = time.monotonic()
+    found = []
+    for proxy in list(_checked_out):
+        try:
+            if proxy._released or not proxy._slot.raw.in_transaction:
+                continue
+        except Exception:  # noqa: BLE001, S112 - a closed or moving connection is not a holder
+            continue
+        age = now - proxy._since
+        if age >= min_age:
+            found.append({"thread": proxy._owner, "age_s": round(age, 1),
+                          "path": os.path.basename(proxy._path)})
+    return sorted(found, key=lambda h: -h["age_s"])
 
 
 def discard(path: Any) -> None:
