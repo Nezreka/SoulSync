@@ -20,6 +20,11 @@ import {
  * artist pushes the one you left; back walks down the chain. coming back up
  * from one of the artist's albums keeps the chain as it was.
  */
+// the artist last shown, across views: an owned artist (the library row) and
+// one the library has never heard of (read from the provider) are two views,
+// and hopping between them must still name the artist you came from
+let lastShownArtist: string | null = null;
+
 export function useArtistBack(artistName: string | undefined): {
   label: string;
   onBack: () => void;
@@ -37,6 +42,7 @@ export function useArtistBack(artistName: string | undefined): {
       // cleared in place: vanilla holds the same array
       backLabelStack().length = 0;
       pushPageOrigin(arrival.pathname);
+      lastShownArtist = null;
     }
     setLabel(backButtonLabel());
     // only on arrival: re-running as the chain grows would rewrite it
@@ -45,10 +51,12 @@ export function useArtistBack(artistName: string | undefined): {
 
   useEffect(() => {
     if (!artistName) return;
-    if (previousName.current && previousName.current !== artistName) {
-      pushArtistOrigin(previousName.current);
+    const previous = previousName.current ?? lastShownArtist;
+    if (previous && previous !== artistName) {
+      pushArtistOrigin(previous);
     }
     previousName.current = artistName;
+    lastShownArtist = artistName;
     setLabel(backButtonLabel());
   }, [artistName]);
 

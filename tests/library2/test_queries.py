@@ -1203,6 +1203,8 @@ def test_a_guest_spot_is_an_appearance_and_a_collaboration_is_their_own(imported
 
     assert [a["title"] for a in data["albums"]] == ["Together"]
     assert [a["title"] for a in data["appears_on"]] == ["Hosted"]
+    # the guest's own tracks there, not the four on the host's album
+    assert (data["guest_track_count"], data["guest_release_count"]) == (1, 1)
     # and the host's page is untouched
     host_view = Q.get_artist(imported_conn, host)
     assert {a["title"] for a in host_view["albums"]} >= {"Hosted", "Together"}

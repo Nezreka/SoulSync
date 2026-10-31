@@ -266,6 +266,9 @@ export interface LibraryV2AlbumSummary {
   spotify_id: string | null;
   /** the release card's musicbrainz link. */
   musicbrainz_id?: string | null;
+  /** the release's ids by provider: a release you don't have opens the
+   *  download modal from the one matching the artist's source */
+  provider_ids?: Record<string, string>;
   /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
   explicit: boolean | null;
   label: string | null;
@@ -304,6 +307,12 @@ export interface LibraryV2ArtistDetail {
   albums: LibraryV2AlbumSummary[];
   eps: LibraryV2AlbumSummary[];
   singles: LibraryV2AlbumSummary[];
+  /** releases by other artists this one is credited on (guest spots) */
+  appears_on?: LibraryV2AlbumSummary[];
+  /** the artist's own tracks on those releases that are here, and on how
+   *  many releases */
+  guest_track_count?: number;
+  guest_release_count?: number;
   album_count: number;
   single_count: number;
   /** Provider-only releases currently persisted for this artist. */

@@ -133,16 +133,17 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     expect(detailRequests).toHaveLength(0);
   });
 
-  it('keeps unknown provider artists on the original detail page without Library tabs', async () => {
+  it('opens an unknown provider artist on the library artist page, without My Library', async () => {
+    // dev had one artist page for every artist; the old provider page is gone
     const { router } = renderAt('/artist-detail/deezer/2481?name=Aphex%20Twin');
 
     expect(await screen.findByText('Drukqs')).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe('/artist-detail/deezer/2481');
+    expect(router.state.location.pathname).toBe('/library');
     expect(router.state.location.search).toMatchObject({
-      name: 'Aphex Twin',
+      discover: 'deezer:2481',
+      discoverName: 'Aphex Twin',
     });
     expect(screen.queryByRole('button', { name: 'My Library' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Discovery' })).not.toBeInTheDocument();
     expect(detailRequests[0]?.searchParams.get('source')).toBe('deezer');
     expect(detailRequests[0]?.searchParams.get('name')).toBe('Aphex Twin');
   });
@@ -157,13 +158,15 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     expect(detailRequests[0]?.searchParams.get('name')).toBe('311');
   });
 
-  it('keeps a catalogued but not owned provider artist on the original page', async () => {
+  it('opens a catalogued but not owned provider artist on its library page, on Discovery', async () => {
     resolved = 7;
     owned = false;
     const { router } = renderAt('/artist-detail/deezer/2481?name=Aphex%20Twin');
 
-    expect(await screen.findByText('Drukqs')).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe('/artist-detail/deezer/2481');
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ artist: 7, releases: 'all' }),
+    );
+    expect(router.state.location.pathname).toBe('/library');
   });
 
   it('keeps a search-only profile on the artist page instead of bouncing home', async () => {
@@ -198,15 +201,17 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     expect(await screen.findByText('Drukqs')).toBeInTheDocument();
   });
 
-  it('sends an in-app link to a catalogued but unowned artist to the artist page', async () => {
+  it('sends an in-app link to a catalogued but unowned artist to its library page', async () => {
     resolved = 7;
     owned = false;
     const { router } = renderAt(
       '/library?view=discovery&immersive=true&discover=deezer%3A2481&discoverName=Aphex%20Twin',
     );
 
-    expect(await screen.findByText('Drukqs')).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe('/artist-detail/deezer/2481');
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ artist: 7, releases: 'all' }),
+    );
+    expect(router.state.location.pathname).toBe('/library');
   });
 
   it('sends an in-app artist link from a search-only profile to the artist page', async () => {

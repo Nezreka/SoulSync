@@ -54,6 +54,7 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
       return;
     }
     let known: number | null = null;
+    let owned = true;
     let focusAlbum: number | undefined =
       isLibrary && search.album && /^\d+$/.test(search.album) ? Number(search.album) : undefined;
     if (isLibrary && /^\d+$/.test(params.id)) {
@@ -81,10 +82,13 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
       // only an artist with files here leaves the artist page. a watchlisted,
       // bookmarked or discography-only row keeps the original page. a
       // media-server id has no provider page, so any catalogue row will do.
-      if (found?.artistId && (isLibrary || found.owned)) known = found.artistId;
+      if (found?.artistId) known = found.artistId;
+      owned = isLibrary || found?.owned === true;
       // a provider ?album= keeps its focus when the release is catalogued here
       if (found?.albumId) focusAlbum = found.albumId;
     }
+    // every artist opens on the library's artist page, the way dev had one
+    // artist page for everyone: My Library only when there are files here
     if (known) {
       throw redirect({
         to: '/library',
@@ -93,13 +97,27 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
           album: focusAlbum,
           view: 'discovery',
           immersive: true,
+          ...(owned ? {} : { releases: 'all' as const }),
         },
         replace: true,
       });
     }
-    // Unknown provider artists retain the original page. Media-server ids
-    // without a catalogue match have no provider page to fall back to.
+    // Media-server ids without a catalogue match have no provider page.
     if (isLibrary) throw redirect({ to: '/library', search: {}, replace: true });
+    // one the library has never heard of: the same page, read from the
+    // provider. nothing is written until you watch, monitor or download
+    throw redirect({
+      to: '/library',
+      search: {
+        discover: `${source}:${params.id}`,
+        discoverName: search.name || undefined,
+        discoverAlbum: search.album ? `${source}:${search.album}` : undefined,
+        view: 'discovery',
+        immersive: true,
+        releases: 'all',
+      },
+      replace: true,
+    });
   },
   component: ArtistDetailRouteComponent,
 });

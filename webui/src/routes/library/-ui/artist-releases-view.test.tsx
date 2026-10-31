@@ -62,6 +62,38 @@ function portishead(patch: Record<string, unknown> = {}) {
   };
 }
 
+/** one release with files here: My Library is offered only for an artist in
+ *  the library, the way dev offered its library view (and the tests of that
+ *  view need an artist that has one) */
+const OWNED_SINGLE = {
+  id: 99,
+  title: 'Numb',
+  album_type: 'single',
+  origin: 'library',
+  tracks_present: 1,
+  tracks_missing: 1,
+  track_count: 2,
+};
+
+function inLibrary() {
+  server.use(
+    http.get('/api/library/v2/artists/1', () =>
+      HttpResponse.json({
+        success: true,
+        artist: portishead({
+          media_server_sources: ['navidrome', 'plex'],
+          monitored: false,
+          albums: [album({ id: 1, title: 'Dummy' }), album({ id: 2, title: 'Roseland NYC Live' })],
+          singles: [album(OWNED_SINGLE)],
+          album_count: 2,
+          discography_count: 2,
+          total_size_bytes: 2048,
+        }),
+      }),
+    ),
+  );
+}
+
 function renderArtist(entry: string) {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [entry] });
@@ -204,6 +236,7 @@ describe('Library V2 artist detail — All Releases views', () => {
   });
 
   it('uses the existing rich header for immersive arrivals and keeps the artist tools on show', async () => {
+    inLibrary();
     const { router } = renderArtist('/library?artist=1&view=discovery&immersive=true');
     await screen.findByRole('heading', { name: 'Portishead' });
     expect(router.state.location.search).toMatchObject({ header: 'rich', releaseView: 'cards' });
@@ -271,6 +304,7 @@ describe('Library V2 artist detail — All Releases views', () => {
   });
 
   it('offers the Table ↔ Discover switch only on All Releases (ldp-03)', async () => {
+    inLibrary();
     const { router } = renderArtist('/library?artist=1');
     await screen.findByRole('heading', { name: 'Portishead' });
     expect(screen.queryByRole('button', { name: 'Discover View' })).not.toBeInTheDocument();
@@ -301,7 +335,8 @@ describe('Library V2 artist detail — All Releases views', () => {
     // the card CSS depends on to cancel `.release-card`'s fixed 300px height,
     // without which the covers overlapped.
     await waitFor(() =>
-      expect(document.querySelectorAll('.release-card.album-card')).toHaveLength(2),
+      // two albums and the single the artist has here
+      expect(document.querySelectorAll('.release-card.album-card')).toHaveLength(3),
     );
     expect(
       document.querySelector('.discography-sections .discography-section .releases-grid'),
@@ -448,6 +483,7 @@ describe('Library V2 artist detail — All Releases views', () => {
                 track_count: 10,
               }),
             ],
+            singles: [album(OWNED_SINGLE)],
           }),
         }),
       ),
@@ -678,6 +714,7 @@ describe('Library V2 artist detail — All Releases views', () => {
 
   it('monitors every not-yet-wanted top track with Monitor All', async () => {
     const monitored: unknown[] = [];
+    inLibrary();
     server.use(
       http.get('/api/artist/:id/top-tracks', () =>
         HttpResponse.json({
@@ -709,6 +746,7 @@ describe('Library V2 artist detail — All Releases views', () => {
   });
 
   it('uses the same bookmark glyph as every other monitor control', async () => {
+    inLibrary();
     server.use(
       http.get('/api/artist/:id/top-tracks', () =>
         HttpResponse.json({
@@ -732,7 +770,10 @@ describe('Library V2 artist detail — All Releases views', () => {
     // The monitor toggle by its own label, not "the first icon in the hero" —
     // the hero actions gained a Play button in front of it, and a positional
     // lookup silently compares against whatever happens to be leftmost.
-    const monitor = screen.getByLabelText(/^(Start|Stop) monitoring$/).querySelector('svg path');
+    // the artist's own toggle comes first; a release card carries one too
+    const monitor = screen
+      .getAllByLabelText(/^(Start|Stop) monitoring$/)[0]
+      .querySelector('svg path');
     expect(bookmark.querySelector('svg path')?.getAttribute('d')).toBe(monitor?.getAttribute('d'));
   });
 

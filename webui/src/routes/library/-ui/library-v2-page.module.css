@@ -4003,6 +4003,12 @@ button.statusWarn:disabled {
   backdrop-filter: blur(8px);
 }
 
+/* the album menu floats on the page's top level (AlbumOverflowMenu) */
+.overflowMenuFloating {
+  position: fixed;
+  left: auto;
+}
+
 .overflowMenuItem {
   display: flex;
   align-items: center;
@@ -9269,4 +9275,11 @@ textarea.searchInput {
   .bandCollection :global(.artist-hero-stat .hero-stat-value) {
     font-size: 24px;
   }
+}
+
+/* "Plus 62 tracks on 40 releases by other artists", under the meters */
+.collectionNote {
+  margin: -6px 0 0;
+  color: var(--white-a55);
+  font-size: 12.5px;
 }

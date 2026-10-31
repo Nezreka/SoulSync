@@ -59,42 +59,29 @@ export const Route = createFileRoute('/library')({
               name: search.discoverName ?? '',
             }),
         })
-        .then((found) =>
-          // only an artist with files here opens in the library. a
-          // watchlisted or discography-only row keeps the artist page.
-          found.artistId && (source === 'library' || found.owned) ? found.artistId : null,
-        )
+        .then((found) => (found.artistId ? found : null))
         .catch(() => null);
       if (!known && source === 'library')
         throw redirect({ to: '/library', search: {}, replace: true });
+      // every artist is this page, the way dev had one artist page for
+      // everyone. one the library has a row for opens it, with My Library
+      // only when it has files here; one it has never heard of stays on
+      // ?discover= and the page reads it from the provider (no row written)
       if (known)
         throw redirect({
           to: '/library',
           search: {
             ...search,
-            artist: known,
+            artist: known.artistId ?? undefined,
             discover: undefined,
             discoverName: undefined,
             view: 'discovery',
             header: 'rich',
-            releases: 'all',
+            releases: known.owned || source === 'library' ? (search.releases ?? 'all') : 'all',
             releaseView: 'cards',
           },
           replace: true,
         });
-      const albumSplit = search.discoverAlbum?.indexOf(':') ?? -1;
-      throw redirect({
-        to: '/artist-detail/$source/$id',
-        params: { source, id: providerId },
-        search: {
-          name: search.discoverName ?? '',
-          album:
-            albumSplit > 0 && search.discoverAlbum?.slice(0, albumSplit) === source
-              ? search.discoverAlbum.slice(albumSplit + 1)
-              : undefined,
-        },
-        replace: true,
-      });
     }
   },
   loaderDeps: ({ search }) => ({

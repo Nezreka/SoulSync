@@ -6,6 +6,7 @@ import {
   type UseNavigateResult,
 } from '@tanstack/react-router';
 import {
+  type CSSProperties,
   type InputHTMLAttributes,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -18,6 +19,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 import { DialogFrame, DialogHeader } from '@/components/dialog';
 import {
@@ -28,7 +30,10 @@ import {
 import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
+import { profileAsksFirst } from '@/platform/shell/download-rights';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
+
+import type { ArtistDetailResponse } from '../../artist-detail/-artist-detail.types';
 
 import { playLibraryV2ArtistRadio } from '../-artist-radio';
 import { bitrateKbps, formatBitrate } from '../-bitrate';
@@ -167,15 +172,26 @@ import {
   type LibraryV2WantedRow,
 } from '../-library-v2.types';
 import { computeTrackEditValues } from '../-metadata-edit';
+import {
+  artistDetailQueryOptions,
+  watchlistIdentity,
+} from '../../artist-detail/-artist-detail.api';
 import { announceWatchlistFollow } from '../../artist-detail/-artist-detail.enrich-match';
 import { syncResultMessage } from '../../artist-detail/-artist-detail.meta';
+import {
+  checkWatchlistRequest,
+  toggleWatchlistRequest,
+} from '../../artist-detail/-artist-detail.watchlist-button';
 import { AppearsOnSection } from '../../artist-detail/-ui/appears-on-section';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
 import { ConcertsSection } from '../../artist-detail/-ui/concerts-section';
+import { DiscographyModal } from '../../artist-detail/-ui/discography-modal';
 import { ReassignModal } from '../../artist-detail/-ui/reassign-modal';
 import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
 import { SimilarArtistsSection } from '../../artist-detail/-ui/similar-artists-section';
+import { WatchlistAddModal } from '../../artist-detail/-ui/watchlist-add-modal';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
+import { ArtistPageLibraryProvider, ReleaseMonitorButton } from './artist-page-release-actions';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import {
   classifyReleaseContent,
@@ -425,6 +441,7 @@ const ICON_PATHS = {
   expand: 'M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5',
   collapse: 'M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6',
   download: 'M12 3v12M8 11l4 4 4-4M5 21h14',
+  eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   quality: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
   star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
   userProfile:
@@ -3118,6 +3135,54 @@ function AlbumMetadataForm({
  *  nothing. `onDeleted` lets the deep-link view navigate back to the artist
  *  after a successful delete; the row doesn't need it (it just disappears
  *  once the query invalidates). */
+/** where a floating menu sits: under its button, right edges lined up, and
+ *  above the button when there isn't room below. it closes on scroll and
+ *  resize instead of drifting away from the button it belongs to */
+function useFloatingMenuPosition(
+  anchorRef: { current: HTMLElement | null },
+  menuRef: { current: HTMLElement | null },
+  open: boolean,
+  close: () => void,
+): CSSProperties {
+  const [position, setPosition] = useState<CSSProperties>({ visibility: 'hidden' });
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition({ visibility: 'hidden' });
+      return;
+    }
+    const anchor = anchorRef.current?.getBoundingClientRect();
+    if (!anchor) return;
+    const height = menuRef.current?.offsetHeight ?? 0;
+    const gap = 8;
+    const below = anchor.bottom + gap;
+    const top =
+      below + height > window.innerHeight - 12 && anchor.top - gap - height > 12
+        ? anchor.top - gap - height
+        : below;
+    setPosition({ top, right: Math.max(12, window.innerWidth - anchor.right) });
+  }, [open, anchorRef, menuRef]);
+  useEffect(() => {
+    if (!open) return;
+    const onMove = (event: Event) => {
+      if (
+        menuRef.current &&
+        event.target instanceof Node &&
+        menuRef.current.contains(event.target)
+      ) {
+        return;
+      }
+      close();
+    };
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => {
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+    };
+  }, [open, menuRef, close]);
+  return position;
+}
+
 export function AlbumOverflowMenu({
   album,
   onDeleted,
@@ -3152,10 +3217,15 @@ export function AlbumOverflowMenu({
     },
   });
 
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuPosition = useFloatingMenuPosition(wrapRef, menuRef, open, () => setOpen(false));
+
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (wrapRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
@@ -3164,170 +3234,180 @@ export function AlbumOverflowMenu({
   return (
     <span ref={wrapRef} className={styles.overflowWrap} onClick={(e) => e.stopPropagation()}>
       <IconActionButton icon="more" title="More actions" onClick={() => setOpen((v) => !v)} />
-      {open ? (
-        <div className={`${styles.overflowMenu} ${styles.alignRight}`}>
-          <button
-            type="button"
-            className={styles.overflowMenuItem}
-            onClick={() => {
-              setShowDetails(true);
-              setOpen(false);
-            }}
-          >
-            Album details
-          </button>
-          {canWrite ? (
-            <AlbumUnlockMenuItem
-              albumId={album.id}
-              className={styles.overflowMenuItem}
-              onDone={() => setOpen(false)}
-            />
-          ) : null}
-          <button
-            type="button"
-            className={styles.overflowMenuItem}
-            data-requires-write=""
-            disabled={!canWrite}
-            onClick={() => {
-              if (!canWrite) return;
-              setShowRetag(true);
-              setOpen(false);
-            }}
-          >
-            Preview Retag
-          </button>
-          <button
-            type="button"
-            className={styles.overflowMenuItem}
-            data-requires-write=""
-            disabled={replaygain.isPending || !canWrite}
-            onClick={() => {
-              if (!canWrite) return;
-              replaygain.mutate();
-              setOpen(false);
-            }}
-          >
-            {replaygain.isPending ? 'Analyzing ReplayGain…' : 'Analyze ReplayGain'}
-          </button>
-          <button
-            type="button"
-            className={styles.overflowMenuItem}
-            data-requires-write=""
-            disabled={!canWrite}
-            onClick={() => {
-              if (!canWrite) return;
-              setShowReorganize(true);
-              setOpen(false);
-            }}
-          >
-            Preview Rename / Organize
-          </button>
-          <button
-            type="button"
-            className={styles.overflowMenuItem}
-            data-requires-write=""
-            disabled={!canWrite || album.owns_files === false}
-            title={
-              album.owns_files === false
-                ? 'Nothing to reassign — this release has no files in your library'
-                : 'Move this album\u2019s files to a different artist'
-            }
-            onClick={() => {
-              if (!canWrite || album.owns_files === false) return;
-              setShowReassign(true);
-              setOpen(false);
-            }}
-          >
-            Reassign to another artist…
-          </button>
-          <button
-            type="button"
-            className={styles.overflowMenuItem}
-            data-requires-write=""
-            disabled={!canWrite}
-            onClick={() => {
-              if (!canWrite) return;
-              setShowArtPicker(true);
-              setOpen(false);
-            }}
-          >
-            Change Cover
-          </button>
-          <button
-            type="button"
-            className={styles.overflowMenuItem}
-            onClick={() => {
-              setShowHistory(true);
-              setOpen(false);
-            }}
-          >
-            History
-          </button>
-          <button
-            type="button"
-            className={styles.overflowMenuItem}
-            onClick={() => {
-              window.showReportIssueModal?.(
-                'album',
-                album.id,
-                album.title,
-                String(album.artist_name || ''),
-              );
-              setOpen(false);
-            }}
-          >
-            Report a Problem…
-          </button>
-          <div
-            className={styles.submenuContainer}
-            onMouseEnter={() => {
-              if (canWrite) setShowSubmenu(true);
-            }}
-            onMouseLeave={() => setShowSubmenu(false)}
-          >
-            <button
-              type="button"
-              className={styles.overflowMenuItem}
-              data-requires-write=""
-              disabled={!canWrite}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (!canWrite) return;
-                setShowSubmenu((v) => !v);
-              }}
+      {open
+        ? createPortal(
+            // on the page's top level: inside a card or a hero it was clipped by
+            // their overflow, half the menu cut off
+            <div
+              ref={menuRef}
+              className={`${styles.overflowMenu} ${styles.overflowMenuFloating}`}
+              style={menuPosition}
+              onClick={(e) => e.stopPropagation()}
             >
-              Enrich… <span className={styles.submenuChevron}>›</span>
-            </button>
-            {showSubmenu ? (
-              <EnrichDropdown
-                entity="albums"
-                entityId={album.id}
-                entityName={album.title}
-                wrapperRef={wrapRef}
-                align="right"
-                submenu
-                onClose={() => {
-                  setShowSubmenu(false);
+              <button
+                type="button"
+                className={styles.overflowMenuItem}
+                onClick={() => {
+                  setShowDetails(true);
                   setOpen(false);
                 }}
-              />
-            ) : null}
-          </div>
-          <button
-            type="button"
-            className={`${styles.overflowMenuItem} ${styles.overflowMenuItemDanger}`}
-            data-requires-write=""
-            disabled={!canWrite}
-            onClick={() => {
-              if (!canWrite) return;
-              setShowDelete(true);
-              setOpen(false);
-            }}
-          >
-            Delete
-          </button>
-        </div>
-      ) : null}
+              >
+                Album details
+              </button>
+              {canWrite ? (
+                <AlbumUnlockMenuItem
+                  albumId={album.id}
+                  className={styles.overflowMenuItem}
+                  onDone={() => setOpen(false)}
+                />
+              ) : null}
+              <button
+                type="button"
+                className={styles.overflowMenuItem}
+                data-requires-write=""
+                disabled={!canWrite}
+                onClick={() => {
+                  if (!canWrite) return;
+                  setShowRetag(true);
+                  setOpen(false);
+                }}
+              >
+                Preview Retag
+              </button>
+              <button
+                type="button"
+                className={styles.overflowMenuItem}
+                data-requires-write=""
+                disabled={replaygain.isPending || !canWrite}
+                onClick={() => {
+                  if (!canWrite) return;
+                  replaygain.mutate();
+                  setOpen(false);
+                }}
+              >
+                {replaygain.isPending ? 'Analyzing ReplayGain…' : 'Analyze ReplayGain'}
+              </button>
+              <button
+                type="button"
+                className={styles.overflowMenuItem}
+                data-requires-write=""
+                disabled={!canWrite}
+                onClick={() => {
+                  if (!canWrite) return;
+                  setShowReorganize(true);
+                  setOpen(false);
+                }}
+              >
+                Preview Rename / Organize
+              </button>
+              <button
+                type="button"
+                className={styles.overflowMenuItem}
+                data-requires-write=""
+                disabled={!canWrite || album.owns_files === false}
+                title={
+                  album.owns_files === false
+                    ? 'Nothing to reassign — this release has no files in your library'
+                    : 'Move this album\u2019s files to a different artist'
+                }
+                onClick={() => {
+                  if (!canWrite || album.owns_files === false) return;
+                  setShowReassign(true);
+                  setOpen(false);
+                }}
+              >
+                Reassign to another artist…
+              </button>
+              <button
+                type="button"
+                className={styles.overflowMenuItem}
+                data-requires-write=""
+                disabled={!canWrite}
+                onClick={() => {
+                  if (!canWrite) return;
+                  setShowArtPicker(true);
+                  setOpen(false);
+                }}
+              >
+                Change Cover
+              </button>
+              <button
+                type="button"
+                className={styles.overflowMenuItem}
+                onClick={() => {
+                  setShowHistory(true);
+                  setOpen(false);
+                }}
+              >
+                History
+              </button>
+              <button
+                type="button"
+                className={styles.overflowMenuItem}
+                onClick={() => {
+                  window.showReportIssueModal?.(
+                    'album',
+                    album.id,
+                    album.title,
+                    String(album.artist_name || ''),
+                  );
+                  setOpen(false);
+                }}
+              >
+                Report a Problem…
+              </button>
+              <div
+                className={styles.submenuContainer}
+                onMouseEnter={() => {
+                  if (canWrite) setShowSubmenu(true);
+                }}
+                onMouseLeave={() => setShowSubmenu(false)}
+              >
+                <button
+                  type="button"
+                  className={styles.overflowMenuItem}
+                  data-requires-write=""
+                  disabled={!canWrite}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!canWrite) return;
+                    setShowSubmenu((v) => !v);
+                  }}
+                >
+                  Enrich… <span className={styles.submenuChevron}>›</span>
+                </button>
+                {showSubmenu ? (
+                  <EnrichDropdown
+                    entity="albums"
+                    entityId={album.id}
+                    entityName={album.title}
+                    wrapperRef={wrapRef}
+                    align="right"
+                    submenu
+                    onClose={() => {
+                      setShowSubmenu(false);
+                      setOpen(false);
+                    }}
+                  />
+                ) : null}
+              </div>
+              <button
+                type="button"
+                className={`${styles.overflowMenuItem} ${styles.overflowMenuItemDanger}`}
+                data-requires-write=""
+                disabled={!canWrite}
+                onClick={() => {
+                  if (!canWrite) return;
+                  setShowDelete(true);
+                  setOpen(false);
+                }}
+              >
+                Delete
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
       {replaygain.isError ? (
         <span className={styles.mutationError} role="alert">
           <span>{mutationErrorMessage(replaygain.error, 'ReplayGain analysis failed')}</span>
@@ -4591,6 +4671,11 @@ export function LibraryV2Page() {
           <AlbumDetailView albumId={search.album} />
         ) : search.artist ? (
           <ArtistDetailView artistId={search.artist} />
+        ) : providerArtist(search.discover) ? (
+          <ProviderArtistView
+            {...(providerArtist(search.discover) as { source: string; providerId: string })}
+            name={search.discoverName ?? ''}
+          />
         ) : search.section === 'wanted' ? (
           <WantedIndexView />
         ) : search.section === 'songs' ? (
@@ -7076,9 +7161,12 @@ function LegacyArtistHero({
   onPickImage,
   eyebrow,
   facts,
+  collectionNote,
 }: {
   /** the quiet line above the name */
   eyebrow?: ReactNode;
+  /** one line under the collection meters */
+  collectionNote?: string | null;
   /** what the library holds for this artist (catalogue artists only) */
   facts?: ReactNode;
   name: string;
@@ -7258,6 +7346,7 @@ function LegacyArtistHero({
               </div>
             ))}
           </div>
+          {collectionNote ? <p className={styles.collectionNote}>{collectionNote}</p> : null}
           {hasNumbers ? (
             <div className="artist-hero-numbers">
               {listeners ? (
@@ -7397,6 +7486,7 @@ function CatalogueArtistHero({
       // artist's TRACKS a provider actually knows).
       badges={<ArtistMatchChips artist={artist} />}
       facts={facts}
+      collectionNote={guestCollectionNote(artist)}
       coverage={matchStatus.data?.enrichmentCoverage}
       actions={
         <>
@@ -7429,10 +7519,25 @@ function CatalogueArtistHero({
 
 /** the quiet line the hero sets above the artist's name */
 function artistEyebrow(artist: LibraryV2ArtistDetail) {
-  const owned = [...artist.albums, ...(artist.eps ?? []), ...artist.singles].some(
-    (a) => a.tracks_present > 0,
-  );
+  // a guest verse you have counts: 2 chainz with 62 tracks, all of them
+  // features on other artists' albums, is in your library
+  const owned =
+    [...artist.albums, ...(artist.eps ?? []), ...artist.singles].some(
+      (a) => a.tracks_present > 0,
+    ) || (artist.guest_track_count ?? 0) > 0;
   return owned ? 'In your library' : 'Artist';
+}
+
+/** "Plus 62 tracks on 40 releases by other artists" under the collection
+ *  meters: those count only the artist's own releases, so a featured
+ *  artist read 0/19 with 62 of their tracks in the library */
+function guestCollectionNote(artist: LibraryV2ArtistDetail): string | null {
+  const tracks = artist.guest_track_count ?? 0;
+  const releases = artist.guest_release_count ?? 0;
+  if (tracks === 0) return null;
+  return `Plus ${tracks} ${tracks === 1 ? 'track' : 'tracks'} on ${releases} ${
+    releases === 1 ? 'release' : 'releases'
+  } by other artists`;
 }
 
 /** Upstream da5c61779 "Treat as audiobook": file the artist's downloads in the
@@ -7511,6 +7616,326 @@ function ArtistViewSkeleton() {
   );
 }
 
+/** `deezer:1518490` from ?discover= */
+function providerArtist(discover: string | undefined) {
+  const split = (discover ?? '').indexOf(':');
+  if (split <= 0) return null;
+  return { source: discover!.slice(0, split), providerId: discover!.slice(split + 1) };
+}
+
+/** An artist the library has no row for, on the same page as every other
+ *  artist. dev had one artist page for everyone; Library v2 sent an artist
+ *  you don't have to the old provider page, with its own look and a back
+ *  button that only knew "Back to Library". Nothing is written by opening it:
+ *  the header and the discography are read from the provider, and a row only
+ *  comes into being when you act (watch, monitor, download). With nothing in
+ *  the library there is no My Library view, only the discography. */
+function ProviderArtistView({
+  source,
+  providerId,
+  name,
+}: {
+  source: string;
+  providerId: string;
+  name: string;
+}) {
+  const search = Route.useSearch();
+  const detail = useQuery({
+    ...artistDetailQueryOptions(source, providerId, name),
+    staleTime: 10 * 60_000,
+  });
+  const payload = detail.data;
+  const info = payload?.artist;
+  const artistName = String(info?.name || name || '');
+  const back = useArtistBack(artistName || undefined);
+  const { filters, setFilters } = useDiscographyFilters();
+  const providerIds = { [source]: providerId };
+  const discography = useReadOnlyProviderDiscography({
+    enabled: true,
+    artistName,
+    providerIds,
+    catalogueTitles: [],
+  });
+  const otherSources = useOtherSources({ providerId, artistName });
+  const releaseCardArtist = {
+    id: providerId,
+    name: artistName,
+    imageUrl: String(info?.image_url || ''),
+    source,
+  };
+  const heroStats = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'hero-stats', artistName],
+    queryFn: () =>
+      fetchArtistHeroStats({
+        name: artistName,
+        spotifyId: source === 'spotify' ? providerId : undefined,
+        deezerId: source === 'deezer' ? providerId : undefined,
+      }),
+    enabled: Boolean(artistName),
+    staleTime: 30 * 60_000,
+  });
+  useEffect(() => {
+    if (!artistName) return;
+    window.loadSimilarArtists?.(artistName);
+    return () => window.cancelSimilarArtistsLoad?.();
+  }, [artistName]);
+
+  // a provider ?album= link opens that release once the page is up
+  const openedAlbum = useRef<string | null>(null);
+  useEffect(() => {
+    const album = search.discoverAlbum ?? '';
+    const split = album.indexOf(':');
+    const albumId = split > 0 ? album.slice(split + 1) : '';
+    if (!albumId || !artistName || openedAlbum.current === albumId) return;
+    openedAlbum.current = albumId;
+    void openProviderRelease(
+      { key: `provider-${albumId}`, providerId: albumId, title: '', albumType: 'album' } as never,
+      releaseCardArtist,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.discoverAlbum, artistName]);
+
+  const buckets = (['albums', 'eps', 'singles'] as const).map((bucket) => ({
+    bucket,
+    title: ({ albums: 'Albums', eps: 'EPs', singles: 'Singles' } as const)[bucket],
+    cards: discography
+      .releasesFor(bucket)
+      .filter((release) =>
+        filters.categories[bucket]
+          ? passesDiscographyFilters(
+              { title: release.title, album_type: release.album_type },
+              filters,
+              release.owned === true,
+            )
+          : false,
+      )
+      .map(providerCard),
+  }));
+  const watchlist = payload ? watchlistIdentity(payload, source) : null;
+
+  return (
+    <ArtistPageLibraryProvider source={source} id={providerId} name={artistName}>
+      <div className={`${styles.page} ${styles.detailView}`}>
+        <BackLink onClick={back.onBack}>{back.label}</BackLink>
+        {detail.isError || payload?.success === false ? (
+          <div className={styles.emptyState}>
+            <h2>Artist not found</h2>
+            <p>
+              {payload?.error ||
+                mutationErrorMessage(detail.error, 'This artist could not be loaded.')}
+            </p>
+          </div>
+        ) : detail.isLoading || !payload ? (
+          <ArtistViewSkeleton />
+        ) : (
+          <>
+            <LegacyArtistHero
+              name={artistName}
+              imageUrl={String(info?.image_url || '')}
+              genres={(info?.genres ?? []).map(String)}
+              bio={heroStats.data?.bio || (info?.lastfm_bio as string | undefined) || null}
+              listeners={heroStats.data?.listeners ?? null}
+              playcount={heroStats.data?.playcount ?? null}
+              followers={heroStats.data?.followers ?? null}
+              sections={buckets.map(({ title, bucket }) => ({
+                label: title,
+                owned: discography.releasesFor(bucket).filter((r) => r.owned).length,
+                total: discography.releasesFor(bucket).length,
+              }))}
+              providerId={providerId}
+              source={source}
+              eyebrow="Not in your library"
+              actions={<ProviderArtistActions payload={payload} watchlist={watchlist} />}
+            />
+
+            <div className={styles.releasesBar}>
+              <div className={styles.releasesToggle}>
+                <button type="button" className={styles.viewActive} aria-pressed="true">
+                  Discovery
+                </button>
+              </div>
+              <span className={styles.releasesHint}>
+                Full discography from the metadata provider. Monitor or download a release to add it
+                to your library.
+              </span>
+            </div>
+
+            <DiscographyFilterBar
+              state={filters}
+              onChange={setFilters}
+              otherSources={otherSources.enabled}
+              otherSourcesBusy={otherSources.busy}
+              onToggleOtherSources={otherSources.available ? otherSources.toggle : undefined}
+            />
+
+            <DiscographySections>
+              {buckets.map(({ bucket, title, cards }) => {
+                const all = [
+                  ...cards,
+                  ...otherSources.byBucket(
+                    ({ albums: 'album', eps: 'ep', singles: 'single' } as const)[bucket],
+                  ),
+                ];
+                if (all.length === 0) return null;
+                return (
+                  <DiscographySection
+                    key={bucket}
+                    title={title}
+                    stats={
+                      <>
+                        <span>{cards.filter((c) => c.owned).length} owned</span>
+                        <span>{cards.filter((c) => !c.owned).length} missing</span>
+                      </>
+                    }
+                  >
+                    <ReleaseCardGrid
+                      cards={all}
+                      openTitle="Open release"
+                      onOpen={(card) =>
+                        card.providerId
+                          ? void openProviderRelease(card, releaseCardArtist)
+                          : undefined
+                      }
+                      extras={(card) => (
+                        <>
+                          {card.providerId ? (
+                            // dev's bookmark: monitors the release, writing the
+                            // artist's row then and only then
+                            <ReleaseMonitorButton
+                              release={{
+                                id: card.providerId,
+                                title: card.title,
+                                album_type: card.albumType,
+                                release_date: card.releaseDate ?? undefined,
+                                image_url: card.imageUrl || undefined,
+                                track_count: card.totalTracks || undefined,
+                                ...(card.gapSource ? { _gap_source: card.gapSource } : {}),
+                              }}
+                            />
+                          ) : null}
+                          <ReleaseCardExtras card={card} artist={releaseCardArtist} />
+                        </>
+                      )}
+                    />
+                  </DiscographySection>
+                );
+              })}
+            </DiscographySections>
+            {discography.busy ? <div className={styles.loading}>Loading discography…</div> : null}
+
+            <div className={styles.musicVideosPanel}>
+              <ArtistVideosSection artistName={artistName} />
+            </div>
+            <SimilarArtistsSection />
+            <ConcertsSection
+              artistName={artistName}
+              mbid={String(info?.musicbrainz_id || (source === 'musicbrainz' ? providerId : ''))}
+            />
+          </>
+        )}
+      </div>
+    </ArtistPageLibraryProvider>
+  );
+}
+
+/** the provider artist's hero buttons: dev's watchlist button and Download
+ *  Discography, the two things there are to do for an artist you don't have */
+function ProviderArtistActions({
+  payload,
+  watchlist,
+}: {
+  payload: ArtistDetailResponse;
+  watchlist: { id: string; name: string; source?: string } | null;
+}) {
+  const [watching, setWatching] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const canWish = useLibraryV2CanWish();
+  const watchlistId = watchlist?.id ?? null;
+  useEffect(() => {
+    setWatching(null);
+    if (!watchlistId) return;
+    let cancelled = false;
+    void checkWatchlistRequest(watchlistId).then((state) => {
+      if (!cancelled) setWatching(state);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [watchlistId]);
+  const artist = payload.artist ?? {};
+  const image = String(artist.image_url || '');
+  const toggle = async () => {
+    if (!watchlist || busy) return;
+    if (!watching) {
+      setAdding(true);
+      return;
+    }
+    setBusy(true);
+    try {
+      const { watching: next, message } = await toggleWatchlistRequest(
+        watchlist.id,
+        watchlist.name,
+        watchlist.source,
+      );
+      setWatching(next);
+      window.showToast?.(message, 'success');
+    } catch (error) {
+      window.showToast?.(`Error: ${(error as Error).message}`, 'error');
+    }
+    setBusy(false);
+  };
+  return (
+    <>
+      {watchlist && canWish ? (
+        <button
+          type="button"
+          className={`${watching ? 'library-artist-watchlist-btn watching' : 'library-artist-watchlist-btn'} ${styles.heroSecondary}`}
+          disabled={busy}
+          onClick={() => void toggle()}
+        >
+          <SvgIcon name="eye" />
+          {busy ? 'Loading…' : watching ? 'Watching' : 'Add to Watchlist'}
+        </button>
+      ) : null}
+      {canWish && payload.discography ? (
+        <button
+          type="button"
+          className={`library-artist-download-btn ${styles.heroSecondary}`}
+          onClick={() => setDownloading(true)}
+        >
+          <SvgIcon name="download" />
+          {profileAsksFirst() ? 'Request Discography' : 'Download Discography'}
+        </button>
+      ) : null}
+      {downloading && payload.discography ? (
+        <DiscographyModal
+          libraryArtistId={artist.id}
+          artistName={String(artist.name || '')}
+          artistImage={image}
+          discography={payload.discography}
+          onClose={() => setDownloading(false)}
+          watchlistIdentity={watchlist}
+        />
+      ) : null}
+      {adding && watchlist ? (
+        <WatchlistAddModal
+          artist={{
+            id: watchlist.id,
+            name: watchlist.name,
+            source: watchlist.source,
+            imageUrl: image,
+          }}
+          onClose={() => setAdding(false)}
+          onWatched={() => setWatching(true)}
+          onDownloadExisting={() => setDownloading(true)}
+        />
+      ) : null}
+    </>
+  );
+}
+
 function ArtistDetailView({ artistId }: { artistId: number }) {
   const navigate = useNavigate();
   const canWish = useLibraryV2CanWish();
@@ -7562,6 +7987,15 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     window.loadSimilarArtists?.(artist.name);
     return () => window.cancelSimilarArtistsLoad?.();
   }, [artist?.name, releasesMode]);
+  // My Library is there only for an artist with files here, the way dev
+  // offered its library view only for an artist in the library. a watched or
+  // discography-only artist opens on its discography
+  const inLibrary = artist ? artistEyebrow(artist) === 'In your library' : true;
+  useEffect(() => {
+    if (artist && !inLibrary && releasesMode !== 'all') {
+      void navigate({ search: (p) => ({ ...p, releases: 'all' }), replace: true });
+    }
+  }, [artist, inLibrary, releasesMode, navigate]);
   const [discographyBusy, setDiscographyBusy] = useState(false);
   const [modalAction, setModalAction] = useState<{
     action: string;
@@ -7663,6 +8097,35 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
         album.tracks_present > 0,
       ),
     );
+  }
+
+  /** a release you have opens its own page; one you don't opens dev's
+   *  Download Missing Tracks modal, the way the provider page did, from the
+   *  release's id in the artist's source */
+  function openReleaseCard(card: DiscographyCard) {
+    if (card.albumId) {
+      const release = [
+        ...(artist?.albums ?? []),
+        ...(artist?.eps ?? []),
+        ...(artist?.singles ?? []),
+      ].find((a) => a.id === card.albumId);
+      // the first source both the release and the artist are known to: a
+      // discography row can carry only a deezer id while the artist's
+      // identity here is spotify
+      const shared = ['spotify', 'deezer', 'itunes', 'musicbrainz', 'tidal', 'qobuz'].find(
+        (source) => release?.provider_ids?.[source] && artistProviderIds[source],
+      );
+      if (!card.owned && shared) {
+        void openProviderRelease(
+          { ...card, providerId: release!.provider_ids![shared] },
+          { ...releaseCardArtist, id: artistProviderIds[shared] ?? null, source: shared },
+        );
+        return;
+      }
+      void navigate({ search: (p) => ({ ...p, album: card.albumId }) });
+      return;
+    }
+    if (card.providerId) void openProviderRelease(card, releaseCardArtist);
   }
 
   // Auto-fetches the discography for "All Releases" — on an explicit toggle
@@ -7968,14 +8431,16 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           <div ref={heroSentinelRef} className={styles.heroSentinel} aria-hidden="true" />
           <div className={styles.releasesBar}>
             <div className={styles.releasesToggle}>
-              <button
-                type="button"
-                className={releasesMode === 'library' ? styles.viewActive : ''}
-                aria-pressed={releasesMode === 'library'}
-                onClick={() => setReleasesMode('library')}
-              >
-                My Library
-              </button>
+              {inLibrary ? (
+                <button
+                  type="button"
+                  className={releasesMode === 'library' ? styles.viewActive : ''}
+                  aria-pressed={releasesMode === 'library'}
+                  onClick={() => setReleasesMode('library')}
+                >
+                  My Library
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={releasesMode === 'all' ? styles.viewActive : ''}
@@ -8070,15 +8535,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                     <ReleaseCardGrid
                       cards={cards}
                       openTitle="Open release"
-                      onOpen={(card) =>
-                        card.albumId
-                          ? void navigate({
-                              search: (p) => ({ ...p, album: card.albumId }),
-                            })
-                          : card.providerId
-                            ? void openProviderRelease(card, releaseCardArtist)
-                            : undefined
-                      }
+                      onOpen={openReleaseCard}
                       extras={(card) => (
                         <ReleaseCardExtras card={card} artist={releaseCardArtist} />
                       )}
@@ -8123,7 +8580,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 hidden={
                   releasesOf(artist.albums, 'albums').length > 0 ||
                   releasesOf(artist.eps ?? [], 'eps').length > 0 ||
-                  releasesOf(artist.singles, 'singles').length > 0
+                  releasesOf(artist.singles, 'singles').length > 0 ||
+                  // only guest spots here: Appears On below lists them
+                  (releasesMode !== 'all' && guestCollectionNote(artist) !== null)
                 }
                 mode={releasesMode}
                 onShowAll={() => setReleasesMode('all')}
@@ -8138,7 +8597,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               <AppearsOnSection artistId={artist.id} artistName={artist.name} />
               <SimilarArtistsSection />
             </>
-          ) : null}
+          ) : (
+            // the artist's tracks on other artists' releases are in the
+            // library too: a featured artist's My Library was empty
+            <AppearsOnSection artistId={artist.id} artistName={artist.name} />
+          )}
           <ConcertsSection
             artistName={artist.name}
             mbid={String(artist.provider_ids?.musicbrainz ?? '')}

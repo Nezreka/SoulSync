@@ -7,7 +7,9 @@ import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
-/** Unknown artists keep the original provider page and native monitoring. */
+/** An artist the catalogue does not hold opens on the same Library v2 artist
+ *  page as every other artist (dev had one artist page for everyone), read
+ *  from the provider: no My Library, nothing written until you act. */
 function renderAt(entry: string) {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [entry] });
@@ -104,14 +106,17 @@ describe('an artist the catalogue does not hold', () => {
     delete document.body.dataset.artistSource;
   });
 
-  it("renders upstream's artist page without creating a catalogue row", async () => {
+  it('renders on the library artist page without creating a catalogue row', async () => {
     const { router } = renderAt(ARTIST_URL);
 
     expect(await screen.findByText('Music Has the Right to Children')).toBeInTheDocument();
-    expect(document.querySelector('.artist-detail-page')).not.toBeNull();
-    expect(router.state.location.pathname).toBe('/artist-detail/spotify/sp-1');
+    // the one artist page, not the old provider page
+    expect(document.querySelector('.artist-detail-page')).toBeNull();
+    expect(router.state.location.pathname).toBe('/library');
+    expect(router.state.location.search).toMatchObject({ discover: 'spotify:sp-1' });
+    expect(screen.getByText('Not in your library')).toBeInTheDocument();
+    // nothing in the library: no My Library view
     expect(screen.queryByRole('button', { name: 'My Library' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Discovery' })).not.toBeInTheDocument();
     // Read-only until the user asks for something (issues §28.6 question 1).
     expect(materializeCalls).toHaveLength(0);
     expect(monitoredAlbums).toHaveLength(0);
@@ -135,7 +140,7 @@ describe('an artist the catalogue does not hold', () => {
       track_count: 1,
     });
     expect(await screen.findByRole('button', { name: 'Monitored' })).toBeDisabled();
-    expect(router.state.location.pathname).toBe('/artist-detail/spotify/sp-1');
+    expect(router.state.location.pathname).toBe('/library');
     expect(screen.queryByRole('button', { name: 'My Library' })).not.toBeInTheDocument();
     // The bookmark is not a click on the card.
     expect(window.openDownloadMissingModalForArtistAlbum).not.toHaveBeenCalled();
@@ -179,11 +184,11 @@ describe('an artist the catalogue does not hold', () => {
         '&discoverAlbum=%22spotify%3Aa1%22',
     );
 
-    await waitFor(() => expect(router.state.location.pathname).toBe('/artist-detail/spotify/sp-1'));
-    expect(router.state.location.search).toMatchObject({
-      name: 'Boards of Canada',
-      album: 'a1',
-    });
     expect(await screen.findByText('Music Has the Right to Children')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/library');
+    // the album link opens that release's download dialog
+    await waitFor(() => expect(window.openDownloadMissingModalForArtistAlbum).toHaveBeenCalled());
+    const call = vi.mocked(window.openDownloadMissingModalForArtistAlbum!).mock.calls[0]!;
+    expect(call[3]).toMatchObject({ id: 'a1' });
   });
 });

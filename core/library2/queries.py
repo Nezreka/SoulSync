@@ -825,7 +825,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                al.image_url, {monitored_sql("album", "al")} AS monitored, al.quality_profile_id,
                al.quality_profile_explicit, al.track_count,
                al.expected_track_count, al.origin, al.spotify_id, al.musicbrainz_id,
-               al.primary_artist_id,
+               al.external_ids, al.primary_artist_id,
                pa.quality_profile_id AS artist_quality_profile_id,
                pa.quality_profile_explicit AS artist_quality_profile_explicit,
                al.explicit, al.label, al.style, al.mood,
@@ -913,6 +913,9 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "spotify_id": r["spotify_id"],
             # the release card's "view on musicbrainz" link
             "musicbrainz_id": r["musicbrainz_id"],
+            # a release you don't have opens dev's download modal from its
+            # provider id, the way the provider page did
+            "provider_ids": _album_provider_ids(r),
             "explicit": (bool(effective["explicit"]) if effective["explicit"] is not None else None),
             "label": effective["label"],
             "style": effective["style"],
@@ -975,6 +978,10 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         # releases the artist is credited on but not the album artist of
         # (core/library2/artist_page.appears_on_payload reads these)
         "appears_on": appears_on,
+        # the artist's OWN tracks on those releases that are on disk here: the
+        # releases' own counts are every track on them (810 for 2 chainz,
+        # whose 62 tracks are guest verses)
+        **_guest_track_counts(conn, group, [e["id"] for e in appears_on]),
         "album_count": _in_library(albums) + _in_library(eps),
         "single_count": _in_library(singles),
         "discography_count": sum(1 for e in albums + eps + singles if e["origin"] == "discography"),
@@ -986,6 +993,33 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "total_size_bytes": sum(e["total_size_bytes"] for e in albums + eps + singles),
         "user_overrides": artist_overrides,
     }
+
+
+def _album_provider_ids(row) -> Dict[str, str]:
+    from .provider_ids import parse_external_ids
+    ids = {k: str(v) for k, v in parse_external_ids(row["external_ids"]).items()
+           if v and k in ("spotify", "deezer", "itunes", "musicbrainz", "tidal", "qobuz")}
+    if row["spotify_id"]:
+        ids.setdefault("spotify", str(row["spotify_id"]))
+    return ids
+
+
+def _guest_track_counts(conn, group, album_ids) -> Dict[str, int]:
+    if not album_ids:
+        return {"guest_track_count": 0, "guest_release_count": 0}
+    marks = ",".join("?" for _ in group)
+    row = conn.execute(
+        f"""SELECT COUNT(DISTINCT t.id), COUNT(DISTINCT t.album_id)
+              FROM lib2_track_artists x
+              JOIN lib2_tracks t ON t.id = x.track_id
+             WHERE x.artist_id IN ({marks})
+               AND t.album_id IN (SELECT value FROM json_each(?))
+               AND EXISTS (SELECT 1 FROM lib2_track_files f
+                            WHERE f.track_id = t.id
+                              AND COALESCE(f.file_state, 'active') = 'active')""",
+        (*[int(g) for g in group], json.dumps([int(a) for a in album_ids])),
+    ).fetchone()
+    return {"guest_track_count": int(row[0] or 0), "guest_release_count": int(row[1] or 0)}
 
 
 def _own_release_ids(conn, album_rows, group) -> set:
