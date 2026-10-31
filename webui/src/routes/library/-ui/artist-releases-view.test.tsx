@@ -222,22 +222,24 @@ describe('Library V2 artist detail — All Releases views', () => {
     },
   );
 
-  it('suggests similar artists on Discovery only, never in My Library', async () => {
-    // My Library is what you have; suggestions belong to the discovery side
+  it('ends on similar artists in both views, the way the artist page always did', async () => {
     window.loadSimilarArtists = vi.fn();
     window.cancelSimilarArtistsLoad = vi.fn();
     inLibrary();
     renderArtist('/library?artist=1&releases=library');
     await screen.findByRole('button', { name: 'My Library' });
-    expect(screen.queryByText('Similar Artists')).not.toBeInTheDocument();
-    expect(window.loadSimilarArtists).not.toHaveBeenCalled();
+    expect(await screen.findByText('Similar Artists')).toBeInTheDocument();
+    await waitFor(() => expect(window.loadSimilarArtists).toHaveBeenCalledWith('Portishead'));
 
     fireEvent.click(screen.getByRole('button', { name: /Discovery/ }));
-    expect(await screen.findByText('Similar Artists')).toBeInTheDocument();
+    // the discography walk repaints the page, the section is there once it settles
+    await waitFor(() => expect(screen.getByText('Similar Artists')).toBeInTheDocument(), {
+      timeout: 4000,
+    });
     await waitFor(() => expect(window.loadSimilarArtists).toHaveBeenCalledWith('Portishead'));
   });
 
-  it('says a release on the wishlist is monitored, held to its quality profile', async () => {
+  it('says a release on the wishlist keeps upgrading to its quality profile', async () => {
     // being on the wishlist is monitoring: it is what quality upgrades act on,
     // and taking it off stops both
     server.use(
@@ -254,7 +256,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     renderArtist('/library?artist=1&releases=library');
 
     const title =
-      'Monitored: on your Wishlist and held to its quality profile. Click to stop monitoring';
+      'On your Wishlist. SoulSync keeps upgrading it to its quality profile. Click to remove it';
     await waitFor(() => expect(screen.getAllByTitle(title).length).toBeGreaterThan(0));
   });
 

@@ -868,10 +868,11 @@ export function MonitorToggle({
               ? 'On your Watchlist. Click to remove this artist (files and wishlisted tracks stay as they are)'
               : entity === 'artists'
                 ? 'Add this artist to your Watchlist'
-                : // the wishlist is monitoring: quality upgrades act on it too
+                : // the wishlist also drives quality upgrades, so an owned file on it
+                  // keeps getting upgraded to its quality profile
                   monitored
-                  ? 'Monitored: on your Wishlist and held to its quality profile. Click to stop monitoring'
-                  : 'Monitor: add to your Wishlist and hold it to its quality profile'
+                  ? 'On your Wishlist. SoulSync keeps upgrading it to its quality profile. Click to remove it'
+                  : 'Add to your Wishlist. SoulSync gets it and keeps upgrading it to its quality profile'
         }
         data-requires-write=""
         disabled={mutation.isPending || !canWrite}
@@ -8170,10 +8171,10 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const artist = artistQuery.data;
   const back = useArtistBack(artist?.name);
   const openArtist = useOpenArtist();
-  // suggestions are discovery: My Library is what you have, nothing else. it
-  // runs once the page is up: the loader fills a section it finds in the DOM
+  // in both views, the way dev's artist page always ended on similar artists.
+  // it runs once the page is up: the loader fills a section it finds in the DOM
   useEffect(() => {
-    if (releasesMode !== 'all' || !artist?.name) return;
+    if (!artist?.name) return;
     window.loadSimilarArtists?.(artist.name);
     return () => window.cancelSimilarArtistsLoad?.();
   }, [artist?.name, releasesMode]);
@@ -8837,6 +8838,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 }
                 onOpenArtist={(id) => openArtist(Number(id))}
               />
+              <SimilarArtistsSection />
             </>
           )}
           <ConcertsSection
