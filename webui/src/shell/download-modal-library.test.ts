@@ -64,11 +64,11 @@ describe('the download dialog knows the library as soon as it opens', () => {
     ]);
     expect(cell('p1', 0).textContent).toBe('✅ In library');
     expect(cell('p1', 0).className).toBe('track-match-status match-found');
-    expect(cell('p1', 1).textContent).toBe('Monitored');
+    expect(cell('p1', 1).textContent).toBe('On Wishlist');
     expect(cell('p1', 1).className).toBe('track-match-status match-monitored');
-    // Library v2's bookmark, not an emoji
+    // the wishlist heart, not an emoji
     expect(cell('p1', 1).querySelector('svg.match-bookmark path')?.getAttribute('d')).toMatch(
-      /^M5 3\.5/,
+      /^M10\.5 19\.5/,
     );
     expect(cell('p1', 2).textContent).toBe('❌ Missing');
     expect(cell('p1', 2).className).toBe('track-match-status match-missing');
@@ -158,7 +158,7 @@ describe('the download dialog knows the library as soon as it opens', () => {
   });
 });
 
-describe('Monitor downloads what it added right away', () => {
+describe('Add to Wishlist downloads what it added right away', () => {
   let requests: Array<{ track_ids: string[] }>;
   let releases: string[];
   let status: number;
@@ -195,17 +195,17 @@ describe('Monitor downloads what it added right away', () => {
   it('says so when the wishlist run is busy or the start fails', async () => {
     status = 409;
     expect(await monitorAddedTracks(2, [{ id: 't1' }, { id: 't2' }])).toBe(
-      'Monitoring 2 tracks — the running wishlist pass takes them',
+      'Added 2 tracks to your Wishlist — the running wishlist pass takes them',
     );
     status = 500;
     expect(await monitorAddedTracks(1, [{ id: 't1' }])).toBe(
-      'Monitoring 1 track — the download could not start, still wanted',
+      'Added 1 track to your Wishlist — the download could not start, still wanted',
     );
     status = 200;
     expect(await monitorAddedTracks(1, [{ id: 't1' }])).toBe(
-      'Monitoring 1 track — download started',
+      'Added 1 track to your Wishlist — download started',
     );
-    expect(await monitorAddedTracks(3, [])).toBe('Monitoring 3 tracks');
+    expect(await monitorAddedTracks(3, [])).toBe('Added 3 tracks to your Wishlist');
   });
 
   it('monitors the album itself when every track of it was picked', async () => {
@@ -216,7 +216,7 @@ describe('Monitor downloads what it added right away', () => {
     ];
 
     expect(await monitorAddedTracks(3, rows, true)).toBe(
-      'Monitoring the album (3 tracks) — download started',
+      'Added the album to your Wishlist (3 tracks) — download started',
     );
     expect(releases).toEqual(['7']);
     expect(requests).toEqual([{ track_ids: ['t1::a', 't2::a', 't3::a'] }]);
@@ -224,7 +224,7 @@ describe('Monitor downloads what it added right away', () => {
 
   it('leaves the album alone when only some tracks were picked', async () => {
     expect(await monitorAddedTracks(1, [{ id: 't1::a', album: 7 }], false)).toBe(
-      'Monitoring 1 track — download started',
+      'Added 1 track to your Wishlist — download started',
     );
     expect(releases).toHaveLength(0);
   });

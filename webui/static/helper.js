@@ -625,12 +625,12 @@ const HELPER_CONTENT = {
     },
 
     '[id^="add-to-wishlist-btn"]': {
-        title: 'Monitor',
-        description: 'Marks the selected tracks as wanted in your library and starts downloading them right away. A track that is not found stays wanted and is searched again on the next wishlist run.',
+        title: 'Add to Wishlist',
+        description: 'Adds the selected tracks to your Wishlist and starts downloading them right away. A track that is not found stays wanted and is searched again on the next wishlist run.',
         tips: [
             'The Library Status column shows what you already have as soon as the dialog opens',
-            'Monitored tracks appear in the Wishlist and under Wanted in the Library',
-            'Begin Analysis downloads once without monitoring, with Force Download and Skip AcoustID'
+            'Wishlisted tracks appear in the Wishlist and under Wanted in the Library',
+            'Begin Analysis downloads once without wishlisting, with Force Download and Skip AcoustID'
         ]
     },
     '.download-control-btn.primary': {

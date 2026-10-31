@@ -6,11 +6,10 @@
  * the library already has. It now asks as soon as it opens: the same fast,
  * Library-v2 backed check the search results use, which reads owned files and
  * the wishlist in one pass. A track the user already wants shows as
- * monitored. "Begin Analysis" still does its own, deeper matching and
+ * on the Wishlist. "Begin Analysis" still does its own, deeper matching and
  * overwrites these cells as it goes.
  *
- * Its "Monitor" button (the old "Add to Wishlist", the same in the Add to
- * Wishlist dialog) hands the tracks it added to `monitorAddedTracks`, which
+ * Its "Add to Wishlist" button (the same in the Add to Wishlist dialog) hands the tracks it added to `monitorAddedTracks`, which
  * starts their download at once instead of waiting for the next wishlist run,
  * and monitors the album itself when every one of its tracks was picked.
  *
@@ -56,8 +55,11 @@ function trackArtist(track: ModalTrack): string {
   return String(track.artist_name || track.artist || '').trim();
 }
 
-/** Library v2's bookmark, the one every monitor control there draws. */
-const BOOKMARK_PATH = 'M5 3.5A1.5 1.5 0 0 1 6.5 2h11A1.5 1.5 0 0 1 19 3.5V22l-7-4.2L5 22V3.5z';
+/** the wishlist heart and its sparkle, as the library draws them (list-icons.tsx) */
+const WISHLIST_PATHS = [
+  'M10.5 19.5S3 15 3 9.8A4.3 4.3 0 0 1 10.5 7a4.3 4.3 0 0 1 7.5 2.8c0 5.2-7.5 9.7-7.5 9.7z',
+  'M20.2 3.4l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z',
+];
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function bookmarkIcon(): SVGSVGElement {
@@ -65,9 +67,11 @@ function bookmarkIcon(): SVGSVGElement {
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('class', 'match-bookmark');
-  const path = document.createElementNS(SVG_NS, 'path');
-  path.setAttribute('d', BOOKMARK_PATH);
-  svg.appendChild(path);
+  for (const d of WISHLIST_PATHS) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+  }
   return svg;
 }
 
@@ -77,7 +81,7 @@ function statusFor(row: PresenceRow | undefined): {
   bookmark?: boolean;
 } {
   if (row?.in_library) return { text: '✅ In library', cls: 'match-found' };
-  if (row?.in_wishlist) return { text: 'Monitored', cls: 'match-monitored', bookmark: true };
+  if (row?.in_wishlist) return { text: 'On Wishlist', cls: 'match-monitored', bookmark: true };
   return { text: '❌ Missing', cls: 'match-missing' };
 }
 
@@ -191,7 +195,7 @@ export async function startMonitoredDownloads(
   }
 }
 
-/** One track "Monitor" added: its wishlist row and the release it landed on. */
+/** One track "Add to Wishlist" added: its wishlist row and the release it landed on. */
 export interface AddedRow {
   id?: string | number | null;
   /** The Library v2 album id; absent when nothing was materialized (non-admin). */
@@ -223,7 +227,7 @@ async function monitorRelease(rows: AddedRow[]): Promise<boolean> {
 }
 
 /**
- * The end of a "Monitor" click: monitor the release when all of it was
+ * The end of an "Add to Wishlist" click: monitor the release when all of it was
  * picked, start the downloads, and word the toast.
  *
  * `added` counts the tracks the server accepted, `rows` the ones it actually
@@ -238,8 +242,8 @@ export async function monitorAddedTracks(
   const release = wholeRelease && (await monitorRelease(rows));
   const outcome = await startMonitoredDownloads(rows.map((row) => row.id));
   const what = release
-    ? `Monitoring the album (${added} track${added === 1 ? '' : 's'})`
-    : `Monitoring ${added} track${added === 1 ? '' : 's'}`;
+    ? `Added the album to your Wishlist (${added} track${added === 1 ? '' : 's'})`
+    : `Added ${added} track${added === 1 ? '' : 's'} to your Wishlist`;
   if (outcome === 'started') return `${what} — download started`;
   if (outcome === 'busy') return `${what} — the running wishlist pass takes them`;
   if (outcome === 'failed') return `${what} — the download could not start, still wanted`;

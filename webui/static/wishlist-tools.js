@@ -960,10 +960,11 @@ function generateWishlistTrackList(tracks, trackOwnership) {
 }
 
 // a profile without download rights sends a request, so the button says so.
-// Everyone else monitors: the add marks the tracks wanted in Library v2, and
-// the download starts right away (addModalTracksToWishlist)
+// everyone else adds to the wishlist, and the download starts right away
+// (monitorAddedTracks)
+const WISHLIST_ADD_LABEL = 'Add to Wishlist';
 function wishlistAddLabel() {
-    return (typeof canDownload === 'function' && !canDownload()) ? 'Request' : 'Monitor';
+    return (typeof canDownload === 'function' && !canDownload()) ? 'Request' : WISHLIST_ADD_LABEL;
 }
 
 /**
@@ -997,7 +998,7 @@ async function handleAddToWishlist() {
         let successCount = 0;
         let errorCount = 0;
         let skippedCount = 0;   // already-in-library tracks the backend declined to add (#825)
-        const addedRows = [];   // what "Monitor" downloads (and monitors) right after the adds
+        const addedRows = [];   // what the add downloads right after
 
         // Add each track to wishlist individually
         for (const track of tracks) {
@@ -1097,8 +1098,8 @@ async function handleAddToWishlist() {
         if (successCount === 0 && skippedCount > 0 && errorCount === 0) {
             showToast(`All ${skippedCount} track${skippedCount !== 1 ? 's' : ''} already in your library`, 'success');
         } else if (successCount > 0) {
-            // "Monitor" downloads the added tracks now (shell/download-modal-library.ts)
-            let message = wishlistAddLabel() === 'Monitor' && window.monitorAddedTracks
+            // the add downloads the added tracks now (shell/download-modal-library.ts)
+            let message = wishlistAddLabel() === WISHLIST_ADD_LABEL && window.monitorAddedTracks
                 ? await window.monitorAddedTracks(successCount, addedRows,
                     Boolean(album?.total_tracks) && tracks.length >= album.total_tracks)
                 : `Added ${successCount} track${successCount !== 1 ? 's' : ''} to wishlist`;
@@ -1469,7 +1470,7 @@ async function addModalTracksToWishlist(playlistId) {
     if (wishlistBtn) {
         wishlistBtn.disabled = true;
         wishlistBtn.classList.add('loading');
-        wishlistBtn.textContent = wishlistAddLabel() === 'Monitor' ? 'Monitoring...' : 'Adding...';
+        wishlistBtn.textContent = 'Adding...';
     }
 
     try {
@@ -1478,7 +1479,7 @@ async function addModalTracksToWishlist(playlistId) {
         // already-in-library tracks: the ones the modal knew about (#1910) plus
         // any the backend declined to add (#825)
         let skippedCount = ownedSkipped;
-        const addedRows = [];   // what "Monitor" downloads (and monitors) right after the adds
+        const addedRows = [];   // what the add downloads right after
 
         // Add each track to wishlist individually
         let wingItSkipped = 0;
@@ -1608,8 +1609,8 @@ async function addModalTracksToWishlist(playlistId) {
             showToast(`All ${skippedCount} track${skippedCount !== 1 ? 's' : ''} already in your library`, 'success');
             await closeDownloadMissingModal(playlistId);
         } else if (successCount > 0) {
-            // "Monitor" downloads the added tracks now (shell/download-modal-library.ts)
-            let message = wishlistAddLabel() === 'Monitor' && window.monitorAddedTracks
+            // the add downloads the added tracks now (shell/download-modal-library.ts)
+            let message = wishlistAddLabel() === WISHLIST_ADD_LABEL && window.monitorAddedTracks
                 ? await window.monitorAddedTracks(successCount, addedRows,
                     Boolean(process.album) && tracks.length === process.tracks.length)
                 : `Added ${successCount} track${successCount !== 1 ? 's' : ''} to wishlist`;
