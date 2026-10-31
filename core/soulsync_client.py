@@ -33,6 +33,7 @@ def _read_tags(file_path: str) -> Dict[str, Any]:
         'track_number': 0, 'disc_number': 1, 'year': '',
         'genre': '', 'duration_ms': 0, 'bitrate': 0,
         'musicbrainz_albumid': '', 'musicbrainz_albumcomment': '',
+        'isrc': '',
     }
     try:
         # AIFF/WAV carry raw ID3 the easy view can't map (#1919)
@@ -77,6 +78,11 @@ def _read_tags(file_path: str) -> Dict[str, Any]:
                 kbps = _kbps_from_stream_info(audio.info, file_path)
                 if kbps:
                     result['bitrate'] = int(kbps)
+        # Reuse the existing probe for both easy keys and raw ID3 frames.
+        if audio is not None:
+            from core.library2.tag_cache import plausible_isrc
+            from core.metadata.source import _isrc_tag_value
+            result['isrc'] = plausible_isrc(_isrc_tag_value(audio)) or ''
     except Exception as e:
         logger.debug(f"Could not read tags from {os.path.basename(file_path)}: {e}")
 

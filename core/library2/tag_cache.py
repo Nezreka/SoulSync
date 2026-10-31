@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Optional
@@ -93,6 +94,7 @@ def persist_tag_cache(conn, file_id: int, file_tags: Dict[str, Any], config_mana
     heal_compilation_credit(conn, int(file_id), file_tags)
     persist_validation(conn, file_id, validation)
     adopt_file_bpm(conn, int(file_id), file_tags.get("bpm"))
+    adopt_file_isrc(conn, int(file_id), file_tags.get("isrc"))
     return True
 
 
@@ -122,6 +124,46 @@ def adopt_file_bpm(conn, file_id: int, value: Any) -> bool:
         (round(bpm, 1), int(file_id)),
     )
     return cur.rowcount > 0
+
+
+_ISRC_SHAPE = re.compile(r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}")
+
+
+def plausible_isrc(value: Any) -> Optional[str]:
+    """an isrc worth keeping, upper-cased, or None ("n/a", a url, a catalogue
+    number). hyphenated and spaced forms ("US-RC1-76-07839") are accepted."""
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", "ignore")
+    text = re.sub(r"[\s-]", "", str(value or "")).upper()
+    return text if _ISRC_SHAPE.fullmatch(text) else None
+
+
+def adopt_track_isrc(conn, track_id: int, value: Any) -> bool:
+    """the library takes a track's isrc from its file when it has none (#1921).
+
+    the standalone full refresh and simple downloads identify a file from its
+    own tags, and its isrc was the one tag left behind. only ever fills an
+    empty isrc, so a provider's or a hand-set one is never replaced."""
+    isrc = plausible_isrc(value)
+    if isrc is None:
+        return False
+    cur = conn.execute(
+        "UPDATE lib2_tracks SET isrc=?, updated_at=CURRENT_TIMESTAMP"
+        " WHERE id=? AND NULLIF(TRIM(isrc), '') IS NULL",
+        (isrc, int(track_id)),
+    )
+    return cur.rowcount > 0
+
+
+def adopt_file_isrc(conn, file_id: int, value: Any) -> bool:
+    """adopt_track_isrc, for the track whose primary file this is"""
+    row = conn.execute(
+        "SELECT track_id FROM lib2_track_files WHERE id=? AND is_primary=1",
+        (int(file_id),),
+    ).fetchone()
+    return bool(row) and adopt_track_isrc(conn, row[0], value)
 
 
 def read_tag_snapshot(path: str) -> Dict[str, Any]:

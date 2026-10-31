@@ -583,6 +583,7 @@ def _fallback_identity(context: Dict[str, Any],
         "album": album or None,
         "track_number": tags.get("track_number"),
         "disc_number": tags.get("disc_number"),
+        "isrc": tags.get("isrc"),
     }
 
 
@@ -871,6 +872,11 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                 # how this download filed the release, for a later reorganize
                 from core.library2.reorganize_plan import record_filed_release
                 record_filed_release(conn, album_id, context)
+            elif fallback.get("isrc"):
+                # identified from its own tags (the standalone full refresh,
+                # a simple download): its isrc comes along (#1921)
+                from core.library2.tag_cache import adopt_track_isrc
+                adopt_track_isrc(conn, track_id, fallback["isrc"])
 
             fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
             bitrate = sample_rate = bit_depth = None
