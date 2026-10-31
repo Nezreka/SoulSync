@@ -12,6 +12,8 @@ export interface AppearsOnTrack {
   disc_number?: number | null;
   duration?: number | null;
   file_path?: string | null;
+  /** credited and wanted, not here yet: listed, nothing to play */
+  wanted?: boolean;
   album_id?: string | number;
   album_title?: string;
   album_thumb_url?: string | null;

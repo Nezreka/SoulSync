@@ -7315,7 +7315,10 @@ function LegacyArtistHero({
   eyebrow,
   facts,
   collectionNote,
+  video = true,
 }: {
+  /** the backdrop clip, looked up on YouTube: only for the rich header */
+  video?: boolean;
   /** the quiet line above the name */
   eyebrow?: ReactNode;
   /** one line under the collection meters */
@@ -7413,7 +7416,7 @@ function LegacyArtistHero({
         ) : (
           <div className={styles.billboardGlow} aria-hidden="true" />
         )}
-        <ArtistHeroVideo name={name} providerId={providerId} />
+        {video ? <ArtistHeroVideo name={name} providerId={providerId} /> : null}
         <div className={styles.billboardScrim} aria-hidden="true" />
         <div className="artist-hero-content">
           <div
@@ -7680,9 +7683,17 @@ function artistEyebrow(artist: LibraryV2ArtistDetail) {
   // only guest verses on other artists' music (jpegmafia on 6 releases):
   // they are in the library, but none of their own music is
   if ((artist.guest_track_count ?? 0) > 0) return 'Featured in your library';
-  // nothing on disk yet, but a wishlisted track or a watch of its own: the
+  // nothing on disk yet, but a wishlisted release or a watch of its own: the
   // library is waiting for it, and its quality profile applies
-  if (artist.in_library) return 'Monitored in your library';
+  const ownIntent =
+    artist.monitored ||
+    [...artist.albums, ...(artist.eps ?? []), ...artist.singles].some(
+      (a) => a.monitored || (a.monitored_tracks ?? 0) > 0,
+    );
+  if (artist.in_library && ownIntent) return 'Monitored in your library';
+  // in only through a wanted track of another artist's (Rockwell on a
+  // Michael Jackson compilation): appears on lists it
+  if (artist.in_library) return 'Featured in your library';
   return 'Not in your library';
 }
 
@@ -7806,6 +7817,13 @@ function ProviderArtistView({
   const info = payload?.artist;
   const artistName = String(info?.name || name || '');
   const back = useArtistBack(artistName || undefined);
+  // reached from search or discover: the header this profile picked for
+  // arrivals from elsewhere decides whether the backdrop video plays, and
+  // nothing plays (or is looked up) before that is known
+  const prefs = useQuery(libraryV2UiPreferencesQueryOptions());
+  const heroHeader =
+    search.header ??
+    (prefs.isSuccess ? (prefs.data?.artist_page?.header_elsewhere ?? 'rich') : undefined);
   const { filters, setFilters } = useDiscographyFilters();
   const providerIds = { [source]: providerId };
   const discography = useReadOnlyProviderDiscography({
@@ -7891,6 +7909,7 @@ function ProviderArtistView({
         ) : (
           <>
             <LegacyArtistHero
+              video={heroHeader === 'rich'}
               name={artistName}
               imageUrl={String(info?.image_url || '')}
               genres={(info?.genres ?? []).map(String)}
@@ -8779,8 +8798,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   releasesOf(artist.albums, 'albums').length > 0 ||
                   releasesOf(artist.eps ?? [], 'eps').length > 0 ||
                   releasesOf(artist.singles, 'singles').length > 0 ||
-                  // only guest spots here: Appears On below lists them
-                  (releasesMode !== 'all' && guestCollectionNote(artist) !== null)
+                  // only guest spots here, on disk or wanted: Appears On below lists them
+                  (releasesMode !== 'all' && artistEyebrow(artist) === 'Featured in your library')
                 }
                 mode={releasesMode}
                 onShowAll={() => setReleasesMode('all')}

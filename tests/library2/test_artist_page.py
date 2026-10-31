@@ -73,8 +73,32 @@ def test_appears_on_uses_native_credits_and_scoped_files(tmp_path, monkeypatch):
         assert result['albums'] == []
         conn.execute('UPDATE lib2_track_files SET owner_profile_id=7')
         with library_scope('shared'):
+            # another library's file is not played here: the track the shared
+            # library still wants is listed without one
+            scoped = appears_on_payload(conn, guest)
+            assert scoped['albums'] == []
+            assert [(t['file_path'], t['wanted']) for t in scoped['tracks']] == [(None, True)]
+            conn.execute('UPDATE lib2_tracks SET monitored=0 WHERE id=?', (tid,))
             assert appears_on_payload(conn, guest) == {'success': True, 'albums': [], 'tracks': []}
 
+
+
+def test_appears_on_lists_a_wanted_guest_track_that_is_not_here_yet(tmp_path):
+    # Rockwell on a monitored Michael Jackson compilation: the wanted track is
+    # what puts him in the library, so his page shows it, with nothing to play
+    from core.library2.artist_page import appears_on_payload
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    with db._get_connection() as conn:
+        wanted = lib2_seed.track(conn, 'Host', 'Scream', 'Wanted song', owned=False, monitored=1)
+        unwanted = lib2_seed.track(conn, 'Host', 'Scream', 'Unwanted song', owned=False, monitored=0)
+        guest = lib2_seed.artist(conn, 'Guest')
+        for tid in (wanted, unwanted):
+            conn.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role) VALUES (?,?,'featured')",
+                         (tid, guest))
+        conn.commit()
+        result = appears_on_payload(conn, guest)
+    assert [(t['lib2_track_id'], t['file_path'], t['wanted']) for t in result['tracks']] == [
+        (wanted, None, True)]
 
 
 def test_appears_on_route_includes_collaborative_album_and_manual_projection(tmp_path, monkeypatch):

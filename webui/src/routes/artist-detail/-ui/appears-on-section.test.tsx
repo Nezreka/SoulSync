@@ -201,6 +201,19 @@ describe('collab albums', () => {
     expect(screen.queryByRole('button', { name: 'JAY-Z' })).toBeNull();
   });
 
+  it('lists a wanted guest track that is not here yet, with nothing to play', async () => {
+    // Rockwell on a monitored Michael Jackson compilation: the wish is what
+    // puts him in the library, so his page shows it
+    stub([{ ...WFL, file_path: null, wanted: true }]);
+    const play = vi.fn();
+    window.playTrackList = play;
+    render(<AppearsOnSection artistId="6" artistName="Rihanna" />);
+    const row = await screen.findByRole('button', { name: /We Found Love/ });
+    expect(row).toBeDisabled();
+    expect(screen.getByText('Wanted')).toBeTruthy();
+    expect(screen.queryByLabelText('Play all')).toBeNull();
+  });
+
   it('play all takes the albums first, then the songs', async () => {
     stub([{ ...WFL, id: '100' }], [WTT]);
     const play = vi.fn();

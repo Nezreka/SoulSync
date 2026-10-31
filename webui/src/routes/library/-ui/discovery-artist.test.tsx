@@ -131,6 +131,28 @@ describe('an artist the catalogue does not hold', () => {
     expect(monitoredAlbums).toHaveLength(0);
   });
 
+  it.each([
+    ['rich', true],
+    ['compact', false],
+  ])(
+    'plays the hero video only when arrivals from elsewhere get the rich header (%s)',
+    async (header, video) => {
+      // the backdrop video looks its clip up on YouTube: a compact header has
+      // no backdrop, so it asks nothing
+      server.use(
+        http.get('/api/library/v2/ui-preferences', () =>
+          HttpResponse.json({
+            success: true,
+            preferences: { artist_page: { header_elsewhere: header } },
+          }),
+        ),
+      );
+      renderAt(ARTIST_URL);
+      expect(await screen.findByText('Music Has the Right to Children')).toBeInTheDocument();
+      await waitFor(() => expect(Boolean(document.querySelector('[data-live]'))).toBe(video));
+    },
+  );
+
   it('returns an unowned artist to its exact source without browser history', async () => {
     (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack = [
       { type: 'page', pageId: 'discover', href: '/discover' },

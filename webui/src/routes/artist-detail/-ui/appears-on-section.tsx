@@ -110,9 +110,13 @@ export function AppearsOnSection({
     };
   }, [artistId]);
 
-  const albums = data.albums.filter((a) => albumTracks(a).length);
-  const playable = data.tracks.filter((t) => t.file_path);
-  if (!albums.length && !playable.length) return null;
+  // a wanted track not here yet is what puts a guest in the library, so it
+  // is listed too, with nothing to play
+  const shows = (t: AppearsOnTrack) => Boolean(t.file_path || t.wanted);
+  const albums = data.albums.filter((a) => (a.tracks ?? []).some(shows));
+  const listed = data.tracks.filter(shows);
+  const playable = listed.filter((t) => t.file_path);
+  if (!albums.length && !listed.length) return null;
 
   const play = (queue: AppearsOnTrack[]) => {
     void window.playTrackList?.(
@@ -122,13 +126,17 @@ export function AppearsOnSection({
   };
   const playAlbum = (album: AppearsOnAlbum) => play(albumTracks(album));
   // the whole song list as the queue, starting at the one clicked
-  const playFrom = (index: number) => play([...playable.slice(index), ...playable.slice(0, index)]);
+  const playFrom = (track: AppearsOnTrack) => {
+    const index = playable.indexOf(track);
+    play([...playable.slice(index), ...playable.slice(0, index)]);
+  };
   const playAll = () => play([...albums.flatMap(albumTracks), ...playable]);
+  const canPlay = albums.some((a) => albumTracks(a).length) || playable.length > 0;
 
-  const shown = expanded ? playable : playable.slice(0, COLLAPSED);
+  const shown = expanded ? listed : listed.slice(0, COLLAPSED);
   const counts = [
     albums.length ? countLabel(albums.length, 'album', 'albums') : '',
-    playable.length ? countLabel(playable.length, 'track', 'tracks') : '',
+    listed.length ? countLabel(listed.length, 'track', 'tracks') : '',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -138,15 +146,17 @@ export function AppearsOnSection({
       <div className="artist-appears-on-head">
         <h3 className="artist-appears-on-title">Appears on</h3>
         <span className="artist-appears-on-count">{counts}</span>
-        <button
-          type="button"
-          className="artist-appears-on-play-all"
-          title="Play all"
-          aria-label="Play all"
-          onClick={playAll}
-        >
-          ▶
-        </button>
+        {canPlay ? (
+          <button
+            type="button"
+            className="artist-appears-on-play-all"
+            title="Play all"
+            aria-label="Play all"
+            onClick={playAll}
+          >
+            ▶
+          </button>
+        ) : null}
       </div>
 
       {albums.length ? (
@@ -158,7 +168,10 @@ export function AppearsOnSection({
               <button
                 type="button"
                 className="artist-appears-on-album-play"
-                title={`Play ${a.title ?? ''}`}
+                title={
+                  albumTracks(a).length ? `Play ${a.title ?? ''}` : 'Wanted, not downloaded yet'
+                }
+                disabled={!albumTracks(a).length}
                 onClick={() => playAlbum(a)}
               >
                 {a.thumb_url ? (
@@ -192,15 +205,16 @@ export function AppearsOnSection({
         </ul>
       ) : null}
 
-      {playable.length ? (
+      {listed.length ? (
         <ul className="artist-appears-on-list">
-          {shown.map((t, i) => (
+          {shown.map((t) => (
             <li key={String(t.id)}>
               <button
                 type="button"
                 className="artist-appears-on-row"
-                title={`Play ${t.title ?? ''}`}
-                onClick={() => playFrom(i)}
+                title={t.file_path ? `Play ${t.title ?? ''}` : 'Wanted, not downloaded yet'}
+                disabled={!t.file_path}
+                onClick={() => playFrom(t)}
               >
                 {t.album_thumb_url ? (
                   <PendingCover
@@ -218,20 +232,22 @@ export function AppearsOnSection({
                   <span className="artist-appears-on-name">{t.title}</span>
                   <span className="artist-appears-on-sub">{subLine(t, artistName)}</span>
                 </span>
-                <span className="artist-appears-on-time">{formatDuration(t.duration)}</span>
+                <span className="artist-appears-on-time">
+                  {t.file_path ? formatDuration(t.duration) : 'Wanted'}
+                </span>
               </button>
             </li>
           ))}
         </ul>
       ) : null}
 
-      {playable.length > COLLAPSED ? (
+      {listed.length > COLLAPSED ? (
         <button
           type="button"
           className="artist-appears-on-more"
           onClick={() => setExpanded((v) => !v)}
         >
-          {expanded ? 'Show less' : `Show all ${playable.length}`}
+          {expanded ? 'Show less' : `Show all ${listed.length}`}
         </button>
       ) : null}
     </section>

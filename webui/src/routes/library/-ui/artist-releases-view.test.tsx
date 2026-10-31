@@ -1062,7 +1062,10 @@ describe('Library V2 artist detail — All Releases views', () => {
     [{ guest_track_count: 6, guest_release_count: 6 }, 'Featured in your library', true],
     // nothing on disk yet, but a wishlisted track or a watch: monitored, so its
     // releases and their quality profile live in My Library
-    [{ in_library: true }, 'Monitored in your library', true],
+    [{ in_library: true, monitored: true }, 'Monitored in your library', true],
+    // only credited on wanted tracks of other artists (Rockwell on a Michael
+    // Jackson compilation): featured, its appears on is its My Library
+    [{ in_library: true, monitored: false }, 'Featured in your library', true],
     [{}, 'Not in your library', false],
   ])('labels the artist by what the library holds: %#', async (patch, label, myLibrary) => {
     server.use(
