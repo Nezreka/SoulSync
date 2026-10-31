@@ -1182,6 +1182,30 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(router.state.location.search).toMatchObject({ section: 'albums' });
   });
 
+  it('a second artist opened from the same grid goes back to the library, not the first', async () => {
+    // the grid's url is the same both times, so "the artist last shown" was
+    // still the first one: the second read "Back to 21 Savage" and led there
+    server.use(
+      http.get('/api/library/v2/artists/:id', ({ params }) => {
+        const id = Number(params.id);
+        return HttpResponse.json({
+          success: true,
+          artist: portishead({ id, name: id === 1 ? '21 Savage' : 'Nicki Minaj' }),
+        });
+      }),
+    );
+    const { router } = renderArtist('/library?section=artists');
+    await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/library'));
+    await act(() => router.navigate({ href: '/library?section=artists&artist=1' }));
+    await screen.findByRole('heading', { name: '21 Savage' });
+    fireEvent.click(screen.getByRole('button', { name: '← Back to Library' }));
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('artist'));
+
+    await act(() => router.navigate({ href: '/library?section=artists&artist=2' }));
+    await screen.findByRole('heading', { name: 'Nicki Minaj' });
+    expect(screen.getByRole('button', { name: '← Back to Library' })).toBeInTheDocument();
+  });
+
   it('back never walks into the album it came up from', async () => {
     // a cold load straight onto a release, then up to its artist: the chain
     // is empty, and stepping back through history went into the album again,
