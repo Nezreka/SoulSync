@@ -233,7 +233,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 - Trailer-backed heroes with one primary action (Play / Resume on your server, else Get) and everything else in one More menu.
 - Every rating, cast and crew, where to watch, collections and acquisition history.
 - Four season views, and season tools: grab, search, wishlist, monitor.
-- A **Your library** tab on every movie and show: each copy you own with its quality, codecs, size, folder and subtitles, whether its name matches your template, and file actions (rename to template, delete to the recycle bin). Shows get every season with counts, size, a resolution mix and a monitored switch, plus the folders a show is split across.
+- A **Your library** tab on every movie and show: each copy you own with its quality, codecs, audio languages, size, folder and subtitles (beside it or inside it), whether its name matches your template, and file actions (rename to template, delete to the recycle bin). Shows get every season with counts, size, a resolution mix and a monitored switch, plus the folders a show is split across.
 - **Fix match** that sticks: re-point a title to the right TMDB entry and scans can't switch it back.
 - Person, studio, channel and playlist pages.
 
@@ -266,7 +266,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Codec, HDR and audio preferences, **audio language** (prefer or require a dubbed / MULTI release), size limits and minimum seeders.
   - **Optional 4K libraries**: a separate Movies 4K and TV 4K folder, off until you switch them on. A profile set to save to the 4K library files new titles there.
   - A separate YouTube profile.
-- **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames, NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
+- **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames (with `$audiolangs` / `$sublangs` for `[JA+EN]` style names), NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
 - **Downloads page**: Downloads / Review / Clients views with live batches, a review queue and download-client management — the same setup as the music side.
 
 **Making it yours**

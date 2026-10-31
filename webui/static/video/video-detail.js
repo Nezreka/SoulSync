@@ -1526,10 +1526,15 @@
         var gb = n / 1073741824;
         return gb >= 1 ? (Math.round(gb * 10) / 10) + ' GB' : Math.round(n / 1048576) + ' MB';
     }
+    // a version's audio languages as 'JA+EN' (the $audiolangs naming shape)
+    function audioLangs(v) {
+        return String(v.audio_languages || '').split(',').map(function (c) { return c.trim().toUpperCase(); })
+            .filter(Boolean).join('+');
+    }
     function fileSummary(v) {
         return [mediaRes(v.resolution), v.dynamic_range || '', prettyCodec(v.video_codec),
             v.audio_codec ? String(v.audio_codec).toUpperCase() : '',
-            v.atmos ? 'Atmos' : channelsLabel(v.audio_channels), fmtBytes(v.size_bytes),
+            v.atmos ? 'Atmos' : channelsLabel(v.audio_channels), audioLangs(v), fmtBytes(v.size_bytes),
             v.release_source ? prettySource(v.release_source) : ''].filter(Boolean).join(' · ');
     }
 

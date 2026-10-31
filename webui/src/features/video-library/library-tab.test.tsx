@@ -247,6 +247,32 @@ describe('movie tab', () => {
     expect(screen.getByText('Meets your 1080p target')).toBeTruthy();
   });
 
+  it('says the audio languages and every subtitle, in the file or beside it', async () => {
+    routes['/library'] = () =>
+      movie({
+        files: [
+          file({
+            audio_languages: ['ja', 'en'],
+            subtitle_languages: ['en', 'es'],
+            subtitles: [{ language: 'en', hi: false, forced: false }],
+          }),
+        ],
+      });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Japanese, English')).toBeTruthy();
+    // english is beside it already; spanish is only inside the file
+    expect(screen.getByText('English, Spanish (in file)')).toBeTruthy();
+  });
+
+  it('never claims there are no subtitles before the folder was looked at', async () => {
+    routes['/library'] = () =>
+      movie({ files: [file({ subtitles: null, subtitle_languages: [], audio_languages: [] })] });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Bluray-1080p')).toBeTruthy();
+    expect(screen.queryByText('No subtitles')).toBeNull();
+    expect(screen.queryByText(/Audio/)).toBeNull();
+  });
+
   it('offers a rename for a file whose name drifted from the template', async () => {
     routes['/library'] = () =>
       movie({

@@ -37,6 +37,11 @@ def _res_label(res: Any) -> str:
     return resolution_label(res) or ("Unknown" if res else "Unknown")
 
 
+def _langs_or_none(raw):
+    from core.video.mediainfo import language_list
+    return None if raw is None else language_list(raw)
+
+
 def light_file(row: dict) -> Dict[str, Any]:
     """one file's facts from the database alone (no disk)."""
     path = row.get("relative_path") or ""
@@ -54,6 +59,9 @@ def light_file(row: dict) -> Dict[str, Any]:
         "audio_channels": row.get("audio_channels"),
         "dynamic_range": row.get("dynamic_range"),
         "atmos": bool(row.get("atmos")),
+        # None = not read yet (the media info job gets to it), [] = no tags
+        "audio_languages": _langs_or_none(row.get("audio_languages")),
+        "subtitle_languages": _langs_or_none(row.get("subtitle_languages")),
         "release_source": row.get("release_source"),
         "runtime_seconds": row.get("runtime_seconds"),
         "added_at": row.get("added_at"),

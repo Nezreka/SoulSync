@@ -1588,9 +1588,11 @@
     var _videoOrg = null;
     // Sample values for the live preview (mirrors what the importer feeds the engine).
     var _ORG_MOVIE_EG = { title: 'The Matrix', titlefirst: 'T', year: '1999', quality: 'Bluray-1080p',
-        resolution: '1080p', source: 'Bluray', codec: 'HEVC', edition: '', tmdbid: '603', imdbid: 'tt0133093' };
+        resolution: '1080p', source: 'Bluray', codec: 'HEVC', edition: '', audiolangs: 'EN', sublangs: 'EN+ES',
+        tmdbid: '603', imdbid: 'tt0133093' };
     var _ORG_EP_EG = { series: 'Breaking Bad', season: '01', seasonraw: '1', episode: '01', episodetitle: 'Pilot',
-        year: '2008', quality: 'WEBDL-1080p', resolution: '1080p', source: 'WEBDL', codec: 'H264', tvdbid: '81189',
+        year: '2008', quality: 'WEBDL-1080p', resolution: '1080p', source: 'WEBDL', codec: 'H264',
+        audiolangs: 'EN', sublangs: 'EN', tvdbid: '81189',
         tmdbid: '1396', imdbid: 'tt0903747' };
     var _ORG_YT_EG = { channel: 'Veritasium', title: 'How Electricity Actually Works', year: '2024',
         date: '2024-03-15', month: '03', day: '15', sxe: 's2024e0315', videoid: 'oI_X2cMHNe0' };

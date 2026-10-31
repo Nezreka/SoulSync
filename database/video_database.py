@@ -88,7 +88,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 59   # v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 60   # v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -212,6 +212,12 @@ _COLUMN_MIGRATIONS = [
     ("media_files", "audio_channels", "INTEGER"),
     ("media_files", "dynamic_range", "TEXT"),
     ("media_files", "atmos", "INTEGER"),
+    # v60: the languages in the file, as two-letter codes 'ja,en' (audio
+    # tracks) and its embedded subtitle tracks. NULL = not looked at yet,
+    # '' = looked at, nothing tagged. a server scan rewrites the rows, so
+    # _set_media_file carries a probed value over for the same file.
+    ("media_files", "audio_languages", "TEXT"),
+    ("media_files", "subtitle_languages", "TEXT"),
     ("episodes", "play_count", "INTEGER"),
     ("episodes", "last_viewed_at", "TEXT"),
     ("episodes", "view_offset_ms", "INTEGER"),
@@ -4527,23 +4533,96 @@ class VideoDatabase:
             return
         if isinstance(files, dict):
             files = [files]
-        from core.video.mediainfo import canonical_aspect
+        from core.video.mediainfo import canonical_aspect, format_languages
         for file in files:
             if not file:
                 continue
+            path = file.get("relative_path") or file.get("path") or ""
+            audio_langs = format_languages(file.get("audio_languages"))
+            sub_langs = format_languages(file.get("subtitle_languages"))
+            channels = file.get("audio_channels")
+            if audio_langs is None:
+                # the server sent no stream data (plex's listing never does):
+                # what soulsync probed off this file, if it has
+                probed = VideoDatabase._file_probe(conn, path, file.get("size_bytes"))
+                if probed:
+                    audio_langs = probed["audio_languages"]
+                    sub_langs = probed["subtitle_languages"] if sub_langs is None else sub_langs
+                    channels = channels or probed["audio_channels"]
             conn.execute(
                 f"INSERT INTO media_files ({owner_col}, relative_path, size_bytes, resolution, "
                 "video_codec, audio_codec, release_source, quality, runtime_seconds, aspect, "
-                "audio_channels, dynamic_range, atmos) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (owner_id,
-                 file.get("relative_path") or file.get("path") or "",
+                "audio_channels, dynamic_range, atmos, audio_languages, subtitle_languages) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (owner_id, path,
                  file.get("size_bytes"), file.get("resolution"), file.get("video_codec"),
                  file.get("audio_codec"), file.get("release_source"), file.get("quality"),
                  file.get("runtime_seconds"), canonical_aspect(file.get("aspect")),
-                 file.get("audio_channels"), file.get("dynamic_range"),
-                 1 if file.get("atmos") else 0),
+                 channels, file.get("dynamic_range"),
+                 1 if file.get("atmos") else 0, audio_langs, sub_langs),
             )
+
+    @staticmethod
+    def _file_name(path) -> str:
+        """the last path component, whichever separator the server used"""
+        return re.split(r"[\\/]", str(path or ""))[-1]
+
+    @staticmethod
+    def _file_probe(conn, path, size_bytes):
+        """the probe recorded for this file (by name + size), or None"""
+        name = VideoDatabase._file_name(path)
+        if not name or not size_bytes:
+            return None
+        try:
+            row = conn.execute(
+                "SELECT audio_languages, subtitle_languages, audio_channels "
+                "FROM video_file_probes WHERE file_name=? AND size_bytes=?",
+                (name, int(size_bytes))).fetchone()
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+        if not row:
+            return None
+        return {"audio_languages": row[0], "subtitle_languages": row[1],
+                "audio_channels": row[2]}
+
+    def record_file_probe(self, path, size_bytes, info) -> bool:
+        """keep what ffprobe read off a file (languages, channels), and fill it
+        into the library rows for that file now. never raises."""
+        name = self._file_name(path)
+        if not name or not size_bytes or not isinstance(info, dict):
+            return False
+        from core.video.mediainfo import format_languages
+        audio = format_languages(info.get("audio_languages") or [])
+        subs = format_languages(info.get("subtitle_languages") or [])
+        channels = info.get("audio_channels") or None
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO video_file_probes (file_name, size_bytes, audio_languages, "
+                "subtitle_languages, audio_channels, probed_at) "
+                "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(file_name, size_bytes) DO UPDATE SET "
+                "audio_languages=excluded.audio_languages, "
+                "subtitle_languages=excluded.subtitle_languages, "
+                "audio_channels=COALESCE(excluded.audio_channels, video_file_probes.audio_channels), "
+                "probed_at=CURRENT_TIMESTAMP",
+                (name, int(size_bytes), audio, subs, channels))
+            # the library rows for this file, on whatever path the server sees it
+            for row in conn.execute(
+                    "SELECT id, relative_path FROM media_files WHERE size_bytes=?",
+                    (int(size_bytes),)).fetchall():
+                if self._file_name(row[1]) == name:
+                    conn.execute(
+                        "UPDATE media_files SET audio_languages=?, subtitle_languages=?, "
+                        "audio_channels=COALESCE(audio_channels, ?) WHERE id=?",
+                        (audio, subs, channels, row[0]))
+            conn.commit()
+            return True
+        except (sqlite3.Error, ValueError, TypeError) as e:
+            logger.debug("record_file_probe failed for %s: %s", name, e)
+            return False
+        finally:
+            conn.close()
 
     @staticmethod
     def _parse_locked(raw) -> set:
@@ -7642,7 +7721,7 @@ class VideoDatabase:
             rows = conn.execute(
                 "SELECT m.id AS movie_id, m.tmdb_id, m.imdb_id, m.title, m.year, m.runtime_minutes, "
                 "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
-                "f.video_codec, f.audio_codec, f.release_source, f.runtime_seconds "
+                "f.video_codec, f.audio_languages, f.subtitle_languages, f.audio_codec, f.release_source, f.runtime_seconds "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                 "WHERE m.has_file=1 ORDER BY m.title COLLATE NOCASE, f.size_bytes DESC").fetchall()
             return [dict(r) for r in rows]
@@ -7664,7 +7743,7 @@ class VideoDatabase:
                 # without waiting for a deep scan (musicagine).
                 "COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER)) AS show_year, "
                 "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
-                "f.video_codec, f.release_source "
+                "f.video_codec, f.audio_languages, f.subtitle_languages, f.release_source "
                 "FROM episodes e JOIN shows s ON s.id = e.show_id "
                 "JOIN media_files f ON f.episode_id = e.id "
                 "WHERE e.has_file=1 "
@@ -7892,6 +7971,36 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def media_files_unprobed(self, limit: int = 300) -> list:
+        """owned movie/episode files soulsync hasn't read the languages of yet
+        (audio_languages NULL), biggest first so a run covers the most
+        watched-looking files. the media info job's source."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT f.id AS file_id, f.relative_path, f.size_bytes, "
+                "COALESCE(m.title, s.title) AS title, e.season_number AS season, "
+                "e.episode_number AS episode "
+                "FROM media_files f "
+                "LEFT JOIN movies m ON m.id = f.movie_id "
+                "LEFT JOIN episodes e ON e.id = f.episode_id "
+                "LEFT JOIN shows s ON s.id = e.show_id "
+                "WHERE f.audio_languages IS NULL AND f.video_id IS NULL "
+                "AND f.size_bytes > 0 "
+                "ORDER BY f.size_bytes DESC LIMIT ?", (int(limit),)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def media_files_unprobed_count(self) -> int:
+        conn = self._get_connection()
+        try:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM media_files WHERE audio_languages IS NULL "
+                "AND video_id IS NULL AND size_bytes > 0").fetchone()[0])
+        finally:
+            conn.close()
+
     def repair_library_files(self) -> list:
         """Every owned movie/episode file with the fields the naming templates
         need — the naming-conformance job's source."""
@@ -7902,7 +8011,7 @@ class VideoDatabase:
                 "m.title, m.year, m.tmdb_id, m.imdb_id, NULL AS tvdb_id, "
                 "NULL AS season, NULL AS episode, "
                 "NULL AS episode_title, NULL AS series, "
-                "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec "
+                "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec, f.audio_languages, f.subtitle_languages "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                 "WHERE m.has_file = 1")]
             eps = [dict(r) for r in conn.execute(
@@ -7914,7 +8023,7 @@ class VideoDatabase:
                 "s.tmdb_id, s.imdb_id, s.tvdb_id, "
                 "e.season_number AS season, e.episode_number AS episode, "
                 "e.title AS episode_title, s.title AS series, "
-                "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec "
+                "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec, f.audio_languages, f.subtitle_languages "
                 "FROM episodes e JOIN shows s ON e.show_id = s.id "
                 "JOIN media_files f ON f.episode_id = e.id "
                 "WHERE e.has_file = 1")]
@@ -7924,7 +8033,7 @@ class VideoDatabase:
 
     _TITLE_FILE_COLS = (
         "f.id AS file_id, f.relative_path, f.size_bytes, f.quality, f.resolution, "
-        "f.video_codec, f.audio_codec, f.audio_channels, f.dynamic_range, f.atmos, "
+        "f.video_codec, f.audio_languages, f.subtitle_languages, f.audio_codec, f.audio_channels, f.dynamic_range, f.atmos, "
         "f.release_source, f.runtime_seconds, f.added_at, f.aspect")
 
     def library_title_files(self, kind: str, item_id) -> list:
@@ -11345,7 +11454,7 @@ class VideoDatabase:
             credits = self._credits_for(conn, "movie_id", movie_id)
             files = conn.execute(
                 "SELECT resolution, quality, video_codec, audio_codec, release_source, size_bytes, "
-                "audio_channels, dynamic_range, atmos "
+                "audio_channels, dynamic_range, atmos, audio_languages "
                 "FROM media_files WHERE movie_id=? ORDER BY size_bytes DESC",
                 (movie_id,)).fetchall()
         finally:

@@ -1316,6 +1316,23 @@ def _union_jf_episode_delta_series(req, uid, view_id, since, series_items, show_
         return series_items
 
 
+def _stream_langs(streams, kind: str, *, embedded_only: bool = False) -> list:
+    """a jellyfin item's languages for one stream type, in track order, each
+    once. its external .srt files come through as streams too: left out of
+    the embedded subtitle list."""
+    from core.video.subtitles.languages import to_code
+    out: list = []
+    for s in streams or []:
+        if not isinstance(s, dict) or s.get("Type") != kind:
+            continue
+        if embedded_only and s.get("IsExternal"):
+            continue
+        code = to_code(s.get("Language"))
+        if code and code not in out:
+            out.append(code)
+    return out
+
+
 class JellyfinVideoSource:
     server_name = "jellyfin"
 
@@ -1745,6 +1762,9 @@ class JellyfinVideoSource:
                 "audio_codec": aud.get("Codec"),
                 "audio_channels": aud.get("Channels"),
                 "runtime_seconds": JellyfinVideoSource._ticks_to_seconds(item.get("RunTimeTicks")),
+                # every track's language, which jellyfin sends with the listing
+                "audio_languages": _stream_langs(streams, "Audio"),
+                "subtitle_languages": _stream_langs(streams, "Subtitle", embedded_only=True),
             }
             # release-name tokens first, then REAL stream facts override them
             entry.update(_format_from_name(fpath))

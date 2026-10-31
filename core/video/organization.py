@@ -15,13 +15,17 @@ Settings (persisted as JSON in video.db ``video_settings['organization']``):
 
 Template tokens
   Movies:   $title $titlefirst $year $quality $resolution $source $codec $edition
-            $tmdbid $imdbid
+            $audiolangs $sublangs $tmdbid $imdbid
   Episodes: $series $season $seasonraw $episode $episodetitle $year $quality
-            $resolution $source $codec $tmdbid $imdbid $tvdbid $airdate
+            $resolution $source $codec $audiolangs $sublangs $tmdbid $imdbid
+            $tvdbid $airdate
             (an episode's ids are its SHOW's)
   ($season/$episode are zero-padded to 2; $seasonraw is the bare number; a
   multi-episode file renders its span through $episode — 'S01E01-E02'; $airdate
-  is the episode's YYYY-MM-DD air date, for daily-show naming. An id that isn't
+  is the episode's YYYY-MM-DD air date, for daily-show naming. $audiolangs /
+  $sublangs are the file's audio / embedded subtitle languages as 'JA+EN',
+  empty when it has no language tags -- write '[$audiolangs]' and the
+  brackets go with it. An id that isn't
   known renders empty, and a brace group it leaves empty -- '{imdb-}', '{}' --
   is dropped like an empty '()' or '[]'.)
 
@@ -271,6 +275,25 @@ def _ext(ext: Any) -> str:
     return e if e.startswith(".") else "." + e
 
 
+def _langs(v) -> str:
+    """a file's languages for a name: ['ja', 'en'] -> 'JA+EN' (sonarr's
+    MediaInfo AudioLanguages shape). '' when it has none."""
+    from core.video.mediainfo import language_list
+    return "+".join(code.upper() for code in language_list(v))
+
+
+def languages_unknown(scope: Any, fields: dict, settings: Any) -> bool:
+    """the template names a language this file hasn't been probed for yet,
+    so its right name isn't known: mass rename and the naming check leave it
+    alone instead of stripping a '[JA]' it may well deserve."""
+    if scope not in ("movie", "episode"):
+        return False
+    s = normalize(settings)
+    tpl = str(s.get("movie_template" if scope == "movie" else "episode_template") or "")
+    return (("$audiolangs" in tpl and fields.get("audio_languages") is None)
+            or ("$sublangs" in tpl and fields.get("subtitle_languages") is None))
+
+
 def _movie_values(f: dict) -> dict:
     title = f.get("title") or "Unknown"
     return {
@@ -282,6 +305,8 @@ def _movie_values(f: dict) -> dict:
         "source": source_label(f.get("source")),
         "codec": _str(f.get("codec")).upper(),
         "edition": _str(f.get("edition")),
+        "audiolangs": _langs(f.get("audio_languages")),
+        "sublangs": _langs(f.get("subtitle_languages")),
         "tmdbid": _str(f.get("tmdbid")),
         "imdbid": _imdb(f.get("imdbid")),
     }
@@ -308,6 +333,8 @@ def _episode_values(f: dict) -> dict:
         "resolution": _str(f.get("resolution")),
         "source": source_label(f.get("source")),
         "codec": _str(f.get("codec")).upper(),
+        "audiolangs": _langs(f.get("audio_languages")),
+        "sublangs": _langs(f.get("subtitle_languages")),
         "tmdbid": _str(f.get("tmdbid")),
         "imdbid": _imdb(f.get("imdbid")),
         "tvdbid": _str(f.get("tvdbid")),

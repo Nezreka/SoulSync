@@ -354,9 +354,22 @@ def _make_organizer(db):
             # each its own download row (durable per-episode wanted rows).
             if settings.get("download_subtitles") and not dl.get("pack_episode"):
                 write_subtitles_for(db, dl, patch["dest_path"], settings, fs)
+            keep_probe(db, patch["dest_path"], probe_info)
         return patch
 
     return organize
+
+
+def keep_probe(db, dest_path, probe_info) -> None:
+    """what ffprobe read off a file that just landed (its audio and subtitle
+    languages), kept so the library shows it once the media server scans the
+    file in: a plex scan sends no stream data. best effort."""
+    if not isinstance(probe_info, dict) or not probe_info.get("ok"):
+        return
+    try:
+        db.record_file_probe(dest_path, os.path.getsize(dest_path), probe_info)
+    except Exception:   # noqa: BLE001 - the languages are a nicety, never the import
+        logger.debug("could not keep the probe for %s", dest_path, exc_info=True)
 
 
 def pack_file_list(root, walker=None, sizer=None):
