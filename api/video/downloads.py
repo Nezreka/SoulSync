@@ -1640,10 +1640,36 @@ def register_routes(bp):
         ensure_started(get_video_db)
         return jsonify({"ok": True})
 
+    @bp.route("/downloads/remove", methods=["POST"])
+    def video_downloads_remove():
+        """Take one failed or cancelled row off the list without retrying it.
+        Live rows, finished rows and import_failed rows (Manual import's) are
+        refused and left alone. History is untouched."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        try:
+            dl_id = int(body.get("id"))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "Missing download id."}), 400
+        db = get_video_db()
+        dl = db.get_video_download(dl_id)
+        if not dl:
+            return jsonify({"ok": False, "error": "Download not found."}), 404
+        if not db.remove_video_download(dl_id):
+            return jsonify({"ok": False,
+                            "error": "Only failed or cancelled downloads can be removed."}), 409
+        return jsonify({"ok": True})
+
     @bp.route("/downloads/clear", methods=["POST"])
     def video_downloads_clear():
+        """Clear finished rows. ``scope: "failed"`` clears only failed and
+        cancelled rows, leaving completed ones on the list."""
         from . import get_video_db
-        return jsonify({"cleared": get_video_db().clear_finished_video_downloads()})
+        body = request.get_json(silent=True) or {}
+        db = get_video_db()
+        if body.get("scope") == "failed":
+            return jsonify({"cleared": db.clear_failed_video_downloads()})
+        return jsonify({"cleared": db.clear_finished_video_downloads()})
 
     @bp.route("/downloads/youtube-quality", methods=["GET"])
     def video_youtube_quality():

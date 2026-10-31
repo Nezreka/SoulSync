@@ -177,6 +177,16 @@ export function clearVideoDownloads(): Promise<VdlResult | null> {
   return post('video/downloads/clear', {});
 }
 
+/** Clear only failed and cancelled downloads -- completed rows stay. */
+export function clearFailedVideoDownloads(): Promise<VdlResult | null> {
+  return post('video/downloads/clear', { scope: 'failed' });
+}
+
+/** Take one failed or cancelled download off the list, no retry. */
+export function removeVideoDownload(id: number): Promise<VdlResult | null> {
+  return post('video/downloads/remove', { id });
+}
+
 /** Block one exact release (slskd rows only — YouTube has no release identity). */
 export function blockVideoRelease(downloadId: number): Promise<VdlResult | null> {
   return post('video/downloads/blocklist', { download_id: downloadId });

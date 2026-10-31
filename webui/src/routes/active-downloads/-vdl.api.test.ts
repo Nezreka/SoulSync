@@ -7,6 +7,7 @@ import {
   blockVideoRelease,
   cancelVideoDownload,
   stopVideoWishlistSearches,
+  clearFailedVideoDownloads,
   clearVideoBlocklist,
   clearVideoDownloads,
   clearVideoHistory,
@@ -22,6 +23,7 @@ import {
   purgeVideoRecycleEntry,
   restoreAllVideoRecycle,
   restoreVideoRecycleEntry,
+  removeVideoDownload,
   retryVideoDownload,
   unblockVideoRelease,
 } from './-vdl.api';
@@ -169,6 +171,22 @@ describe('the mutations hit the right endpoints with the right bodies', () => {
     const r = await clearVideoDownloads();
     expect(seen).toHaveLength(1);
     expect(r?.cleared).toBe(2);
+  });
+
+  it('clearFailedVideoDownloads posts {scope: failed} to /clear', async () => {
+    const seen = capture('post', '/api/video/downloads/clear', { cleared: 3 });
+    const r = await clearFailedVideoDownloads();
+    expect(seen).toHaveLength(1);
+    expect(JSON.parse(seen[0].body)).toEqual({ scope: 'failed' });
+    expect(r?.cleared).toBe(3);
+  });
+
+  it('removeVideoDownload posts {id} to /remove', async () => {
+    const seen = capture('post', '/api/video/downloads/remove', { ok: true });
+    const r = await removeVideoDownload(9);
+    expect(seen).toHaveLength(1);
+    expect(JSON.parse(seen[0].body)).toEqual({ id: 9 });
+    expect(r?.ok).toBe(true);
   });
 
   it('blockVideoRelease posts {download_id}', async () => {

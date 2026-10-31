@@ -16,7 +16,7 @@ export interface VdlHeaderProps {
   filter: VdlFilter;
   onFilter: (filter: VdlFilter) => void;
   downloads: VdlDownload[];
-  counts: { active: number; completed: number; failed: number; total: number };
+  counts: { active: number; completed: number; failed: number; removable: number; total: number };
   liveSpeedBps: number;
   hasRunningWork: boolean;
   retryableCount: number;
@@ -26,6 +26,7 @@ export interface VdlHeaderProps {
   onCancelAll: () => void;
   onRetryAll: () => void;
   onClearFinished: () => void;
+  onClearFailed: () => void;
   retryAllPending: boolean;
 }
 
@@ -48,6 +49,7 @@ export function VdlHeader({
   onCancelAll,
   onRetryAll,
   onClearFinished,
+  onClearFailed,
   retryAllPending,
 }: VdlHeaderProps) {
   const chipCounts = videoChipCounts(downloads);
@@ -60,6 +62,14 @@ export function VdlHeader({
       title: 'Re-grab every failed download (same releases)',
       disabled: retryAllPending,
       onSelect: onRetryAll,
+    });
+  }
+  if (counts.removable > 0) {
+    menu.push({
+      key: 'clear-failed',
+      label: `Clear failed (${counts.removable})`,
+      title: 'Remove failed and cancelled downloads from the list without retrying',
+      onSelect: onClearFailed,
     });
   }
   if (finished > 0) {

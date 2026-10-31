@@ -15,16 +15,19 @@ import type { VdlDownload, VdlFilter, VdlMeta, VdlView, VdlYtMeta } from './-vdl
 import {
   blockVideoRelease,
   cancelVideoDownload,
+  clearFailedVideoDownloads,
   clearVideoDownloads,
   fetchVideoDownloads,
   fetchVideoMeta,
   fetchVideoYtMeta,
+  removeVideoDownload,
   retryVideoDownload,
   stopVideoWishlistSearches,
 } from './-vdl.api';
 import {
   vdlIsActive,
   vdlIsFail,
+  vdlIsRemovable,
   vdlIsRetryable,
   vdlMatchesFilter,
   vdlMetaURL,
@@ -72,7 +75,8 @@ export interface VdlDownloadsController {
   setFilter: (filter: VdlFilter) => void;
   /** Rows after the status filter, in server order. */
   visible: VdlDownload[];
-  counts: { active: number; completed: number; failed: number; total: number };
+  /** `removable`: failed + cancelled rows (import_failed excluded). */
+  counts: { active: number; completed: number; failed: number; removable: number; total: number };
   hasRunningWork: boolean;
   /** Failed rows that can actually be re-grabbed (≥2 shows "Retry Failed"). */
   retryableCount: number;
@@ -92,9 +96,11 @@ export interface VdlDownloadsController {
   cancelOne: (id: number) => Promise<void>;
   retryOne: (id: number) => Promise<void>;
   blockOne: (d: VdlDownload) => Promise<void>;
+  removeOne: (id: number) => Promise<void>;
   cancelAll: () => Promise<void>;
   retryAllFailed: () => Promise<void>;
   clearFinished: () => Promise<void>;
+  clearFailed: () => Promise<void>;
   retryAllPending: boolean;
 }
 
@@ -313,6 +319,17 @@ export function useVideoDownloads(): VdlDownloadsController {
     [refresh],
   );
 
+  /** Take one failed/cancelled row off the list -- no retry, history kept. */
+  const removeOne = useCallback(
+    async (id: number) => {
+      const res = await removeVideoDownload(id);
+      if (okOf(res)) toast('Removed from the list', 'success');
+      else toast(res?.error || 'Could not remove that download', 'error');
+      await refresh();
+    },
+    [refresh],
+  );
+
   const cancelAll = useCallback(async () => {
     const ids = downloadsRef.current.filter((d) => vdlIsActive(d.status)).map((d) => d.id);
     // stop the searches first, or a running search-all re-fills the list as we cancel it
@@ -347,12 +364,21 @@ export function useVideoDownloads(): VdlDownloadsController {
     await refresh();
   }, [refresh]);
 
+  const clearFailed = useCallback(async () => {
+    const res = await clearFailedVideoDownloads();
+    const n = Number(res?.cleared) || 0;
+    if (res) toast(`Cleared ${n} failed download${n === 1 ? '' : 's'}`, 'success');
+    else toast('Could not clear failed downloads', 'error');
+    await refresh();
+  }, [refresh]);
+
   const visible = downloads.filter((d) => vdlMatchesFilter(d.status, filter));
 
   const counts = {
     active: downloads.filter((d) => vdlIsActive(d.status)).length,
     completed: downloads.filter((d) => d.status === 'completed').length,
     failed: downloads.filter((d) => vdlIsFail(d.status)).length,
+    removable: downloads.filter((d) => vdlIsRemovable(d.status)).length,
     total: downloads.length,
   };
   const hasRunningWork = counts.active > 0;
@@ -384,9 +410,11 @@ export function useVideoDownloads(): VdlDownloadsController {
     cancelOne,
     retryOne,
     blockOne,
+    removeOne,
     cancelAll,
     retryAllFailed,
     clearFinished,
+    clearFailed,
     retryAllPending,
   };
 }

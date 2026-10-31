@@ -52,6 +52,7 @@ export function VideoDownloadsView() {
     onCancel: (id) => void dl.cancelOne(id),
     onRetry: (id) => void dl.retryOne(id),
     onBlock: (d) => void dl.blockOne(d),
+    onRemove: (id) => void dl.removeOne(id),
     onToggle: dl.toggleExpanded,
   };
 
@@ -85,6 +86,7 @@ export function VideoDownloadsView() {
             onCancelAll={() => void dl.cancelAll()}
             onRetryAll={() => void dl.retryAllFailed()}
             onClearFinished={() => void dl.clearFinished()}
+            onClearFailed={() => void dl.clearFailed()}
             retryAllPending={dl.retryAllPending}
           />
 

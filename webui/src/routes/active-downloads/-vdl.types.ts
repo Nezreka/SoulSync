@@ -127,6 +127,11 @@ export type VdlReviewSub = 'recycle' | 'blocklist';
 export const VDL_ACTIVE_STATUSES = ['downloading', 'queued', 'searching', 'importing'] as const;
 /** Failed per the old page: failed, cancelled, import_failed. */
 export const VDL_FAILED_STATUSES = ['failed', 'cancelled', 'import_failed'] as const;
+/**
+ * Failed rows that can come off the list without a retry. import_failed stays:
+ * it is Manual import's only pointer to a file still in the download area.
+ */
+export const VDL_REMOVABLE_STATUSES = ['failed', 'cancelled'] as const;
 
 /** The old page's cadence: 2s while anything is active, 6s when idle. */
 export const VDL_POLL_ACTIVE_MS = 2000;

@@ -2011,7 +2011,7 @@ const HELPER_CONTENT = {
     },
     '#adl-actions': {
         title: 'History and Actions',
-        description: 'History opens every download SoulSync has done. The ⋯ menu holds Clear finished (tidies the list, never deletes files), Retry failed on the video side, and Cancel all.',
+        description: 'History opens every download SoulSync has done. The ⋯ menu holds Clear finished (tidies the list, never deletes files), Retry failed and Clear failed on the video side, and Cancel all. On the video side the ⋯ on a failed row also has Remove from list.',
     },
 
     // ─── PLAYLIST EXPLORER PAGE ──────────────────────────────────────
