@@ -15,7 +15,7 @@ registerDocsSection({
             body: `
 SoulSync's **Video** side is a self-hosted movies & TV manager that lives inside the same app as the music side but runs as an **isolated application** — its own database, its own pages, its own API. Think of it as a Sonarr + Radarr + overlay/collection manager built into SoulSync.
 
-It connects to **Plex** or **Jellyfin** to read your movie and TV libraries, enriches every title from **TMDB**, **TVDB**, **OMDb**, **fanart.tv**, **Trakt**, **TVMaze** and **OpenSubtitles**, and can search, grab, organize, and upgrade downloads to fill the gaps in your collection.
+It connects to **Plex** or **Jellyfin** to read your movie and TV libraries, enriches every title from **TMDB**, **TVDB**, **OMDb**, **fanart.tv**, **Trakt**, **TVMaze**, **AniList** (anime) and **OpenSubtitles**, and can search, grab, organize, and upgrade downloads to fill the gaps in your collection.
 
 ::: cards
 ### 🎬 Movies & TV
@@ -404,7 +404,7 @@ Movies and shows can come from either Plex or Jellyfin and render the same way.
 
 The hero keeps one main action: **Play / Resume** on your server when you own it, otherwise **Get**. Trailer and the follow toggle (watchlist for an airing show, wishlist for a movie you don't own) sit beside it, and everything else is in one **More** menu, grouped into **Get**, **Library** (edit details, change poster, sync with server, mark watched, files and match) and **Open on** (IMDb, TMDB, TVDB, Letterboxd, official site). An episode's **⋯** menu marks just that episode watched or unwatched, and the season's **⋯** marks the whole season; both sync to your server like the show-wide toggle.
 
-The synopsis shows three lines; **More** opens the rest in place. Every score in the ratings row opens its own site (IMDb, Rotten Tomatoes, Metacritic, Trakt, TVmaze). Below the tabs, cast comes first, then the collection and **More Like This**, videos and photos, then one **About** section with the facts (release, runtime, rating, network, budget, language, the languages subtitles exist in, with the ones you grab listed first), the studios, and keywords. **Where to Watch** shows one tile per service. The side-scrolling rows have arrows when you hover them.
+The synopsis shows three lines; **More** opens the rest in place. Every score in the ratings row opens its own site (IMDb, Rotten Tomatoes, Metacritic, Trakt, TVmaze, AniList). Below the tabs, cast comes first, then the collection and **More Like This**, videos and photos, then one **About** section with the facts (release, runtime, rating, network, budget, language, the languages subtitles exist in, with the ones you grab listed first), the studios, and keywords. An anime also gets its other names (romaji and Japanese), the studio that animated it, the next episode's countdown while it airs, and a link to each season on AniList. **Where to Watch** shows one tile per service. The side-scrolling rows have arrows when you hover them.
 
 A show's numbers count like you'd read them: **Specials** and episodes that haven't aired yet are never "missing", so a show with every aired episode reads **Complete**. Specials sit after the real seasons.
 

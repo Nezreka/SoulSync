@@ -414,7 +414,7 @@ def season_pack_requests(items: List[Dict[str, Any]], active: Iterable,
     return out
 
 
-def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any) -> List[str]:
+def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any, season: Any = None) -> List[str]:
     """[primary title, *TMDB aliases, *your own] — deduped, primary first. The alias
     set the release-title gate matches against (so a release named by a known aka still
     matches). Best-effort: just the primary when TMDB is unavailable.
@@ -439,6 +439,14 @@ def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any) -> List[str]:
             get_video_db().title_overrides_for(kind, tmdb_id=tmdb_id).get("manual_aliases") or [])
     except Exception:   # noqa: BLE001 - same: an assist never blocks a grab
         logger.debug("manual aliases unavailable for %s %s", kind, tmdb_id, exc_info=True)
+    # an anime's AniList names (romaji, english, that season's synonyms): the
+    # scene names anime releases those ways ("Shingeki no Kyojin"). per season,
+    # so season 2's "JJK2" never accepts a release for season 1
+    try:
+        from api.video import get_video_db
+        aliases = list(aliases) + list(get_video_db().anime_titles_for(kind, tmdb_id, season))
+    except Exception:   # noqa: BLE001 - same: an assist never blocks a grab
+        logger.debug("anime titles unavailable for %s %s", kind, tmdb_id, exc_info=True)
     out, seen = [], set()
     for t in [primary, *aliases]:
         t = str(t or "").strip()
@@ -511,7 +519,10 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
             except Exception:   # noqa: BLE001 - a numbering assist must never break a grab
                 ctx["absolute"] = None
         tmdb_id, kind = item.get("show_tmdb_id"), "show"
-    titles = _acceptable_titles(ctx["title"], kind, tmdb_id)
+    # the anime id map numbers seasons the scene (TVDB) way: alt_season when
+    # TMDB's numbering differs
+    anime_season = ctx.get("alt_season", ctx.get("season")) if kind == "show" else None
+    titles = _acceptable_titles(ctx["title"], kind, tmdb_id, anime_season)
     if len(titles) > 1:
         ctx["titles"] = titles
     # External ids for the indexer search. Prowlarr's structured tvsearch/movie
