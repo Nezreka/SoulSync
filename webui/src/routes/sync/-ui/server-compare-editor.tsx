@@ -31,6 +31,7 @@ import type {
 
 import {
   addServerTrack,
+  adoptServerPlaylist,
   addTrackPosition,
   alignMatchedIds,
   alignServerPlaylist,
@@ -50,6 +51,7 @@ import {
   compareSourceLabel,
   compareStats,
   deleteServerPlaylist,
+  fetchMirroredMatches,
   exportServerM3u,
   fetchComparePlaylist,
   formatDurationMs,
@@ -309,9 +311,17 @@ export interface ServerCompareEditorProps {
   playlist: ServerPlaylist;
   mirrored: MirroredMatch | null;
   onBack: () => void;
+  /** adopted into My Playlists: compare against that from now on */
+  onAdopted?: (mirrored: MirroredMatch | null) => void;
 }
 
-export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompareEditorProps) {
+export function ServerCompareEditor({
+  playlist,
+  mirrored,
+  onBack,
+  onAdopted,
+}: ServerCompareEditorProps) {
+  const [adopting, setAdopting] = useState(false);
   const [data, setData] = useState<CompareResponse | null>(null);
   /**
    * The tracks are state of their own, apart from `data`, because that is the
@@ -655,6 +665,31 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
     }
   }, [playlist.name, onBack]);
 
+  const adopt = useCallback(async () => {
+    setAdopting(true);
+    try {
+      const result = await adoptServerPlaylist(playlistIdRef.current, playlist.name);
+      if (!result.success) {
+        window.showToast?.(result.error || 'Could not adopt the playlist', 'error');
+        return;
+      }
+      const skipped = result.skipped ? `, ${result.skipped} without an artist left out` : '';
+      window.showToast?.(
+        `Added to My Playlists: ${result.name} (${result.track_count} tracks${skipped})`,
+        'success',
+      );
+      const matches = await fetchMirroredMatches(playlist.name, playlistIdRef.current);
+      onAdopted?.(matches.find((m) => m.id === result.id) ?? matches[0] ?? null);
+    } catch (error) {
+      window.showToast?.(
+        `Adopt failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+        'error',
+      );
+    } finally {
+      setAdopting(false);
+    }
+  }, [playlist.name, onAdopted]);
+
   const stats = compareStats(tracks);
   const outOfOrder = Boolean(data?.order_status?.out_of_order);
   const serverLabel = compareServerLabel(data?.server_type);
@@ -731,7 +766,27 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
           markup's own — the vanilla never wrote this text, it just unhid it. */}
       {data && !mirrored && (
         <div id="server-no-source-banner" className="server-no-source-banner">
-          No mirrored playlist found matching this name. Showing server tracks only.
+          {playlist.readonly ? (
+            <span>
+              Read-only on the server (a smart playlist, or one you can't edit). The server builds
+              it, so it stays as it is.
+            </span>
+          ) : (
+            <>
+              <span>
+                Made outside SoulSync. Adopt it to manage it here: it joins My Playlists under the
+                same name, and syncing it updates this playlist.
+              </span>
+              <button
+                type="button"
+                className="server-adopt-btn"
+                disabled={adopting}
+                onClick={() => void adopt()}
+              >
+                {adopting ? 'Adopting…' : 'Adopt into My Playlists'}
+              </button>
+            </>
+          )}
         </div>
       )}
 

@@ -13,6 +13,8 @@ export interface ServerPlaylist {
   track_count?: number;
   /** the server user it belongs to, where the server says (navidrome) */
   owner?: string | null;
+  /** the server won't let you edit it: a smart playlist, or someone else's */
+  readonly?: boolean;
   /** Set by the split below, not by the backend. */
   _synced?: boolean;
 }
@@ -731,6 +733,29 @@ export async function deleteServerPlaylist(
     body: JSON.stringify({ playlist_name: playlistName }),
   });
   return (await response.json()) as ServerMutationResponse;
+}
+
+export interface AdoptResponse {
+  success?: boolean;
+  error?: string;
+  id?: number;
+  name?: string;
+  track_count?: number;
+  skipped?: number;
+}
+
+/** a server playlist soulsync didn't make becomes a My Playlist under the
+ *  same name, each track pinned to its server track */
+export async function adoptServerPlaylist(
+  playlistId: string,
+  playlistName: string,
+): Promise<AdoptResponse> {
+  const response = await fetch(`/api/server/playlist/${playlistId}/adopt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: playlistName }),
+  });
+  return (await response.json()) as AdoptResponse;
 }
 
 /* ── M3U export (632-696) ─────────────────────────────────────────────────── */

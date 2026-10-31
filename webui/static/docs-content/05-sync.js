@@ -210,6 +210,13 @@ Open a playlist and the line under its title says where its tracks are: **in lib
 - **Download Missing Tracks** opens the download window. It shows straight away which songs you have and which are missing, and **Add to Wishlist** only queues the missing ones (turn on **Force Download All** to queue everything). The server playlist picks up the new songs on the next push or sync
 - **Clear & re-identify** in a card's **⋯** menu throws the identification away and opens the window to run it again
 
+## Server playlists
+
+The **Server** tab lists the playlists on your media server. Open one to compare it with the SoulSync playlist that syncs to it: matched, missing and extra tracks side by side, with Find & Add, swap, unmatch, reorder and M3U export.
+
+- **Adopt into My Playlists**: a playlist made on the server instead of in SoulSync offers to be adopted. It becomes one of your playlists under the same name, each track stays paired with the server track it came from (so a sync never drops one it can't match), and syncing it updates that same server playlist
+- Smart playlists, and any playlist the server won't let you edit, are never offered for adoption. The server builds those, so they stay as they are
+
 ## Cover art
 
 Pick **Generate cover art** from a playlist card's **⋯** menu, or the **⋯** inside an open playlist. SoulSync reads the playlist's genres, mood and era from your library (and the playlist's name) and asks [Pollinations](https://pollinations.ai) for an image.

@@ -77330,3 +77330,25 @@ body.src-modal-open { overflow: hidden; }
 .mm-hero--adding .mm-desc,
 .mm-hero--adding .mm-desc-edit,
 .mm-hero--adding .mm-eyebrow { display: none; }
+
+/* adopt: a server playlist made outside soulsync, offered to My Playlists */
+.server-no-source-banner:has(.server-adopt-btn) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+.server-adopt-btn {
+    flex: none;
+    padding: 7px 14px;
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    border-radius: var(--radius-pill);
+    background: rgba(var(--accent-rgb), 0.16);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 650;
+    cursor: pointer;
+    transition: background var(--dur-fast) ease;
+}
+.server-adopt-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.28); }
+.server-adopt-btn:disabled { opacity: 0.6; cursor: default; }

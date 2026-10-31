@@ -262,6 +262,7 @@ export function SyncPage() {
         playlist={compare.playlist}
         mirrored={compare.mirrored}
         onBack={() => setCompare(null)}
+        onAdopted={(mirrored) => setCompare({ playlist: compare.playlist, mirrored })}
       />
     ) : (
       <ServerPlaylistList

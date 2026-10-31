@@ -17260,7 +17260,8 @@ def get_server_playlists():
         def _row(pl):
             return {'id': str(getattr(pl, 'id', '')), 'name': getattr(pl, 'title', ''),
                     'track_count': getattr(pl, 'leaf_count', 0) or 0,
-                    'owner': getattr(pl, 'owner', None)}
+                    'owner': getattr(pl, 'owner', None),
+                    'readonly': bool(getattr(pl, 'readonly', False))}
 
         others = []
         server_admin = []
@@ -17286,6 +17287,105 @@ def get_server_playlists():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _fetch_server_playlist_tracks(active_server, client, playlist_id, playlist_name):
+    """(server_tracks, playlist_name) for one server playlist: id, title,
+    artist, album, duration (ms) and thumb per track, in playlist order. the
+    compare view and adopt read the same tracks. plex can fill in the name."""
+    server_tracks = []
+    if active_server == 'plex' and client:
+        try:
+            # Try by ID first, fall back to name lookup (ID changes when playlist is recreated)
+            raw_playlist = None
+            try:
+                raw_playlist = client.server.fetchItem(int(playlist_id))
+            except Exception as e:
+                logger.debug("plex playlist fetchItem failed: %s", e)
+            if not raw_playlist and playlist_name:
+                try:
+                    raw_playlist = client.server.playlist(playlist_name)
+                except Exception as e:
+                    logger.debug("plex playlist by-name lookup failed: %s", e)
+            if not raw_playlist:
+                logger.warning(
+                    f"[ServerPlaylistTracks] Plex playlist not found by "
+                    f"id={playlist_id} or name='{playlist_name}' — "
+                    f"compare view will show every source track as Find & Add"
+                )
+            if raw_playlist:
+                if not playlist_name:
+                    playlist_name = raw_playlist.title
+                plex_base = getattr(client.server, '_baseurl', '') or ''
+                plex_token = getattr(client.server, '_token', '') or ''
+                if not plex_base:
+                    # Fallback: get from config
+                    _pc = config_manager.get_plex_config()
+                    plex_base = (_pc.get('base_url', '') or '').rstrip('/')
+                    plex_token = plex_token or _pc.get('token', '')
+                logger.debug(f"[ServerPlaylistTracks] Plex base URL: {plex_base}")
+                for item in raw_playlist.items():
+                    grandparent = getattr(item, 'grandparentTitle', '') or ''
+                    parent = getattr(item, 'parentTitle', '') or ''
+                    # Build full thumb URL from Plex relative path
+                    thumb = ''
+                    raw_thumb = getattr(item, 'thumb', '') or getattr(item, 'parentThumb', '') or ''
+                    if raw_thumb and plex_base and plex_token:
+                        thumb = f"{plex_base}{raw_thumb}?X-Plex-Token={plex_token}"
+                    server_tracks.append({
+                        'id': str(item.ratingKey),
+                        'title': item.title,
+                        # originalTitle is plex's per-track artist; grandparent is the
+                        # album artist ('Various Artists' on a compilation)
+                        'artist': getattr(item, 'originalTitle', None) or grandparent,
+                        'album': parent,
+                        'duration': item.duration or 0,
+                        'thumb': thumb,
+                    })
+        except Exception as e:
+            logger.error(f"[ServerPlaylistTracks] Plex error: {e}", exc_info=True)
+    elif active_server == 'jellyfin' and client:
+        tracks = client.get_playlist_tracks(playlist_id)
+        for t in (tracks or []):
+            raw = t._data if hasattr(t, '_data') else {}
+            artists = raw.get('Artists', [])
+            # Through the token-safe proxy, NOT a raw {jf_base}/Items/...
+            # URL. The raw form handed the BROWSER an unauthenticated
+            # request against whatever address SOULSYNC uses for Jellyfin —
+            # and Jellyfin answers those with 200 and an empty body, which
+            # is #1159's "all requests for the images return a 200 response
+            # but with an empty body", verbatim. The server-activity proxy
+            # already exists for exactly this (its jellyfin fetch even
+            # guards on `r.content` because someone hit the empty-200
+            # before); it attaches the api_key server-side so the token
+            # never reaches the browser, same reason Navidrome thumbs go
+            # through /api/navidrome/cover/.
+            album_id = raw.get('AlbumId', '')
+            thumb = f"/api/server-activity/image?path=jf:{album_id}" if album_id else ''
+            server_tracks.append({
+                'id': str(t.ratingKey),
+                'title': t.title,
+                'artist': artists[0] if artists else raw.get('AlbumArtist', ''),
+                'album': raw.get('Album', ''),
+                'duration': t.duration,
+                'thumb': thumb,
+            })
+    elif active_server == 'navidrome' and client:
+        tracks = client.get_playlist_tracks(playlist_id)
+        for t in (tracks or []):
+            raw = t._data if hasattr(t, '_data') else {}
+            # Navidrome cover art via Subsonic API
+            cover_id = raw.get('coverArt', '') or raw.get('albumId', '')
+            thumb = f"/api/navidrome/cover/{cover_id}" if cover_id else ''
+            server_tracks.append({
+                'id': str(t.ratingKey),
+                'title': t.title,
+                'artist': raw.get('artist', ''),
+                'album': raw.get('album', ''),
+                'duration': t.duration,
+                'thumb': thumb,
+            })
+    return server_tracks, playlist_name
+
+
 @app.route('/api/server/playlist/<playlist_id>/tracks', methods=['GET'])
 def get_server_playlist_tracks(playlist_id):
     """Get tracks from a server playlist with source match info from sync history."""
@@ -17299,99 +17399,8 @@ def get_server_playlist_tracks(playlist_id):
         if _sp_refusal is not None:
             return _sp_refusal
 
-        # Get tracks from server
-        server_tracks = []
-        if active_server == 'plex' and _sp_client:
-            try:
-                # Try by ID first, fall back to name lookup (ID changes when playlist is recreated)
-                raw_playlist = None
-                try:
-                    raw_playlist = _sp_client.server.fetchItem(int(playlist_id))
-                except Exception as e:
-                    logger.debug("plex playlist fetchItem failed: %s", e)
-                if not raw_playlist and playlist_name:
-                    try:
-                        raw_playlist = _sp_client.server.playlist(playlist_name)
-                    except Exception as e:
-                        logger.debug("plex playlist by-name lookup failed: %s", e)
-                if not raw_playlist:
-                    logger.warning(
-                        f"[ServerPlaylistTracks] Plex playlist not found by "
-                        f"id={playlist_id} or name='{playlist_name}' — "
-                        f"compare view will show every source track as Find & Add"
-                    )
-                if raw_playlist:
-                    if not playlist_name:
-                        playlist_name = raw_playlist.title
-                    plex_base = getattr(_sp_client.server, '_baseurl', '') or ''
-                    plex_token = getattr(_sp_client.server, '_token', '') or ''
-                    if not plex_base:
-                        # Fallback: get from config
-                        _pc = config_manager.get_plex_config()
-                        plex_base = (_pc.get('base_url', '') or '').rstrip('/')
-                        plex_token = plex_token or _pc.get('token', '')
-                    logger.debug(f"[ServerPlaylistTracks] Plex base URL: {plex_base}")
-                    for item in raw_playlist.items():
-                        grandparent = getattr(item, 'grandparentTitle', '') or ''
-                        parent = getattr(item, 'parentTitle', '') or ''
-                        # Build full thumb URL from Plex relative path
-                        thumb = ''
-                        raw_thumb = getattr(item, 'thumb', '') or getattr(item, 'parentThumb', '') or ''
-                        if raw_thumb and plex_base and plex_token:
-                            thumb = f"{plex_base}{raw_thumb}?X-Plex-Token={plex_token}"
-                        server_tracks.append({
-                            'id': str(item.ratingKey),
-                            'title': item.title,
-                            # originalTitle is plex's per-track artist; grandparent is the
-                            # album artist ('Various Artists' on a compilation)
-                            'artist': getattr(item, 'originalTitle', None) or grandparent,
-                            'album': parent,
-                            'duration': item.duration or 0,
-                            'thumb': thumb,
-                        })
-            except Exception as e:
-                logger.error(f"[ServerPlaylistTracks] Plex error: {e}", exc_info=True)
-        elif active_server == 'jellyfin' and _sp_client:
-            tracks = _sp_client.get_playlist_tracks(playlist_id)
-            for t in (tracks or []):
-                raw = t._data if hasattr(t, '_data') else {}
-                artists = raw.get('Artists', [])
-                # Through the token-safe proxy, NOT a raw {jf_base}/Items/...
-                # URL. The raw form handed the BROWSER an unauthenticated
-                # request against whatever address SOULSYNC uses for Jellyfin —
-                # and Jellyfin answers those with 200 and an empty body, which
-                # is #1159's "all requests for the images return a 200 response
-                # but with an empty body", verbatim. The server-activity proxy
-                # already exists for exactly this (its jellyfin fetch even
-                # guards on `r.content` because someone hit the empty-200
-                # before); it attaches the api_key server-side so the token
-                # never reaches the browser, same reason Navidrome thumbs go
-                # through /api/navidrome/cover/.
-                album_id = raw.get('AlbumId', '')
-                thumb = f"/api/server-activity/image?path=jf:{album_id}" if album_id else ''
-                server_tracks.append({
-                    'id': str(t.ratingKey),
-                    'title': t.title,
-                    'artist': artists[0] if artists else raw.get('AlbumArtist', ''),
-                    'album': raw.get('Album', ''),
-                    'duration': t.duration,
-                    'thumb': thumb,
-                })
-        elif active_server == 'navidrome' and _sp_client:
-            tracks = _sp_client.get_playlist_tracks(playlist_id)
-            for t in (tracks or []):
-                raw = t._data if hasattr(t, '_data') else {}
-                # Navidrome cover art via Subsonic API
-                cover_id = raw.get('coverArt', '') or raw.get('albumId', '')
-                thumb = f"/api/navidrome/cover/{cover_id}" if cover_id else ''
-                server_tracks.append({
-                    'id': str(t.ratingKey),
-                    'title': t.title,
-                    'artist': raw.get('artist', ''),
-                    'album': raw.get('album', ''),
-                    'duration': t.duration,
-                    'thumb': thumb,
-                })
+        server_tracks, playlist_name = _fetch_server_playlist_tracks(
+            active_server, _sp_client, playlist_id, playlist_name)
 
         # Get source tracks — prefer mirrored playlist, fall back to sync history
         source_tracks = []
@@ -17551,6 +17560,40 @@ def get_server_playlist_tracks(playlist_id):
     except Exception as e:
         logger.error(f"Error getting server playlist tracks: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/adopt', methods=['POST'])
+def adopt_server_playlist_route(playlist_id):
+    """a server playlist soulsync didn't make becomes a My Playlist under the
+    same name, each track pinned to its server track, so syncing it writes
+    back to this playlist (core/playlists/adopt_server_playlist)."""
+    from core.playlists.adopt_server_playlist import AdoptError, adopt_server_playlist
+    try:
+        active_server = config_manager.get_active_media_server()
+        data = request.get_json(silent=True) or {}
+        client, playlist_id, playlist_name, refusal = _server_playlist_guard(
+            active_server, playlist_id, str(data.get('name') or ''))
+        if refusal is not None:
+            return refusal
+        # name and read-only come from the server's listing, not the request
+        from core.sync.server_playlist_access import list_playlists
+        listed = next((p for p in list_playlists(active_server, client)
+                       if str(getattr(p, 'id', '')) == str(playlist_id)), None)
+        if listed is None:
+            return jsonify({"success": False, "error": "That playlist isn't on the server anymore"}), 404
+        server_tracks, playlist_name = _fetch_server_playlist_tracks(
+            active_server, client, playlist_id, getattr(listed, 'title', '') or playlist_name)
+        result = adopt_server_playlist(
+            get_database(), get_current_profile_id(), active_server, playlist_name,
+            server_tracks, readonly=bool(getattr(listed, 'readonly', False)))
+        from api.user_playlists import _identify_soon
+        _identify_soon(result['id'])
+        return jsonify({"success": True, **result})
+    except AdoptError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error adopting server playlist {playlist_id}: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Could not adopt the playlist"}), 500
 
 
 @app.route('/api/server/playlist/<playlist_id>/align', methods=['POST'])
