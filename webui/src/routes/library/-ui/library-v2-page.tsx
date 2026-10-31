@@ -198,6 +198,7 @@ import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
 import { SimilarArtistsSection } from '../../artist-detail/-ui/similar-artists-section';
 import { WatchlistAddModal } from '../../artist-detail/-ui/watchlist-add-modal';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
+import { ArtistHeroVideo } from './artist-hero-video';
 import { ArtistPageLibraryProvider, ReleaseMonitorButton } from './artist-page-release-actions';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import { cardFadeIn } from './card-fade';
@@ -7421,6 +7422,7 @@ function LegacyArtistHero({
         ) : (
           <div className={styles.billboardGlow} aria-hidden="true" />
         )}
+        <ArtistHeroVideo name={name} providerId={providerId} />
         <div className={styles.billboardScrim} aria-hidden="true" />
         <div className="artist-hero-content">
           <div
