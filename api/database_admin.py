@@ -260,14 +260,10 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
         summary += f" | {removed_artists} artists, {removed_albums} albums removed"
     add_activity_item("", "Database Update Complete", summary, "Now")
 
-    # Invalidate sync match cache (track IDs may have changed) before emitting completion
-    try:
-        inv_db = get_database()
-        cleared = inv_db.invalidate_sync_match_cache()
-        if cleared:
-            logger.info(f"Cleared {cleared} sync match cache entries after database update")
-    except Exception as e:
-        logger.debug("sync match cache invalidation failed: %s", e)
+    # the sync match cache is kept. every read re-checks its row (the track
+    # still on the server, still the same song, not unmatched), so a scan
+    # leaves nothing to clear. wiping it here made the auto-sync this update
+    # fires re-match every playlist track from scratch, minutes per playlist
 
     try:
         if automation_engine:
