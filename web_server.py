@@ -24660,6 +24660,27 @@ def _active_playlist_sync_summaries():
                 'status': state.get('status'),
                 'progress': progress,
             })
+    # a Sync & download run spends its first minutes refreshing and
+    # identifying before the sync step registers above, and the dashboard
+    # showed nothing live for all of it. its own progress is listed under the
+    # id the sync step will use, until that step takes over
+    syncing = {s['playlist_id'] for s in summaries}
+    with playlist_pipeline_progress_lock:
+        pipelines = [dict(s) for s in playlist_pipeline_progress_states.values() if s]
+    for state in pipelines:
+        if state.get('status') != 'running' or state.get('playlist_id') is None:
+            continue
+        pid = f"auto_mirror_{state['playlist_id']}"
+        if pid in syncing:
+            continue
+        summaries.append({
+            'playlist_id': pid,
+            'playlist_name': state.get('playlist_name') or '',
+            'status': 'running',
+            'progress': {'progress': state.get('progress') or 0,
+                         'current_step': state.get('phase') or 'Running',
+                         'playlist_name': state.get('playlist_name') or ''},
+        })
     return summaries
 
 
