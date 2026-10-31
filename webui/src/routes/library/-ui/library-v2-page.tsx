@@ -7049,6 +7049,13 @@ function EnrichmentCoverage({ coverage }: { coverage: Record<string, number> }) 
  *  `styles.heroImageBox` gives that column a width of its own. Without one it
  *  took the photo's intrinsic width, so the header's proportions changed from
  *  artist to artist depending on what the provider shipped. */
+/** how long a name reads, for the hero's type size: a short name stands
+ *  large, a long one steps down rather than being cut */
+function nameLength(name: string): 'short' | 'long' | 'longest' {
+  const n = name.trim().length;
+  return n > 28 ? 'longest' : n > 16 ? 'long' : 'short';
+}
+
 function LegacyArtistHero({
   name,
   imageUrl,
@@ -7130,7 +7137,14 @@ function LegacyArtistHero({
       // the Show less button the reader needs to get back.
       const wasExpanded = node.classList.contains('expanded');
       if (wasExpanded) node.classList.remove('expanded');
-      const { scrollHeight, clientHeight } = node;
+      // the premier hero clamps the text itself to four lines; the legacy
+      // box clips the whole container. whichever clips is what's measured
+      const text = node.querySelector<HTMLElement>('.bio-text');
+      const clipped =
+        text && text.scrollHeight - text.clientHeight > node.scrollHeight - node.clientHeight
+          ? text
+          : node;
+      const { scrollHeight, clientHeight } = clipped;
       if (wasExpanded) node.classList.add('expanded');
       // An environment that cannot measure reports 0/0 — that is "unknown",
       // never "it fits".
@@ -7188,7 +7202,9 @@ function LegacyArtistHero({
               ) : null}
               <div className={styles.detailTitleRow}>
                 {titleLeading}
-                <h1 className="artist-name">{name}</h1>
+                <h1 className="artist-name" data-length={nameLength(name)}>
+                  {name}
+                </h1>
                 {titleActions}
               </div>
               {genres.length > 0 ? (
