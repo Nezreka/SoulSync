@@ -1235,6 +1235,30 @@
   font-size: 13.5px;
 }
 
+.stateHint {
+  margin: 0;
+  max-width: 440px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.stateRetry {
+  padding: 7px 16px;
+  border: 1px solid var(--white-a14);
+  border-radius: var(--radius-pill);
+  background: var(--white-a05);
+  color: var(--text-1);
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.stateRetry:hover,
+.stateRetry:focus-visible {
+  background: var(--white-a10);
+}
+
 .skeletons {
   display: flex;
   gap: 14px;

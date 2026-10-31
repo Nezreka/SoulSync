@@ -297,6 +297,8 @@ export function SearchPage() {
     return hasSourceResults ? 'results' : 'empty';
   }, [dismissed, soulseekActive, idLookupPending, loading, cached, state.query, hasSourceResults]);
 
+  const loadingFor = useSecondsWhile(view === 'loading');
+
   // results are the page now, not a dropdown over it, so a click elsewhere no
   // longer throws them away. clearing the box does.
   const open = view !== 'hidden';
@@ -602,6 +604,23 @@ export function SearchPage() {
                     ? 'Looking up that link…'
                     : `Searching ${sourceLabel(state.activeSource)}…`}
                 </p>
+                {/* a search that hangs used to say "Searching Deezer…" for
+                    as long as it took, two minutes once, with nothing else */}
+                {loadingFor >= 8 ? (
+                  <p className={styles.stateHint} role="status">
+                    Taking longer than usual. SoulSync is busy, results will show as soon as it
+                    answers.
+                  </p>
+                ) : null}
+                {loadingFor >= 20 && !idLookupPending ? (
+                  <button
+                    type="button"
+                    className={styles.stateRetry}
+                    onClick={() => runSearch(query)}
+                  >
+                    Try again
+                  </button>
+                ) : null}
               </div>
             ) : null}
 
@@ -710,4 +729,17 @@ function filesSubtitle(source: BasicSource | undefined): string {
   if (!source) return 'Raw files from your download sources, grabbed as they come';
   if (source.name === 'soulseek') return 'Raw files from Soulseek, grabbed exactly as shared';
   return `Files straight from ${basicSourceLabel(source)}, grabbed as they come`;
+}
+
+/** whole seconds since `active` turned true, 0 while it is false */
+function useSecondsWhile(active: boolean): number {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    setSeconds(0);
+    if (!active) return;
+    const started = Date.now();
+    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return seconds;
 }
