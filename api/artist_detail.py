@@ -456,11 +456,21 @@ def debug_library_photos():
 @bp.route('/api/artist/similar/<path:artist_name>/stream')
 def get_similar_artists_stream(artist_name):
     """Stream MusicMap similar artists using source-priority metadata matching."""
+    from core.metadata.similar_artists import iter_fallback_similar_artist_events
     from core.metadata_service import iter_musicmap_similar_artist_events
 
     def generate():
         logger.info(f"Streaming similar artists for: {artist_name}")
         for event in iter_musicmap_similar_artist_events(artist_name, limit=20):
+            # MusicMap has no page for many smaller and newer artists ("Gizmo
+            # & Mac" is a 404 there). the page sat on "Finding similar
+            # artists..." for good; the providers' own lists answer instead
+            if event.get('type') == 'error' and int(event.get('status_code') or 0) in (400, 404):
+                for fallback in iter_fallback_similar_artist_events(artist_name, limit=20):
+                    yield f"data: {json.dumps(fallback)}\n\n"
+                    if fallback.get('artist'):
+                        time.sleep(0.1)
+                return
             yield f"data: {json.dumps(event)}\n\n"
             if event.get('artist'):
                 time.sleep(0.1)

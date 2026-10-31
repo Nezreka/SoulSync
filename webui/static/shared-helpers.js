@@ -4243,6 +4243,7 @@ async function loadSimilarArtists(artistName) {
         const decoder = new TextDecoder();
         let buffer = '';
         let artistCount = 0;
+        let finished = false;
 
         // Read the stream
         while (true) {
@@ -4267,8 +4268,13 @@ async function loadSimilarArtists(artistName) {
                 try {
                     const jsonData = JSON.parse(message.substring(6)); // Remove 'data: ' prefix
 
+                    // an error event used to be thrown inside this parse
+                    // try, swallowed as a parse error, and the section sat
+                    // on "Finding similar artists..." for good. it ends the
+                    // search like an empty answer does
                     if (jsonData.error) {
-                        throw new Error(jsonData.error);
+                        console.warn('Similar artists:', jsonData.error);
+                        continue;
                     }
 
                     if (jsonData.artist) {
@@ -4287,6 +4293,7 @@ async function loadSimilarArtists(artistName) {
                     }
 
                     if (jsonData.complete) {
+                        finished = true;
                         if (signal?.aborted) return;
                         console.log(`🎉 Streaming complete: ${jsonData.total} artists`);
 
@@ -4306,6 +4313,20 @@ async function loadSimilarArtists(artistName) {
                 } catch (parseError) {
                     console.error('❌ Error parsing stream message:', parseError);
                 }
+            }
+        }
+
+        // a stream that ended with no artists and no "complete" (an error, a
+        // dropped connection) still takes the spinner down
+        if (!finished && !signal?.aborted) {
+            loadingEl.classList.add('hidden');
+            if (artistCount === 0) {
+                container.innerHTML = `
+                    <div style="width: 100%; text-align: center; padding: 40px 20px; color: rgba(255, 255, 255, 0.5);">
+                        <div style="font-size: 18px; margin-bottom: 8px;">🎵</div>
+                        <div style="font-size: 14px;">No similar artists found</div>
+                    </div>
+                `;
             }
         }
 
