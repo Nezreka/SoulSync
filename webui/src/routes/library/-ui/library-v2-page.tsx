@@ -4680,6 +4680,7 @@ function UnmatchedImportsBanner() {
   const [identifying, setIdentifying] = useState<LibraryV2UnmatchedTrack | null>(null);
   const queryClient = useQueryClient();
   const count = data?.count ?? 0;
+  const ready = Math.min(data?.ready ?? 0, count);
   if (count <= 0 && !identifying && !reviewing) return null;
 
   return (
@@ -4694,8 +4695,9 @@ function UnmatchedImportsBanner() {
               {count} {count === 1 ? 'track needs' : 'tracks need'} a match
             </strong>
             <span>
-              SoulSync couldn’t tell what {count === 1 ? 'it is' : 'they are'} from the tags. Review
-              them to remove duplicates and file the rest where they belong.
+              {ready > 0
+                ? `${ready === count ? (count === 1 ? 'It has' : 'All have') : `${ready} ${ready === 1 ? 'has' : 'have'}`} a strong match ready, found by listening to the audio.`
+                : `SoulSync couldn’t tell what ${count === 1 ? 'it is' : 'they are'} from the tags, so it’s listening to the audio to find out.`}
             </span>
           </div>
           <button
@@ -4709,7 +4711,13 @@ function UnmatchedImportsBanner() {
       ) : null}
       {reviewing ? (
         <UnmatchedReviewModal
-          onClose={() => setReviewing(false)}
+          onClose={() => {
+            setReviewing(false);
+            // what was accepted or removed changes the banner's counts
+            void queryClient.invalidateQueries({
+              queryKey: [...LIBRARY_V2_QUERY_KEY, 'unmatched'],
+            });
+          }}
           onFindMatch={(track) => {
             setReviewing(false);
             setIdentifying(track);

@@ -2358,10 +2358,24 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """The files filed under Unknown Artist, each with its best guess:
         the album its folder holds, the title its name gives, and the
         matched copy it duplicates (core/library2/unmatched_review)."""
+        from core.library2.unmatched_matcher import get_unmatched_matcher
         from core.library2.unmatched_review import list_unmatched
         with closing(_conn()) as conn:
             tracks = list_unmatched(conn)
-        return jsonify({"success": True, "tracks": tracks})
+        matcher = get_unmatched_matcher()
+        return jsonify({"success": True, "tracks": tracks,
+                        "matcher": matcher.status() if matcher else None})
+
+    @_route("/api/library/v2/unmatched/match", methods=["POST"])
+    def lib2_unmatched_match():
+        """Wake the background matcher now (the review asks when it opens on
+        files nothing has looked at yet)."""
+        from core.library2.unmatched_matcher import get_unmatched_matcher
+        matcher = get_unmatched_matcher()
+        if matcher is None:
+            return _fail("The background matcher isn't running", 503)
+        matcher.nudge()
+        return jsonify({"success": True, "matcher": matcher.status()})
 
     @_route("/api/library/v2/unmatched/<int:file_id>/identify", methods=["POST"])
     def lib2_unmatched_identify(file_id):

@@ -2,15 +2,8 @@
 
 import pytest
 
-from core.library2.unmatched_identify import forget_identifications, identify_file
+from core.library2.unmatched_identify import identify_file
 from tests import lib2_seed
-
-
-@pytest.fixture(autouse=True)
-def _fresh():
-    forget_identifications()
-    yield
-    forget_identifications()
 
 
 @pytest.fixture
@@ -115,3 +108,18 @@ def test_a_missing_file_says_so(conn):
                            lookup=lambda p: pytest.fail("nothing to fingerprint"),
                            search=lambda *a: [], source="deezer", resolve=lambda p: None)
     assert result["status"] == "missing"
+
+
+def test_the_files_own_length_counts_against_a_shorter_release(conn, monkeypatch):
+    # the row has no length; the file does (suzy: 4:26 against a shorter release)
+    import core.library2.unmatched_identify as ui
+    monkeypatch.setattr(ui, "_file_length", lambda path: 266.0)
+    result = _identify(conn, "15 - Suzy (1).flac", lookup={"status": "no_match"}, rows=[
+        _row("short", "Suzy", "Kanye West", "Donda 2", duration_ms=161000),
+        _row("long", "Suzy", "Kanye West", "Donda 2 (Deluxe)", duration_ms=265000),
+    ])
+    by_id = {c["track_id"]: c for c in result["candidates"]}
+    assert "Same length" in by_id["long"]["reasons"]
+    assert "Length differs (4:26 vs 2:41)" in by_id["short"]["reasons"]
+    assert by_id["short"]["confidence"] < 0.6
+

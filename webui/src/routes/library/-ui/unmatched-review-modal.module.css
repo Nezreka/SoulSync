@@ -74,6 +74,32 @@
   color: var(--text-1);
 }
 
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 28px 16px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.progressTrack {
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--white-a08);
+}
+
+.progressFill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: rgb(var(--accent-rgb));
+  transition: width var(--dur-fast) var(--ease-out);
+}
+
 .body {
   flex: 1;
   min-height: 140px;

@@ -240,6 +240,159 @@ describe('the unmatched-imports banner', () => {
     expect(await screen.findByText('1 track needs a match')).toBeInTheDocument();
   });
 
+  it('says how many strong matches the background found', async () => {
+    server.use(
+      ...baseHandlers(),
+      http.get('/api/library/unmatched-summary', () =>
+        HttpResponse.json({ success: true, count: 12, artist_id: 7, ready: 9 }),
+      ),
+    );
+    renderLibrary();
+    expect(await screen.findByText('12 tracks need a match')).toBeInTheDocument();
+    expect(
+      screen.getByText('9 have a strong match ready, found by listening to the audio.'),
+    ).toBeInTheDocument();
+  });
+
+  it('the review reads what the background matcher found, and shows its progress', async () => {
+    const base = {
+      album_id: 6,
+      artist_id: 42,
+      format: 'FLAC',
+      bitrate: 900,
+      duration: 180,
+      guess: { title: 'x', track_number: null, album: null, artist: null, query: 'x', copy: false },
+      duplicate_of: null,
+      filing: null,
+      folder: '/m',
+    };
+    const found = {
+      status: 'matched',
+      method: 'fingerprint',
+      heard: { title: 'Tongue', artist: 'MØ', score: 0.97 },
+      already_have: null,
+      message: '',
+      candidates: [
+        {
+          source: 'deezer',
+          track_id: 'dz-1',
+          track_title: 'Tongue',
+          artist_name: 'MØ',
+          album_name: 'No Mythologies to Follow',
+          album_type: 'album',
+          year: 2014,
+          total_tracks: 12,
+          image_url: '',
+          isrc: null,
+          confidence: 0.94,
+          reasons: ['Fingerprint 97%'],
+        },
+      ],
+    };
+    let identifyCalls = 0;
+    server.use(
+      ...baseHandlers(),
+      http.get('/api/library/unmatched-summary', () =>
+        HttpResponse.json({ success: true, count: 2, artist_id: 42 }),
+      ),
+      http.get('/api/library/v2/unmatched', () =>
+        HttpResponse.json({
+          success: true,
+          matcher: { running: true, done: 1, total: 2 },
+          tracks: [
+            {
+              ...base,
+              track_id: 1,
+              file_id: 11,
+              file_path: '/m/a.flac',
+              file_name: 'a.flac',
+              title: 'a',
+              identified: found,
+            },
+            {
+              ...base,
+              track_id: 2,
+              file_id: 12,
+              file_path: '/m/b.flac',
+              file_name: 'b.flac',
+              title: 'b',
+              identified: null,
+            },
+          ],
+        }),
+      ),
+      http.post('/api/library/v2/unmatched/:id/identify', () => {
+        identifyCalls += 1;
+        return HttpResponse.json({ success: false, error: 'no' }, { status: 500 });
+      }),
+    );
+    renderLibrary();
+    (await screen.findByRole('button', { name: 'Review' }, { timeout: 5000 })).click();
+    expect(
+      await screen.findByText('No Mythologies to Follow · MØ · Album · 2014'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Matching in the background · 1 of\s*2/)).toBeInTheDocument();
+    // the other file waits for the matcher; the review doesn't fingerprint it too
+    expect(screen.getByText(/Listening to the file/)).toBeInTheDocument();
+    expect(identifyCalls).toBe(0);
+  });
+
+  it('a re-file the import turned down says so, and tries again', async () => {
+    const retried: string[] = [];
+    server.use(
+      ...baseHandlers(),
+      http.get('/api/library/unmatched-summary', () =>
+        HttpResponse.json({ success: true, count: 1, artist_id: 42 }),
+      ),
+      http.get('/api/library/v2/unmatched', () =>
+        HttpResponse.json({
+          success: true,
+          matcher: { running: false, done: 0, total: 0 },
+          tracks: [
+            {
+              track_id: 1,
+              file_id: 11,
+              album_id: 5,
+              artist_id: 42,
+              file_path: '/m/15 - SUZY (1).flac',
+              file_name: '15 - SUZY (1).flac',
+              folder: '/m',
+              format: 'FLAC',
+              bitrate: 900,
+              duration: null,
+              title: 'SUZY (1)',
+              guess: {
+                title: 'SUZY',
+                track_number: 15,
+                album: null,
+                artist: null,
+                query: 'SUZY',
+                copy: true,
+              },
+              duplicate_of: null,
+              identified: null,
+              filing: {
+                album_name: 'DONDA 2',
+                artist_name: 'Kanye West',
+                failed: 'The import couldn’t line it up with that release’s tracklist.',
+                retry_id: 45,
+              },
+            },
+          ],
+        }),
+      ),
+      http.post('/api/auto-import/retry/:id', ({ params }) => {
+        retried.push(String(params.id));
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    renderLibrary();
+    (await screen.findByRole('button', { name: 'Review' }, { timeout: 5000 })).click();
+    expect(await screen.findByText('Couldn’t file it under DONDA 2.')).toBeInTheDocument();
+    screen.getByRole('button', { name: 'Try again' }).click();
+    await waitFor(() => expect(retried).toEqual(['45']));
+  });
+
   it('renders nothing for a clean library', async () => {
     server.use(
       ...baseHandlers(),

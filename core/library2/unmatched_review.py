@@ -61,24 +61,32 @@ def _norm(text: Any) -> str:
     return normalize_key(str(text or "")) or ""
 
 
+# the "Unknown Artist" rows, found first among the artists (a few ms) and
+# walked out from there. left to itself the planner scanned every album in the
+# library looking for them: 2s a request on a 300k-track library.
+UNKNOWN_ARTISTS_CTE = (
+    "WITH unknown AS MATERIALIZED (SELECT id FROM lib2_artists "
+    "WHERE LOWER(TRIM(name)) = 'unknown artist')")
+
+
 def _unmatched_rows(conn, file_id: Optional[int] = None) -> List[Any]:
     one = "AND f.id = ?" if file_id is not None else ""
     return conn.execute(
         f"""
+        {UNKNOWN_ARTISTS_CTE}
         SELECT t.id AS track_id, t.title, t.track_number, t.duration,
-               al.id AS album_id, ar.id AS artist_id,
-               f.id AS file_id, f.path, f.format, f.bitrate
-          FROM lib2_artists ar
-          JOIN lib2_albums al ON al.primary_artist_id = ar.id
+               al.id AS album_id, u.id AS artist_id,
+               f.id AS file_id, f.path, f.format, f.bitrate, f.size, f.content_hash
+          FROM unknown u
+          CROSS JOIN lib2_albums al ON al.primary_artist_id = u.id
           JOIN lib2_tracks t ON t.album_id = al.id
           JOIN lib2_track_files f ON f.track_id = t.id
-         WHERE LOWER(TRIM(ar.name)) = ?
-           AND f.path IS NOT NULL AND TRIM(f.path) <> ''
+         WHERE f.path IS NOT NULL AND TRIM(f.path) <> ''
            AND COALESCE(f.file_state, 'active') = 'active'
            {one}
          ORDER BY f.path
         """,
-        (_UNKNOWN,) if file_id is None else (_UNKNOWN, int(file_id)),
+        () if file_id is None else (int(file_id),),
     ).fetchall()
 
 
@@ -89,13 +97,35 @@ def _filing(conn, track_ids: List[int]) -> Dict[int, Dict[str, str]]:
     marks = ",".join("?" for _ in track_ids)
     try:
         rows = conn.execute(
-            f"SELECT replace_track_id, album_name, artist_name FROM rematch_hints "
+            f"SELECT replace_track_id, album_name, artist_name, staged_path FROM rematch_hints "
             f"WHERE status = 'pending' AND replace_track_id IN ({marks})",
             [int(t) for t in track_ids],
         ).fetchall()
     except Exception:  # noqa: BLE001 - no hints table, nothing waiting
         return {}
-    return {int(r[0]): {"album_name": r[1] or "", "artist_name": r[2] or ""} for r in rows}
+    out = {}
+    for r in rows:
+        out[int(r[0])] = {"album_name": r[1] or "", "artist_name": r[2] or "",
+                          **_import_outcome(conn, r[3])}
+    return out
+
+
+def _import_outcome(conn, staged_path: Any) -> Dict[str, Any]:
+    """whether the import pass turned the staged copy down: "filing" must not
+    be what the review says about a file that's stuck in the import inbox"""
+    try:
+        row = conn.execute(
+            "SELECT id, status, error_message FROM auto_import_history "
+            "WHERE folder_path = ? ORDER BY id DESC LIMIT 1", (str(staged_path or ""),)
+        ).fetchone()
+    except Exception:  # noqa: BLE001 - no history table: nothing known yet
+        row = None
+    if row is None or row[1] not in ("failed", "needs_identification", "partial", "rejected"):
+        return {"failed": None, "retry_id": None}
+    reason = str(row[2] or "")
+    if "tracklist" in reason.lower():
+        reason = "The import couldn’t line it up with that release’s tracklist."
+    return {"failed": reason or "The import couldn’t file it.", "retry_id": int(row[0])}
 
 
 def _folder_neighbours(conn, folder: str) -> List[Dict[str, Any]]:
@@ -161,8 +191,11 @@ def list_unmatched(conn) -> List[Dict[str, Any]]:
     neighbours_by_folder: Dict[str, List[Dict[str, Any]]] = {}
     out = [_entry(conn, row, neighbours_by_folder) for row in _unmatched_rows(conn)]
     filing = _filing(conn, [e["track_id"] for e in out])
+    from .unmatched_identify import stored_results
+    identified = stored_results(conn, out)
     for entry in out:
         entry["filing"] = filing.get(int(entry["track_id"]))
+        entry["identified"] = identified.get(int(entry["file_id"]))
     return out
 
 
@@ -208,4 +241,8 @@ def _entry(conn, row, neighbours_by_folder: Dict[str, List[Dict[str, Any]]]) -> 
             "copy": parsed["copy"],
         },
         "duplicate_of": duplicate,
+        # what a stored identification is good for: the same file, unchanged
+        # (built as strong_matches_ready builds it in sql)
+        "file_key": "|".join("" if v is None else str(v)
+                             for v in (path, row["size"], row["content_hash"])),
     }

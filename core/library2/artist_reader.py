@@ -93,6 +93,13 @@ def forget_upgradable_counts() -> None:
     _upgrade_cache.clear()
 
 
+def refresh_upgradable_counts() -> None:
+    """Recheck every cached count in the background now, not on the next
+    click (core/library2/library_watch calls it once new files settle)."""
+    for key in list(_upgrade_cache):
+        _refresh_in_background(key, key[1])
+
+
 def _upgrade_key(conn, owner: str) -> Tuple[str, str]:
     return (str(conn.execute("PRAGMA database_list").fetchone()[2]), owner)
 
