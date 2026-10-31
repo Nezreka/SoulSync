@@ -111,10 +111,11 @@ def test_list_artists_stats(imported_conn):
     assert drake["total_size_bytes"] == 10000
 
 
-def test_list_artists_skips_a_guest_on_someone_elses_missing_track(imported_conn):
-    # Akon credited on a monitored Michael Jackson album he has no file of:
-    # nothing of his is here and nothing of his is monitored, so he is not in
-    # the library. A guest on a file that is here (Wizkid) still is.
+def test_list_artists_takes_a_guest_on_a_wanted_track_but_not_on_an_unwanted_one(imported_conn):
+    # Akon featured on a monitored Michael Jackson album: a featured artist is
+    # in the library, file or not. A guest on a track nobody wants, with no
+    # file here, is only a catalogue row: opened from a search, it is read
+    # from the provider instead of having its discography written in.
     hotline = imported_conn.execute(
         "SELECT id FROM lib2_tracks WHERE title='Hotline Bling'").fetchone()[0]
     guest = imported_conn.execute(
@@ -122,18 +123,18 @@ def test_list_artists_skips_a_guest_on_someone_elses_missing_track(imported_conn
     imported_conn.execute(
         "INSERT INTO lib2_track_artists(track_id, artist_id, role, position)"
         " VALUES(?, ?, 'featured', 1)", (hotline, guest))
+
+    def listed():
+        return {a["name"] for a in Q.list_artists(imported_conn)[0]}
+
+    assert "Rihanna" not in listed()
+    assert Q.get_artist(imported_conn, guest)["in_library"] is False
+
     imported_conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (hotline,))
     imported_conn.execute("DELETE FROM lib2_wanted_tracks WHERE track_id=?", (hotline,))
 
-    names = {a["name"] for a in Q.list_artists(imported_conn)[0]}
-
-    assert "Rihanna" not in names
-    assert {"Drake", "Wizkid"} <= names
-    # the artist page asks the same question: one outside the library is read
-    # from the provider instead of having its discography written in
-    assert Q.get_artist(imported_conn, guest)["in_library"] is False
-    drake = imported_conn.execute("SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()[0]
-    assert Q.get_artist(imported_conn, drake)["in_library"] is True
+    assert {"Drake", "Wizkid", "Rihanna"} <= listed()
+    assert Q.get_artist(imported_conn, guest)["in_library"] is True
 
 
 def test_queries_project_media_server_recognition_badges(imported_conn):

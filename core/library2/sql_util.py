@@ -249,7 +249,7 @@ def entity_visible(conn: Any, entity_type: str, entity_id: int, *, scope=_AMBIEN
 
 
 def library_artist_sql(alias: str) -> str:
-    """Library membership: live files (any credit) or monitoring intent on the own releases.
+    """Library membership: live files or monitoring intent, across alias groups and credits.
 
     The wanted arms are correlated EXISTS, asked only of an artist the owned
     and monitored arms didn't already admit. They used to be one IN list of
@@ -267,10 +267,10 @@ def library_artist_ids_sql() -> str:
     library_artist_sql's IN list, for a caller that evaluates it once and
     reads the result twice (the artist list's count and its page).
 
-    Intent counts on the artist's own releases only. A credit on someone
-    else's monitored release (Akon on a Michael Jackson album, Diana Ross on
-    his Love Songs) is not this artist in the library until its file is here,
-    which the owned arm already covers for every credit."""
+    A credit counts like the album artist: Akon featured on a monitored
+    Michael Jackson album is in the library before the file is. A row with
+    none of it (a guest on a track nobody wants, a looked-up discography) is
+    only a catalogue row."""
     return (f"SELECT COALESCE(va.canonical_artist_id,va.id) FROM lib2_artists va "
             f"WHERE {_member_row_sql('va')}")
 
@@ -292,6 +292,8 @@ def _member_row_sql(alias: str) -> str:
     return (f"({owned_sql('artist', alias)} OR {monitored_sql('artist', alias)}=1 "
             f"OR EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t ON t.album_id=al.id "
             f"{wanted_join} WHERE al.primary_artist_id={alias}.id AND {wanted}) "
+            f"OR EXISTS (SELECT 1 FROM lib2_track_artists ta JOIN lib2_tracks t ON t.id=ta.track_id "
+            f"{wanted_join} WHERE ta.artist_id={alias}.id AND {wanted}) "
             f"OR EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_monitor_rules r ON r.entity_type='album' "
             f"AND r.entity_id=al.id AND r.profile_id={intent} AND r.monitored=1 "
             f"WHERE al.primary_artist_id={alias}.id))")
