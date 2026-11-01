@@ -1089,8 +1089,13 @@ def _fresh_fold_index():
     fold_index.clear()
     # a test writes then reads straight away; ask the table every time
     saved, fold_index.CHECK_SECONDS = fold_index.CHECK_SECONDS, 0.0
+    # enrichment progress is a shared snapshot in production; exact here
+    from core.library2 import worker_queue
+    saved_ttl, worker_queue.PROGRESS_SNAPSHOT_TTL = worker_queue.PROGRESS_SNAPSHOT_TTL, 0.0
+    worker_queue._reset_progress_snapshots()
     yield
     fold_index.CHECK_SECONDS = saved
+    worker_queue.PROGRESS_SNAPSHOT_TTL = saved_ttl
 
 
 @pytest.fixture(autouse=True, scope='session')

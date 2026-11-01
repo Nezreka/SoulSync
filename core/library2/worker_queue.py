@@ -16,6 +16,7 @@ workers' own backoff, so they cannot turn into a tight catalogue-wide retry loop
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Dict, Mapping, Optional
 
@@ -307,6 +308,91 @@ def status_counts(conn, service: str, entity_type: str, *,
             for key in ("matched", "not_found", "error", "pending", "total")}
 
 
+# every service's progress, computed together and kept: per service the two
+# counts below cost ~14s on a 311k-track library (the owned check per row), and
+# the status page asks for all 15 services at once while the status loop asks
+# again every few seconds. one pass for all services is ~30s, so it runs in the
+# background and readers get the last snapshot (Oct 31 2026)
+PROGRESS_SNAPSHOT_TTL = 120.0
+_progress_lock = threading.Lock()
+_progress_snapshots: Dict[str, Dict[str, Any]] = {}  # db file -> {"at", "data", "refreshing"}
+
+
+def _db_file(conn) -> str:
+    try:
+        for row in conn.execute("PRAGMA database_list"):
+            if row[1] == "main":
+                return str(row[2] or "")
+    except Exception:  # noqa: BLE001, S110 - an unknown file just isn't shared
+        pass
+    return f"conn:{id(conn)}"
+
+
+def _compute_progress(conn) -> Dict[str, Dict[str, Any]]:
+    """{entity_type: {"total": n, "processed": {service: n}}} for every service.
+
+    Both halves are scoped to the OWNED library, matching the universe the
+    queue actually works on (`_pending_sql`). Counting every row in the table
+    meant a library with any discography or wishlist rows had a denominator
+    the worker would never reach, so the bar could not hit 100% however long
+    it ran. The owned set is built once per entity type (the IN subquery) and
+    the attempts are counted against it for all services at once."""
+    out: Dict[str, Dict[str, Any]] = {}
+    for entity_type in ENTITY_ORDER:
+        table = _TABLES[entity_type]
+        owned = (f"{owned_sql(entity_type, 'e', scope=ANY_OWNER)} "
+                 f"AND {worker_credit_ready_sql(entity_type)}")
+        total = conn.execute(f"SELECT COUNT(*) FROM {table} e WHERE {owned}").fetchone()[0]
+        processed = {
+            str(row[0]).strip().lower(): int(row[1] or 0)
+            for row in conn.execute(
+                f"SELECT a.service, COUNT(*) FROM lib2_provider_attempts a "
+                f"WHERE a.entity_type=? AND a.entity_id IN "
+                f"(SELECT e.id FROM {table} e WHERE {owned}) GROUP BY a.service",
+                (entity_type,))
+        }
+        out[entity_type] = {"total": int(total or 0), "processed": processed}
+    return out
+
+
+def _refresh_progress(key: str) -> None:
+    try:
+        from database.music_database import get_database
+        conn = get_database()._get_connection()
+        try:
+            data = _compute_progress(conn)
+        finally:
+            conn.close()
+        with _progress_lock:
+            _progress_snapshots[key] = {"at": time.monotonic(), "data": data, "refreshing": False}
+    except Exception:  # noqa: BLE001 - keep the last snapshot, try again later
+        with _progress_lock:
+            snap = _progress_snapshots.get(key)
+            if snap:
+                snap["refreshing"] = False
+
+
+def _progress_snapshot(conn) -> Dict[str, Dict[str, Any]]:
+    if PROGRESS_SNAPSHOT_TTL <= 0:  # no sharing (the test suite): always exact
+        return _compute_progress(conn)
+    key = _db_file(conn)
+    with _progress_lock:
+        snap = _progress_snapshots.get(key)
+        if snap and snap.get("data") is not None:
+            stale = time.monotonic() - snap["at"] >= PROGRESS_SNAPSHOT_TTL
+            if stale and not snap["refreshing"] and not key.startswith("conn:"):
+                snap["refreshing"] = True
+                threading.Thread(target=_refresh_progress, args=(key,), daemon=True,
+                                 name="lib2-progress-refresh").start()
+            if not stale or not key.startswith("conn:"):
+                return snap["data"]
+    # first read for this library: compute it here, on the caller's connection
+    data = _compute_progress(conn)
+    with _progress_lock:
+        _progress_snapshots[key] = {"at": time.monotonic(), "data": data, "refreshing": False}
+    return data
+
+
 def progress_breakdown(conn, service: str, *,
                        entity_types: tuple = ENTITY_ORDER) -> Dict[str, Dict[str, int]]:
     """Per-entity-type progress, keyed the way the UI already expects.
@@ -314,36 +400,26 @@ def progress_breakdown(conn, service: str, *,
     Any recorded attempt counts as progress, including ``not_found``: legacy
     counted every non-NULL ``match_status`` the same way, and a bar that only
     counted successes would never reach 100% on a library with obscure releases.
+    Read from the shared snapshot above, up to PROGRESS_SNAPSHOT_TTL old.
     """
+    snapshot = _progress_snapshot(conn)
     out: Dict[str, Dict[str, int]] = {}
     key = str(service).strip().lower()
     for entity_type in entity_types:
-        # Both halves are scoped to the OWNED library, matching the universe
-        # the queue actually works on (`_pending_sql`). Counting every row in
-        # the table meant a library with any discography or wishlist rows had a
-        # denominator the worker would never reach, so the bar could not hit
-        # 100% however long it ran.
-        row = conn.execute(
-            f"""
-            SELECT (SELECT COUNT(*) FROM {_TABLES[entity_type]} e
-                     WHERE {owned_sql(entity_type, "e", scope=ANY_OWNER)}
-                       AND {worker_credit_ready_sql(entity_type)}) AS total,
-                   (SELECT COUNT(*) FROM lib2_provider_attempts a
-                     JOIN {_TABLES[entity_type]} e ON e.id = a.entity_id
-                    WHERE a.entity_type=:entity AND a.service=:service
-                      AND {owned_sql(entity_type, "e", scope=ANY_OWNER)}
-                      AND {worker_credit_ready_sql(entity_type)}) AS processed
-            """,
-            {"entity": entity_type, "service": key},
-        ).fetchone()
-        total = int(row["total"] or 0)
-        processed = min(int(row["processed"] or 0), total)
+        entry = snapshot.get(entity_type) or {"total": 0, "processed": {}}
+        total = int(entry["total"])
+        processed = min(int(entry["processed"].get(key, 0)), total)
         out[f"{entity_type}s"] = {
             "matched": processed,
             "total": total,
             "percent": int((processed / total * 100) if total else 0),
         }
     return out
+
+
+def _reset_progress_snapshots() -> None:
+    with _progress_lock:
+        _progress_snapshots.clear()
 
 
 # --- Batch-first selection -------------------------------------------------
