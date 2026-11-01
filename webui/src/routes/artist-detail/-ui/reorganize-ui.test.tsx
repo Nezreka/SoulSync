@@ -190,7 +190,6 @@ describe('ReorganizeStatusPanel', () => {
                 queue_id: 'q2',
                 artist_id: 42,
                 album_title: 'Druqks',
-                source: 'spotify',
               },
             ],
             recent: [],
@@ -206,7 +205,7 @@ describe('ReorganizeStatusPanel', () => {
 
     fireEvent.click(document.querySelector('.reorg-panel-compact') as HTMLElement);
     expect(screen.getByText('Queued (1)')).toBeTruthy();
-    expect(screen.getByText('via spotify')).toBeTruthy();
+    expect(screen.getByText('Druqks')).toBeTruthy();
 
     fireEvent.click(document.querySelector('.reorg-panel-cancel-btn') as HTMLElement);
     await waitFor(() =>

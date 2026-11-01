@@ -72,7 +72,7 @@ def test_mark_placed_closes_only_that_albums_findings(tmp_path):
     db = _db(tmp_path)
     _finding(db, "lib2:1")
     _finding(db, "lib2:2")
-    assert lr.mark_album_placed(db, 100, "itunes", "it1", "fp1") is True
+    assert lr.mark_album_placed(db, 100, "fp1") is True
     assert _statuses(db) == {"lib2:1": "resolved", "lib2:2": "pending"}
 
 
@@ -148,7 +148,7 @@ def test_scan_stamps_an_album_already_in_place_then_skips_it(tmp_path, monkeypat
 
 def test_scan_rechecks_placed_albums_when_the_naming_changes(tmp_path, monkeypatch):
     db = _db(tmp_path)
-    lr.mark_album_placed(db, "100", "itunes", "it1", "old-fp")
+    lr.mark_album_placed(db, "100", "old-fp")
     calls = []
     _stub_preview(monkeypatch, {"100": _planned("100", False), "200": _planned("200", True)}, calls)
     ctx = _ctx(db)
@@ -159,7 +159,7 @@ def test_scan_rechecks_placed_albums_when_the_naming_changes(tmp_path, monkeypat
 
 def test_scan_recheck_setting_replans_placed_albums(tmp_path, monkeypatch):
     db = _db(tmp_path)
-    lr.mark_album_placed(db, "100", "itunes", "it1", "fp1")
+    lr.mark_album_placed(db, "100", "fp1")
     calls = []
     _stub_preview(monkeypatch, {"100": _planned("100", True), "200": _planned("200", True)}, calls)
     settings = {"repair.jobs.library_reorganize.settings": {"recheck_placed_albums": True}}
@@ -169,8 +169,8 @@ def test_scan_recheck_setting_replans_placed_albums(tmp_path, monkeypatch):
 
 def test_source_outage_does_not_replan_a_settled_album(tmp_path, monkeypatch):
     db = _db(tmp_path)
-    lr.mark_album_placed(db, "100", "itunes", "it1", "fp1")
-    lr.mark_album_placed(db, "200", "itunes", "it2", "fp1")
+    lr.mark_album_placed(db, "100", "fp1")
+    lr.mark_album_placed(db, "200", "fp1")
     calls = []
     _stub_preview(monkeypatch, {}, calls)
     assert LibraryReorganizeJob().scan(_ctx(db)).skipped == 2

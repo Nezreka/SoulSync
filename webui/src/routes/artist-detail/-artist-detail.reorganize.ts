@@ -270,7 +270,6 @@ export interface ReorganizeQueueItem {
   album_title?: string;
   artist_id?: unknown;
   artist_name?: string;
-  source?: string;
   status?: string;
   result_status?: string;
   moved?: number;

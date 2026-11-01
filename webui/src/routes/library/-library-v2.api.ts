@@ -27,7 +27,6 @@ import type {
   LibraryV2ReorganizePreview,
   LibraryV2ReorganizeQueueItem,
   LibraryV2ReorganizeQueueSnapshot,
-  LibraryV2ReorganizeSource,
   LibraryV2Search,
   LibraryV2Track,
   LibraryV2TrackDownload,
@@ -1653,30 +1652,6 @@ export async function enrichLibraryV2Entity(
   }>(apiClient.post(`library/v2/${entity}/${id}/enrich`, { json: { service } }));
   if (!payload.success) throw new Error(payload.error || payload.message || 'Enrichment failed');
   return { message: payload.message, resynced: payload.resynced };
-}
-
-/** Sources authed/configured on this instance — for the artist-level
- *  "Reorganize All" source picker (docs §50, no per-album ID coverage check). */
-export async function fetchLibraryV2ReorganizeSourcesGlobal(): Promise<
-  LibraryV2ReorganizeSource[]
-> {
-  const payload = await lib2Json<Ok & { sources: LibraryV2ReorganizeSource[] }>(
-    apiClient.get('library/v2/reorganize/sources'),
-    'Failed to load reorganize sources',
-  );
-  return payload.sources;
-}
-
-/** Sources this album has a stored provider ID for AND an authed client —
- *  for the per-album source picker (docs §50). */
-export async function fetchLibraryV2AlbumReorganizeSources(
-  albumId: number,
-): Promise<LibraryV2ReorganizeSource[]> {
-  const payload = await lib2Json<Ok & { sources: LibraryV2ReorganizeSource[] }>(
-    apiClient.get(`library/v2/albums/${albumId}/reorganize/sources`),
-    'Failed to load reorganize sources',
-  );
-  return payload.sources;
 }
 
 /** Preview current-vs-proposed file paths for one lib2 album, without moving

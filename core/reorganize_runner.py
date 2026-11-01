@@ -261,8 +261,7 @@ def build_runner(
         # Re-tagging did not live in there alone: it is a job of its own, with
         # a preview, findings and a rule about hand-set fields. So nothing is
         # left for the staging path to contribute, and every item takes the
-        # mover -- `rename_only` included, which is why the flag is no longer
-        # read.
+        # mover. The staging path and its flag are gone.
         if build_final_path_fn is None:
             return {
                 'status': 'setup_failed', 'source': None,
@@ -280,9 +279,6 @@ def build_runner(
             update_track_path_fn=_update_track_path,
             cleanup_empty_dir_fn=_cleanup_empty,
             on_progress=_on_progress,
-            primary_source=item.source,
-            strict_source=bool(item.source),
-            metadata_source=getattr(item, 'metadata_source', 'api') or 'api',
             stop_check=is_shutting_down_fn,
             # The catalogue is the source for a destination path -- no provider
             # call, no source-id requirement, and the filename matches what the

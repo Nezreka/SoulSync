@@ -214,7 +214,7 @@ def test_runner_progress_callback_forwards_to_queue(monkeypatch, tmp_path):
     q = get_queue()
     q.set_runner(runner)
     enq = q.enqueue(album_id='alb-1', album_title='good kid',
-                    artist_id='ar-1', artist_name='Kendrick Lamar', source=None)
+                    artist_id='ar-1', artist_name='Kendrick Lamar')
 
     # Wait for the worker to finish (fake_reorganize_album is fast).
     deadline_passes = 0

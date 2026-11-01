@@ -111,28 +111,10 @@ def api(tmp_path):
 # -- sources -------------------------------------------------------------
 
 
-def test_global_sources_delegates(monkeypatch, api):
-    client, _db, _ids = api
-    monkeypatch.setattr(
-        "core.library_reorganize.authed_sources",
-        lambda: [{"source": "deezer", "label": "Deezer"}], raising=True,
-    )
-    resp = client.get("/api/library/v2/reorganize/sources")
-    assert resp.status_code == 200
-    assert resp.get_json()["sources"] == [{"source": "deezer", "label": "Deezer"}]
-
-
 def test_album_sources_404_for_missing_album(api):
     client, _db, _ids = api
     resp = client.get("/api/library/v2/albums/999999/reorganize/sources")
     assert resp.status_code == 404
-
-
-def test_album_sources_are_empty_for_discography_only(api):
-    client, _db, ids = api
-    resp = client.get(f"/api/library/v2/albums/{ids['no_legacy_album']}/reorganize/sources")
-    assert resp.status_code == 200
-    assert resp.get_json()["sources"] == []
 
 
 # -- preview ---------------------------------------------------------------

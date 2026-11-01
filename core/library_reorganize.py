@@ -22,11 +22,6 @@ import re
 import shutil
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from core.metadata_service import (
-    get_client_for_source,
-    get_primary_source,
-    get_source_priority,
-)
 from core.source_ids import id_column
 from utils.logging_config import get_logger
 
@@ -111,8 +106,6 @@ def resolve_album_profile_id(db, album_id, tracks=None, resolve_file_path_fn=Non
     return None
 
 
-SUPPORTED_SOURCES = ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase')
-
 # Compatibility aliases projected by :func:`load_album_and_tracks`.
 _ALBUM_ID_COLUMNS = {
     'spotify': 'spotify_album_id',
@@ -123,77 +116,12 @@ _ALBUM_ID_COLUMNS = {
     'musicbrainz': 'musicbrainz_release_id',
 }
 
-# Human-facing label for each source.
-SOURCE_LABELS = {
-    'spotify': 'Spotify',
-    'itunes': 'Apple Music (iTunes)',
-    'deezer': 'Deezer',
-    'discogs': 'Discogs',
-    'hydrabase': 'Hydrabase',
-}
-
-
 def _extract_source_ids(album_data: dict) -> Dict[str, str]:
     """Pull the per-source album-ID strings off an album row."""
     return {
         source: (album_data.get(column) or '')
         for source, column in _ALBUM_ID_COLUMNS.items()
     }
-
-
-def available_sources_for_album(album_data: dict) -> List[dict]:
-    """Return the list of metadata sources the user can pick for this
-    album's reorganize. Every entry has both (a) a stored album ID on
-    the local row AND (b) an authenticated / configured client on this
-    SoulSync instance.
-
-    Returns entries in source-priority order (preferred source first).
-    Each entry is ``{'source': str, 'label': str}``. No API calls —
-    purely local inspection.
-    """
-    source_ids = _extract_source_ids(album_data)
-    try:
-        primary = get_primary_source()
-    except Exception:
-        primary = 'deezer'
-
-    out = []
-    for source in get_source_priority(primary):
-        if source not in SUPPORTED_SOURCES:
-            continue
-        if not source_ids.get(source):
-            continue
-        if get_client_for_source(source) is None:
-            continue
-        out.append({
-            'source': source,
-            'label': SOURCE_LABELS.get(source, source),
-        })
-    return out
-
-
-def authed_sources() -> List[dict]:
-    """Return all metadata sources the user has authed/configured on
-    this SoulSync instance. Doesn't require any album-specific stored
-    ID — used by the bulk "Reorganize All" picker where each album
-    has its own ID coverage and we just want to know which sources
-    are reachable. Returned in priority order."""
-    try:
-        primary = get_primary_source()
-    except Exception:
-        primary = 'deezer'
-
-    out = []
-    for source in get_source_priority(primary):
-        if source not in SUPPORTED_SOURCES:
-            continue
-        if get_client_for_source(source) is None:
-            continue
-        out.append({
-            'source': source,
-            'label': SOURCE_LABELS.get(source, source),
-        })
-    return out
 
 
 _UNKNOWN_ARTIST_NAMES = {'unknown artist', 'unknown', ''}
@@ -414,63 +342,6 @@ def load_album_and_tracks(db, album_id):
                 conn.close()
             except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
                 pass
-
-
-def is_multi_artist_compilation(
-    album_artist: Optional[str],
-    tracks: Optional[List[dict]] = None,
-    api_tracks: Optional[List[dict]] = None,
-    threshold: int = 3,
-) -> bool:
-    """Detect if an album release is a compilation based on artist signals.
-
-    A release is identified as a compilation if:
-    1. The album artist name is explicitly 'Various Artists', 'Various', 'VA', 'V.A.', etc.
-    2. Or there are multiple tracks (>= threshold, default 3) with distinct primary
-       artists, where neither any single track artist nor the album artist accounts
-       for more than 50% of the total tracks.
-    """
-    clean_aa = str(album_artist or '').strip().lower()
-    if clean_aa in ('various artists', 'various', 'va', 'v.a.', 'soundtrack'):
-        return True
-
-    track_artists: List[str] = []
-    if api_tracks:
-        for t in api_tracks:
-            a_list = t.get('artists')
-            if isinstance(a_list, list) and a_list:
-                first = a_list[0]
-                name = first.get('name') if isinstance(first, dict) else str(first)
-                if name and str(name).strip():
-                    track_artists.append(str(name).strip().lower())
-            elif t.get('artist') or t.get('artist_name'):
-                name = t.get('artist') or t.get('artist_name')
-                if name and str(name).strip():
-                    track_artists.append(str(name).strip().lower())
-    elif tracks:
-        for t in tracks:
-            name = t.get('track_artist') or t.get('artist_name') or t.get('artist')
-            if name and str(name).strip():
-                track_artists.append(str(name).strip().lower())
-
-    if len(track_artists) < threshold:
-        return False
-
-    unique_artists = set(track_artists)
-    if len(unique_artists) < threshold:
-        return False
-
-    total = len(track_artists)
-    from collections import Counter
-    counts = Counter(track_artists)
-    max_count = max(counts.values())
-    if (max_count / total) > 0.50:
-        return False
-
-    if clean_aa and (counts.get(clean_aa, 0) / total) > 0.50:
-        return False
-
-    return True
 
 
 def _build_post_process_context(
@@ -899,12 +770,8 @@ def reorganize_album_rename_only(
     update_track_path_fn: Optional[Callable[[object, str], None]] = None,
     cleanup_empty_dir_fn: Optional[Callable[[str], None]] = None,
     on_progress: Optional[Callable[[dict], None]] = None,
-    primary_source: Optional[str] = None,
-    strict_source: bool = False,
-    metadata_source: str = 'api',
     stop_check: Optional[Callable[[], bool]] = None,
     preview_fn: Optional[Callable] = None,
-    profile_id: Optional[int] = None,
 ) -> dict:
     """RENAME-ONLY reorganize (#875): move each track's file to the path the current
     naming scheme dictates, and nothing else — no copy-to-staging, no re-tag, no
@@ -938,9 +805,6 @@ def reorganize_album_rename_only(
         album_id=album_id, db=db, transfer_dir=transfer_dir,
         resolve_file_path_fn=resolve_file_path_fn,
         build_final_path_fn=build_final_path_fn,
-        primary_source=primary_source, strict_source=strict_source,
-        metadata_source=metadata_source,
-        profile_id=profile_id,
     )
     summary['source'] = preview.get('source')
     if not preview.get('success'):
@@ -1078,10 +942,10 @@ def reorganize_album_rename_only(
     if summary.get('moved', 0) > 0 and preview.get('record_type') == 'compilation':
         _persist_compilation_record_type(db, album_id)
 
-    if (metadata_source == 'api' and _run_placed_everything(summary, stop_check)
+    if (_run_placed_everything(summary, stop_check)
             and tracks and all(t.get('matched') and t.get('file_exists')
                                and not t.get('collision') for t in tracks)):
-        mark_album_placed(db, album_id, preview.get('source'), preview.get('source_album_id'))
+        mark_album_placed(db, album_id)
     return summary
 
 
@@ -1125,7 +989,7 @@ def _run_placed_everything(summary: dict, stop_check) -> bool:
         return False
 
 
-def mark_album_placed(db, album_id, source, source_album_id, fingerprint=None) -> bool:
+def mark_album_placed(db, album_id, fingerprint=None) -> bool:
     """Remember native placement and close its completed move findings (#1701)."""
     conn = None
     try:

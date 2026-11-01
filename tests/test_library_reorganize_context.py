@@ -1,6 +1,6 @@
 """Tests for the pieces of `core.library_reorganize` the catalogue planner
 (`core.library2.reorganize_plan`) shares: the post-process context the path
-builder reads, and the source lists the reorganize UI offers.
+builder reads.
 
 The orchestrator these tests used to sit beside (copy to staging, re-run
 post-processing) is gone; reorganize only moves files now.
@@ -92,52 +92,3 @@ def test_reorganize_context_is_a_local_import():
     assert expected_duration_for_check(241000, False) == 241000
 
 
-def test_available_sources_only_lists_authed_sources_with_stored_ids(monkeypatch):
-    """The reorganize modal needs to know which sources the user can
-    actually pick. A source is pickable iff: (a) we have an album ID
-    for that source on the local row, AND (b) the user has the source
-    authed/configured. Empty-ID sources and unauthed sources are
-    omitted."""
-    monkeypatch.setattr(library_reorganize, 'get_primary_source', lambda: 'deezer')
-    monkeypatch.setattr(library_reorganize, 'get_source_priority',
-                        lambda p: [p, 'spotify', 'itunes', 'discogs', 'hydrabase'])
-
-    # Authed: deezer + spotify only.
-    auth = {'deezer': object(), 'spotify': object()}
-    monkeypatch.setattr(library_reorganize, 'get_client_for_source',
-                        lambda src: auth.get(src))
-
-    album = {
-        'spotify_album_id': 'sp-1',
-        'deezer_id': 'dz-1',
-        'itunes_album_id': 'it-1',  # has ID but user not authed
-        'discogs_id': '',           # no ID
-        'soul_id': '',              # no ID
-    }
-
-    sources = library_reorganize.available_sources_for_album(album)
-    names = [s['source'] for s in sources]
-
-    assert names == ['deezer', 'spotify']
-    assert all('label' in s for s in sources)
-
-
-def test_authed_sources_lists_all_authed_regardless_of_album_ids(monkeypatch):
-    """Bulk reorganize uses this — needs the authed sources without
-    requiring per-album ID coverage. Each album in the bulk run will
-    do its own per-album ID check at apply time."""
-    monkeypatch.setattr(library_reorganize, 'get_primary_source', lambda: 'spotify')
-    monkeypatch.setattr(library_reorganize, 'get_source_priority',
-                        lambda p: [p, 'deezer', 'itunes', 'discogs', 'hydrabase'])
-
-    # Authed: spotify + deezer + itunes; discogs + hydrabase NOT authed.
-    auth = {'spotify': object(), 'deezer': object(), 'itunes': object()}
-    monkeypatch.setattr(library_reorganize, 'get_client_for_source',
-                        lambda src: auth.get(src))
-
-    sources = library_reorganize.authed_sources()
-    names = [s['source'] for s in sources]
-
-    # Primary first, then rest of priority chain — only authed ones
-    assert names == ['spotify', 'deezer', 'itunes']
-    assert all('label' in s for s in sources)

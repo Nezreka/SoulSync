@@ -1,10 +1,5 @@
-"""Unit tests for compilation handling in Library Reorganize.
-
-Covers:
-- Manually set album `record_type = 'compilation'` overriding provider's `album` classification.
-- Multi-artist auto-detection for compilations.
-- Template resolution separating $albumartist from $artist on compilations.
-- Persistence of detected compilation type in DB on reorganize / rename-only.
+"""Compilation handling in Library Reorganize: a rename-only run that moves a
+compilation's files records the album's compilation type in the catalogue.
 """
 
 from __future__ import annotations
@@ -13,44 +8,8 @@ import os
 from unittest.mock import MagicMock
 
 from core.library_reorganize import (
-    is_multi_artist_compilation,
     reorganize_album_rename_only,
 )
-
-
-def test_is_multi_artist_compilation_explicit_various_artists():
-    assert is_multi_artist_compilation("Various Artists")
-    assert is_multi_artist_compilation("Various")
-    assert is_multi_artist_compilation("VA")
-    assert is_multi_artist_compilation("V.A.")
-    assert is_multi_artist_compilation("Soundtrack")
-
-
-def test_is_multi_artist_compilation_track_distribution():
-    # 4 distinct artists across 4 tracks -> Compilation
-    api_tracks = [
-        {"artists": [{"name": "Artist A"}], "title": "T1"},
-        {"artists": [{"name": "Artist B"}], "title": "T2"},
-        {"artists": [{"name": "Artist C"}], "title": "T3"},
-        {"artists": [{"name": "Artist D"}], "title": "T4"},
-    ]
-    assert is_multi_artist_compilation("Label Presents", api_tracks=api_tracks)
-
-    # Dominant artist (3 out of 4 tracks by Artist A > 50%) -> NOT a compilation
-    dominant_tracks = [
-        {"artists": [{"name": "Artist A"}], "title": "T1"},
-        {"artists": [{"name": "Artist A"}], "title": "T2"},
-        {"artists": [{"name": "Artist A"}], "title": "T3"},
-        {"artists": [{"name": "Artist B"}], "title": "T4"},
-    ]
-    assert not is_multi_artist_compilation("Artist A", api_tracks=dominant_tracks)
-
-    # Fewer than 3 tracks -> NOT a compilation
-    short_tracks = [
-        {"artists": [{"name": "Artist A"}], "title": "T1"},
-        {"artists": [{"name": "Artist B"}], "title": "T2"},
-    ]
-    assert not is_multi_artist_compilation("Label Presents", api_tracks=short_tracks)
 
 
 def test_reorganize_rename_only_persists_compilation_type(tmp_path):

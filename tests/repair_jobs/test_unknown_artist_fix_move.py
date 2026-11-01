@@ -27,7 +27,7 @@ def setup(tmp_path, monkeypatch):
         get=lambda key, default=None: settings if key.endswith("unknown_artist_fixer.settings") else default)
     queued = []
     monkeypatch.setattr("core.library2.reorganize_bridge.enqueue_album_reorganize",
-                        lambda db_, album_id, **kw: queued.append((album_id, kw)))
+                        lambda db_, album_id: queued.append(album_id))
     return SimpleNamespace(db=db, worker=worker, transfer=transfer, settings=settings,
                            queued=queued, tmp=tmp_path)
 
@@ -54,7 +54,7 @@ def test_a_file_in_the_transfer_folder_is_refiled_and_moved(setup):
     result = setup.worker._fix_unknown_artist("track", f"lib2:{track}", None, DETAILS)
 
     assert result["success"] is True and result["reorganize"] == "queued"
-    assert setup.queued == [(_album_of(setup, "Album"), {"mode": "api"})]
+    assert setup.queued == [_album_of(setup, "Album")]
 
 
 def test_a_media_server_file_is_refiled_but_stays_put(setup):

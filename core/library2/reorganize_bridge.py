@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import closing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from utils.logging_config import get_logger
 
@@ -63,36 +63,15 @@ def _resolve_file_path_fn(config_manager: Any):
     return _resolve
 
 
-def album_reorganize_sources(db: Any, lib2_album_id: int) -> List[Dict[str, str]]:
-    """Sources this album's stored provider IDs support, for the per-album
-    source picker."""
-    from core.library_reorganize import available_sources_for_album, load_album_and_tracks
-
-    album_data, _tracks = load_album_and_tracks(db, lib2_album_id)
-    if album_data is None:
-        raise ReorganizeBridgeError("Album not found", status=404)
-    return available_sources_for_album(album_data)
-
-
-def global_reorganize_sources() -> List[Dict[str, str]]:
-    """Sources authed/configured on this instance, for the artist-level
-    "Reorganize All" picker (no per-album ID coverage check)."""
-    from core.library_reorganize import authed_sources
-    return authed_sources()
-
-
 def catalogue_preview_fn(
     *, album_id: Any, db: Any, transfer_dir: str,
     resolve_file_path_fn: Any, build_final_path_fn: Any,
-    primary_source: Any = None, strict_source: bool = False,
-    metadata_source: str = "api", profile_id: Any = None,
 ) -> Dict[str, Any]:
     """``preview_fn`` adapter over the catalogue planner.
 
-    Carries the signature the rename executor calls with, and accepts the
-    provider arguments only to ignore them: reorganize computes a PATH, and a
-    path needs no metadata source. ``profile_id`` (#1504) is ignored too: the
-    runner already plans per library root, with ``transfer_dir`` being it. Keeping the shape means the executor keeps
+    Carries the signature the rename executor calls with. A path needs no
+    metadata source, and the runner already plans per library root, with
+    ``transfer_dir`` being it. Keeping the shape means the executor keeps
     acting on exactly what the preview showed, which is the property that made
     the preview trustworthy in the first place (#875).
     """
@@ -107,16 +86,8 @@ def catalogue_preview_fn(
         )
 
 
-def preview_album_reorganize(
-    db: Any, config_manager: Any, lib2_album_id: int,
-    *, source: Optional[str] = None, mode: str = "api",
-) -> Dict[str, Any]:
-    """Preview the reorganize plan for one lib2 album (docs §50).
-
-    ``source``/``mode`` are inert since reorganize stopped consulting a
-    provider; they stay in the signature so an older client's request body is
-    accepted rather than rejected.
-    """
+def preview_album_reorganize(db: Any, config_manager: Any, lib2_album_id: int) -> Dict[str, Any]:
+    """Preview the reorganize plan for one lib2 album (docs §50)."""
     from core.imports.paths import build_final_path_for_track
 
     result = catalogue_preview_fn(
@@ -133,14 +104,10 @@ def preview_album_reorganize(
     return result
 
 
-def enqueue_album_reorganize(
-    db: Any, lib2_album_id: int,
-    *, source: Optional[str] = None, mode: str = "api", rename_only: bool = False,
-) -> Dict[str, Any]:
+def enqueue_album_reorganize(db: Any, lib2_album_id: int) -> Dict[str, Any]:
     """Enqueue one lib2 album for reorganize (docs §50)."""
     from core.reorganize_queue import get_queue
 
-    metadata_source = mode if mode in ("api", "tags") else "api"
     meta = db.get_album_display_meta(lib2_album_id)
     if meta is None:
         raise ReorganizeBridgeError("Album not found", status=404)
@@ -150,20 +117,13 @@ def enqueue_album_reorganize(
         album_title=meta["album_title"],
         artist_id=meta["artist_id"],
         artist_name=meta["artist_name"],
-        source=source or None,
-        metadata_source=metadata_source,
-        rename_only=bool(rename_only),
     )
 
 
-def enqueue_artist_reorganize_all(
-    db: Any, lib2_artist_id: int,
-    *, source: Optional[str] = None, mode: str = "api",
-) -> Dict[str, Any]:
+def enqueue_artist_reorganize_all(db: Any, lib2_artist_id: int) -> Dict[str, Any]:
     """Enqueue every album of one lib2 artist for reorganize (docs §50)."""
     from core.reorganize_queue import get_queue
 
-    metadata_source = mode if mode in ("api", "tags") else "api"
     with closing(db._get_connection()) as conn:
         artist = conn.execute("SELECT id FROM lib2_artists WHERE id=?", (int(lib2_artist_id),)).fetchone()
         if artist is None:
@@ -180,9 +140,6 @@ def enqueue_artist_reorganize_all(
     if not albums:
         raise ReorganizeBridgeError("No albums found for this artist", status=404)
 
-    for album in albums:
-        album["source"] = source or None
-        album["metadata_source"] = metadata_source
     result = get_queue().enqueue_many(albums)
     return {
         "enqueued": result["enqueued"],
@@ -195,8 +152,6 @@ __all__ = [
     "ReorganizeBridgeError",
     "resolve_legacy_album_id",
     "resolve_legacy_artist_id",
-    "album_reorganize_sources",
-    "global_reorganize_sources",
     "catalogue_preview_fn",
     "preview_album_reorganize",
     "enqueue_album_reorganize",
