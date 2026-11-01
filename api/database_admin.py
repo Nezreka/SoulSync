@@ -259,6 +259,13 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
         summary += f" | {removed_artists} artists, {removed_albums} albums removed"
     add_activity_item("", "Database Update Complete", summary, "Now")
 
+    # the dashboard's library counts are cached; a scan just changed them
+    try:
+        from database.music_database import MusicDatabase
+        MusicDatabase.invalidate_database_info()
+    except Exception as e:
+        logger.debug("db info cache invalidation failed: %s", e)
+
     # the sync match cache is kept. every read re-checks its row (the track
     # still on the server, still the same song, not unmatched), so a scan
     # leaves nothing to clear. wiping it here made the auto-sync this update

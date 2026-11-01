@@ -20100,7 +20100,12 @@ class MusicDatabase:
     # the dashboard's library card: counts that walk every track, for numbers
     # that move only when a scan runs. kept a minute per server and library
     # scope; scans read get_statistics_for_server directly, never this.
-    _DB_INFO_TTL = 60.0
+    # the dashboard's library counts and "last updated" are 6.4s of queries on
+    # a 311k-track library, and the stats loop asked every 60s while a page
+    # was open. a stale answer is served at once and refreshed in the
+    # background; a finished library scan clears it (Oct 31 2026)
+    _DB_INFO_TTL = 300.0
+    _db_info_refreshing: set = set()
     _db_info_cache: Dict[Any, Any] = {}
 
     def get_database_info_for_server(self, server_source: str = None) -> Dict[str, Any]:
@@ -20119,12 +20124,28 @@ class MusicDatabase:
             scope_key = None
         key = (str(self.database_path), server_source, scope_key)
         hit = MusicDatabase._db_info_cache.get(key) if scope_key else None
-        if hit and time.monotonic() - hit[0] < self._DB_INFO_TTL:
+        if hit:
+            if time.monotonic() - hit[0] >= self._DB_INFO_TTL \
+                    and key not in MusicDatabase._db_info_refreshing:
+                MusicDatabase._db_info_refreshing.add(key)
+
+                def _refresh():
+                    try:
+                        fresh = self._database_info_for_server(server_source)
+                        MusicDatabase._db_info_cache[key] = (time.monotonic(), dict(fresh))
+                    finally:
+                        MusicDatabase._db_info_refreshing.discard(key)
+                threading.Thread(target=_refresh, daemon=True, name="db-info-refresh").start()
             return dict(hit[1])
         info = self._database_info_for_server(server_source)
         if scope_key:
             MusicDatabase._db_info_cache[key] = (time.monotonic(), dict(info))
         return info
+
+    @classmethod
+    def invalidate_database_info(cls) -> None:
+        """Drop the cached dashboard counts: a scan just changed them."""
+        cls._db_info_cache.clear()
 
     def _database_info_for_server(self, server_source: str = None) -> Dict[str, Any]:
         try:
