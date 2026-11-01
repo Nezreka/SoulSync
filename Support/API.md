@@ -1675,6 +1675,9 @@ Delete a profile and all its per-profile data (watchlist, wishlist, discovery po
 ### Retag Queue
 
 Browse and manage the retag queue — albums/tracks pending metadata corrections.
+The queue is the Library Re-tag job's pending findings: a group is an album with
+pending findings (`id` = the album's id), a track is one finding (`id` = the
+finding's id), and deleting a group dismisses its findings.
 
 #### `GET /api/v1/retag/groups`
 
@@ -1719,7 +1722,7 @@ List all retag groups with track counts. Groups are ordered by artist name (asce
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | int | Group ID (auto-increment) |
+| `id` | int | Group ID (the album's id) |
 | `group_type` | string | Type of retag group (currently always `album`) |
 | `artist_name` | string | Artist name for this retag group |
 | `album_name` | string | Album name for this retag group |
@@ -1797,7 +1800,7 @@ Get a retag group with its full track list. Tracks are ordered by disc number th
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | int | Track ID (auto-increment) |
+| `id` | int | Track ID (the Re-tag finding's id) |
 | `group_id` | int | Parent retag group ID (foreign key) |
 | `track_number` | int? | Track number on disc |
 | `disc_number` | int | Disc number (default 1) |
@@ -1806,11 +1809,11 @@ Get a retag group with its full track list. Tracks are ordered by disc number th
 | `file_format` | string? | Audio format (`flac`, `mp3`, `opus`, etc.) |
 | `spotify_track_id` | string? | Spotify track ID for metadata lookup |
 | `itunes_track_id` | string? | iTunes/Apple Music track ID for metadata lookup |
-| `created_at` | string | ISO 8601 timestamp when track was added to queue |
+| `created_at` | string | When the Re-tag finding was raised |
 
 #### `DELETE /api/v1/retag/groups/<group_id>`
 
-Delete a specific retag group and all its tracks (cascade delete).
+Dismiss a retag group: every pending Re-tag finding of that album.
 
 ```json
 {
@@ -1822,7 +1825,7 @@ Delete a specific retag group and all its tracks (cascade delete).
 
 #### `DELETE /api/v1/retag/groups`
 
-Clear all retag groups and tracks from the queue.
+Dismiss every pending Re-tag finding; the message counts the groups (albums) cleared.
 
 ```json
 {
