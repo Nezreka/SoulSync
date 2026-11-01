@@ -830,9 +830,11 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
     batch['phase'] = 'complete'
     batch['completion_time'] = time.time()  # Track when batch completed
 
-    # Record sync history completion (reads download_tasks, so under the lock)
-    from database.music_database import MusicDatabase
-    record_sync_history_completion(MusicDatabase(), batch_id, batch)
+    # Sync history: read download_tasks here, under the lock; the write is the
+    # first thing the out-of-lock half does. writing here held tasks_lock (and
+    # every downloads page) for as long as the db write lock was busy
+    from core.downloads.history import build_sync_history_completion
+    history_payload = build_sync_history_completion(batch_id, batch)
 
     # Add activity for batch completion
     playlist_name = batch.get('playlist_name', 'Unknown Playlist')
@@ -909,7 +911,8 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
         batch['wishlist_processing_complete'] = True
 
     return {'m3u_tracks': m3u_tracks, 'tasks_snapshot': tasks_snapshot,
-            'successful_downloads': successful_downloads}
+            'successful_downloads': successful_downloads,
+            'history_payload': history_payload}
 
 
 def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: LifecycleDeps,
@@ -923,6 +926,14 @@ def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: Lifecyc
     the lock: the batch is already 'complete' and the tasks it reads are a
     snapshot taken under it."""
     tasks_snapshot = outcome.get('tasks_snapshot') or {}
+
+    # sync history, built under the lock in _mark_batch_complete
+    try:
+        from core.downloads.history import write_sync_history_completion
+        from database.music_database import MusicDatabase
+        write_sync_history_completion(MusicDatabase(), batch_id, outcome.get('history_payload'))
+    except Exception as _hist_err:  # noqa: BLE001 — the batch is already complete
+        logger.warning(f"{tag} Could not write sync history: {_hist_err}")
 
     # ALBUM-BUNDLE STAGING CLEANUP: the synchronous shutil.rmtree of the
     # private staging tree. Runs here — outside the global lock — instead of
