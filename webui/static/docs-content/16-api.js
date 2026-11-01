@@ -3322,9 +3322,9 @@ key):
 
 | Field | Type | Description |
 |-------|------|-------------|
-| \`groups\` | int | Total retag groups (\`COUNT(*)\` on \`retag_groups\`) |
-| \`tracks\` | int | Total retag tracks (\`COUNT(*)\` on \`retag_tracks\`) |
-| \`artists\` | int | Distinct artists (\`COUNT(DISTINCT artist_name)\` on \`retag_groups\`) |
+| \`groups\` | int | Albums with a pending Re-tag finding |
+| \`tracks\` | int | Pending Re-tag findings (one per track) |
+| \`artists\` | int | Distinct artists across those albums |
 
 **Errors**
 
