@@ -217,6 +217,24 @@ def test_sab_parse_queue_slot_marks_jobs_waiting_their_turn(sab_status, waiting)
     assert status.waiting_in_queue is waiting
 
 
+@pytest.mark.parametrize('sab_status, fetching', [
+    ('Grabbing', True),
+    ('grabbing', True),
+    ('Queued', False),
+    ('Propagating', False),
+    ('Downloading', False),
+])
+def test_sab_parse_queue_slot_flags_the_nzb_fetch_placeholder(sab_status, fetching) -> None:
+    """SAB answers addurl with an nzo_id and parks the job as a 'Grabbing'
+    placeholder until the NZB is fetched; its files are not in yet."""
+    adapter = _sab_with_config()
+    status = adapter._parse_queue_slot({
+        'nzo_id': 'SABnzbd_nzo_3', 'filename': 'Trying to fetch NZB from x',
+        'status': sab_status, 'percentage': '0', 'mb': '0', 'mbleft': '0',
+    })
+    assert status.fetching_nzb is fetching
+
+
 # -- waiting its turn, read from the queue ORDER (live SAB, 31 Oct 2026) --
 # A live SAB 4.x reported every slot as 'Downloading', the ones waiting behind
 # the active job at 0% included, and a lookup by nzo_ids renumbers the one slot

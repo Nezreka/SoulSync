@@ -58,6 +58,12 @@ class UsenetStatus:
     # with grabbing/propagating, which can hang and must stay stall-timed.
     # Adapters that can't tell leave it False.
     waiting_in_queue: bool = False
+    # True while the client is still fetching the NZB for a job it has just
+    # been handed (SAB's ``Grabbing`` placeholder). The job's files are not in
+    # yet, and SAB lists the job in neither its queue nor its history while it
+    # adds them, so a gap right after this is expected. Adapters that can't
+    # tell leave it False.
+    fetching_nzb: bool = False
 
 
 @runtime_checkable

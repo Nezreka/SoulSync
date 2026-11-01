@@ -309,6 +309,7 @@ class SABnzbdAdapter:
             eta=eta,
             category=slot.get('cat'),
             waiting_in_queue=(slot.get('status') or '').lower() in _SAB_WAITING_STATES,
+            fetching_nzb=(slot.get('status') or '').lower() == 'grabbing',
         )
 
     def _parse_history_slot(self, slot: dict) -> UsenetStatus:

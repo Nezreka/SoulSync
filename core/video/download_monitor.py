@@ -1003,6 +1003,17 @@ def _walk(root: str):
 
 _GIVE_UP_AFTER = 8       # consecutive 'transfer gone, no file' polls before failing it
 _misses: dict = {}       # download id -> consecutive missing polls
+# A usenet job SAB has just been handed first sits as a 'Grabbing' placeholder
+# while SAB fetches its NZB (one at a time, so a few grabs queue up), then is in
+# neither the queue nor the history while SAB adds its files one by one -- on a
+# busy SAB a job with ~80 files took minutes (worst seen 245 s during a storage
+# scrub, 121 s without one). Eight 3-second polls ran out first, the row
+# failed, SAB downloaded the job anyway, and the wishlist grabbed it again. So
+# until the client reports a new usenet job in a real state, misses inside this
+# window don't count; each sighting of the placeholder starts the window again.
+_NEW_USENET_GRACE = 300  # seconds
+_grace: dict = {}        # (download id, client ref) -> window start (monotonic), None once reported
+_clock = time.monotonic  # seam for tests
 _STALL_TIMEOUT = 1800    # seconds of zero % movement (queued or frozen) before giving up
 # NB: the stall clock is NOT kept here any more — it lives on the row as
 # `progress_at`. A module dict keyed off process uptime was wiped by every
@@ -1014,6 +1025,38 @@ _requerying: set = set()  # download ids with a requery thread in flight
 
 def _now():
     return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+
+
+def _grace_key(dl):
+    ref = str(dl.get("client_ref") or "")
+    if str(dl.get("source") or "") != "usenet" or not ref:
+        return None
+    return (dl.get("id"), ref)
+
+
+def _in_new_job_grace(dl, now) -> bool:
+    """True while a usenet row's job is new and the client has not reported it
+    yet -- a miss then means 'still being added', not 'gone'."""
+    key = _grace_key(dl)
+    if key is None:
+        return False
+    start = _grace.setdefault(key, now)
+    return start is not None and now - start < _NEW_USENET_GRACE
+
+
+def _mark_reported(dl) -> None:
+    """The client has reported this job: from now on a miss is a real miss."""
+    key = _grace_key(dl)
+    if key is not None:
+        _grace[key] = None
+
+
+def _restart_grace(dl, now) -> None:
+    """The client is still fetching the job's NZB: the build, and the gap that
+    comes with it, is still ahead, so the window starts again."""
+    key = _grace_key(dl)
+    if key is not None and _grace.get(key, 0) is not None:
+        _grace[key] = now
 
 
 # ── auto-retry ────────────────────────────────────────────────────────────────
@@ -1632,6 +1675,7 @@ def _tick(db) -> bool:
               if d.get("status") != "searching" and d.get("source") != "youtube"]
     if not active:
         _misses.clear()
+        _grace.clear()
         # Rows this tick did not process can still mean work is in flight:
         # 'searching' rows are owned by their requery thread and YouTube rows
         # by their workers / the recovery pump — either keeps the fast cadence.
@@ -1659,6 +1703,8 @@ def _tick(db) -> bool:
         if upd.get("status") == "completed":
             completed_now += 1
         if upd.get("_missing"):
+            if _in_new_job_grace(dl, _clock()):
+                continue
             n = _misses.get(dl["id"], 0) + 1
             _misses[dl["id"]] = n
             if n >= _GIVE_UP_AFTER:
@@ -1669,6 +1715,10 @@ def _tick(db) -> bool:
                                else "Soulseek transfer disappeared")
             continue
         _misses.pop(dl["id"], None)
+        if upd.get("_client_adding"):
+            _restart_grace(dl, _clock())
+        else:
+            _mark_reported(dl)
         if upd.get("status") == "failed":
             # A proven-bad release (importer-proved junk, or a truncated transfer)
             # is blocklisted before the retry so the next candidate isn't the
@@ -1741,6 +1791,8 @@ def _tick(db) -> bool:
             logger.exception("video download %s: failed to persist update", dl.get("id"))
     for k in [k for k in _misses if k not in live_ids]:
         _misses.pop(k, None)
+    for k in [k for k in _grace if k[0] not in live_ids]:
+        _grace.pop(k, None)
     # Batch complete: we finished ≥1 download this tick AND nothing is left in
     # flight (queued/downloading/searching). Fires once, on the transition to
     # empty — the next tick early-returns. Publishes to the event bridge so the
