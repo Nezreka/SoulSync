@@ -1548,6 +1548,7 @@ class MusicDatabase:
 
             # Universal metadata cache (Spotify + iTunes API responses)
             self._add_metadata_cache_tables(cursor)
+            self._ensure_metadata_cache_indexes(cursor)
 
             # Repair worker v2 tables (findings + job runs)
             self._add_repair_worker_tables(cursor)
@@ -8123,6 +8124,25 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error creating spotify_library_cache table: {e}")
+
+    def _ensure_metadata_cache_indexes(self, cursor):
+        """Indexes added after the cache tables existed. _add_metadata_cache_tables
+        skips itself on an install that already has them, so an index added
+        there never reached one: this runs every start.
+
+        Discover's genre explorer and new releases read the few cached rows
+        that carry genres / a release date, and walked every cached artist or
+        album to find them (~1.2s each on 550k rows). Partial: they hold only
+        those rows; the queries repeat these conditions."""
+        try:
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_with_genres "
+                           "ON metadata_cache_entities (entity_type, source) "
+                           "WHERE genres IS NOT NULL AND genres != '' AND genres != '[]'")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_release_date "
+                           "ON metadata_cache_entities (entity_type, release_date) "
+                           "WHERE release_date IS NOT NULL AND release_date != ''")
+        except Exception as e:
+            logger.error(f"Error creating metadata cache indexes (will retry next start): {e}")
 
     def _add_metadata_cache_tables(self, cursor):
         """Create metadata_cache_entities and metadata_cache_searches tables for universal API response caching"""
