@@ -92,6 +92,28 @@ describe('the album modal ownership preview', () => {
     expect(text(`stat-missing-${ID}`)).toBe('1');
   });
 
+  it('asks a long list in blocks, each row under its own index', async () => {
+    modal(ID, 450);
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: { body: string }) => {
+      const sent = JSON.parse(init.body).tracks as Array<{ _original_index: number }>;
+      const results = sent.map((t) => ({
+        track_index: t._original_index,
+        found: t._original_index % 2 === 0,
+      }));
+      return Promise.resolve({ json: () => Promise.resolve({ success: true, results }) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const proc = { status: 'idle', tracks: Array.from({ length: 450 }, () => ({})) };
+    await load({ [ID]: proc })(ID);
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).tracks.length)).toEqual([
+      200, 200, 50,
+    ]);
+    expect(text(`match-${ID}-449`)).toBe('❌ Missing');
+    expect(text(`match-${ID}-448`)).toBe('✅ Found');
+    expect(text(`stat-found-${ID}`)).toBe('225');
+    expect((proc as { ownedIndices?: Set<number> }).ownedIndices?.size).toBe(225);
+  });
+
   it('sends the album context so the album fast path runs', async () => {
     modal(ID, 1);
     const fetchMock = respond({ success: true, results: [] });

@@ -153,24 +153,42 @@ def test_begin_analysis_owns_what_library_v2_has_a_file_for(tmp_path, monkeypatc
     assert _analysis_found(_lib2_db(tmp_path), monkeypatch) == {0: True, 1: True, 2: True}
 
 
+def _wish(db, name, profile_id):
+    import json
+
+    with db._get_connection() as conn:
+        conn.execute(
+            "INSERT INTO wishlist_tracks (spotify_track_id, spotify_data, profile_id) VALUES (?, ?, ?)",
+            (f'w-{name}', json.dumps({'name': name, 'artists': [{'name': 'Pierce The Veil'}]}), profile_id))
+        conn.commit()
+
+
+def _wished_preview(db, names, profile_id=1):
+    tracks = [{'name': name, 'artists': ['Pierce The Veil']} for name in names]
+    results = mw.preview_ownership(
+        db, tracks, album_context=None, artist_context=None, is_album=False,
+        profile_id=profile_id, source='spotify', allow_duplicates=True)
+    return [(r['found'], r['in_wishlist']) for r in results]
+
+
 def test_preview_marks_a_missing_track_the_user_already_wants(tmp_path):
     """the one answer the dialog shows on open, so it carries the wishlist mark
     the Library v2 check used to paint before the preview overwrote it."""
-    import json
-
     db = _lib2_db(tmp_path)
-    with db._get_connection() as conn:
-        conn.execute(
-            "INSERT INTO wishlist_tracks (spotify_track_id, spotify_data, profile_id) VALUES (?, ?, 1)",
-            ('w1', json.dumps({'name': 'Texas Is Forever', 'artists': [{'name': 'Pierce The Veil'}]})))
-        conn.commit()
-    tracks = [{'name': name, 'artists': ['Pierce The Veil']}
-              for name in ('Circles', 'Texas Is Forever', 'Bulls In The Bronx')]
-    results = mw.preview_ownership(
-        db, tracks, album_context=None, artist_context=None, is_album=False,
-        profile_id=1, source='spotify', allow_duplicates=True)
-    assert [(r['found'], r['in_wishlist']) for r in results] == [
+    _wish(db, 'Texas Is Forever', 1)
+    assert _wished_preview(db, ('Circles', 'Texas Is Forever', 'Bulls In The Bronx')) == [
         (True, False), (False, True), (False, False)]
+
+
+def test_preview_marks_the_wishlist_of_the_library_being_worked_in(tmp_path, monkeypatch):
+    """wishlist entries belong to the library they fill (E-12): an admin who
+    picked Guest's library sees Guest's marks, not the ones on their own list."""
+    db = _lib2_db(tmp_path)
+    _wish(db, 'Texas Is Forever', 2)
+    _wish(db, 'Bulls In The Bronx', 1)
+    monkeypatch.setattr('core.library_scope.acting_profile_id', lambda profile_id: 2)
+    assert _wished_preview(db, ('Texas Is Forever', 'Bulls In The Bronx')) == [
+        (False, True), (False, False)]
 
 
 def test_preview_asks_every_name_of_a_linked_artist(tmp_path):
@@ -200,3 +218,8 @@ def test_preview_asks_every_name_of_a_linked_artist(tmp_path):
         db, [{'name': 'Eye-Water', 'artists': ['Hiroyuki Sawano']}], album_context=None,
         artist_context=None, is_album=False, profile_id=1, source='spotify', allow_duplicates=True)
     assert [r['found'] for r in single] == [True]
+    # the lookups themselves, so the wishlist run, watchlist and completion
+    # find it too, not only the dialog
+    assert db.check_track_exists('Vogel Im Kafig', 'Sawano Hiroyuki', confidence_threshold=0.7)[0]
+    assert db.check_album_exists_with_editions('Attack on Titan OST', 'Hiroyuki Sawano',
+                                               confidence_threshold=0.7)[0]

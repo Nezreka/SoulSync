@@ -210,31 +210,6 @@ def release_year_of(album_context) -> Optional[str]:
     return year if year.isdigit() else None
 
 
-def _with_alias_names(db, names) -> list:
-    """the names, then every other name their artist rows are linked under
-    (§40 artist aliases): a kanji and a romaji row of one composer are one
-    artist, and the library may hold the release under the other one."""
-    from core.library2.artist_aliases import resolve_alias_group
-    from core.library2.importer import normalize_name
-    names = [n for n in dict.fromkeys(names) if n]
-    try:
-        conn = db._get_connection()
-        try:
-            for name in list(names):
-                for (artist_id,) in conn.execute("SELECT id FROM lib2_artists WHERE name_key = ?",
-                                                 (normalize_name(name),)).fetchall():
-                    group = resolve_alias_group(conn, artist_id)
-                    if len(group) > 1:
-                        names.extend(r[0] for r in conn.execute(
-                            f"SELECT name FROM lib2_artists WHERE id IN ({','.join('?' * len(group))})",
-                            group))
-        finally:
-            conn.close()
-    except Exception as e:
-        logger.debug("alias names for %s skipped: %s", names, e)
-    return [n for n in dict.fromkeys(names) if n]
-
-
 def album_tracks_map_for(db, album_context, artist_context) -> dict:
     """Album fast path: find the album in the db and map its lowercased track
     titles to their rows, so tracks match inside the one album instead of N
@@ -248,15 +223,12 @@ def album_tracks_map_for(db, album_context, artist_context) -> dict:
     if not album_name or not artist_name:
         return album_tracks_map
     try:
-        for name in _with_alias_names(db, [artist_name]):
-            db_album, album_confidence = db.check_album_exists_with_editions(
-                title=album_name, artist=name,
-                confidence_threshold=0.7,
-                expected_track_count=total_tracks if total_tracks > 0 else None,
-                expected_year=release_year_of(album_context),
-            )
-            if db_album and album_confidence >= 0.7:
-                break
+        db_album, album_confidence = db.check_album_exists_with_editions(
+            title=album_name, artist=artist_name,
+            confidence_threshold=0.7,
+            expected_track_count=total_tracks if total_tracks > 0 else None,
+            expected_year=release_year_of(album_context),
+        )
         if db_album and album_confidence >= 0.7:
             db_album_tracks = db.get_tracks_by_album(db_album.id)
             for t in db_album_tracks:
@@ -318,7 +290,7 @@ def match_track_in_library(db, track_data, *, album_tracks_map, album_context,
     missing, the modal said so and Begin Analysis fetched it again.
     """
     track_name = track_data.get('name', '')
-    artists = _with_alias_names(db, [_artist_name_of(a) for a in track_data.get('artists') or []])
+    artists = track_data.get('artists', [])
     if album_tracks_map:
         # Album-scoped matching: check against known album tracks first
         track_name_lower = track_name.lower().strip()
@@ -422,7 +394,9 @@ def preview_ownership(db, tracks_json, *, album_context, artist_context, is_albu
         if is_album else {}
     )
     expected_year = release_year_of(album_context)
-    wished = _wishlist_keys(db, profile_id)
+    # the wishlist of the library being worked in (E-12), not the caller's own
+    from core.library_scope import acting_profile_id
+    wished = _wishlist_keys(db, acting_profile_id(profile_id))
     results = []
     for i, track_data in enumerate(tracks_json or []):
         if not isinstance(track_data, dict):
