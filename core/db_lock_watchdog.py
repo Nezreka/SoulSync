@@ -112,6 +112,53 @@ def report_blocked_loop(*, log: Optional[Callable[..., None]] = None) -> None:
     )
 
 
+# a busy server: more than this share of one core, averaged over a tick
+BUSY_CPU_FRACTION = 0.7
+BUSY_TOP_THREADS = 8
+
+
+def thread_cpu_snapshot() -> Optional[Dict[int, float]]:
+    """{native thread id: cpu seconds so far} for this process, or None
+    without psutil."""
+    try:
+        import psutil
+        return {t.id: t.user_time + t.system_time for t in psutil.Process().threads()}
+    except Exception:  # noqa: BLE001 - diagnostics only
+        return None
+
+
+def format_busy_threads(before: Dict[int, float], after: Dict[int, float],
+                        elapsed: float) -> Optional[str]:
+    """The threads that used the CPU between two snapshots, busiest first,
+    each with its share of a core and the line it is on now; None when the
+    process as a whole stayed under BUSY_CPU_FRACTION.
+
+    Pages that take milliseconds on their own took seconds live (Oct 31 2026):
+    one process runs every request and dozens of background threads, and they
+    share the GIL. This says which threads are taking it."""
+    if elapsed <= 0:
+        return None
+    used = {tid: after[tid] - before.get(tid, 0.0) for tid in after}
+    total = sum(v for v in used.values() if v > 0)
+    if total / elapsed < BUSY_CPU_FRACTION:
+        return None
+    names = {th.native_id: th.name for th in threading.enumerate() if th.native_id}
+    idents = {th.native_id: th.ident for th in threading.enumerate() if th.native_id}
+    frames = sys._current_frames()
+    lines = []
+    for tid, cpu in sorted(used.items(), key=lambda kv: -kv[1])[:BUSY_TOP_THREADS]:
+        if cpu <= 0:
+            break
+        where = ""
+        frame = frames.get(idents.get(tid))
+        if frame is not None:
+            last = traceback.extract_stack(frame)[-1]
+            where = f" at {last.filename.rsplit('SoulSync', 1)[-1]}:{last.lineno} {last.name}"
+        lines.append(f"  {names.get(tid, f'thread {tid}')}: {cpu / elapsed * 100:.0f}% of a core{where}")
+    return (f"The server used {total / elapsed * 100:.0f}% of a core over the last "
+            f"{elapsed:.0f}s; busiest threads:\n" + "\n".join(lines))
+
+
 def format_thread_stacks() -> str:
     """Every live thread with its stack, newest frame last."""
     names: Dict[int, str] = {t.ident: t.name for t in threading.enumerate() if t.ident}
@@ -164,6 +211,8 @@ def run_watchdog(
     report: Optional[Callable[[], None]] = None,
     loop_probe: Optional[Callable[[], bool]] = None,
     loop_report: Optional[Callable[[], None]] = None,
+    cpu_snapshot: Optional[Callable[[], Optional[Dict[int, float]]]] = None,
+    cpu_report: Optional[Callable[[str], None]] = None,
     max_iterations: Optional[int] = None,
     now: Callable[[], float] = time.monotonic,
 ) -> int:
@@ -179,9 +228,14 @@ def run_watchdog(
     do_loop_probe = loop_probe or (lambda: True)
     do_loop_report = loop_report or (lambda: report_blocked_loop())
 
+    do_cpu_report = cpu_report or (lambda text: logger.warning("%s", text))
+
     dumps = 0
     last_dump: Optional[float] = None
     last_loop_dump: Optional[float] = None
+    last_cpu_report: Optional[float] = None
+    cpu_before = cpu_snapshot() if cpu_snapshot else None
+    cpu_at = now()
     iterations = 0
     while not stop_event.is_set():
         if max_iterations is not None and iterations >= max_iterations:
@@ -200,6 +254,16 @@ def run_watchdog(
                     last_loop_dump = moment
                     dumps += 1
                     do_loop_report()
+            if cpu_snapshot is not None:
+                moment = now()
+                cpu_after = cpu_snapshot()
+                if cpu_before is not None and cpu_after is not None:
+                    text = format_busy_threads(cpu_before, cpu_after, moment - cpu_at)
+                    if text and (last_cpu_report is None
+                                 or (moment - last_cpu_report) >= 2 * cooldown_seconds):
+                        last_cpu_report = moment
+                        do_cpu_report(text)
+                cpu_before, cpu_at = cpu_after, moment
         except Exception as exc:  # noqa: BLE001 - diagnostics never break the app
             logger.debug("write-lock watchdog tick skipped: %s", exc)
         if max_iterations is not None and iterations >= max_iterations:
@@ -213,6 +277,7 @@ def start_watchdog(database: Any, **kwargs: Any) -> threading.Thread:
     # the live watchdog also watches the shared async loop; tests drive
     # run_watchdog directly and pass their own probes
     kwargs.setdefault("loop_probe", probe_shared_loop)
+    kwargs.setdefault("cpu_snapshot", thread_cpu_snapshot)
     thread = threading.Thread(
         target=run_watchdog, args=(database,), kwargs=kwargs,
         name="DbLockWatchdog", daemon=True,
@@ -225,6 +290,7 @@ __all__ = [
     "DUMP_COOLDOWN_SECONDS",
     "PROBE_INTERVAL_SECONDS",
     "PROBE_TIMEOUT_MS",
+    "format_busy_threads",
     "format_open_transactions",
     "format_thread_stacks",
     "probe_shared_loop",

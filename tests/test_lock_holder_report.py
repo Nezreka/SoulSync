@@ -90,3 +90,30 @@ def test_the_watchdog_dumps_once_per_cooldown_for_a_stalled_loop():
         interval_seconds=0, cooldown_seconds=300, max_iterations=3,
         now=lambda: 1000.0)
     assert reports == [1]
+
+
+def test_a_busy_server_names_its_busiest_threads():
+    import threading as _th
+    me = _th.current_thread()
+    before = {me.native_id: 1.0, 999999: 5.0}
+    after = {me.native_id: 13.0, 999999: 5.5}
+    text = db_lock_watchdog.format_busy_threads(before, after, 15.0)
+    assert text is not None
+    first, second = text.splitlines()[1:3]
+    assert me.name in first and "80% of a core" in first and " at " in first
+    assert "thread 999999: 3% of a core" in second
+
+
+def test_a_quiet_server_logs_nothing():
+    assert db_lock_watchdog.format_busy_threads({1: 1.0}, {1: 2.0}, 15.0) is None
+
+
+def test_the_watchdog_reports_busy_threads_once_per_window():
+    snaps = iter([{1: 0.0}, {1: 30.0}, {1: 60.0}, {1: 90.0}])
+    reports = []
+    db_lock_watchdog.run_watchdog(
+        None, probe=lambda: True, report=lambda: None, loop_probe=lambda: True,
+        cpu_snapshot=lambda: next(snaps), cpu_report=reports.append,
+        interval_seconds=0, cooldown_seconds=300, max_iterations=3,
+        now=iter([0.0, 15.0, 30.0, 45.0]).__next__)
+    assert len(reports) == 1 and "200% of a core" in reports[0]
