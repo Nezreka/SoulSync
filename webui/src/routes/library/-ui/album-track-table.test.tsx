@@ -877,6 +877,46 @@ describe('library v2 album track table', () => {
     expect(within(dialog).getByLabelText('Drag to reorder Title')).toBeInTheDocument();
   });
 
+  it.each([
+    [undefined, 1],
+    [false, 0],
+  ])('offers Add to playlist on a track unless View Settings hides it (%s)', async (shown, buttons) => {
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({
+          success: true,
+          album: album([
+            track({ file: trackFile(), artists: [{ id: 1, name: 'Portishead', role: 'primary' }] }),
+          ]),
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { track_table: {}, artist_page: { add_to_playlist: shown } },
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText('Track Seven')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryAllByRole('button', { name: /to a playlist/ })).toHaveLength(buttons),
+    );
+  });
+
   it('keeps table preference writes and column resize fail-closed read-only', async () => {
     let writes = 0;
     server.use(

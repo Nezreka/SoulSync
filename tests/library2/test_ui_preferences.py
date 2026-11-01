@@ -220,8 +220,27 @@ def test_each_profile_keeps_its_own_artist_toolbar():
 
 def test_each_profile_picks_how_an_artist_opens_from_the_library():
     conn = _conn()
-    assert get_ui_preferences(conn)["artist_page"] == {"header": "rich", "header_elsewhere": "rich"}
+    page = get_ui_preferences(conn)["artist_page"]
+    assert (page["header"], page["header_elsewhere"]) == ("rich", "rich")
     update_ui_preferences(conn, {"artist_page": {"header": "compact"}}, profile_id=2)
-    assert get_ui_preferences(conn, profile_id=2)["artist_page"] == {
-        "header": "compact", "header_elsewhere": "rich"}
+    page = get_ui_preferences(conn, profile_id=2)["artist_page"]
+    assert (page["header"], page["header_elsewhere"]) == ("compact", "rich")
     assert get_ui_preferences(conn)["artist_page"]["header"] == "rich"
+
+
+def test_each_profile_picks_what_my_library_shows_and_the_track_actions():
+    conn = _conn()
+    page = get_ui_preferences(conn)["artist_page"]
+    assert page["library_sections"] == {"similar_artists": True, "concerts": True}
+    assert page["add_to_playlist"] is True
+    update_ui_preferences(
+        conn, {"artist_page": {"library_sections": {"similar_artists": False}}}, profile_id=2)
+    update_ui_preferences(conn, {"artist_page": {"add_to_playlist": False}}, profile_id=2)
+
+    guest, admin = get_ui_preferences(conn, profile_id=2), get_ui_preferences(conn)
+    # one section off leaves the other, and the header, as they were
+    assert guest["artist_page"]["library_sections"] == {"similar_artists": False, "concerts": True}
+    assert guest["artist_page"]["add_to_playlist"] is False
+    assert guest["artist_page"]["header"] == "rich"
+    assert admin["artist_page"]["library_sections"]["similar_artists"] is True
+    assert admin["artist_page"]["add_to_playlist"] is True

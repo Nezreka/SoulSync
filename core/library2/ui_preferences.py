@@ -147,9 +147,13 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
     },
     # Which header an artist opens with ("rich" / "compact"): coming from the
     # library, and coming from anywhere else (search, discover, the dashboard).
+    # Then what the artist's My Library view shows below its releases, and
+    # whether the track table's Actions column offers Add to playlist.
     "artist_page": {
         "header": "rich",
         "header_elsewhere": "rich",
+        "library_sections": {"similar_artists": True, "concerts": True},
+        "add_to_playlist": True,
     },
 }
 

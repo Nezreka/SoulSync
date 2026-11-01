@@ -239,6 +239,35 @@ describe('Library V2 artist detail — All Releases views', () => {
     await waitFor(() => expect(window.loadSimilarArtists).toHaveBeenCalledWith('Portishead'));
   });
 
+  it('leaves similar artists out of My Library when View Settings says so', async () => {
+    window.loadSimilarArtists = vi.fn();
+    window.cancelSimilarArtistsLoad = vi.fn();
+    inLibrary();
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: {},
+            artist_page: { library_sections: { similar_artists: false } },
+          },
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&releases=library');
+    await screen.findByRole('button', { name: 'My Library' });
+    expect(await screen.findByText('Numb')).toBeInTheDocument();
+    expect(screen.queryByText('Similar Artists')).not.toBeInTheDocument();
+    expect(window.loadSimilarArtists).not.toHaveBeenCalled();
+
+    // Discovery still suggests them
+    fireEvent.click(screen.getByRole('button', { name: /Discovery/ }));
+    await waitFor(() => expect(screen.getByText('Similar Artists')).toBeInTheDocument(), {
+      timeout: 4000,
+    });
+    await waitFor(() => expect(window.loadSimilarArtists).toHaveBeenCalledWith('Portishead'));
+  });
+
   it('says a release on the wishlist keeps upgrading to its quality profile', async () => {
     // being on the wishlist is monitoring: it is what quality upgrades act on,
     // and taking it off stops both

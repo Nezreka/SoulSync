@@ -148,6 +148,8 @@ import {
 import {
   ARTIST_TOOLBAR_BUTTONS,
   type ArtistToolbarButton,
+  LIBRARY_VIEW_SECTIONS,
+  type LibraryViewSection,
   LIBRARY_V2_WANTED_KINDS,
   type LibraryV2ArtistPageHeader,
   type LibraryV2AlbumDetail,
@@ -6419,9 +6421,24 @@ export function shouldAutoFetchDiscography(params: {
 const PROFILE_SECTIONS = new Set(['artist_toolbar', 'artist_page']);
 
 /** View Settings' artist page part, kept per profile: which toolbar buttons
- *  show and which header an artist opens with. Each pick saves at once. */
+ *  show, which header an artist opens with, what My Library shows below the
+ *  releases and whether tracks offer Add to playlist. Each pick saves at once. */
 function ArtistPageOptions({ prefs }: { prefs: LibraryV2UiPreferences | undefined }) {
   const mutation = useUiPreferencesMutation();
+  const checkbox = (
+    key: string,
+    label: string,
+    checked: boolean,
+    patch: Parameters<typeof mutation.mutate>[0],
+    example?: string,
+  ) => (
+    <label key={key} className={styles.tableOptionsItem}>
+      <input type="checkbox" checked={checked} onChange={() => mutation.mutate(patch)} />
+      {label}
+      {example ? <span className={styles.tableOptionsExample}>{example}</span> : null}
+    </label>
+  );
+  const addToPlaylist = prefs?.artist_page?.add_to_playlist !== false;
   const headerChoice = (key: 'header' | 'header_elsewhere', label: string) => {
     const current = prefs?.artist_page?.[key] ?? 'rich';
     return (
@@ -6462,18 +6479,12 @@ function ArtistPageOptions({ prefs }: { prefs: LibraryV2UiPreferences | undefine
         </p>
         {Object.entries(ARTIST_TOOLBAR_BUTTONS).map(([key, label]) => {
           const checked = prefs?.artist_toolbar?.[key as ArtistToolbarButton] !== false;
-          return (
-            <label key={key} className={styles.tableOptionsItem}>
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() => mutation.mutate({ artist_toolbar: { [key]: !checked } })}
-              />
-              {label}
-              {key === 'enhance_quality' ? (
-                <span className={styles.tableOptionsExample}>when files can be upgraded</span>
-              ) : null}
-            </label>
+          return checkbox(
+            key,
+            label,
+            checked,
+            { artist_toolbar: { [key]: !checked } },
+            key === 'enhance_quality' ? 'when files can be upgraded' : undefined,
           );
         })}
       </section>
@@ -6481,6 +6492,27 @@ function ArtistPageOptions({ prefs }: { prefs: LibraryV2UiPreferences | undefine
         <div className={styles.tableOptionsGroupLabel}>Artist header</div>
         {headerChoice('header', 'Opening an artist from the library')}
         {headerChoice('header_elsewhere', 'From Search, Discover and elsewhere')}
+      </section>
+      <section className={styles.tableOptionsSection}>
+        <div className={styles.tableOptionsGroupLabel}>My Library</div>
+        <p className={styles.tableOptionsHint}>
+          What an artist's My Library view shows below its releases. Discovery shows them all.
+        </p>
+        {Object.entries(LIBRARY_VIEW_SECTIONS).map(([key, label]) => {
+          const checked = prefs?.artist_page?.library_sections?.[key as LibraryViewSection] !== false;
+          return checkbox(key, label, checked, {
+            artist_page: { library_sections: { [key]: !checked } },
+          });
+        })}
+      </section>
+      <section className={styles.tableOptionsSection}>
+        <div className={styles.tableOptionsGroupLabel}>Track actions</div>
+        <p className={styles.tableOptionsHint}>
+          The buttons next to search in the track table's Actions column.
+        </p>
+        {checkbox('add_to_playlist', 'Add to playlist', addToPlaylist, {
+          artist_page: { add_to_playlist: !addToPlaylist },
+        })}
       </section>
     </>
   );
@@ -6495,7 +6527,11 @@ function ViewSettingsDialog({ onClose }: { onClose: () => void }) {
   const mutation = useUiPreferencesMutation();
   if (!canWrite) {
     return (
-      <ModalShell title="View Settings" description="For this profile." onClose={onClose}>
+      <ModalShell
+        title="View Settings"
+        description="Applies across the whole Library, on every artist and album, for this profile."
+        onClose={onClose}
+      >
         <div className={styles.tableOptionsStack}>
           <ArtistPageOptions prefs={prefs} />
         </div>
@@ -8171,13 +8207,20 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const artist = artistQuery.data;
   const back = useArtistBack(artist?.name);
   const openArtist = useOpenArtist();
+  // My Library shows what View Settings leaves on, Discovery all of it. A
+  // section waits for the preferences, it was loaded and then taken away
+  const viewPrefs = useQuery(libraryV2UiPreferencesQueryOptions());
+  const showSection = (key: LibraryViewSection) =>
+    releasesMode === 'all' ||
+    (!viewPrefs.isPending && viewPrefs.data?.artist_page?.library_sections?.[key] !== false);
+  const showSimilar = showSection('similar_artists');
   // in both views, the way dev's artist page always ended on similar artists.
   // it runs once the page is up: the loader fills a section it finds in the DOM
   useEffect(() => {
-    if (!artist?.name) return;
+    if (!artist?.name || !showSimilar) return;
     window.loadSimilarArtists?.(artist.name);
     return () => window.cancelSimilarArtistsLoad?.();
-  }, [artist?.name, releasesMode]);
+  }, [artist?.name, releasesMode, showSimilar]);
   // My Library is there for an artist in the library, the way dev offered
   // its library view only for an artist in the library: files here, or a
   // watch or wish of its own. one only looked at opens on its discography
@@ -8838,13 +8881,15 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 }
                 onOpenArtist={(id) => openArtist(Number(id))}
               />
-              <SimilarArtistsSection />
+              {showSimilar ? <SimilarArtistsSection /> : null}
             </>
           )}
-          <ConcertsSection
-            artistName={artist.name}
-            mbid={String(artist.provider_ids?.musicbrainz ?? '')}
-          />
+          {showSection('concerts') ? (
+            <ConcertsSection
+              artistName={artist.name}
+              mbid={String(artist.provider_ids?.musicbrainz ?? '')}
+            />
+          ) : null}
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
               initialQuery={buildSearchQuery(artist.name, modalAction.action, modalAction.entity)}
@@ -9471,10 +9516,11 @@ const LEGACY_PIXEL_WIDTH_THRESHOLD = 100;
 const CHECKBOX_COLUMN_WIDTH = 24;
 const MONITOR_COLUMN_WIDTH = 28;
 const TRACK_NUMBER_COLUMN_WIDTH = 32;
-/** Search, interactive search and add-to-playlist, plus the edit pencil
- *  unless the title opens the editor. A fourth 24px button in 80px was
- *  clipped away by the cell's overflow. */
-const trackActionColumnWidth = (editViaTitle: boolean) => (editViaTitle ? 80 : 106);
+/** Search and interactive search, add-to-playlist unless View Settings hides
+ *  it, and the edit pencil unless the title opens the editor: 26px a button.
+ *  A fourth 24px button in 80px was clipped away by the cell's overflow. */
+const trackActionColumnWidth = (editViaTitle: boolean, addToPlaylist: boolean) =>
+  54 + (addToPlaylist ? 26 : 0) + (editViaTitle ? 0 : 26);
 const UTILITY_COLUMN_WIDTH_BASE =
   CHECKBOX_COLUMN_WIDTH + MONITOR_COLUMN_WIDTH + TRACK_NUMBER_COLUMN_WIDTH;
 
@@ -10018,9 +10064,11 @@ function ColumnsOptionsMenu<K extends string>({
   extra,
   columnsFooter,
   workspace = false,
+  description,
   onClose,
 }: {
   title: string;
+  description?: ReactNode;
   columnLabels: Record<K, string>;
   columns: Record<K, boolean>;
   onToggle: (key: K) => void;
@@ -10066,6 +10114,7 @@ function ColumnsOptionsMenu<K extends string>({
       {open ? (
         <ModalShell
           title={title}
+          description={description}
           settings={!workspace}
           wide={workspace}
           className={workspace ? styles.toolWorkspace : undefined}
@@ -10199,6 +10248,7 @@ function TrackTableOptionsMenu({
   return (
     <ColumnsOptionsMenu
       title="View Settings"
+      description="Applies across the whole Library, on every artist and album. The table layout is shared by all profiles, the artist page settings are this profile's own."
       onClose={onClose}
       columnLabels={TRACK_TABLE_COLUMN_LABELS}
       columns={columns}
@@ -10887,7 +10937,8 @@ export function AlbumTrackTable({
   };
   const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
   const editViaTitle = prefsQuery.data?.track_table.edit_via_title ?? true;
-  const actionColumnWidth = trackActionColumnWidth(editViaTitle);
+  const addToPlaylist = prefsQuery.data?.artist_page?.add_to_playlist !== false;
+  const actionColumnWidth = trackActionColumnWidth(editViaTitle, addToPlaylist);
   const utilityColumnWidth = UTILITY_COLUMN_WIDTH_BASE + actionColumnWidth;
   const columnWidths =
     prefsQuery.data?.track_table.column_widths ?? DEFAULT_TRACK_TABLE_COLUMN_WIDTHS;
@@ -11393,6 +11444,7 @@ export function AlbumTrackTable({
               responsiveColumnWidths={responsiveColumnWidths}
               showAllProviders={showAllProviders}
               editViaTitle={editViaTitle}
+              addToPlaylist={addToPlaylist}
               selected={track.id != null && selected.has(track.id)}
               onToggleSelect={
                 track.id != null ? () => toggleSelected(track.id as number) : undefined
@@ -11631,6 +11683,8 @@ type TrackRowProps = {
   showAllProviders: boolean;
   /** Table option: the title opens the track editor instead of a pencil. */
   editViaTitle: boolean;
+  /** View Settings: Add to playlist among the actions. */
+  addToPlaylist: boolean;
   selected: boolean;
   onToggleSelect: (() => void) | undefined;
   onAction: ActionHandler;
@@ -11725,6 +11779,7 @@ function TrackRow(props: TrackRowProps) {
     responsiveColumnWidths,
     showAllProviders,
     editViaTitle,
+    addToPlaylist,
     selected,
     onToggleSelect,
     onAction,
@@ -12139,10 +12194,12 @@ function TrackRow(props: TrackRowProps) {
             disabled={!track.id}
             onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
           />
-          <AddToPlaylistButton
-            track={playlistTrack(track, albumTitle)}
-            className={styles.iconAction}
-          />
+          {addToPlaylist ? (
+            <AddToPlaylistButton
+              track={playlistTrack(track, albumTitle)}
+              className={styles.iconAction}
+            />
+          ) : null}
           <OwnedTrackMoreMenu
             track={track}
             albumId={entityBase.albumId}
