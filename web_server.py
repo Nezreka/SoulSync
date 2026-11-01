@@ -2467,8 +2467,12 @@ def get_cached_transfer_data():
                 all_downloads = []
                 if download_orchestrator and hasattr(download_orchestrator, 'engine'):
                     try:
+                        # display only: a client slower than this sits the
+                        # refresh out (and is named in the log) instead of
+                        # holding every page that reads live progress
                         all_downloads = run_async(
-                            download_orchestrator.engine.get_all_downloads(exclude=('soulseek',))
+                            download_orchestrator.engine.get_all_downloads(
+                                exclude=('soulseek',), plugin_timeout=3.0)
                         )
                     except Exception as e:
                         logger.debug("get_all_downloads failed: %s", e)

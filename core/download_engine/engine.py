@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from utils.logging_config import get_logger
@@ -55,6 +56,8 @@ class DownloadEngine:
         # ``iter_records_for_source`` is O(source_records) instead of
         # O(total_records).
         self._records: Dict[str, Dict[str, DownloadRecord]] = {}
+        # source -> when its slow listing was last logged (get_all_downloads)
+        self._slow_plugin_logged: Dict[str, float] = {}
         # Per-source RLocks. Each source gets its own so progress
         # updates on one source never block writes on another. RLock
         # so a plugin's worker callback can re-enter while holding the
@@ -321,7 +324,8 @@ class DownloadEngine:
     #
     # All methods are async to match the per-plugin contract.
 
-    async def get_all_downloads(self, exclude: Tuple[str, ...] = ()):
+    async def get_all_downloads(self, exclude: Tuple[str, ...] = (),
+                                plugin_timeout: Optional[float] = None):
         """Aggregated view across every registered plugin's active
         downloads. Per-plugin exceptions are swallowed (one source
         failing shouldn't take down cross-source aggregation) but
@@ -336,8 +340,23 @@ class DownloadEngine:
         all_downloads = []
 
         async def _fetch(source_name, plugin):
+            started = time.monotonic()
             try:
-                return source_name, await plugin.get_all_downloads()
+                call = plugin.get_all_downloads()
+                if plugin_timeout is None:
+                    return source_name, await call
+                return source_name, await asyncio.wait_for(call, plugin_timeout)
+            except asyncio.TimeoutError:
+                # ``plugin_timeout`` is for display callers (the downloads
+                # page): one slow client held every row for ~97s with nothing
+                # in the log to say which (Oct 31 2026). It sits this
+                # refresh out and is named, once per window.
+                if time.monotonic() - self._slow_plugin_logged.get(source_name, 0.0) > 600:
+                    self._slow_plugin_logged[source_name] = time.monotonic()
+                    logger.warning(
+                        "%s took over %.0fs to list its downloads; its rows are left out "
+                        "of this refresh", source_name, time.monotonic() - started)
+                return source_name, []
             except Exception as exc:
                 logger.debug("%s get_all_downloads failed: %s", source_name, exc)
                 return source_name, []
