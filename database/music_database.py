@@ -10891,10 +10891,13 @@ class MusicDatabase:
             "COALESCE((SELECT m.server_id FROM lib2_media_server_mappings m WHERE "
             "m.entity_type='track' AND m.entity_id=t.id AND m.server_source=? "
             "LIMIT 1),t.server_id)")
+        # the mapping lookup starts from the mapping's own (source, type, id)
+        # index. as a correlated EXISTS it tested all 312k tracks one by one:
+        # 1.5s a call, twice per already-matched playlist track (Oct 31 2026)
         for where, params in (
-            ("EXISTS (SELECT 1 FROM lib2_media_server_mappings m WHERE "
-             "m.entity_type='track' AND m.entity_id=t.id AND m.server_source=? "
-             "AND m.server_id=?)", (server_source, str(track_id))),
+            ("t.id IN (SELECT m.entity_id FROM lib2_media_server_mappings m WHERE "
+             "m.server_source=? AND m.entity_type='track' AND m.server_id=?)",
+             (server_source, str(track_id))),
             ("(t.server_source=? AND t.server_id=?)", (server_source, str(track_id))),
         ):
             found = self._get_track_with_metadata(
