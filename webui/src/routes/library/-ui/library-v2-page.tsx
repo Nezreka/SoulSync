@@ -6174,24 +6174,26 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
     runScoped(scope.entity, scope.id);
   }
 
-  // Back must return to the view you left, the artist page the album was
-  // opened from with its view settings (Discover View, the header). A guest
-  // spot or a collaboration is filed under someone else: back to its main
-  // artist was a page you were never on, in the library's header instead of
-  // yours. With no artist in the url (the album list) it goes to its own.
-  const fromArtist = previousArtist ?? album?.primary_artist?.id;
-  const guestAlbum = fromArtist != null && fromArtist !== album?.primary_artist?.id;
+  // Back must return to the view you left: the artist page the album was
+  // opened from with its view settings (Discover View, the header), or the
+  // library list it was picked from (Albums, Songs, Wanted). A guest spot or
+  // a collaboration is filed under someone else: back to its main artist was
+  // a page you were never on, in the library's header instead of yours, and
+  // so was the album's own artist after picking it from a list.
+  const guestAlbum = previousArtist != null && previousArtist !== album?.primary_artist?.id;
   const fromArtistName = useQuery({
-    ...libraryV2ArtistQueryOptions(fromArtist ?? 0),
+    ...libraryV2ArtistQueryOptions(previousArtist ?? 0),
     enabled: guestAlbum,
   }).data?.name;
-  const goBack = () =>
-    navigate({ search: (previous) => ({ ...previous, album: undefined, artist: fromArtist }) });
+  const goBack = () => navigate({ search: (previous) => ({ ...previous, album: undefined }) });
 
   return (
     <div className={`${styles.page} ${styles.detailView}`}>
       <BackLink onClick={() => void goBack()}>
-        ← {(guestAlbum ? fromArtistName : album?.primary_artist?.name) ?? 'Library'}
+        ←{' '}
+        {(previousArtist != null &&
+          (guestAlbum ? fromArtistName : album?.primary_artist?.name)) ||
+          'Library'}
       </BackLink>
       {albumQuery.isError ? (
         <div className={styles.emptyState}>Album not found.</div>

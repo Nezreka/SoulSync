@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { type KeyboardEvent, type MouseEvent, useMemo, useState } from 'react';
 
 import { useNowPlaying } from '@/features/playback/use-now-playing';
@@ -108,14 +108,14 @@ function SongRow({
   onCompare,
   onDelete,
 }: RowProps) {
-  const navigate = useNavigate();
-  const albumHref = `/artist-detail/library/${song.artist_id}?album=${song.album_id}`;
-  const openArtist = (album?: boolean) =>
+  const navigate = useNavigate({ from: '/library' });
+  const openArtist = () =>
     void navigate({
       to: '/artist-detail/$source/$id',
       params: { source: 'library', id: String(song.artist_id) },
-      search: album ? { album: String(song.album_id) } : {},
     });
+  // the album opens over the list, and back on it returns here
+  const albumId = Number(song.album_id);
   const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
   const quality = formatQuality(song, qualityParts(prefsQuery.data));
   const playable = Boolean(song.file_path);
@@ -210,9 +210,14 @@ function SongRow({
         <div className={styles.meta}>
           <Marked text={song.artist_name} query={query} />
           <span className={styles.dot}>·</span>
-          <a className={styles.album} href={albumHref}>
+          <Link
+            className={styles.album}
+            from="/library"
+            to="/library"
+            search={(previous) => ({ ...previous, album: albumId })}
+          >
             {song.album_title || 'Unknown album'}
-          </a>
+          </Link>
           {songMeta(song) ? (
             <>
               <span className={styles.dot}>·</span>
@@ -259,8 +264,13 @@ function SongRow({
                   },
                 ]
               : []),
-            { key: 'album', label: 'Open album', onSelect: () => openArtist(true) },
-            { key: 'artist', label: 'Open artist', onSelect: () => openArtist(false) },
+            {
+              key: 'album',
+              label: 'Open album',
+              onSelect: () =>
+                void navigate({ search: (previous) => ({ ...previous, album: albumId }) }),
+            },
+            { key: 'artist', label: 'Open artist', onSelect: openArtist },
             ...(song.copies > 1
               ? [{ key: 'copies', label: `Compare ${song.copies} copies`, onSelect: onCompare }]
               : []),

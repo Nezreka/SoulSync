@@ -268,6 +268,37 @@ describe('Library V2 artist detail — All Releases views', () => {
     await waitFor(() => expect(window.loadSimilarArtists).toHaveBeenCalledWith('Portishead'));
   });
 
+  it.each(['albums', 'songs', 'wanted'])(
+    'goes back from an album picked in %s to that list, not to its artist',
+    async (section) => {
+      server.use(
+        http.get('/api/library/v2/albums/1', () =>
+          HttpResponse.json({
+            success: true,
+            album: {
+              ...album({ id: 1, title: 'Dummy' }),
+              genres: [],
+              quality_profile: null,
+              primary_artist: { id: 1, name: 'Portishead' },
+              tracks: [],
+            },
+          }),
+        ),
+        http.get('/api/library/v2/albums/1/match-status', () =>
+          HttpResponse.json({ success: true, album: [], tracks: {} }),
+        ),
+        http.get('/api/library/v2/albums/1/queue-status', () =>
+          HttpResponse.json({ success: true, tracks: {}, albums: {} }),
+        ),
+      );
+      const { router } = renderArtist(`/library?section=${section}&album=1`);
+      fireEvent.click(await screen.findByRole('button', { name: '← Library' }));
+      await waitFor(() => expect(router.state.location.search).not.toHaveProperty('album'));
+      expect(router.state.location.search).toMatchObject({ section });
+      expect(router.state.location.search).not.toHaveProperty('artist');
+    },
+  );
+
   it('says a release on the wishlist keeps upgrading to its quality profile', async () => {
     // being on the wishlist is monitoring: it is what quality upgrades act on,
     // and taking it off stops both
