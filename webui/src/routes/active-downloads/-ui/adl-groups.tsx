@@ -107,6 +107,7 @@ function BucketFold({
 
 interface RowHandlers {
   onCancelRow: (dl: AdlDownload) => void | Promise<void>;
+  onRemoveRow?: (dl: AdlDownload) => void | Promise<void>;
   onDownloadNext: (dl: AdlDownload) => void | Promise<void>;
   numbered: boolean;
   canInspect: boolean;
@@ -123,6 +124,7 @@ function BucketedRows({
   openBuckets,
   onToggleBucket,
   onCancelRow,
+  onRemoveRow,
   onDownloadNext,
   numbered,
   canInspect,
@@ -143,6 +145,7 @@ function BucketedRows({
       numbered={numbered}
       canInspect={canInspect}
       onCancel={onCancelRow}
+      onRemove={onRemoveRow}
       onDownloadNext={next ? onDownloadNext : undefined}
     />
   );
@@ -220,6 +223,7 @@ export interface AdlGroupProps {
   onCancel: () => void;
   onOpenModal: () => void;
   onCancelRow: (dl: AdlDownload) => void | Promise<void>;
+  onRemoveRow?: (dl: AdlDownload) => void | Promise<void>;
   onDownloadNext: (dl: AdlDownload) => void | Promise<void>;
   onDownloadBatchNext: (batch: AdlBatch) => void | Promise<void>;
 }
@@ -244,6 +248,7 @@ export function AdlGroup({
   onCancel,
   onOpenModal,
   onCancelRow,
+  onRemoveRow,
   onDownloadNext,
   onDownloadBatchNext,
 }: AdlGroupProps) {
@@ -393,6 +398,9 @@ export function AdlGroup({
               openBuckets={openBuckets}
               onToggleBucket={toggleBucket}
               onCancelRow={onCancelRow}
+              // a running batch keeps its rows until it ends, so Remove from
+              // list only shows up once the batch is done
+              onRemoveRow={terminal ? onRemoveRow : undefined}
               onDownloadNext={onDownloadNext}
               numbered={numbered}
               canInspect={canInspect}
@@ -406,6 +414,7 @@ export function AdlGroup({
                 numbered={numbered}
                 canInspect={canInspect}
                 onCancel={onCancelRow}
+                onRemove={terminal ? onRemoveRow : undefined}
                 onDownloadNext={onDownloadNext}
               />
             ))
@@ -465,9 +474,11 @@ function finishedAt(dl: AdlDownload): number | null {
 function EarlierAlbum({
   item,
   onCancelRow,
+  onRemoveRow,
 }: {
   item: Extract<EarlierItem, { kind: 'album' }>;
   onCancelRow: (dl: AdlDownload) => void | Promise<void>;
+  onRemoveRow?: (dl: AdlDownload) => void | Promise<void>;
 }) {
   const [open, setOpen] = useState(item.rows.length <= EARLIER_OPEN_MAX);
   const podcast = item.rows.every((dl) => dl.event_type === 'podcast');
@@ -497,7 +508,15 @@ function EarlierAlbum({
         <span className="dlc-sub-summary">{earlierAlbumSummary(item.rows)}</span>
       </button>
       {open
-        ? item.rows.map((dl) => <AdlRow key={dl.task_id} dl={dl} compact onCancel={onCancelRow} />)
+        ? item.rows.map((dl) => (
+            <AdlRow
+              key={dl.task_id}
+              dl={dl}
+              compact
+              onCancel={onCancelRow}
+              onRemove={onRemoveRow}
+            />
+          ))
         : null}
     </div>
   );
@@ -514,9 +533,11 @@ function EarlierAlbum({
 export function AdlEarlierGroup({
   rows,
   onCancelRow,
+  onRemoveRow,
 }: {
   rows: AdlDownload[];
   onCancelRow: (dl: AdlDownload) => void | Promise<void>;
+  onRemoveRow?: (dl: AdlDownload) => void | Promise<void>;
 }) {
   const [showAll, setShowAll] = useState(false);
   if (rows.length === 0) return null;
@@ -573,7 +594,7 @@ export function AdlEarlierGroup({
       {live.length ? (
         <div className="dlc-list">
           {live.map((dl) => (
-            <AdlRow key={dl.task_id} dl={dl} onCancel={onCancelRow} />
+            <AdlRow key={dl.task_id} dl={dl} onCancel={onCancelRow} onRemove={onRemoveRow} />
           ))}
         </div>
       ) : null}
@@ -583,9 +604,19 @@ export function AdlEarlierGroup({
           <div className="dlc-list">
             {bucket.items.map((item) =>
               item.kind === 'row' ? (
-                <AdlRow key={item.row.task_id} dl={item.row} onCancel={onCancelRow} />
+                <AdlRow
+                  key={item.row.task_id}
+                  dl={item.row}
+                  onCancel={onCancelRow}
+                  onRemove={onRemoveRow}
+                />
               ) : (
-                <EarlierAlbum key={item.key} item={item} onCancelRow={onCancelRow} />
+                <EarlierAlbum
+                  key={item.key}
+                  item={item}
+                  onCancelRow={onCancelRow}
+                  onRemoveRow={onRemoveRow}
+                />
               ),
             )}
           </div>
@@ -735,6 +766,7 @@ export interface AdlGroupedListProps {
   onOpenBatchModal: (batch: AdlBatch) => void;
   onOpenFullHistory: () => void;
   onCancelRow: (dl: AdlDownload) => void | Promise<void>;
+  onRemoveRow?: (dl: AdlDownload) => void | Promise<void>;
   onDownloadNext: (dl: AdlDownload) => void | Promise<void>;
   onDownloadBatchNext: (batch: AdlBatch) => void | Promise<void>;
   onNavigate: (page: string) => void;
@@ -759,6 +791,7 @@ export function AdlGroupedList({
   onOpenBatchModal,
   onOpenFullHistory,
   onCancelRow,
+  onRemoveRow,
   onDownloadNext,
   onDownloadBatchNext,
   onNavigate,
@@ -797,11 +830,14 @@ export function AdlGroupedList({
           onCancel={() => onCancelBatch(batch)}
           onOpenModal={() => onOpenBatchModal(batch)}
           onCancelRow={onCancelRow}
+          onRemoveRow={onRemoveRow}
           onDownloadNext={onDownloadNext}
           onDownloadBatchNext={onDownloadBatchNext}
         />
       ))}
-      {!filterBatchId ? <AdlEarlierGroup rows={earlier} onCancelRow={onCancelRow} /> : null}
+      {!filterBatchId ? (
+        <AdlEarlierGroup rows={earlier} onCancelRow={onCancelRow} onRemoveRow={onRemoveRow} />
+      ) : null}
       {!filterBatchId ? (
         <AdlRecentHistory history={history} onOpenFullHistory={onOpenFullHistory} />
       ) : null}

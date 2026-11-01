@@ -4,6 +4,7 @@ import type { RateSample } from './-adl.helpers';
 import type { AdlBatch, AdlBatchHistoryEntry, AdlDownload, AdlFilter } from './-adl.types';
 
 import { fetchBatchHistory, fetchDownloads } from './-adl.api';
+import { isTerminalPhase } from './-adl.batch';
 import {
   ADL_BATCH_HISTORY_POLL_MS,
   ADL_FILTER_STATUSES,
@@ -33,6 +34,14 @@ export interface AdlDownloadsController {
     queued: number;
     failed: number;
     total: number;
+    /**
+     * what Clear failed takes: failed rows whose batch is not still running
+     * (the server leaves a running batch's rows alone).
+     */
+    failedClearable: number;
+    /** what Clear finished takes: completed rows not waiting in the review queue. */
+    finished: number;
+    /** what Clear everything takes: every completed or failed row. */
     completedOrFailed: number;
   };
   hasRunningWork: boolean;
@@ -180,10 +189,18 @@ export function useAdlDownloads({
    * happening overall, so switching to Completed must not make "3 active"
    * disappear.
    *
-   * `completedOrFailed` drives the Clear Completed button, and counts failed
-   * rows too: clear-completed wipes the persisted history tail as well, so
-   * after a restart the list can be entirely completed/failed rows and the
-   * button has to stay reachable.
+   * The three clear counts leave out rows of a batch that is still running:
+   * the server keeps a running batch intact until it ends (its end-of-batch
+   * pass walks every row), so counting them would promise rows a clear does
+   * not take. Upstream drops a finished batch and its rows on its own five
+   * minutes after it ends.
+   *
+   * `finished` drives Clear finished: completed rows, minus the ones still
+   * waiting in the review queue, which that clear leaves for Review.
+   * `completedOrFailed` drives Clear everything, which takes those too and
+   * every failed row; it wipes the persisted history tail as well, so after a
+   * restart the list can be entirely completed/failed rows and the button has
+   * to stay reachable.
    */
   const counts = useMemo(() => {
     const active = state.downloads.filter((d) =>
@@ -195,13 +212,36 @@ export function useAdlDownloads({
     const failed = state.downloads.filter((d) =>
       ADL_FILTER_STATUSES.failed.includes(d.status),
     ).length;
+    const running = new Set(
+      state.batches.filter((b) => !isTerminalPhase(b.phase)).map((b) => b.batch_id),
+    );
+    const settled = (d: AdlDownload) =>
+      d.is_persistent_history || !d.batch_id || !running.has(d.batch_id);
+    const failedClearable = state.downloads.filter(
+      (d) => settled(d) && ADL_FILTER_STATUSES.failed.includes(d.status),
+    ).length;
+    const finished = state.downloads.filter(
+      (d) =>
+        settled(d) &&
+        ADL_FILTER_STATUSES.completed.includes(d.status) &&
+        !ADL_REVIEW_STATUSES.includes(String(d.verification_status ?? '')),
+    ).length;
     const completedOrFailed = state.downloads.filter(
       (d) =>
-        ADL_FILTER_STATUSES.completed.includes(d.status) ||
-        ADL_FILTER_STATUSES.failed.includes(d.status),
+        settled(d) &&
+        (ADL_FILTER_STATUSES.completed.includes(d.status) ||
+          ADL_FILTER_STATUSES.failed.includes(d.status)),
     ).length;
-    return { active, queued, failed, total: state.downloads.length, completedOrFailed };
-  }, [state.downloads]);
+    return {
+      active,
+      queued,
+      failed,
+      total: state.downloads.length,
+      failedClearable,
+      finished,
+      completedOrFailed,
+    };
+  }, [state.downloads, state.batches]);
 
   /** Cancel All only appears when there is something cancellable. */
   const hasRunningWork = useMemo(

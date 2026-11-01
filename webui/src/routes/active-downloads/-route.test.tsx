@@ -277,6 +277,52 @@ describe('the active-downloads route', () => {
     );
   });
 
+  it('clears failed rows without asking, and without retrying them', async () => {
+    const posted: unknown[] = [];
+    server.use(
+      http.post('/api/downloads/clear-completed', async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({ success: true, cleared: 1, total_cleared: 1 });
+      }),
+    );
+    const confirm = vi.fn(async () => true);
+    window.showConfirmDialog = confirm;
+    stub({
+      downloads: [
+        row({ task_id: 'f1', status: 'failed', error: 'No sources' }),
+        row({ task_id: 'c1', status: 'completed' }),
+      ],
+    });
+    const { container } = renderRoute();
+    await settled();
+    await waitFor(() => expect(container.querySelector('#adl-actions .dlc-more')).not.toBeNull());
+    fireEvent.click(container.querySelector('#adl-actions .dlc-more') as HTMLElement);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear failed (1)' }));
+    await waitFor(() => expect(posted).toEqual([{ scope: 'failed' }]));
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('offers Remove from list on a failed row and posts its task id', async () => {
+    const posted: unknown[] = [];
+    server.use(
+      http.post('/api/downloads/remove', async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    stub({ downloads: [row({ task_id: 'f1', status: 'failed', error: 'No sources' })] });
+    const { container } = renderRoute();
+    await settled();
+    const failedRow = await waitFor(() => {
+      const el = container.querySelector('[data-task-id="f1"]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.click(failedRow.querySelector('.dlc-more') as HTMLElement);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from list' }));
+    await waitFor(() => expect(posted).toEqual([{ task_id: 'f1' }]));
+  });
+
   it('survives every endpoint failing', async () => {
     // A downloads page that white-screens because one poll 500'd is worse
     // than one showing an empty list.

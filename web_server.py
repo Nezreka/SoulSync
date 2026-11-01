@@ -16264,20 +16264,66 @@ def get_batch_history():
 
 @app.route('/api/downloads/clear-completed', methods=['POST'])
 def clear_completed_downloads():
-    """Clear completed/failed downloads from the Downloads page: the live
-    session tasks AND the persisted download-history tail (so the list actually
-    empties and stays empty across restart). Rows still awaiting verification
-    (unverified / force_imported) are preserved — they belong to the review
-    queue, not this cleanup."""
+    """Clear finished rows from the Downloads page.
+
+    With no body this is Clear everything: every completed, failed and
+    cancelled live task AND the whole persisted download-history tail, review
+    queue included (so the list empties and stays empty across restart).
+
+    ``{"scope": "finished"}`` is Clear finished: completed / skipped /
+    already-owned tasks and the history tail, but rows waiting in the review
+    queue (unverified / force_imported) stay -- they leave through Review.
+    ``{"scope": "failed"}`` is Clear failed: failed / not-found / cancelled
+    tasks only. Those live only in memory, so no history is touched. Neither
+    scope retries anything."""
+    data = request.get_json(silent=True) or {}
+    scope = data.get('scope') if isinstance(data, dict) else None
+    if scope not in (None, 'finished', 'failed'):
+        return jsonify({'success': False, 'error': f'Unknown scope: {scope}'}), 400
     try:
-        cleared = _downloads_cancel.clear_completed_local()
-        history_cleared = get_database().clear_completed_download_history()
+        if scope == 'failed':
+            cleared = _downloads_cancel.clear_completed_local(_downloads_cancel.FAILED_STATUSES)
+            history_cleared = 0
+        elif scope == 'finished':
+            cleared = _downloads_cancel.clear_completed_local(_downloads_cancel.FINISHED_STATUSES)
+            history_cleared = get_database().clear_completed_download_history(keep_review=True)
+        else:
+            cleared = _downloads_cancel.clear_completed_local()
+            history_cleared = get_database().clear_completed_download_history()
         return jsonify({'success': True, 'cleared': cleared,
                         'history_cleared': history_cleared,
                         'total_cleared': cleared + history_cleared})
     except Exception as e:
         logger.error(f"Error clearing completed downloads: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+_REMOVE_REFUSALS = {
+    'missing': (404, 'That download is no longer in the list'),
+    'not_removable': (409, 'Only failed, not-found or cancelled downloads can be removed'),
+    'batch_running': (409, 'Its batch is still running; it can be removed once the batch ends'),
+}
+
+
+@app.route('/api/downloads/remove', methods=['POST'])
+def remove_download_from_list():
+    """Take one failed / not-found / cancelled row off the Downloads page.
+
+    Nothing is retried, and history, the wishlist and files on disk are left
+    alone."""
+    data = request.get_json(silent=True) or {}
+    task_id = data.get('task_id') if isinstance(data, dict) else None
+    if not task_id or not isinstance(task_id, str):
+        return jsonify({'success': False, 'error': 'Missing task_id'}), 400
+    try:
+        outcome = _downloads_cancel.remove_local_task(task_id)
+    except Exception as e:
+        logger.error(f"Error removing download {task_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+    if outcome == 'removed':
+        return jsonify({'success': True})
+    status, message = _REMOVE_REFUSALS.get(outcome, (409, outcome))
+    return jsonify({'success': False, 'error': message, 'reason': outcome}), status
 
 
 @app.route('/api/downloads/task/download-next', methods=['POST'])

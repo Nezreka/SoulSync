@@ -18,6 +18,7 @@ import {
   quarantineDelete,
   quarantineEntry,
   quarantinePlay,
+  removeDownload,
   verificationApprove,
   verificationCleanOrphans,
   verificationDelete,
@@ -220,6 +221,21 @@ describe('cancelling', () => {
     const data = await clearCompleted();
     expect(seen[0].url.pathname).toBe('/api/downloads/clear-completed');
     expect(data.total_cleared).toBe(3);
+  });
+  it('clears one scope with {scope} in the body', async () => {
+    const seen = capture('post', '/api/downloads/clear-completed', { success: true });
+    await clearCompleted('failed');
+    await clearCompleted('finished');
+    expect(seen.map((s) => JSON.parse(s.body))).toEqual([
+      { scope: 'failed' },
+      { scope: 'finished' },
+    ]);
+  });
+  it('removes one row by task id', async () => {
+    const seen = capture('post', '/api/downloads/remove', { success: true });
+    await removeDownload('t-9');
+    expect(seen[0].url.pathname).toBe('/api/downloads/remove');
+    expect(JSON.parse(seen[0].body)).toEqual({ task_id: 't-9' });
   });
 });
 

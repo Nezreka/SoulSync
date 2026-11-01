@@ -342,7 +342,10 @@ The **Active Downloads** page is poll-driven and has three views: **Downloads**,
 Live counts — **active**, **queued**, **failed**, **total** — with the active count showing combined speed + ETA.
 
 - **Cancel All** (only while work is running) — cancelled tasks are added to the wishlist.
-- **Clear Completed** — confirm dialog: "Remove ALL completed and failed downloads from the list and history? … This also clears unverified items from the verification queue. Your files stay in the library — only the download-history rows are removed."
+- **Clear finished** — completed downloads leave the list and the download history. Failed downloads and anything waiting in **Review** stay. Asks first.
+- **Clear failed** (only when something failed) — failed, not-found and cancelled downloads leave the list. Nothing is retried. These rows live only in memory, so no history is touched.
+- **Clear everything** — confirm dialog: "Remove ALL completed and failed downloads from the list and history? … This also clears unverified items from the verification queue. Your files stay in the library — only the download-history rows are removed."
+- A failed row's **⋯** menu has **Remove from list**: that one row goes, nothing is retried. Rows of a batch that is still running stay until the batch ends, for all of these.
 
 ## Downloads view — batches
 
