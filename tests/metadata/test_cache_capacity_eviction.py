@@ -94,6 +94,7 @@ class _TempCache(MetadataCache):
     holding just the entities table — enough to exercise evict_over_capacity."""
 
     def __init__(self):
+        super().__init__()
         self._conn = sqlite3.connect(":memory:")
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("""

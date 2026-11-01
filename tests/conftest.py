@@ -1102,10 +1102,14 @@ def _fresh_fold_index():
     from database.music_database import MusicDatabase
     MusicDatabase._owned_genres_cache.clear()
     saved_genres_ttl, MusicDatabase._OWNED_GENRES_TTL = MusicDatabase._OWNED_GENRES_TTL, 0.0
+    # cache hits write their access stats on a timer; in tests, right away
+    from core.metadata import cache as metadata_cache
+    saved_touch, metadata_cache._TOUCH_FLUSH_SECONDS = metadata_cache._TOUCH_FLUSH_SECONDS, 0.0
     yield
     fold_index.CHECK_SECONDS = saved
     worker_queue.PROGRESS_SNAPSHOT_TTL = saved_ttl
     MusicDatabase._OWNED_GENRES_TTL = saved_genres_ttl
+    metadata_cache._TOUCH_FLUSH_SECONDS = saved_touch
 
 
 @pytest.fixture(autouse=True, scope='session')
