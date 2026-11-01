@@ -10008,20 +10008,29 @@ function useUiPreferencesMutation() {
   // width visibly "sprang back". Stamp each request and ignore any answer that
   // is not the newest one this component instance issued.
   const sequenceRef = useRef(0);
-  const settledRef = useRef(0);
+  const key = [...LIBRARY_V2_QUERY_KEY, 'ui-preferences'];
+  // a profile's own artist page is its to change; the shared layout is the admin's
+  const refused = (patch: object) =>
+    !canWrite && Object.keys(patch).some((section) => !PROFILE_SECTIONS.has(section));
   return useMutation({
+    // the pick shows at once (a dragged column lands where it was dropped);
+    // the server's answer, or the refetch after an error, settles it
+    onMutate: async (patch) => {
+      if (refused(patch)) return;
+      await queryClient.cancelQueries({ queryKey: key });
+      queryClient.setQueryData<LibraryV2UiPreferences>(key, (prefs) =>
+        prefs ? mergePreferences(prefs, patch) : prefs,
+      );
+    },
     mutationFn: async (patch: Parameters<typeof updateLibraryV2UiPreferences>[0]) => {
-      // a profile's own artist page is its to change; the shared layout is the admin's
-      if (!canWrite && Object.keys(patch).some((key) => !PROFILE_SECTIONS.has(key)))
-        throw new Error('Library changes require the admin profile');
+      if (refused(patch)) throw new Error('Library changes require the admin profile');
       const sequence = ++sequenceRef.current;
       const preferences = await updateLibraryV2UiPreferences(patch);
       return { sequence, preferences };
     },
     onSuccess: ({ sequence, preferences }) => {
-      if (sequence < settledRef.current) return;
-      settledRef.current = sequence;
-      queryClient.setQueryData([...LIBRARY_V2_QUERY_KEY, 'ui-preferences'], preferences);
+      if (sequence !== sequenceRef.current) return;
+      queryClient.setQueryData(key, preferences);
     },
     /**
      * iss29-C09: no consumer of this mutation renders `error`, so a rejected
@@ -10042,11 +10051,21 @@ function useUiPreferencesMutation() {
       } else {
         console.error('[library-v2] ui preferences update failed:', message);
       }
-      void queryClient.invalidateQueries({
-        queryKey: [...LIBRARY_V2_QUERY_KEY, 'ui-preferences'],
-      });
+      void queryClient.invalidateQueries({ queryKey: key });
     },
   });
+}
+
+/** The server's merge (ui_preferences._merge_section): objects merge key by
+ *  key, anything else replaces. */
+function mergePreferences<T>(base: T, patch: unknown): T {
+  const isObject = (v: unknown): v is Record<string, unknown> =>
+    typeof v === 'object' && v !== null && !Array.isArray(v);
+  if (!isObject(base) || !isObject(patch)) return patch as T;
+  const merged: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(patch))
+    if (v !== undefined) merged[k] = mergePreferences(merged[k], v);
+  return merged as T;
 }
 
 /** Shared gear-popover column-visibility menu (B5 pattern) — one generic body
@@ -10087,18 +10106,22 @@ function ColumnsOptionsMenu<K extends string>({
   const [gearOpen, setOpen] = useState(false);
   const open = Boolean(onClose) || gearOpen;
   const [dragKey, setDragKey] = useState<K | null>(null);
+  // while a row is dragged the others make room under the pointer; the order
+  // is saved once, on the drop (Escape or a drop outside the list puts it back)
+  const [dragOrder, setDragOrder] = useState<K[] | null>(null);
 
-  const columnKeys = columnOrder ?? (Object.keys(columnLabels) as K[]);
+  const columnKeys = dragOrder ?? columnOrder ?? (Object.keys(columnLabels) as K[]);
   const reorderable = Boolean(onReorder && columnOrder);
 
-  const moveTo = (targetIndex: number) => {
-    if (!onReorder || !columnOrder || dragKey == null) return;
-    const fromIndex = columnOrder.indexOf(dragKey);
-    if (fromIndex === -1 || fromIndex === targetIndex) return;
-    const nextOrder = [...columnOrder];
-    const [moved] = nextOrder.splice(fromIndex, 1);
-    nextOrder.splice(targetIndex, 0, moved);
-    onReorder(nextOrder);
+  const moved = (order: K[], key: K, toIndex: number) => {
+    const next = order.filter((k) => k !== key);
+    next.splice(toIndex, 0, key);
+    return next;
+  };
+  const endDrag = (dropped: boolean) => {
+    if (dropped && dragOrder && dragOrder.join() !== columnOrder?.join()) onReorder?.(dragOrder);
+    setDragKey(null);
+    setDragOrder(null);
   };
 
   return (
@@ -10126,69 +10149,53 @@ function ColumnsOptionsMenu<K extends string>({
             >
               <section className={styles.tableOptionsSection}>
                 <div className={styles.tableOptionsGroupLabel}>Visible columns</div>
+                {reorderable ? (
+                  <p className={styles.tableOptionsHint}>
+                    Drag a row to change the column order, left to right.
+                  </p>
+                ) : null}
                 <div
                   className={`${styles.tableOptionsColumnGrid} ${reorderable ? styles.tableOptionsColumnGridReorder : ''}`}
+                  onDragOver={dragKey ? (e) => e.preventDefault() : undefined}
+                  onDrop={dragKey ? (e) => e.preventDefault() : undefined}
                 >
                   {columnKeys.map((key, index) => {
                     const locked = lockedColumns?.has(key) ?? false;
                     return (
                       <div
                         key={key}
-                        className={`${styles.tableOptionsRow} ${dragKey === key ? styles.tableOptionsRowDragging : ''}`}
-                        onDragOver={reorderable ? (e) => e.preventDefault() : undefined}
-                        onDrop={
+                        className={`${styles.tableOptionsRow} ${reorderable ? styles.tableOptionsRowDraggable : ''} ${dragKey === key ? styles.tableOptionsRowDragging : ''}`}
+                        draggable={reorderable}
+                        onDragStart={
                           reorderable
                             ? (e) => {
-                                e.preventDefault();
-                                moveTo(index);
-                                setDragKey(null);
+                                e.dataTransfer.effectAllowed = 'move';
+                                // Firefox starts no drag without data
+                                e.dataTransfer.setData('text/plain', key);
+                                setDragKey(key);
+                                setDragOrder(columnOrder!);
                               }
+                            : undefined
+                        }
+                        onDragOver={
+                          dragKey && dragOrder && dragOrder[index] !== dragKey
+                            ? () => setDragOrder(moved(dragOrder, dragKey, index))
+                            : undefined
+                        }
+                        onDragEnd={
+                          reorderable
+                            ? (e) => endDrag(e.dataTransfer.dropEffect !== 'none')
                             : undefined
                         }
                       >
                         {reorderable ? (
-                          <div className={styles.tableOptionsReorder}>
-                            <span
-                              className={styles.reorderHandle}
-                              draggable
-                              title="Drag to reorder"
-                              aria-label={`Drag to reorder ${columnLabels[key]}`}
-                              onDragStart={() => setDragKey(key)}
-                              onDragEnd={() => setDragKey(null)}
-                            >
-                              ⠿
-                            </span>
-                            <button
-                              type="button"
-                              title="Move up"
-                              disabled={index === 0}
-                              onClick={() => {
-                                const nextOrder = [...columnOrder!];
-                                const temp = nextOrder[index];
-                                nextOrder[index] = nextOrder[index - 1];
-                                nextOrder[index - 1] = temp;
-                                onReorder!(nextOrder);
-                              }}
-                              className={styles.reorderBtn}
-                            >
-                              ▲
-                            </button>
-                            <button
-                              type="button"
-                              title="Move down"
-                              disabled={index === columnKeys.length - 1}
-                              onClick={() => {
-                                const nextOrder = [...columnOrder!];
-                                const temp = nextOrder[index];
-                                nextOrder[index] = nextOrder[index + 1];
-                                nextOrder[index + 1] = temp;
-                                onReorder!(nextOrder);
-                              }}
-                              className={styles.reorderBtn}
-                            >
-                              ▼
-                            </button>
-                          </div>
+                          <span
+                            className={styles.reorderHandle}
+                            title="Drag to reorder"
+                            aria-label={`Drag to reorder ${columnLabels[key]}`}
+                          >
+                            ⠿
+                          </span>
                         ) : null}
                         <label
                           className={styles.tableOptionsItem}
@@ -10205,6 +10212,30 @@ function ColumnsOptionsMenu<K extends string>({
                             <span className={styles.tableOptionsLocked}>Always visible</span>
                           ) : null}
                         </label>
+                        {reorderable ? (
+                          <div className={styles.tableOptionsReorder}>
+                            <button
+                              type="button"
+                              title="Move up"
+                              aria-label={`Move ${columnLabels[key]} up`}
+                              disabled={index === 0}
+                              onClick={() => onReorder!(moved(columnOrder!, key, index - 1))}
+                              className={styles.reorderBtn}
+                            >
+                              ▲
+                            </button>
+                            <button
+                              type="button"
+                              title="Move down"
+                              aria-label={`Move ${columnLabels[key]} down`}
+                              disabled={index === columnKeys.length - 1}
+                              onClick={() => onReorder!(moved(columnOrder!, key, index + 1))}
+                              className={styles.reorderBtn}
+                            >
+                              ▼
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}

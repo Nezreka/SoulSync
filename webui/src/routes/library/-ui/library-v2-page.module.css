@@ -4409,8 +4409,7 @@ button.statusWarn:disabled {
 .tableOptionsReorder {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-right: 4px;
+  gap: 2px;
 }
 
 .reorderBtn {
@@ -4456,8 +4455,42 @@ button.statusWarn:disabled {
   cursor: grabbing;
 }
 
-.tableOptionsRowDragging {
-  opacity: 0.4;
+.tableOptionsRowDraggable {
+  cursor: grab;
+}
+
+.tableOptionsRowDraggable:active {
+  cursor: grabbing;
+}
+
+/* the dragged row stays as the slot it will land in */
+.tableOptionsRowDragging,
+.tableOptionsRowDragging:hover {
+  background: rgba(var(--accent-rgb), 0.1);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55);
+  border-radius: 6px;
+}
+
+.tableOptionsRowDragging .tableOptionsItem {
+  opacity: 0.55;
+}
+
+/* the arrows are the keyboard's and the touch screen's way; with a mouse
+ * the row is dragged, so they wait for the row's hover */
+@media (hover: hover) {
+  .tableOptionsRow .reorderBtn {
+    opacity: 0;
+  }
+
+  .tableOptionsRow:hover .reorderBtn,
+  .tableOptionsRow:focus-within .reorderBtn {
+    opacity: 1;
+  }
+
+  .tableOptionsRow:hover .reorderBtn:disabled,
+  .tableOptionsRow:focus-within .reorderBtn:disabled {
+    opacity: 0.15;
+  }
 }
 
 .bulkBar {

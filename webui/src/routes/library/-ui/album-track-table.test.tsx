@@ -917,6 +917,59 @@ describe('library v2 album track table', () => {
     );
   });
 
+  it('moves a column by dragging its row, the others making room, saved once on the drop', async () => {
+    const saved: { track_table?: { column_order?: string[] } }[] = [];
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({ success: true, album: album([track()]) }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({ success: true, preferences: { track_table: {} } }),
+      ),
+      http.put('/api/library/v2/ui-preferences', async ({ request }) => {
+        const patch = (await request.json()) as (typeof saved)[number];
+        saved.push(patch);
+        return HttpResponse.json({ success: true, preferences: { track_table: patch.track_table } });
+      }),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <LibraryV2CanWriteContext.Provider value>
+          <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+        </LibraryV2CanWriteContext.Provider>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole('table');
+    fireEvent.click(screen.getByRole('button', { name: 'View Settings' }));
+    const dialog = screen.getByRole('dialog', { name: 'View Settings' });
+    const row = (name: string) =>
+      within(dialog).getByRole('checkbox', { name }).closest('[draggable="true"]') as HTMLElement;
+    const order = () =>
+      Array.from(dialog.querySelectorAll('[draggable="true"]'), (r) => r.textContent ?? '');
+    const dataTransfer = { setData: vi.fn(), effectAllowed: 'all', dropEffect: 'move' };
+
+    fireEvent.dragStart(row('Quality'), { dataTransfer });
+    fireEvent.dragOver(row('Duration'), { dataTransfer });
+    const quality = order().findIndex((label) => label.includes('Quality'));
+    expect(order()[quality + 1]).toContain('Duration');
+    expect(saved).toEqual([]);
+
+    fireEvent.drop(row('Quality'), { dataTransfer });
+    fireEvent.dragEnd(row('Quality'), { dataTransfer });
+    await waitFor(() => expect(saved).toHaveLength(1));
+    const columns = saved[0].track_table?.column_order ?? [];
+    expect(columns.indexOf('quality')).toBe(columns.indexOf('duration') - 1);
+  });
+
   it('keeps table preference writes and column resize fail-closed read-only', async () => {
     let writes = 0;
     server.use(
