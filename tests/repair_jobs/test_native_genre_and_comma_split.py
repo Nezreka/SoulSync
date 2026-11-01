@@ -263,6 +263,7 @@ def test_native_comma_splitter_resolves_parts_from_the_native_library(comma_db,
     assert [entry['library_artist_id'] for entry in resolution] == [2, 3]
 
 
+@pytest.mark.skipif(not __import__('shutil').which('ffmpeg'), reason='ffmpeg not installed')
 def test_comma_split_fix_retags_the_native_files(comma_db, monkeypatch):
     pytest.importorskip('mutagen')
     from mutagen.flac import FLAC

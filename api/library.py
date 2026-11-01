@@ -422,7 +422,8 @@ def register_routes(bp):
         profile_id = parse_profile_id(request)
         try:
             db = get_database()
-            playlists = db.get_mirrored_playlists(profile_id=profile_id)
+            # a GET open to read keys must not write; the web page fills covers in
+            playlists = db.get_mirrored_playlists(profile_id=profile_id, backfill_covers=False)
             out = []
             for pl in playlists:
                 out.append({

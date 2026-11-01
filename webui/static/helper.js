@@ -1373,10 +1373,6 @@ const HELPER_CONTENT = {
         title: 'Search Library',
         description: 'Search your library by artist name. Results filter in real-time as you type.',
     },
-    '#watchlist-filter': {
-        title: 'Watchlist Filter',
-        description: 'Filter artists by watchlist status: All shows everyone, Watched shows only artists you follow, Unwatched shows artists not on your watchlist.',
-    },
     '#alphabet-selector': {
         title: 'Alphabet Jump',
         description: 'Jump to artists starting with a specific letter. Click "All" to reset. "#" shows artists starting with numbers.',
@@ -2374,7 +2370,6 @@ const HELPER_TOURS = {
 
             // Controls
             { page: 'library', selector: '#library-search-input', title: 'Search Artists', description: 'Type to filter your library by artist name. Results update instantly as you type.' },
-            { page: 'library', selector: '#watchlist-filter', title: 'Monitoring Filter', description: 'Show all artists, monitored artists, or unmonitored artists.' },
             { page: 'library', selector: '#library-view-toggle', title: 'Library View', description: 'Switch between the visual card grid and the detailed table view.' },
 
             // Grid
@@ -3403,7 +3398,7 @@ function _guessPageFromSelector(selector) {
         'discover':    ['discover-', 'spotify-library', 'recent-releases', 'seasonal', 'release-radar', 'discovery-weekly', 'build-playlist', 'listenbrainz', 'decade-tabs', 'genre-tabs', 'daily-mixes', 'personalized-'],
         'artists':     ['artists-search', 'artists-hero', 'artist-detail', 'similar-artists'],
         'automations': ['automations-', 'auto-', 'builder-'],
-        'library':     ['library-', 'alphabet-selector', 'watchlist-filter'],
+        'library':     ['library-', 'alphabet-selector'],
         // '#stats-' not 'stats-': the bare prefix also matched
         // #listening-stats-enabled, which is a Settings control, so its helper
         // search result navigated to the Stats page and found nothing.

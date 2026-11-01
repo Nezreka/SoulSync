@@ -57,6 +57,19 @@ if "spotipy" not in sys.modules:
 from core.reorganize_runner import build_runner  # noqa: E402
 
 
+
+@pytest.fixture(autouse=True)
+def _one_shared_library(monkeypatch):
+    """these tests are about one library. an earlier test on the same worker
+    can leave profiles with libraries of their own in the shared test
+    database, and the findings/reorganize queries then filter by library
+    against tables these fixtures don't build."""
+    import core.library_scope as library_scope
+    monkeypatch.setattr(library_scope, "SCOPE_PARKED", True)
+    library_scope.invalidate_library_scope_cache()
+    yield
+    library_scope.invalidate_library_scope_cache()
+
 @pytest.fixture(autouse=True)
 def reset_queue_singleton():
     """Each test gets a fresh queue singleton so update_active_progress

@@ -25579,7 +25579,8 @@ class MusicDatabase:
             logger.error(f"Error backfilling mirrored covers: {e}")
         return filled
 
-    def get_mirrored_playlists(self, profile_id: int = 1, is_request_list: Optional[bool] = None) -> List[Dict]:
+    def get_mirrored_playlists(self, profile_id: int = 1, is_request_list: Optional[bool] = None,
+                               backfill_covers: bool = True) -> List[Dict]:
         """Return all mirrored playlists for a profile, newest first.
         If is_request_list is True, return only request lists.
         If is_request_list is False, return only non-request lists.
@@ -25589,7 +25590,9 @@ class MusicDatabase:
         # from the first track discovery matched. Doing it here means the first
         # visit after an upgrade fixes the whole library; every later visit
         # short-circuits on the count and costs nothing.
-        self.backfill_missing_mirrored_covers(profile_id)
+        # a read-only caller (the REST API's read keys) writes nothing
+        if backfill_covers:
+            self.backfill_missing_mirrored_covers(profile_id)
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()

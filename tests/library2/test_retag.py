@@ -668,6 +668,7 @@ def test_a_hand_set_artist_name_is_what_gets_written(imported_conn):
     assert data['artists_list'] == ['Corrected Artist', 'Wizkid']
 
 
+@pytest.mark.skipif(not __import__('shutil').which('ffmpeg'), reason='ffmpeg not installed')
 def test_wrong_file_number_does_not_select_another_catalogue_track(imported_conn, legacy_db, tmp_path):
     """#1610: tags naming Beta but numbered 1 must never receive Alpha's tags."""
     import subprocess

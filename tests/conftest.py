@@ -1102,6 +1102,11 @@ def _fresh_fold_index():
     from database.music_database import MusicDatabase
     MusicDatabase._owned_genres_cache.clear()
     saved_genres_ttl, MusicDatabase._OWNED_GENRES_TTL = MusicDatabase._OWNED_GENRES_TTL, 0.0
+    # which profiles keep a library of their own is cached per process. a test
+    # that set some up left it filled for the next test on the same xdist
+    # worker, which then filtered by library and read tables it doesn't have
+    from core.library_scope import invalidate_library_scope_cache
+    invalidate_library_scope_cache()
     # cache hits write their access stats on a timer; in tests, right away
     from core.metadata import cache as metadata_cache
     saved_touch, metadata_cache._TOUCH_FLUSH_SECONDS = metadata_cache._TOUCH_FLUSH_SECONDS, 0.0

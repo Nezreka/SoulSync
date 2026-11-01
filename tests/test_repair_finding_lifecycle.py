@@ -29,6 +29,19 @@ import pytest
 from core.repair_worker import DESTRUCTIVE_FINDING_TYPES, RepairWorker
 
 
+
+@pytest.fixture(autouse=True)
+def _one_shared_library(monkeypatch):
+    """these tests are about one library. an earlier test on the same worker
+    can leave profiles with libraries of their own in the shared test
+    database, and the findings/reorganize queries then filter by library
+    against tables these fixtures don't build."""
+    import core.library_scope as library_scope
+    monkeypatch.setattr(library_scope, "SCOPE_PARKED", True)
+    library_scope.invalidate_library_scope_cache()
+    yield
+    library_scope.invalidate_library_scope_cache()
+
 class _NonClosingConn(sqlite3.Connection):
     """The worker closes connections in `finally`; keep ours alive for asserts."""
 
