@@ -77,6 +77,41 @@ def probe_write_lock(database: Any, *, timeout_ms: int = PROBE_TIMEOUT_MS) -> bo
             logger.debug("write-lock probe close failed: %s", close_exc)
 
 
+LOOP_PROBE_TIMEOUT_SECONDS = 2.0
+
+
+def probe_shared_loop(*, timeout: float = LOOP_PROBE_TIMEOUT_SECONDS) -> bool:
+    """True iff the shared async loop runs a no-op within ``timeout``.
+
+    Most of the app reaches clients through that one loop (utils.async_helpers);
+    a coroutine that blocks it (a thread lock, a sync call) stalls every page
+    that needs it. On Oct 31 2026 the Downloads page took two minutes with
+    nothing in the log to say why."""
+    try:
+        import asyncio
+        from utils.async_helpers import AsyncCallTimeout, run_async
+    except Exception:  # noqa: BLE001 - no loop to watch
+        return True
+    try:
+        run_async(asyncio.sleep(0), timeout=timeout)
+        return True
+    except AsyncCallTimeout:
+        return False
+    except Exception as exc:  # noqa: BLE001 - a probe never breaks the app
+        logger.debug("shared loop probe failed: %s", exc)
+        return True
+
+
+def report_blocked_loop(*, log: Optional[Callable[..., None]] = None) -> None:
+    emit = log or (lambda message: logger.error("%s", message))
+    emit(
+        f"The shared async loop did not run a no-op within {LOOP_PROBE_TIMEOUT_SECONDS:g}s, "
+        "so every page and worker waiting on it is stalled. The blocker is the "
+        "SoulSyncAsyncLoop thread's stack below (a coroutine doing blocking work):\n"
+        + format_thread_stacks()
+    )
+
+
 def format_thread_stacks() -> str:
     """Every live thread with its stack, newest frame last."""
     names: Dict[int, str] = {t.ident: t.name for t in threading.enumerate() if t.ident}
@@ -127,6 +162,8 @@ def run_watchdog(
     stop_event: Optional[threading.Event] = None,
     probe: Optional[Callable[[], bool]] = None,
     report: Optional[Callable[[], None]] = None,
+    loop_probe: Optional[Callable[[], bool]] = None,
+    loop_report: Optional[Callable[[], None]] = None,
     max_iterations: Optional[int] = None,
     now: Callable[[], float] = time.monotonic,
 ) -> int:
@@ -139,8 +176,12 @@ def run_watchdog(
     do_probe = probe or (lambda: probe_write_lock(database))
     do_report = report or (lambda: report_blocked_writer())
 
+    do_loop_probe = loop_probe or (lambda: True)
+    do_loop_report = loop_report or (lambda: report_blocked_loop())
+
     dumps = 0
     last_dump: Optional[float] = None
+    last_loop_dump: Optional[float] = None
     iterations = 0
     while not stop_event.is_set():
         if max_iterations is not None and iterations >= max_iterations:
@@ -153,6 +194,12 @@ def run_watchdog(
                     last_dump = moment
                     dumps += 1
                     do_report()
+            if not do_loop_probe():
+                moment = now()
+                if last_loop_dump is None or (moment - last_loop_dump) >= cooldown_seconds:
+                    last_loop_dump = moment
+                    dumps += 1
+                    do_loop_report()
         except Exception as exc:  # noqa: BLE001 - diagnostics never break the app
             logger.debug("write-lock watchdog tick skipped: %s", exc)
         if max_iterations is not None and iterations >= max_iterations:
@@ -163,6 +210,9 @@ def run_watchdog(
 
 
 def start_watchdog(database: Any, **kwargs: Any) -> threading.Thread:
+    # the live watchdog also watches the shared async loop; tests drive
+    # run_watchdog directly and pass their own probes
+    kwargs.setdefault("loop_probe", probe_shared_loop)
     thread = threading.Thread(
         target=run_watchdog, args=(database,), kwargs=kwargs,
         name="DbLockWatchdog", daemon=True,
@@ -177,7 +227,9 @@ __all__ = [
     "PROBE_TIMEOUT_MS",
     "format_open_transactions",
     "format_thread_stacks",
+    "probe_shared_loop",
     "probe_write_lock",
+    "report_blocked_loop",
     "report_blocked_writer",
     "run_watchdog",
     "start_watchdog",

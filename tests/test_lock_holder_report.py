@@ -58,3 +58,35 @@ def test_a_read_only_connection_is_not_a_holder(tmp_path):
     assert connection_pool.open_transactions() == []
     conn.close()
     assert "none on pooled connections" in db_lock_watchdog.format_open_transactions()
+
+
+def test_a_stalled_shared_loop_is_reported_with_every_stack(monkeypatch):
+    import asyncio
+    import time as _time
+
+    from utils.async_helpers import run_async
+
+    # a coroutine doing blocking work freezes the shared loop
+    async def blocker():
+        _time.sleep(1.5)
+
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(1) as pool:
+        pool.submit(run_async, blocker())
+        _time.sleep(0.2)
+        assert db_lock_watchdog.probe_shared_loop(timeout=0.5) is False
+    assert db_lock_watchdog.probe_shared_loop(timeout=2) is True
+    seen = []
+    db_lock_watchdog.report_blocked_loop(log=seen.append)
+    assert "shared async loop" in seen[0] and "--- thread" in seen[0]
+    assert asyncio  # imported for the coroutine above
+
+
+def test_the_watchdog_dumps_once_per_cooldown_for_a_stalled_loop():
+    reports = []
+    db_lock_watchdog.run_watchdog(
+        None, probe=lambda: True, report=lambda: None,
+        loop_probe=lambda: False, loop_report=lambda: reports.append(1),
+        interval_seconds=0, cooldown_seconds=300, max_iterations=3,
+        now=lambda: 1000.0)
+    assert reports == [1]
