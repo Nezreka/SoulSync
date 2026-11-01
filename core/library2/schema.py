@@ -1206,6 +1206,13 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
             cursor.execute(
                 f"CREATE INDEX IF NOT EXISTS {name} "
                 f"ON lib2_tracks({expression}) WHERE {expression} IS NOT NULL")
+        # the same for releases: an import groups tracks into an album by its
+        # provider id, and without these each miss parsed all 72k albums
+        for service in ('deezer', 'tidal', 'qobuz', 'itunes'):
+            expression = external_id_sql('external_ids', service)
+            cursor.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_lib2_albums_ext_{service} "
+                f"ON lib2_albums({expression}) WHERE {expression} IS NOT NULL")
     except Exception as e:  # noqa: BLE001
         logger.error("external_ids index failed (will retry next start): %s", e)
     # iss29-D13 normalized artist key. Index first, then backfill — also AFTER

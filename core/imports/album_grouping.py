@@ -103,7 +103,13 @@ def find_existing_soulsync_album_id(
             column = 'spotify_id' if provider == 'spotify' else 'musicbrainz_id'
             where = f"{column} = ?"
         else:
-            where = f"json_extract(external_ids, '$.{provider}') = ?"
+            # the indexed form (idx_lib2_albums_ext_*): the bare json_extract
+            # parsed all 72k albums on every miss (~190ms an import)
+            from core.library2.provider_ids import external_id_sql
+            try:
+                where = f"{external_id_sql('external_ids', provider)} = ?"
+            except ValueError:  # not a provider the indexes know
+                where = f"json_extract(external_ids, '$.{provider}') = ?"
         try:
             row = cursor.execute(
                 f"SELECT id, musicbrainz_id FROM lib2_albums WHERE {where} LIMIT 1",

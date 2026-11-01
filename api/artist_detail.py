@@ -712,8 +712,8 @@ def get_artist_top_tracks_endpoint(artist_id):
                     FROM lib2_artists
                     WHERE id = ?
                        OR spotify_id = ?
-                       OR json_extract(external_ids, '$.itunes') = ?
-                       OR json_extract(external_ids, '$.deezer') = ?
+                       OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
+                       OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
                        OR musicbrainz_id = ?
                     LIMIT 1
                 """, (artist_id, artist_id, artist_id, artist_id, artist_id))
@@ -791,8 +791,8 @@ def _resolve_artist_source_ids(artist_id) -> dict:
                 FROM lib2_artists
                 WHERE id = ?
                    OR spotify_id = ?
-                   OR json_extract(external_ids, '$.itunes') = ?
-                   OR json_extract(external_ids, '$.deezer') = ?
+                   OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
+                   OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
                    OR musicbrainz_id = ?
                 LIMIT 1
             """, (artist_id, artist_id, artist_id, artist_id, artist_id))

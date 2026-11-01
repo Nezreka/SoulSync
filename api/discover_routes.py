@@ -3221,9 +3221,9 @@ def get_your_artist_info(artist_id):
             # Check by various ID columns
             cursor.execute("""
                 SELECT * FROM lib2_artists WHERE id = ? OR spotify_id = ?
-                   OR json_extract(external_ids, '$.itunes') = ?
-                   OR json_extract(external_ids, '$.deezer') = ?
-                   OR json_extract(external_ids, '$.discogs') = ? LIMIT 1
+                   OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
+                   OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
+                   OR TRIM(CAST(json_extract(external_ids,'$.discogs') AS TEXT)) = ? LIMIT 1
             """, (artist_id, artist_id, artist_id, artist_id, artist_id))
             row = cursor.fetchone()
             if row:

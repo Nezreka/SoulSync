@@ -1635,9 +1635,9 @@ def watchlist_artist_config(artist_id):
                     SELECT banner_url, summary, style, mood, label, genres
                     FROM lib2_artists
                     WHERE spotify_id = ?
-                       OR json_extract(external_ids, '$.itunes') = ?
-                       OR json_extract(external_ids, '$.deezer') = ?
-                       OR json_extract(external_ids, '$.discogs') = ?
+                       OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
+                       OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
+                       OR TRIM(CAST(json_extract(external_ids,'$.discogs') AS TEXT)) = ?
                        OR musicbrainz_id = ?
                     LIMIT 1
                 """, (

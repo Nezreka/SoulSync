@@ -283,8 +283,14 @@ def provider_id_owner(
     elif service == "musicbrainz":
         predicate, params = "musicbrainz_id = ?", (value,)
     else:
-        predicate = "json_extract(external_ids, '$.' || ?) = ?"
-        params = (service, value)
+        # a literal path in the indexed form: a bound path can never use the
+        # external_ids expression indexes, so it scanned the whole table
+        from core.library2.provider_ids import external_id_sql
+        try:
+            predicate, params = f"{external_id_sql('external_ids', service)} = ?", (value,)
+        except ValueError:  # not a provider the indexes know
+            predicate = "json_extract(external_ids, '$.' || ?) = ?"
+            params = (service, value)
     row = conn.execute(
         f"SELECT id FROM {table} WHERE {predicate} LIMIT 1", params,
     ).fetchone()
