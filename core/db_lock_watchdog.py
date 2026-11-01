@@ -115,6 +115,7 @@ def report_blocked_loop(*, log: Optional[Callable[..., None]] = None) -> None:
 # a busy server: more than this share of one core, averaged over a tick
 BUSY_CPU_FRACTION = 0.7
 BUSY_TOP_THREADS = 8
+BUSY_MIN_WINDOW_SECONDS = 5.0
 
 
 def thread_cpu_snapshot() -> Optional[Dict[int, float]]:
@@ -136,7 +137,9 @@ def format_busy_threads(before: Dict[int, float], after: Dict[int, float],
     Pages that take milliseconds on their own took seconds live (Oct 31 2026):
     one process runs every request and dozens of background threads, and they
     share the GIL. This says which threads are taking it."""
-    if elapsed <= 0:
+    # a sliver of a second (the first tick after start) makes any CPU look
+    # like thousands of percent of a core
+    if elapsed < BUSY_MIN_WINDOW_SECONDS:
         return None
     used = {tid: after[tid] - before.get(tid, 0.0) for tid in after}
     total = sum(v for v in used.values() if v > 0)

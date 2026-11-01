@@ -117,3 +117,8 @@ def test_the_watchdog_reports_busy_threads_once_per_window():
         interval_seconds=0, cooldown_seconds=300, max_iterations=3,
         now=iter([0.0, 15.0, 30.0, 45.0]).__next__)
     assert len(reports) == 1 and "200% of a core" in reports[0]
+
+
+def test_a_sliver_of_a_window_is_never_reported():
+    # the first tick after start: 0.2s of start-up cpu read as 2000% of a core
+    assert db_lock_watchdog.format_busy_threads({1: 0.0}, {1: 5.0}, 0.2) is None
