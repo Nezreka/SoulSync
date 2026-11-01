@@ -207,6 +207,23 @@ def test_sync_pending_downloaded_playlists_handles_errors():
         assert 'Sync error' in res['errors'][0]
 
 
+def test_sync_pending_downloaded_playlists_preserves_curation_pending_outcome():
+    """Post-download sync delegates to the curation-aware mirror sync gate."""
+    register_completed_playlist_batch({
+        'mirrored_playlist_id': 42,
+        'playlist_name': 'Needs Review',
+        'profile_id': 1,
+    })
+
+    with patch('core.automation.handlers.sync_playlist.auto_sync_playlist') as mock_sync:
+        mock_sync.return_value = {'status': 'curation_pending', 'reason': 'No tracks approved'}
+        result = sync_pending_downloaded_playlists(MagicMock())
+
+    assert result['status'] == 'skipped'
+    assert result['synced_playlists'] == []
+    assert mock_sync.call_args[0][0]['skip_wishlist_add'] is True
+
+
 class CountingDatabase(FakeDatabase):
     def __init__(self, assignments=None):
         super().__init__(assignments)

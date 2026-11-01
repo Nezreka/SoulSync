@@ -76,6 +76,9 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
             # on, which is exactly the choice to search the guess anyway.
             # Check the track ID prefix since the wishlist payload helper overwrites source.
             track_data = failed_track_info.get('track_data') or failed_track_info.get('spotify_track', {})
+            track_source_context = dict(source_context or {})
+            if isinstance(track_data, dict):
+                track_source_context.update(track_data.get('_curation_origin') or {})
             sp_id = track_data.get('id', '') if isinstance(track_data, dict) else ''
             _artists = track_data.get('artists') if isinstance(track_data, dict) else None
             _artist = (_artists or [None])[0] if isinstance(_artists, list) else _artists
@@ -96,7 +99,7 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
             success = wishlist_service.add_failed_track_from_modal(
                 track_info=failed_track_info,
                 source_type=batch_source_type,
-                source_context=source_context,
+                source_context=track_source_context,
                 profile_id=owner_profile_id,
             )
             # Count the attempt EITHER way — a fresh add becomes

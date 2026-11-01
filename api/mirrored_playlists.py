@@ -149,6 +149,11 @@ def _invalidate_mirror_sync_fingerprint(playlist_id):
         logger.debug("Could not invalidate sync fingerprint for %s: %s", key, e)
 
 
+def _invalidate_affected_mirror_fingerprints(playlist_ids):
+    for playlist_id in dict.fromkeys(int(value) for value in (playlist_ids or [])):
+        _invalidate_mirror_sync_fingerprint(playlist_id)
+
+
 @bp.route('/api/mirrored-playlists/list', methods=['GET'])
 def get_mirrored_playlists_list():
     """Return simple list of mirrored playlists for automation config dropdowns."""
@@ -316,7 +321,21 @@ def get_mirrored_playlist_endpoint(playlist_id):
         playlist['source_ref_error'] = source_ref.source_ref_error
         playlist['display_name'] = effective_mirrored_name(playlist)
         playlist['pipeline_state'] = _snapshot_playlist_pipeline_state(playlist_id)
-        playlist['tracks'] = database.get_mirrored_playlist_tracks(playlist_id)
+        tracks = database.get_mirrored_playlist_tracks(
+            playlist_id, profile_id=_mirror_scope_profile_id()
+        )
+        policy = database.get_mirrored_playlist_curation(
+            playlist_id, profile_id=_mirror_scope_profile_id()
+        )
+        if policy is None:
+            return jsonify({"error": "Playlist not found"}), 404
+        from core.playlists.curation import decorate_tracks
+        playlist['tracks'], playlist['curation_counts'] = decorate_tracks(
+            tracks,
+            enabled=policy['enabled'],
+            decisions=policy['decisions'],
+            global_rejections=policy['global_rejections'],
+        )
         _stamp_track_statuses(database, playlist)
         return jsonify(playlist)
     except Exception as e:
@@ -518,7 +537,7 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
     """Update per-playlist download preferences (e.g. organize by playlist folder)."""
     try:
         data = request.get_json() or {}
-        if not ({'organize_by_playlist', 'quality_profile_id', 'sync_mode'} & set(data)):
+        if not ({'organize_by_playlist', 'quality_profile_id', 'sync_mode', 'curation_enabled'} & set(data)):
             return jsonify({"error": "No supported preference supplied"}), 400
 
         database = get_database()
@@ -552,6 +571,12 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             else:
                 return jsonify({"error": "Invalid sync_mode"}), 400
 
+        curation_enabled = None
+        if 'curation_enabled' in data:
+            curation_enabled = parse_strict_bool(data.get('curation_enabled'))
+            if curation_enabled is None:
+                return jsonify({"error": "Invalid curation_enabled"}), 400
+
         # Both fields are validated and written in ONE transaction: a rejected
         # Quality Profile used to leave the already-committed organize toggle
         # behind while the response said 400 (P2-02).
@@ -561,6 +586,7 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             organize_by_playlist=organize_by_playlist,
             quality_profile_id=quality_profile_id,
             sync_mode=sync_mode,
+            curation_enabled=curation_enabled,
         )
         if outcome == 'not_found':
             return jsonify({"error": "Playlist not found"}), 404
@@ -576,12 +602,87 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             # A profile-only change must not be swallowed by the auto-sync
             # "tracks unchanged" fast path (P1-03).
             _invalidate_mirror_sync_fingerprint(playlist_id)
+        if (
+            curation_enabled is not None
+            and bool(curation_enabled) != bool(playlist.get('curation_enabled'))
+        ):
+            _invalidate_mirror_sync_fingerprint(playlist_id)
 
         updated = _owned_mirrored_playlist(database, playlist_id) or {}
         return jsonify({"success": True, "playlist": updated})
     except Exception as e:
         logger.error(f"Error updating mirrored playlist preferences: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/mirrored-playlists/<int:playlist_id>/curation/decisions', methods=['PATCH'])
+def update_mirrored_playlist_decisions_endpoint(playlist_id):
+    """Apply Keep/Pending/Reject/Unreviewed changes as one transaction."""
+    try:
+        database = get_database()
+        if not _owned_mirrored_playlist(database, playlist_id):
+            return jsonify({"error": "Playlist not found"}), 404
+        data = request.get_json() or {}
+        updates = data.get('updates')
+        if not isinstance(updates, list):
+            return jsonify({"error": "updates must be an array"}), 400
+        try:
+            outcome = database.update_mirrored_playlist_decisions(
+                playlist_id, updates, profile_id=_mirror_scope_profile_id()
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if outcome.get('status') == 'not_found':
+            return jsonify({"error": "Playlist not found"}), 404
+        if outcome.get('status') == 'unknown_track':
+            return jsonify({
+                "error": "One or more tracks are not in this playlist",
+                "source_track_ids": outcome.get('source_track_ids', []),
+            }), 400
+        if outcome.get('status') != 'ok':
+            return jsonify({"error": "Failed to update curation decisions"}), 500
+        _invalidate_affected_mirror_fingerprints(outcome.get('affected_playlist_ids'))
+        return jsonify({"success": True, **outcome})
+    except Exception as exc:
+        logger.error("Error updating mirrored playlist curation: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+@bp.route('/api/mirrored-playlists/<int:playlist_id>/curation/global-rejections', methods=['PATCH'])
+def update_mirrored_global_rejections_endpoint(playlist_id):
+    """Set profile/source rejection state for tracks from one owned mirror."""
+    try:
+        database = get_database()
+        if not _owned_mirrored_playlist(database, playlist_id):
+            return jsonify({"error": "Playlist not found"}), 404
+        data = request.get_json() or {}
+        source_track_ids = data.get('source_track_ids')
+        rejected = parse_strict_bool(data.get('rejected'))
+        if not isinstance(source_track_ids, list) or rejected is None:
+            return jsonify({"error": "source_track_ids array and rejected boolean are required"}), 400
+        try:
+            outcome = database.update_mirrored_global_rejections(
+                playlist_id,
+                source_track_ids,
+                rejected,
+                profile_id=_mirror_scope_profile_id(),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if outcome.get('status') == 'not_found':
+            return jsonify({"error": "Playlist not found"}), 404
+        if outcome.get('status') == 'unknown_track':
+            return jsonify({
+                "error": "One or more tracks are not in this playlist",
+                "source_track_ids": outcome.get('source_track_ids', []),
+            }), 400
+        if outcome.get('status') != 'ok':
+            return jsonify({"error": "Failed to update global rejections"}), 500
+        _invalidate_affected_mirror_fingerprints(outcome.get('affected_playlist_ids'))
+        return jsonify({"success": True, **outcome})
+    except Exception as exc:
+        logger.error("Error updating mirrored global rejections: %s", exc)
+        return jsonify({"error": str(exc)}), 500
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/copy-to-request-list', methods=['POST'])

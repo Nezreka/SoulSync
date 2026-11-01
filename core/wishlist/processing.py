@@ -207,6 +207,34 @@ def _run_wishlist_cycle(
     logger = runtime.logger
     from core.wishlist.album_grouping import group_wishlist_tracks_by_album
 
+    # Re-evaluate persisted playlist policy immediately before deferred
+    # dispatch. Rows can outlive their originating sync and can have several
+    # independent playlist origins; any still-eligible origin is sufficient.
+    from core.playlists.curation import CurationPolicyError, wishlist_track_allowed
+    database_getter = getattr(runtime, 'get_music_database', None)
+    if callable(database_getter):
+        policy_database = database_getter()
+    else:
+        from database.music_database import get_database
+        policy_database = get_database()
+    eligible_tracks = []
+    for track in tracks:
+        try:
+            if wishlist_track_allowed(
+                policy_database,
+                track,
+                profile_id=int(
+                    track.get('profile_id') or getattr(runtime, 'profile_id', 1) or 1
+                ),
+            ):
+                eligible_tracks.append(track)
+        except CurationPolicyError as exc:
+            logger.error("Blocking deferred wishlist track: curation policy unavailable: %s", exc)
+    tracks = eligible_tracks
+    if not tracks:
+        logger.info("Wishlist dispatch skipped: no tracks are currently eligible")
+        return {'submitted': [], 'album_batches': 0, 'residual_count': 0}
+
     # stopped while the manual run was still preparing: the placeholder is
     # about to be rebuilt as the first album batch, which would quietly undo
     # the cancel and start the downloads anyway

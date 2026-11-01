@@ -105,3 +105,97 @@ def test_the_profile_does_not_leak_past_the_sync(harness):
     # a later call on the same instance with no profile is not still profile 2
     harness.run('pl-B', None)
     assert harness.seen['library'] == applied
+
+
+def test_overlapping_syncs_keep_colliding_source_payloads_task_local(monkeypatch):
+    """One shared service must not swap or delete another sync's curation origin."""
+    from core.sync.wishlist_readd import (
+        build_original_tracks_by_source,
+        build_original_tracks_map,
+    )
+
+    svc = ss.PlaylistSyncService.__new__(ss.PlaylistSyncService)
+    svc.progress_callbacks = {}
+    svc.syncing_playlists = set()
+    client = _Client()
+    svc._media_client = lambda name: client
+    monkeypatch.setattr('core.settings.config_manager.get_active_media_server', lambda: 'plex')
+    monkeypatch.setattr(ss.PlaylistSyncService, '_apply_profile_library', lambda *a, **k: None)
+    monkeypatch.setattr(ss.PlaylistSyncService, '_update_progress', lambda *a, **k: None)
+
+    entered = 0
+    entered_lock = threading.Lock()
+    both_entered = threading.Event()
+
+    async def overlapping_find(self, track, candidate_pool=None):
+        nonlocal entered
+        with entered_lock:
+            entered += 1
+            if entered == 2:
+                both_entered.set()
+        while not both_entered.is_set():
+            await asyncio.sleep(0.001)
+        await asyncio.sleep(0.02)
+        return None, 0.0
+
+    monkeypatch.setattr(ss.PlaylistSyncService, '_find_track_in_media_server', overlapping_find)
+    monkeypatch.setattr('core.wishlist.library_match.find_owned_match', lambda *a, **k: None)
+
+    seen = []
+    seen_lock = threading.Lock()
+
+    class _Wishlist:
+        database = None
+
+        def add_spotify_track_to_wishlist(self, **kwargs):
+            with seen_lock:
+                seen.append((
+                    kwargs['spotify_track_data']['name'],
+                    kwargs['source_context']['mirrored_playlist_id'],
+                    kwargs['source_context']['source_track_id'],
+                ))
+            return True
+
+    monkeypatch.setattr(
+        'core.wishlist_service.get_wishlist_service', lambda: _Wishlist()
+    )
+
+    def run(label, mirror_id):
+        payload = {
+            'id': 'shared-provider-id',
+            'source_track_id': 'shared-source-id',
+            'name': label,
+            'artists': [{'name': 'Artist'}],
+            'album': {'name': f'{label} Album'},
+            '_curation_origin': {
+                'mirrored_playlist_id': mirror_id,
+                'source_track_id': 'shared-source-id',
+            },
+        }
+        track = SimpleNamespace(
+            id='shared-provider-id', source_track_id='shared-source-id',
+            name=label, artists=['Artist'], album=f'{label} Album', duration_ms=1,
+        )
+        playlist = SimpleNamespace(
+            id=f'auto_mirror_{mirror_id}', name=label, tracks=[track]
+        )
+        asyncio.run(svc.sync_playlist(
+            playlist,
+            original_tracks_map=build_original_tracks_map([payload]),
+            original_tracks_by_source=build_original_tracks_by_source([payload]),
+        ))
+
+    first = threading.Thread(target=run, args=('First', 7))
+    second = threading.Thread(target=run, args=('Second', 8))
+    first.start()
+    second.start()
+    first.join(10)
+    second.join(10)
+
+    assert not first.is_alive() and not second.is_alive()
+    assert sorted(seen) == [
+        ('First', 7, 'shared-source-id'),
+        ('Second', 8, 'shared-source-id'),
+    ]
+    assert ss._sync_original_tracks_map.get() is None
+    assert ss._sync_original_tracks_by_source.get() is None

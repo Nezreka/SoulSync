@@ -17,10 +17,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import type { MirroredPlaylistDetail } from '../-sync.api';
+import type { MirroredCurationDecision, MirroredPlaylistDetail } from '../-sync.api';
 import type { MirroredTrack, MirroredTrackStatus } from '../-sync.mirrored';
 
 import { isLiveBeatportRef, saveBeatportSnapshot } from '../-beatport.lists';
+import {
+  patchMirroredCurationDecisions,
+  patchMirroredGlobalRejections,
+  patchMirroredPreferences,
+} from '../-sync.api';
 import {
   mirroredDetailSourceIcon,
   mirroredDetailSourceLabel,
@@ -261,13 +266,23 @@ interface EditProps {
   onDragEnd: () => void;
 }
 
+interface CurationRowProps {
+  selected: boolean;
+  busy: boolean;
+  onSelect: () => void;
+  onDecision: (decision: MirroredCurationDecision) => void;
+  onGlobalRejection: (rejected: boolean) => void;
+}
+
 function TrackRow({
   track,
   edit,
+  curation,
   onPlay,
 }: {
   track: MirroredTrack;
   edit?: EditProps;
+  curation?: CurationRowProps;
   /** play the playlist from this song on; the number turns into it on hover */
   onPlay?: () => void;
 }) {
@@ -306,6 +321,16 @@ function TrackRow({
       onDragEnd={edit?.onDragEnd}
     >
       <span className="mm-row-pos">
+        {curation ? (
+          <input
+            type="checkbox"
+            className="mm-curate-check"
+            checked={curation.selected}
+            disabled={curation.busy}
+            aria-label={`Select ${track.track_name ?? 'track'} for review`}
+            onChange={curation.onSelect}
+          />
+        ) : null}
         <span className="mm-row-num">{track.position}</span>
         {onPlay ? (
           <button
@@ -351,10 +376,42 @@ function TrackRow({
               {chip}
             </span>
           ) : null}
+          {curation ? (
+            <span className="mm-curate-effective" data-decision={track.effective_decision}>
+              {track.effective_decision === 'unreviewed' ? 'Unreviewed' : track.effective_decision}
+            </span>
+          ) : null}
         </span>
       </div>
       <span className="mm-row-album">{track.album_name || ''}</span>
       <span className="mm-row-dur">{mirroredRowDuration(track.duration_ms)}</span>
+      {curation ? (
+        <div className="mm-curate-cell">
+          <select
+            aria-label={`Review decision for ${track.track_name ?? 'track'}`}
+            value={track.curation_decision ?? ''}
+            disabled={curation.busy}
+            onChange={(event) =>
+              curation.onDecision((event.target.value || null) as MirroredCurationDecision)
+            }
+          >
+            <option value="">Unreviewed</option>
+            <option value="keep">Keep</option>
+            <option value="pending">Pending</option>
+            <option value="reject">Reject</option>
+          </select>
+          <button
+            type="button"
+            className={`mm-global-reject${track.globally_rejected ? ' is-on' : ''}`}
+            disabled={curation.busy}
+            aria-pressed={Boolean(track.globally_rejected)}
+            title="Reject this source track across this profile"
+            onClick={() => curation.onGlobalRejection(!track.globally_rejected)}
+          >
+            Global
+          </button>
+        </div>
+      ) : null}
       {/* copy it onto one of your playlists, from any mirror or your own */}
       <AddToPlaylistButton
         track={{
@@ -596,13 +653,46 @@ export function MirroredDetailModal({
   // second click on a stale row could hit the wrong track. a new payload
   // (the refetch) is what frees it.
   const [busy, setBusy] = useState(false);
+  const curatedMirror = !own;
+  const [curationBusy, setCurationBusy] = useState(false);
+  const [curationSelection, setCurationSelection] = useState<Set<string>>(new Set());
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   useEffect(() => {
     setBusy(false);
+    setCurationBusy(false);
+    setCurationSelection(new Set());
     setDragFrom(null);
     setDragOver(null);
   }, [data]);
+  const mutateCuration = async (mutation: () => Promise<unknown>) => {
+    if (curationBusy) return;
+    setCurationBusy(true);
+    try {
+      await mutation();
+      onRefresh();
+    } catch (err) {
+      window.showToast?.(
+        err instanceof Error ? err.message : 'Could not update playlist review',
+        'error',
+      );
+      setCurationBusy(false);
+    }
+  };
+  const selectedSourceIds = Array.from(curationSelection);
+  const setDecision = (sourceTrackIds: string[], decision: MirroredCurationDecision) => {
+    if (sourceTrackIds.length === 0) return;
+    void mutateCuration(() =>
+      patchMirroredCurationDecisions(
+        playlistId,
+        sourceTrackIds.map((source_track_id) => ({ source_track_id, decision })),
+      ),
+    );
+  };
+  const setGlobalRejection = (sourceTrackIds: string[], rejected: boolean) => {
+    if (sourceTrackIds.length === 0) return;
+    void mutateCuration(() => patchMirroredGlobalRejections(playlistId, sourceTrackIds, rejected));
+  };
   const source = data.source || 'unknown';
   const sourceIcon = mirroredDetailSourceIcon(source);
   const srcLabel = mirroredDetailSourceLabel(source);
@@ -1092,6 +1182,77 @@ export function MirroredDetailModal({
             onClose={() => setAddOpen(false)}
           />
         ) : null}
+        {curatedMirror ? (
+          <div className="mm-curation" aria-label="Playlist review">
+            <div className="mm-curation-title">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={Boolean(data.curation_enabled)}
+                  disabled={curationBusy}
+                  onChange={(event) => {
+                    const enabled = event.target.checked;
+                    void mutateCuration(async () => {
+                      const response = await patchMirroredPreferences(playlistId, {
+                        curation_enabled: enabled,
+                      });
+                      const result = (await response.json()) as { error?: string };
+                      if (!response.ok || result.error) {
+                        throw new Error(result.error || 'Could not change playlist review');
+                      }
+                    });
+                  }}
+                />
+                Require Keep approval before sync and download
+              </label>
+              <span>
+                {data.curation_enabled
+                  ? 'Only effective Keep tracks proceed.'
+                  : 'Decisions are staged; current sync behavior is unchanged.'}
+              </span>
+            </div>
+            <div className="mm-curation-counts">
+              <b>{data.curation_counts?.keep ?? 0}</b> Keep
+              <b>{data.curation_counts?.pending ?? 0}</b> Pending
+              <b>{data.curation_counts?.reject ?? 0}</b> Reject
+              <b>{data.curation_counts?.unreviewed ?? 0}</b> Unreviewed
+            </div>
+            <div className="mm-curation-bulk">
+              <span>{selectedSourceIds.length} selected</span>
+              {(['keep', 'pending', 'reject'] as const).map((decision) => (
+                <button
+                  key={decision}
+                  type="button"
+                  disabled={curationBusy || selectedSourceIds.length === 0}
+                  onClick={() => setDecision(selectedSourceIds, decision)}
+                >
+                  {decision[0].toUpperCase() + decision.slice(1)}
+                </button>
+              ))}
+              <button
+                type="button"
+                disabled={curationBusy || selectedSourceIds.length === 0}
+                onClick={() => setDecision(selectedSourceIds, null)}
+              >
+                Unreview
+              </button>
+              <button
+                type="button"
+                disabled={curationBusy || selectedSourceIds.length === 0}
+                onClick={() => setGlobalRejection(selectedSourceIds, true)}
+              >
+                Reject globally
+              </button>
+              <button
+                type="button"
+                disabled={curationBusy || selectedSourceIds.length === 0}
+                onClick={() => setGlobalRejection(selectedSourceIds, false)}
+              >
+                Clear global
+              </button>
+            </div>
+          </div>
+        ) : null}
         {tracks.length > 1 ? (
           <div className="mm-sortbar">
             {editable && sort !== 'custom' ? (
@@ -1112,13 +1273,16 @@ export function MirroredDetailModal({
             </label>
           </div>
         ) : null}
-        <div className={`mm-list${editable ? ' mm-list--editable' : ''}`}>
+        <div
+          className={`mm-list${editable ? ' mm-list--editable' : ''}${curatedMirror ? ' mm-list--curation' : ''}`}
+        >
           <div className="mm-list-head">
             <span>#</span>
             <span />
             <span>Title</span>
             <span>Album</span>
             <span className="mm-col-dur">Time</span>
+            {curatedMirror ? <span>Review</span> : null}
             <span />
             {editable ? <span /> : null}
           </div>
@@ -1128,6 +1292,25 @@ export function MirroredDetailModal({
                 key={`${track.position ?? index}-${track.track_name ?? ''}`}
                 track={track}
                 onPlay={() => void runPlay('play', index)}
+                curation={
+                  curatedMirror && track.source_track_id
+                    ? {
+                        selected: curationSelection.has(track.source_track_id),
+                        busy: curationBusy,
+                        onSelect: () =>
+                          setCurationSelection((current) => {
+                            const next = new Set(current);
+                            if (next.has(track.source_track_id!))
+                              next.delete(track.source_track_id!);
+                            else next.add(track.source_track_id!);
+                            return next;
+                          }),
+                        onDecision: (decision) => setDecision([track.source_track_id!], decision),
+                        onGlobalRejection: (rejected) =>
+                          setGlobalRejection([track.source_track_id!], rejected),
+                      }
+                    : undefined
+                }
                 edit={
                   editable
                     ? {

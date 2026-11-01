@@ -50,6 +50,44 @@ def build_original_tracks_map(tracks_json: Optional[List[Dict[str, Any]]]) -> Di
     return out
 
 
+def build_original_tracks_by_source(
+    tracks_json: Optional[List[Dict[str, Any]]],
+) -> Dict[str, Dict[str, Any]]:
+    """Original payloads keyed by mirrored source identity, not provider ID."""
+    out: Dict[str, Dict[str, Any]] = {}
+    for track in tracks_json or []:
+        if not isinstance(track, dict):
+            continue
+        source_track_id = str(track.get('source_track_id') or '').strip()
+        if source_track_id:
+            out[source_track_id] = normalize_wishlist_track(track)
+    return out
+
+
+def _mirrored_source_track_id(
+    track_result: Dict[str, Any],
+    tracks: Optional[List[Dict[str, Any]]],
+) -> str:
+    """Return verified source identity without treating provider IDs as source IDs."""
+    direct = str(track_result.get('mirrored_source_track_id') or '').strip()
+    if direct:
+        return direct
+    try:
+        index = int(track_result.get('index'))
+        if index < 0:
+            return ''
+        indexed = (tracks or [])[index]
+    except (TypeError, ValueError, IndexError):
+        return ''
+    if not isinstance(indexed, dict):
+        return ''
+    provider_track_id = str(track_result.get('source_track_id') or '').strip()
+    indexed_provider_id = str(indexed.get('id') or '').strip()
+    if provider_track_id and indexed_provider_id != provider_track_id:
+        return ''
+    return str(indexed.get('source_track_id') or '').strip()
+
+
 def reconstruct_sync_track_data(
     track_results: Optional[List[Dict[str, Any]]],
     tracks: Optional[List[Dict[str, Any]]],
@@ -57,10 +95,10 @@ def reconstruct_sync_track_data(
 ) -> Optional[Dict[str, Any]]:
     """Return the wishlist-add ``spotify_track_data`` for re-adding a synced track.
 
-    Resolves the track the SAME way the auto-add did: the normalized tracks_json
-    entry (``build_original_tracks_map``), looked up by the track_result's
-    ``source_track_id`` — so the payload (full album object + images + album_type +
-    total_tracks + artists-as-dicts) is identical to the original auto-add.
+    Resolves the track the SAME way the auto-add did: source-specific mirrored
+    identity first, then the legacy provider-ID map. This keeps colliding provider
+    IDs separate while preserving the payload (full album object + images +
+    album_type + total_tracks + artists-as-dicts) used by older history rows.
 
     Only 'wishlist' rows are eligible. Falls back to a normalized rebuild from the
     track_result's own fields (with the album cover from its image_url) when the
@@ -73,6 +111,7 @@ def reconstruct_sync_track_data(
         return None
 
     sid = str(tr.get('source_track_id') or '')
+    mirrored_sid = _mirrored_source_track_id(tr, tracks)
     # Wing-it fallback stubs have no catalogue release behind them (so no album or
     # cover) — the live sync keeps them off the wishlist unless
     # wishlist.wing_it_guesses is on, and the re-add has to make the SAME call or it
@@ -81,6 +120,10 @@ def reconstruct_sync_track_data(
         return None
 
     # Primary: the exact normalized track the auto-add used.
+    if mirrored_sid:
+        payload = build_original_tracks_by_source(tracks).get(mirrored_sid)
+        if payload:
+            return payload
     if sid:
         payload = build_original_tracks_map(tracks).get(sid)
         if payload:
@@ -103,4 +146,41 @@ def reconstruct_sync_track_data(
     })
 
 
-__all__ = ["normalize_wishlist_track", "build_original_tracks_map", "reconstruct_sync_track_data"]
+def sync_history_curation_origin(
+    entry: Dict[str, Any],
+    track_results: Optional[List[Dict[str, Any]]],
+    track_index: int,
+    tracks: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Recover durable mirrored provenance for a sync-history wishlist retry.
+
+    Only synthetic mirror batch identifiers carry a mirrored-playlist primary
+    key. Bare numeric playlist identifiers can be upstream Deezer IDs, so they
+    deliberately remain legacy provenance instead of being guessed as mirrors.
+    """
+    playlist_ref = str((entry or {}).get('playlist_id') or '').strip()
+    if not playlist_ref.startswith(('auto_mirror_', 'mirrored_', 'youtube_mirrored_')):
+        return None
+    if not track_results or track_index < 0 or track_index >= len(track_results):
+        return None
+    track_result = track_results[track_index] or {}
+    source_track_id = _mirrored_source_track_id(track_result, tracks)
+    if not source_track_id:
+        return None
+    from core.playlists.source_refs import extract_mirrored_pk
+    mirrored_playlist_id = extract_mirrored_pk(playlist_ref)
+    if mirrored_playlist_id is None:
+        return None
+    return {
+        'mirrored_playlist_id': mirrored_playlist_id,
+        'source_track_id': source_track_id,
+    }
+
+
+__all__ = [
+    "normalize_wishlist_track",
+    "build_original_tracks_map",
+    "build_original_tracks_by_source",
+    "reconstruct_sync_track_data",
+    "sync_history_curation_origin",
+]

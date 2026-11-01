@@ -234,7 +234,7 @@ def run_sync_and_wishlist(
                 log_type='success',
             )
 
-        elif sync_status == 'skipped':
+        elif sync_status in ('skipped', 'curation_pending'):
             total_skipped += 1
             reason = sync_result.get('reason', 'unchanged')
             deps.update_progress(
@@ -279,7 +279,7 @@ def run_sync_and_wishlist(
                         log_line=f'Organize download started for "{pl_name}"',
                         log_type='success',
                     )
-                elif org_result.get('status') == 'skipped':
+                elif org_result.get('status') in ('skipped', 'curation_pending'):
                     deps.update_progress(
                         automation_id,
                         log_line=f'Organize download skipped for "{pl_name}": {org_result.get("reason", "")}',
