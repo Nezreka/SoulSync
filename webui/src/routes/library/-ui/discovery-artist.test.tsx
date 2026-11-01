@@ -135,8 +135,8 @@ describe('an artist the catalogue does not hold', () => {
     ['rich', true],
     ['compact', false],
   ])(
-    'plays the hero video only when arrivals from elsewhere get the rich header (%s)',
-    async (header, video) => {
+    'opens in the header arrivals from elsewhere get, the video only with the rich one (%s)',
+    async (header, rich) => {
       // the backdrop video looks its clip up on YouTube: a compact header has
       // no backdrop, so it asks nothing
       server.use(
@@ -149,7 +149,12 @@ describe('an artist the catalogue does not hold', () => {
       );
       renderAt(ARTIST_URL);
       expect(await screen.findByText('Music Has the Right to Children')).toBeInTheDocument();
-      await waitFor(() => expect(Boolean(document.querySelector('[data-live]'))).toBe(video));
+      await waitFor(() => expect(Boolean(document.querySelector('[data-live]'))).toBe(rich));
+      // a compact header of its own, not the hero with its video switched off
+      expect(Boolean(document.querySelector('.artist-hero-identity'))).toBe(rich);
+      expect(
+        screen.getByRole('button', { name: rich ? 'Compact header' : /^Rich header/ }),
+      ).toBeInTheDocument();
     },
   );
 

@@ -826,10 +826,20 @@ export interface LibraryV2UiPreferences {
   artist_page?: {
     header?: LibraryV2ArtistPageHeader;
     header_elsewhere?: LibraryV2ArtistPageHeader;
+    /** What the My Library view shows below the releases (all by default). */
+    library_sections?: Partial<Record<LibraryViewSection, boolean>>;
+    /** Add to playlist in the track table's Actions column. */
+    add_to_playlist?: boolean;
   };
 }
 
 export type LibraryV2ArtistPageHeader = 'rich' | 'compact';
+
+export const LIBRARY_VIEW_SECTIONS = {
+  similar_artists: 'Similar Artists',
+  concerts: 'Concerts',
+} as const;
+export type LibraryViewSection = keyof typeof LIBRARY_VIEW_SECTIONS;
 
 export const ARTIST_TOOLBAR_BUTTONS = {
   automatic_search: 'Automatic Search',

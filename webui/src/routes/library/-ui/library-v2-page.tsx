@@ -148,6 +148,8 @@ import {
 import {
   ARTIST_TOOLBAR_BUTTONS,
   type ArtistToolbarButton,
+  LIBRARY_VIEW_SECTIONS,
+  type LibraryViewSection,
   LIBRARY_V2_WANTED_KINDS,
   type LibraryV2ArtistPageHeader,
   type LibraryV2AlbumDetail,
@@ -455,6 +457,7 @@ const ICON_PATHS = {
   edit: 'M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4zM13 7l4 4',
   delete: 'M4 7h16M9 7V4h6v3M8 7l1 13h6l1-13',
   expand: 'M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5',
+  chevronDown: 'M6 9l6 6 6-6',
   collapse: 'M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6',
   download: 'M12 3v12M8 11l4 4 4-4M5 21h14',
   eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
@@ -1271,21 +1274,21 @@ function MatchArtistReleaseContext({
 }
 
 /** The metadata providers this page names, in display order: the chip
- *  abbreviation, the Enrich menu icon and the enrichment ring colour. */
-const PROVIDERS: { key: string; label: string; abbr?: string; icon: string; color?: string }[] = [
-  { key: 'spotify', label: 'Spotify', abbr: 'SP', icon: '🟢', color: '#1db954' },
-  { key: 'musicbrainz', label: 'MusicBrainz', abbr: 'MB', icon: '🟠', color: '#ba55d3' },
-  { key: 'deezer', label: 'Deezer', abbr: 'Dz', icon: '🟣', color: '#a238ff' },
-  { key: 'itunes', label: 'iTunes', abbr: 'iT', icon: '🔴', color: '#fc3c44' },
-  { key: 'audiodb', label: 'AudioDB', abbr: 'ADB', icon: '🔵', color: '#1a9fff' },
-  { key: 'discogs', label: 'Discogs', icon: '🟤', color: '#D4A574' },
-  { key: 'lastfm', label: 'Last.fm', abbr: 'LFM', icon: '⚪', color: '#d51007' },
-  { key: 'genius', label: 'Genius', abbr: 'Gen', icon: '🟡', color: '#ffff64' },
-  { key: 'tidal', label: 'Tidal', icon: '⬛', color: '#00ffff' },
-  { key: 'qobuz', label: 'Qobuz', icon: '🔷', color: '#4285f4' },
-  { key: 'amazon', label: 'Amazon', abbr: 'Amz', icon: '🛒' },
-  { key: 'jiosaavn', label: 'JioSaavn', abbr: 'JS', icon: '🎵' },
-  { key: 'bandcamp', label: 'Bandcamp', abbr: 'BC', icon: '🔹', color: '#1da0c3' },
+ *  abbreviation and the colour of the enrichment ring and the Enrich menu dot. */
+const PROVIDERS: { key: string; label: string; abbr?: string; color?: string }[] = [
+  { key: 'spotify', label: 'Spotify', abbr: 'SP', color: '#1db954' },
+  { key: 'musicbrainz', label: 'MusicBrainz', abbr: 'MB', color: '#ba55d3' },
+  { key: 'deezer', label: 'Deezer', abbr: 'Dz', color: '#a238ff' },
+  { key: 'itunes', label: 'iTunes', abbr: 'iT', color: '#fc3c44' },
+  { key: 'audiodb', label: 'AudioDB', abbr: 'ADB', color: '#1a9fff' },
+  { key: 'discogs', label: 'Discogs', color: '#D4A574' },
+  { key: 'lastfm', label: 'Last.fm', abbr: 'LFM', color: '#d51007' },
+  { key: 'genius', label: 'Genius', abbr: 'Gen', color: '#ffff64' },
+  { key: 'tidal', label: 'Tidal', color: '#00ffff' },
+  { key: 'qobuz', label: 'Qobuz', color: '#4285f4' },
+  { key: 'amazon', label: 'Amazon', abbr: 'Amz' },
+  { key: 'jiosaavn', label: 'JioSaavn', abbr: 'JS' },
+  { key: 'bandcamp', label: 'Bandcamp', abbr: 'BC', color: '#1da0c3' },
 ];
 const PROVIDER_BY_KEY = new Map(PROVIDERS.map((p) => [p.key, p]));
 
@@ -1839,7 +1842,7 @@ function EnrichDropdown({
           onClose();
         }}
       >
-        <span className={styles.enrichDropdownIcon}>✨</span>
+        <SvgIcon name="refresh" />
         <span className={styles.enrichDropdownLabel}>Enrich with all</span>
       </button>
       <div className={styles.enrichDivider} />
@@ -1856,7 +1859,10 @@ function EnrichDropdown({
             onClose();
           }}
         >
-          <span className={styles.enrichDropdownIcon}>{s.icon}</span>
+          <span
+            className={styles.enrichDropdownDot}
+            style={s.color ? { background: s.color } : undefined}
+          />
           <span className={styles.enrichDropdownLabel}>{s.label}</span>
         </button>
       ))}
@@ -6169,24 +6175,26 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
     runScoped(scope.entity, scope.id);
   }
 
-  // Back must return to the view you left, the artist page the album was
-  // opened from with its view settings (Discover View, the header). A guest
-  // spot or a collaboration is filed under someone else: back to its main
-  // artist was a page you were never on, in the library's header instead of
-  // yours. With no artist in the url (the album list) it goes to its own.
-  const fromArtist = previousArtist ?? album?.primary_artist?.id;
-  const guestAlbum = fromArtist != null && fromArtist !== album?.primary_artist?.id;
+  // Back must return to the view you left: the artist page the album was
+  // opened from with its view settings (Discover View, the header), or the
+  // library list it was picked from (Albums, Songs, Wanted). A guest spot or
+  // a collaboration is filed under someone else: back to its main artist was
+  // a page you were never on, in the library's header instead of yours, and
+  // so was the album's own artist after picking it from a list.
+  const guestAlbum = previousArtist != null && previousArtist !== album?.primary_artist?.id;
   const fromArtistName = useQuery({
-    ...libraryV2ArtistQueryOptions(fromArtist ?? 0),
+    ...libraryV2ArtistQueryOptions(previousArtist ?? 0),
     enabled: guestAlbum,
   }).data?.name;
-  const goBack = () =>
-    navigate({ search: (previous) => ({ ...previous, album: undefined, artist: fromArtist }) });
+  const goBack = () => navigate({ search: (previous) => ({ ...previous, album: undefined }) });
 
   return (
     <div className={`${styles.page} ${styles.detailView}`}>
       <BackLink onClick={() => void goBack()}>
-        ← {(guestAlbum ? fromArtistName : album?.primary_artist?.name) ?? 'Library'}
+        ←{' '}
+        {(previousArtist != null &&
+          (guestAlbum ? fromArtistName : album?.primary_artist?.name)) ||
+          'Library'}
       </BackLink>
       {albumQuery.isError ? (
         <div className={styles.emptyState}>Album not found.</div>
@@ -6419,9 +6427,24 @@ export function shouldAutoFetchDiscography(params: {
 const PROFILE_SECTIONS = new Set(['artist_toolbar', 'artist_page']);
 
 /** View Settings' artist page part, kept per profile: which toolbar buttons
- *  show and which header an artist opens with. Each pick saves at once. */
+ *  show, which header an artist opens with, what My Library shows below the
+ *  releases and whether tracks offer Add to playlist. Each pick saves at once. */
 function ArtistPageOptions({ prefs }: { prefs: LibraryV2UiPreferences | undefined }) {
   const mutation = useUiPreferencesMutation();
+  const checkbox = (
+    key: string,
+    label: string,
+    checked: boolean,
+    patch: Parameters<typeof mutation.mutate>[0],
+    example?: string,
+  ) => (
+    <label key={key} className={styles.tableOptionsItem}>
+      <input type="checkbox" checked={checked} onChange={() => mutation.mutate(patch)} />
+      {label}
+      {example ? <span className={styles.tableOptionsExample}>{example}</span> : null}
+    </label>
+  );
+  const addToPlaylist = prefs?.artist_page?.add_to_playlist !== false;
   const headerChoice = (key: 'header' | 'header_elsewhere', label: string) => {
     const current = prefs?.artist_page?.[key] ?? 'rich';
     return (
@@ -6462,18 +6485,12 @@ function ArtistPageOptions({ prefs }: { prefs: LibraryV2UiPreferences | undefine
         </p>
         {Object.entries(ARTIST_TOOLBAR_BUTTONS).map(([key, label]) => {
           const checked = prefs?.artist_toolbar?.[key as ArtistToolbarButton] !== false;
-          return (
-            <label key={key} className={styles.tableOptionsItem}>
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() => mutation.mutate({ artist_toolbar: { [key]: !checked } })}
-              />
-              {label}
-              {key === 'enhance_quality' ? (
-                <span className={styles.tableOptionsExample}>when files can be upgraded</span>
-              ) : null}
-            </label>
+          return checkbox(
+            key,
+            label,
+            checked,
+            { artist_toolbar: { [key]: !checked } },
+            key === 'enhance_quality' ? 'when files can be upgraded' : undefined,
           );
         })}
       </section>
@@ -6481,6 +6498,27 @@ function ArtistPageOptions({ prefs }: { prefs: LibraryV2UiPreferences | undefine
         <div className={styles.tableOptionsGroupLabel}>Artist header</div>
         {headerChoice('header', 'Opening an artist from the library')}
         {headerChoice('header_elsewhere', 'From Search, Discover and elsewhere')}
+      </section>
+      <section className={styles.tableOptionsSection}>
+        <div className={styles.tableOptionsGroupLabel}>My Library</div>
+        <p className={styles.tableOptionsHint}>
+          What an artist's My Library view shows below its releases. Discovery shows them all.
+        </p>
+        {Object.entries(LIBRARY_VIEW_SECTIONS).map(([key, label]) => {
+          const checked = prefs?.artist_page?.library_sections?.[key as LibraryViewSection] !== false;
+          return checkbox(key, label, checked, {
+            artist_page: { library_sections: { [key]: !checked } },
+          });
+        })}
+      </section>
+      <section className={styles.tableOptionsSection}>
+        <div className={styles.tableOptionsGroupLabel}>Track actions</div>
+        <p className={styles.tableOptionsHint}>
+          The buttons next to search in the track table's Actions column.
+        </p>
+        {checkbox('add_to_playlist', 'Add to playlist', addToPlaylist, {
+          artist_page: { add_to_playlist: !addToPlaylist },
+        })}
       </section>
     </>
   );
@@ -6495,7 +6533,11 @@ function ViewSettingsDialog({ onClose }: { onClose: () => void }) {
   const mutation = useUiPreferencesMutation();
   if (!canWrite) {
     return (
-      <ModalShell title="View Settings" description="For this profile." onClose={onClose}>
+      <ModalShell
+        title="View Settings"
+        description="Applies across the whole Library, on every artist and album, for this profile."
+        onClose={onClose}
+      >
         <div className={styles.tableOptionsStack}>
           <ArtistPageOptions prefs={prefs} />
         </div>
@@ -6558,6 +6600,34 @@ function ArtistToolsMenu({
   const [showSubmenu, setShowSubmenu] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
+  // Enrich unfolds to the left of the panel, a submenu like any other; the
+  // panel scrolls, so inside it the list could only open in place. Where the
+  // screen has no room on the left (a phone) it still does
+  const panelRef = useRef<HTMLDivElement>(null);
+  const enrichRef = useRef<HTMLButtonElement>(null);
+  const flyoutRef = useRef<HTMLDivElement>(null);
+  const [flyoutAt, setFlyoutAt] = useState<CSSProperties | 'inline' | null>(null);
+  useLayoutEffect(() => {
+    const [wrap, panel, button, flyout] = [wrapRef, panelRef, enrichRef, flyoutRef].map((ref) =>
+      ref.current?.getBoundingClientRect(),
+    );
+    if (!showSubmenu || !wrap || !panel || !button || !flyout) return setFlyoutAt(null);
+    if (panel.left - flyout.width - 6 < 8) return setFlyoutAt('inline');
+    const top = Math.max(8, Math.min(button.top - 7, window.innerHeight - 8 - flyout.height));
+    setFlyoutAt({ top: top - wrap.top, right: wrap.right - panel.left + 6 });
+  }, [showSubmenu]);
+  const enrich = (
+    <EnrichDropdown
+      entity="artists"
+      entityId={artistId}
+      entityName={artistName}
+      wrapperRef={wrapRef}
+      onClose={() => {
+        setOpen(false);
+        setShowSubmenu(false);
+      }}
+    />
+  );
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
@@ -6609,7 +6679,10 @@ function ArtistToolsMenu({
         className={styles.toolButton}
         aria-expanded={open}
         aria-controls="artist-tools-panel"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setOpen((v) => !v);
+          setShowSubmenu(false);
+        }}
       >
         <SvgIcon name="organize" />
         <span>Tools</span>
@@ -6618,7 +6691,9 @@ function ArtistToolsMenu({
       {open ? (
         <div
           id="artist-tools-panel"
+          ref={panelRef}
           className={`${styles.overflowMenu} ${styles.artistToolsPanel} ${styles.alignRight}`}
+          onScroll={() => setShowSubmenu(false)}
         >
           <div className={styles.toolMenuHeading}>Files</div>
           {item('Manage Tracks', 'tracks', onManageTracks, false)}
@@ -6639,6 +6714,7 @@ function ArtistToolsMenu({
           )}
           <div className={styles.submenuContainer}>
             <button
+              ref={enrichRef}
               type="button"
               className={styles.overflowMenuItem}
               disabled={!canWrite}
@@ -6646,22 +6722,10 @@ function ArtistToolsMenu({
               onClick={() => setShowSubmenu((v) => !v)}
             >
               <SvgIcon name="refresh" />
-              Enrich… <span className={styles.submenuChevron}>›</span>
+              Enrich…{' '}
+              <span className={styles.submenuChevron}>{flyoutAt === 'inline' ? '⌄' : '‹'}</span>
             </button>
-            {showSubmenu ? (
-              <EnrichDropdown
-                entity="artists"
-                entityId={artistId}
-                entityName={artistName}
-                wrapperRef={wrapRef}
-                align="right"
-                submenu
-                onClose={() => {
-                  setOpen(false);
-                  setShowSubmenu(false);
-                }}
-              />
-            ) : null}
+            {showSubmenu && flyoutAt === 'inline' ? enrich : null}
           </div>
           <div className={styles.toolMenuHeading}>Maintenance</div>
           {item('Library Health & Repair', 'settings', onMaintenance)}
@@ -6678,6 +6742,15 @@ function ArtistToolsMenu({
           {item('View Settings…', 'settings', onViewSettings, false)}
           <div className={styles.toolMenuDivider} />
           {item('Delete Artist…', 'delete', onDelete, true, true)}
+        </div>
+      ) : null}
+      {open && showSubmenu && flyoutAt !== 'inline' ? (
+        <div
+          ref={flyoutRef}
+          className={styles.toolsFlyout}
+          style={flyoutAt ?? { visibility: 'hidden' }}
+        >
+          {enrich}
         </div>
       ) : null}
       {showExport ? (
@@ -7786,6 +7859,24 @@ function ArtistViewSkeleton() {
   );
 }
 
+/** ldp-05: one switch, in both header shapes, on every artist page. The rich
+ *  hero is the default; compact is the opt-in for a denser page. */
+function HeaderToggle({ mode }: { mode: LibraryV2ArtistPageHeader }) {
+  const navigate = useNavigate();
+  return (
+    <IconActionButton
+      icon={mode === 'rich' ? 'collapse' : 'expand'}
+      title={mode === 'rich' ? 'Compact header' : 'Rich header — bio, listeners, plays and top tracks'}
+      onClick={() =>
+        void navigate({
+          replace: true,
+          search: (p) => ({ ...p, header: mode === 'rich' ? 'compact' : 'rich' }),
+        })
+      }
+    />
+  );
+}
+
 /** `deezer:1518490` from ?discover= */
 function providerArtist(discover: string | undefined) {
   const split = (discover ?? '').indexOf(':');
@@ -7819,8 +7910,8 @@ function ProviderArtistView({
   const artistName = String(info?.name || name || '');
   const back = useArtistBack(artistName || undefined);
   // reached from search or discover: the header this profile picked for
-  // arrivals from elsewhere decides whether the backdrop video plays, and
-  // nothing plays (or is looked up) before that is known
+  // arrivals from elsewhere, compact or the rich hero with its video, bio and
+  // stats. nothing rich is shown (or looked up) before that is known
   const prefs = useQuery(libraryV2UiPreferencesQueryOptions());
   const heroHeader =
     search.header ??
@@ -7848,7 +7939,7 @@ function ProviderArtistView({
         spotifyId: source === 'spotify' ? providerId : undefined,
         deezerId: source === 'deezer' ? providerId : undefined,
       }),
-    enabled: Boolean(artistName),
+    enabled: Boolean(artistName) && heroHeader === 'rich',
     staleTime: 30 * 60_000,
   });
   // only once the page has rendered: the name is known from the URL before
@@ -7909,25 +8000,62 @@ function ProviderArtistView({
           <ArtistViewSkeleton />
         ) : (
           <>
-            <LegacyArtistHero
-              video={heroHeader === 'rich'}
-              name={artistName}
-              imageUrl={String(info?.image_url || '')}
-              genres={(info?.genres ?? []).map(String)}
-              bio={heroStats.data?.bio || (info?.lastfm_bio as string | undefined) || null}
-              listeners={heroStats.data?.listeners ?? null}
-              playcount={heroStats.data?.playcount ?? null}
-              followers={heroStats.data?.followers ?? null}
-              sections={buckets.map(({ title, bucket }) => ({
-                label: title,
-                owned: discography.releasesFor(bucket).filter((r) => r.owned).length,
-                total: discography.releasesFor(bucket).length,
-              }))}
-              providerId={providerId}
-              source={source}
-              eyebrow="Not in your library"
-              actions={<ProviderArtistActions payload={payload} watchlist={watchlist} />}
-            />
+            {heroHeader === 'rich' ? (
+              <LegacyArtistHero
+                titleActions={<HeaderToggle mode="rich" />}
+                name={artistName}
+                imageUrl={String(info?.image_url || '')}
+                genres={(info?.genres ?? []).map(String)}
+                bio={heroStats.data?.bio || (info?.lastfm_bio as string | undefined) || null}
+                listeners={heroStats.data?.listeners ?? null}
+                playcount={heroStats.data?.playcount ?? null}
+                followers={heroStats.data?.followers ?? null}
+                sections={buckets.map(({ title, bucket }) => ({
+                  label: title,
+                  owned: discography.releasesFor(bucket).filter((r) => r.owned).length,
+                  total: discography.releasesFor(bucket).length,
+                }))}
+                providerId={providerId}
+                source={source}
+                eyebrow="Not in your library"
+                actions={<ProviderArtistActions payload={payload} watchlist={watchlist} />}
+              />
+            ) : (
+              <header className={styles.detailHeader}>
+                {info?.image_url ? (
+                  <div
+                    className={styles.heroBackdrop}
+                    style={{
+                      backgroundImage: `url("${String(info.image_url).replace(/"/g, '%22')}")`,
+                    }}
+                    aria-hidden="true"
+                  />
+                ) : null}
+                <Artwork
+                  src={String(info?.image_url || '')}
+                  alt={artistName}
+                  className={styles.detailThumb}
+                />
+                <div className={styles.detailMeta}>
+                  <p className={styles.heroEyebrow}>
+                    <span className={styles.heroEyebrowDot} aria-hidden="true" />
+                    Not in your library
+                  </p>
+                  <div className={styles.detailTitleRow}>
+                    <h1 className={styles.title} title={artistName}>
+                      {artistName}
+                    </h1>
+                    <HeaderToggle mode="compact" />
+                  </div>
+                  {info?.genres?.length ? (
+                    <p className={styles.genres}>{info.genres.map(String).join(', ')}</p>
+                  ) : null}
+                  <div className={styles.detailLabels}>
+                    <ProviderArtistActions payload={payload} watchlist={watchlist} />
+                  </div>
+                </div>
+              </header>
+            )}
 
             <div className={styles.releasesBar}>
               <div className={styles.releasesToggle}>
@@ -8126,7 +8254,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   // is are view settings, carried in the URL next to `releases` and `view`
   // like every other Library V2 view setting.
   const releaseView = search.releaseView;
-  const headerMode = search.header ?? 'rich';
+  // a header the url names stays; any other way in from inside the library
+  // (a link that names none) opens in the one this profile picked for it.
+  // nothing rich, and so no lookup, before that is known
+  const viewPrefs = useQuery(libraryV2UiPreferencesQueryOptions());
+  const headerMode =
+    search.header ??
+    (viewPrefs.isPending ? 'compact' : (viewPrefs.data?.artist_page?.header ?? 'rich'));
   // the toolbar picks up a small name tag once the hero scrolls away
   const artistTopRef = useRef<HTMLDivElement>(null);
   const heroSentinelRef = useRef<HTMLDivElement>(null);
@@ -8171,13 +8305,19 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const artist = artistQuery.data;
   const back = useArtistBack(artist?.name);
   const openArtist = useOpenArtist();
+  // My Library shows what View Settings leaves on, Discovery all of it. A
+  // section waits for the preferences, it was loaded and then taken away
+  const showSection = (key: LibraryViewSection) =>
+    releasesMode === 'all' ||
+    (!viewPrefs.isPending && viewPrefs.data?.artist_page?.library_sections?.[key] !== false);
+  const showSimilar = showSection('similar_artists');
   // in both views, the way dev's artist page always ended on similar artists.
   // it runs once the page is up: the loader fills a section it finds in the DOM
   useEffect(() => {
-    if (!artist?.name) return;
+    if (!artist?.name || !showSimilar) return;
     window.loadSimilarArtists?.(artist.name);
     return () => window.cancelSimilarArtistsLoad?.();
-  }, [artist?.name, releasesMode]);
+  }, [artist?.name, releasesMode, showSimilar]);
   // My Library is there for an artist in the library, the way dev offered
   // its library view only for an artist in the library: files here, or a
   // watch or wish of its own. one only looked at opens on its discography
@@ -8418,27 +8558,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     </>
   ) : null;
 
-  /** ldp-05: one switch, in both header shapes. The rich hero is the default
-   *  everywhere; compact is the opt-in for a denser page. */
-  const headerToggle = (
-    <IconActionButton
-      icon={headerMode === 'rich' ? 'collapse' : 'expand'}
-      title={
-        headerMode === 'rich'
-          ? 'Compact header'
-          : 'Rich header — bio, listeners, plays and top tracks'
-      }
-      onClick={() =>
-        void navigate({
-          replace: true,
-          search: (p) => ({
-            ...p,
-            header: headerMode === 'rich' ? 'compact' : 'rich',
-          }),
-        })
-      }
-    />
-  );
+  const headerToggle = <HeaderToggle mode={headerMode} />;
 
   return (
     <div ref={artistTopRef} className={`${styles.page} ${styles.detailView}`}>
@@ -8838,13 +8958,15 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 }
                 onOpenArtist={(id) => openArtist(Number(id))}
               />
-              <SimilarArtistsSection />
+              {showSimilar ? <SimilarArtistsSection /> : null}
             </>
           )}
-          <ConcertsSection
-            artistName={artist.name}
-            mbid={String(artist.provider_ids?.musicbrainz ?? '')}
-          />
+          {showSection('concerts') ? (
+            <ConcertsSection
+              artistName={artist.name}
+              mbid={String(artist.provider_ids?.musicbrainz ?? '')}
+            />
+          ) : null}
           {modalAction && INTERACTIVE_RE.test(modalAction.action) ? (
             <InteractiveSearchModal
               initialQuery={buildSearchQuery(artist.name, modalAction.action, modalAction.entity)}
@@ -9277,7 +9399,6 @@ function AlbumBlock({
         title="Click to expand or collapse · Double-click to open the album page"
         onClick={handleAlbumClick}
       >
-        <span className={`${styles.chevron} ${open ? styles.chevronOpen : ''}`}>›</span>
         <MonitorToggle entity="albums" id={album.id} monitored={album.monitored} />
         <Artwork
           src={album.image_url ?? ''}
@@ -9314,6 +9435,11 @@ function AlbumBlock({
             </span>
           </div>
         </div>
+        {/* Sonarr's season toggle: in the middle of the row, out of the way of
+            the wishlist heart at its start */}
+        <span className={`${styles.albumExpand} ${open ? styles.albumExpandOpen : ''}`}>
+          <SvgIcon name="chevronDown" />
+        </span>
         <TrackPresence
           className={styles.albumTrackCount}
           present={album.tracks_present}
@@ -9471,10 +9597,11 @@ const LEGACY_PIXEL_WIDTH_THRESHOLD = 100;
 const CHECKBOX_COLUMN_WIDTH = 24;
 const MONITOR_COLUMN_WIDTH = 28;
 const TRACK_NUMBER_COLUMN_WIDTH = 32;
-/** Search, interactive search and add-to-playlist, plus the edit pencil
- *  unless the title opens the editor. A fourth 24px button in 80px was
- *  clipped away by the cell's overflow. */
-const trackActionColumnWidth = (editViaTitle: boolean) => (editViaTitle ? 80 : 106);
+/** Search and interactive search, add-to-playlist unless View Settings hides
+ *  it, and the edit pencil unless the title opens the editor: 26px a button.
+ *  A fourth 24px button in 80px was clipped away by the cell's overflow. */
+const trackActionColumnWidth = (editViaTitle: boolean, addToPlaylist: boolean) =>
+  54 + (addToPlaylist ? 26 : 0) + (editViaTitle ? 0 : 26);
 const UTILITY_COLUMN_WIDTH_BASE =
   CHECKBOX_COLUMN_WIDTH + MONITOR_COLUMN_WIDTH + TRACK_NUMBER_COLUMN_WIDTH;
 
@@ -9962,20 +10089,29 @@ function useUiPreferencesMutation() {
   // width visibly "sprang back". Stamp each request and ignore any answer that
   // is not the newest one this component instance issued.
   const sequenceRef = useRef(0);
-  const settledRef = useRef(0);
+  const key = [...LIBRARY_V2_QUERY_KEY, 'ui-preferences'];
+  // a profile's own artist page is its to change; the shared layout is the admin's
+  const refused = (patch: object) =>
+    !canWrite && Object.keys(patch).some((section) => !PROFILE_SECTIONS.has(section));
   return useMutation({
+    // the pick shows at once (a dragged column lands where it was dropped);
+    // the server's answer, or the refetch after an error, settles it
+    onMutate: async (patch) => {
+      if (refused(patch)) return;
+      await queryClient.cancelQueries({ queryKey: key });
+      queryClient.setQueryData<LibraryV2UiPreferences>(key, (prefs) =>
+        prefs ? mergePreferences(prefs, patch) : prefs,
+      );
+    },
     mutationFn: async (patch: Parameters<typeof updateLibraryV2UiPreferences>[0]) => {
-      // a profile's own artist page is its to change; the shared layout is the admin's
-      if (!canWrite && Object.keys(patch).some((key) => !PROFILE_SECTIONS.has(key)))
-        throw new Error('Library changes require the admin profile');
+      if (refused(patch)) throw new Error('Library changes require the admin profile');
       const sequence = ++sequenceRef.current;
       const preferences = await updateLibraryV2UiPreferences(patch);
       return { sequence, preferences };
     },
     onSuccess: ({ sequence, preferences }) => {
-      if (sequence < settledRef.current) return;
-      settledRef.current = sequence;
-      queryClient.setQueryData([...LIBRARY_V2_QUERY_KEY, 'ui-preferences'], preferences);
+      if (sequence !== sequenceRef.current) return;
+      queryClient.setQueryData(key, preferences);
     },
     /**
      * iss29-C09: no consumer of this mutation renders `error`, so a rejected
@@ -9996,11 +10132,21 @@ function useUiPreferencesMutation() {
       } else {
         console.error('[library-v2] ui preferences update failed:', message);
       }
-      void queryClient.invalidateQueries({
-        queryKey: [...LIBRARY_V2_QUERY_KEY, 'ui-preferences'],
-      });
+      void queryClient.invalidateQueries({ queryKey: key });
     },
   });
+}
+
+/** The server's merge (ui_preferences._merge_section): objects merge key by
+ *  key, anything else replaces. */
+function mergePreferences<T>(base: T, patch: unknown): T {
+  const isObject = (v: unknown): v is Record<string, unknown> =>
+    typeof v === 'object' && v !== null && !Array.isArray(v);
+  if (!isObject(base) || !isObject(patch)) return patch as T;
+  const merged: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(patch))
+    if (v !== undefined) merged[k] = mergePreferences(merged[k], v);
+  return merged as T;
 }
 
 /** Shared gear-popover column-visibility menu (B5 pattern) — one generic body
@@ -10018,9 +10164,11 @@ function ColumnsOptionsMenu<K extends string>({
   extra,
   columnsFooter,
   workspace = false,
+  description,
   onClose,
 }: {
   title: string;
+  description?: ReactNode;
   columnLabels: Record<K, string>;
   columns: Record<K, boolean>;
   onToggle: (key: K) => void;
@@ -10039,18 +10187,22 @@ function ColumnsOptionsMenu<K extends string>({
   const [gearOpen, setOpen] = useState(false);
   const open = Boolean(onClose) || gearOpen;
   const [dragKey, setDragKey] = useState<K | null>(null);
+  // while a row is dragged the others make room under the pointer; the order
+  // is saved once, on the drop (Escape or a drop outside the list puts it back)
+  const [dragOrder, setDragOrder] = useState<K[] | null>(null);
 
-  const columnKeys = columnOrder ?? (Object.keys(columnLabels) as K[]);
+  const columnKeys = dragOrder ?? columnOrder ?? (Object.keys(columnLabels) as K[]);
   const reorderable = Boolean(onReorder && columnOrder);
 
-  const moveTo = (targetIndex: number) => {
-    if (!onReorder || !columnOrder || dragKey == null) return;
-    const fromIndex = columnOrder.indexOf(dragKey);
-    if (fromIndex === -1 || fromIndex === targetIndex) return;
-    const nextOrder = [...columnOrder];
-    const [moved] = nextOrder.splice(fromIndex, 1);
-    nextOrder.splice(targetIndex, 0, moved);
-    onReorder(nextOrder);
+  const moved = (order: K[], key: K, toIndex: number) => {
+    const next = order.filter((k) => k !== key);
+    next.splice(toIndex, 0, key);
+    return next;
+  };
+  const endDrag = (dropped: boolean) => {
+    if (dropped && dragOrder && dragOrder.join() !== columnOrder?.join()) onReorder?.(dragOrder);
+    setDragKey(null);
+    setDragOrder(null);
   };
 
   return (
@@ -10066,6 +10218,7 @@ function ColumnsOptionsMenu<K extends string>({
       {open ? (
         <ModalShell
           title={title}
+          description={description}
           settings={!workspace}
           wide={workspace}
           className={workspace ? styles.toolWorkspace : undefined}
@@ -10077,69 +10230,53 @@ function ColumnsOptionsMenu<K extends string>({
             >
               <section className={styles.tableOptionsSection}>
                 <div className={styles.tableOptionsGroupLabel}>Visible columns</div>
+                {reorderable ? (
+                  <p className={styles.tableOptionsHint}>
+                    Drag a row to change the column order, left to right.
+                  </p>
+                ) : null}
                 <div
                   className={`${styles.tableOptionsColumnGrid} ${reorderable ? styles.tableOptionsColumnGridReorder : ''}`}
+                  onDragOver={dragKey ? (e) => e.preventDefault() : undefined}
+                  onDrop={dragKey ? (e) => e.preventDefault() : undefined}
                 >
                   {columnKeys.map((key, index) => {
                     const locked = lockedColumns?.has(key) ?? false;
                     return (
                       <div
                         key={key}
-                        className={`${styles.tableOptionsRow} ${dragKey === key ? styles.tableOptionsRowDragging : ''}`}
-                        onDragOver={reorderable ? (e) => e.preventDefault() : undefined}
-                        onDrop={
+                        className={`${styles.tableOptionsRow} ${reorderable ? styles.tableOptionsRowDraggable : ''} ${dragKey === key ? styles.tableOptionsRowDragging : ''}`}
+                        draggable={reorderable}
+                        onDragStart={
                           reorderable
                             ? (e) => {
-                                e.preventDefault();
-                                moveTo(index);
-                                setDragKey(null);
+                                e.dataTransfer.effectAllowed = 'move';
+                                // Firefox starts no drag without data
+                                e.dataTransfer.setData('text/plain', key);
+                                setDragKey(key);
+                                setDragOrder(columnOrder!);
                               }
+                            : undefined
+                        }
+                        onDragOver={
+                          dragKey && dragOrder && dragOrder[index] !== dragKey
+                            ? () => setDragOrder(moved(dragOrder, dragKey, index))
+                            : undefined
+                        }
+                        onDragEnd={
+                          reorderable
+                            ? (e) => endDrag(e.dataTransfer.dropEffect !== 'none')
                             : undefined
                         }
                       >
                         {reorderable ? (
-                          <div className={styles.tableOptionsReorder}>
-                            <span
-                              className={styles.reorderHandle}
-                              draggable
-                              title="Drag to reorder"
-                              aria-label={`Drag to reorder ${columnLabels[key]}`}
-                              onDragStart={() => setDragKey(key)}
-                              onDragEnd={() => setDragKey(null)}
-                            >
-                              ⠿
-                            </span>
-                            <button
-                              type="button"
-                              title="Move up"
-                              disabled={index === 0}
-                              onClick={() => {
-                                const nextOrder = [...columnOrder!];
-                                const temp = nextOrder[index];
-                                nextOrder[index] = nextOrder[index - 1];
-                                nextOrder[index - 1] = temp;
-                                onReorder!(nextOrder);
-                              }}
-                              className={styles.reorderBtn}
-                            >
-                              ▲
-                            </button>
-                            <button
-                              type="button"
-                              title="Move down"
-                              disabled={index === columnKeys.length - 1}
-                              onClick={() => {
-                                const nextOrder = [...columnOrder!];
-                                const temp = nextOrder[index];
-                                nextOrder[index] = nextOrder[index + 1];
-                                nextOrder[index + 1] = temp;
-                                onReorder!(nextOrder);
-                              }}
-                              className={styles.reorderBtn}
-                            >
-                              ▼
-                            </button>
-                          </div>
+                          <span
+                            className={styles.reorderHandle}
+                            title="Drag to reorder"
+                            aria-label={`Drag to reorder ${columnLabels[key]}`}
+                          >
+                            ⠿
+                          </span>
                         ) : null}
                         <label
                           className={styles.tableOptionsItem}
@@ -10156,6 +10293,30 @@ function ColumnsOptionsMenu<K extends string>({
                             <span className={styles.tableOptionsLocked}>Always visible</span>
                           ) : null}
                         </label>
+                        {reorderable ? (
+                          <div className={styles.tableOptionsReorder}>
+                            <button
+                              type="button"
+                              title="Move up"
+                              aria-label={`Move ${columnLabels[key]} up`}
+                              disabled={index === 0}
+                              onClick={() => onReorder!(moved(columnOrder!, key, index - 1))}
+                              className={styles.reorderBtn}
+                            >
+                              ▲
+                            </button>
+                            <button
+                              type="button"
+                              title="Move down"
+                              aria-label={`Move ${columnLabels[key]} down`}
+                              disabled={index === columnKeys.length - 1}
+                              onClick={() => onReorder!(moved(columnOrder!, key, index + 1))}
+                              className={styles.reorderBtn}
+                            >
+                              ▼
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -10199,6 +10360,7 @@ function TrackTableOptionsMenu({
   return (
     <ColumnsOptionsMenu
       title="View Settings"
+      description="Applies across the whole Library, on every artist and album. The table layout is shared by all profiles, the artist page settings are this profile's own."
       onClose={onClose}
       columnLabels={TRACK_TABLE_COLUMN_LABELS}
       columns={columns}
@@ -10887,7 +11049,8 @@ export function AlbumTrackTable({
   };
   const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
   const editViaTitle = prefsQuery.data?.track_table.edit_via_title ?? true;
-  const actionColumnWidth = trackActionColumnWidth(editViaTitle);
+  const addToPlaylist = prefsQuery.data?.artist_page?.add_to_playlist !== false;
+  const actionColumnWidth = trackActionColumnWidth(editViaTitle, addToPlaylist);
   const utilityColumnWidth = UTILITY_COLUMN_WIDTH_BASE + actionColumnWidth;
   const columnWidths =
     prefsQuery.data?.track_table.column_widths ?? DEFAULT_TRACK_TABLE_COLUMN_WIDTHS;
@@ -11393,6 +11556,7 @@ export function AlbumTrackTable({
               responsiveColumnWidths={responsiveColumnWidths}
               showAllProviders={showAllProviders}
               editViaTitle={editViaTitle}
+              addToPlaylist={addToPlaylist}
               selected={track.id != null && selected.has(track.id)}
               onToggleSelect={
                 track.id != null ? () => toggleSelected(track.id as number) : undefined
@@ -11631,6 +11795,8 @@ type TrackRowProps = {
   showAllProviders: boolean;
   /** Table option: the title opens the track editor instead of a pencil. */
   editViaTitle: boolean;
+  /** View Settings: Add to playlist among the actions. */
+  addToPlaylist: boolean;
   selected: boolean;
   onToggleSelect: (() => void) | undefined;
   onAction: ActionHandler;
@@ -11725,6 +11891,7 @@ function TrackRow(props: TrackRowProps) {
     responsiveColumnWidths,
     showAllProviders,
     editViaTitle,
+    addToPlaylist,
     selected,
     onToggleSelect,
     onAction,
@@ -12139,10 +12306,12 @@ function TrackRow(props: TrackRowProps) {
             disabled={!track.id}
             onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
           />
-          <AddToPlaylistButton
-            track={playlistTrack(track, albumTitle)}
-            className={styles.iconAction}
-          />
+          {addToPlaylist ? (
+            <AddToPlaylistButton
+              track={playlistTrack(track, albumTitle)}
+              className={styles.iconAction}
+            />
+          ) : null}
           <OwnedTrackMoreMenu
             track={track}
             albumId={entityBase.albumId}
