@@ -27,6 +27,7 @@ import {
   clearArtistDetailPageState,
   navigateToArtistDetail,
   playLibraryTrack,
+  setLibraryArtistBreadcrumb,
 } from './library-globals';
 import {
   _mlmClose,
@@ -125,6 +126,7 @@ export const SHELL_WINDOW_EXPORTS = {
   playLibraryTrack,
   clearArtistDetailPageState,
   _updateSidebarLibraryBreadcrumb,
+  setLibraryArtistBreadcrumb,
   _handoffLibrarySearchToEnhancedSearch,
   // track-detail.js (ported aug 26)
   openTrackDetail,

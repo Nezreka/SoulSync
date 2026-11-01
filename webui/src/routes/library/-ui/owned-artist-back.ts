@@ -74,6 +74,14 @@ export function useArtistBack(artistName: string | undefined): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artistName]);
 
+  // the sidebar's "Library / <Artist>" while this artist is up, plain
+  // "Library" again once no artist is (both artist views come through here)
+  useEffect(() => {
+    if (!artistName) return;
+    window.setLibraryArtistBreadcrumb?.(artistName);
+  }, [artistName]);
+  useEffect(() => () => window.setLibraryArtistBreadcrumb?.(null), []);
+
   return {
     label,
     onBack: () => {

@@ -124,6 +124,9 @@ declare global {
      * synced after that.
      */
     _updateSidebarLibraryBreadcrumb?: () => void;
+    /** library-globals — the Library page shows (or stopped showing) an artist:
+     *  "Library / <Artist>" in the sidebar. */
+    setLibraryArtistBreadcrumb?: (name: string | null) => void;
     updateWatchlistCount?: () => void;
     /** shared-helpers.js — drops JioSaavn entries unless the experimental
      *  source is enabled. Kept as the single source of truth for that flag. */

@@ -179,19 +179,37 @@ window.addEventListener(_PAGE_WILL_CHANGE, (event) => {
 // nav button width stays consistent across the rest of the sidebar.
 const _SIDEBAR_BREADCRUMB_ARTIST_MAXLEN = 14;
 
+// The artist the Library page is showing. Every artist opens there now (the
+// one artist page), not on artist-detail, so the breadcrumb lost its name;
+// the library artist views set this while they're up.
+let _libraryArtistName: string | null = null;
+
+/** The Library page shows (or stopped showing) an artist: repaint the
+ *  sidebar's "Library / <Artist>". */
+export function setLibraryArtistBreadcrumb(name: string | null): void {
+  _libraryArtistName = name && name.trim() ? name : null;
+  _updateSidebarLibraryBreadcrumb();
+}
+
 export function _updateSidebarLibraryBreadcrumb(): void {
   // Rewrite the Library nav button label between plain "Library" and a
-  // "Library / <Artist>" breadcrumb depending on whether the user is on
-  // the artist-detail pseudo-page. Pure visual - touches no app state.
+  // "Library / <Artist>" breadcrumb: on the artist-detail pseudo-page, or on
+  // the Library page while it shows an artist. Pure visual - touches no app
+  // state.
   const btn = document.querySelector('[data-page="library"]');
   if (!btn) return;
   const textEl = btn.querySelector('.nav-text') as HTMLElement | null;
   if (!textEl) return;
 
   const onArtistDetail = typeof currentPage === 'string' && currentPage === 'artist-detail';
-  const artistName = onArtistDetail ? artistDetailPageState.currentArtistName || '' : '';
+  const onLibrary = typeof currentPage === 'string' && currentPage === 'library';
+  const artistName = onArtistDetail
+    ? artistDetailPageState.currentArtistName || ''
+    : onLibrary
+      ? _libraryArtistName || ''
+      : '';
 
-  if (!onArtistDetail || !artistName) {
+  if (!artistName) {
     // Default state: plain "Library" label. Use textContent so we wipe
     // any previously-injected breadcrumb spans cleanly.
     textEl.textContent = 'Library';
