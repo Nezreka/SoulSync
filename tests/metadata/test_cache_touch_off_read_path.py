@@ -102,3 +102,35 @@ def test_eviction_flushes_first(cache_db):
     # "a" was hit, so the never-touched "b" is the one evicted
     left = [r[0] for r in conn.execute("SELECT entity_id FROM metadata_cache_entities")]
     assert left == ["a"]
+
+
+def test_eviction_deletes_a_chunk_per_transaction(cache_db, monkeypatch):
+    # one big delete held the write lock for seconds while every worker queued
+    cache, conn, _ = cache_db
+    for eid in ("c", "d", "e"):
+        conn.execute(
+            "INSERT INTO metadata_cache_entities (source, entity_type, entity_id, raw_json, updated_at) "
+            "VALUES ('spotify', 'track', ?, '{}', datetime('now', 'localtime'))", (eid,))
+    conn.commit()
+    monkeypatch.setattr(metadata_cache, "_MAINTENANCE_CHUNK", 2)
+    commits = []
+    real_get_db = cache._get_db
+
+    class _Counting:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def commit(self):
+            commits.append(1)
+            return self._inner.commit()
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    fake = MagicMock()
+    fake._get_connection.side_effect = lambda: _Counting(real_get_db()._get_connection())
+    cache._get_db = lambda: fake  # type: ignore[method-assign]
+
+    assert cache.evict_over_capacity(max_rows=1) == 4
+    assert len(commits) == 2
+    assert conn.execute("SELECT COUNT(*) FROM metadata_cache_entities").fetchone()[0] == 1

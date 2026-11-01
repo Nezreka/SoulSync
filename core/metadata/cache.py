@@ -101,6 +101,22 @@ def get_metadata_cache():
 # browser, both fine a few seconds behind.
 _TOUCH_FLUSH_SECONDS = 15.0
 
+# maintenance deletes pick their rows with a plain read, then delete them a
+# chunk per transaction so other writers get the lock in between. one big
+# delete held it for 15s+ while every enrichment worker queued (Nov 1 2026).
+_MAINTENANCE_CHUNK = 500
+
+
+def _delete_ids_in_chunks(conn, table: str, ids) -> int:
+    cursor = conn.cursor()
+    removed = 0
+    for i in range(0, len(ids), _MAINTENANCE_CHUNK):
+        chunk = list(ids[i:i + _MAINTENANCE_CHUNK])
+        cursor.execute(f"DELETE FROM {table} WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+        removed += max(cursor.rowcount, 0)
+        conn.commit()
+    return removed
+
 
 class MetadataCache:
     """Caches Spotify and iTunes API responses with structured fields + raw JSON."""
@@ -751,20 +767,18 @@ class MetadataCache:
             cursor = conn.cursor()
 
             # Entities
-            cursor.execute("""
-                DELETE FROM metadata_cache_entities
+            ids = [r[0] for r in cursor.execute("""
+                SELECT id FROM metadata_cache_entities
                 WHERE julianday('now') - julianday(updated_at) > ttl_days
-            """)
-            entity_count = cursor.rowcount
+            """).fetchall()]
+            entity_count = _delete_ids_in_chunks(conn, 'metadata_cache_entities', ids)
 
             # Searches
-            cursor.execute("""
-                DELETE FROM metadata_cache_searches
+            ids = [r[0] for r in cursor.execute("""
+                SELECT id FROM metadata_cache_searches
                 WHERE julianday('now') - julianday(created_at) > ttl_days
-            """)
-            search_count = cursor.rowcount
-
-            conn.commit()
+            """).fetchall()]
+            search_count = _delete_ids_in_chunks(conn, 'metadata_cache_searches', ids)
             total = entity_count + search_count
             if total > 0:
                 logger.info(f"Evicted {total} expired cache entries ({entity_count} entities, {search_count} searches)")
@@ -791,16 +805,12 @@ class MetadataCache:
                 return 0
             # Delete the oldest-accessed rows. NULL last_accessed_at sorts first
             # (evicted earliest) — those were never touched since insert.
-            cursor.execute("""
-                DELETE FROM metadata_cache_entities
-                WHERE id IN (
-                    SELECT id FROM metadata_cache_entities
-                    ORDER BY last_accessed_at ASC
-                    LIMIT ?
-                )
-            """, (to_evict,))
-            evicted = cursor.rowcount
-            conn.commit()
+            ids = [r[0] for r in cursor.execute("""
+                SELECT id FROM metadata_cache_entities
+                ORDER BY last_accessed_at ASC
+                LIMIT ?
+            """, (to_evict,)).fetchall()]
+            evicted = _delete_ids_in_chunks(conn, 'metadata_cache_entities', ids)
             if evicted > 0:
                 logger.info(
                     "Cache over capacity (%d > %d) — evicted %d least-recently-used entities",
@@ -815,16 +825,15 @@ class MetadataCache:
         def _operation(conn):
             cursor = conn.cursor()
             junk_names = "', '".join(self._JUNK_NAMES - {''})  # exclude empty, handled separately
-            cursor.execute(f"""
-                DELETE FROM metadata_cache_entities
+            ids = [r[0] for r in cursor.execute(f"""
+                SELECT id FROM metadata_cache_entities
                 WHERE (name IS NULL
                    OR TRIM(name) = ''
                    OR LOWER(TRIM(name)) IN ('{junk_names}'))
                   AND entity_id NOT LIKE '%\\_features' ESCAPE '\\'
                   AND entity_id NOT LIKE '%\\_tracks' ESCAPE '\\'
-            """)
-            count = cursor.rowcount
-            conn.commit()
+            """).fetchall()]
+            count = _delete_ids_in_chunks(conn, 'metadata_cache_entities', ids)
             if count > 0:
                 logger.info(f"Cleaned {count} junk entities from cache")
             return count
