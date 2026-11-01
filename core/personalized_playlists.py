@@ -43,6 +43,9 @@ _OWNED_PROVIDER_IDS_SQL = """
 # in indexed temp tables, refilled in one sql pass when a file is added or
 # after five minutes.
 _OWNED_IDS_TTL = 300.0
+# a new file still rebuilds them, but not more than once a minute: during a
+# download run every file moved the stamp and every shelf paid a ~4s rebuild
+_OWNED_IDS_MIN_AGE = 60.0
 
 
 def _ensure_owned_ids(conn) -> None:
@@ -53,7 +56,8 @@ def _ensure_owned_ids(conn) -> None:
     conn.execute("CREATE TEMP TABLE IF NOT EXISTS owned_ids_version (stamp, built_at REAL)")
     current = conn.execute("SELECT stamp, built_at FROM temp.owned_ids_version").fetchone()
     now = _time.monotonic()
-    if current and current[0] == stamp and now - current[1] < _OWNED_IDS_TTL:
+    if current and now - current[1] < _OWNED_IDS_TTL and (
+            current[0] == stamp or now - current[1] < _OWNED_IDS_MIN_AGE):
         return
     conn.execute("DROP TABLE IF EXISTS temp.owned_all")
     conn.execute(f"CREATE TEMP TABLE owned_all AS {_OWNED_PROVIDER_IDS_SQL}")
@@ -61,8 +65,11 @@ def _ensure_owned_ids(conn) -> None:
                          ('owned_deezer', 'deezer_id')):
         conn.execute(f"CREATE TEMP TABLE IF NOT EXISTS {name} (v PRIMARY KEY) WITHOUT ROWID")
         conn.execute(f"DELETE FROM temp.{name}")
+        # sorted: in-order inserts into the key's b-tree are ~3x cheaper
+        # than the catalogue's own order (0.7s against 2.2s for ~700k ids)
         conn.execute(f"INSERT OR IGNORE INTO temp.{name} "
-                     f"SELECT {column} FROM temp.owned_all WHERE {column} IS NOT NULL")
+                     f"SELECT DISTINCT {column} FROM temp.owned_all "
+                     f"WHERE {column} IS NOT NULL ORDER BY {column}")
     conn.execute("DROP TABLE temp.owned_all")
     conn.execute("DELETE FROM temp.owned_ids_version")
     conn.execute("INSERT INTO temp.owned_ids_version VALUES (?, ?)", (stamp, now))
