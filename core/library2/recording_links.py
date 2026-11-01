@@ -199,8 +199,15 @@ def prefer_album_home(conn: Any) -> Dict[str, int]:
     a duplicate finding, not a re-home. Idempotent; does not commit.
     """
     key = _title_key_sql("{col}", ensure_sql_helpers(conn))
+    # only recordings more than one track shares can have another home: the
+    # join enumerated every file's recording first (~8s on 311k files, every
+    # start), now ~4.5s for the same rows
     rows = conn.execute(
         f"""
+        WITH shared AS MATERIALIZED (
+            SELECT recording_id FROM lib2_release_tracks
+             WHERE track_id IS NOT NULL
+             GROUP BY recording_id HAVING COUNT(DISTINCT track_id) > 1)
         SELECT f.id            AS file_id,
                f.track_id      AS from_track_id,
                src_al.album_type AS from_type,
@@ -210,6 +217,7 @@ def prefer_album_home(conn: Any) -> Dict[str, int]:
           JOIN lib2_tracks src ON src.id = f.track_id
           JOIN lib2_albums src_al ON src_al.id = src.album_id
           JOIN lib2_release_tracks mine ON mine.track_id = src.id
+               AND mine.recording_id IN (SELECT recording_id FROM shared)
           JOIN lib2_release_tracks theirs
                 ON theirs.recording_id = mine.recording_id
                AND theirs.track_id IS NOT NULL
