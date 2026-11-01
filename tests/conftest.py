@@ -1105,11 +1105,16 @@ def _fresh_fold_index():
     # cache hits write their access stats on a timer; in tests, right away
     from core.metadata import cache as metadata_cache
     saved_touch, metadata_cache._TOUCH_FLUSH_SECONDS = metadata_cache._TOUCH_FLUSH_SECONDS, 0.0
+    # naming never asks musicbrainz in tests; the tests of that ask turn it on
+    from core.imports import artist_facts as _artist_facts
+    saved_online, _artist_facts.ONLINE_LOOKUP = _artist_facts.ONLINE_LOOKUP, False
+    _artist_facts.clear_cache()
     yield
     fold_index.CHECK_SECONDS = saved
     worker_queue.PROGRESS_SNAPSHOT_TTL = saved_ttl
     MusicDatabase._OWNED_GENRES_TTL = saved_genres_ttl
     metadata_cache._TOUCH_FLUSH_SECONDS = saved_touch
+    _artist_facts.ONLINE_LOOKUP = saved_online
 
 
 @pytest.fixture(autouse=True, scope='session')

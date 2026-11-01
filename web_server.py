@@ -14145,7 +14145,8 @@ def _apply_path_template(template: str, context: dict) -> str:
         if not primary and context.get('_track_artists_list'):
             primary = listed_primary_of(_raw_album_artist, context['_track_artists_list'][0])
         if primary:
-            album_artist_value = primary
+            # raw list name: sanitize like every other value (#1954)
+            album_artist_value = _sanitize_filename(primary)
         elif artists_list and len(artists_list) == 1:
             # Single artist string — could be a combined name from iTunes
             # Resolve via artistId if available (safe: "Simon & Garfunkel" ID → "Simon & Garfunkel")
@@ -14154,7 +14155,7 @@ def _apply_path_template(template: str, context: dict) -> str:
                 try:
                     resolved = _get_itunes_client().resolve_primary_artist(itunes_artist_id)
                     if resolved and resolved != album_artist_value:
-                        album_artist_value = resolved
+                        album_artist_value = _sanitize_filename(resolved)
                 except Exception as e:
                     logger.debug("itunes primary artist resolve failed: %s", e)
     # $cdnum — smart CD label for multi-disc filenames. Produces "CD01" /

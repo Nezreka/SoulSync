@@ -744,7 +744,8 @@ def apply_artist_facts(template: str, album_artist: str, track_artist: str, cont
     else:
         album = artist_facts(album_artist, mbid=context.get("_albumartist_mbid"),
                              source=context.get("_albumartist_source"),
-                             source_id=context.get("_albumartist_source_id"))
+                             source_id=context.get("_albumartist_source_id"),
+                             album=context.get("album"))
         same = str(track_artist or "").casefold() == str(album_artist or "").casefold()
         track = album if same else artist_facts(track_artist)
     result = template
@@ -784,7 +785,10 @@ def _replace_template_variables(template: str, context: dict) -> str:
             if track_list:
                 primary = listed_primary_of(_raw_album_artist, track_list[0])
         if primary:
-            album_artist_value = primary
+            # the list's name is raw: unsanitized, a collab album went to
+            # "L.A.B." and a solo one to "L.A.B" (#1954), and a "/" in it
+            # made an extra folder
+            album_artist_value = sanitize_filename(primary)
         elif artists_list and len(artists_list) == 1:
             itunes_artist_id = context.get("_itunes_artist_id")
             if itunes_artist_id and ("," in album_artist_value or " & " in album_artist_value):
@@ -793,7 +797,7 @@ def _replace_template_variables(template: str, context: dict) -> str:
                     if resolved_client and hasattr(resolved_client, "resolve_primary_artist"):
                         resolved = resolved_client.resolve_primary_artist(itunes_artist_id)
                         if resolved and resolved != album_artist_value:
-                            album_artist_value = resolved
+                            album_artist_value = sanitize_filename(resolved)
                 except Exception as e:
                     logger.debug("resolve primary artist failed: %s", e)
 
