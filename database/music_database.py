@@ -7225,13 +7225,18 @@ class MusicDatabase:
         """plays per artist genre payload, as (genres, plays) rows. counts each
         track's plays first, then joins each played track once. joining per
         play hit tracks 150k times for 11k distinct tracks, 0.5 s on every
-        genre shelf."""
+        genre shelf.
+
+        ``+`` on the track id, in the filter and the GROUP BY: either one let
+        the planner walk the track index for the grouping order and read every
+        play even for a 7-day window (500ms); without them the window's
+        played_at index leads."""
         return f"""
             WITH played AS MATERIALIZED (
                 SELECT lh.lib2_track_id AS tid, COUNT(*) AS n
                 FROM listening_history lh
-                {where} AND lh.lib2_track_id IS NOT NULL
-                GROUP BY lh.lib2_track_id
+                {where} AND +lh.lib2_track_id IS NOT NULL
+                GROUP BY +lh.lib2_track_id
             )
             SELECT a.genres, SUM(played.n) AS plays
             FROM played
@@ -7264,6 +7269,10 @@ class MusicDatabase:
             if name:
                 genre_counts[name] = genre_counts.get(name, 0) + weight
 
+    # owned-library genre shares, per database and scope (get_genre_own_vs_play)
+    _owned_genres_cache: Dict[Any, Any] = {}
+    _OWNED_GENRES_TTL = 600.0
+
     def get_genre_own_vs_play(self, time_range='all', limit=12, profile_id=None):
         """What share of the library each genre is, against what share of plays.
 
@@ -7280,8 +7289,9 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            owned = {}
-            cursor.execute(f"""
+            # the owned side doesn't depend on the time range, and the stats
+            # worker asks for four ranges in a row: ~0.9s each on 311k tracks
+            owned_sql = f"""
                 SELECT a.genres, COUNT(*) AS owned_tracks
                 FROM lib2_tracks t
                 JOIN lib2_albums al ON al.id = t.album_id
@@ -7289,9 +7299,17 @@ class MusicDatabase:
                 WHERE {_owned_track()}
                   AND a.genres IS NOT NULL AND a.genres != ''
                 GROUP BY a.genres
-            """)
-            for genres_str, count in cursor.fetchall():
-                self._accumulate_genres(owned, genres_str, count)
+            """
+            cache_key = (str(self.database_path), owned_sql)
+            hit = MusicDatabase._owned_genres_cache.get(cache_key)
+            if hit and time.monotonic() - hit[0] < self._OWNED_GENRES_TTL:
+                owned = dict(hit[1])
+            else:
+                owned = {}
+                cursor.execute(owned_sql)
+                for genres_str, count in cursor.fetchall():
+                    self._accumulate_genres(owned, genres_str, count)
+                MusicDatabase._owned_genres_cache[cache_key] = (time.monotonic(), dict(owned))
 
             played = {}
             where = self._listening_time_filter(time_range, alias='lh', owner=owner)
@@ -7636,13 +7654,14 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t WHERE {_owned_track()}")
-            total_tracks = (cursor.fetchone() or [0])[0]
-
+            # count, never-played and total length in ONE walk of the owned
+            # tracks: three walks cost ~7s on a 311k-track library
             cursor.execute(
-                "SELECT COUNT(*) FROM lib2_tracks t "
-                f"WHERE COALESCE(t.play_count, 0) = 0 AND {_owned_track()}")
-            unplayed = (cursor.fetchone() or [0])[0]
+                "SELECT COUNT(*), "
+                "COALESCE(SUM(CASE WHEN COALESCE(t.play_count, 0) = 0 THEN 1 ELSE 0 END), 0), "
+                "COALESCE(SUM(t.duration), 0) "
+                f"FROM lib2_tracks t WHERE {_owned_track()}")
+            total_tracks, unplayed, total_duration_ms = cursor.fetchone() or (0, 0, 0)
 
             # The labels are what the page renders, so the extension keeps
             # deciding them — `lib2_track_files.format` is free text a provider
@@ -7669,11 +7688,6 @@ class MusicDatabase:
                 ORDER BY count DESC
             """)
             format_breakdown = {row[0]: row[1] for row in cursor.fetchall()}
-
-            cursor.execute(
-                "SELECT COALESCE(SUM(t.duration), 0) FROM lib2_tracks t "
-                f"WHERE {_owned_track()}")
-            total_duration_ms = (cursor.fetchone() or [0])[0]
 
             # Enrichment coverage: how much of the catalogue each service has
             # matched. Only Spotify and MusicBrainz have promoted columns in v2;

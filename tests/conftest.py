@@ -1096,9 +1096,14 @@ def _fresh_fold_index():
     # library membership ids are kept per file between requests; test files are reused
     from core.library2 import member_version
     member_version.clear()
+    # the owned genre shares are cached per database for 10 minutes; exact here
+    from database.music_database import MusicDatabase
+    MusicDatabase._owned_genres_cache.clear()
+    saved_genres_ttl, MusicDatabase._OWNED_GENRES_TTL = MusicDatabase._OWNED_GENRES_TTL, 0.0
     yield
     fold_index.CHECK_SECONDS = saved
     worker_queue.PROGRESS_SNAPSHOT_TTL = saved_ttl
+    MusicDatabase._OWNED_GENRES_TTL = saved_genres_ttl
 
 
 @pytest.fixture(autouse=True, scope='session')
