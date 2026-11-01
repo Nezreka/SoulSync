@@ -5795,13 +5795,13 @@ class RepairWorker:
             self.db, track_id, details or {},
             fix_tags=fix_tags, config_manager=self._config_manager)
         if result.get('success') and settings.get('reorganize_files', True):
-            moved = self._move_refiled_track(result.get('library_v2_rehomed_track_id'), fix_tags)
+            moved = self._move_refiled_track(result.get('library_v2_rehomed_track_id'))
             result['reorganize'] = moved
             if moved == 'queued':
                 result['message'] = f"{result.get('message')}; moving it into its folder"
         return result
 
-    def _move_refiled_track(self, track_id, from_tags: bool) -> str:
+    def _move_refiled_track(self, track_id) -> str:
         """dev's Fix Unknown Artists "reorganize files": the re-filed track moves
         into its artist/album folder. Library Reorganize does the move. Only a
         file inside SoulSync's own folders moves (the transfer folder, an own
@@ -5835,7 +5835,7 @@ class RepairWorker:
             return 'kept_in_place'
         try:
             from core.library2.reorganize_bridge import enqueue_album_reorganize
-            enqueue_album_reorganize(self.db, int(row[0]), mode='tags' if from_tags else 'api')
+            enqueue_album_reorganize(self.db, int(row[0]))
         except Exception as exc:  # noqa: BLE001 - the re-file stands; the move is a follow-up
             logger.warning("Unknown Artist: reorganize for album %s not queued: %s", row[0], exc)
             return 'not_queued'

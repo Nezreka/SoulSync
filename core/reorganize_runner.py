@@ -4,19 +4,19 @@ and the monolith stays small.
 
 The runner ties three subsystems together:
 
-* :func:`core.library_reorganize.reorganize_album` — the orchestrator
-  that copies files to staging, matches them against the metadata
-  source, and routes each through the post-process pipeline.
+* :func:`core.library_reorganize.reorganize_album_rename_only` — the
+  executor that moves each file to the path the catalogue plan gives it
+  (:func:`core.library2.reorganize_bridge.catalogue_preview_fn`).
 * :func:`core.reorganize_queue.get_queue` — the queue this runner is
   registered with; we forward live progress updates back into the
   active queue item so the status panel can show per-track state.
 * The dependency callbacks injected by ``web_server`` (DB accessor,
-  resolve-file-path, post-process function, empty-dir cleanup,
-  shutdown signal). These are passed in rather than imported so the
-  module stays testable in isolation.
+  resolve-file-path, path builder, empty-dir cleanup, shutdown signal).
+  These are passed in rather than imported so the module stays testable
+  in isolation.
 
-Config (download path / transfer path) is read **per run**, not at
-module load. That way a user changing their download path in settings
+Config (the transfer path) is read **per run**, not at
+module load. That way a user changing their transfer path in settings
 takes effect on the next reorganize without needing a server restart.
 """
 
@@ -33,10 +33,8 @@ def build_runner(
     *,
     get_database: Callable[[], object],
     resolve_file_path_fn: Callable[[Optional[str]], Optional[str]],
-    post_process_fn: Callable[[str, dict, str], None],
     cleanup_empty_directories_fn: Callable[[str, str], None],
     is_shutting_down_fn: Callable[[], bool],
-    get_download_path: Callable[[], str],
     get_transfer_path: Callable[[], str],
     build_final_path_fn: Optional[Callable] = None,
     get_config_manager: Optional[Callable[[], object]] = None,
@@ -47,16 +45,13 @@ def build_runner(
         get_database: Returns the live MusicDatabase singleton.
         resolve_file_path_fn: Resolves a DB-stored file path to the
             actual on-disk path (or ``None`` if missing).
-        post_process_fn: ``_post_process_matched_download``. Must set
-            ``context['_final_processed_path']`` on success.
         cleanup_empty_directories_fn: Called as
             ``cleanup_empty_directories_fn(transfer_dir, marker_path)``
             to prune empty source dirs after a track is moved.
         is_shutting_down_fn: Returns True when the server is shutting
             down so the orchestrator can abort early.
-        get_download_path: Resolves the user's configured download
+        get_transfer_path: Resolves the user's configured transfer
             path *at call time* (so config changes apply live).
-        get_transfer_path: Same, for the transfer path.
         get_config_manager: Optional live config accessor. When supplied, a
             successful path update is reconciled through the strictly gated
             Library-v2 maintenance boundary and appears in entity history.
@@ -65,7 +60,7 @@ def build_runner(
         A callable ``runner(item)`` suitable for
         :meth:`core.reorganize_queue.ReorganizeQueue.set_runner`.
     """
-    from core.library_reorganize import reorganize_album, reorganize_album_rename_only
+    from core.library_reorganize import reorganize_album_rename_only
     from core.reorganize_queue import get_queue
 
     def _repoint_findings(conn, old_path, new_path):
@@ -266,8 +261,7 @@ def build_runner(
         # Re-tagging did not live in there alone: it is a job of its own, with
         # a preview, findings and a rule about hand-set fields. So nothing is
         # left for the staging path to contribute, and every item takes the
-        # mover -- `rename_only` included, which is why the flag is no longer
-        # read.
+        # mover. The staging path and its flag are gone.
         if build_final_path_fn is None:
             return {
                 'status': 'setup_failed', 'source': None,
@@ -285,9 +279,6 @@ def build_runner(
             update_track_path_fn=_update_track_path,
             cleanup_empty_dir_fn=_cleanup_empty,
             on_progress=_on_progress,
-            primary_source=item.source,
-            strict_source=bool(item.source),
-            metadata_source=getattr(item, 'metadata_source', 'api') or 'api',
             stop_check=is_shutting_down_fn,
             # The catalogue is the source for a destination path -- no provider
             # call, no source-id requirement, and the filename matches what the

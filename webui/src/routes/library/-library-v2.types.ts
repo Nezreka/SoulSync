@@ -482,12 +482,6 @@ export interface LibraryV2ArtCandidate {
   front?: boolean;
 }
 
-/** One reorganize metadata source option (docs §50). */
-export interface LibraryV2ReorganizeSource {
-  source: string;
-  label: string;
-}
-
 /** One per-track row of a reorganize preview plan. */
 export interface LibraryV2ReorganizeTrackPreview {
   track_id: number | null;

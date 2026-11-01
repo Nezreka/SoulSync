@@ -319,6 +319,41 @@ def test_a_track_landing_on_an_unchanged_file_is_a_collision(imported_conn):
     assert by_title["Move"]["collision"] is True
 
 
+
+def test_a_file_already_in_place_is_unchanged_under_any_spelling(imported_conn, tmp_path):
+    """#1080: an album that is already organized must plan as `unchanged`, or
+    every run rewrites it. The catalogue often stores another spelling of the
+    same location than the path builder returns: a media-server mount reached
+    through a symlink, a `.` segment. Both name the file it would move, so
+    neither may count as a move."""
+    conn = imported_conn
+    _, album_id, track_ids = _seed(conn, tracks=(("Linked", 1, 1), ("Dotted", 2, 1), ("Moves", 3, 1)))
+    real = tmp_path / "lib" / "Drake" / "Views"
+    real.mkdir(parents=True)
+    (tmp_path / "mount").symlink_to(tmp_path / "lib")
+    for name in ("Linked", "Dotted", "Moves"):
+        (real / f"{name}.flac").write_bytes(b"audio")
+    stored = {
+        track_ids[0]: tmp_path / "mount" / "Drake" / "Views" / "Linked.flac",
+        track_ids[1]: f"{tmp_path}/lib/./Drake/Views/Dotted.flac",
+        track_ids[2]: real / "Moves.flac",
+    }
+    for track_id, path in stored.items():
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?", (str(path), track_id))
+    conn.commit()
+
+    def build(context, _artist, _album_info, file_ext, create_dirs=True):
+        title = context["track_info"]["name"]
+        folder = real if title != "Moves" else tmp_path / "lib" / "Drake" / "Elsewhere"
+        return str(folder / f"{title}{file_ext}"), True
+
+    plan = _plan(conn, album_id, build, transfer_dir=str(tmp_path / "lib"))
+
+    by_title = {t["title"]: t for t in plan["tracks"]}
+    assert by_title["Linked"]["unchanged"] is True
+    assert by_title["Dotted"]["unchanged"] is True
+    assert by_title["Moves"]["unchanged"] is False
+
 # ── the release type a download filed the album under (upstream 558d96864) ──
 
 class _Cfg:

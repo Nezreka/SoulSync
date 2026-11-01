@@ -3075,14 +3075,16 @@ curl -X PATCH http://localhost:8008/api/v1/settings \\
 Retag groups collect files whose metadata needs rewriting — the batches behind
 library-wide tag fixes. The API is read-and-delete only: inspect the groups,
 review what a group caught, delete it when its fixes are done, or clear
-everything at once. Groups themselves are created by the retag worker, not by
-this API.
+everything at once. Groups come from the Library Re-tag job: a group is an
+album with pending Re-tag findings (its \`id\` is the album's id), a track is one
+of those findings (its \`id\` is the finding's id), and deleting a group
+dismisses its findings.
 
 ### The retag group object
 
 | Field | Type | Description |
 |-------|------|-------------|
-| \`id\` | int | Group ID |
+| \`id\` | int | Group ID (the album's id) |
 | \`group_type\` | string | Group kind, e.g. \`"album"\` (default) |
 | \`artist_name\` | string | Artist the group belongs to |
 | \`album_name\` | string | Album the group belongs to |
@@ -3098,7 +3100,7 @@ this API.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| \`id\` | int | Track row ID |
+| \`id\` | int | Track ID (the Re-tag finding's id) |
 | \`group_id\` | int | Owning group ID |
 | \`track_number\` | int \\| null | Track number within the disc |
 | \`disc_number\` | int | Disc number (default \`1\`) |
@@ -3107,7 +3109,7 @@ this API.
 | \`file_format\` | string \\| null | Audio container/codec, e.g. \`"flac"\` |
 | \`spotify_track_id\` | string \\| null | Spotify track ID, when known |
 | \`itunes_track_id\` | string \\| null | iTunes track ID, when known |
-| \`created_at\` | string | When the track row was created |
+| \`created_at\` | string | When the Re-tag finding was raised |
 
 Note: \`?fields=\` trimming and \`?page=\`/\`?limit=\` pagination are **not**
 supported on any retag endpoint.
@@ -3230,7 +3232,9 @@ curl -H "Authorization: Bearer $API_KEY" \\
 
 ### \`DELETE /api/v1/retag/groups/{group_id}\`
 
-Delete one retag group and all of its tracks. **There is no undo.**
+Dismiss one retag group: every pending Re-tag finding of that album. The files
+are not touched; the next Re-tag scan raises a finding again for a file that
+still disagrees with the catalogue.
 
 **Path parameters**
 
@@ -3253,6 +3257,7 @@ Delete one retag group and all of its tracks. **There is no undo.**
 
 | Status | Code | Meaning |
 |--------|------|---------|
+| 404 | \`NOT_FOUND\` | The album has no pending Re-tag findings |
 | 500 | \`RETAG_ERROR\` | Database failure |
 
 **Example**
@@ -3262,26 +3267,13 @@ curl -X DELETE -H "Authorization: Bearer $API_KEY" \\
   http://localhost:8008/api/v1/retag/groups/7
 \`\`\`
 
-**Notes**
-
-- The underlying delete does not check that the group exists first: deleting
-  a nonexistent \`group_id\` still answers \`200\` with the confirmation message.
-  (The \`404\` branch in the route is unreachable with the current database
-  code, which returns success unconditionally.)
-
 ---
 
 ### \`DELETE /api/v1/retag/groups\`
 
-Delete **all** retag groups and their tracks at once. **There is no undo.**
+Dismiss **every** pending Re-tag finding at once.
 
-> [!WARNING]
-> This endpoint is currently broken: it always answers \`500 RETAG_ERROR\`
-> because \`api/retag.py\` calls \`db.clear_all_retag_groups()\`, which does not
-> exist (the database method is \`delete_all_retag_groups()\`). The contract
-> below is the intended behavior once that is fixed.
-
-**Response** — intended \`200\` with the number of groups cleared:
+**Response** — \`200\` with the number of groups (albums) cleared:
 
 \`\`\`json
 {

@@ -4,19 +4,19 @@ Contract this test file pins:
 
 1. **Runner is a closure** — calling `build_runner` returns a callable
    that takes a queue item and returns a summary dict matching
-   `reorganize_album`'s shape.
+   `reorganize_album_rename_only`'s shape.
 2. **Config is read per-run, not at factory time** — changing the
-   download/transfer path between runs is honoured. Web server config
-   should never need a restart for this to take effect.
-3. **Setup failure surfaces a clean summary** — if the staging dir
-   cannot be created, the runner returns `status='setup_failed'`
-   instead of raising (so the queue marks the item failed cleanly).
-4. **Progress callbacks fan out into the queue** — the runner wires
-   `reorganize_album`'s `on_progress` to `update_active_progress` on
-   the live singleton queue, so the status panel sees per-track state.
+   transfer path between runs is honoured. Web server config should
+   never need a restart for this to take effect.
+3. **Setup failure surfaces a clean summary** — without a path builder
+   the runner returns `status='setup_failed'` instead of raising (so the
+   queue marks the item failed cleanly).
+4. **Progress callbacks fan out into the queue** — the runner wires the
+   mover's `on_progress` to `update_active_progress` on the live
+   singleton queue, so the status panel sees per-track state.
 5. **Dependencies are injected, not imported** — the factory takes
    every external dependency as a callable so tests can run without
-   spinning up Flask, the DB, or the post-process pipeline.
+   spinning up Flask or the DB.
 """
 
 import sys
@@ -92,7 +92,7 @@ def _make_item(*, queue_id='qid-1', album_id='alb-1', source=None):
     return item
 
 
-def _build(monkeypatch, *, download_path_fn, transfer_path_fn,
+def _build(monkeypatch, *, transfer_path_fn,
            reorganize_album_fn, get_database=lambda: object()):
     """Helper: stub out the mover so the wiring can be tested without a real
     DB. The mover is the only executor now — the staging pipeline is gone."""
@@ -105,10 +105,8 @@ def _build(monkeypatch, *, download_path_fn, transfer_path_fn,
     return build_runner(
         get_database=get_database,
         resolve_file_path_fn=lambda p: p,
-        post_process_fn=lambda *a, **k: None,
         cleanup_empty_directories_fn=lambda *a, **k: None,
         is_shutting_down_fn=lambda: False,
-        get_download_path=download_path_fn,
         get_transfer_path=transfer_path_fn,
         build_final_path_fn=lambda *a, **k: (None, True),
     )
@@ -126,7 +124,6 @@ def test_runner_invokes_reorganize_album_with_injected_deps(monkeypatch, tmp_pat
 
     runner = _build(
         monkeypatch,
-        download_path_fn=lambda: str(tmp_path),
         transfer_path_fn=lambda: str(tmp_path / 'transfer'),
         reorganize_album_fn=fake_reorganize_album,
     )
@@ -162,7 +159,6 @@ def test_runner_reads_config_per_call(monkeypatch, tmp_path):
     current_path = {'value': str(tmp_path / 'first')}
     runner = _build(
         monkeypatch,
-        download_path_fn=lambda: str(tmp_path),
         transfer_path_fn=lambda: current_path['value'],
         reorganize_album_fn=fake_reorganize_album,
     )
@@ -190,10 +186,8 @@ def test_runner_returns_setup_failed_without_a_path_builder(monkeypatch, tmp_pat
     runner = build_runner(
         get_database=lambda: object(),
         resolve_file_path_fn=lambda p: p,
-        post_process_fn=lambda *a, **k: None,
         cleanup_empty_directories_fn=lambda *a, **k: None,
         is_shutting_down_fn=lambda: False,
-        get_download_path=lambda: str(tmp_path),
         get_transfer_path=lambda: str(tmp_path / 'transfer'),
     )
     summary = runner(_make_item())
@@ -202,7 +196,7 @@ def test_runner_returns_setup_failed_without_a_path_builder(monkeypatch, tmp_pat
 
 
 def test_runner_progress_callback_forwards_to_queue(monkeypatch, tmp_path):
-    """When reorganize_album fires its on_progress callback, the runner
+    """When the mover fires its on_progress callback, the runner
     must forward into the live queue's update_active_progress so the
     status panel sees per-track updates."""
     from core.reorganize_queue import get_queue, ReorganizeQueue
@@ -224,7 +218,6 @@ def test_runner_progress_callback_forwards_to_queue(monkeypatch, tmp_path):
 
     runner = _build(
         monkeypatch,
-        download_path_fn=lambda: str(tmp_path),
         transfer_path_fn=lambda: str(tmp_path / 'transfer'),
         reorganize_album_fn=fake_reorganize_album,
     )
@@ -234,7 +227,7 @@ def test_runner_progress_callback_forwards_to_queue(monkeypatch, tmp_path):
     q = get_queue()
     q.set_runner(runner)
     enq = q.enqueue(album_id='alb-1', album_title='good kid',
-                    artist_id='ar-1', artist_name='Kendrick Lamar', source=None)
+                    artist_id='ar-1', artist_name='Kendrick Lamar')
 
     # Wait for the worker to finish (fake_reorganize_album is fast).
     deadline_passes = 0
@@ -256,8 +249,8 @@ def test_runner_progress_callback_forwards_to_queue(monkeypatch, tmp_path):
 
 
 def test_rename_only_item_routes_to_rename_executor(monkeypatch, tmp_path):
-    """#875: an item with rename_only=True invokes the rename-only executor (NOT the
-    full reorganize_album), and never creates a staging dir."""
+    """#875: an item with rename_only=True invokes the rename-only executor and
+    never creates a staging dir."""
     captured = {}
 
     def fake_rename_only(**kwargs):
@@ -265,20 +258,14 @@ def test_rename_only_item_routes_to_rename_executor(monkeypatch, tmp_path):
         return {'status': 'completed', 'source': 'deezer',
                 'total': 1, 'moved': 1, 'skipped': 0, 'failed': 0, 'errors': []}
 
-    def fail_full(**kwargs):
-        raise AssertionError("full reorganize_album must NOT run for rename_only")
-
-    monkeypatch.setattr('core.library_reorganize.reorganize_album', fail_full, raising=True)
     monkeypatch.setattr('core.library_reorganize.reorganize_album_rename_only',
                         fake_rename_only, raising=True)
 
     runner = build_runner(
         get_database=lambda: object(),
         resolve_file_path_fn=lambda p: p,
-        post_process_fn=lambda *a, **k: None,
         cleanup_empty_directories_fn=lambda *a, **k: None,
         is_shutting_down_fn=lambda: False,
-        get_download_path=lambda: str(tmp_path),
         get_transfer_path=lambda: str(tmp_path / 'transfer'),
         build_final_path_fn=lambda *a, **k: (None, True),
     )
@@ -311,20 +298,14 @@ def test_an_item_without_the_flag_also_only_moves_files(monkeypatch, tmp_path):
         return {'status': 'completed', 'source': None,
                 'total': 1, 'moved': 1, 'skipped': 0, 'failed': 0, 'errors': []}
 
-    def fail_full(**kwargs):
-        raise AssertionError("the staging pipeline must not run for a reorganize")
-
-    monkeypatch.setattr('core.library_reorganize.reorganize_album', fail_full, raising=True)
     monkeypatch.setattr('core.library_reorganize.reorganize_album_rename_only',
                         fake_rename_only, raising=True)
 
     runner = build_runner(
         get_database=lambda: object(),
         resolve_file_path_fn=lambda p: p,
-        post_process_fn=lambda *a, **k: None,
         cleanup_empty_directories_fn=lambda *a, **k: None,
         is_shutting_down_fn=lambda: False,
-        get_download_path=lambda: str(tmp_path),
         get_transfer_path=lambda: str(tmp_path / 'transfer'),
         build_final_path_fn=lambda *a, **k: (None, True),
     )
@@ -355,10 +336,8 @@ def test_the_plan_comes_from_the_catalogue_not_a_provider(monkeypatch, tmp_path)
     runner = build_runner(
         get_database=lambda: object(),
         resolve_file_path_fn=lambda p: p,
-        post_process_fn=lambda *a, **k: None,
         cleanup_empty_directories_fn=lambda *a, **k: None,
         is_shutting_down_fn=lambda: False,
-        get_download_path=lambda: str(tmp_path),
         get_transfer_path=lambda: str(tmp_path / 'transfer'),
         build_final_path_fn=lambda *a, **k: (None, True),
     )
@@ -394,10 +373,8 @@ def test_rename_only_without_path_builder_fails_cleanly(monkeypatch, tmp_path):
     runner = build_runner(
         get_database=lambda: object(),
         resolve_file_path_fn=lambda p: p,
-        post_process_fn=lambda *a, **k: None,
         cleanup_empty_directories_fn=lambda *a, **k: None,
         is_shutting_down_fn=lambda: False,
-        get_download_path=lambda: str(tmp_path),
         get_transfer_path=lambda: str(tmp_path / 'transfer'),
     )
     item = _make_item()
@@ -452,7 +429,6 @@ def repoint(monkeypatch, tmp_path):
 
     runner = _build(
         monkeypatch,
-        download_path_fn=lambda: str(tmp_path),
         transfer_path_fn=lambda: str(tmp_path / 'transfer'),
         reorganize_album_fn=fake_reorganize_album,
         get_database=lambda: _RepointDb(conn),
@@ -594,12 +570,12 @@ def test_a_missing_findings_table_does_not_break_the_reorganize(repoint):
 
 # ── the catalogue update must never fail silently ────────────────────────────
 #
-# `_finalize_track` (core/library_reorganize.py) decides "the catalogue row now
-# points at the new path" SOLELY by whether this callback raised. On success it
-# goes on to `os.remove` the original. A callback that swallows its errors
-# therefore destroys the user's only copy while the catalogue still names the
-# old path — the track reads as MISSING and the file sits somewhere nothing
-# points at.
+# The mover (`reorganize_album_rename_only`, core/library_reorganize.py) decides
+# "the catalogue row now points at the new path" SOLELY by whether this callback
+# raised; only a raise makes it move the file back. A callback that swallows its
+# errors therefore leaves the file at the new path while the catalogue still
+# names the old one — the track reads as MISSING and the file sits somewhere
+# nothing points at.
 #
 # Reported against a fresh library: songs downloaded, Reorganize run while the
 # import pipeline still held the SQLite write lock, tracks came back missing.
@@ -607,8 +583,7 @@ def test_a_missing_findings_table_does_not_break_the_reorganize(repoint):
 
 def test_a_catalogue_that_cannot_be_read_raises_instead_of_being_swallowed(repoint):
     """Any failure to resolve and repoint the file row must reach the caller.
-    Swallowing it makes `_finalize_track` delete the original after a failed
-    update."""
+    Swallowing it leaves the moved file where the catalogue doesn't look."""
     update_path, conn = repoint
     track_id = _add_track(conn)
     conn.execute("DROP TABLE lib2_track_files")

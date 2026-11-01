@@ -57,7 +57,7 @@ export function classifyPreviewTrack(t: ReorganizePreviewTrack): PreviewRowView 
   const newCell: PreviewRowView['newCell'] = noFile
     ? { kind: 'none', text: '', collision: false }
     : unmatched
-      ? { kind: 'reason', text: t.reason || "Not in selected source's tracklist", collision: false }
+      ? { kind: 'reason', text: t.reason || 'Not placed on the release', collision: false }
       : missingPath
         ? {
             kind: 'reason',
@@ -91,19 +91,14 @@ export function summarizeReorganizePreview(tracks: ReorganizePreviewTrack[]): Pr
   const chips: PreviewSummary['chips'] = [];
   if (changed > 0) chips.push({ className: 'changed', text: `${changed} will move` });
   if (skipped > 0) chips.push({ className: 'unchanged', text: `${skipped} unchanged` });
-  if (unmatched > 0) {
-    chips.push({
-      className: 'missing',
-      text: `${unmatched} not in source — try a different source`,
-    });
-  }
+  if (unmatched > 0) chips.push({ className: 'missing', text: `${unmatched} not placed` });
   if (noPath > 0)
     chips.push({ className: 'missing', text: `${noPath} couldn't compute destination` });
   if (missing > 0) chips.push({ className: 'missing', text: `${missing} missing on disk` });
   if (collisions > 0) {
     chips.push({
       className: 'collision',
-      text: `${collisions} collision${collisions !== 1 ? 's' : ''} — likely a source data issue`,
+      text: `${collisions} collision${collisions !== 1 ? 's' : ''} — two files would get the same path`,
     });
   }
 
@@ -136,12 +131,9 @@ export function formatReorganizeResultMessage(state: {
   errors?: { error?: string }[];
 }): string {
   const status = state.result_status;
-  if (status === 'no_source_id') {
-    return 'Reorganize skipped — album has no metadata source ID. Run enrichment first.';
-  }
   if (status === 'no_album') return 'Reorganize skipped — album not found in DB.';
   if (status === 'no_tracks') return 'Reorganize skipped — album has no tracks.';
-  if (status === 'setup_failed') return "Reorganize failed — couldn't create staging directory.";
+  if (status === 'setup_failed') return 'Reorganize failed — the path builder is unavailable.';
   if (status === 'error') return 'Reorganize failed — see server logs for details.';
   let msg = `Reorganized: ${state.moved || 0} moved`;
   if ((state.skipped || 0) > 0) msg += `, ${state.skipped} skipped`;
@@ -152,56 +144,16 @@ export function formatReorganizeResultMessage(state: {
   return msg;
 }
 
-// ---- Mode persistence (#592) ----
-
-const MODE_KEY = 'soulsync-reorganize-mode';
-
-export function readReorganizeMode(): string {
-  try {
-    return localStorage.getItem(MODE_KEY) || 'api';
-  } catch {
-    return 'api';
-  }
-}
-
-export function writeReorganizeMode(mode: string): void {
-  try {
-    localStorage.setItem(MODE_KEY, mode);
-  } catch {
-    /* localStorage unavailable, ignore */
-  }
-}
-
 // ---- Requests ----
-
-export interface ReorganizeSource {
-  source: string;
-  label?: string;
-}
-
-export async function fetchAlbumReorganizeSources(albumId: unknown): Promise<ReorganizeSource[]> {
-  const response = await fetch(`/api/library/album/${albumId}/reorganize/sources`);
-  if (!response.ok) return [];
-  const data = await response.json();
-  return data.sources || [];
-}
-
-export async function fetchGlobalReorganizeSources(): Promise<ReorganizeSource[]> {
-  const response = await fetch('/api/library/reorganize/sources');
-  if (!response.ok) return [];
-  const data = await response.json();
-  return data.sources || [];
-}
+// The plan comes from the catalogue, so no request names a source or a mode.
 
 export async function fetchReorganizePreview(
   albumId: unknown,
-  source: string,
-  mode: string,
 ): Promise<{ tracks: ReorganizePreviewTrack[]; error?: string }> {
   const response = await fetch(`/api/library/album/${albumId}/reorganize/preview`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source, mode }),
+    body: '{}',
   });
   const result = await response.json();
   if (!result.success) return { tracks: [], error: result.error || 'Preview failed' };
@@ -212,16 +164,11 @@ export async function fetchReorganizePreview(
 export async function queueReorganizeRequest(
   albumId: unknown,
   albumTitle: string,
-  options: { source: string; mode: string; renameOnly: boolean },
 ): Promise<string> {
   const response = await fetch(`/api/library/album/${albumId}/reorganize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      source: options.source,
-      mode: options.mode,
-      rename_only: options.renameOnly,
-    }),
+    body: '{}',
   });
   const result = await response.json();
   if (!result.success) throw new Error(result.error);
@@ -238,12 +185,11 @@ export async function queueReorganizeRequest(
 export async function queueReorganizeAllRequest(
   artistId: unknown,
   artistName: string,
-  options: { source: string; mode: string },
 ): Promise<{ message: string; tone: 'info' | 'warning' }> {
   const response = await fetch(`/api/library/artist/${artistId}/reorganize-all`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source: options.source, mode: options.mode }),
+    body: '{}',
   });
   const result = await response.json();
   if (!result.success) throw new Error(result.error || 'Queue request failed');
@@ -324,7 +270,6 @@ export interface ReorganizeQueueItem {
   album_title?: string;
   artist_id?: unknown;
   artist_name?: string;
-  source?: string;
   status?: string;
   result_status?: string;
   moved?: number;
