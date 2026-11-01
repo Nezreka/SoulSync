@@ -36,6 +36,7 @@ import { VIDEO_WISHLIST_CHANGED, useVideoWishlistActions } from '../-video.use-a
 import { artistHue, orbSizeClass } from '../-wishlist.helpers';
 import { NebulaOrb, NebulaPoster, NebulaStage, NebulaZone } from './nebula-parts';
 import { VideoMovieSheet, VideoShowSheet, openVideoDetail } from './video-sheets';
+import { WishlistExportDialog } from './wishlist-export';
 
 const TABS: { media: VideoMedia; label: string }[] = [
   { media: 'movies', label: 'Movies' },
@@ -90,6 +91,7 @@ export function VideoWishlist({
   }, [query]);
 
   const [sort, setSort] = useState<VideoSort>('added');
+  const [exporting, setExporting] = useState(false);
   // any change to what's listed starts again at page one.
   const listKey = `${media}|${debounced}|${sort}`;
   const [paging, setPaging] = useState({ key: listKey, page: 1 });
@@ -305,6 +307,12 @@ export function VideoWishlist({
             className="wlp-menu"
             items={[
               {
+                key: 'export',
+                label: 'Export…',
+                title: 'Save the wishlist as CSV or JSON',
+                onSelect: () => setExporting(true),
+              },
+              {
                 key: 'clear',
                 label: 'Clear all',
                 danger: true,
@@ -315,7 +323,7 @@ export function VideoWishlist({
               <button
                 type="button"
                 className="wlp-btn wlp-more"
-                title="Clear all"
+                title="Export, clear all"
                 aria-label="More wishlist actions"
                 {...props}
                 ref={props.ref as (el: HTMLButtonElement | null) => void}
@@ -450,6 +458,13 @@ export function VideoWishlist({
           ) : null}
         </>
       )}
+      {exporting ? (
+        <WishlistExportDialog
+          side="video"
+          initialScope={media === 'movies' ? 'movie' : media === 'tv' ? 'show' : 'all'}
+          onClose={() => setExporting(false)}
+        />
+      ) : null}
     </>
   );
 }

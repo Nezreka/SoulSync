@@ -48,6 +48,7 @@ import { NebulaStage, NebulaZone } from './nebula-parts';
 import { VideoWishlist } from './video-wishlist';
 import { WishlistArtistSheet } from './wishlist-artist-sheet';
 import { WishlistAudiobooks } from './wishlist-audiobooks';
+import { WishlistExportDialog } from './wishlist-export';
 import { WishlistList } from './wishlist-list';
 import { WishlistOrb } from './wishlist-orb';
 
@@ -108,6 +109,7 @@ function MusicWishlistPage() {
   const queryClient = useQueryClient();
 
   const [abReloadKey, setAbReloadKey] = useState(0);
+  const [exporting, setExporting] = useState(false);
   // The audiobook search box lives in WishlistAudiobooks; the audio plays listed
   // beneath it follow the same text.
   const [abQuery, setAbQuery] = useState('');
@@ -778,6 +780,12 @@ function MusicWishlistPage() {
                       onSelect: () => window.cleanupWishlistOverview?.(),
                     },
                     {
+                      key: 'export',
+                      label: 'Export…',
+                      title: 'Save the wishlist as CSV or JSON',
+                      onSelect: () => setExporting(true),
+                    },
+                    {
                       key: 'clear',
                       label: 'Clear All',
                       danger: true,
@@ -788,7 +796,7 @@ function MusicWishlistPage() {
                     <button
                       type="button"
                       className="wlp-btn wlp-more"
-                      title="Ignored, cleanup, clear all"
+                      title="Ignored, cleanup, export, clear all"
                       aria-label="More wishlist actions"
                       {...props}
                       ref={props.ref as (el: HTMLButtonElement | null) => void}
@@ -971,6 +979,7 @@ function MusicWishlistPage() {
           )}
         </>
       )}
+      {exporting ? <WishlistExportDialog side="music" onClose={() => setExporting(false)} /> : null}
     </div>
   );
 }

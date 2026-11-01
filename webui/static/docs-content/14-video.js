@@ -587,6 +587,10 @@ Everything is grouped by what's holding it up, worst first:
 A show or channel sits in the group of its worst episode. **⚠ Failing** narrows the page to the stuck ones.
 
 Click a poster or orb and a panel opens beside it (a drawer on a tablet, a bottom sheet on a phone). It says in plain words why the title is stuck, and lists every season and episode with **Search**, a **⋯** menu for **Pick a release** and **Retry with all sources**, and remove. Click an episode to open its synopsis, guest cast and **what the last search found** — every release each source returned and the rule that turned it down.
+
+## Export
+
+**⋯ → Export…** saves the wishlist as **CSV** or **JSON**: everything, **Movies** only or **TV shows** only, previewed before you copy or download it. One row per wanted movie, episode or YouTube video, with its type, title, year, season and episode, air date, TMDB id, status and when it was added.
 `
         },
         {

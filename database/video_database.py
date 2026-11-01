@@ -9570,6 +9570,24 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def wishlist_export_items(self, profile_id: int = 1, kinds=None) -> list:
+        """Every wanted row of a profile's video wishlist for an export, oldest
+        first and grouped the way the page reads (a show's episodes together).
+        ``kinds`` limits it to some of movie / episode / video."""
+        sql = ("SELECT kind, tmdb_id, title, year, release_date, season_number, episode_number, "
+               "episode_title, air_date, status, date_added FROM video_wishlist WHERE profile_id = ?")
+        params: list = [int(profile_id)]
+        if kinds:
+            sql += f" AND kind IN ({','.join('?' * len(kinds))})"
+            params.extend(kinds)
+        sql += (" ORDER BY CASE kind WHEN 'movie' THEN 0 WHEN 'episode' THEN 1 ELSE 2 END, "
+                "title COLLATE NOCASE, season_number, episode_number, date_added")
+        conn = self._get_connection()
+        try:
+            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+        finally:
+            conn.close()
+
     def wishlist_counts(self, profile_id: int = 1) -> dict:
         """{'movie': n, 'show': n, 'episode': n, 'total': movies+episodes}."""
         conn = self._get_connection()

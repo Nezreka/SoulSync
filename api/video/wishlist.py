@@ -150,6 +150,32 @@ def register_routes(bp):
             logger.exception("Failed to list video wishlist")
             return jsonify({"success": False, "error": "Failed to load wishlist"}), 500
 
+    @bp.route("/wishlist/export", methods=["GET"])
+    def video_wishlist_export():
+        """The video wishlist as json or csv: everything, movies only
+        (kind=movie) or TV only (kind=show), one row per wanted movie,
+        episode or YouTube video. The kids cap applies like it does to the list."""
+        from flask import Response
+        from . import get_video_db
+        from core.exports.artist_export import export_mime_and_ext
+        from core.exports.wishlist_export import VIDEO_FIELDS, VIDEO_SCOPES, render, video_rows
+        try:
+            fmt = "csv" if request.args.get("format") == "csv" else "json"
+            scope = request.args.get("kind") if request.args.get("kind") in VIDEO_SCOPES else "all"
+            db = get_video_db()
+            items = db.wishlist_export_items(profile_id=_profile(), kinds=VIDEO_SCOPES[scope])
+            from .kids import filter_tmdb_items, video_cap
+            cap = video_cap()
+            if cap is not None:
+                items = filter_tmdb_items(db, items, cap)
+            rows = video_rows(items)
+            mime, ext = export_mime_and_ext(fmt)
+            return Response(render(rows, VIDEO_FIELDS, fmt), mimetype=mime,
+                            headers={"X-Export-Count": str(len(rows)), "X-Export-Ext": ext})
+        except Exception:
+            logger.exception("Video wishlist export failed")
+            return jsonify({"success": False, "error": "Export failed"}), 500
+
     @bp.route("/wishlist/counts", methods=["GET"])
     def video_wishlist_counts():
         from . import get_video_db
