@@ -286,12 +286,10 @@ def check_mirrored_playlist_library_endpoint(playlist_id):
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
         tracks = database.get_mirrored_playlist_tracks(playlist_id)
-        active = config_manager.get_active_media_server() if config_manager else None
         result = check_mirror_tracks(
             database, tracks,
             profile_id=int(playlist.get('profile_id') or get_current_profile_id() or 1),
             source=playlist.get('source'),
-            active_server=active,
         )
         return jsonify({"success": True, **result})
     except Exception as e:

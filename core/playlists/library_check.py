@@ -89,7 +89,7 @@ def unchecked_rows(tracks: List[Dict[str, Any]], now: Optional[float] = None) ->
 
 
 def check_mirror_tracks(db: Any, tracks: List[Dict[str, Any]], *, profile_id: int,
-                        source: Optional[str], active_server: Optional[str],
+                        source: Optional[str],
                         limit: int = MAX_PER_CALL,
                         time_budget: float = TIME_BUDGET_SECONDS) -> Dict[str, int]:
     """stamp in_library / library_track_id / library_checked_at on the rows
@@ -99,6 +99,12 @@ def check_mirror_tracks(db: Any, tracks: List[Dict[str, Any]], *, profile_id: in
 
     pending = unchecked_rows(tracks)
     batch = pending[:max(0, int(limit))]
+    alias_cache = {}
+    try:
+        from core.settings import config_manager
+        server_source = config_manager.get_active_media_server()
+    except Exception:
+        server_source = None
     checked_at = int(time.time())
     deadline = time.monotonic() + max(0.0, float(time_budget))
     checked = found_count = attempted = 0
@@ -118,7 +124,9 @@ def check_mirror_tracks(db: Any, tracks: List[Dict[str, Any]], *, profile_id: in
                 else:
                     hit, _conf, db_track = match_track_in_library(
                         db, query, album_tracks_map={}, album_context=None,
-                        expected_year=None, album_only=False, active_server=active_server)
+                        expected_year=None, album_only=False,
+                        alias_cache=alias_cache, server_source=server_source,
+                        include_downloads=False)
                     if hit:
                         found = True
                         lib_id = getattr(db_track, "id", None) if db_track is not None else None

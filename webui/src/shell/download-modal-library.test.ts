@@ -4,157 +4,21 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { server } from '@/test/msw';
 
 import {
-  hydrateDownloadModalLibraryStatus,
+  markWishlistedTrack,
   monitorAddedTracks,
   startMonitoredDownloads,
 } from './download-modal-library';
 
-/** The status cells and counters every variant of the download dialog renders. */
-function renderDialog(id: string, rows: number) {
-  document.body.innerHTML = `
-    <span id="stat-found-${id}">-</span>
-    <span id="stat-missing-${id}">-</span>
-    <table><tbody>${Array.from(
-      { length: rows },
-      (_, i) =>
-        `<tr><td class="track-match-status match-checking" id="match-${id}-${i}">🔍 Pending</td></tr>`,
-    ).join('')}</tbody></table>`;
-}
-
-const cell = (id: string, i: number) => document.getElementById(`match-${id}-${i}`)!;
-
-describe('the download dialog knows the library as soon as it opens', () => {
-  let checks: Array<{ tracks: Array<{ name: string; artist: string }> }>;
-
-  beforeEach(() => {
-    checks = [];
-    server.use(
-      http.post('/api/enhanced-search/library-check', async ({ request }) => {
-        const body = (await request.json()) as (typeof checks)[number];
-        checks.push(body);
-        return HttpResponse.json({
-          albums: [],
-          tracks: body.tracks.map((t) =>
-            t.name === 'Owned'
-              ? { in_library: true, in_wishlist: false }
-              : t.name === 'Wanted'
-                ? { in_library: false, in_wishlist: true }
-                : { in_library: false, in_wishlist: false },
-          ),
-        });
-      }),
-    );
-  });
-
-  it('marks owned, monitored and missing tracks and fills the counters', async () => {
-    renderDialog('p1', 3);
-
-    await hydrateDownloadModalLibraryStatus('p1', {
-      tracks: [
-        { name: 'Owned', artists: [{ name: 'Boards of Canada' }, { name: 'Guest' }] },
-        { name: 'Wanted', artists: ['Boards of Canada'] },
-        { title: 'Gone', artist_name: 'Boards of Canada' },
-      ],
-    });
-
-    expect(checks[0]!.tracks).toEqual([
-      { name: 'Owned', artist: 'Boards of Canada' },
-      { name: 'Wanted', artist: 'Boards of Canada' },
-      { name: 'Gone', artist: 'Boards of Canada' },
-    ]);
-    expect(cell('p1', 0).textContent).toBe('✅ In library');
-    expect(cell('p1', 0).className).toBe('track-match-status match-found');
-    expect(cell('p1', 1).textContent).toBe('On Wishlist');
-    expect(cell('p1', 1).className).toBe('track-match-status match-monitored');
-    // the wishlist heart, not an emoji
-    expect(cell('p1', 1).querySelector('svg.match-bookmark path')?.getAttribute('d')).toMatch(
-      /^M10\.5 19\.5/,
-    );
-    expect(cell('p1', 2).textContent).toBe('❌ Missing');
-    expect(cell('p1', 2).className).toBe('track-match-status match-missing');
-    expect(document.getElementById('stat-found-p1')!.textContent).toBe('1');
-    expect(document.getElementById('stat-missing-p1')!.textContent).toBe('2');
-  });
-
-  it("finds a guest's song on an album where the library files it: under the album artist", async () => {
-    server.use(
-      http.post('/api/enhanced-search/library-check', async ({ request }) => {
-        const body = (await request.json()) as (typeof checks)[number];
-        checks.push(body);
-        return HttpResponse.json({
-          albums: [],
-          tracks: body.tracks.map((t) => ({
-            in_library: t.artist === 'Michael Jackson',
-            in_wishlist: false,
-          })),
-        });
-      }),
-    );
-    renderDialog('p6', 2);
-
-    await hydrateDownloadModalLibraryStatus('p6', {
-      artist: { name: 'Michael Jackson' },
-      tracks: [
-        { name: "Somebody's Watching Me", artists: ['Rockwell'] },
-        { name: 'Scream', artists: ['Michael Jackson', 'Janet Jackson'] },
-      ],
-    });
-
-    // Asked twice for the guest, once for the album artist's own song.
-    expect(checks[0]!.tracks).toEqual([
-      { name: "Somebody's Watching Me", artist: 'Rockwell' },
-      { name: "Somebody's Watching Me", artist: 'Michael Jackson' },
-      { name: 'Scream', artist: 'Michael Jackson' },
-    ]);
-    expect(cell('p6', 0).textContent).toBe('✅ In library');
-    expect(cell('p6', 1).textContent).toBe('✅ In library');
-    expect(document.getElementById('stat-missing-p6')!.textContent).toBe('0');
-  });
-
-  it('leaves what Begin Analysis has already answered alone', async () => {
-    renderDialog('p2', 1);
-    cell('p2', 0).className = 'track-match-status match-found';
-    cell('p2', 0).textContent = '✅ Found';
-    document.getElementById('stat-found-p2')!.textContent = '1';
-
-    await hydrateDownloadModalLibraryStatus('p2', { tracks: [{ name: 'Gone', artists: ['X'] }] });
-
-    expect(cell('p2', 0).textContent).toBe('✅ Found');
-    expect(document.getElementById('stat-found-p2')!.textContent).toBe('1');
-  });
-
-  it('asks a long playlist in chunks', async () => {
-    renderDialog('p3', 450);
-
-    await hydrateDownloadModalLibraryStatus('p3', {
-      tracks: Array.from({ length: 450 }, (_, i) => ({
-        name: i === 449 ? 'Owned' : `T${i}`,
-        artists: ['A'],
-      })),
-    });
-
-    expect(checks.map((c) => c.tracks.length)).toEqual([200, 200, 50]);
-    expect(cell('p3', 449).textContent).toBe('✅ In library');
-  });
-
-  it('keeps the dialog as it was when the check fails', async () => {
-    server.use(
-      http.post('/api/enhanced-search/library-check', () =>
-        HttpResponse.json({ error: 'down' }, { status: 500 }),
-      ),
-    );
-    renderDialog('p4', 1);
-
-    await hydrateDownloadModalLibraryStatus('p4', { tracks: [{ name: 'Owned', artists: ['A'] }] });
-
-    expect(cell('p4', 0).textContent).toBe('🔍 Pending');
-    expect(document.getElementById('stat-found-p4')!.textContent).toBe('-');
-  });
-
-  it('does nothing without tracks', async () => {
-    await hydrateDownloadModalLibraryStatus('p5', undefined);
-    await hydrateDownloadModalLibraryStatus('p5', { tracks: [] });
-    expect(checks).toHaveLength(0);
+describe('the download dialog marks a missing track the user already wants', () => {
+  it('draws "On Wishlist" with the library heart', () => {
+    document.body.innerHTML = `<table><tbody><tr>
+      <td class="track-match-status match-checking" id="match-p1-0">🔍 Pending</td>
+    </tr></tbody></table>`;
+    const cell = document.getElementById('match-p1-0')!;
+    markWishlistedTrack(cell);
+    expect(cell.textContent).toBe('On Wishlist');
+    expect(cell.className).toBe('track-match-status match-monitored');
+    expect(cell.querySelector('svg.match-bookmark')).not.toBeNull();
   });
 });
 

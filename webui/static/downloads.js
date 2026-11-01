@@ -620,9 +620,6 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
     modal.style.display = 'flex';
     hideLoadingOverlay();
-    // owned/missing per track straight away, not a column of 'pending' until
-    // Begin Analysis (#1910)
-    void previewModalOwnership(virtualPlaylistId);
 }
 
 async function closeDownloadMissingModal(playlistId) {
@@ -1990,40 +1987,49 @@ function isAlbumContextPlaylistId(playlistId) {
 }
 
 // the library half of Begin Analysis, read-only, so the modal opens knowing
-// what's owned instead of a column of 'pending'. nothing is queued.
+// what's owned instead of a column of 'pending'. nothing is queued. a long
+// playlist or wishlist is asked in blocks: no request holds a server thread
+// for the whole list, and the rows fill in as each block answers.
 async function previewModalOwnership(playlistId) {
+    const BLOCK = 200;
     const process = activeDownloadProcesses[playlistId];
     if (!process || !process.tracks?.length) return;
     const isAlbum = isAlbumContextPlaylistId(playlistId);
     const progressText = document.getElementById(`analysis-progress-text-${playlistId}`);
     if (progressText) progressText.textContent = 'Checking your library...';
-    let data = null;
-    try {
-        const response = await fetch(`/api/playlists/${playlistId}/ownership-preview`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                tracks: process.tracks,
-                is_album_download: isAlbum,
-                album_context: isAlbum ? process.album : null,
-                artist_context: isAlbum ? process.artist : null,
-            }),
-        });
-        data = await response.json();
-    } catch (error) {
-        console.debug('ownership preview failed:', error);
+    const results = [];
+    for (let start = 0; start < process.tracks.length; start += BLOCK) {
+        let data = null;
+        try {
+            const response = await fetch(`/api/playlists/${playlistId}/ownership-preview`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    // each row keeps its place in the whole list
+                    tracks: process.tracks.slice(start, start + BLOCK)
+                        .map((track, offset) => ({ ...track, _original_index: start + offset })),
+                    is_album_download: isAlbum,
+                    album_context: isAlbum ? process.album : null,
+                    artist_context: isAlbum ? process.artist : null,
+                }),
+            });
+            data = await response.json();
+        } catch (error) {
+            console.debug('ownership preview failed:', error);
+        }
+        // begin analysis ran (or the modal closed) while we waited: its answer wins
+        if (activeDownloadProcesses[playlistId] !== process || process.status !== 'idle') return;
+        if (!data?.success || !Array.isArray(data.results)) {
+            if (progressText) progressText.textContent = 'Ready to start';
+            return;
+        }
+        updateTrackAnalysisResults(playlistId, data.results);
+        results.push(...data.results);
     }
-    // begin analysis ran (or the modal closed) while we waited: its answer wins
-    if (activeDownloadProcesses[playlistId] !== process || process.status !== 'idle') return;
-    if (!data?.success || !Array.isArray(data.results)) {
-        if (progressText) progressText.textContent = 'Ready to start';
-        return;
-    }
-    updateTrackAnalysisResults(playlistId, data.results);
     // Add to Wishlist reads this so it doesn't queue songs you own (#1910)
-    process.ownedIndices = new Set(data.results.filter(r => r.found).map(r => r.track_index));
-    const found = data.results.filter(r => r.found).length;
-    const missing = data.results.length - found;
+    process.ownedIndices = new Set(results.filter(r => r.found).map(r => r.track_index));
+    const found = results.filter(r => r.found).length;
+    const missing = results.length - found;
     const foundEl = document.getElementById(`stat-found-${playlistId}`);
     const missingEl = document.getElementById(`stat-missing-${playlistId}`);
     if (foundEl) foundEl.textContent = found;
@@ -2040,6 +2046,11 @@ function updateTrackAnalysisResults(playlistId, results) {
     for (const result of results) {
         const matchElement = document.getElementById(`match-${playlistId}-${result.track_index}`);
         if (matchElement) {
+            // the preview marks a missing track the user already wants
+            if (!result.found && result.in_wishlist && window.markWishlistedTrack) {
+                window.markWishlistedTrack(matchElement);
+                continue;
+            }
             matchElement.textContent = result.found ? '✅ Found' : '❌ Missing';
             matchElement.className = `track-match-status ${result.found ? 'match-found' : 'match-missing'}`;
         }
