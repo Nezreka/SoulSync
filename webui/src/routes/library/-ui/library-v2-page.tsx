@@ -457,6 +457,7 @@ const ICON_PATHS = {
   edit: 'M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4zM13 7l4 4',
   delete: 'M4 7h16M9 7V4h6v3M8 7l1 13h6l1-13',
   expand: 'M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5',
+  chevronDown: 'M6 9l6 6 6-6',
   collapse: 'M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6',
   download: 'M12 3v12M8 11l4 4 4-4M5 21h14',
   eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
@@ -9398,7 +9399,6 @@ function AlbumBlock({
         title="Click to expand or collapse · Double-click to open the album page"
         onClick={handleAlbumClick}
       >
-        <span className={`${styles.chevron} ${open ? styles.chevronOpen : ''}`}>›</span>
         <MonitorToggle entity="albums" id={album.id} monitored={album.monitored} />
         <Artwork
           src={album.image_url ?? ''}
@@ -9435,6 +9435,11 @@ function AlbumBlock({
             </span>
           </div>
         </div>
+        {/* Sonarr's season toggle: in the middle of the row, out of the way of
+            the wishlist heart at its start */}
+        <span className={`${styles.albumExpand} ${open ? styles.albumExpandOpen : ''}`}>
+          <SvgIcon name="chevronDown" />
+        </span>
         <TrackPresence
           className={styles.albumTrackCount}
           present={album.tracks_present}
