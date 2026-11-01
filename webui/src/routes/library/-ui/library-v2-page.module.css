@@ -7867,7 +7867,6 @@ textarea.searchInput {
   display: none;
 }
 
-
 .detailView .albumActions {
   gap: 2px;
 }
@@ -8407,7 +8406,8 @@ textarea.searchInput {
 /* Tools → Enrich: the provider list beside the panel (ArtistToolsMenu) */
 .toolsFlyout {
   position: absolute;
-  z-index: 201;
+  /* above the tools panel (200), from the menu token, no new value */
+  z-index: var(--z-menu);
 }
 
 .toolsFlyout .enrichDropdownMenu {

@@ -6192,8 +6192,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
     <div className={`${styles.page} ${styles.detailView}`}>
       <BackLink onClick={() => void goBack()}>
         ←{' '}
-        {(previousArtist != null &&
-          (guestAlbum ? fromArtistName : album?.primary_artist?.name)) ||
+        {(previousArtist != null && (guestAlbum ? fromArtistName : album?.primary_artist?.name)) ||
           'Library'}
       </BackLink>
       {albumQuery.isError ? (
@@ -6505,7 +6504,8 @@ function ArtistPageOptions({ prefs }: { prefs: LibraryV2UiPreferences | undefine
           What an artist's My Library view shows below its releases. Discovery shows them all.
         </p>
         {Object.entries(LIBRARY_VIEW_SECTIONS).map(([key, label]) => {
-          const checked = prefs?.artist_page?.library_sections?.[key as LibraryViewSection] !== false;
+          const checked =
+            prefs?.artist_page?.library_sections?.[key as LibraryViewSection] !== false;
           return checkbox(key, label, checked, {
             artist_page: { library_sections: { [key]: !checked } },
           });
@@ -7866,7 +7866,9 @@ function HeaderToggle({ mode }: { mode: LibraryV2ArtistPageHeader }) {
   return (
     <IconActionButton
       icon={mode === 'rich' ? 'collapse' : 'expand'}
-      title={mode === 'rich' ? 'Compact header' : 'Rich header — bio, listeners, plays and top tracks'}
+      title={
+        mode === 'rich' ? 'Compact header' : 'Rich header — bio, listeners, plays and top tracks'
+      }
       onClick={() =>
         void navigate({
           replace: true,

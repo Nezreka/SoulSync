@@ -880,42 +880,48 @@ describe('library v2 album track table', () => {
   it.each([
     [undefined, 1],
     [false, 0],
-  ])('offers Add to playlist on a track unless View Settings hides it (%s)', async (shown, buttons) => {
-    server.use(
-      http.get('/api/library/v2/albums/42', () =>
-        HttpResponse.json({
-          success: true,
-          album: album([
-            track({ file: trackFile(), artists: [{ id: 1, name: 'Portishead', role: 'primary' }] }),
-          ]),
-        }),
-      ),
-      http.get('/api/library/v2/albums/42/match-status', () =>
-        HttpResponse.json({ success: true, album: [], tracks: {} }),
-      ),
-      http.get('/api/library/v2/quality-profiles', () =>
-        HttpResponse.json({ success: true, profiles: [] }),
-      ),
-      http.get('/api/library/v2/ui-preferences', () =>
-        HttpResponse.json({
-          success: true,
-          preferences: { track_table: {}, artist_page: { add_to_playlist: shown } },
-        }),
-      ),
-      http.get('/api/library/v2/albums/42/queue-status', () =>
-        HttpResponse.json({ tracks: {}, albums: {} }),
-      ),
-    );
-    render(
-      <QueryClientProvider client={createTestQueryClient()}>
-        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
-      </QueryClientProvider>,
-    );
-    expect(await screen.findByText('Track Seven')).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.queryAllByRole('button', { name: /to a playlist/ })).toHaveLength(buttons),
-    );
-  });
+  ])(
+    'offers Add to playlist on a track unless View Settings hides it (%s)',
+    async (shown, buttons) => {
+      server.use(
+        http.get('/api/library/v2/albums/42', () =>
+          HttpResponse.json({
+            success: true,
+            album: album([
+              track({
+                file: trackFile(),
+                artists: [{ id: 1, name: 'Portishead', role: 'primary' }],
+              }),
+            ]),
+          }),
+        ),
+        http.get('/api/library/v2/albums/42/match-status', () =>
+          HttpResponse.json({ success: true, album: [], tracks: {} }),
+        ),
+        http.get('/api/library/v2/quality-profiles', () =>
+          HttpResponse.json({ success: true, profiles: [] }),
+        ),
+        http.get('/api/library/v2/ui-preferences', () =>
+          HttpResponse.json({
+            success: true,
+            preferences: { track_table: {}, artist_page: { add_to_playlist: shown } },
+          }),
+        ),
+        http.get('/api/library/v2/albums/42/queue-status', () =>
+          HttpResponse.json({ tracks: {}, albums: {} }),
+        ),
+      );
+      render(
+        <QueryClientProvider client={createTestQueryClient()}>
+          <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+        </QueryClientProvider>,
+      );
+      expect(await screen.findByText('Track Seven')).toBeInTheDocument();
+      await waitFor(() =>
+        expect(screen.queryAllByRole('button', { name: /to a playlist/ })).toHaveLength(buttons),
+      );
+    },
+  );
 
   it('moves a column by dragging its row, the others making room, saved once on the drop', async () => {
     const saved: { track_table?: { column_order?: string[] } }[] = [];
@@ -935,7 +941,10 @@ describe('library v2 album track table', () => {
       http.put('/api/library/v2/ui-preferences', async ({ request }) => {
         const patch = (await request.json()) as (typeof saved)[number];
         saved.push(patch);
-        return HttpResponse.json({ success: true, preferences: { track_table: patch.track_table } });
+        return HttpResponse.json({
+          success: true,
+          preferences: { track_table: patch.track_table },
+        });
       }),
       http.get('/api/library/v2/albums/42/queue-status', () =>
         HttpResponse.json({ tracks: {}, albums: {} }),

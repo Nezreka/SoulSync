@@ -169,8 +169,6 @@ describe('the album modal ownership preview', () => {
     loadProgressive(new Set([ID]), preview)(ID, 1);
 
     expect(preview).not.toHaveBeenCalled();
-    expect(text(`analysis-progress-text-${ID}`)).toBe(
-      'Restored after reload, analysis is running',
-    );
+    expect(text(`analysis-progress-text-${ID}`)).toBe('Restored after reload, analysis is running');
   });
 });
