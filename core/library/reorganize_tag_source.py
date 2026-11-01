@@ -59,6 +59,26 @@ _ARTIST_SPLIT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Same set minus the ambiguous separators, used when the value has no
+# comma/semicolon to prove it is a list.
+_ARTIST_SPLIT_SAFE_RE = re.compile(
+    r'\s*(?:,|;|/| feat\. | feat | ft\. | ft | featuring )\s*',
+    re.IGNORECASE,
+)
+
+# Separators that are unambiguous list markers inside a single tag value.
+# ``&``, bare ``x`` and ``with`` are deliberately excluded here: they are
+# far more often part of one act's name ("Chase & Status", "Above &
+# Beyond", "Simon & Garfunkel") than a list separator. They only split
+# when the same string also carries one of ``_LIST_CONTEXT_RE`` markers,
+# which is the shape taggers actually emit for lists.
+_LIST_CONTEXT_RE = re.compile(r'[,;]')
+
+# The multi-value ``artists`` tag is already a list: the reader joins its
+# entries with ", ". Splitting it on anything but that join is a bug
+# ("Chase & Status, Above & Beyond" must stay two acts, not four).
+_MULTI_VALUE_SPLIT_RE = re.compile(r'\s*,\s*')
+
 
 def _stringify(value: Any) -> str:
     """Coerce an embedded-tag value into a clean string."""
@@ -194,15 +214,26 @@ def _secondary_album_types(value: Any, primary: str) -> List[str]:
     return [t for t in _release_type_tokens(value) if t != primary]
 
 
-def _split_artists(value: Any) -> List[str]:
+def _split_artists(value: Any, *, multi_value: bool = False) -> List[str]:
     """Split an artist-string field into a list. Handles common
-    separators (``,``, ``;``, ``/``, ``&``, ``feat``, ``ft``, ``x``,
-    ``with``). Strips whitespace, drops empties, dedupes (case-
-    insensitive) while preserving order."""
+    separators (``,``, ``;``, ``/``, ``feat``, ``ft``, ``featuring``)
+    plus the ambiguous ones (``&``, ``x``, ``with``) *only* when the
+    value also carries a comma or semicolon. Strips whitespace, drops
+    empties, dedupes (case-insensitive) while preserving order.
+
+    Issue #1945: a bare ``A & B`` is treated as one artist, because
+    splitting it discards the second half downstream and reorganizes the
+    album into the wrong folder."""
     s = _stringify(value)
     if not s:
         return []
-    parts = _ARTIST_SPLIT_RE.split(s)
+    if multi_value:
+        pattern = _MULTI_VALUE_SPLIT_RE
+    elif _LIST_CONTEXT_RE.search(s):
+        pattern = _ARTIST_SPLIT_RE
+    else:
+        pattern = _ARTIST_SPLIT_SAFE_RE
+    parts = pattern.split(s)
     seen: set = set()
     out: List[str] = []
     for p in parts:
@@ -226,7 +257,7 @@ def _resolve_track_artists(tags: Dict[str, Any]) -> List[str]:
     if artists_value:
         # Multi-value tag readers may already have joined with ', '.
         # Re-split to recover the list.
-        parts = _split_artists(artists_value)
+        parts = _split_artists(artists_value, multi_value=True)
         if parts:
             return parts
     return _split_artists(tags.get('artist') or '')

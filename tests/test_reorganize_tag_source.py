@@ -84,19 +84,49 @@ class TestExtractTrackMeta:
     def test_artist_string_split_on_known_separators(self):
         for sep_input, expected in [
             ('Foo, Bar', ['Foo', 'Bar']),
-            ('Foo & Bar', ['Foo', 'Bar']),
             ('Foo feat. Bar', ['Foo', 'Bar']),
             ('Foo ft Bar', ['Foo', 'Bar']),
             ('Foo featuring Bar', ['Foo', 'Bar']),
             ('Foo / Bar', ['Foo', 'Bar']),
             ('Foo; Bar', ['Foo', 'Bar']),
-            ('Foo x Bar', ['Foo', 'Bar']),
-            ('Foo with Bar', ['Foo', 'Bar']),
+            # Issue #1945: ambiguous separators are not list markers on
+            # their own. A bare "A & B" / "A x B" / "A with B" is one
+            # act name far more often than it is a list, and splitting it
+            # makes reorganize pick the first half and file the album
+            # under the wrong artist.
+            ('Foo & Bar', ['Foo & Bar']),
+            ('Foo x Bar', ['Foo x Bar']),
+            ('Foo with Bar', ['Foo with Bar']),
         ]:
             out = extract_track_meta_from_tags({'title': 't', 'artist': sep_input})
             assert out is not None
             names = [a['name'] for a in out['artists']]
             assert names == expected, f"failed for {sep_input!r}: got {names}"
+
+    def test_ampersand_name_survives_when_no_list_separator(self):
+        """Issue #1945: real act names keep their ampersand."""
+        for raw in ('Chase & Status', 'Above & Beyond', 'Simon & Garfunkel'):
+            out = extract_track_meta_from_tags({'title': 't', 'artist': raw})
+            assert out is not None
+            assert [a['name'] for a in out['artists']] == [raw]
+
+    def test_ampersand_splits_inside_a_real_list(self):
+        """A comma proves the value is a list, so ``&`` splits there."""
+        out = extract_track_meta_from_tags({
+            'title': 't',
+            'artist': 'Foo, Bar & Baz',
+        })
+        assert out is not None
+        assert [a['name'] for a in out['artists']] == ['Foo', 'Bar', 'Baz']
+
+    def test_multi_value_tag_keeps_ampersand_acts(self):
+        """The multi-value path must not re-split ampersand names either."""
+        out = extract_track_meta_from_tags({
+            'title': 't',
+            'artists': 'Chase & Status, Above & Beyond',
+        })
+        assert out is not None
+        assert [a['name'] for a in out['artists']] == ['Chase & Status', 'Above & Beyond']
 
     def test_artist_dedup_case_insensitive(self):
         out = extract_track_meta_from_tags({
