@@ -4127,10 +4127,62 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def clear_finished_video_downloads(self) -> int:
+    # A failed or cancelled row is only a record of a grab that went nowhere;
+    # removing it from the queue touches nothing else (history keeps its own
+    # copy). import_failed is NOT here: that row is the only pointer Manual
+    # import has to a file still sitting in the download area.
+    VIDEO_DOWNLOAD_REMOVABLE_STATUSES = ("failed", "cancelled")
+
+    def remove_video_download(self, dl_id: int) -> bool:
+        """Delete one failed/cancelled row from the queue. False when the row is
+        missing or in any other state -- live, finished, or waiting on import."""
+        statuses = self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES
         conn = self._get_connection()
         try:
-            cur = conn.execute("DELETE FROM video_downloads WHERE status IN ('completed', 'failed', 'cancelled', 'import_failed')")
+            cur = conn.execute(
+                "DELETE FROM video_downloads WHERE id = ? AND status IN (%s)"
+                % ",".join("?" * len(statuses)), (dl_id, *statuses))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def clear_failed_video_downloads(self) -> int:
+        """Delete every failed/cancelled row from the queue."""
+        statuses = self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM video_downloads WHERE status IN (%s)"
+                % ",".join("?" * len(statuses)), statuses)
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def clear_finished_video_downloads(self) -> int:
+        """Delete completed rows only. Failed and cancelled rows stay until
+        Clear failed or Remove from list takes them; import_failed rows stay
+        until Manual import places or dismisses them -- each is the only
+        pointer to a file still sitting in the download area."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM video_downloads WHERE status = 'completed'")
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def clear_everything_video_downloads(self) -> int:
+        """Clear everything: completed, failed and cancelled rows together.
+        import_failed rows still stay -- each is Manual import's only pointer
+        to a file in the download area, and deleting it strands that file."""
+        statuses = ("completed",) + self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM video_downloads WHERE status IN (%s)"
+                % ",".join("?" * len(statuses)), statuses)
             conn.commit()
             return cur.rowcount
         finally:
