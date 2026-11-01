@@ -5214,6 +5214,20 @@ class MusicDatabase:
                     logger.info("Rebuilt similar_artists with profile-scoped UNIQUE constraint")
             except Exception as e:
                 logger.error(f"Error rebuilding similar_artists for profiles v3: {e}")
+            # the rebuild above recreates the table with only its profile index;
+            # the backfill's case-folded name update needs this one on a first run too.
+            # a new index has no planner stats, and without them sqlite keeps
+            # choosing the profile-only index, so a fresh one is analyzed once
+            try:
+                had = cursor.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='index' "
+                    "AND name='idx_similar_artists_profile_name_lower'").fetchone()
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_similar_artists_profile_name_lower "
+                               "ON similar_artists (profile_id, LOWER(similar_artist_name))")
+                if not had:
+                    cursor.execute("ANALYZE idx_similar_artists_profile_name_lower")
+            except Exception as e:
+                logger.error(f"Error creating similar_artists name index: {e}")
 
             # Make discovery_pool_metadata per-profile: change CHECK(id=1) to use profile_id as key
             try:

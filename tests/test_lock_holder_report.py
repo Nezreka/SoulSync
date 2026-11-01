@@ -42,7 +42,7 @@ def test_an_open_write_names_its_thread(tmp_path):
         assert [h["thread"] for h in holders] == ["quality-backfill-writer"]
         assert holders[0]["path"] == "lib.db"
         report = db_lock_watchdog.format_open_transactions()
-        assert "quality-backfill-writer" in report and "likely holder" in report
+        assert "quality-backfill-writer" in report and "holder is among them" in report
     finally:
         done.set()
         th.join(5)

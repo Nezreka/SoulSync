@@ -114,7 +114,9 @@ def format_open_transactions() -> str:
         return ("Open transactions: none on pooled connections (the holder opened "
                 "its own connection, or another process has the file)\n")
     lines = [f"  {h['thread']}: open {h['age_s']}s on {h['path']}" for h in holders]
-    return "Open transactions, oldest first (the first is the likely holder):\n" + "\n".join(lines) + "\n"
+    return ("Open transactions, oldest first (the holder is among them; a writer still "
+            "waiting for the lock shows here too, its stack below is parked in execute):\n"
+            + "\n".join(lines) + "\n")
 
 
 def run_watchdog(
