@@ -11,6 +11,9 @@ from typing import Any, Callable, TypeVar
 
 _T = TypeVar("_T")
 
+# how long a lost wake-up can delay an await (see _run); not a poll interval
+_FALLBACK_POLL_SECONDS = 0.05
+
 _SLOW_IO_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=16,
     thread_name_prefix="soulsync-slow-io",
@@ -43,11 +46,28 @@ async def _run(
     # blocking call. Copy the context explicitly and run the work inside it.
     # That fix is orthogonal to how completion is observed, so it survives the
     # workaround above.
+    #
+    # The worker's done-callback wakes us at once; the timed check is only the
+    # fallback for a lost 3.14.6 wake-up. A 1 ms poll alone cost a Windows
+    # timer tick (~15 ms) per await and woke the shared loop 1000x a second.
     context = contextvars.copy_context()
     future = executor.submit(context.run, func, *args, **kwargs)
+    loop = asyncio.get_running_loop()
+    done = asyncio.Event()
+
+    def _wake(_finished):
+        try:
+            loop.call_soon_threadsafe(done.set)
+        except RuntimeError:  # loop closed; nobody is waiting any more
+            pass
+
+    future.add_done_callback(_wake)
     try:
         while not future.done():
-            await asyncio.sleep(0.001)
+            try:
+                await asyncio.wait_for(done.wait(), _FALLBACK_POLL_SECONDS)
+            except asyncio.TimeoutError:
+                pass
         return future.result()
     except asyncio.CancelledError:
         future.cancel()

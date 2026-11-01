@@ -27,10 +27,16 @@ _active_tasks = set()
 _future_tasks = {}
 _pump_task = None
 _accepting = False
+# set from any thread when work arrives; the pump waits on it
+_wake = None
 
-# Short enough not to impose the former 10 ms per-call floor, but still a
-# bounded selector timeout that makes a lost cross-thread wake-up harmless.
-_PUMP_INTERVAL_SECONDS = 0.001
+# A submission wakes the pump at once (call_soon_threadsafe). This is only the
+# fallback for the Python 3.14.6 lost wake-up the queue exists for: a missed
+# wake costs at most this long instead of hanging. It used to be the only
+# wake, polled every 1 ms: on Windows that sleep lasts a timer tick (~15 ms),
+# so every run_async call paid ~13 ms and the loop woke 1000 times a second
+# for nothing (Oct 31 2026, measured on a live install)
+_PUMP_INTERVAL_SECONDS = 0.05
 
 
 class AsyncCallTimeout(TimeoutError):
@@ -59,7 +65,12 @@ def _forget_task(task, future):
 
 async def _pump_jobs():
     """Move cross-thread jobs onto the owner loop as concurrent tasks."""
+    global _wake
+    _wake = asyncio.Event()
     while True:
+        # cleared before draining: a submission landing after the drain sets
+        # it again, so the wait below returns at once instead of missing it
+        _wake.clear()
         while True:
             try:
                 future = _cancellations.get_nowait()
@@ -84,7 +95,22 @@ async def _pump_jobs():
                 lambda finished, submitted=future: _forget_task(finished, submitted)
             )
 
-        await asyncio.sleep(_PUMP_INTERVAL_SECONDS)
+        try:
+            await asyncio.wait_for(_wake.wait(), _PUMP_INTERVAL_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+
+
+def _wake_pump(loop):
+    """Wake the pump now. Best effort: if the wake-up is lost (3.14.6) or the
+    loop is going away, the pump's timed fallback still picks the job up."""
+    wake = _wake
+    if loop is None or wake is None:
+        return
+    try:
+        loop.call_soon_threadsafe(wake.set)
+    except RuntimeError:  # loop closed; _run_loop fails what it can't run
+        pass
 
 
 def _fail_queued(exc):
@@ -192,10 +218,11 @@ def _get_loop():
 def _submit(coro):
     """Atomically select the live loop generation and enqueue one coroutine."""
     with _lock:
-        _ensure_loop_locked()
+        loop = _ensure_loop_locked()
         future = concurrent.futures.Future()
         _jobs.put((coro, future))
-        return future
+    _wake_pump(loop)
+    return future
 
 
 def run_async(coro, *, timeout=None):
@@ -213,6 +240,7 @@ def run_async(coro, *, timeout=None):
     except concurrent.futures.TimeoutError as exc:
         future.cancel()
         _cancellations.put(future)
+        _wake_pump(_loop)
         raise AsyncCallTimeout(
             f"async call did not finish within {timeout}s"
         ) from exc
