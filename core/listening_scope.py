@@ -41,6 +41,17 @@ _HAS_ACCOUNT = " OR ".join(
 # katy perry stays out of the admin's stats and mixes)
 MEDIA_ACCOUNT_COLUMNS = ('plex_account_id', 'plex_home_user_id')
 
+# jellyfin: the poll reads each linked profile's jellyfin user as well as the
+# app's own, and records the app's user here. a profile linked to that same
+# user shares the pile instead of owning an empty one, and with jellyfin not
+# the server being read (no key) a jellyfin link owns nothing
+JELLYFIN_OWNER_KEY = 'jellyfin_owner_user_id'
+_JELLYFIN_OWNS_PILE = (
+    "(jellyfin_user_id IS NOT NULL AND jellyfin_user_id != '' AND EXISTS ("
+    f"SELECT 1 FROM metadata WHERE key = '{JELLYFIN_OWNER_KEY}' "
+    "AND value != '' AND value != jellyfin_user_id))"
+)
+
 
 def _owns_pile_sql(conn) -> str:
     """the "this profile has its own pile" condition, for the columns this
@@ -48,6 +59,8 @@ def _owns_pile_sql(conn) -> str:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(profiles)").fetchall()}
     parts = [_HAS_ACCOUNT]
     parts += [f"({c} IS NOT NULL AND {c} != '')" for c in MEDIA_ACCOUNT_COLUMNS if c in cols]
+    if 'jellyfin_user_id' in cols:
+        parts.append(_JELLYFIN_OWNS_PILE)
     return " OR ".join(parts)
 
 
@@ -224,17 +237,28 @@ PLEX_OWNER_ACCOUNT = '1'
 
 def media_account_owners(database, server_source: str) -> dict:
     """{server account id: pile} for every profile linked to an account on
-    this server. plex only for now; the owner's account is the shared pile"""
-    if server_source != 'plex':
+    this server (plex and jellyfin); the app's own account is the shared pile"""
+    if server_source == 'plex':
+        owners = {PLEX_OWNER_ACCOUNT: SHARED_OWNER}
+        columns = MEDIA_ACCOUNT_COLUMNS
+    elif server_source == 'jellyfin':
+        try:
+            app_user = database.get_metadata(JELLYFIN_OWNER_KEY)
+        except Exception:  # noqa: BLE001 - no owner known: nothing to attribute
+            app_user = None
+        if not app_user:
+            return {}
+        owners = {str(app_user): SHARED_OWNER}
+        columns = ('jellyfin_user_id',)
+    else:
         return {}
-    owners = {PLEX_OWNER_ACCOUNT: SHARED_OWNER}
     conn = None
     try:
         conn = database._get_connection()
         cols = {r[1] for r in conn.execute("PRAGMA table_info(profiles)").fetchall()}
         # sign-in's own record first, then the home-user link; lowest id wins
         # a tie, so two profiles on one account can't split its plays
-        for col in [c for c in MEDIA_ACCOUNT_COLUMNS if c in cols]:
+        for col in [c for c in columns if c in cols]:
             for pid, account in conn.execute(
                     f"SELECT id, {col} FROM profiles WHERE {col} IS NOT NULL AND {col} != '' "
                     f"AND id != ? ORDER BY id DESC", (SHARED_OWNER,)).fetchall():

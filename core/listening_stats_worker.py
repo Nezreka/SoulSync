@@ -220,6 +220,68 @@ class ListeningStatsWorker:
         except Exception as e:
             logger.warning(f"Tagging earlier {server} plays by account failed, will retry: {e}")
 
+    _JELLYFIN_SEEDED_KEY = 'listening_jellyfin_seeded_{user}'
+    _JELLYFIN_SEED_LIMIT = 5000
+
+    def _jellyfin_history_by_user(self, client, history):
+        """jellyfin answers history per user, and the app reads as one user.
+        tag those plays with that user and add each linked profile's own
+        user's plays, so a profile's plays land in its pile (Phonk_Ben_67:
+        per-profile stats from jellyfin). a user read for the first time is
+        read wider, so their pile doesn't start empty."""
+        from core.listening_scope import JELLYFIN_OWNER_KEY
+        app_user = getattr(client, 'user_id', None)
+        if not app_user:
+            return history
+        app_user = str(app_user)
+        try:
+            self.db.set_metadata(JELLYFIN_OWNER_KEY, app_user)
+        except Exception as e:  # noqa: BLE001 - the next poll records it
+            logger.debug("could not record the jellyfin owner user: %s", e)
+        out = [dict(e, account_id=app_user) for e in history or []]
+        for user in self._linked_jellyfin_users(app_user):
+            seeded_key = self._JELLYFIN_SEEDED_KEY.format(user=user)
+            try:
+                seeded = bool(self.db.get_metadata(seeded_key))
+                plays = client.as_user(user).get_play_history(
+                    limit=500 if seeded else self._JELLYFIN_SEED_LIMIT)
+            except Exception as e:  # noqa: BLE001 - one user failing leaves the rest
+                logger.warning(f"Reading jellyfin plays for user {user} failed: {e}")
+                continue
+            out.extend(dict(e, account_id=user) for e in plays or [])
+            if not seeded:
+                self.db.set_metadata(seeded_key, '1')
+        return out
+
+    def _linked_jellyfin_users(self, app_user):
+        """the jellyfin users profiles are linked to, other than the app's own."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(profiles)").fetchall()}
+            if 'jellyfin_user_id' not in cols:
+                return []
+            rows = conn.execute(
+                "SELECT DISTINCT jellyfin_user_id FROM profiles WHERE jellyfin_user_id IS NOT NULL "
+                "AND jellyfin_user_id != '' AND jellyfin_user_id != ?", (app_user,)).fetchall()
+            return [str(r[0]) for r in rows]
+        except Exception as e:  # noqa: BLE001
+            logger.debug("linked jellyfin users lookup failed: %s", e)
+            return []
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def _forget_jellyfin_owner(self):
+        """not reading jellyfin: a jellyfin link owns no pile (its pile would
+        get nothing)"""
+        try:
+            from core.listening_scope import JELLYFIN_OWNER_KEY
+            if self.db.get_metadata(JELLYFIN_OWNER_KEY):
+                self.db.set_metadata(JELLYFIN_OWNER_KEY, '')
+        except Exception as e:  # noqa: BLE001
+            logger.debug("could not clear the jellyfin owner user: %s", e)
+
     def _repair_history_once(self):
         try:
             from core.listening_import.history_repair import repair_once
@@ -260,6 +322,10 @@ class ListeningStatsWorker:
             logger.error(f"Failed to fetch play history from {active_server}: {e}")
             self.stats['errors'] += 1
             return
+        if active_server == 'jellyfin':
+            history = self._jellyfin_history_by_user(client, history)
+        else:
+            self._forget_jellyfin_owner()
 
         if history:
             # each play goes in the pile of whoever played it: the owner's
