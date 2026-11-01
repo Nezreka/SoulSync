@@ -542,6 +542,46 @@ def test_sab_add_nzb_via_bytes_uses_addfile_multipart() -> None:
     assert files['name'][1] == b'<nzb/>'
 
 
+# -- adding a job waits out SAB building another one (live SAB, 1 Nov 2026) --
+# SAB held an addurl sent at ~10:09:59 until it had finished adding another
+# job's files at 10:10:18, and registered it at 10:10:22. The 15 s call timed
+# out at 10:10:14, the grab was reported as refused, and SAB queued it anyway.
+
+
+def test_sab_addurl_waits_longer_than_a_status_call() -> None:
+    adapter = _sab_with_config()
+    with patch('core.usenet_clients.sabnzbd.http_requests.get',
+               return_value=_mock_response(200, {'status': True, 'nzo_ids': ['SABnzbd_1']})) as mock_get:
+        _run(adapter.add_nzb('https://example.com/x.nzb', category='cat'))
+    assert mock_get.call_args.kwargs['timeout'] == SABnzbdAdapter.ADD_TIMEOUT
+    assert '_timeout' not in mock_get.call_args.kwargs['params']
+
+
+def test_sab_addfile_waits_longer_than_a_status_call() -> None:
+    adapter = _sab_with_config()
+    with patch('core.usenet_clients.sabnzbd.http_requests.post',
+               return_value=_mock_response(200, {'status': True, 'nzo_ids': ['SABnzbd_2']})) as mock_post:
+        _run(adapter.add_nzb(b'<nzb/>', category='cat'))
+    assert mock_post.call_args.kwargs['timeout'] == SABnzbdAdapter.ADD_TIMEOUT
+    assert '_timeout' not in mock_post.call_args.kwargs['params']
+
+
+def test_sab_status_calls_keep_the_short_timeout() -> None:
+    adapter = _sab_with_config()
+    with patch('core.usenet_clients.sabnzbd.http_requests.get',
+               return_value=_mock_response(200, {'queue': {'slots': []}, 'history': {'slots': []}})) as mock_get:
+        adapter._get_status_sync('x')
+    assert mock_get.call_args_list
+    assert all(c.kwargs['timeout'] == SABnzbdAdapter.DEFAULT_TIMEOUT for c in mock_get.call_args_list)
+
+
+def test_sab_add_timeout_outlasts_a_normal_days_slowest_build() -> None:
+    # 1,029 jobs on a live SAB, 25 Oct-1 Nov: worst 121 s on a normal day. The
+    # 245 s build during a storage scrub is longer than this on purpose.
+    assert SABnzbdAdapter.ADD_TIMEOUT > 121
+    assert SABnzbdAdapter.DEFAULT_TIMEOUT < SABnzbdAdapter.ADD_TIMEOUT
+
+
 def test_sab_get_all_merges_queue_and_history() -> None:
     """SAB's queue and history are separate endpoints; the adapter
     must hit both so completed jobs surface in the global list."""
