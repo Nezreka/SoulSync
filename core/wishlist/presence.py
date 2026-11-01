@@ -29,7 +29,7 @@ def presence_key(title: str, artist: str) -> str:
     return f"{normalize_key(str(title or ''))}|||{normalize_key(str(artist or ''))}"
 
 
-def load_wishlist_keys(cursor, profile_id: int) -> set[str]:
+def load_wishlist_keys(cursor, profile_id: int, artist_aliases=None) -> set[str]:
     """Build a set of `name|||artist` keys from the wishlist for fast lookup.
 
     Try the profile-aware schema first; fall back to the legacy schema if
@@ -51,6 +51,9 @@ def load_wishlist_keys(cursor, profile_id: int) -> set[str]:
                     wa = ""
                 if wname:
                     keys.add(presence_key(wname, wa))
+                    if artist_aliases and wa:
+                        for alias in artist_aliases(wa) or []:
+                            keys.add(presence_key(wname, alias))
             except Exception as e:
                 logger.debug("parse wishlist row failed: %s", e)
 

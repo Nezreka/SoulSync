@@ -116,6 +116,47 @@ def test_a_saved_manual_match_counts_as_owned(monkeypatch):
     assert _extra(db, 1)["in_library"] is True and _extra(db, 1)["library_track_id"] == 77
 
 
+def test_library_check_uses_the_active_server_like_playlist_sync(monkeypatch):
+    db = _DB([_row(1, "Native only", "Artist")])
+    seen = {}
+
+    def fake_match(db_, query, **kwargs):
+        seen.update(kwargs)
+        return False, 0.0, None
+
+    monkeypatch.setattr(master, "match_track_in_library", fake_match)
+    monkeypatch.setattr(master, "live_manual_match", lambda *a, **k: None)
+    monkeypatch.setattr("core.settings.config_manager.get_active_media_server", lambda: "navidrome")
+
+    library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1, source="deezer")
+
+    assert seen["server_source"] == "navidrome"
+    assert seen["include_downloads"] is False
+
+
+def test_mirror_check_resolves_linked_artists_with_a_real_database(tmp_path, monkeypatch):
+    from database.music_database import MusicDatabase
+    from tests import lib2_seed
+
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    with db._get_connection() as conn:
+        canonical = lib2_seed.artist(conn, "Sawano Hiroyuki")
+        lib2_seed.track(conn, "澤野弘之", "Attack on Titan OST", "Eye-Water", track_number=1)
+        conn.execute("UPDATE lib2_artists SET canonical_artist_id = ? WHERE name = ?",
+                     (canonical, "澤野弘之"))
+        conn.commit()
+    pk = db.mirror_playlist(
+        source="deezer", source_playlist_id="aot", name="AOT",
+        tracks=[{"track_name": "Eye-Water", "artist_name": "Sawano Hiroyuki",
+                 "source_track_id": "dz-aot"}], profile_id=1)
+    monkeypatch.setattr("core.settings.config_manager.get_active_media_server", lambda: None)
+
+    library_check.check_mirror_tracks(
+        db, db.get_mirrored_playlist_tracks(pk), profile_id=1, source="deezer")
+
+    assert track_status(db.get_mirrored_playlist_tracks(pk)[0], set()) == IN_LIBRARY
+
+
 def test_a_big_playlist_is_checked_a_slice_at_a_time(monkeypatch):
     db = _DB([_row(i, f"T{i}", "A") for i in range(1, 8)])
     _patch(monkeypatch, owned={})

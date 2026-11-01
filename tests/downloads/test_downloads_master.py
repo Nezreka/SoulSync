@@ -54,7 +54,7 @@ class _FakeDB:
         self.track_results_calls = []
         self.manual_matches = []
 
-    def check_track_exists(self, title, artist, confidence_threshold=0.7, server_source=None, album=None, include_downloads=False):
+    def check_track_exists(self, title, artist, confidence_threshold=0.7, server_source=None, album=None, include_downloads=False, _alias_cache=None):
         key = (title.lower().strip(), artist.lower().strip())
         if key in self.found_tracks:
             conf = self.found_tracks[key]
@@ -62,7 +62,8 @@ class _FakeDB:
         return (None, 0.0)
 
     def check_album_exists_with_editions(self, title, artist, confidence_threshold=0.7,
-                                         expected_track_count=None, server_source=None, expected_year=None):
+                                         expected_track_count=None, server_source=None, expected_year=None,
+                                         _alias_cache=None):
         return (self.album, self.album_confidence)
 
     def get_tracks_by_album(self, album_id):

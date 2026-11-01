@@ -153,13 +153,13 @@ def test_begin_analysis_owns_what_library_v2_has_a_file_for(tmp_path, monkeypatc
     assert _analysis_found(_lib2_db(tmp_path), monkeypatch) == {0: True, 1: True, 2: True}
 
 
-def _wish(db, name, profile_id):
+def _wish(db, name, profile_id, artist='Pierce The Veil'):
     import json
 
     with db._get_connection() as conn:
         conn.execute(
             "INSERT INTO wishlist_tracks (spotify_track_id, spotify_data, profile_id) VALUES (?, ?, ?)",
-            (f'w-{name}', json.dumps({'name': name, 'artists': [{'name': 'Pierce The Veil'}]}), profile_id))
+            (f'w-{name}', json.dumps({'name': name, 'artists': [{'name': artist}]}), profile_id))
         conn.commit()
 
 
@@ -223,3 +223,76 @@ def test_preview_asks_every_name_of_a_linked_artist(tmp_path):
     assert db.check_track_exists('Vogel Im Kafig', 'Sawano Hiroyuki', confidence_threshold=0.7)[0]
     assert db.check_album_exists_with_editions('Attack on Titan OST', 'Hiroyuki Sawano',
                                                confidence_threshold=0.7)[0]
+
+
+def test_begin_analysis_asks_every_name_of_a_linked_artist(tmp_path, monkeypatch):
+    from database.music_database import MusicDatabase
+    from tests import lib2_seed
+
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    with db._get_connection() as conn:
+        canonical = lib2_seed.artist(conn, 'Sawano Hiroyuki')
+        lib2_seed.track(conn, '澤野弘之', 'Attack on Titan OST', 'Eye-Water', track_number=1)
+        conn.execute("UPDATE lib2_artists SET canonical_artist_id = ? WHERE name = ?",
+                     (canonical, '澤野弘之'))
+        conn.commit()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    _seed_batch('P1', is_album_download=True,
+                album_context={'name': 'Attack on Titan OST', 'total_tracks': 1},
+                artist_context={'name': 'Sawano Hiroyuki'})
+    deps = _build_deps(config=_FakeConfig({'wishlist.allow_duplicate_tracks': True}))
+
+    mw.run_full_missing_tracks_process(
+        'P1', 'artist_album_aot',
+        [{'name': 'Eye-Water', 'artists': ['Sawano Hiroyuki']}], deps)
+
+    assert [r['found'] for r in download_batches['P1']['analysis_results']] == [True]
+
+
+def test_preview_marks_wishlist_entries_under_a_linked_artist_name(tmp_path):
+    from database.music_database import MusicDatabase
+    from tests import lib2_seed
+
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    with db._get_connection() as conn:
+        canonical = lib2_seed.artist(conn, 'Sawano Hiroyuki')
+        lib2_seed.artist(conn, '澤野弘之')
+        conn.execute("UPDATE lib2_artists SET canonical_artist_id = ? WHERE name = ?",
+                     (canonical, '澤野弘之'))
+        conn.commit()
+    _wish(db, 'Barricades', 1, artist='澤野弘之')
+
+    results = mw.preview_ownership(
+        db, [{'name': 'Barricades', 'artists': ['Sawano Hiroyuki']}],
+        album_context=None, artist_context=None, is_album=False,
+        profile_id=1, source='spotify', allow_duplicates=True)
+
+    assert [(r['found'], r['in_wishlist']) for r in results] == [(False, True)]
+
+
+def test_preview_resolves_one_alias_group_once_per_artist(tmp_path, monkeypatch):
+    from database.music_database import MusicDatabase
+    from tests import lib2_seed
+
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    with db._get_connection() as conn:
+        canonical = lib2_seed.artist(conn, 'Sawano Hiroyuki')
+        lib2_seed.artist(conn, '澤野弘之')
+        conn.execute("UPDATE lib2_artists SET canonical_artist_id = ? WHERE name = ?",
+                     (canonical, '澤野弘之'))
+        conn.commit()
+    real = db._artist_alias_names
+    calls = []
+
+    def counted(name):
+        calls.append(name)
+        return real(name)
+
+    monkeypatch.setattr(db, '_artist_alias_names', counted)
+    mw.preview_ownership(
+        db,
+        [{'name': f'Missing {i}', 'artists': ['Sawano Hiroyuki']} for i in range(3)],
+        album_context=None, artist_context=None, is_album=False,
+        profile_id=1, source='spotify', allow_duplicates=True)
+
+    assert calls == ['Sawano Hiroyuki']

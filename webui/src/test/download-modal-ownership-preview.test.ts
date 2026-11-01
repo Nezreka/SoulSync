@@ -33,6 +33,15 @@ function load(processes: Record<string, Proc>): Preview {
   )(processes) as Preview;
 }
 
+function loadProgressive(rehydrating: Set<string>, preview: (id: string) => void) {
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  return new Function(
+    'rehydratingDownloadProcessIds',
+    'previewModalOwnership',
+    `const TRACK_RENDER_BATCH_SIZE = 100; ${extractFunction('applyProgressiveTrackRendering', SPOTIFY)}; return applyProgressiveTrackRendering;`,
+  )(rehydrating, preview) as (id: string, count: number) => void;
+}
+
 function modal(id: string, rows: number) {
   document.body.innerHTML = `
     <span id="analysis-progress-text-${id}">Ready to start</span>
@@ -152,5 +161,16 @@ describe('the album modal ownership preview', () => {
     const open = extractFunction('openDownloadMissingModalForArtistAlbum', HELPERS);
     expect(open).toContain('applyProgressiveTrackRendering(virtualPlaylistId');
     expect(open).not.toContain('previewModalOwnership(');
+  });
+
+  it('does not start a discarded preview while restoring a running batch', () => {
+    modal(ID, 1);
+    const preview = vi.fn();
+    loadProgressive(new Set([ID]), preview)(ID, 1);
+
+    expect(preview).not.toHaveBeenCalled();
+    expect(text(`analysis-progress-text-${ID}`)).toBe(
+      'Restored after reload — analysis is running',
+    );
   });
 });

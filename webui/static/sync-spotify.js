@@ -1,6 +1,8 @@
 // == SYNC PAGE SPOTIFY FUNCTIONALITY       ==
 // ===========================================
 
+const rehydratingDownloadProcessIds = new Set();
+
 async function checkForActiveProcesses() {
     try {
         const response = await fetch('/api/active-processes');
@@ -460,6 +462,16 @@ async function rehydrateEnhancedSearchModal(virtualPlaylistId, playlistName, bat
 }
 
 async function rehydrateModal(processInfo, userRequested = false) {
+    const playlistId = processInfo?.playlist_id;
+    if (playlistId) rehydratingDownloadProcessIds.add(playlistId);
+    try {
+        return await _rehydrateModal(processInfo, userRequested);
+    } finally {
+        if (playlistId) rehydratingDownloadProcessIds.delete(playlistId);
+    }
+}
+
+async function _rehydrateModal(processInfo, userRequested = false) {
     const { playlist_id, playlist_name, batch_id, current_cycle } = processInfo;
     console.log(`💧 Rehydrating modal for "${playlist_name}" (batch: ${batch_id}) - User requested: ${userRequested}`);
 
@@ -1050,7 +1062,12 @@ function applyProgressiveTrackRendering(playlistId, totalTrackCount) {
     // Every download dialog calls this once its rows exist: ask the library
     // what it already has now, not only after Begin Analysis. One read, the
     // answer the analysis gives (previewModalOwnership in downloads.js, #1910).
-    if (typeof previewModalOwnership === 'function') void previewModalOwnership(playlistId);
+    if (rehydratingDownloadProcessIds.has(playlistId)) {
+        const progressText = document.getElementById(`analysis-progress-text-${playlistId}`);
+        if (progressText) progressText.textContent = 'Restored after reload — analysis is running';
+    } else if (typeof previewModalOwnership === 'function') {
+        void previewModalOwnership(playlistId);
+    }
     if (totalTrackCount <= TRACK_RENDER_BATCH_SIZE) return;
 
     const modal = document.getElementById(`download-missing-modal-${playlistId}`);

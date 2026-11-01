@@ -12120,6 +12120,16 @@ class MusicDatabase:
             return []
         return [n for n in dict.fromkeys(names) if n and normalize_name(n) != key]
 
+    def _cached_artist_alias_names(self, artist: str, cache: Optional[dict] = None) -> List[str]:
+        """Resolve one artist once during a multi-track ownership operation."""
+        from core.library2.importer import normalize_name
+        if cache is None:
+            return self._artist_alias_names(artist)
+        key = normalize_name(artist or '')
+        if key not in cache:
+            cache[key] = self._artist_alias_names(artist)
+        return cache[key]
+
     def _library_artist_forms(self, artist_variations: List[str]) -> List[str]:
         """The artist spellings this library owns tracks of: as the album
         artist or a per-track credit, matched by exact name or by the stored
@@ -12162,7 +12172,7 @@ class MusicDatabase:
             logger.debug(f"artist presence probe failed for {forms}: {e}")
             return forms
 
-    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False, include_downloads: bool = False, prefer_album: Optional[str] = None, _alias_retry: bool = True) -> Tuple[Optional[DatabaseTrack], float]:
+    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False, include_downloads: bool = False, prefer_album: Optional[str] = None, _alias_retry: bool = True, _alias_cache: Optional[dict] = None) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
 
@@ -12475,11 +12485,11 @@ class MusicDatabase:
             # the library may hold it under another name of the same artist
             # (§40 aliases: a kanji row linked to its romaji one)
             if _alias_retry:
-                for alias in self._artist_alias_names(artist):
+                for alias in self._cached_artist_alias_names(artist, _alias_cache):
                     hit = self.check_track_exists(
                         title, alias, confidence_threshold, server_source, album,
                         include_downloads=include_downloads, prefer_album=prefer_album,
-                        _alias_retry=False)
+                        _alias_retry=False, _alias_cache=_alias_cache)
                     if hit[0] is not None:
                         return hit
 
@@ -13358,7 +13368,7 @@ class MusicDatabase:
         formats = [f.upper() for f in str(book.get("audio_format") or "").split("/") if f]
         return album, 1.0, expected, expected, True, formats
 
-    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None, strip_single_kind: bool = False, _alias_retry: bool = True) -> Tuple[Optional[DatabaseAlbum], float]:
+    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None, strip_single_kind: bool = False, _alias_retry: bool = True, _alias_cache: Optional[dict] = None) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
         Matches standard albums with deluxe/platinum/special editions and vice versa.
@@ -13510,13 +13520,13 @@ class MusicDatabase:
                 return best_match, best_confidence
 
             if _alias_retry:
-                for alias in self._artist_alias_names(artist):
+                for alias in self._cached_artist_alias_names(artist, _alias_cache):
                     hit = self.check_album_exists_with_editions(
                         title, alias, confidence_threshold, expected_track_count, server_source,
                         strict_discography_match=strict_discography_match,
                         expected_year=expected_year, metadata_source=metadata_source,
                         card_source_id=card_source_id, strip_single_kind=strip_single_kind,
-                        _alias_retry=False)
+                        _alias_retry=False, _alias_cache=_alias_cache)
                     if hit[0] is not None:
                         return hit
 
