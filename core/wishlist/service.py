@@ -192,7 +192,7 @@ class WishlistService:
             logger.error("No track data provided for wishlist add")
             return self.database._wishlist_outcome("rejected", reason="no track data")
 
-        return self.database.add_to_wishlist_detailed(
+        outcome = self.database.add_to_wishlist_detailed(
             track_data=track_data,
             failure_reason=failure_reason,
             source_type=source_type,
@@ -201,6 +201,7 @@ class WishlistService:
             user_initiated=user_initiated,
             quality_profile_id=quality_profile_id,
         )
+        return outcome
 
     def add_spotify_track_to_wishlist(
         self,
@@ -388,6 +389,11 @@ class WishlistService:
                 formatted_track.setdefault("profile_id", profile_id)
                 formatted_tracks.append(formatted_track)
 
+            try:
+                from core.library2.wishlist_mirror import fill_catalogue_durations
+                fill_catalogue_durations(self.database, formatted_tracks)
+            except Exception as e:  # noqa: BLE001 - a length is a check, not the queue
+                logger.warning("Wishlist: catalogue lengths not filled in: %s", e)
             return formatted_tracks
 
         except Exception as e:

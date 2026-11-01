@@ -74,6 +74,32 @@ export function statusLabel(status: string): { spinner: boolean; text: string } 
   }
 }
 
+/** Older workers call every exhausted search "not found", even after a match. */
+export function downloadFailureSummary(dl: Pick<AdlDownload, 'status' | 'error'>) {
+  if (!['failed', 'not_found'].includes(dl.status) || !dl.error?.startsWith('No match found for '))
+    return null;
+  const diagnostics = dl.error.split('Breakdown: ')[1] || '';
+  if (diagnostics.includes('passed filters but download failed to start'))
+    return {
+      status: 'failed',
+      message:
+        'Matching results found, but the download could not start. No specific failure reason was recorded.',
+    };
+  if (diagnostics.includes('results but none passed quality/artist filters'))
+    return {
+      status: dl.status,
+      message: 'Results found, but none passed the quality or artist filters.',
+    };
+  if (diagnostics.includes('search error'))
+    return {
+      status: 'failed',
+      message: 'Some searches failed. Expand details for the source errors.',
+    };
+  if (diagnostics.includes('no results found'))
+    return { status: dl.status, message: 'No results found from the searched sources.' };
+  return null;
+}
+
 // ── Formatting ────────────────────────────────────────────────────────────
 
 /**

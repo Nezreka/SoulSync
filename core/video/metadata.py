@@ -73,11 +73,14 @@ def release_lock(db, kind: str, item_id: int, field: str, source=_UNSET) -> dict
     return {"ok": True, "locked": locks, "pushed": bool(push.get("ok"))}
 
 
-def set_watched(db, kind: str, item_id: int, watched: bool, source=_UNSET) -> dict:
-    """Played/unplayed toggle: local state + server markPlayed/markUnplayed."""
+def set_watched(db, kind: str, item_id: int, watched: bool, source=_UNSET,
+                push: bool = True) -> dict:
+    """Played/unplayed toggle: local state + server markPlayed/markUnplayed.
+    push=False keeps it local (a member's click must not land in the admin's
+    plex history, #1941)."""
     if not db.set_watch_state(kind, item_id, watched):
         return {"ok": False, "error": "item not found"}
-    target = db.poster_set_target(kind, item_id)
+    target = db.poster_set_target(kind, item_id) if push else None
     pushed = False
     if target and target.get("server_id"):
         src = _resolve_source(source)

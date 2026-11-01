@@ -5,15 +5,22 @@
  * in SoulSync and opens it. Everything else (identify, sync, download) happens
  * on the imported playlist, under Mirrored.
  *
+ * Only the button imports (#1934). A click anywhere else on a card that can
+ * load its songs shows them first, with Import there too.
+ *
  * A source that loads its own tracks also offers a copy kept as your own
  * (#1913): a playlist in My Playlists that never refreshes from the source.
+ *
+ * Once it's in, Edit opens its copy on the server in the server editor, to
+ * swap a track for another version you own without going to Server Playlists.
  */
 
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 
 import type { ImportStatus } from './use-importer';
 
 import styles from './import-card.module.css';
+import { ImportPreviewSheet, type PreviewTrack } from './import-preview-sheet';
 import { PlaylistArt } from './playlist-art';
 
 export interface ImportCardProps {
@@ -31,6 +38,10 @@ export interface ImportCardProps {
   onCopy?: () => void;
   /** that copy is being made */
   copying?: boolean;
+  /** The songs, for the look-before-you-import sheet; absent when it can't. */
+  loadPreview?: () => Promise<PreviewTrack[]>;
+  /** imported: its server copy in the server editor */
+  onEdit?: () => Promise<unknown>;
 }
 
 function actionLabel(status: ImportStatus): string {
@@ -57,10 +68,21 @@ export function ImportCard({
   onAction,
   onCopy,
   copying = false,
+  loadPreview,
+  onEdit,
 }: ImportCardProps) {
+  const [previewing, setPreviewing] = useState(false);
+  const [opening, setOpening] = useState(false);
   const imported = status === 'imported';
   const busy = status === 'importing' || status === 'checking';
-  const title = imported ? `Open ${name} in SoulSync` : `Import ${name} into SoulSync`;
+  const previews = !imported && Boolean(loadPreview);
+  const actionTitle = imported ? `Open ${name} in SoulSync` : `Import ${name} into SoulSync`;
+  const title = previews ? `See what's in ${name}` : actionTitle;
+  const open = () => {
+    if (busy) return;
+    if (previews) setPreviewing(true);
+    else onAction();
+  };
   return (
     <div
       className={styles.card}
@@ -69,15 +91,14 @@ export function ImportCard({
       role="button"
       tabIndex={0}
       aria-busy={status === 'importing' || undefined}
-      aria-label={title}
+      aria-label={previews ? title : name}
       title={title}
-      onClick={() => {
-        if (!busy) onAction();
-      }}
+      onClick={open}
       onKeyDown={(e) => {
-        if ((e.key === 'Enter' || e.key === ' ') && !busy) {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onAction();
+          open();
         }
       }}
     >
@@ -132,10 +153,56 @@ export function ImportCard({
         </span>
         {imported ? <span className={styles.inTag}>In SoulSync</span> : null}
       </span>
-      <span className={styles.action} aria-hidden="true">
-        {status === 'importing' ? <span className={styles.spinner} /> : null}
-        {actionLabel(status)}
+      <span className={styles.actions}>
+        {imported && onEdit ? (
+          <button
+            type="button"
+            className={styles.edit}
+            disabled={opening}
+            aria-busy={opening || undefined}
+            aria-label={`Edit ${name} on your server`}
+            title="Edit its copy on your server: swap a track for another version you own, add or remove"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (opening) return;
+              setOpening(true);
+              void onEdit().finally(() => setOpening(false));
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            {opening ? <span className={styles.spinner} /> : null}
+            Edit
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className={styles.action}
+          disabled={busy}
+          data-status={status}
+          aria-label={actionTitle}
+          title={actionTitle}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!busy) onAction();
+          }}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          {status === 'importing' ? <span className={styles.spinner} /> : null}
+          {actionLabel(status)}
+        </button>
       </span>
+      {previewing && loadPreview ? (
+        <ImportPreviewSheet
+          name={name}
+          meta={meta}
+          artUrl={artUrl}
+          glyph={glyph}
+          load={loadPreview}
+          onImport={onAction}
+          onCopy={onCopy}
+          onClose={() => setPreviewing(false)}
+        />
+      ) : null}
     </div>
   );
 }

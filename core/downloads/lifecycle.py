@@ -137,27 +137,10 @@ def _publish_atomic_album(batch_id: str, batch: dict, deps=None) -> bool:
 
         db = MusicDatabase()
 
-        # Repoint one file, returning how many library rows moved with it.
-        #
-        # The count is the publish's proof that the library knows where the file
-        # went; an audio file that repoints nothing leaves the library pointing
-        # at a staging path this publish is about to remove. None means the count
-        # carries no meaning — "unknown", not "zero" — and an unknown must not
-        # fail a publish that may well have worked.
-        #
-        # THAT PROOF ONLY EXISTS ON A 'soulsync' SERVER. Rows with a staged path
-        # are written by record_soulsync_library_entry, which is gated on the
-        # active media server being soulsync — on a Plex/Navidrome/Jellyfin
-        # install there is legitimately NO row until the server scans the
-        # PUBLISHED files. Reading that 0 as a failure made every atomic album
-        # publish on a media-server install roll itself back and strand the album
-        # in .soulsync_atomic_staging forever (Lil-Uzi-Chimp, Docker + Navidrome:
-        # two direct albums landed, the one staged album stuck). The UPDATE still
-        # runs — a row from an earlier soulsync-mode session deserves repointing
-        # — but its count is only evidence where the rows are ours to expect.
-        #
-        # Shared with the startup recovery (#1289), which republishes an
-        # abandoned staging tree and needs the identical rule.
+        # Repoint one file, returning how many library rows moved with it --
+        # the publish's proof that the catalogue knows where the file went
+        # (L2-002). Shared with the startup recovery (#1289); the reasoning for
+        # why a zero is evidence on this branch lives with the helper.
         from core.downloads.atomic_recovery import make_db_path_updater
         _db_update = make_db_path_updater(db)
 
@@ -666,6 +649,14 @@ def start_next_batch_of_downloads(batch_id: str, deps: LifecycleDeps) -> None:
 # on_download_completed
 # ---------------------------------------------------------------------------
 
+# Statuses that mean "this task will not do any more work". `already_owned` is
+# here because a task that stood down against a sibling that already has the
+# file has genuinely finished — leaving it out let a deduped task hold its batch
+# in 'downloading' forever, since the batch waits for every queue entry to reach
+# a terminal state.
+_FINISHED_TASK_STATUSES = ('completed', 'failed', 'cancelled', 'not_found',
+                           'already_owned')
+
 
 def _wake_waiting_batches(finished_batch_id: str, deps: LifecycleDeps) -> None:
     """Offer a just-freed worker slot to the batches the global gate is holding.
@@ -839,9 +830,11 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
     batch['phase'] = 'complete'
     batch['completion_time'] = time.time()  # Track when batch completed
 
-    # Record sync history completion (reads download_tasks, so under the lock)
-    from database.music_database import MusicDatabase
-    record_sync_history_completion(MusicDatabase(), batch_id, batch)
+    # Sync history: read download_tasks here, under the lock; the write is the
+    # first thing the out-of-lock half does. writing here held tasks_lock (and
+    # every downloads page) for as long as the db write lock was busy
+    from core.downloads.history import build_sync_history_completion
+    history_payload = build_sync_history_completion(batch_id, batch)
 
     # Add activity for batch completion
     playlist_name = batch.get('playlist_name', 'Unknown Playlist')
@@ -918,7 +911,8 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
         batch['wishlist_processing_complete'] = True
 
     return {'m3u_tracks': m3u_tracks, 'tasks_snapshot': tasks_snapshot,
-            'successful_downloads': successful_downloads}
+            'successful_downloads': successful_downloads,
+            'history_payload': history_payload}
 
 
 def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: LifecycleDeps,
@@ -932,6 +926,14 @@ def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: Lifecyc
     the lock: the batch is already 'complete' and the tasks it reads are a
     snapshot taken under it."""
     tasks_snapshot = outcome.get('tasks_snapshot') or {}
+
+    # sync history, built under the lock in _mark_batch_complete
+    try:
+        from core.downloads.history import write_sync_history_completion
+        from database.music_database import MusicDatabase
+        write_sync_history_completion(MusicDatabase(), batch_id, outcome.get('history_payload'))
+    except Exception as _hist_err:  # noqa: BLE001 — the batch is already complete
+        logger.warning(f"{tag} Could not write sync history: {_hist_err}")
 
     # ALBUM-BUNDLE STAGING CLEANUP: the synchronous shutil.rmtree of the
     # private staging tree. Runs here — outside the global lock — instead of
@@ -1225,7 +1227,7 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                         finished_count += 1
                     else:
                         retrying_count += 1
-                elif task_status in ['completed', 'failed', 'cancelled', 'not_found']:
+                elif task_status in _FINISHED_TASK_STATUSES:
                     finished_count += 1
             else:
                 # Task ID in queue but not in download_tasks - treat as completed to prevent blocking
@@ -1369,7 +1371,7 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                             finished_count += 1
                         else:
                             retrying_count += 1
-                    elif task_status in ['completed', 'failed', 'cancelled', 'not_found']:
+                    elif task_status in _FINISHED_TASK_STATUSES:
                         finished_count += 1
                 else:
                     # Task ID in queue but not in download_tasks - treat as completed to prevent blocking

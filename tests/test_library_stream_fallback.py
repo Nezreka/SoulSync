@@ -1,8 +1,9 @@
 """#809: when a library file isn't on SoulSync's disk, play it by proxying the
 media server's stream API instead of 404-ing.
 
-Tests the routing helper _build_library_stream_url: Navidrome-only, uses the
-passed song id or falls back to a DB lookup, returns None otherwise.
+Tests the routing helper _build_library_stream_url: any active client that
+builds a stream URL (Navidrome today), uses the passed song id or falls back to
+a DB lookup, returns None otherwise.
 """
 
 from __future__ import annotations
@@ -25,7 +26,20 @@ def navidrome(monkeypatch):
 
 def test_non_navidrome_server_returns_none(monkeypatch):
     monkeypatch.setattr(web_server.config_manager, "get_active_media_server", lambda: "plex")
+    monkeypatch.setattr(web_server.media_server_engine, "client", lambda name: object())
     assert web_server._build_library_stream_url("song1", "/music/x.flac") is None
+
+
+def test_any_server_whose_client_streams_is_used(monkeypatch):
+    # the capability, not the name: a fifth server with a stream url plays too
+    monkeypatch.setattr(web_server.config_manager, "get_active_media_server",
+                        lambda: "music_assistant")
+    asked = []
+    monkeypatch.setattr(web_server.media_server_engine, "client",
+                        lambda name: asked.append(name) or _Client())
+    assert web_server._build_library_stream_url("s1", "/x.flac") == \
+        "http://nav.example/rest/stream?id=s1"
+    assert asked == ["music_assistant"]
 
 
 def test_uses_passed_track_id(navidrome):

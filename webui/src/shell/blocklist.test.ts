@@ -200,6 +200,7 @@ describe('the window contract', () => {
       'removeSelectedOriginEntries',
       'saveMyAccountToken',
       'setActiveSource',
+      'setLibraryArtistBreadcrumb',
       'setWeatherPreview',
       'switchBlocklistTab',
       'switchDownloadOriginTab',

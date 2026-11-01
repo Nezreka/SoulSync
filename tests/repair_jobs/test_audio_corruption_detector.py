@@ -16,12 +16,47 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 import core.repair_jobs.audio_corruption_detector as mod
 from core.repair_jobs.audio_corruption_detector import (
     AudioCorruptionDetectorJob,
     check_flac_integrity,
 )
 from core.repair_jobs.base import JobContext
+
+
+@pytest.fixture(autouse=True)
+def _native_subject_boundary(monkeypatch):
+    """Feed the scanner native subject rows; it must never query old tracks.
+    A real Library v2 database (``_SqliteDB`` below) is read for real."""
+    from core.library2 import maintenance_subjects
+
+    real = maintenance_subjects.active_file_subjects
+
+    def subjects(database, _config_manager, **_kwargs):
+        if not hasattr(database, "_rows"):
+            return real(database, _config_manager, **_kwargs)
+        return [
+            {
+                "file_id": row["id"],
+                "track_id": row["id"],
+                "album_id": 1,
+                "artist_id": 1,
+                "title": row["title"],
+                "artist_name": row["artist_name"],
+                "album_title": row["album_title"],
+                "path": row["file_path"],
+                "track_source_ids": {},
+                "album_source_ids": {},
+                "artist_source_ids": {},
+            }
+            for row in database._rows
+        ]
+
+    monkeypatch.setattr(
+        "core.library2.maintenance_subjects.active_file_subjects", subjects
+    )
 
 
 # --- check_flac_integrity (decode test) --------------------------------------
@@ -141,7 +176,7 @@ def test_scan_flags_corrupt_flac(tmp_path, monkeypatch):
     assert result.findings_created == 1
     f = findings[0]
     assert f["finding_type"] == "corrupt_audio"
-    assert f["entity_type"] == "track" and f["entity_id"] == "7"
+    assert f["entity_type"] == "track" and f["entity_id"] == "lib2:7"
     assert "FRAME_CRC_MISMATCH" in f["description"]
 
 
@@ -243,6 +278,28 @@ def test_scan_surfaces_total_resolution_failure(tmp_path, monkeypatch):
                for r in reports)
 
 
+def test_a_file_outside_the_catalogue_is_not_promised_a_re_download(tmp_path, monkeypatch):
+    """The walk also finds audio no lib2 row points at. Those findings carry
+    `entity_type='file'` and no id, so there is no track to put back on the
+    wishlist — and the copy must not say there is. The reported symptom was a
+    row reading "approve to delete it and re-download the real version" whose
+    fix could only answer "No track ID associated with this finding"."""
+    stray = tmp_path / "EKKSTACY" / "NEGATIVE" / "01 - i walk this earth.flac"
+    stray.parent.mkdir(parents=True)
+    stray.write_bytes(b"x")
+    _prep(monkeypatch, {str(stray): (False, "LOST_SYNC after processing 6418432 samples")})
+
+    ctx, findings = _context([], tmp_path)
+    result = AudioCorruptionDetectorJob().scan(ctx)
+
+    assert result.findings_created == 1
+    f = findings[0]
+    assert f["entity_type"] == "file" and f["entity_id"] is None
+    assert "LOST_SYNC" in f["description"]
+    assert "re-download" not in f["description"].lower()
+    assert "delete" in f["description"].lower()
+
+
 # ── a file that changed under the decode test is not evidence ────────────────
 #
 # The scan walks the library while the import pipeline is still moving files
@@ -312,20 +369,16 @@ import time
 
 
 class _SqliteDB:
-    """A real database with just the tables the job reads, so the result
-    memory is exercised for real."""
+    """A real Library v2 database, so the result memory is exercised for
+    real and the job enumerates the catalogue the way it does in production."""
 
     def __init__(self, path):
+        from database.music_database import MusicDatabase
         self.path = str(path)
+        MusicDatabase(self.path)          # creates the schema
         conn = self._get_connection()
-        conn.executescript("""
-            CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT);
-            CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT);
-            CREATE TABLE tracks (id INTEGER PRIMARY KEY, title TEXT, artist_id INTEGER,
-                                 album_id INTEGER, file_path TEXT);
-            INSERT INTO artists VALUES (1, 'Artist');
-            INSERT INTO albums VALUES (1, 'Album');
-        """)
+        conn.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Artist')")
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'Album')")
         conn.commit()
         conn.close()
 
@@ -336,15 +389,25 @@ class _SqliteDB:
 
     def add_track(self, track_id, path):
         conn = self._get_connection()
-        conn.execute("INSERT INTO tracks VALUES (?, ?, 1, 1, ?)", (track_id, f"Track {track_id}", str(path)))
+        conn.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (?, 1, ?)",
+                     (track_id, f"Track {track_id}"))
+        conn.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+                     (track_id, str(path)))
         conn.commit()
         conn.close()
 
     def drop_track(self, track_id):
+        # gone from the library: the catalogue row AND the file. This branch
+        # also walks the library folders for audio the catalogue does not
+        # know, so a file still on disk is still decoded and remembered.
         conn = self._get_connection()
-        conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
+        path = conn.execute("SELECT path FROM lib2_track_files WHERE track_id = ?",
+                            (track_id,)).fetchone()[0]
+        conn.execute("DELETE FROM lib2_track_files WHERE track_id = ?", (track_id,))
+        conn.execute("DELETE FROM lib2_tracks WHERE id = ?", (track_id,))
         conn.commit()
         conn.close()
+        os.remove(path)
 
     def remembered(self):
         conn = self._get_connection()
@@ -403,7 +466,7 @@ def test_a_damaged_file_is_tested_every_run_and_never_remembered(tmp_path, monke
     db, files = _library(tmp_path)
     bad = {files[0]: (False, "MD5 mismatch")}
     _, findings, _ = _run(db, tmp_path, monkeypatch, verdicts=bad)
-    assert [f["entity_id"] for f in findings] == ["1"]
+    assert [f["entity_id"] for f in findings] == ["lib2:1"]
     assert files[0] not in db.remembered()
 
     _, _, again = _run(db, tmp_path, monkeypatch, verdicts=bad)
@@ -449,7 +512,7 @@ def test_several_workers_decode_every_file_and_flag_only_the_bad_one(tmp_path, m
                                      verdicts={files[5]: (False, "frame CRC mismatch")},
                                      settings={key: {"workers": 4}})
     assert sorted(decoded) == sorted(files)
-    assert [f["entity_id"] for f in findings] == ["6"]
+    assert [f["entity_id"] for f in findings] == ["lib2:6"]
     assert result.findings_created == 1
     assert db.remembered() == set(files) - {files[5]}
 
@@ -520,3 +583,20 @@ def test_the_summary_counts_a_reconfirmed_corrupt_file(tmp_path, monkeypatch):
     assert result.findings_created == 0
     summary = [line for line in lines if "decode-tested" in line][-1]
     assert "1 corrupt (0 new findings)" in summary
+
+
+def test_a_scoped_run_does_not_forget_what_it_did_not_see(tmp_path, monkeypatch):
+    """A run for one artist (or one library) sees some files; the others are
+    still in the library, so their remembered passes must survive."""
+    db, files = _library(tmp_path)
+    _run(db, tmp_path, monkeypatch)
+    assert db.remembered() == set(files)
+
+    cfg = MagicMock()
+    cfg.get.side_effect = lambda key, default=None: default
+    ctx = JobContext(db=db, transfer_folder=str(tmp_path), config_manager=cfg)
+    ctx.scope = {"file_paths": [files[0]]}
+    monkeypatch.setattr(mod, "check_flac_integrity", lambda p: (True, ""))
+    AudioCorruptionDetectorJob().scan(ctx)
+
+    assert db.remembered() == set(files)

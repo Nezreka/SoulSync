@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useRouterState } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { artistNavigationOrigin } from '@/platform/shell/last-navigation';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { Discography, DiscographyBucket, DiscographyRelease } from '../-artist-detail.types';
@@ -15,7 +16,12 @@ import {
   settleOwnershipForSourceArtist,
   watchlistIdentity,
 } from '../-artist-detail.api';
-import { backButtonLabel, pushArtistOrigin, pushPageOrigin } from '../-artist-detail.back-label';
+import {
+  backButtonLabel,
+  ensurePageOrigin,
+  pushArtistOrigin,
+  pushPageOrigin,
+} from '../-artist-detail.back-label';
 import { peekArtistEdit } from '../-artist-detail.edit-focus';
 import {
   readEnhancedViewMode,
@@ -205,7 +211,9 @@ export function ArtistDetailPage() {
    * is read AFTER the push, not before.
    */
   const previousArtistName = useRef<string | null>(null);
+  const previousArtistHref = useRef<string | null>(null);
   const [backLabel, setBackLabel] = useState('← Back');
+  const currentHref = useRouterState({ select: (state) => state.location.href });
 
   /**
    * Where you came FROM, for arrivals that never touched
@@ -216,7 +224,15 @@ export function ArtistDetailPage() {
    */
   const cameFrom = useRouterState({ select: (state) => state.resolvedLocation?.pathname });
   useEffect(() => {
-    pushPageOrigin(cameFrom);
+    // an arrival from outside the artist pages starts a fresh chain: the
+    // shared stack outlives every visit, so without this the first page ever
+    // recorded ("library") labelled the button for good
+    const arrival = artistNavigationOrigin();
+    if (arrival) {
+      ensurePageOrigin(arrival.pathname, arrival.searchStr);
+    } else {
+      pushPageOrigin(cameFrom);
+    }
     setBackLabel(backButtonLabel());
     // Only on arrival: re-running as the chain grows would rewrite it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -226,10 +242,15 @@ export function ArtistDetailPage() {
     const name = payload?.artist?.name ?? null;
     if (!name) return;
     if (previousArtistName.current && previousArtistName.current !== name) {
-      pushArtistOrigin(previousArtistName.current);
+      pushArtistOrigin(previousArtistName.current, previousArtistHref.current ?? undefined);
     }
     previousArtistName.current = name;
+    previousArtistHref.current = currentHref;
     setBackLabel(backButtonLabel());
+    // `currentHref` deliberately is not a dependency: the href belongs to the
+    // artist whose payload just resolved. Updating it while the next artist is
+    // still loading would overwrite the route we need for Back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payload?.artist?.name]);
 
   /**

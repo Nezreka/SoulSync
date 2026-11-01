@@ -51,6 +51,13 @@ class UsenetStatus:
     category: Optional[str] = None
     files: Optional[List[str]] = None
     error: Optional[str] = None
+    # True only when the job is waiting its turn behind other jobs: SAB
+    # ``Queued``/``Idle``, or nothing downloaded yet with an unpaused job ahead
+    # of it in SAB's queue (a live SAB reported every waiting slot as
+    # ``Downloading``). ``state`` can't carry it: the adapters fold waiting in
+    # with grabbing/propagating, which can hang and must stay stall-timed.
+    # Adapters that can't tell leave it False.
+    waiting_in_queue: bool = False
 
 
 @runtime_checkable

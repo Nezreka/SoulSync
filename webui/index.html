@@ -2678,6 +2678,32 @@
                                             </div>
                                         </div>
 
+                                        <!-- fanart.tv (optional; HD artist photos and backgrounds, #1957) -->
+                                        <div class="api-service-frame stg-service" data-service="artist-fanart">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: rgb(var(--accent-rgb));"></span>
+                                                <h4 class="service-title">fanart.tv</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>API Key (optional):</label>
+                                                    <input type="password" id="artist-fanart-api-key"
+                                                        placeholder="fanart.tv personal API key" autocomplete="off">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-help">HD artist photos and the wide background Plex and Jellyfin show behind an artist page, used by <b>Update media server metadata</b> on the Tools page.
+                                                        Without a key SoulSync still tries TheAudioDB and Deezer.</div>
+                                                    <div class="callback-help">A free key from <a
+                                                            href="https://fanart.tv/get-an-api-key/" target="_blank" rel="noopener noreferrer"
+                                                            style="color: rgb(var(--accent-rgb));">fanart.tv</a>. The video side's fanart.tv key is used when this is empty.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('fanart')">Test Connection</button>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         <!-- MusicBrainz server (optional; public API requires no credentials) -->
                                         <div class="api-service-frame stg-service" id="musicbrainz-server-settings"
                                             data-service="musicbrainz">
@@ -3107,9 +3133,10 @@
                                                     <span>TVmaze (TV community rating)</span>
                                                 </label>
                                                 <label class="vid-pref-row">
-                                                    <input type="checkbox" id="video-anilist-enabled">
-                                                    <span>AniList (anime score) — off by default; enable if you have
-                                                        anime</span>
+                                                    <input type="checkbox" id="video-anilist-enabled" checked>
+                                                    <span>AniList (anime): links your anime to AniList by id and adds
+                                                        their romaji and English names to release searches, plus score,
+                                                        studio and the next episode. Only ever touches anime</span>
                                                 </label>
                                                 <label class="vid-pref-row">
                                                     <input type="checkbox" id="video-wikidata-enabled" checked>
@@ -3288,6 +3315,12 @@
                                                 <img src="/static/img/brands/navidrome.png" alt="Navidrome"
                                                     class="server-logo">
                                                 Navidrome
+                                            </button>
+                                            <button class="server-toggle-btn" id="music_assistant-toggle"
+                                                onclick="toggleServer('music_assistant')">
+                                                <img src="/static/img/brands/music-assistant.png" alt="Music Assistant"
+                                                    class="server-logo">
+                                                Music Assistant
                                             </button>
                                             <button class="server-toggle-btn" id="soulsync-toggle"
                                                 onclick="toggleServer('soulsync')">
@@ -3478,6 +3511,41 @@
                                                     onclick="autoDetectNavidrome()">Auto-detect</button>
                                                 <button class="test-button"
                                                     onclick="testConnection('navidrome')">Test</button>
+                                            </div>
+                                        </div>
+
+                                        <!-- Music Assistant Settings -->
+                                        <div class="server-config-container hidden" id="music_assistant-container">
+                                            <div class="setting-help-text">
+                                                SoulSync reads one <strong>Local files</strong> (or SMB) music source
+                                                of your Music Assistant library, so every track has a file path. Create
+                                                a long-lived token in Music Assistant under Settings, Users.
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Music Assistant URL:</label>
+                                                <input type="url" id="music_assistant-url"
+                                                    placeholder="http://localhost:8095">
+                                                <div class="form-actions">
+                                                    <button class="detect-button" type="button"
+                                                        onclick="autoDetectMusicAssistant()">Auto-detect</button>
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Long-lived token:</label>
+                                                <input type="password" id="music_assistant-token" placeholder="Token">
+                                            </div>
+                                            <div class="form-group" id="music_assistant-source-selector-container"
+                                                style="display: none;">
+                                                <label>Music source</label>
+                                                <select id="music_assistant-source"
+                                                    onchange="selectMusicAssistantSource()">
+                                                </select>
+                                                <div class="setting-help-text">The Local files source whose tracks
+                                                    SoulSync scans. Save the URL and token first, then pick one.</div>
+                                            </div>
+                                            <div class="form-actions">
+                                                <button class="test-button" type="button"
+                                                    onclick="loadMusicAssistantSources()">Load sources</button>
                                             </div>
                                         </div>
 
@@ -5174,6 +5242,7 @@
                                                             <select id="quality-upgrade-policy"
                                                                 style="width:100%;max-width:420px;"
                                                                 onchange="onUpgradePolicyChange(); debouncedSaveQualityProfile();">
+                                                                <option value="none">No upgrades</option>
                                                                 <option value="acceptable">Any accepted target</option>
                                                                 <option value="until_cutoff">Selected target or better
                                                                 </option>
@@ -5186,6 +5255,9 @@
                                                                     onchange="debouncedSaveQualityProfile()"></select>
                                                             </div>
                                                             <div class="help-text setting-help-body" hidden>
+                                                                <strong>No upgrades</strong> never replaces a file
+                                                                that already exists.
+                                                                <br><br>
                                                                 <strong>Any accepted target</strong> stops upgrade
                                                                 findings as soon as a file matches any target in the
                                                                 list.
@@ -6369,21 +6441,33 @@
                                             </div>
 
                                             <div class="settings-group" data-stg="library">
-                                                <h3>Collections on other drives</h3>
+                                                <h3>Your library's folders</h3>
                                                 <div class="setting-help-text">
-                                                    Extra folders SoulSync scans and manages but never downloads into,
-                                                    for an existing collection on another drive. Add them to your
-                                                    Plex / Jellyfin scan too. No need to repeat the main folder.
+                                                    Every folder your Plex / Jellyfin libraries read, Movies or TV.
+                                                    The ones SoulSync already reaches are ticked. Tell it where it
+                                                    reaches the rest and every file in them is found, renamed to
+                                                    your templates, recycled on delete and kept track of. New
+                                                    downloads still go to the folders above. Leave one blank and it
+                                                    works the way it does today.
+                                                </div>
+                                                <div id="video-drive-map" class="video-drive-map"></div>
+                                                <button type="button" class="test-button" id="video-drive-map-save">Save
+                                                    folders</button>
+
+                                                <h4 class="video-extra-heading">Folders your server doesn't list</h4>
+                                                <div class="setting-help-text">
+                                                    A collection SoulSync should manage that your server doesn't
+                                                    read. New downloads never go here.
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>More movie folders:</label>
+                                                    <label>Movie folders:</label>
                                                     <div id="video-movies-additional-paths"
                                                         data-video-extra-kind="movies"></div>
                                                     <button type="button" class="test-button"
                                                         data-video-add-path="movies">+ Add folder</button>
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>More TV folders:</label>
+                                                    <label>TV folders:</label>
                                                     <div id="video-tv-additional-paths" data-video-extra-kind="tv">
                                                     </div>
                                                     <button type="button" class="test-button" data-video-add-path="tv">+
@@ -7313,6 +7397,17 @@
                                                         so both Music and TV media libraries can index the same folder
                                                         simultaneously.</small>
                                                 </div>
+                                                <label class="toggle-row" style="margin-top: 10px;">
+                                                    <input type="checkbox" id="redownload-externally-deleted">
+                                                    <span>Re-download files deleted outside SoulSync</span>
+                                                </label>
+                                                <div class="help-text" style="margin-top: 6px;">
+                                                    When a library scan finds that a monitored track's file was
+                                                    deleted outside SoulSync, the track is wanted again and goes
+                                                    back to the Wishlist (on by default, like Lidarr). Turn off to
+                                                    treat such a deletion like <em>Don't download again</em>:
+                                                    the track is unmonitored instead.
+                                                </div>
                                             </div>
 
                                         </div>
@@ -7332,8 +7427,10 @@
                                                         placeholder="$title ($year)/$title ($year) $quality">
                                                     <small class="settings-hint">Variables: $title, $titlefirst, $year,
                                                         $quality (e.g. Bluray-1080p), $resolution, $source, $codec,
-                                                        $edition, $tmdbid, $imdbid. Folders split on "/", the last
-                                                        segment is the filename.</small>
+                                                        $edition, $audiolangs, $sublangs, $tmdbid, $imdbid. Folders split
+                                                        on "/", the last segment is the filename. <code>[$audiolangs]</code>
+                                                        gives <code>[JA+EN]</code> and disappears when a file has no
+                                                        language tags.</small>
                                                     <small class="settings-hint">Example: <code
                                                             id="vo-movie-preview">&hellip;</code></small>
                                                 </div>
@@ -7344,8 +7441,8 @@
                                                         placeholder="$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality">
                                                     <small class="settings-hint">Variables: $series, $season (01),
                                                         $seasonraw (1), $episode (01), $episodetitle, $year, $quality,
-                                                        $resolution, $source, $codec, $tmdbid, $imdbid, $tvdbid (the show's
-                                                        ids).</small>
+                                                        $resolution, $source, $codec, $audiolangs, $sublangs, $tmdbid,
+                                                        $imdbid, $tvdbid (the show's ids).</small>
                                                     <small class="settings-hint">Example: <code
                                                             id="vo-episode-preview">&hellip;</code></small>
                                                 </div>

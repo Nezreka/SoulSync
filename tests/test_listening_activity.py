@@ -77,26 +77,19 @@ def client(db, monkeypatch):
 def _seed(db):
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES (1, 'The Testers')")
-    cur.execute(
-        "INSERT INTO albums (id, artist_id, title, musicbrainz_release_id) "
-        "VALUES (10, 1, 'Album A', ?)", (REL_A,))
-    cur.execute(
-        "INSERT INTO albums (id, artist_id, title, musicbrainz_release_id) "
-        "VALUES (11, 1, 'Album NoMBID', NULL)")
-    cur.execute(
-        "INSERT INTO albums (id, artist_id, title, musicbrainz_release_id) "
-        "VALUES (12, 1, 'Album B', ?)", (REL_B,))
+    # lib2 port: the release id is lib2_albums.musicbrainz_id, a play names
+    # its catalogue track by lib2_track_id
+    from tests.lib2_seed import album, file_track
+    albums = {10: album(conn, "The Testers", "Album A", musicbrainz_id=REL_A),
+              11: album(conn, "The Testers", "Album NoMBID"),
+              12: album(conn, "The Testers", "Album B", musicbrainz_id=REL_B)}
     for track_id, album_id in ((100, 10), (101, 10), (102, 10), (103, 11), (104, 12)):
-        cur.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-            "VALUES (?, ?, 1, ?, ?)",
-            (track_id, album_id, f"T{track_id}", f"/music/{track_id}.flac"))
+        file_track(conn, track_id, albums[album_id], f"T{track_id}", f"/music/{track_id}.flac")
 
     def play(db_track_id, played_at, profile_id=SHARED):
         cur.execute(
             "INSERT INTO listening_history (track_id, title, artist, album, "
-            "played_at, server_source, db_track_id, profile_id) "
+            "played_at, server_source, lib2_track_id, profile_id) "
             "VALUES (?, 'T', 'The Testers', 'X', ?, 'plex', ?, ?)",
             (f"src-{db_track_id}-{played_at}", played_at, db_track_id, profile_id))
 

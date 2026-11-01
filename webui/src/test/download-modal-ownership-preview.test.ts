@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import '@/shell/download-modal-library';
+
 import { extractFunction } from './vanilla-extract';
 
 /**
@@ -13,6 +15,7 @@ import { extractFunction } from './vanilla-extract';
 
 const JS = readFileSync(resolve(process.cwd(), 'static/downloads.js'), 'utf8');
 const HELPERS = readFileSync(resolve(process.cwd(), 'static/shared-helpers.js'), 'utf8');
+const SPOTIFY = readFileSync(resolve(process.cwd(), 'static/sync-spotify.js'), 'utf8');
 
 type Proc = { status: string; tracks: unknown[]; album?: unknown; artist?: unknown };
 type Preview = (id: string) => Promise<void>;
@@ -28,6 +31,15 @@ function load(processes: Record<string, Proc>): Preview {
       'return previewModalOwnership;',
     ].join('\n'),
   )(processes) as Preview;
+}
+
+function loadProgressive(rehydrating: Set<string>, preview: (id: string) => void) {
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  return new Function(
+    'rehydratingDownloadProcessIds',
+    'previewModalOwnership',
+    `const TRACK_RENDER_BATCH_SIZE = 100; ${extractFunction('applyProgressiveTrackRendering', SPOTIFY)}; return applyProgressiveTrackRendering;`,
+  )(rehydrating, preview) as (id: string, count: number) => void;
 }
 
 function modal(id: string, rows: number) {
@@ -73,6 +85,44 @@ describe('the album modal ownership preview', () => {
     expect(text(`analysis-progress-text-${ID}`)).toBe('2 in your library, 1 missing');
   });
 
+  it('keeps the wishlist mark on a missing track the user already wants', async () => {
+    modal(ID, 2);
+    respond({
+      success: true,
+      results: [
+        { track_index: 0, found: false, in_wishlist: true },
+        { track_index: 1, found: true, in_wishlist: false },
+      ],
+    });
+    await load({ [ID]: { status: 'idle', tracks: [{}, {}] } })(ID);
+    expect(text(`match-${ID}-0`)).toBe('On Wishlist');
+    expect(document.getElementById(`match-${ID}-0`)?.className).toContain('match-monitored');
+    expect(text(`match-${ID}-1`)).toBe('✅ Found');
+    expect(text(`stat-missing-${ID}`)).toBe('1');
+  });
+
+  it('asks a long list in blocks, each row under its own index', async () => {
+    modal(ID, 450);
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: { body: string }) => {
+      const sent = JSON.parse(init.body).tracks as Array<{ _original_index: number }>;
+      const results = sent.map((t) => ({
+        track_index: t._original_index,
+        found: t._original_index % 2 === 0,
+      }));
+      return Promise.resolve({ json: () => Promise.resolve({ success: true, results }) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const proc = { status: 'idle', tracks: Array.from({ length: 450 }, () => ({})) };
+    await load({ [ID]: proc })(ID);
+    expect(fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).tracks.length)).toEqual([
+      200, 200, 50,
+    ]);
+    expect(text(`match-${ID}-449`)).toBe('❌ Missing');
+    expect(text(`match-${ID}-448`)).toBe('✅ Found');
+    expect(text(`stat-found-${ID}`)).toBe('225');
+    expect((proc as { ownedIndices?: Set<number> }).ownedIndices?.size).toBe(225);
+  });
+
   it('sends the album context so the album fast path runs', async () => {
     modal(ID, 1);
     const fetchMock = respond({ success: true, results: [] });
@@ -104,8 +154,21 @@ describe('the album modal ownership preview', () => {
     expect(text(`match-${ID}-0`)).toBe('🔍 Pending');
   });
 
-  it('runs when the artist album modal opens', () => {
+  it('runs once for every dialog, from the hook each opener calls', () => {
+    expect(extractFunction('applyProgressiveTrackRendering', SPOTIFY)).toContain(
+      'previewModalOwnership(playlistId)',
+    );
     const open = extractFunction('openDownloadMissingModalForArtistAlbum', HELPERS);
-    expect(open).toContain('previewModalOwnership(virtualPlaylistId)');
+    expect(open).toContain('applyProgressiveTrackRendering(virtualPlaylistId');
+    expect(open).not.toContain('previewModalOwnership(');
+  });
+
+  it('does not start a discarded preview while restoring a running batch', () => {
+    modal(ID, 1);
+    const preview = vi.fn();
+    loadProgressive(new Set([ID]), preview)(ID, 1);
+
+    expect(preview).not.toHaveBeenCalled();
+    expect(text(`analysis-progress-text-${ID}`)).toBe('Restored after reload, analysis is running');
   });
 });

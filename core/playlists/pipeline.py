@@ -49,7 +49,17 @@ def resolve_pipeline_skip_wishlist(data: Dict[str, Any], config_manager=None) ->
     return not config_manager.get('playlist_sync.wishlist_missing_tracks', True)
 
 
-def run_mirrored_playlist_pipeline(
+def run_mirrored_playlist_pipeline(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+    """Run REFRESH -> DISCOVER -> SYNC -> WISHLIST with the background workers
+    paused for all of it, not just the sync step: discovery's provider lookups
+    write the metadata cache, and queued behind the enrichment workers a
+    playlist sat in "identifying" for many minutes (Oct 31 2026)."""
+    from core import background_pause
+    with background_pause.paused_for("playlist sync"):
+        return _run_mirrored_playlist_pipeline(*args, **kwargs)
+
+
+def _run_mirrored_playlist_pipeline(
     config: Dict[str, Any],
     deps: Any,
     *,

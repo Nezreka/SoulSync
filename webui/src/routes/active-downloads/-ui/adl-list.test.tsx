@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { openDownloadTaskInspector } from '@/features/downloads/inspector-modal';
+import { openDownloadTaskSearch } from '@/routes/library/-ui/interactive-search-host';
 
 import type { AdlDownload } from '../-adl.types';
 
@@ -9,7 +9,10 @@ import { AdlHeader } from './adl-header';
 import { BatchFilterBanner } from './adl-list';
 import { AdlRow } from './adl-row';
 
-vi.mock('@/features/downloads/inspector-modal', () => ({ openDownloadTaskInspector: vi.fn() }));
+// the library's Interactive Search for a library track, else the inspector
+vi.mock('@/routes/library/-ui/interactive-search-host', () => ({
+  openDownloadTaskSearch: vi.fn(),
+}));
 
 afterEach(cleanup);
 
@@ -322,7 +325,7 @@ describe('AdlRow', () => {
       const btn = container.querySelector('.dlc-acts .dlc-btn-primary') as HTMLButtonElement;
       expect(btn.textContent).toContain('Search');
       fireEvent.click(btn);
-      expect(openDownloadTaskInspector).toHaveBeenCalledWith('tf', {
+      expect(openDownloadTaskSearch).toHaveBeenCalledWith('tf', {
         name: 'Xtal',
         artist: 'Aphex Twin',
         album: 'SAW',
@@ -422,7 +425,15 @@ describe('BatchFilterBanner', () => {
 });
 
 describe('AdlHeader', () => {
-  const counts = { active: 0, queued: 0, failed: 0, total: 0, completedOrFailed: 0 };
+  const counts = {
+    active: 0,
+    queued: 0,
+    failed: 0,
+    total: 0,
+    failedClearable: 0,
+    finished: 0,
+    completedOrFailed: 0,
+  };
   const props = {
     filter: 'all' as const,
     counts,
@@ -436,7 +447,9 @@ describe('AdlHeader', () => {
     onOpenHistory: vi.fn(),
     onFilter: vi.fn(),
     onCancelAll: vi.fn(),
-    onClearCompleted: vi.fn(),
+    onClearFinished: vi.fn(),
+    onClearFailed: vi.fn(),
+    onClearEverything: vi.fn(),
     cancelAllPending: false,
   };
   const openMenu = (container: HTMLElement) =>
@@ -534,13 +547,76 @@ describe('AdlHeader', () => {
       <AdlHeader
         {...props}
         hasRunningWork
-        counts={{ ...counts, active: 2, queued: 3, completedOrFailed: 4 }}
+        counts={{ ...counts, active: 2, queued: 3, finished: 4, completedOrFailed: 4 }}
       />,
     );
     openMenu(busy.container);
     expect(screen.getByRole('menuitem', { name: 'Clear finished (4)' })).not.toBeNull();
+    // nothing failed, so no Clear failed
+    expect(screen.queryByRole('menuitem', { name: /Clear failed/ })).toBeNull();
     const cancel = screen.getByRole('menuitem', { name: 'Cancel all (5)' });
     expect(cancel.className).toContain('danger');
+  });
+
+  it('offers three clears, each counting only what it takes', () => {
+    const onClearFinished = vi.fn();
+    const onClearFailed = vi.fn();
+    const onClearEverything = vi.fn();
+    const { container } = render(
+      <AdlHeader
+        {...props}
+        // 10 completed (2 of them waiting in Review) + 3 failed
+        counts={{ ...counts, failed: 3, failedClearable: 3, finished: 8, completedOrFailed: 13 }}
+        onClearFinished={onClearFinished}
+        onClearFailed={onClearFailed}
+        onClearEverything={onClearEverything}
+      />,
+    );
+    openMenu(container);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear finished (8)' }));
+    openMenu(container);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Clear failed (3)' }));
+    openMenu(container);
+    const everything = screen.getByRole('menuitem', { name: 'Clear everything (13)' });
+    // the one that also empties the review queue is the red one
+    expect(everything.className).toContain('danger');
+    fireEvent.click(everything);
+    expect(onClearFinished).toHaveBeenCalledTimes(1);
+    expect(onClearFailed).toHaveBeenCalledTimes(1);
+    expect(onClearEverything).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts Clear failed by what it can take, not every failed row', () => {
+    // 2 failed rows, 1 of them in a batch that is still running
+    const { container } = render(
+      <AdlHeader
+        {...props}
+        counts={{ ...counts, failed: 2, failedClearable: 1, completedOrFailed: 1 }}
+      />,
+    );
+    openMenu(container);
+    expect(screen.getByRole('menuitem', { name: 'Clear failed (1)' })).not.toBeNull();
+  });
+
+  it('hides Clear failed while every failed row sits in a running batch', () => {
+    const { container } = render(
+      <AdlHeader {...props} hasRunningWork counts={{ ...counts, active: 1, failed: 1 }} />,
+    );
+    openMenu(container);
+    expect(screen.queryByRole('menuitem', { name: /Clear failed/ })).toBeNull();
+  });
+
+  it('hides Clear finished when only review rows and failures are left', () => {
+    const { container } = render(
+      <AdlHeader
+        {...props}
+        counts={{ ...counts, failed: 1, failedClearable: 1, finished: 0, completedOrFailed: 3 }}
+      />,
+    );
+    openMenu(container);
+    expect(screen.queryByRole('menuitem', { name: /Clear finished/ })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Clear failed (1)' })).not.toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Clear everything (3)' })).not.toBeNull();
   });
 
   it('locks Cancel all while it is running', () => {

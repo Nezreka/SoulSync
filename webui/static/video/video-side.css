@@ -1164,6 +1164,14 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vd-rt--trakt .vd-rt-tag { background: #ed1c24; color: #fff; }
 .vd-rt--tvmaze .vd-rt-tag { background: #3dd6c0; color: #00211d; }
 .vd-rt--anilist .vd-rt-tag { background: #02a9ff; color: #fff; }
+/* each season's AniList page, in the About section (the anime layer) */
+.vd-anilist-link {
+    display: inline-flex; align-items: center; gap: 6px; margin: 0 6px 6px 0; padding: 3px 10px;
+    border: 1px solid var(--white-a10); border-radius: var(--radius-pill);
+    color: var(--text-1); font-size: 12px; text-decoration: none;
+}
+.vd-anilist-link:hover { background: var(--white-a06); }
+.vd-anilist-score { color: var(--text-3); font-variant-numeric: tabular-nums; }
 /* DeArrow crowd title (YouTube video expand panel) */
 .vd-dearrow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-weight: 600; color: #cfe0ff; }
 .vd-dearrow-tag { font-size: 10px; font-weight: 900; letter-spacing: 0.04em; padding: 2px 6px; border-radius: var(--radius-xs);

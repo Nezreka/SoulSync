@@ -79,12 +79,16 @@ def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
             eta = int((size - done) / speed) if (speed > 0 and size > done) else None
         patch = {"status": "downloading", "progress": pct,
                  "speed_bps": speed, "eta_seconds": eta}
-        # the torrent client is holding it back on purpose (its own queue, a
-        # recheck). that's not a stall, so the monitor keeps the clock off it.
-        # usenet's queued also covers grabbing/propagating, which can hang, so
-        # it stays on the clock
-        if str(dl.get("source") or "").lower() == "torrent" \
-                and str(getattr(status, "state", "") or "").lower() == "queued":
+        # the client is holding it back on purpose (its own queue, a recheck).
+        # that's not a stall, so the monitor keeps the clock off it. usenet's
+        # ``queued`` state also covers grabbing/propagating, which can hang, so
+        # a usenet job is held only when the adapter says it is plainly waiting
+        # its turn: SAB runs one job at a time, and the third job in line can
+        # sit behind the others far longer than the stall timeout
+        source = str(dl.get("source") or "").lower()
+        if (source == "torrent"
+                and str(getattr(status, "state", "") or "").lower() == "queued") \
+                or (source == "usenet" and getattr(status, "waiting_in_queue", False) is True):
             patch["_client_queued"] = True
         return patch
     # Completed → locate THIS job's finished video file, then import. Prefer the client's

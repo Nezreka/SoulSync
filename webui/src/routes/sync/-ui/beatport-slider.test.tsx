@@ -42,6 +42,12 @@ afterEach(() => {
 });
 
 describe('BeatportSlider', () => {
+  it('clears autoplay when leaving the React page', () => {
+    const { unmount } = renderSlider('releases');
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('pages by the config, not by a shared default', () => {
     // 25 items: ten per slide for releases, three for DJ.
     renderSlider('releases');

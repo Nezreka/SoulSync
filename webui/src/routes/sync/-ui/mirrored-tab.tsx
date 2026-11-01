@@ -139,6 +139,8 @@ export interface MirroredTabProps {
    * the returned controller is STABLE").
    */
   registerReload: (reload: () => void, key?: string) => void;
+  /** a mirror's copy on the server, in the server editor; true once it opened */
+  onOpenServerEditor?: (mirrorId: number, name?: string) => Promise<boolean>;
   /**
    * Hand the page this tab's detail-modal opener.
    *
@@ -353,6 +355,7 @@ export function MirroredTab({
   pipeline,
   registerReload,
   registerOpenDetail,
+  onOpenServerEditor,
   scope = 'all',
 }: MirroredTabProps) {
   const config = SYNC_SOURCES.mirrored;
@@ -1564,6 +1567,16 @@ export function MirroredTab({
           }
           onRefresh={() => editTracks(detail.playlistId, async () => {})}
           onMakeMine={isUserPlaylist(detail.data) ? undefined : () => copyToMine(detail.playlistId)}
+          onOpenEditor={
+            onOpenServerEditor && !isUserPlaylist(detail.data)
+              ? async () => {
+                  const id = detail.playlistId;
+                  if (await onOpenServerEditor(id, detail.data.name)) {
+                    setDetail((cur) => (cur?.playlistId === id ? null : cur));
+                  }
+                }
+              : undefined
+          }
           onDuplicate={
             isUserPlaylist(detail.data)
               ? async () => {

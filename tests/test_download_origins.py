@@ -56,6 +56,30 @@ def test_manual_and_garbage_derive_none():
     assert derive_download_origin({'track_info': {'_dl_origin': 'aliens'}}) == (None, '')
 
 
+def test_a_hand_picked_download_retried_through_the_wishlist_is_not_a_playlist():
+    """#1932: a cancelled or failed search / artist-page download goes back to
+    the wishlist with its batch's made-up id and the album as its "playlist"."""
+    for si in (
+        {'playlist_name': 'Street Fighter OST', 'playlist_id': 'enhanced_search_album_1108109492',
+         'added_from': 'modal_cancellation'},
+        {'playlist_name': 'Signs', 'playlist_id': 'artist_album_508786_839958042',
+         'added_from': 'webui_modal', 'is_album_download': True},
+        {'playlist_name': 'One Week', 'playlist_id': 'enhanced_search_track_42'},
+        {'playlist_name': 'Unknown Playlist', 'playlist_id': None},
+    ):
+        assert derive_download_origin({'track_info': {'source_info': si}}) == (None, ''), si
+
+
+def test_a_real_playlist_retried_through_the_wishlist_still_counts():
+    si = {'playlist_name': 'Release Radar', 'playlist_id': 'auto_mirror_44',
+          'added_from': 'webui_modal'}
+    assert derive_download_origin({'track_info': {'source_info': si}}) == (
+        'playlist', 'Release Radar')
+    mine = {'playlist_name': 'road trip', 'playlist_id': '5101', 'added_from': 'webui_modal'}
+    assert derive_download_origin({'track_info': {'source_info': mine}}) == (
+        'playlist', 'road trip')
+
+
 # ── persistence ──────────────────────────────────────────────────────────────
 
 def _seed(db):
@@ -101,16 +125,30 @@ def test_history_rows_fetch_and_delete(tmp_path):
 
 
 def test_delete_track_by_file_path(tmp_path):
+    from tests.support.catalogue_seed import seed_library_track
     db = MusicDatabase(str(tmp_path / 'm.db'))
     conn = db._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES ('a1', 'A')")
-    cur.execute("INSERT INTO albums (id, title, artist_id) VALUES ('al1', 'Al', 'a1')")
-    cur.execute("""INSERT INTO tracks (id, album_id, artist_id, title, file_path)
-                   VALUES ('t1', 'al1', 'a1', 'Song', '/music/k/squabble.flac')""")
+    seed_library_track(conn, artist='A', album='Al', title='Song',
+                       file_path='/music/k/squabble.flac')
     conn.commit()
     conn.close()
 
     assert db.delete_track_by_file_path('/music/k/squabble.flac') == 1
     assert db.delete_track_by_file_path('/music/k/squabble.flac') == 0
     assert db.delete_track_by_file_path('') == 0
+
+
+def test_delete_track_by_file_path_keeps_other_files_and_catalogue(tmp_path):
+    from tests.support.catalogue_seed import seed_library_track
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    with db._get_connection() as conn:
+        track = seed_library_track(conn, artist='A', album='Al', title='Song',
+                                   file_path='/music/a.flac')
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,is_primary) "
+                     "VALUES(?, '/music/b.flac', 0)", (track,))
+
+    assert db.delete_track_by_file_path('/music/a.flac') == 1
+    with db._get_connection() as conn:
+        assert conn.execute("SELECT 1 FROM lib2_tracks WHERE id=?", (track,)).fetchone()
+        assert conn.execute("SELECT is_primary FROM lib2_track_files "
+                            "WHERE path='/music/b.flac'").fetchone()[0] == 1

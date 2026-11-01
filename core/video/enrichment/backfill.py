@@ -17,7 +17,6 @@ Isolated: imports only video.db helpers + requests; no music code.
 from __future__ import annotations
 
 import json
-import re
 import threading
 import time
 
@@ -91,11 +90,6 @@ def _http_post_json(url, json_body, headers=None, timeout=12):
         return None
 
 
-def _norm_title(s):
-    """Lowercase alphanumerics only — for conservative title matching."""
-    return re.sub(r"[^a-z0-9]+", "", str(s or "").lower())
-
-
 # ── base worker (lifecycle + loop + status; mirrors VideoEnrichmentWorker) ────
 class VideoBackfillWorker:
     is_ratings = False
@@ -115,6 +109,7 @@ class VideoBackfillWorker:
         self.stats = {"matched": 0, "not_found": 0, "errors": 0}
         self.note = None
         self._cooldown_until = 0.0
+        self._enabled_cache = None
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
     def start(self):
@@ -155,12 +150,26 @@ class VideoBackfillWorker:
         except Exception:
             logger.exception("video backfill: could not restore pause for %s", self.service)
 
+    # the enabled flag is a settings read (a fresh sqlite connection), and a
+    # dozen idle workers asking every second kept the cpu awake (#1922)
+    ENABLED_TTL = 5.0
+
     @property
     def enabled(self):
+        now = time.monotonic()
+        cached = self._enabled_cache
+        if cached is not None and now - cached[0] < self.ENABLED_TTL:
+            return cached[1]
         try:
-            return self._enabled()
+            value = bool(self._enabled())
         except Exception:
-            return False
+            value = False
+        self._enabled_cache = (now, value)
+        return value
+
+    def forget_enabled(self):
+        """Drop the cached enabled flag so a settings change shows at once."""
+        self._enabled_cache = None
 
     # ── subclass hooks ────────────────────────────────────────────────────────
     def _enabled(self) -> bool:
@@ -192,8 +201,11 @@ class VideoBackfillWorker:
     # ── loop ──────────────────────────────────────────────────────────────────
     def _run(self):
         while not self.should_stop:
-            if self.paused or not self.enabled:
+            if self.paused:
                 self._stop.wait(1.0)
+                continue
+            if not self.enabled:
+                self._stop.wait(self.ENABLED_TTL)
                 continue
             if self._cooldown_until > time.monotonic():
                 self.current_item = None
@@ -652,62 +664,78 @@ class TVmazeWorker(VideoBackfillWorker):
         return self.db.backfill_breakdown("tvmaze")
 
 
-# ── AniList (no key, GraphQL) — anime average score ───────────────────────────
-_ANILIST_QUERY = (
-    "query($search:String){Media(search:$search,type:ANIME){"
-    "averageScore startDate{year} title{romaji english}}}"
-)
-
-
+# ── AniList (no key, GraphQL) — the anime layer ───────────────────────────────
 class AniListWorker(VideoBackfillWorker):
+    """Links every anime in the library to AniList and keeps what TMDB/TVDB
+    don't have: romaji/english titles and synonyms (release search), score,
+    studio, airing countdown, per-season entries (core/video/anime_map,
+    core/video/anilist).
+
+    By id first: the anime id map says which shows and movies are anime and
+    which AniList entry each season is, so nothing that isn't anime is ever
+    touched. A show the map doesn't know that's tagged Animation still gets
+    the strict exact-title search. AniList allows 30 requests a minute right
+    now: one batched request per title, one every 2.5s.
+    """
     BASE = "https://graphql.anilist.co"
+    # releasing shows come back for the next episode's countdown
+    AIRING_REFRESH_DAYS = 3
 
     def __init__(self, db):
-        super().__init__(db, "anilist", "AniList", interval=1.0)
+        super().__init__(db, "anilist", "AniList", interval=2.5)
+        self._map_checked = 0.0
 
     def _enabled(self):
-        # OFF by default — anime-only + title-search matching, so it's opt-in to
-        # avoid touching every show in a non-anime library.
         return str(self.db.get_setting("anilist_enabled") or "0") == "1"
 
     def test(self):
+        from core.video import anilist
         try:
-            j = _http_post_json(self.BASE, {"query": _ANILIST_QUERY,
-                                            "variables": {"search": "Cowboy Bebop"}})
-            ok = isinstance(j, dict) and (j.get("data") or {}).get("Media") is not None
+            ok = bool(anilist.by_ids(_http_post_json, [1]))
             return (ok, "AniList reachable" if ok else "No response")
         except Exception as e:
             return (False, str(e))
 
+    def _ensure_map(self):
+        # the id map, at most once a day checked (it refreshes itself weekly)
+        now = time.monotonic()
+        if now - self._map_checked < 86400 and self._map_checked:
+            return
+        self._map_checked = now
+        from core.video import anime_map
+        anime_map.refresh(self.db)
+
     def next_item(self):
-        return self.db.backfill_next("anilist")
+        self._ensure_map()
+        return self.db.backfill_next("anilist") or self.db.anime_airing_due(self.AIRING_REFRESH_DAYS)
 
     def fetch(self, item):
-        title = item.get("title")
-        if not title:
+        from core.video import anilist
+        entries = self.db.anime_map_entries(item["kind"], tmdb_id=item.get("tmdb_id"),
+                                            tvdb_id=item.get("tvdb_id"), imdb_id=item.get("imdb_id"))
+        if entries:
+            facts = anilist.by_ids(_http_post_json, [e["anilist_id"] for e in entries])
+            rows = []
+            for e in entries:
+                f = facts.get(e["anilist_id"])
+                if f:
+                    rows.append({**e, **f})
+            return {"rows": rows, "by": "id"} if rows else None
+        # the map doesn't know it: the queue only serves an unmapped show
+        # when it's animated, for the strict title search. movies are by id only
+        if item["kind"] != "show":
             return None
-        j = _http_post_json(self.BASE, {"query": _ANILIST_QUERY, "variables": {"search": title}})
-        media = (j.get("data") or {}).get("Media") if isinstance(j, dict) else None
-        if not isinstance(media, dict):
+        row = anilist.by_title(_http_post_json, item.get("title"), item.get("year"))
+        if not row:
             return None
-        # Conservative guard: the title must match exactly (a substring let "The
-        # Bear" take a longer anime's score) and, when both sides know it, the
-        # year must agree within one.
-        names = media.get("title") or {}
-        want = _norm_title(title)
-        got = {_norm_title(names.get("romaji")), _norm_title(names.get("english"))}
-        if not want or want not in got:
-            return None
-        year, start = item.get("year"), (media.get("startDate") or {}).get("year")
-        if isinstance(year, int) and isinstance(start, int) and abs(year - start) > 1:
-            return None
-        score = media.get("averageScore")
-        if isinstance(score, int) and 0 < score <= 100:
-            return {"anilist_score": score}
-        return None
+        return {"rows": [{**row, "tvdb_season": None, "tvdb_offset": 0,
+                          "tmdb_season": None, "tmdb_offset": 0}], "by": "title"}
 
     def record_ok(self, item, data):
-        self.db.backfill_mark("anilist", item["kind"], item["id"], "ok", columns=data)
+        self.db.save_anime_entries(item["kind"], item["id"], data["rows"])
+        main = self.db.anime_main_entry(item["kind"], item["id"])
+        cols = {"anilist_score": (main or {}).get("score")}
+        self.db.backfill_mark("anilist", item["kind"], item["id"], "ok", columns=cols)
 
     def record_empty(self, item):
         self.db.backfill_mark("anilist", item["kind"], item["id"], "not_found")

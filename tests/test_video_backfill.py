@@ -402,6 +402,7 @@ def test_tvmaze_is_show_only_and_enabled_by_default(db):
     w = TVmazeWorker(db)
     assert w.enabled is True                              # keyless → on by default
     db.set_setting("tvmaze_enabled", "0")
+    w.forget_enabled()                                    # the settings save does this
     assert w.enabled is False
     # No movie entry in the backfill map → movies are never queued for tvmaze.
     mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
@@ -436,27 +437,30 @@ def test_tvmaze_fetch_parses_lookup(db, monkeypatch):
     assert out == {"tvmaze_rating": 9.3}
 
 
-# ── AniList (no-key GraphQL, anime score, opt-in + title-match guard) ──────────
-def test_anilist_off_by_default(db):
+# ── AniList (no-key GraphQL): by id through the anime id map, title fallback ───
+def test_anilist_on_by_default_and_can_be_switched_off(db):
+    # by id it only ever touches anime (v61), so it runs unless switched off
     w = AniListWorker(db)
-    assert w.enabled is False                            # opt-in (anime-niche)
-    db.set_setting("anilist_enabled", "1")
     assert w.enabled is True
+    db.set_setting("anilist_enabled", "0")
+    w.forget_enabled()                                    # the settings save does this
+    assert w.enabled is False
 
 
 def test_anilist_fetch_matches_title_and_scores(db, monkeypatch):
+    # an animated show the id map doesn't know: the strict title search
     import core.video.enrichment.backfill as bf
-    payload = {"data": {"Media": {"averageScore": 85,
+    payload = {"data": {"Media": {"id": 1, "averageScore": 85,
                                    "title": {"romaji": "Cowboy Bebop", "english": "Cowboy Bebop"}}}}
     monkeypatch.setattr(bf, "_http_post_json", lambda url, body, headers=None, timeout=12: payload)
     out = AniListWorker(db).fetch({"kind": "show", "title": "Cowboy Bebop"})
-    assert out == {"anilist_score": 85}
+    assert out["by"] == "title" and out["rows"][0]["score"] == 85
 
 
 def test_anilist_rejects_title_mismatch(db, monkeypatch):
     # AniList returns SOME anime for a non-anime title → the guard must reject it.
     import core.video.enrichment.backfill as bf
-    payload = {"data": {"Media": {"averageScore": 90,
+    payload = {"data": {"Media": {"id": 20, "averageScore": 90,
                                    "title": {"romaji": "Naruto", "english": "Naruto"}}}}
     monkeypatch.setattr(bf, "_http_post_json", lambda url, body, headers=None, timeout=12: payload)
     assert AniListWorker(db).fetch({"kind": "show", "title": "The Office"}) is None
@@ -489,20 +493,23 @@ def test_anilist_rejects_a_longer_title_and_a_far_year(db, monkeypatch):
     import core.video.enrichment.backfill as bf
 
     def media(title, year):
-        return {"data": {"Media": {"averageScore": 40, "startDate": {"year": year},
+        return {"data": {"Media": {"id": 7, "averageScore": 40, "startDate": {"year": year},
                                    "title": {"romaji": title, "english": title}}}}
     monkeypatch.setattr(bf, "_http_post_json", lambda *a, **k: media("The Bear's Claw", 2022))
     assert AniListWorker(db).fetch({"kind": "show", "title": "The Bear", "year": 2022}) is None
     monkeypatch.setattr(bf, "_http_post_json", lambda *a, **k: media("Arrow", 1990))
     assert AniListWorker(db).fetch({"kind": "show", "title": "Arrow", "year": 2012}) is None
     monkeypatch.setattr(bf, "_http_post_json", lambda *a, **k: media("Cowboy Bebop", 1998))
-    assert AniListWorker(db).fetch({"kind": "show", "title": "Cowboy Bebop", "year": 1998}) == {"anilist_score": 40}
+    hit = AniListWorker(db).fetch({"kind": "show", "title": "Cowboy Bebop", "year": 1998})
+    assert hit["rows"][0]["score"] == 40
 
 
 def test_anilist_worker_records_score(db):
     sid = _animated_show(db, "Bebop", 1998)
     w = AniListWorker(db)
-    w.fetch = lambda item: {"anilist_score": 87}
+    w._map_checked = 1.0                       # no id map fetch in a test
+    w.fetch = lambda item: {"rows": [{"anilist_id": 1, "score": 87, "title_romaji": "Bebop",
+                                      "tvdb_season": None}], "by": "title"}
     assert w.process_one() is True
     with db.connect() as c:
         r = c.execute("SELECT anilist_score, anilist_status FROM shows WHERE id=?", (sid,)).fetchone()
@@ -515,3 +522,42 @@ def test_backfill_module_imports_nothing_from_music():
         s = line.strip()
         if s.startswith("import ") or s.startswith("from "):
             assert "music" not in s.lower(), f"music import leaked: {s!r}"
+
+
+# ── #1922: idle workers don't hit the settings table every second ─────────────
+def test_the_enabled_flag_is_read_once_per_ttl(db, monkeypatch):
+    w = RydWorker(db)
+    reads = []
+    real = db.get_setting
+    monkeypatch.setattr(db, "get_setting", lambda key, *a: reads.append(key) or real(key, *a))
+    for _ in range(20):
+        assert w.enabled is True
+    assert reads == ["ryd_enabled"]
+
+
+def test_saving_a_toggle_shows_at_once(db, monkeypatch):
+    import api.video.enrichment as routes
+
+    w = RydWorker(db)
+    assert w.enabled is True
+    db.set_setting("ryd_enabled", "0")
+    assert w.enabled is True                               # still cached
+    monkeypatch.setattr("core.video.enrichment.engine.peek_video_enrichment_engine",
+                        lambda: type("E", (), {"workers": {"ryd": w}})())
+    routes._forget_worker_enabled()
+    assert w.enabled is False
+
+
+def test_a_disabled_worker_sleeps_the_ttl_not_one_second(db):
+    w = RydWorker(db)
+    db.set_setting("ryd_enabled", "0")
+    waits = []
+
+    class _Stop:
+        def wait(self, seconds):
+            waits.append(seconds)
+            w.should_stop = True
+
+    w._stop = _Stop()
+    w._run()
+    assert waits == [w.ENABLED_TTL] and w.ENABLED_TTL >= 5

@@ -220,7 +220,7 @@ describe('MetadataUpdaterCard', () => {
     const { container } = render(<MetadataUpdaterCard />);
     await waitFor(() => expect(screen.getByText('Jellyfin Metadata Updater')).toBeTruthy());
     expect(container.querySelector('.metadata-updater-description')?.textContent).toContain(
-      'Jellyfin server',
+      'for Jellyfin artists',
     );
     cleanup();
 
@@ -228,7 +228,7 @@ describe('MetadataUpdaterCard', () => {
     const second = render(<MetadataUpdaterCard />);
     await waitFor(() => expect(screen.getByText('Plex Metadata Updater')).toBeTruthy());
     expect(second.container.querySelector('.metadata-updater-description')?.textContent).toContain(
-      'Plex server',
+      'for Plex artists',
     );
   });
 

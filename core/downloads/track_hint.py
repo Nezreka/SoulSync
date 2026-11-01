@@ -78,7 +78,12 @@ def hint_from_track(track_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     album = track_data.get("album") or ""
     if isinstance(album, dict):
         album = album.get("name") or album.get("title") or ""
-    return {"title": title, "artist": artist, "album": str(album).strip(),
+    from copy import deepcopy
+    catalogue_context = {'track_info': deepcopy(track_data),
+                         'source': track_data.get('_source') or track_data.get('source') or track_data.get('provider'),
+                         'artist': {'name': artist},
+                         'album': deepcopy(track_data.get('album')) if isinstance(track_data.get('album'), dict) else {'name': album}}
+    return {'catalogue_context': catalogue_context, "title": title, "artist": artist, "album": str(album).strip(),
             "deezer_id": deezer_track_id(track_data)}
 
 

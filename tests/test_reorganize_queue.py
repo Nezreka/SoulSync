@@ -6,23 +6,20 @@ Contract this test file pins:
    running returns ``{'queued': False, 'reason': 'already_queued'}`` and
    the existing queue_id, never a duplicate.
 2. **FIFO order** — the worker drains items in submission order.
-3. **Per-item source preserved** — the source string the user picked at
-   enqueue time is what the runner sees, even when multiple items with
-   different sources are interleaved.
-4. **Continue on failure** — a runner that raises (or one whose summary
+3. **Continue on failure** — a runner that raises (or one whose summary
    reports a non-completed status) marks that item failed and the
    worker moves to the next item, it does not stall.
-5. **Cancel queued** — items in `queued` state can be dropped before
+4. **Cancel queued** — items in `queued` state can be dropped before
    they reach the runner.
-6. **Cancel running rejected** — the currently-running item can NOT be
+5. **Cancel running rejected** — the currently-running item can NOT be
    cancelled, the API returns `running_cant_cancel`.
-7. **Clear queued** — bulk-cancels all `queued` items at once, leaves
+6. **Clear queued** — bulk-cancels all `queued` items at once, leaves
    the running item alone.
-8. **Snapshot shape** — `active`, `queued`, `recent`, and `totals` keys
+7. **Snapshot shape** — `active`, `queued`, `recent`, and `totals` keys
    are always present and reflect the current state.
-9. **update_active_progress** — live progress fields propagate onto the
+8. **update_active_progress** — live progress fields propagate onto the
    running item (and only the running item).
-10. **Setting runner late** — items enqueued before `set_runner()` was
+9. **Setting runner late** — items enqueued before `set_runner()` was
     called still get processed once the runner shows up.
 """
 
@@ -42,7 +39,7 @@ def _make_runner(record, *, raise_on=None, summary_factory=None,
     """Build a runner closure that records what it was called with.
 
     Args:
-        record: list to append `(queue_id, source)` to per call.
+        record: list to append `(queue_id, album_id)` to per call.
         raise_on: queue_id (or set of queue_ids) for which the runner
             should raise — used to test continue-on-failure.
         summary_factory: optional callable `(item) -> summary dict` to
@@ -59,7 +56,7 @@ def _make_runner(record, *, raise_on=None, summary_factory=None,
         raise_set = set(raise_on)
 
     def runner(item):
-        record.append((item.queue_id, item.source))
+        record.append((item.queue_id, item.album_id))
         if block_event is not None:
             block_event.wait(timeout=2.0)
         if runtime:
@@ -70,7 +67,7 @@ def _make_runner(record, *, raise_on=None, summary_factory=None,
             return summary_factory(item)
         return {
             'status': 'completed',
-            'source': item.source or 'spotify',
+            'source': None,
             'total': 1,
             'moved': 1,
             'skipped': 0,
@@ -80,13 +77,12 @@ def _make_runner(record, *, raise_on=None, summary_factory=None,
     return runner
 
 
-def _enqueue(queue, *, album_id, source=None, title=None, artist='Aerosmith'):
+def _enqueue(queue, *, album_id, title=None, artist='Aerosmith'):
     return queue.enqueue(
         album_id=album_id,
         album_title=title or f"Album {album_id}",
         artist_id='artist-1',
         artist_name=artist,
-        source=source,
     )
 
 
@@ -128,8 +124,8 @@ def test_enqueue_returns_queued_with_position(queue):
 
 def test_enqueue_same_album_dedupes(queue):
     queue.set_runner(_make_runner([], block_event=threading.Event()))
-    r1 = _enqueue(queue, album_id='alb-1', source='spotify')
-    r2 = _enqueue(queue, album_id='alb-1', source='deezer')  # different source
+    r1 = _enqueue(queue, album_id='alb-1')
+    r2 = _enqueue(queue, album_id='alb-1')
     assert r1['queued'] is True
     assert r2['queued'] is False
     assert r2['reason'] == 'already_queued'
@@ -158,16 +154,6 @@ def test_fifo_order(queue):
     assert [r[0] for r in record] == ids
 
 
-def test_per_item_source_preserved(queue):
-    record = []
-    queue.set_runner(_make_runner(record))
-    sources = ['spotify', 'deezer', 'itunes', None, 'discogs']
-    for i, src in enumerate(sources):
-        _enqueue(queue, album_id=f'alb-{i}', source=src)
-    assert _wait_for(lambda: len(record) == len(sources))
-    assert [r[1] for r in record] == sources
-
-
 def test_continue_on_runner_exception(queue):
     """A runner that raises must not stall the queue — the item is
     marked failed and the next item runs."""
@@ -179,7 +165,7 @@ def test_continue_on_runner_exception(queue):
     raise_target = {}
 
     def runner(item):
-        record.append((item.queue_id, item.source))
+        record.append((item.queue_id, item.album_id))
         block.wait(timeout=2.0)
         if item.queue_id == raise_target.get('id'):
             raise RuntimeError(f"Simulated failure for {item.queue_id}")
@@ -365,7 +351,7 @@ def test_enqueue_many_tallies_enqueued_and_dedupes(queue):
 
     # Pre-existing item — should appear as already_queued.
     queue.enqueue(album_id='alb-existing', album_title='X',
-                  artist_id='ar-1', artist_name='A', source=None)
+                  artist_id='ar-1', artist_name='A')
     # Wait for it to be running so the dedupe path triggers.
     assert _wait_for(lambda: queue.snapshot()['active'] is not None)
 
@@ -377,21 +363,6 @@ def test_enqueue_many_tallies_enqueued_and_dedupes(queue):
     result = queue.enqueue_many(items)
     assert result == {'enqueued': 2, 'already_queued': 1, 'total': 3}
     block.set()
-
-
-def test_enqueue_many_carries_source_per_item(queue):
-    """Each dict's ``source`` is honoured independently — the bulk
-    helper doesn't collapse them to one value."""
-    record = []
-    queue.set_runner(_make_runner(record))
-    items = [
-        {'album_id': 'a', 'album_title': 'A', 'artist_id': 'x', 'artist_name': 'X', 'source': 'spotify'},
-        {'album_id': 'b', 'album_title': 'B', 'artist_id': 'x', 'artist_name': 'X', 'source': 'deezer'},
-        {'album_id': 'c', 'album_title': 'C', 'artist_id': 'x', 'artist_name': 'X', 'source': None},
-    ]
-    queue.enqueue_many(items)
-    assert _wait_for(lambda: len(record) == 3)
-    assert [r[1] for r in record] == ['spotify', 'deezer', None]
 
 
 def test_enqueue_many_handles_empty_list(queue):
@@ -612,3 +583,29 @@ def test_without_a_store_nothing_is_persisted():
     finally:
         q.stop()
 
+
+
+def test_a_backlog_saved_with_the_old_fields_still_restores():
+    """An older build saved ``source`` / ``metadata_source`` / ``rename_only``
+    with every item. Those picks are gone; the saved item still loads."""
+    class Store:
+        def load_pending(self):
+            return [{'queue_id': 'old-1', 'album_id': '7', 'album_title': 'SAW 85-92',
+                     'artist_id': '1', 'artist_name': 'Aphex Twin', 'status': 'queued',
+                     'enqueued_at': 1.0, 'source': 'deezer', 'metadata_source': 'tags',
+                     'rename_only': True, 'result_source': None}]
+
+        def save(self, snap):
+            pass
+
+        def delete(self, queue_id):
+            pass
+
+    q = ReorganizeQueue(store=Store())
+    try:
+        assert q.restore() == 1
+        queued = q.snapshot()['queued']
+        assert [(i['queue_id'], i['album_title']) for i in queued] == [('old-1', 'SAW 85-92')]
+        assert not {'source', 'metadata_source', 'rename_only'} & set(queued[0])
+    finally:
+        q.stop()

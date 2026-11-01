@@ -55,6 +55,8 @@ def _movie_fields(row: Dict[str, Any]) -> Dict[str, Any]:
     return {"title": row.get("title"), "year": row.get("year"),
             "quality": row.get("quality"), "resolution": row.get("resolution"),
             "source": row.get("release_source"), "codec": row.get("video_codec"),
+            "audio_languages": row.get("audio_languages"),
+            "subtitle_languages": row.get("subtitle_languages"),
             "tmdbid": row.get("tmdb_id"), "imdbid": row.get("imdb_id")}
 
 
@@ -64,6 +66,8 @@ def _episode_fields(row: Dict[str, Any]) -> Dict[str, Any]:
             "year": row.get("show_year"), "quality": row.get("quality"),
             "resolution": row.get("resolution"), "source": row.get("release_source"),
             "codec": row.get("video_codec"),
+            "audio_languages": row.get("audio_languages"),
+            "subtitle_languages": row.get("subtitle_languages"),
             # an episode's ids are its show's, the same as at import
             "tmdbid": row.get("show_tmdb_id"), "imdbid": row.get("show_imdb_id"),
             "tvdbid": row.get("show_tvdb_id")}
@@ -121,6 +125,14 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
     db = get_video_db()
     settings = organization.load(db)
     base_dirs = video_base_dirs(db)
+    # a mapped Movies / TV folder is a library folder (library_roots) and
+    # names its files like any other. a mapping with no kind (a whole drive,
+    # the server unreachable when it was saved) only REACHES files: one found
+    # through it, under no library folder, is left alone, since renaming from
+    # the drive root (or its own folder) would pull it out of its MOVIES folder
+    from core.video import drive_map
+    mapped = [e["local"] for e in drive_map.load(db) if not e.get("kind")]
+    name_bases = [d for d in base_dirs if d not in mapped]
     entries: List[Dict[str, Any]] = []
     unresolved = 0
 
@@ -153,11 +165,17 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
 
     def _consider(kind: str, key: str, title: str, stored: str, size, fields: Dict[str, Any]):
         nonlocal unresolved
+        if organization.languages_unknown(kind, fields, settings):
+            return   # not probed yet: renaming now could strip a right '[JA]'
         local = _resolve(stored, size)
         if not local or not os.path.exists(local):
             unresolved += 1
             return
-        base = _base_dir_of(local, base_dirs) or os.path.dirname(local)
+        base = _base_dir_of(local, name_bases)
+        if base is None:
+            if mapped and _base_dir_of(local, mapped):
+                return              # on a mapped drive, in no library folder
+            base = os.path.dirname(local)
         ext = os.path.splitext(local)[1]
         fields = dict(fields, quality=file_quality(fields.get("quality"), local))
         proposed = organization.render_path(kind, base, fields, settings, ext)["path"]

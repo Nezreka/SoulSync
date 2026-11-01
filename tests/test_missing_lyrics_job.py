@@ -83,6 +83,34 @@ class _DB:
         return conn
 
 
+@pytest.fixture(autouse=True)
+def _native_subject_boundary(monkeypatch):
+    """Adapt the compact rows into the native P3 maintenance contract."""
+
+    def subjects(database, _config_manager, **_kwargs):
+        return [
+            {
+                "file_id": row[0],
+                "track_id": row[0],
+                "album_id": 10,
+                "artist_id": 1,
+                "title": row[1],
+                "artist_name": row[2],
+                "album_title": row[3],
+                "path": row[4],
+                "duration": row[5],
+                "track_source_ids": {},
+                "album_source_ids": {},
+                "artist_source_ids": {},
+            }
+            for row in database._rows
+        ]
+
+    monkeypatch.setattr(
+        "core.library2.maintenance_subjects.active_file_subjects", subjects
+    )
+
+
 def _ctx(db, findings):
     return SimpleNamespace(
         db=db,
@@ -157,8 +185,10 @@ def test_scan_resolves_db_path_before_lrc_check(tmp_path, monkeypatch):
     db_path = "/data/Sean Kingston/Tomorrow (2009)/08. Tomorrow (Album Version).flac"   # not real here
     rows = [(626, "Tomorrow", "Sean Kingston", "Tomorrow", db_path, 200000)]
     # resolver maps the stored container path -> the real file on disk
-    monkeypatch.setattr("core.repair_jobs.missing_lyrics.resolve_library_file_path",
-                        lambda p, **k: str(real_audio) if p == db_path else None)
+    monkeypatch.setattr(
+        "core.library2.paths.resolve_lib2_path",
+        lambda p, **k: str(real_audio) if p == db_path else None,
+    )
     # LRClib WOULD have lyrics — so without the fix (raw-path check) this gets wrongly flagged.
     fake_client = SimpleNamespace(api=object(), has_remote_lyrics=lambda *a, **k: True)
     monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)
@@ -215,57 +245,107 @@ def test_fix_missing_lyrics_missing_file(tmp_path, monkeypatch):
     assert res["success"] is False
 
 
-# ── retag apply_track_plans lyrics_action ────────────────────────────────────
+def test_fix_missing_lyrics_native_finding_uses_lib2_resolver(tmp_path, monkeypatch):
+    """LV2-LYRICS-01: a native (``lib2:<id>``) finding must resolve its stored
+    path through resolve_lib2_path — the same resolver the scan used to
+    confirm the file exists — never the generic/legacy _resolve_file_path.
+    The divergence between the two was exactly what caused a false
+    'File not found on disk' for a file Library v2 could still play."""
+    from core.repair_worker import RepairWorker
+    audio = tmp_path / "song.flac"
+    audio.write_bytes(b"x")
 
-def test_apply_track_plans_lyrics_action(tmp_path, monkeypatch):
-    from core.repair_jobs import library_retag
-    audio = tmp_path / "t.flac"; audio.write_bytes(b"x")
+    w = RepairWorker.__new__(RepairWorker)
+    w.transfer_folder = str(tmp_path)
+    w._config_manager = SimpleNamespace(get=lambda k, d=None: d)
 
-    monkeypatch.setattr(library_retag, "write_tags_to_file",
-                        lambda *a, **k: {"success": True}, raising=False)
-    seen = {}
-    fake_client = SimpleNamespace(
-        create_lrc_file=lambda path, title, artist, album_name=None, duration_seconds=None:
-            seen.update(title=title) or True)
-    monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)
+    monkeypatch.setattr(
+        "core.lyrics_client.lyrics_client",
+        SimpleNamespace(create_lrc_file=lambda *a, **k: True),
+    )
 
-    plans = [{"file_path": str(audio), "db_data": {},
-              "lyrics_meta": {"title": "Song", "artist": "Artist", "album": "Album"}}]
-    res = library_retag.apply_track_plans(plans, lyrics_action=True)
-    assert res["lyrics_written"] == 1 and seen["title"] == "Song"
+    def _boom(*a, **k):
+        raise AssertionError("legacy resolver must not be used for a native lib2 finding")
+    monkeypatch.setattr("core.repair_worker._resolve_file_path", _boom)
 
+    resolve_calls = []
+    monkeypatch.setattr(
+        "core.library2.paths.resolve_lib2_path",
+        lambda raw, config_manager=None: resolve_calls.append(raw) or str(audio),
+    )
 
-def test_apply_track_plans_lyrics_never_writes_tags(tmp_path, monkeypatch):
-    # The lyrics query must come from lyrics_meta, NOT db_data — so an
-    # unmatched track (db_data={}) gets lyrics fetched but NO tags written.
-    from core.repair_jobs import library_retag
-    audio = tmp_path / "t.flac"; audio.write_bytes(b"x")
-    written = []
-    monkeypatch.setattr("core.tag_writer.write_tags_to_file",
-                        lambda fp, db_data, **k: written.append(db_data) or {"success": True})
-    monkeypatch.setattr("core.lyrics_client.lyrics_client",
-                        SimpleNamespace(create_lrc_file=lambda *a, **k: True))
+    res = w._fix_missing_lyrics("track", "lib2:1", None, {
+        "file_path": "stored/relative/song.flac", "track_title": "Song",
+        "artist": "Artist", "album_title": "Album", "duration": 200,
+    })
 
-    plans = [{"file_path": str(audio), "db_data": {},
-              "lyrics_meta": {"title": "Song", "artist": "Artist", "album": "Al"}}]
-    res = library_retag.apply_track_plans(plans, lyrics_action=True)
-    assert res["lyrics_written"] == 1
-    # write_tags_to_file is never called for lyrics-only plans — no tags written at all.
-    assert written == []
+    assert res["success"] is True
+    assert resolve_calls == ["stored/relative/song.flac"]
 
 
-def test_apply_track_plans_no_lyrics_when_disabled(tmp_path, monkeypatch):
-    from core.repair_jobs import library_retag
-    audio = tmp_path / "t.flac"; audio.write_bytes(b"x")
-    monkeypatch.setattr(library_retag, "write_tags_to_file",
-                        lambda *a, **k: {"success": True}, raising=False)
-    called = []
-    fake_client = SimpleNamespace(create_lrc_file=lambda *a, **k: called.append(1) or True)
-    monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)
+def test_fix_missing_lyrics_refreshes_lib2_tag_cache_on_success(tmp_path, monkeypatch):
+    """Acceptance criterion 3: after a successful write, tags_json/
+    missing_tags_json must be re-read immediately, not left stale until the
+    next Refresh & Scan."""
+    from core.repair_worker import RepairWorker
+    audio = tmp_path / "song.flac"
+    audio.write_bytes(b"x")
 
-    plans = [{"file_path": str(audio), "db_data": {"title": "Song"}}]
-    res = library_retag.apply_track_plans(plans, lyrics_action=False)
-    assert res["lyrics_written"] == 0 and called == []
+    w = RepairWorker.__new__(RepairWorker)
+    w.transfer_folder = str(tmp_path)
+    w._config_manager = SimpleNamespace(get=lambda k, d=None: d)
+    w.db = SimpleNamespace(_get_connection=lambda: MagicMock())
+
+    monkeypatch.setattr(
+        "core.lyrics_client.lyrics_client",
+        SimpleNamespace(create_lrc_file=lambda *a, **k: True),
+    )
+    monkeypatch.setattr(
+        "core.library2.paths.resolve_lib2_path",
+        lambda raw, config_manager=None: str(audio),
+    )
+    refreshed = {}
+    monkeypatch.setattr(
+        "core.library2.tag_cache.read_and_persist_tag_cache",
+        lambda conn, file_id, path: refreshed.update(file_id=file_id, path=path) or True,
+    )
+
+    res = w._fix_missing_lyrics("track", "lib2:1", None, {
+        "file_path": "song.flac", "track_title": "Song", "artist": "Artist",
+        "library_v2": {"file_id": 42},
+    })
+
+    assert res["success"] is True
+    assert refreshed == {"file_id": 42, "path": str(audio)}
+
+
+def test_fix_missing_lyrics_native_finding_without_file_id_does_not_crash(tmp_path, monkeypatch):
+    """A native finding missing library_v2.file_id (e.g. an older cached
+    finding) must not fail the whole apply — the tag-cache refresh is a
+    best-effort follow-up, not a precondition for success."""
+    from core.repair_worker import RepairWorker
+    audio = tmp_path / "song.flac"
+    audio.write_bytes(b"x")
+
+    w = RepairWorker.__new__(RepairWorker)
+    w.transfer_folder = str(tmp_path)
+    w._config_manager = SimpleNamespace(get=lambda k, d=None: d)
+    w.db = SimpleNamespace(_get_connection=lambda: MagicMock())
+
+    monkeypatch.setattr(
+        "core.lyrics_client.lyrics_client",
+        SimpleNamespace(create_lrc_file=lambda *a, **k: True),
+    )
+    monkeypatch.setattr(
+        "core.library2.paths.resolve_lib2_path",
+        lambda raw, config_manager=None: str(audio),
+    )
+
+    res = w._fix_missing_lyrics("track", "lib2:1", None, {
+        "file_path": "song.flac", "track_title": "Song", "artist": "Artist",
+    })
+
+    assert res["success"] is True
 
 
 # ── #1902: pending-finding skip + remembered 404s ──────────────────────────
@@ -296,7 +376,7 @@ def _real_db(tmp_path, tracks, findings_rows=()):
         conn.execute(
             "INSERT INTO repair_findings (job_id, finding_type, severity, "
             "status, entity_type, entity_id, file_path, title) "
-            "VALUES (?, ?, 'info', ?, 'track', ?, ?, ?)", f)
+            "VALUES (?, ?, 'info', ?, 'track', ?, ?, ?)", (*f[:3], _native_id(f[3]), *f[4:]))
     conn.commit()
     conn.close()
 
@@ -305,7 +385,31 @@ def _real_db(tmp_path, tracks, findings_rows=()):
         c.row_factory = sqlite3.Row
         return c
 
-    return SimpleNamespace(_get_connection=connect)
+    return _SeededDb(connect)
+
+
+class _SeededDb:
+    """lib2 port: the scan walks native file subjects, which the autouse
+    boundary above builds from ``_rows`` -- read from the seeded table on
+    every scan, so a test can change a track between two scans. The scan
+    names a track lib2:<id>."""
+
+    def __init__(self, connect):
+        self._get_connection = connect
+
+    @property
+    def _rows(self):
+        conn = self._get_connection()
+        try:
+            return [(r[0], r[1], 'Artist', 'Album', r[2], r[3]) for r in conn.execute(
+                "SELECT id, title, file_path, duration FROM tracks ORDER BY id")]
+        finally:
+            conn.close()
+
+
+def _native_id(entity_id):
+    """A finding's track id the way the lib2 scan writes it."""
+    return f"lib2:{entity_id}" if str(entity_id).isdigit() else entity_id
 
 
 def _real_ctx(db, findings, **settings):
@@ -376,7 +480,7 @@ def test_scan_skips_pending_finding_matched_by_file_path(tmp_path, monkeypatch):
     entity_id = conn.execute(
         "SELECT entity_id FROM repair_findings WHERE status = 'pending'").fetchone()[0]
     conn.close()
-    assert entity_id == "7"
+    assert entity_id == "lib2:7"
 
 
 @pytest.mark.parametrize('status', ['dismissed', 'resolved'])
@@ -410,7 +514,7 @@ def _no_findings_db(tmp_path, tracks):
     for t in tracks:
         conn.execute("INSERT INTO tracks VALUES (?, ?, 1, 1, ?, ?)", t)
     conn.commit(); conn.close()
-    return SimpleNamespace(_get_connection=lambda: sqlite3.connect(path))
+    return _SeededDb(lambda: sqlite3.connect(path))
 
 
 def test_scan_probes_when_no_repair_findings_table(tmp_path, monkeypatch):
@@ -838,12 +942,12 @@ def test_early_stop_does_not_prune_memory(tmp_path, monkeypatch):
     conn = db._get_connection()
     keys = [r[0] for r in conn.execute("SELECT key FROM repair_empty_lookups ORDER BY key")]
     conn.close()
-    assert keys == ["1", "2"]                    # the deleted track's entry survived
+    assert keys == ["lib2:1", "lib2:2"]          # the deleted track's entry survived
     MissingLyricsJob().scan(ctx())               # completed scan: prune runs
     conn = db._get_connection()
     keys = [r[0] for r in conn.execute("SELECT key FROM repair_empty_lookups ORDER BY key")]
     conn.close()
-    assert keys == ["2"]
+    assert keys == ["lib2:2"]
 
 
 def test_remembered_skip_does_not_reset_the_unknown_streak(tmp_path, monkeypatch):
@@ -941,6 +1045,8 @@ def test_finding_cleared_mid_scan_is_not_refiled(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         "core.repair_jobs.missing_lyrics.resolve_library_file_path", clearing_resolver)
+    # lib2 port: a native subject's path resolves through the lib2 resolver
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", clearing_resolver)
     findings = []
     result = MissingLyricsJob().scan(_real_ctx(db, findings))
     assert client.calls == []                    # still never probed
@@ -986,8 +1092,8 @@ def test_refresh_updates_only_the_best_matching_row(tmp_path, monkeypatch):
     rows = conn.execute(
         "SELECT entity_id, file_path FROM repair_findings ORDER BY id").fetchall()
     conn.close()
-    assert (rows[0][0], rows[0][1]) == ('1', str(audio))   # winner refreshed
-    assert (rows[1][0], rows[1][1]) == ('5', str(audio))   # loser untouched
+    assert (rows[0][0], rows[0][1]) == ('lib2:1', str(audio))   # winner refreshed
+    assert (rows[1][0], rows[1][1]) == ('lib2:5', str(audio))   # loser untouched
 
 
 def test_refresh_overwrites_stale_saved_details(tmp_path, monkeypatch):
@@ -1082,3 +1188,21 @@ def test_refresh_never_touches_a_non_pending_row(tmp_path, monkeypatch):
     title = conn.execute("SELECT title FROM repair_findings").fetchone()[0]
     conn.close()
     assert title == 'keep me'
+
+
+def test_a_scoped_run_never_prunes_memory_outside_its_scope(tmp_path, monkeypatch):
+    """lib2 port: the prune keeps only this run's rows, so an artist or file
+    scoped run (supports_file_scope) must not forget the rest of the library."""
+    a = tmp_path / "a.flac"; a.write_bytes(b"x")
+    b = tmp_path / "b.flac"; b.write_bytes(b"x")
+    db = _real_db(tmp_path, [(1, "One", str(a), 200000), (2, "Two", str(b), 200000)])
+    monkeypatch.setattr("core.lyrics_client.lyrics_client", _probe_client({}))
+    MissingLyricsJob().scan(_real_ctx(db, [], remember_empty_lookups=True))
+
+    scoped = _real_ctx(db, [], remember_empty_lookups=True)
+    scoped.scope = {"file_paths": [str(a)]}
+    MissingLyricsJob().scan(scoped)
+    conn = db._get_connection()
+    keys = sorted(r[0] for r in conn.execute("SELECT key FROM repair_empty_lookups"))
+    conn.close()
+    assert keys == ["lib2:1", "lib2:2"]

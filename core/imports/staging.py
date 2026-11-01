@@ -117,9 +117,10 @@ def available_import_sources() -> List[Dict[str, Any]]:
 def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -> Dict[str, Any]:
     """Read common audio tag metadata from a staging file."""
     try:
-        from mutagen import File as MutagenFile
+        # AIFF/WAV carry raw ID3 the easy view can't map (#1919)
+        from core.metadata.easy_tags import open_easy
 
-        tags = MutagenFile(file_path, easy=True)
+        tags = open_easy(file_path)
     except Exception:
         tags = None
 
@@ -435,9 +436,9 @@ def _normalize_track_result(track: Any, source: str) -> Dict[str, Any]:
 
 def _read_staging_audio_tags(file_path: str) -> Tuple[Optional[str], Optional[str]]:
     try:
-        from mutagen import File as MutagenFile
+        from core.metadata.easy_tags import open_easy
 
-        tags = MutagenFile(file_path, easy=True)
+        tags = open_easy(file_path)
         if not tags:
             return None, None
 

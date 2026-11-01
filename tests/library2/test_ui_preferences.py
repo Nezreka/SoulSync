@@ -1,0 +1,246 @@
+"""B5: persisted Library-v2 UI display preferences."""
+
+from __future__ import annotations
+
+
+from core.library2.schema import ensure_library_v2_schema
+from core.library2.ui_preferences import (
+    DEFAULT_PREFERENCES,
+    get_ui_preferences,
+    update_ui_preferences,
+)
+from tests.lib2_seed import row_conn
+
+
+def _conn():
+    conn = row_conn(":memory:")
+    ensure_library_v2_schema(conn)
+    conn.commit()
+    return conn
+
+
+def test_defaults_when_nothing_stored():
+    conn = _conn()
+    assert get_ui_preferences(conn) == DEFAULT_PREFERENCES
+
+
+def test_update_merges_into_existing_section_without_clobbering_siblings():
+    conn = _conn()
+    update_ui_preferences(conn, {"track_table": {"columns": {"bpm": True}}})
+    prefs = get_ui_preferences(conn)
+    assert prefs["track_table"]["columns"]["bpm"] is True
+    # Untouched sibling columns keep their default.
+    assert prefs["track_table"]["columns"]["duration"] is True
+    assert prefs["track_table"]["show_all_match_providers"] is False
+
+
+def test_disc_column_defaults_off():
+    conn = _conn()
+    assert get_ui_preferences(conn)["track_table"]["columns"]["disc"] is False
+
+
+def test_play_column_defaults_off():
+    conn = _conn()
+    assert get_ui_preferences(conn)["track_table"]["columns"]["play"] is False
+
+
+def test_title_defaults_on_and_participates_in_column_order():
+    conn = _conn()
+    track_table = get_ui_preferences(conn)["track_table"]
+    assert track_table["columns"]["title"] is True
+    assert track_table["column_order"][0] == "title"
+
+
+def test_media_server_recognition_and_profile_columns_default_off():
+    conn = _conn()
+    columns = get_ui_preferences(conn)["track_table"]["columns"]
+    assert columns["media_server"] is False
+    assert columns["profile"] is False
+
+
+def test_file_size_and_resizable_column_defaults():
+    conn = _conn()
+    track_table = get_ui_preferences(conn)["track_table"]
+    assert track_table["columns"]["file_size"] is True
+    assert track_table["column_widths"] == {
+        "number": 2.532,
+        "title": 13.62,
+        "disc": 5.93,
+        "artists": 6.488,
+        "duration": 5.154,
+        "bpm": 3.357,
+        "match": 28.79,
+        "profile": 50.496,
+        "file_size": 56.792,
+        "quality": 12.283,
+        "acoustid": 7.624,
+        "metadata": 7.149,
+        "features": 7.089,
+        "media_server": 6.495,
+    }
+
+
+def test_artist_table_columns_default_off_and_merge_independently():
+    conn = _conn()
+    prefs = get_ui_preferences(conn)
+    assert prefs["artist_table"]["columns"] == {
+        "quality_profile": False,
+        "genres": False,
+        "added": False,
+        "size": False,
+    }
+    update_ui_preferences(conn, {"artist_table": {"columns": {"genres": True}}})
+    prefs = get_ui_preferences(conn)
+    assert prefs["artist_table"]["columns"]["genres"] is True
+    assert prefs["artist_table"]["columns"]["added"] is False
+    # Sibling section untouched.
+    assert prefs["track_table"]["columns"]["bpm"] is False
+
+
+def test_update_persists_across_connections(tmp_path):
+    path = str(tmp_path / "lib2.db")
+
+    def _file_conn():
+        conn = row_conn(path)
+        ensure_library_v2_schema(conn)
+        conn.commit()
+        return conn
+
+    conn = _file_conn()
+    update_ui_preferences(conn, {"track_table": {"show_all_match_providers": True}})
+    conn.close()
+
+    conn2 = _file_conn()
+    assert get_ui_preferences(conn2)["track_table"]["show_all_match_providers"] is True
+    conn2.close()
+
+
+def test_second_update_merges_onto_first_not_onto_defaults():
+    conn = _conn()
+    update_ui_preferences(conn, {"track_table": {"columns": {"bpm": True}}})
+    update_ui_preferences(conn, {"track_table": {"columns": {"file_path": True}}})
+    prefs = get_ui_preferences(conn)
+    assert prefs["track_table"]["columns"]["bpm"] is True
+    assert prefs["track_table"]["columns"]["file_path"] is True
+
+
+def test_unknown_stored_value_is_tolerated_not_fatal():
+    conn = _conn()
+    conn.execute(
+        "INSERT INTO lib2_ui_preferences(id, preferences_json) VALUES (1, 'not json')"
+    )
+    conn.commit()
+    # Falls back to defaults rather than raising on malformed JSON.
+    assert get_ui_preferences(conn) == DEFAULT_PREFERENCES
+
+
+def test_column_order_defaults_and_customization():
+    conn = _conn()
+    prefs = get_ui_preferences(conn)
+    # Default order exists.
+    assert prefs["track_table"]["column_order"] == [
+        "title",
+        "disc",
+        "artists",
+        "duration",
+        "bpm",
+        "match",
+        "profile",
+        "file_size",
+        "quality",
+        "acoustid",
+        "metadata",
+        "features",
+        "play",
+        "file_path",
+        "media_server",
+    ]
+    # Patch overrides it completely since lists are leaf values.
+    custom_order = ["file_path", "play", "artists"]
+    update_ui_preferences(conn, {"track_table": {"column_order": custom_order}})
+    prefs = get_ui_preferences(conn)
+    assert prefs["track_table"]["column_order"] == custom_order
+    # Columns sibling mapping remains untouched.
+    assert prefs["track_table"]["columns"]["bpm"] is False
+
+
+def test_column_widths_merge_and_persist_without_clobbering_other_table_preferences():
+    conn = _conn()
+    update_ui_preferences(
+        conn,
+        {"track_table": {"column_widths": {"title": 320, "file_size": 96}}},
+    )
+    update_ui_preferences(conn, {"track_table": {"column_widths": {"title": 280}}})
+    track_table = get_ui_preferences(conn)["track_table"]
+    assert track_table["column_widths"]["title"] == 280
+    assert track_table["column_widths"]["file_size"] == 96
+    assert track_table["column_widths"]["duration"] == 5.154
+    assert track_table["columns"]["duration"] is True
+
+
+def test_quality_and_match_provider_preferences():
+    conn = _conn()
+    prefs = get_ui_preferences(conn)
+    # Default values exist.
+    assert prefs["track_table"]["quality_show_format"] is True
+    assert prefs["track_table"]["quality_show_resolution"] is True
+    assert prefs["track_table"]["quality_show_bitrate"] is True
+    assert prefs["track_table"]["visible_match_providers"]["spotify"] is True
+    assert prefs["track_table"]["visible_match_providers"]["tidal"] is True
+
+    # Patch values individually.
+    patch = {
+        "track_table": {
+            "quality_show_resolution": False,
+            "visible_match_providers": {"spotify": False},
+        }
+    }
+    update_ui_preferences(conn, patch)
+    prefs = get_ui_preferences(conn)
+    assert prefs["track_table"]["quality_show_resolution"] is False
+    assert prefs["track_table"]["quality_show_format"] is True
+    assert prefs["track_table"]["visible_match_providers"]["spotify"] is False
+    assert prefs["track_table"]["visible_match_providers"]["tidal"] is True
+
+
+def test_each_profile_keeps_its_own_artist_toolbar():
+    conn = _conn()
+    assert all(get_ui_preferences(conn)["artist_toolbar"].values())
+    update_ui_preferences(conn, {"artist_toolbar": {"enhance_quality": False}}, profile_id=2)
+    update_ui_preferences(conn, {"track_table": {"columns": {"bpm": True}}})
+
+    guest, admin = get_ui_preferences(conn, profile_id=2), get_ui_preferences(conn)
+    assert guest["artist_toolbar"]["enhance_quality"] is False
+    assert guest["artist_toolbar"]["history"] is True
+    assert admin["artist_toolbar"]["enhance_quality"] is True
+    # the table layout stays one, shared
+    assert guest["track_table"]["columns"]["bpm"] is True
+    assert "profiles" not in admin
+
+
+def test_each_profile_picks_how_an_artist_opens_from_the_library():
+    conn = _conn()
+    page = get_ui_preferences(conn)["artist_page"]
+    assert (page["header"], page["header_elsewhere"]) == ("rich", "rich")
+    update_ui_preferences(conn, {"artist_page": {"header": "compact"}}, profile_id=2)
+    page = get_ui_preferences(conn, profile_id=2)["artist_page"]
+    assert (page["header"], page["header_elsewhere"]) == ("compact", "rich")
+    assert get_ui_preferences(conn)["artist_page"]["header"] == "rich"
+
+
+def test_each_profile_picks_what_my_library_shows_and_the_track_actions():
+    conn = _conn()
+    page = get_ui_preferences(conn)["artist_page"]
+    assert page["library_sections"] == {"similar_artists": True, "concerts": True}
+    assert page["add_to_playlist"] is True
+    update_ui_preferences(
+        conn, {"artist_page": {"library_sections": {"similar_artists": False}}}, profile_id=2)
+    update_ui_preferences(conn, {"artist_page": {"add_to_playlist": False}}, profile_id=2)
+
+    guest, admin = get_ui_preferences(conn, profile_id=2), get_ui_preferences(conn)
+    # one section off leaves the other, and the header, as they were
+    assert guest["artist_page"]["library_sections"] == {"similar_artists": False, "concerts": True}
+    assert guest["artist_page"]["add_to_playlist"] is False
+    assert guest["artist_page"]["header"] == "rich"
+    assert admin["artist_page"]["library_sections"]["similar_artists"] is True
+    assert admin["artist_page"]["add_to_playlist"] is True

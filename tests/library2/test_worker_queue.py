@@ -1,0 +1,244 @@
+"""Batch selection for enrichment workers, from lib2 instead of legacy.
+
+Every one of the sixteen workers picks its next item the same way: unattempted
+artists, then albums, then tracks, then failures whose retry window has expired.
+Legacy drove that from `<service>_match_status`; this drives it from the provider
+attempt ledger, and returns the exact dict shape the workers already consume so
+the change inside each worker stays small.
+
+Written once here rather than sixteen times: the pinned-group override, the
+artist→album→track priority and the retry ordering are the same rules for all of
+them, and duplicating them per worker is how they would drift.
+"""
+
+from __future__ import annotations
+
+
+import pytest
+
+from core.library2.provider_attempts import (
+    ensure_provider_attempt_schema, record_attempt,
+)
+from core.library2.schema import ensure_library_v2_schema
+from core.library2.worker_queue import next_pending, pending_count, progress_breakdown
+from tests.lib2_seed import row_conn
+
+
+@pytest.fixture
+def conn(tmp_path):
+    c = row_conn(str(tmp_path / "lib2.db"))
+    ensure_library_v2_schema(c)
+    ensure_provider_attempt_schema(c.cursor())
+    artist = c.execute(
+        "INSERT INTO lib2_artists(name, sort_name) VALUES('Massive Attack','Massive Attack')"
+    ).lastrowid
+    album = c.execute(
+        "INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+        "VALUES(?,'Mezzanine','album')", (artist,)).lastrowid
+    track = c.execute(
+        "INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Angel')", (album,)).lastrowid
+    # The queue only offers what the user owns, and ownership is a live file row.
+    c.execute("INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+              "VALUES(?,'/music/angel.flac',1,'active')", (track,))
+    c.commit()
+    yield c
+    c.close()
+
+
+class TestPriorityOrder:
+    @pytest.mark.parametrize('name', ['Eminem, Nate Dogg', 'A feat. B', 'Earth, Wind & Fire',
+                                      'A (feat. B)', 'A (ft. B)', 'A [featuring B]'])
+    def test_unresolved_combined_credits_are_not_worker_items(self, conn, name):
+        conn.execute('UPDATE lib2_artists SET name=? WHERE id=1', (name,))
+        conn.commit()
+        assert next_pending(conn, 'lastfm') is None
+        assert pending_count(conn, 'lastfm') == 0
+        assert progress_breakdown(conn, 'lastfm')['artists']['total'] == 0
+
+    def test_a_confirmed_band_with_punctuation_still_enriches(self, conn):
+        conn.execute("UPDATE lib2_artists SET name='Earth, Wind & Fire', spotify_id='band' WHERE id=1")
+        conn.commit()
+        assert next_pending(conn, 'lastfm')['name'] == 'Earth, Wind & Fire'
+
+    def test_splitting_releases_the_real_artists_and_keeps_the_file(self, conn):
+        from core.library2.native_enrich import reconcile_unmapped_native_artists
+        from core.library2.worker_queue import invalidate_pending_cache
+        conn.execute("UPDATE lib2_artists SET name='Eminem, Nate Dogg' WHERE id=1")
+        conn.execute('INSERT INTO lib2_track_artists(track_id,artist_id) VALUES(1,1)')
+        conn.commit()
+        assert next_pending(conn, 'lastfm') is None
+        identities = {
+            'Eminem': {'source': 'deezer', 'artist_id': '10'},
+            'Nate Dogg': {'source': 'deezer', 'artist_id': '20'},
+        }
+        result = reconcile_unmapped_native_artists(conn, resolver=identities.get)
+        conn.commit()
+        invalidate_pending_cache()
+        assert result['split'] == 1
+        assert next_pending(conn, 'lastfm')['name'] == 'Eminem'
+        assert conn.execute('SELECT path FROM lib2_track_files').fetchone()[0] == '/music/angel.flac'
+        assert {r[0] for r in conn.execute('SELECT name FROM lib2_artists a JOIN lib2_track_artists c ON a.id=c.artist_id')} == {'Eminem', 'Nate Dogg'}
+
+    def test_an_unattempted_artist_comes_first(self, conn):
+        item = next_pending(conn, "lastfm")
+
+        assert item == {"type": "artist", "id": 1, "name": "Massive Attack"}
+
+    def test_albums_follow_once_the_artists_are_done(self, conn):
+        record_attempt(conn, entity_type="artist", entity_id=1,
+                       service="lastfm", status="matched")
+
+        item = next_pending(conn, "lastfm")
+
+        assert item["type"] == "album"
+        assert item["name"] == "Mezzanine"
+        assert item["artist"] == "Massive Attack", "the query needs the artist name"
+
+    def test_tracks_come_last(self, conn):
+        for entity in ("artist", "album"):
+            record_attempt(conn, entity_type=entity, entity_id=1,
+                           service="lastfm", status="matched")
+
+        item = next_pending(conn, "lastfm")
+
+        assert item["type"] == "track"
+        assert item["name"] == "Angel"
+        assert item["artist"] == "Massive Attack"
+
+    def test_nothing_left_is_none(self, conn):
+        for entity in ("artist", "album", "track"):
+            record_attempt(conn, entity_type=entity, entity_id=1,
+                           service="lastfm", status="matched")
+
+        assert next_pending(conn, "lastfm") is None
+
+    def test_a_failure_is_retried_only_after_its_window(self, conn):
+        for entity in ("artist", "album", "track"):
+            record_attempt(conn, entity_type=entity, entity_id=1,
+                           service="lastfm", status="not_found")
+        conn.commit()
+
+        assert next_pending(conn, "lastfm", retry_after_days=30) is None
+
+        conn.execute("UPDATE lib2_provider_attempts "
+                     "SET last_attempted_at = datetime('now','-40 days')")
+        conn.commit()
+
+        assert next_pending(conn, "lastfm", retry_after_days=30)["type"] == "artist"
+
+    def test_an_error_is_retried_after_the_window(self, conn):
+        """Transient per-item errors must not remain a permanent black hole."""
+        for entity in ("artist", "album", "track"):
+            record_attempt(conn, entity_type=entity, entity_id=1,
+                           service="lastfm", status="error")
+        conn.execute("UPDATE lib2_provider_attempts "
+                     "SET last_attempted_at = datetime('now','-400 days')")
+        conn.commit()
+
+        assert next_pending(conn, "lastfm", retry_after_days=30)["type"] == "artist"
+
+
+class TestTheShapeWorkersConsume:
+    def test_a_type_override_is_applied(self, conn):
+        """Spotify and iTunes dispatch on 'album_individual'/'track_individual'."""
+        record_attempt(conn, entity_type="artist", entity_id=1,
+                       service="lastfm", status="matched")
+
+        item = next_pending(conn, "lastfm",
+                            type_overrides={"album": "album_individual"})
+
+        assert item["type"] == "album_individual"
+
+    def test_a_pinned_entity_type_is_served_first(self, conn):
+        """Manage Enrichment Workers can pin one entity type to the front."""
+        item = next_pending(conn, "lastfm", pinned="track")
+
+        assert item["type"] == "track"
+
+    def test_an_exhausted_pin_falls_through_to_the_normal_order(self, conn):
+        record_attempt(conn, entity_type="track", entity_id=1,
+                       service="lastfm", status="matched")
+
+        item = next_pending(conn, "lastfm", pinned="track")
+
+        assert item["type"] == "artist"
+
+
+class TestCounters:
+    def test_pending_counts_every_entity_type(self, conn):
+        assert pending_count(conn, "lastfm") == 3
+
+        record_attempt(conn, entity_type="artist", entity_id=1,
+                       service="lastfm", status="matched")
+
+        assert pending_count(conn, "lastfm") == 2
+
+    def test_the_breakdown_reports_per_entity_progress(self, conn):
+        record_attempt(conn, entity_type="artist", entity_id=1,
+                       service="lastfm", status="matched")
+
+        breakdown = progress_breakdown(conn, "lastfm")
+
+        assert breakdown["artists"] == {"matched": 1, "total": 1, "percent": 100}
+        assert breakdown["albums"] == {"matched": 0, "total": 1, "percent": 0}
+
+    def test_an_attempt_counts_as_progress_even_when_it_found_nothing(self, conn):
+        """Legacy counted any non-NULL match_status as processed. A 'not_found'
+        is work done, and a progress bar that ignores it never reaches 100%."""
+        record_attempt(conn, entity_type="artist", entity_id=1,
+                       service="lastfm", status="not_found")
+
+        assert progress_breakdown(conn, "lastfm")["artists"]["matched"] == 1
+
+
+class TestWalkCursor:
+    """The never-attempted walk carries on from where it got to instead of
+    re-walking every attempted id (about a second a fetch on 311k tracks once
+    most were done), and wraps to the start when it reaches the end."""
+
+    def _artists(self, conn, n):
+        ids = []
+        for i in range(n):
+            artist = conn.execute("INSERT INTO lib2_artists(name) VALUES(?)", (f"Artist {i}",)).lastrowid
+            album = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+                                 "VALUES(?,?,'album')", (artist, f"Album {i}")).lastrowid
+            track = conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)",
+                                 (album, f"Song {i}")).lastrowid
+            conn.execute("INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+                         "VALUES(?,?,1,'active')", (track, f"/m/{i}.flac"))
+            ids.append(artist)
+        conn.commit()
+        return ids
+
+    def test_it_walks_forward_and_offers_an_unfinished_item_again(self, conn):
+        from core.library2 import worker_queue as wq
+        self._artists(conn, 4)
+        seen = []
+        for _ in range(3):
+            item = next_pending(conn, 'lastfm', entity_types=('artist',))
+            seen.append(item['id'])
+            record_attempt(conn, entity_type='artist', entity_id=item['id'], service='lastfm', status='matched')
+            conn.commit()
+        assert seen == sorted(seen) and len(set(seen)) == 3
+        # an item the worker never got to is offered again, not skipped
+        again = next_pending(conn, 'lastfm', entity_types=('artist',))
+        assert next_pending(conn, 'lastfm', entity_types=('artist',))['id'] == again['id']
+        assert any(k[2] == 'artist' for k in wq._NEW_CURSOR)
+
+    def test_an_older_row_that_becomes_eligible_is_found_after_the_end(self, conn):
+        ids = self._artists(conn, 3)
+        everyone = [1, *ids]
+
+        def attempt(artist):
+            record_attempt(conn, entity_type='artist', entity_id=artist, service='lastfm', status='matched')
+            conn.commit()
+        for artist in everyone[:-1]:
+            attempt(artist)
+        # the walk reaches the last artist: the cursor now sits past the others
+        assert next_pending(conn, 'lastfm', entity_types=('artist',))['id'] == everyone[-1]
+        attempt(everyone[-1])
+        # an earlier artist's attempt is reset (a retry clears its row)
+        conn.execute("DELETE FROM lib2_provider_attempts WHERE entity_type='artist' AND entity_id=?",
+                     (everyone[0],))
+        conn.commit()
+        assert next_pending(conn, 'lastfm', entity_types=('artist',))['id'] == everyone[0]

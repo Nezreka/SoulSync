@@ -6,14 +6,19 @@
 
 export interface AppearsOnTrack {
   id: string | number;
+  lib2_track_id?: number;
   title?: string;
   track_number?: number | null;
   disc_number?: number | null;
   duration?: number | null;
   file_path?: string | null;
+  /** credited and wanted, not here yet: listed, nothing to play */
+  wanted?: boolean;
   album_id?: string | number;
   album_title?: string;
   album_thumb_url?: string | null;
+  /** the provider's cover, painted while a cold local one is built */
+  album_thumb_remote_url?: string | null;
   year?: number | null;
   artist_id?: string | number;
   artist_name?: string;
@@ -24,6 +29,7 @@ export interface AppearsOnAlbum {
   id: string | number;
   title?: string;
   thumb_url?: string | null;
+  thumb_remote_url?: string | null;
   year?: number | null;
   artist_id?: string | number;
   artist_name?: string;
@@ -63,6 +69,7 @@ export function albumTracks(album: AppearsOnAlbum): AppearsOnTrack[] {
       album_id: album.id,
       album_title: album.title,
       album_thumb_url: album.thumb_url,
+      album_thumb_remote_url: album.thumb_remote_url,
       year: album.year,
       artist_id: album.artist_id,
       artist_name: album.artist_name,
@@ -105,7 +112,14 @@ export function subLine(track: AppearsOnTrack, pageArtist: string): string {
 export function queueRow(track: AppearsOnTrack, pageArtist: string) {
   const credits = track.credits?.length ? track.credits.join(', ') : track.artist_name;
   return {
-    id: track.id,
+    id: track.lib2_track_id ? null : track.id,
+    ...(track.lib2_track_id
+      ? {
+          lib2_track_id: track.lib2_track_id,
+          lib2_album_id: track.album_id,
+          lib2_artist_id: track.artist_id,
+        }
+      : {}),
     title: track.title || 'Unknown Track',
     artist: credits || pageArtist,
     album: track.album_title || '',

@@ -8,27 +8,20 @@ chews through the queue in submission order.
 
 Design rules:
 
-- **Single global queue**, single worker thread. Reorganize is
-  I/O-heavy (file copy, mutagen tagging, AcoustID, possibly ffmpeg)
-  and post-process is not designed for cross-album concurrency.
-  In-album track parallelism still happens inside `reorganize_album`
-  (3 worker threads — see `_REORGANIZE_MAX_WORKERS`).
+- **Single global queue**, single worker thread. Reorganize moves
+  files and repoints catalogue rows; one album at a time keeps two
+  runs from moving into the same folder at once.
 
 - **Dedupe on enqueue**: an album that's already queued or currently
   running is rejected silently. Stops the user from spamming the
   same album N times by clicking the button repeatedly.
-
-- **Per-item source**: each queued item carries its own `source`
-  string (the user's per-album modal pick). Worker passes it
-  through to `reorganize_album(primary_source=..., strict_source=...)`.
 
 - **Continue on failure**: a failed item doesn't stop the queue.
   Worker logs the failure, marks the item `failed`, moves on.
 
 - **Cancel queued items**: items in `queued` state can be cancelled
   (drop from queue). The currently-running item can NOT be cancelled
-  mid-flight — Python threads aren't cleanly killable, and post-
-  process spawns subprocesses we can't safely interrupt. Cancel
+  mid-flight — Python threads aren't cleanly killable. Cancel
   changes the item's status to `cancelled` and removes it from the
   active queue.
 
@@ -83,22 +76,17 @@ class QueueItem:
     album_title: str                    # captured at enqueue time for UI display
     artist_id: Optional[str]
     artist_name: str                    # captured at enqueue time for UI display
-    source: Optional[str]               # the user's per-modal pick (None = auto)
     enqueued_at: float
-    # 'api' (default) = query metadata source per album_data IDs.
-    # 'tags'          = read each file's embedded tags as the source
-    #                   of truth (issue #592). Zero API calls.
-    metadata_source: str = 'api'
-    # Rename-only mode (#875): move files to the current naming scheme WITHOUT the
-    # copy + post-processing (re-tag / quality / AcoustID) the full flow runs.
-    rename_only: bool = False
+    # The library the album is reorganized in (#1199): 'shared', a profile
+    # id, or None for "each library that holds files of it". Captured when the
+    # item is queued, while the request (and an admin's pick) still exists.
+    library: Any = None
     status: str = 'queued'              # queued | running | done | failed | cancelled
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
     # Populated by the worker after each item finishes — surfaced to the
     # status panel so users see counts + per-item error messages.
-    result_status: Optional[str] = None  # mirrors `reorganize_album` summary['status']
-    result_source: Optional[str] = None  # which source the orchestrator actually used
+    result_status: Optional[str] = None  # mirrors the mover's summary['status']
     moved: int = 0
     skipped: int = 0
     failed: int = 0
@@ -116,15 +104,12 @@ class QueueItem:
             'album_title': self.album_title,
             'artist_id': self.artist_id,
             'artist_name': self.artist_name,
-            'source': self.source,
-            'metadata_source': self.metadata_source,
-            'rename_only': self.rename_only,
+            'library': self.library,
             'enqueued_at': self.enqueued_at,
             'started_at': self.started_at,
             'finished_at': self.finished_at,
             'status': self.status,
             'result_status': self.result_status,
-            'result_source': self.result_source,
             'moved': self.moved,
             'skipped': self.skipped,
             'failed': self.failed,
@@ -153,9 +138,9 @@ class ReorganizeQueue:
                 in-memory-only behaviour, which is what the tests want.
             runner: Callable that takes a `QueueItem` and runs the
                 actual reorganize, returning a summary dict with
-                ``status``, ``source``, ``moved``, ``skipped``,
-                ``failed``, ``errors`` keys (the shape
-                ``reorganize_album`` already returns). Tests inject
+                ``status``, ``moved``, ``skipped``, ``failed``,
+                ``errors`` keys (the shape
+                ``reorganize_album_rename_only`` returns). Tests inject
                 a fake runner; production wires the real one in
                 via :func:`set_runner`.
         """
@@ -178,7 +163,7 @@ class ReorganizeQueue:
     def set_runner(self, runner: Callable[[QueueItem], dict]) -> None:
         """Inject the function that does the actual reorganize work.
         Web_server calls this once at startup with a closure over the
-        injected dependencies (post-process fn, db, etc.)."""
+        injected dependencies (db, path builder, etc.)."""
         with self._cond:
             self._runner = runner
             # the worker parks when there is no runner; wake it now there is one
@@ -191,9 +176,6 @@ class ReorganizeQueue:
         album_title: str,
         artist_id: Optional[str],
         artist_name: str,
-        source: Optional[str] = None,
-        metadata_source: str = 'api',
-        rename_only: bool = False,
     ) -> dict:
         """Add an album to the queue. Returns a result dict:
 
@@ -205,9 +187,11 @@ class ReorganizeQueue:
         adding a duplicate. ``cancelled`` / ``done`` / ``failed``
         items don't block re-enqueue (user retried after a failure).
         """
+        library = _library_for_new_item()
         with self._cond:
             for existing in self._items:
-                if existing.album_id == album_id and existing.status in ('queued', 'running'):
+                if (existing.album_id == album_id and _covers(existing.library, library)
+                        and existing.status in ('queued', 'running')):
                     return {
                         'queued': False,
                         'reason': 'already_queued',
@@ -220,10 +204,8 @@ class ReorganizeQueue:
                 album_title=album_title,
                 artist_id=artist_id,
                 artist_name=artist_name,
-                source=source,
                 enqueued_at=time.time(),
-                metadata_source=metadata_source or 'api',
-                rename_only=bool(rename_only),
+                library=library,
             )
             self._items.append(item)
             self._persist(item)
@@ -232,8 +214,7 @@ class ReorganizeQueue:
             self._cond.notify_all()
             logger.info(
                 f"[Queue] Enqueued '{album_title}' (album_id={album_id}, "
-                f"queue_id={item.queue_id}, position={position}, "
-                f"source={source or 'auto'}, metadata={item.metadata_source})"
+                f"queue_id={item.queue_id}, position={position})"
             )
             return {
                 'queued': True,
@@ -244,7 +225,7 @@ class ReorganizeQueue:
     def enqueue_many(self, items: List[Dict[str, Any]]) -> Dict[str, int]:
         """Bulk-enqueue a list of items. Each ``item`` is a dict with
         the same keys :meth:`enqueue` accepts (``album_id``,
-        ``album_title``, ``artist_id``, ``artist_name``, ``source``).
+        ``album_title``, ``artist_id``, ``artist_name``).
         Dedupe still applies per-album-id.
 
         Holds the queue lock for the entire batch so two things hold:
@@ -263,11 +244,13 @@ class ReorganizeQueue:
         enqueued = 0
         already = 0
         seen_in_batch: set = set()
+        library = _library_for_new_item()
         with self._cond:
             # Snapshot album_ids that already block re-enqueue so we don't
             # rescan self._items per row.
             blocked = {
-                i.album_id for i in self._items if i.status in ('queued', 'running')
+                i.album_id for i in self._items
+                if i.status in ('queued', 'running') and _covers(i.library, library)
             }
             for raw in items:
                 album_id = str(raw['album_id'])
@@ -281,15 +264,14 @@ class ReorganizeQueue:
                     album_title=raw.get('album_title') or 'Unknown Album',
                     artist_id=str(raw['artist_id']) if raw.get('artist_id') is not None else None,
                     artist_name=raw.get('artist_name') or 'Unknown Artist',
-                    source=raw.get('source'),
                     enqueued_at=time.time(),
-                    metadata_source=raw.get('metadata_source') or 'api',
+                    library=library,
                 )
                 self._items.append(item)
                 enqueued += 1
                 logger.info(
                     f"[Queue] Bulk-enqueued '{item.album_title}' (album_id={album_id}, "
-                    f"queue_id={item.queue_id}, source={item.source or 'auto'})"
+                    f"queue_id={item.queue_id})"
                 )
             if enqueued:
                 self._ensure_worker()
@@ -298,8 +280,7 @@ class ReorganizeQueue:
 
     def cancel(self, queue_id: str) -> dict:
         """Cancel a queued item. The currently-running item cannot be
-        cancelled (Python threads aren't cleanly killable; post-process
-        may have spawned ffmpeg)."""
+        cancelled (Python threads aren't cleanly killable)."""
         with self._cond:
             for item in self._items:
                 if item.queue_id != queue_id:
@@ -420,10 +401,8 @@ class ReorganizeQueue:
                         album_title=snap.get('album_title') or '',
                         artist_id=snap.get('artist_id'),
                         artist_name=snap.get('artist_name') or '',
-                        source=snap.get('source'),
                         enqueued_at=float(snap.get('enqueued_at') or time.time()),
-                        metadata_source=snap.get('metadata_source') or 'api',
-                        rename_only=bool(snap.get('rename_only')),
+                        library=snap.get('library'),
                     )
                 except (KeyError, TypeError, ValueError):
                     continue
@@ -524,13 +503,12 @@ class ReorganizeQueue:
                 item.skipped = int(summary.get('skipped', 0))
                 item.failed = int(summary.get('failed', 0))
                 item.result_status = summary.get('status')
-                item.result_source = summary.get('source')
                 errors = summary.get('errors') or []
                 if errors:
                     first_err = errors[0] if isinstance(errors[0], dict) else {'error': str(errors[0])}
                     item.error = first_err.get('error') or first_err.get('reason')
                 # 'failed' status only when the run produced concrete failed tracks
-                # OR ended in a non-completed state (no_source_id / no_album / etc).
+                # OR ended in a non-completed state (no_album / no_tracks / etc).
                 item.status = 'failed' if (item.failed > 0 or item.result_status not in (None, 'completed')) else 'done'
                 item.finished_at = time.time()
                 # Clear live-progress fields — done items don't need them.
@@ -548,7 +526,7 @@ class ReorganizeQueue:
 
     # Called by the runner (or test) to push live progress onto the
     # currently-running item. Safe to call from worker thread inside
-    # reorganize_album's on_progress callback.
+    # the mover's on_progress callback.
     def update_active_progress(self, *, queue_id: str, **fields) -> None:
         with self._cond:
             for item in self._items:
@@ -572,6 +550,27 @@ class ReorganizeQueue:
 
 _singleton: Optional[ReorganizeQueue] = None
 _singleton_lock = threading.Lock()
+
+
+def _covers(queued_library, library) -> bool:
+    """Does a queued item already do this library's run? One queued for every
+    library (None) covers each of them."""
+    return queued_library is None or queued_library == library
+
+
+def _library_for_new_item():
+    """The library an album queued right now is reorganized in (#1199).
+
+    The caller's selected library when libraries are separated at all; None
+    otherwise, and for "all libraries" -- then the runner walks each library
+    that holds files of the album, each inside its own folder."""
+    try:
+        from core.library_scope import any_own_library_exists, current_library_scope
+        if not any_own_library_exists():
+            return None
+        return current_library_scope()
+    except Exception:  # noqa: BLE001 - unscoped is the pre-#1199 behaviour
+        return None
 
 
 class _DatabaseQueueStore:
@@ -612,7 +611,11 @@ def get_queue() -> ReorganizeQueue:
             # caller cannot see a half-restored queue.
             _singleton = ReorganizeQueue(store=_DatabaseQueueStore())
             try:
-                _singleton.restore()
+                # a backlog from before the Library v2 upgrade names legacy
+                # albums; it waits for the import that carries it over
+                from core.library2.migration_gate import defer_or_call
+                from database.music_database import get_database
+                defer_or_call(_singleton.restore, get_database(), "reorganize backlog")
             except Exception as e:
                 logger.error(f"[Queue] Restore failed, starting empty: {e}")
         return _singleton
@@ -620,9 +623,20 @@ def get_queue() -> ReorganizeQueue:
 
 def reset_queue_for_tests() -> None:
     """Test-only: drop the singleton so the next get_queue() returns
-    a fresh instance. Production code never calls this."""
+    a fresh instance. Production code never calls this.
+
+    The persisted backlog goes with it. Dropping only the singleton stopped
+    being enough once the queue became durable (#1235): the next get_queue()
+    calls restore(), which reads `reorganize_queue` straight back out of the
+    database a previous test shared, and those rows then blocked the enqueue
+    the next test was measuring.
+    """
     global _singleton
     with _singleton_lock:
         if _singleton is not None:
             _singleton.stop()
         _singleton = None
+    try:
+        _DatabaseQueueStore().delete_queued()
+    except Exception as e:  # noqa: BLE001 - a test db without the table is fine
+        logger.debug(f"[Queue] test reset could not clear the backlog: {e}")

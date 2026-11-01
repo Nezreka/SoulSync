@@ -219,6 +219,8 @@ export const FINDING_TYPE_LABELS: Record<string, string> = {
   acoustid_no_match: 'No Match',
   fake_lossless: 'Fake Lossless',
   duplicate_tracks: 'Duplicate',
+  native_duplicate_tracks: 'Duplicate',
+  native_duplicate_releases: 'Duplicate Release',
   incomplete_album: 'Incomplete',
   path_mismatch: 'Path Mismatch',
   metadata_gap: 'Missing Metadata',
@@ -228,11 +230,15 @@ export const FINDING_TYPE_LABELS: Record<string, string> = {
   expired_download: 'Expired',
   missing_replaygain: 'No ReplayGain',
   replaygain_retag: 'RG Re-analyze',
+  zero_length_mp4: 'Shows 0:00',
   untagged_download: 'Untagged',
   empty_folder: 'Empty Folder',
   missing_lossy_copy: 'No Lossy Copy',
   library_retag: 'Re-tag',
   quality_upgrade: 'Low Quality',
+  quality_upgrade_review: 'Quality Upgrade Review',
+  quality_format_not_targeted: 'Format Not in Profile',
+  quality_unknown: 'Quality Unknown',
   short_preview_track: 'Preview Clip',
   genre_cleanup: 'Genres',
   genre_enrichment: 'Genre Enrichment',
@@ -256,18 +262,25 @@ export const FINDING_FIXABLE_TYPES: Record<string, string> = {
   missing_lyrics: 'Apply Lyrics',
   missing_replaygain: 'Apply RG',
   replaygain_retag: 'Re-analyze',
+  zero_length_mp4: 'Fix Length',
   untagged_download: 'Write Tags',
   empty_folder: 'Delete Folder',
   expired_download: 'Delete',
   metadata_gap: 'Apply',
   duplicate_tracks: 'Keep Best',
+  native_duplicate_tracks: 'Keep Best',
+  native_duplicate_releases: 'Review Merge',
   incomplete_album: 'Auto-Fill',
   missing_lossy_copy: 'Convert',
   acoustid_mismatch: 'Fix',
   quality_upgrade: 'Upgrade',
+  quality_upgrade_review: 'Monitor & Upgrade',
+  quality_format_not_targeted: 'Leave As-is',
+  quality_unknown: 'Leave As-is',
   missing_discography_track: 'Add to Wishlist',
   library_retag: 'Apply Tags',
   short_preview_track: 'Re-download',
+  fake_lossless: 'Re-download',
   genre_cleanup: 'Clean Genres',
   genre_enrichment: 'Apply Genres',
   comma_artist_split: 'Split Artists',
@@ -279,6 +292,49 @@ export function findingFixLabel(findingType: string, entityType?: string | null)
   // album instead of the single-track re-identify (#1567)
   if (findingType === 'suspect_album_tag' && entityType === 'album') return 'Open album';
   return FINDING_FIXABLE_TYPES[findingType] ?? null;
+}
+
+/** Types whose fix ends in a re-download — but only while the finding names a
+ *  catalogue track. The corruption detector also walks the library folders, so
+ *  it raises rows with `entity_type: 'file'` and no id for audio no lib2 row
+ *  points at. Nothing can be re-requested for those, so the fix is a plain
+ *  delete; saying "Re-download" was a promise the backend answered with
+ *  "No track ID associated with this finding". */
+const SUBJECTLESS_DELETE_ONLY_TYPES = new Set([
+  'corrupt_audio',
+  'short_preview_track',
+  'fake_lossless',
+]);
+
+/** The button label for ONE finding row — `findingFixLabel` by type, unless the
+ *  row has no track behind it and the type's verb only makes sense with one. */
+export function findingRowFixLabel(finding: {
+  finding_type: string;
+  entity_type?: string | null;
+  entity_id?: string | number | null;
+}): string | null {
+  if (!finding.entity_id && SUBJECTLESS_DELETE_ONLY_TYPES.has(finding.finding_type)) {
+    return 'Delete File';
+  }
+  return findingFixLabel(finding.finding_type, finding.entity_type);
+}
+
+/** The `lib2:<track id>` the redownload modal searches for, or null when the
+ *  finding names no catalogue track. A file-subject finding (fake lossless)
+ *  carries the FILE's id as `entity_id`; handing that to the modal would
+ *  search for, and replace, whichever track happens to share the number. */
+export function findingRedownloadTrackId(finding: {
+  entity_type?: string | null;
+  entity_id?: string | number | null;
+  details?: Record<string, unknown> | null;
+}): string | null {
+  if (!finding.entity_id) return null;
+  if (finding.entity_type !== 'file') return String(finding.entity_id);
+  const linked = finding.details?.library_v2 as { track_id?: unknown } | undefined;
+  const trackId = linked?.track_id;
+  return typeof trackId === 'number' || (typeof trackId === 'string' && trackId !== '')
+    ? `lib2:${trackId}`
+    : null;
 }
 
 export const FINDING_ACTION_LABELS: Record<string, string> = {
@@ -294,6 +350,7 @@ export const FINDING_ACTION_LABELS: Record<string, string> = {
   applied_lyrics: 'Lyrics Applied',
   wrote_tags: 'Tags Written',
   already_tagged: 'Already Tagged',
+  fixed_length: 'Length Fixed',
   deleted_expired: 'Deleted',
   removed_duplicates: 'Duplicates Removed',
   genres_applied: 'Genres Applied',

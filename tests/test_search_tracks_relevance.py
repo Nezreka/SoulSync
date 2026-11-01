@@ -24,14 +24,14 @@ def db(tmp_path):
 
 
 def _insert(db, tid, title, artist_id, artist_name):
+    from tests.support.catalogue_seed import seed_library_track
+
     with db._get_connection() as conn:
-        conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)", (artist_id, artist_name))
-        conn.execute("INSERT OR IGNORE INTO albums (id, title, artist_id) VALUES (?, ?, ?)", (artist_id, "Alb", artist_id))
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path) "
-            "VALUES (?, ?, ?, ?, 1, 180, ?)",
-            (tid, artist_id, artist_id, title, f"/m/{tid}.mp3"),
-        )
+        seed_library_track(
+            conn, artist=artist_name, album="Alb", title=title,
+            artist_server_id=str(artist_id), album_server_id=f"al{artist_id}",
+            track_server_id=str(tid), track_number=1, duration=180,
+            file_path=f"/m/{tid}.mp3")
         conn.commit()
 
 

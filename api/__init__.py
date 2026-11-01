@@ -22,6 +22,35 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
+# a caller with a valid api key (metasync, dashboards) pages the library in
+# bursts, and 60 a minute per address cut the weekly report off halfway
+# (#1923). keyed callers get their own, bigger bucket; everyone else keeps
+# the old one per address. a bogus key never earns the bigger bucket.
+ANON_RATE = "60 per minute"
+KEYED_RATE = "600 per minute"
+
+
+def _valid_key_hash():
+    from flask import current_app
+    from .auth import _hash_key, _match_api_key, _request_api_key
+
+    try:
+        raw = _request_api_key()
+        if raw and _match_api_key(current_app.soulsync["config_manager"], raw):
+            return _hash_key(raw)
+    except Exception:
+        logger.debug("rate limit key check failed", exc_info=True)
+    return None
+
+
+def _rate_bucket():
+    key_hash = _valid_key_hash()
+    return "key:" + key_hash if key_hash else get_remote_address()
+
+
+def _rate_value():
+    return KEYED_RATE if _valid_key_hash() else ANON_RATE
+
 
 def create_api_blueprint():
     """Build and return the /api/v1 Blueprint with all sub-modules registered."""
@@ -49,7 +78,7 @@ def create_api_blueprint():
     from .request import start_cleanup_thread as _start_request_cleanup
 
     # ---- rate-limit only /api/v1 routes (not the whole app) ----
-    limiter.limit("60 per minute")(bp)
+    limiter.limit(_rate_value, key_func=_rate_bucket)(bp)
 
     reg_library(bp)
     reg_system(bp)

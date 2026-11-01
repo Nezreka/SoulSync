@@ -1,0 +1,248 @@
+"""The files that imported without a match, with what can be guessed about each.
+
+an import whose tags can't be read and that acoustid can't place is filed
+under a made-up "Unknown Artist" (#1202). sending the user to that fake
+artist's page left them to work out, one track at a time, what each file was.
+this lists the files with the evidence a person would use:
+
+* the folder. if the other files in it are matched to one album, that is
+  almost certainly this file's album too. a folder of mixed albums (a library
+  root) says nothing, so it isn't guessed from.
+* the file name: a leading track number, the title, and a copy suffix like
+  "(1)" that a duplicate download leaves.
+* a duplicate: a matched file in the same folder with the same title. that's
+  a second copy, and the useful action is removing it, not identifying it.
+"""
+
+from __future__ import annotations
+
+import ntpath
+import posixpath
+import re
+from collections import Counter
+from typing import Any, Dict, List, Optional, Tuple
+
+_UNKNOWN = "unknown artist"
+# "15 - Suzy", "15. Suzy", "15 Suzy", "1-15 Suzy" (disc-track)
+_TRACK_PREFIX = re.compile(r"^\s*(?:\d{1,2}[-.])?(\d{1,3})\s*(?:[-.)_]\s*|\s+)")
+# "Suzy (1)", "Suzy (2)", "Suzy - Copy" (what a re-download or a copy leaves)
+_COPY_SUFFIX = re.compile(r"\s*(?:\((\d{1,2})\)|-\s*copy(?:\s*\(\d+\))?)\s*$", re.IGNORECASE)
+# a folder that dominates by this share speaks for the whole folder
+_ALBUM_MAJORITY = 0.8
+
+
+def _path_mod(path: str):
+    return ntpath if "\\" in path or re.match(r"^[A-Za-z]:", path) else posixpath
+
+
+def parse_file_name(path: str) -> Dict[str, Any]:
+    """{'folder', 'folder_name', 'track_number', 'title', 'copy'} from a path."""
+    mod = _path_mod(path)
+    folder = mod.dirname(path)
+    stem = mod.splitext(mod.basename(path))[0]
+    track_number = None
+    match = _TRACK_PREFIX.match(stem)
+    if match and match.end() < len(stem):
+        track_number = int(match.group(1))
+        stem = stem[match.end():]
+    copy = bool(_COPY_SUFFIX.search(stem))
+    title = _COPY_SUFFIX.sub("", stem).strip(" -_.") or stem.strip()
+    return {
+        "folder": folder,
+        "folder_name": mod.basename(folder),
+        "track_number": track_number,
+        "title": title,
+        "copy": copy,
+    }
+
+
+def _norm(text: Any) -> str:
+    from core.text.normalize import normalize_key
+    return normalize_key(str(text or "")) or ""
+
+
+# the "Unknown Artist" rows, found first among the artists (a few ms) and
+# walked out from there. left to itself the planner scanned every album in the
+# library looking for them: 2s a request on a 300k-track library.
+UNKNOWN_ARTISTS_CTE = (
+    "WITH unknown AS MATERIALIZED (SELECT id FROM lib2_artists "
+    "WHERE LOWER(TRIM(name)) = 'unknown artist')")
+
+
+def _unmatched_rows(conn, file_id: Optional[int] = None) -> List[Any]:
+    one = "AND f.id = ?" if file_id is not None else ""
+    return conn.execute(
+        f"""
+        {UNKNOWN_ARTISTS_CTE}
+        SELECT t.id AS track_id, t.title, t.track_number, t.duration,
+               al.id AS album_id, u.id AS artist_id,
+               f.id AS file_id, f.path, f.format, f.bitrate, f.size, f.content_hash
+          FROM unknown u
+          CROSS JOIN lib2_albums al ON al.primary_artist_id = u.id
+          JOIN lib2_tracks t ON t.album_id = al.id
+          JOIN lib2_track_files f ON f.track_id = t.id
+         WHERE f.path IS NOT NULL AND TRIM(f.path) <> ''
+           AND COALESCE(f.file_state, 'active') = 'active'
+           {one}
+         ORDER BY f.path
+        """,
+        () if file_id is None else (int(file_id),),
+    ).fetchall()
+
+
+def _filing(conn, track_ids: List[int]) -> Dict[int, Dict[str, str]]:
+    """the files already re-identified and waiting for the import pass"""
+    if not track_ids:
+        return {}
+    marks = ",".join("?" for _ in track_ids)
+    try:
+        rows = conn.execute(
+            f"SELECT replace_track_id, album_name, artist_name, staged_path FROM rematch_hints "
+            f"WHERE status = 'pending' AND replace_track_id IN ({marks})",
+            [int(t) for t in track_ids],
+        ).fetchall()
+    except Exception:  # noqa: BLE001 - no hints table, nothing waiting
+        return {}
+    out = {}
+    for r in rows:
+        out[int(r[0])] = {"album_name": r[1] or "", "artist_name": r[2] or "",
+                          **_import_outcome(conn, r[3])}
+    return out
+
+
+def _import_outcome(conn, staged_path: Any) -> Dict[str, Any]:
+    """whether the import pass turned the staged copy down: "filing" must not
+    be what the review says about a file that's stuck in the import inbox"""
+    try:
+        row = conn.execute(
+            "SELECT id, status, error_message FROM auto_import_history "
+            "WHERE folder_path = ? ORDER BY id DESC LIMIT 1", (str(staged_path or ""),)
+        ).fetchone()
+    except Exception:  # noqa: BLE001 - no history table: nothing known yet
+        row = None
+    if row is None or row[1] not in ("failed", "needs_identification", "partial", "rejected"):
+        return {"failed": None, "retry_id": None}
+    reason = str(row[2] or "")
+    if "tracklist" in reason.lower():
+        reason = "The import couldn’t line it up with that release’s tracklist."
+    return {"failed": reason or "The import couldn’t file it.", "retry_id": int(row[0])}
+
+
+def _folder_neighbours(conn, folder: str) -> List[Dict[str, Any]]:
+    """the matched files directly in ``folder`` (not its subfolders)."""
+    mod = _path_mod(folder)
+    sep = "\\" if mod is ntpath else "/"
+    prefix = folder.rstrip("\\/") + sep
+    # a path range the path index can serve, and only files directly in the
+    # folder: a library root's range is the whole library, and its subfolders
+    # are other albums anyway
+    rows = conn.execute(
+        """
+        SELECT t.id AS track_id, t.title, t.track_number, f.path,
+               al.id AS album_id, al.title AS album_title,
+               ar.id AS artist_id, ar.name AS artist_name
+          FROM lib2_track_files f
+          JOIN lib2_tracks t ON t.id = f.track_id
+          JOIN lib2_albums al ON al.id = t.album_id
+          JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+         WHERE f.path >= ? AND f.path < ?
+           AND instr(substr(f.path, ?), ?) = 0
+           AND COALESCE(f.file_state, 'active') = 'active'
+           AND LOWER(TRIM(ar.name)) <> ?
+        """,
+        (prefix, prefix + "\uffff", len(prefix) + 1, sep, _UNKNOWN),
+    ).fetchall()
+    folder_key = mod.normcase(folder.rstrip("\\/"))
+    return [dict(r) for r in rows if mod.normcase(mod.dirname(r["path"])) == folder_key]
+
+
+def _folder_album(neighbours: List[Dict[str, Any]]) -> Optional[Tuple[str, str]]:
+    """(album, artist) when one album holds the folder, else None."""
+    if not neighbours:
+        return None
+    counts = Counter((n["album_title"], n["artist_name"]) for n in neighbours)
+    (album, artist), hits = counts.most_common(1)[0]
+    return (album, artist) if hits / len(neighbours) >= _ALBUM_MAJORITY else None
+
+
+def _duplicate_of(parsed: Dict[str, Any], neighbours: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """the matched file in the same folder this one is a copy of"""
+    want = _norm(parsed["title"])
+    if not want:
+        return None
+    for n in neighbours:
+        if _norm(n["title"]) != want:
+            continue
+        if parsed["track_number"] and n["track_number"] and parsed["track_number"] != n["track_number"]:
+            continue
+        return {
+            "track_id": n["track_id"],
+            "title": n["title"],
+            "album_id": n["album_id"],
+            "album_title": n["album_title"],
+            "artist_id": n["artist_id"],
+            "artist_name": n["artist_name"],
+        }
+    return None
+
+
+def list_unmatched(conn) -> List[Dict[str, Any]]:
+    """Every file under Unknown Artist, each with its best guess."""
+    neighbours_by_folder: Dict[str, List[Dict[str, Any]]] = {}
+    out = [_entry(conn, row, neighbours_by_folder) for row in _unmatched_rows(conn)]
+    filing = _filing(conn, [e["track_id"] for e in out])
+    from .unmatched_identify import stored_results
+    identified = stored_results(conn, out)
+    for entry in out:
+        entry["filing"] = filing.get(int(entry["track_id"]))
+        entry["identified"] = identified.get(int(entry["file_id"]))
+    return out
+
+
+def unmatched_entry(conn, file_id: int) -> Optional[Dict[str, Any]]:
+    """One file's entry, or None when it isn't under Unknown Artist (any more)."""
+    rows = _unmatched_rows(conn, file_id)
+    if not rows:
+        return None
+    entry = _entry(conn, rows[0], {})
+    entry["filing"] = _filing(conn, [entry["track_id"]]).get(int(entry["track_id"]))
+    return entry
+
+
+def _entry(conn, row, neighbours_by_folder: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+    path = str(row["path"])
+    parsed = parse_file_name(path)
+    folder = parsed["folder"]
+    if folder not in neighbours_by_folder:
+        neighbours_by_folder[folder] = _folder_neighbours(conn, folder) if folder else []
+    neighbours = neighbours_by_folder[folder]
+    context = _folder_album(neighbours)
+    duplicate = _duplicate_of(parsed, neighbours)
+    album, artist = context if context else (None, None)
+    query = " ".join(part for part in (parsed["title"], artist, album) if part)
+    return {
+        "track_id": row["track_id"],
+        "file_id": row["file_id"],
+        "album_id": row["album_id"],
+        "artist_id": row["artist_id"],
+        "file_path": path,
+        "file_name": _path_mod(path).basename(path),
+        "folder": folder,
+        "format": str(row["format"] or "").upper(),
+        "bitrate": row["bitrate"],
+        "duration": row["duration"],
+        "title": row["title"],
+        "guess": {
+            "title": parsed["title"],
+            "track_number": parsed["track_number"],
+            "album": album,
+            "artist": artist,
+            "query": query,
+            "copy": parsed["copy"],
+        },
+        "duplicate_of": duplicate,
+        # what a stored identification is good for: the same file, unchanged
+        # (built as strong_matches_ready builds it in sql)
+        "file_key": "|".join("" if v is None else str(v)
+                             for v in (path, row["size"], row["content_hash"])),
+    }

@@ -31,6 +31,9 @@ export type ShellBridge = NonNullable<typeof window.SoulSyncWebShellBridge>;
 
 export const SHELL_BRIDGE_READY_EVENT = 'ss:webui-shell-bridge-ready';
 export const SHELL_PROFILE_CONTEXT_CHANGED_EVENT = 'ss:webui-profile-context-changed';
+/** The header's library switcher picked another library (#1199). What every
+ *  page lists and where downloads land changed with it. */
+export const SHELL_LIBRARY_SCOPE_CHANGED_EVENT = 'ss:webui-library-scope-changed';
 
 export function getShellBridge(): ShellBridge | null {
   return window.SoulSyncWebShellBridge ?? null;
@@ -47,9 +50,30 @@ export function getShellContext(bridge = getShellBridge()): ShellContext | null 
   return { bridge, profile };
 }
 
+/** Detail routes need an entity id in the URL, so they are never a landing page. */
+const HOME_FALLBACK_EXCLUDED: ReadonlySet<ShellPageId> = new Set(['artist-detail', 'label-detail']);
+
 export function getProfileHomePath(bridge = getShellBridge()): `/${string}` {
   const pageId = bridge?.getProfileHomePage() ?? 'discover';
-  return getShellRouteByPageId(pageId)?.path ?? '/discover';
+  const isAllowed = (id: ShellPageId) => bridge?.isPageAllowed(id) ?? true;
+
+  // iss29-B10: every route guard redirects here when it denies access, so a
+  // home page the profile may not open hands the router straight back to the
+  // page that just refused it — that is an endless redirect, not a bounce. The
+  // vanilla shell has always checked this (`navigateToPage` in init.js); the
+  // React guards inherited the version that does not. Newly reachable because
+  // the legacy `library-v2` page id normalizes to `library`, so a profile whose
+  // home is the old id lands on a page its allowed_pages need not contain.
+  if (isAllowed(pageId)) {
+    return getShellRouteByPageId(pageId)?.path ?? '/discover';
+  }
+
+  const reachable = shellRouteManifest.find(
+    (route) => !HOME_FALLBACK_EXCLUDED.has(route.pageId) && isAllowed(route.pageId),
+  );
+  // `help` needs no permission in the shell's own gate, so it is the one path
+  // that stays truthful even for a profile allowed nothing else.
+  return reachable?.path ?? '/help';
 }
 
 export async function waitForShellContext(): Promise<ShellContext> {
@@ -115,26 +139,16 @@ export function bindWindowWebRouter(router: AnyRouter) {
         if (qs) href = `${href}?${qs}` as `/${string}`;
       }
       if (pageId === 'artist-detail' && options?.artistId) {
-        const source = options.artistSource ? String(options.artistSource) : 'library';
-        href =
-          `/artist-detail/${encodeURIComponent(source)}/${encodeURIComponent(String(options.artistId))}` as `/${string}`;
-        // Some sources (Bandcamp) have no numeric-ID lookup API — the name
-        // has to travel with the URL or the route has nothing to resolve
-        // against on mount.
-        const artistParams = new URLSearchParams();
-        if (options.artistName) {
-          artistParams.set('name', String(options.artistName));
+        const source = String(options.artistSource || 'library').toLowerCase();
+        const artistParams = new URLSearchParams({ view: 'discovery', immersive: 'true' });
+        if (source === 'library' && /^\d+$/.test(String(options.artistId))) {
+          artistParams.set('artist', String(options.artistId));
+        } else {
+          artistParams.set('discover', `${source}:${options.artistId}`);
+          if (options.artistName) artistParams.set('discoverName', String(options.artistName));
         }
-        // ?album= names the album to open on arrival (the library's album
-        // grid). Without it the deep link silently degrades to the plain
-        // artist page.
-        if (options.focusAlbumId) {
-          artistParams.set('album', String(options.focusAlbumId));
-        }
-        const artistQuery = artistParams.toString();
-        if (artistQuery) {
-          href = `${href}?${artistQuery}` as `/${string}`;
-        }
+        if (options.focusAlbumId) artistParams.set('album', String(options.focusAlbumId));
+        href = `/library?${artistParams}` as `/${string}`;
       }
       if (pageId === 'label-detail' && options?.labelId) {
         href = `/label-detail/${encodeURIComponent(String(options.labelId))}` as `/${string}`;
@@ -146,6 +160,14 @@ export function bindWindowWebRouter(router: AnyRouter) {
       }
 
       await router.navigate({ href: appURL(href), replace: options?.replace === true });
+      return true;
+    },
+    async navigateToHref(href, options) {
+      // Only same-origin app paths; anything else belongs to the browser.
+      if (!href.startsWith('/') || href.startsWith('//')) return false;
+      const pageId = resolveShellPageFromPath(new URL(href, window.location.origin).pathname);
+      if (!pageId || getShellRouteByPageId(pageId)?.kind !== 'react') return false;
+      await router.navigate({ href: href as `/${string}`, replace: options?.replace === true });
       return true;
     },
   };

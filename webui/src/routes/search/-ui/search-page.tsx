@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/react-query';
+import { useRouter, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Skeleton } from '@/components/primitives';
@@ -27,8 +29,17 @@ import {
 } from '../-search.actions';
 import { fetchLabels, lookupById } from '../-search.api';
 import {
+  browseCount,
+  browseHref,
+  browseTitle,
+  BROWSE_TILES,
+  type BrowseResult,
+  fetchBrowse,
+} from '../-search.browse';
+import {
   artistDetailPath,
   fallbackBannerText,
+  inLibraryArtistPath,
   isIdLookupQuery,
   labelDetailPath,
   loadRecentSearches,
@@ -42,6 +53,10 @@ import { useArtistImages } from '../-search.use-artist-images';
 import { activeResults, getPersistedQuery, useSearchController } from '../-search.use-controller';
 import { useLibraryCheck } from '../-search.use-library-check';
 import { useVideoDownloads } from '../-search.use-video-downloads';
+import {
+  libraryScopesQueryOptions,
+  libraryV2UiPreferencesQueryOptions,
+} from '../../library/-library-v2.api';
 import { BasicSearch } from './basic-search';
 import { PlaylistPreviewModal } from './playlist-preview-modal';
 import { SearchBar } from './search-bar';
@@ -50,35 +65,19 @@ import { FilterPills, resultCounts, SearchResults } from './search-results';
 import styles from './search.module.css';
 import { catalogSources, ModeTabs, modeOf, SourcePicker } from './source-row';
 
-/** the idle page's browse tiles. quiet two-stop gradients, no emoji */
-const EXPLORE_CATEGORIES = [
-  { id: 'trending', label: 'Top trending', query: 'Trending', from: '#7a1f3d', to: '#3b0f1f' },
-  {
-    id: 'new_releases',
-    label: 'New releases',
-    query: 'New Releases',
-    from: '#3a3a8c',
-    to: '#1c1c48',
-  },
-  {
-    id: 'electronic',
-    label: 'Electronic & dance',
-    query: 'Electronic',
-    from: '#0f5e6e',
-    to: '#082f38',
-  },
-  { id: 'rock', label: 'Rock & alternative', query: 'Rock', from: '#7a4a12', to: '#3d250a' },
-  { id: 'hiphop', label: 'Hip-hop & rap', query: 'Hip Hop', from: '#5a2d8c', to: '#2c1646' },
-  { id: 'chill', label: 'Lo-fi & chill', query: 'Chill', from: '#1f6b4f', to: '#0f3528' },
-  { id: 'jazz', label: 'Jazz & soul', query: 'Jazz', from: '#80305e', to: '#401830' },
-  {
-    id: 'soundtracks',
-    label: 'Soundtracks & score',
-    query: 'Soundtrack',
-    from: '#284f8c',
-    to: '#142846',
-  },
-];
+/** Where a download started here lands, and which library "in your library"
+ *  means (#1199). Only on an install with more than one library, and only when
+ *  it is not simply the shared one -- or the admin can switch it. */
+function LibraryTargetNote() {
+  const { data } = useQuery(libraryScopesQueryOptions());
+  if (!data?.separated || (!data.switchable && data.target === 'shared')) return null;
+  return (
+    <p className={styles.libraryTarget} data-library-target={data.target}>
+      Downloads land in <strong>{data.targetName}</strong>
+      {data.switchable ? <span> · switch in the sidebar</span> : null}
+    </p>
+  );
+}
 
 /** Which of the dropdown's three bodies is showing. */
 type DropdownView = 'hidden' | 'loading' | 'empty' | 'results';
@@ -99,6 +98,7 @@ type DropdownView = 'hidden' | 'loading' | 'empty' | 'results';
 export function SearchPage() {
   // Seeded from the restored cache: coming back to results sitting above an
   // empty search box reads as a bug even when the results are right.
+  const router = useRouter();
   const [query, setQuery] = useState(getPersistedQuery);
   const [filter, setFilter] = useState<ResultFilter>('all');
   const [dismissed, setDismissed] = useState(false);
@@ -127,6 +127,26 @@ export function SearchPage() {
   const results = activeResults(state);
   const soulseekActive = state.activeSource === 'soulseek';
 
+  // a browse tile's view (/search?browse=genre:jazz). typing takes over from
+  // it, and clearing the box comes back to it.
+  const browseId = useRouterState({
+    select: (s) => new URLSearchParams(s.location.searchStr).get('browse'),
+  });
+  const browsing = Boolean(browseId) && !query.trim() && !soulseekActive;
+  const browseQuery = useQuery({
+    queryKey: ['search-browse', browseId],
+    queryFn: ({ signal }) => fetchBrowse(browseId ?? '', signal),
+    enabled: browsing,
+    staleTime: 5 * 60_000,
+  });
+  const [browseFilter, setBrowseFilter] = useState<ResultFilter>('all');
+  useEffect(() => {
+    setBrowseFilter('all');
+  }, [browseId]);
+  const browse: BrowseResult | undefined = browsing ? browseQuery.data : undefined;
+  // the cards' library badges and artist photos follow whatever is on screen
+  const shown = browse ?? results;
+
   // Catalog returns to the metadata source the user was last on, not the default
   const catalogRef = useRef('');
   if (modeOf(state.activeSource) === 'catalog') catalogRef.current = state.activeSource;
@@ -137,8 +157,12 @@ export function SearchPage() {
     setFilter('all');
   }, [state.query, state.activeSource]);
 
-  const ownership = useLibraryCheck(results.albums, results.tracks);
-  const artistImages = useArtistImages(results.db_artists, results.artists, state.activeSource);
+  const ownership = useLibraryCheck(shown.albums, shown.tracks);
+  const artistImages = useArtistImages(
+    shown.db_artists,
+    shown.artists,
+    browse ? (browse.artists[0]?.source ?? state.activeSource) : state.activeSource,
+  );
   const {
     progress: videoProgress,
     download: downloadVideo,
@@ -276,6 +300,8 @@ export function SearchPage() {
     return hasSourceResults ? 'results' : 'empty';
   }, [dismissed, soulseekActive, idLookupPending, loading, cached, state.query, hasSourceResults]);
 
+  const loadingFor = useSecondsWhile(view === 'loading');
+
   // results are the page now, not a dropdown over it, so a click elsewhere no
   // longer throws them away. clearing the box does.
   const open = view !== 'hidden';
@@ -317,13 +343,19 @@ export function SearchPage() {
   const served = state.fallbacks[state.activeSource];
 
   /**
-   * A library artist resolves under 'library'; a found one under the source it
-   * came from, with its name in tow. Both need the source SEGMENT — the route is
-   * /artist-detail/$source/$id and a two-segment path resolves to nothing.
+   * A library artist opens in Library V2 by its catalogue id; a found one on
+   * the artist page under the source it came from, with its name in tow. That
+   * route still checks the catalogue first, so an artist this result list did
+   * not recognise lands in Library V2 all the same.
    */
+  // a library artist opens in the header this profile picked for arrivals from
+  // outside the library (View Settings); no preferences yet means the rich one
+  const headerFromSearch =
+    useQuery({ ...libraryV2UiPreferencesQueryOptions(), retry: false }).data?.artist_page
+      ?.header_elsewhere ?? 'rich';
   const onArtistHref = (artist: SearchArtist, inLibrary: boolean) =>
     inLibrary
-      ? artistDetailPath(artist.id ?? '')
+      ? inLibraryArtistPath(artist, headerFromSearch)
       : artistDetailPath(artist.id ?? '', state.activeSource, artist.name);
 
   const onLabelHref = (label: SearchLabel) => labelDetailPath(label.id ?? '', label.name);
@@ -342,7 +374,7 @@ export function SearchPage() {
   const filesSource = basic.state.singleSource
     ? basic.state.sources[0]
     : basic.state.sources.find((source) => source.name === basic.state.activeSource);
-  const idle = !open && !soulseekActive && !query.trim();
+  const idle = !open && !soulseekActive && !query.trim() && !browsing;
 
   return (
     <div className="downloads-content">
@@ -357,6 +389,7 @@ export function SearchPage() {
                   ? 'Music videos from YouTube, straight to your library'
                   : 'Find any artist, album or track, then download it tagged and filed'}
             </p>
+            <LibraryTargetNote />
           </div>
           <ModeTabs state={state} catalogSource={catalogSource} onSelect={setActiveSource} />
         </header>
@@ -445,24 +478,122 @@ export function SearchPage() {
                     <h2 className={styles.sectionTitle}>Browse</h2>
                   </div>
                   <div className={styles.explore}>
-                    {EXPLORE_CATEGORIES.map((cat) => (
+                    {BROWSE_TILES.map((tile) => (
                       <button
-                        key={cat.id}
+                        key={tile.id}
                         type="button"
                         className={styles.tile}
-                        style={{ background: `linear-gradient(135deg, ${cat.from}, ${cat.to})` }}
-                        onClick={() => {
-                          setQuery(cat.query);
-                          runSearch(cat.query);
-                        }}
+                        style={{ background: `linear-gradient(135deg, ${tile.from}, ${tile.to})` }}
+                        onClick={() => void router.navigate({ href: browseHref(tile.id) })}
                       >
-                        <b>{cat.label}</b>
+                        <b>{tile.label}</b>
                       </button>
                     ))}
                   </div>
                 </section>
               ) : null}
             </div>
+          ) : null}
+
+          {browsing && browseId ? (
+            <section
+              className={styles.browse}
+              id="enh-browse-view"
+              aria-busy={browseQuery.isLoading || undefined}
+            >
+              <div className={styles.browseHead}>
+                <button
+                  type="button"
+                  className={styles.textLink}
+                  onClick={() => void router.navigate({ href: '/search' })}
+                >
+                  ← Browse
+                </button>
+                <h2 className={styles.browseTitle}>{browse?.title ?? browseTitle(browseId)}</h2>
+                {browse?.subtitle ? <p className={styles.browseSub}>{browse.subtitle}</p> : null}
+                {browse?.related.length ? (
+                  <div className={styles.chips}>
+                    {browse.related.map((genre) => (
+                      <span key={genre} className={styles.chip}>
+                        <button
+                          type="button"
+                          className={`${styles.chipLabel} ${styles.chipPlain}`}
+                          onClick={() =>
+                            void router.navigate({
+                              href: browseHref(`genre:${genre.toLowerCase()}`),
+                            })
+                          }
+                        >
+                          {genre}
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              {browseQuery.isLoading ? (
+                <div className={styles.skeletons} aria-hidden="true">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <Skeleton
+                      key={i}
+                      className={`${styles.skel}${i < 2 ? ` ${styles.skelRound}` : ''}`}
+                    />
+                  ))}
+                </div>
+              ) : browseQuery.isError ? (
+                <div className={styles.state}>
+                  <p className={styles.stateTitle}>Couldn’t load this right now</p>
+                  <p className={styles.stateText}>Try again in a moment, or search above.</p>
+                </div>
+              ) : browse && browseCount(browse) === 0 ? (
+                <div className={styles.state}>
+                  <p className={styles.stateTitle}>Nothing here yet</p>
+                  <p className={styles.stateText}>
+                    {browseId === 'new'
+                      ? 'New releases fill in as your watchlist and discovery scans run.'
+                      : 'This fills in as SoulSync learns more music. Try another tile, or search above.'}
+                  </p>
+                </div>
+              ) : browse ? (
+                <div className={styles.results}>
+                  <SearchResults
+                    activeSource={browse.artists[0]?.source ?? state.activeSource}
+                    dbArtists={[]}
+                    artists={browse.artists}
+                    albums={browse.albums}
+                    tracks={browse.tracks}
+                    playlists={browse.playlists}
+                    labels={[]}
+                    videos={[]}
+                    videoProgress={videoProgressForGrid}
+                    ownership={ownership}
+                    artistImages={artistImages}
+                    filter={browseFilter}
+                    onFilter={setBrowseFilter}
+                    onArtistHref={(artist, inLibrary) =>
+                      inLibrary
+                        ? inLibraryArtistPath(artist, headerFromSearch)
+                        : artistDetailPath(
+                            artist.id ?? '',
+                            artist.source ?? state.activeSource,
+                            artist.name,
+                          )
+                    }
+                    onLabelHref={onLabelHref}
+                    onAlbumClick={(album: SearchAlbum) =>
+                      void openSearchAlbum(album, album.source ?? state.activeSource)
+                    }
+                    onTrackClick={(track: SearchTrack) => void openSearchTrack(track)}
+                    onPlaylistClick={(playlist: SearchPlaylist) => setPreviewPlaylist(playlist)}
+                    onTrackPlay={(track: SearchTrack, row: LibraryCheckTrack | undefined) => {
+                      if (row) playOwnedTrack(row);
+                      else void streamSearchTrack(track);
+                    }}
+                    onVideoDownload={handleVideoAcquire}
+                  />
+                </div>
+              ) : null}
+            </section>
           ) : null}
 
           <div id="enhanced-dropdown" className={open ? undefined : 'hidden'}>
@@ -481,6 +612,23 @@ export function SearchPage() {
                     ? 'Looking up that link…'
                     : `Searching ${sourceLabel(state.activeSource)}…`}
                 </p>
+                {/* a search that hangs used to say "Searching Deezer…" for
+                    as long as it took, two minutes once, with nothing else */}
+                {loadingFor >= 8 ? (
+                  <p className={styles.stateHint} role="status">
+                    Taking longer than usual. SoulSync is busy, results will show as soon as it
+                    answers.
+                  </p>
+                ) : null}
+                {loadingFor >= 20 && !idLookupPending ? (
+                  <button
+                    type="button"
+                    className={styles.stateRetry}
+                    onClick={() => runSearch(query)}
+                  >
+                    Try again
+                  </button>
+                ) : null}
               </div>
             ) : null}
 
@@ -589,4 +737,17 @@ function filesSubtitle(source: BasicSource | undefined): string {
   if (!source) return 'Raw files from your download sources, grabbed as they come';
   if (source.name === 'soulseek') return 'Raw files from Soulseek, grabbed exactly as shared';
   return `Files straight from ${basicSourceLabel(source)}, grabbed as they come`;
+}
+
+/** whole seconds since `active` turned true, 0 while it is false */
+function useSecondsWhile(active: boolean): number {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    setSeconds(0);
+    if (!active) return;
+    const started = Date.now();
+    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return seconds;
 }

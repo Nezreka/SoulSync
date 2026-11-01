@@ -173,6 +173,55 @@ class Prober:
             return _result(False, "Navidrome refused that username or password")
         return _result(True, "Connected to Navidrome")
 
+    def music_assistant(self, cfg: dict) -> dict:
+        """GET /info needs no token (version, name); auth/me proves the
+        token; a Local files or SMB source is what gives tracks paths."""
+        url = self._url(cfg.get("base_url"))
+        token = str(cfg.get("token") or "").strip()
+        if not url:
+            return _unreachable("Music Assistant", url)
+        try:
+            r = self.http.get(f"{url}/info", timeout=TIMEOUT)
+            info = r.json() or {}
+        except Exception:
+            return _unreachable("Music Assistant", _base(cfg.get("base_url")))
+        if r.status_code != 200 or "server_version" not in info:
+            return _result(False, f"That is not a Music Assistant server (HTTP {r.status_code})")
+        name = str(info.get("name") or "Music Assistant")
+        version = str(info.get("server_version") or "")
+        if not token:
+            return _result(False, "Music Assistant needs a long-lived token (Settings, Users)")
+        me = self._ma_call(url, token, "auth/me")
+        if me is None:
+            return _result(False, "Music Assistant refused that token")
+        sources = self._ma_sources(url, token)
+        if not sources:
+            return _result(True, f"Connected to {name}, but it has no Local files or SMB source yet",
+                           server_name=name, version=version, sources=0)
+        return _result(True, f"Connected to {name}", server_name=name, version=version, sources=len(sources))
+
+    def _ma_call(self, url: str, token: str, command: str, **args):
+        """One Music Assistant API command, None on any refusal or error."""
+        try:
+            r = self.http.post(f"{url}/api", json={"message_id": "onboarding", "command": command,
+                                                    "args": args or None},
+                               headers={"Authorization": f"Bearer {token}"}, timeout=TIMEOUT)
+            if r.status_code != 200:
+                return None
+            body = r.json()
+        except Exception as exc:  # noqa: BLE001 - a probe answers, it does not raise
+            logger.debug("music assistant %s unreadable: %s", command, exc)
+            return None
+        if isinstance(body, dict) and body.get("error_code"):
+            return None
+        return body.get("result") if isinstance(body, dict) and "result" in body else body
+
+    def _ma_sources(self, url: str, token: str) -> list:
+        from core.music_assistant_client import FILE_SOURCE_DOMAINS
+        providers = self._ma_call(url, token, "providers", provider_type="music") or []
+        return [p for p in providers if isinstance(p, dict) and p.get("domain") in FILE_SOURCE_DOMAINS
+                and p.get("instance_id")]
+
     # ---- video and indexers ----------------------------------------------
 
     def prowlarr(self, cfg: dict) -> dict:
@@ -275,6 +324,8 @@ class Prober:
                 return self._jellyfin_libraries(cfg)
             if server == "navidrome":
                 return self._navidrome_libraries(cfg)
+            if server == "music_assistant":
+                return self._music_assistant_libraries(cfg)
         except Exception:
             return empty
         return empty
@@ -343,6 +394,18 @@ class Prober:
         return {"music": [{"id": str(f.get("id")), "title": str(f.get("name") or ""),
                            "count": None, "locations": []} for f in folders],
                 "movies": [], "tv": []}
+
+    def _music_assistant_libraries(self, cfg: dict) -> dict:
+        """The Local files / SMB sources, as the "libraries" a user picks."""
+        url = self._url(cfg.get("base_url"))
+        token = str(cfg.get("token") or "").strip()
+        out = []
+        for p in self._ma_sources(url, token):
+            folder = self._ma_call(url, token, "config/providers/get_value",
+                                   instance_id=p["instance_id"], key="path")
+            out.append({"id": str(p["instance_id"]), "title": str(p.get("name") or p["instance_id"]),
+                        "count": None, "locations": [str(folder)] if folder else []})
+        return {"music": out, "movies": [], "tv": []}
 
     # ---- what you listen to ---------------------------------------------
 
@@ -413,7 +476,7 @@ class Prober:
         return [name for name, _ in counts.most_common(limit * 2)]
 
 
-SERVICES = ("slskd", "plex", "jellyfin", "navidrome", "prowlarr", "qbittorrent", "sabnzbd",
+SERVICES = ("slskd", "plex", "jellyfin", "navidrome", "music_assistant", "prowlarr", "qbittorrent", "sabnzbd",
             "tmdb", "listenbrainz")
 
 

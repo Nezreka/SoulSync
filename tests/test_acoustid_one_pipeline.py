@@ -5,7 +5,7 @@ must get the same verdict whether it came through the download or through the
 library scan. That was true of the final decision — both called
 ``audio_verification.evaluate`` — and false of everything leading up to it. The
 scan had its own copy of the availability check, the lookup, the confidence
-floor and the alias wiring, and it never enriched title-less recordings from
+floor, the alias wiring, and it never enriched title-less recordings from
 MusicBrainz the way the download did. Five steps of drift around one shared
 conclusion.
 
@@ -19,6 +19,7 @@ and this test walks both ends of it over the same inputs.
 
 from __future__ import annotations
 
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -63,21 +64,45 @@ def _download_verdict(client, title, artist):
     return result, probe.get("_acoustid_decision")
 
 
-def _scan_verdict(monkeypatch, client, title, artist):
-    """Drive the scanner over one catalogue row carrying the same metadata.
+def _scan_verdict(tmp_path, monkeypatch, client, title, artist, index):
+    """Drive the scanner over one catalogue row carrying the same metadata."""
+    from core.library2.schema import ensure_library_v2_schema
 
-    The scan has no verdict column of its own on this branch, so its verdict is
-    read from what it DOES with one: an untagged file becomes 'verified' on a
-    PASS and 'unverified' on a SKIP, a FAIL raises a finding and moves nothing,
-    and a lookup that reached no judgement writes nothing at all.
-    """
-    persisted, findings = [], []
+    db_path = tmp_path / f"one-{index}.db"
+    path = tmp_path / f"track-{index}.flac"
+    path.write_bytes(b"audio")
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
+    conn.execute("INSERT INTO lib2_artists (id, name) VALUES (7, ?)", (artist,))
+    conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) "
+                 "VALUES (1, 7, 'An Album')")
+    conn.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (42, 1, ?)",
+                 (title,))
+    conn.execute(
+        "INSERT INTO lib2_track_files (id, track_id, path, format, is_primary) "
+        "VALUES (1, 42, ?, 'flac', 1)", (str(path),))
+    conn.commit()
+    conn.close()
+
+    class _DB:
+        def _get_connection(self):
+            c = sqlite3.connect(str(db_path))
+            c.row_factory = sqlite3.Row
+            return c
+
+    class _Config:
+        def get(self, key, default=None):
+            return True if key == "features.library_v2" else default
+
+        def set(self, *a, **k):
+            pass
+
+    captured: dict = {}
     context = SimpleNamespace(
-        db=None, transfer_folder="/music",
-        config_manager=SimpleNamespace(get=lambda *a, **k: None,
-                                       set=lambda *a, **k: None),
-        acoustid_client=None,
-        create_finding=lambda **kw: findings.append(kw) or True,
+        db=_DB(), transfer_folder=str(tmp_path), config_manager=_Config(),
+        acoustid_client=None, create_finding=lambda **kw: True, report_change=None,
         report_progress=lambda **kw: None, update_progress=lambda *a, **k: None,
         check_stop=lambda: False, wait_if_paused=lambda: False,
         sleep_or_stop=lambda *a, **k: False,
@@ -85,39 +110,35 @@ def _scan_verdict(monkeypatch, client, title, artist):
 
     job = AcoustIDScannerJob()
     monkeypatch.setattr(job, "_resolve_path", lambda p, _c: p)
-    monkeypatch.setattr(job, "_persist_status",
-                        lambda *a, **kw: persisted.append(a[4]))
-    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _p: {})
-    job._scan_file("/music/track.flac", "42",
-                   {"title": title, "artist": artist, "track_artist": artist,
-                    "album_artist": artist},
-                   client, context, JobResult(), 0.80, 0.70, 0.60)
-
-    if findings:
-        return "fail"
-    if not persisted:
-        return None
-    return {"verified": "pass", "unverified": "skip"}.get(persisted[0], persisted[0])
+    monkeypatch.setattr(
+        job, "_persist_status",
+        lambda *a, **kw: captured.update(acoustid=kw.get("acoustid_status")))
+    tracks = job._load_db_tracks(context)
+    job._scan_file(str(path), "lib2:42", tracks["lib2:42"], client, context,
+                   JobResult(), 0.80, 0.70, 0.60)
+    return captured.get("acoustid")
 
 
 @pytest.mark.parametrize(
     "label,title,artist,found_title,found_artist,score",
     CASES, ids=[c[0] for c in CASES])
 def test_both_paths_reach_the_same_verdict(
-    monkeypatch, label, title, artist, found_title, found_artist, score,
+    tmp_path, monkeypatch, label, title, artist, found_title, found_artist, score,
 ):
     monkeypatch.setattr(
         "core.acoustid_verification._resolve_expected_artist_aliases", lambda _n: [])
     client = _client(found_title, found_artist, score)
 
     download_result, download_outcome = _download_verdict(client, title, artist)
-    scan_status = _scan_verdict(monkeypatch, client, title, artist)
+    scan_status = _scan_verdict(
+        tmp_path, monkeypatch, client, title, artist, CASES.index(
+            (label, title, artist, found_title, found_artist, score)))
 
     if download_outcome is None:
-        # The verifier never reached a judgement — the scan must not invent
-        # one, and above all must not write "unverified" off the back of it.
+        # The verifier never reached a judgement — the scan must record the
+        # same non-claim rather than inventing one.
         assert download_result == VerificationResult.SKIP
-        assert scan_status is None
+        assert scan_status == "skip"
     else:
         assert scan_status == download_outcome.decision.value, (
             f"{label}: download said {download_outcome.decision.value}, "
@@ -127,8 +148,8 @@ def test_both_paths_reach_the_same_verdict(
 def test_the_scanner_does_not_carry_its_own_verification_logic():
     """A structural guard, because the drift came back the moment the two
     halves could evolve apart. The scan may not call the decision core, resolve
-    aliases, gate on the fingerprint score or enrich recordings itself — all of
-    that belongs to the one entry point it now shares with the download."""
+    aliases, or gate on the fingerprint score itself — all of that belongs to
+    the one entry point it now shares with the download."""
     import inspect
 
     from core.repair_jobs import acoustid_scanner
@@ -148,10 +169,9 @@ def test_the_scanner_does_not_carry_its_own_verification_logic():
 
 
 def test_an_unusable_client_stops_the_run_instead_of_flagging_the_library():
-    """`verify_audio_file` answers SKIP when AcoustID is not usable, and a SKIP
-    on an untagged file is 'unverified'. Without a check up front, a missing API
-    key would walk every file in the library into the review queue and report a
-    clean run."""
+    """`verify_audio_file` answers SKIP when AcoustID is not usable, and a scan
+    persists a SKIP as a completed check. Without a check up front, a missing
+    API key would stamp every row in the library and report a clean run."""
     job = AcoustIDScannerJob()
     scanned = []
     context = SimpleNamespace(

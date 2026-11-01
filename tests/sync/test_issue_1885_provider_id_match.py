@@ -333,6 +333,11 @@ def _db_only_fake(provider_row):
     db.check_track_exists.return_value = (None, 0.0)  # fuzzy fails: Cyrillic artist
     db.get_tracks_by_spotify_id.return_value = [provider_row] if provider_row else []
     db.get_server_match_rejections_strict.return_value = set()
+    # lib2 port: the fork materializes a server id through
+    # get_track_by_server_id; the tests below stub get_track_by_id. A manual
+    # match's stored id has no catalogue translation here, so it is the server's.
+    db.get_track_by_server_id.side_effect = lambda i, *_a, **_k: db.get_track_by_id(i)
+    db.server_track_id.return_value = None
     return db
 
 
@@ -512,6 +517,11 @@ def _media_fake(provider_row):
     db.check_track_exists.return_value = (None, 0.0)  # fuzzy fails: Cyrillic artist
     db.get_tracks_by_spotify_id.return_value = [provider_row] if provider_row else []
     db.get_server_match_rejections_strict.return_value = set()
+    # lib2 port: the fork materializes a server id through
+    # get_track_by_server_id; the tests below stub get_track_by_id. A manual
+    # match's stored id has no catalogue translation here, so it is the server's.
+    db.get_track_by_server_id.side_effect = lambda i, *_a, **_k: db.get_track_by_id(i)
+    db.server_track_id.return_value = None
     return db
 
 
@@ -801,16 +811,21 @@ def real_db(tmp_path):
     return MusicDatabase(str(tmp_path / "music.db"))
 
 
-def _seed_library_track(db, *, spotify_id="sp1885", server_source="soulsync"):
+def _seed_lib2(db, *, artist, title, spotify_id, duration, server, sid, path,
+               album="Albom"):
+    # lib2 port: the catalogue rows the scan leaves, addressed by the server's id
+    from tests.support.catalogue_seed import seed_library_track
     with db._get_connection() as conn:
-        conn.execute("PRAGMA foreign_keys=OFF")
-        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Кириллица')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'Albom')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, duration, file_path,"
-            " server_source, spotify_track_id)"
-            " VALUES ('lib-1', 1, 1, 'Pesnya', 200800, '/m/p.flac', ?, ?)",
-            (server_source, spotify_id))
+        track_id = seed_library_track(conn, artist=artist, album=album, title=title,
+                                      track_server_id=sid, server_source=server,
+                                      duration=duration, file_path=path)
+        conn.execute("UPDATE lib2_tracks SET spotify_id = ? WHERE id = ?", (spotify_id, track_id))
+        conn.commit()
+
+
+def _seed_library_track(db, *, spotify_id="sp1885", server_source="soulsync"):
+    _seed_lib2(db, artist="Кириллица", title="Pesnya", spotify_id=spotify_id,
+               duration=200800, server=server_source, sid="lib-1", path="/m/p.flac")
 
 
 def test_get_track_by_spotify_id_finds_cyrillic_filed_track(real_db):
@@ -890,13 +905,10 @@ def test_db_only_matcher_end_to_end_against_a_real_database(real_db):
 
 
 def test_duplicate_spotify_id_rows_all_surface_in_id_order(real_db):
+    # lib2 port: the order is the catalogue's, so the poison-stamped row goes in first
+    _seed_lib2(real_db, artist="Кириллица", title="Wrong Song", spotify_id="sp1885",
+               duration=200800, server="soulsync", sid="lib-0", path="/m/p0.flac")
     _seed_library_track(real_db)
-    with real_db._get_connection() as conn:
-        conn.execute("PRAGMA foreign_keys=OFF")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, duration, file_path,"
-            " server_source, spotify_track_id)"
-            " VALUES ('lib-0', 1, 1, 'Wrong Song', 200800, '/m/p0.flac', 'soulsync', 'sp1885')")
     rows = real_db.get_tracks_by_spotify_id("sp1885", server_source="soulsync")
     assert [r.id for r in rows] == ["lib-0", "lib-1"]
     assert all(r.spotify_track_id == "sp1885" for r in rows)
@@ -939,16 +951,8 @@ def test_track_artist_counts_on_a_compilation_row():
 
 
 def _seed(db, *, artist, title, spotify_id, duration, server="jellyfin", tid="lib-1"):
-    with db._get_connection() as conn:
-        conn.execute("PRAGMA foreign_keys=OFF")
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-                     (tid, artist, server))
-        conn.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, 'Album', ?)",
-                     (tid, tid, server))
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, duration, server_source,"
-            " spotify_track_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (tid, tid, tid, title, duration, server, spotify_id))
+    _seed_lib2(db, artist=artist, title=title, spotify_id=spotify_id, duration=duration,
+               server=server, sid=tid, path=f"/m/{tid}.flac", album="Album")
 
 
 def _run_media_real(real_db, track):
@@ -980,3 +984,17 @@ def test_wrong_stamped_id_never_pins_another_bands_song(real_db):
     track = _track(name="Intro", artists=["The xx"], id="sp-intro", duration_ms=120_000)
     assert _run_media_real(real_db, track) == (None, 0.0)
 
+
+def test_the_file_path_is_the_callers_librarys_copy(real_db, monkeypatch):
+    """lib2 port: with own libraries a track can have a file in two of them;
+    the row's file is the one in the library asking."""
+    _seed_library_track(real_db)
+    with real_db._get_connection() as conn:
+        conn.execute("UPDATE lib2_track_files SET owner_profile_id = 7")
+        conn.execute("INSERT INTO lib2_track_files (track_id, path, is_primary, owner_profile_id) "
+                      "SELECT track_id, '/other/p.flac', 1, 3 FROM lib2_track_files")
+        conn.commit()
+    monkeypatch.setattr("core.library2.sql_util.ambient_scope", lambda: 7)
+    monkeypatch.setattr("core.library2.sql_util._resolve_scope", lambda scope: 7)
+    row = real_db.get_track_by_spotify_id("sp1885", server_source="soulsync")
+    assert row is not None and row.file_path == "/m/p.flac"

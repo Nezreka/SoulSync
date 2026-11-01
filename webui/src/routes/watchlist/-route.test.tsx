@@ -153,10 +153,16 @@ function stubFetch(options: StubOptions = {}) {
       if (url.includes('/api/watchlist/reset-to-defaults')) {
         return createResponse({ success: true, reset: customCount });
       }
-      if (url.includes('/api/library/albums/9/tracks')) {
+      // the panel plays a Library v2 album through the library page's queue rows
+      if (url.includes('/api/library/v2/albums/9')) {
         return createResponse({
           success: true,
-          tracks: [{ id: 't1', title: 'Minipops 67', file_path: '/m/syro/01.flac' }],
+          album: {
+            id: 9,
+            title: 'Syro',
+            image_url: null,
+            tracks: [{ id: 1, title: 'Minipops 67', file: { path: '/m/syro/01.flac' } }],
+          },
         });
       }
       if (url.includes('/link-provider')) {
@@ -1215,6 +1221,24 @@ describe('watchlist route', () => {
 
     await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());
     expect(calls.some((url) => url.includes('/api/watchlist/remove'))).toBe(false);
+  });
+
+  it('opens an artist the library holds there: the name, and View Discography in its discovery view', async () => {
+    stubFetch({
+      library: { artist_id: 77, album_count: 4, track_count: 52, recent_albums: [] },
+    });
+    const { router } = renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    // the library part arrives with the panel's payload
+    await screen.findByText('4 albums · 52 tracks');
+    fireEvent.click(screen.getByRole('button', { name: 'View Discography' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/library'));
+    expect(router.state.location.search).toMatchObject({ artist: 77, releases: 'all' });
+
+    await act(() => router.navigate({ href: '/watchlist?detailId=sp-aphex' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Aphex Twin' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/library'));
+    expect(router.state.location.search).toMatchObject({ artist: 77 });
   });
 
   it('disables View Discography for an artist with no provider ids', async () => {

@@ -159,14 +159,22 @@ describe('issue fix hand-offs (admin)', () => {
     expect(peekArtistEdit('55')).toMatchObject({ artistId: '55', albumId: '101' });
   });
 
-  it('find duplicates lands on the duplicate detector, searched', async () => {
+  it('find duplicates sends the admin to the artist, where Library v2 keeps them', async () => {
+    // this branch has no Duplicate Detector job: the pairs live in the
+    // artist's Manage Tracks dialog, so there is no findings focus to hand over
     stubFetch({
       category: 'duplicate_tracks',
       fix_action: { id: 'find_duplicates', label: 'Find duplicates' },
     });
     renderIssuesRoute(['/issues?issueId=1']);
     fireEvent.click(await screen.findByRole('button', { name: 'Find duplicates' }));
-    expect(takeFindingsFocus()).toEqual({ jobId: 'duplicate_detector', query: 'Album 1' });
+    expect(takeFindingsFocus()).toBeNull();
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith(
+        expect.stringContaining('Manage Tracks'),
+        'info',
+      ),
+    );
   });
 });
 

@@ -115,7 +115,8 @@ def list_playlists(server: str, client: Any) -> List[Any]:
         if server_obj is None:
             return []
         return [SimpleNamespace(id=str(pl.ratingKey), title=pl.title, owner=None,
-                                leaf_count=getattr(pl, 'leafCount', 0) or 0)
+                                leaf_count=getattr(pl, 'leafCount', 0) or 0,
+                                readonly=bool(getattr(pl, 'smart', False)))
                 for pl in server_obj.playlists()
                 if getattr(pl, 'playlistType', None) == 'audio']
     return list(client.get_all_playlists() or [])

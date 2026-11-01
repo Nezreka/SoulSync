@@ -103,7 +103,11 @@ def test_another_profiles_wishlist_does_not_count(tmp_path):
     with db._get_connection() as conn:
         has_profile = "profile_id" in {r[1] for r in conn.execute("PRAGMA table_info(wishlist_tracks)")}
     assert has_profile
+    pid = _playlist(db)
+    _track(db, pid, 1, 'spX', {'discovered': True, 'matched_data': {'id': 'dzX'}})
     _wish(db, "dzX", profile_id=2)
+    assert db.get_all_mirrored_playlist_status_counts(profile_id=1)[pid]['wishlisted'] == 0
+    assert db.get_mirrored_playlist_status_counts(pid)['wishlisted'] == 0
     assert db.get_wishlisted_ids(["dzX"], profile_id=1) == set()
     assert db.get_wishlisted_ids(["dzX"], profile_id=2) == {"dzX"}
     assert db.get_wishlisted_ids([]) == set()

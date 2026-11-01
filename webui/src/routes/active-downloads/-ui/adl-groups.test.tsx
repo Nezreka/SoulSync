@@ -147,6 +147,34 @@ describe('AdlGroup', () => {
     expect(done.container.querySelector('.dlc-group-rows')).toBeNull();
   });
 
+  it('offers Remove from list on a failed row only once its batch has ended', () => {
+    const failed = row({ task_id: 'f1', status: 'failed', error: 'No sources' });
+    const onRemoveRow = vi.fn();
+    const live = render(
+      <AdlGroup
+        {...groupProps({ rows: [failed], allBatchRows: [failed], bucketed: false, onRemoveRow })}
+      />,
+    );
+    // the running batch keeps the row: nothing to remove it with
+    expect(live.container.querySelector('[data-task-id="f1"] .dlc-more')).toBeNull();
+    cleanup();
+    const done = render(
+      <AdlGroup
+        {...groupProps({
+          batch: batch({ phase: 'complete', active: 0, queued: 0 }),
+          rows: [failed],
+          allBatchRows: [failed],
+          bucketed: false,
+          onRemoveRow,
+        })}
+      />,
+    );
+    fireEvent.click(done.container.querySelector('.dlc-ghead') as HTMLElement);
+    fireEvent.click(done.container.querySelector('[data-task-id="f1"] .dlc-more') as HTMLElement);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove from list' }));
+    expect(onRemoveRow).toHaveBeenCalledTimes(1);
+  });
+
   it('toggles on header click and via keyboard', () => {
     const { container } = render(<AdlGroup {...groupProps()} />);
     const header = container.querySelector('.dlc-ghead') as HTMLElement;

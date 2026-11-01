@@ -106,7 +106,7 @@ const HELPER_CONTENT = {
         tips: [
             'Filter by status: Active, Queued, Completed, Failed',
             'Badge on the nav button shows active download count from any page',
-            'Clear Completed button removes finished items from the list'
+            'The ⋯ menu clears finished rows, failed rows, or everything (only Clear everything also empties the Review queue); a failed row\'s ⋯ has Remove from list'
         ]
     },
     '.nav-button[data-page="playlist-explorer"]': {
@@ -626,11 +626,11 @@ const HELPER_CONTENT = {
 
     '[id^="add-to-wishlist-btn"]': {
         title: 'Add to Wishlist',
-        description: 'Adds all missing tracks from this batch to your Wishlist for later download. Useful when you want to queue tracks but not download them right now.',
+        description: 'Adds the selected tracks to your Wishlist and starts downloading them right away. A track that is not found stays wanted and is searched again on the next wishlist run.',
         tips: [
-            'Only missing tracks are added (already-owned tracks are skipped)',
-            'Tracks appear in the Wishlist modal under the appropriate category',
-            'The Wishlist auto-processes on a schedule via the Automations system'
+            'The Library Status column shows what you already have as soon as the dialog opens',
+            'Wishlisted tracks appear in the Wishlist and under Wanted in the Library',
+            'Begin Analysis downloads once without wishlisting, with Force Download and Skip AcoustID'
         ]
     },
     '.download-control-btn.primary': {
@@ -1373,10 +1373,6 @@ const HELPER_CONTENT = {
         title: 'Search Library',
         description: 'Search your library by artist name. Results filter in real-time as you type.',
     },
-    '#watchlist-filter': {
-        title: 'Watchlist Filter',
-        description: 'Filter artists by watchlist status: All shows everyone, Watched shows only artists you follow, Unwatched shows artists not on your watchlist.',
-    },
     '#alphabet-selector': {
         title: 'Alphabet Jump',
         description: 'Jump to artists starting with a specific letter. Click "All" to reset. "#" shows artists starting with numbers.',
@@ -2011,7 +2007,7 @@ const HELPER_CONTENT = {
     },
     '#adl-actions': {
         title: 'History and Actions',
-        description: 'History opens every download SoulSync has done. The ⋯ menu holds Clear finished (tidies the list, never deletes files), Retry failed on the video side, and Cancel all.',
+        description: 'History opens every download SoulSync has done. The ⋯ menu holds Clear finished (tidies the list, never deletes files; on the video side it takes completed rows only), Retry failed, Clear failed and Clear everything on the video side (import failures stay for Manual import), and Cancel all. On the video side the ⋯ on a failed row also has Remove from list.',
     },
 
     // ─── PLAYLIST EXPLORER PAGE ──────────────────────────────────────
@@ -2374,8 +2370,7 @@ const HELPER_TOURS = {
 
             // Controls
             { page: 'library', selector: '#library-search-input', title: 'Search Artists', description: 'Type to filter your library by artist name. Results update instantly as you type.' },
-            { page: 'library', selector: '#watchlist-filter', title: 'Watchlist Filter', description: 'Filter by watchlist status: All, Watched (artists you follow for new releases), or Unwatched. The "Watch All Unwatched" button adds every remaining artist to your watchlist in one click.' },
-            { page: 'library', selector: '#alphabet-selector', title: 'Alphabet Jump', description: 'Click any letter to jump directly to artists starting with that letter. Great for navigating large libraries.' },
+            { page: 'library', selector: '#library-view-toggle', title: 'Library View', description: 'Switch between the visual card grid and the detailed table view.' },
 
             // Grid
             { page: 'library', selector: '#library-artists-grid', title: 'Artist Grid', description: 'Your artists as cards with photos, track counts, and service badges (Spotify, MusicBrainz, etc.). Click any card to open their artist detail page with full discography.' },
@@ -3403,7 +3398,7 @@ function _guessPageFromSelector(selector) {
         'discover':    ['discover-', 'spotify-library', 'recent-releases', 'seasonal', 'release-radar', 'discovery-weekly', 'build-playlist', 'listenbrainz', 'decade-tabs', 'genre-tabs', 'daily-mixes', 'personalized-'],
         'artists':     ['artists-search', 'artists-hero', 'artist-detail', 'similar-artists'],
         'automations': ['automations-', 'auto-', 'builder-'],
-        'library':     ['library-', 'alphabet-selector', 'watchlist-filter'],
+        'library':     ['library-', 'alphabet-selector'],
         // '#stats-' not 'stats-': the bare prefix also matched
         // #listening-stats-enabled, which is a Settings control, so its helper
         // search result navigated to the Stats page and found nothing.

@@ -26,7 +26,9 @@ import { takeSetupPlaylistLink } from '@/features/onboarding/handoff';
 import type { MirroredMatch, ServerPlaylist } from '../-sync.server';
 import type { SyncTabId } from '../-sync.shell';
 
+import { recordServerLink } from '../-sync.api';
 import { metadataSourceLabel } from '../-sync.modal-core';
+import { locateMirrorOnServer } from '../-sync.server';
 import { normalizeSyncTab } from '../-sync.shell';
 import { DETECTED_SOURCE_TAB_IDS, detectPlaylistUrl, isDetected } from '../-sync.url-detect';
 import { useAutoSync, useAutoSyncActions } from '../-sync.use-autosync';
@@ -41,6 +43,7 @@ import { BeatportTab } from './beatport-tab';
 import { ImportFileTab } from './import-file-tab';
 import { LastfmSyncTab } from './lastfm-sync-tab';
 import { ListenBrainzSyncTab } from './lb-sync-tab';
+import { MirrorMatchEditor } from './mirror-match-editor';
 import { MirroredTab } from './mirrored-tab';
 import { ServerCompareEditor } from './server-compare-editor';
 import { ServerPlaylistList } from './server-playlist-list';
@@ -73,6 +76,8 @@ export function SyncPage() {
   const [activityOpen, setActivityOpen] = useState(false);
   const [activityTab, setActivityTab] = useState<ActivityTab>('syncs');
   const [compare, setCompare] = useState<CompareView | null>(null);
+  /** a mirror not on the server yet: its pre-sync match editor (#1958) */
+  const [presync, setPresync] = useState<MirroredMatch | null>(null);
 
   /**
    * The shell's tab opener, filled on its mount. Only the import tab needs it,
@@ -151,6 +156,37 @@ export function SyncPage() {
     // can ask for it. The fallback covers a future where it is not.
     if (openMirroredDetail.current) openMirroredDetail.current(playlistId);
     else void window.openMirroredPlaylistModal?.(playlistId);
+  }, []);
+  /**
+   * The server editor for a mirror, from wherever the mirror shows: its window
+   * on Mirrored, or its card on the source tab it came from. Same editor the
+   * Server Playlists tab opens, already paired with this mirror, so a swap
+   * there is saved as this mirror's match and the next sync keeps it.
+   */
+  const openServerEditor = useCallback(async (mirrorId: number, name?: string) => {
+    const found = await locateMirrorOnServer(mirrorId);
+    if (found.status === 'error') {
+      window.showToast?.(found.message, 'error');
+      return false;
+    }
+    if (found.status === 'not-synced') {
+      // nothing on the server to edit yet, but which library track each song
+      // will sync as can be checked and changed now (#1958)
+      if (!found.mirror) {
+        const title = name || 'This playlist';
+        window.showToast?.(`${title} isn't on your server yet`, 'info');
+        return false;
+      }
+      setCompare(null);
+      setPresync(found.mirror);
+      openTab.current?.('server');
+      return true;
+    }
+    if (found.serverType) recordServerLink(found.mirror.id, found.playlist.id, found.serverType);
+    setPresync(null);
+    setCompare({ playlist: found.playlist, mirrored: found.mirror });
+    openTab.current?.('server');
+    return true;
   }, []);
   // A SoulSync chart opened from the dashboard or Discover lands here with its
   // (already matched) playlist to show (features/metasync/charts.ts). The
@@ -237,6 +273,7 @@ export function SyncPage() {
         openTab.current?.('mirrored');
         page.reloadMirrored();
       },
+      openEditor: openServerEditor,
       landMine: (playlistId, name) => {
         openTab.current?.('my-playlists');
         page.reloadMirrored();
@@ -247,7 +284,7 @@ export function SyncPage() {
         );
       },
     }),
-    [page, showMirroredDetail, showMineDetail],
+    [page, showMirroredDetail, showMineDetail, openServerEditor],
   );
 
   const onImported = useCallback(() => {
@@ -257,15 +294,23 @@ export function SyncPage() {
   }, [page]);
 
   const panels: Partial<Record<SyncTabId, React.ReactNode>> = {
-    server: compare ? (
+    server: presync ? (
+      <MirrorMatchEditor key={presync.id} mirrored={presync} onBack={() => setPresync(null)} />
+    ) : compare ? (
       <ServerCompareEditor
+        // it reads its playlist once; a different one opened from elsewhere is a new editor
+        key={compare.playlist.id}
         playlist={compare.playlist}
         mirrored={compare.mirrored}
         onBack={() => setCompare(null)}
+        onAdopted={(mirrored) => setCompare({ playlist: compare.playlist, mirrored })}
       />
     ) : (
       <ServerPlaylistList
-        onOpenCompare={(playlist, mirrored) => setCompare({ playlist, mirrored })}
+        onOpenCompare={(playlist, mirrored) => {
+          setPresync(null);
+          setCompare({ playlist, mirrored });
+        }}
       />
     ),
     // the source tabs find playlists and import them (use-importer); the
@@ -303,6 +348,7 @@ export function SyncPage() {
         pipeline={page.pipeline}
         registerReload={page.registerMirroredReload}
         registerOpenDetail={registerOpenDetail}
+        onOpenServerEditor={openServerEditor}
       />
     ),
     // the same tab over the playlists made here: one vertical, one pipeline
@@ -325,6 +371,7 @@ export function SyncPage() {
         sourceName={sourceName}
         pipeline={page.pipeline}
         registerReload={page.registerMirroredReload}
+        onOpenServerEditor={openServerEditor}
       />
     ),
   };

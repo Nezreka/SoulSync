@@ -751,11 +751,15 @@
             items.push(chip('vd-rt--tvmaze', '<span class="vd-rt-tag">TVmaze</span>' + (Math.round(d.tvmaze_rating * 10) / 10),
                 'https://www.tvmaze.com/search?q=' + q1, 'TVmaze'));
         }
-        // AniList only scores anime; older title-search matches gave Arrow and
-        // The Bear a stranger's score, so it shows on animation only
-        if (d.anilist_score && (d.genres || []).indexOf('Animation') >= 0) {
-            items.push(chip('vd-rt--anilist', '<span class="vd-rt-tag">AniList</span>' + d.anilist_score + '%',
-                'https://anilist.co/search/anime?search=' + q1, 'AniList'));
+        // AniList only scores anime. a title linked through the anime id map
+        // has its own entry; an older title-search score (Arrow and The Bear
+        // once got a stranger's) still shows on animation only
+        var anMain = d.anime && d.anime.main;
+        var anScore = (anMain && anMain.score) ||
+            ((d.genres || []).indexOf('Animation') >= 0 ? d.anilist_score : null);
+        if (anScore) {
+            items.push(chip('vd-rt--anilist', '<span class="vd-rt-tag">AniList</span>' + anScore + '%',
+                (anMain && anMain.site_url) || ('https://anilist.co/search/anime?search=' + q1), 'AniList'));
         }
         host.innerHTML = items.join('');
         host.hidden = !items.length;
@@ -1526,10 +1530,15 @@
         var gb = n / 1073741824;
         return gb >= 1 ? (Math.round(gb * 10) / 10) + ' GB' : Math.round(n / 1048576) + ' MB';
     }
+    // a version's audio languages as 'JA+EN' (the $audiolangs naming shape)
+    function audioLangs(v) {
+        return String(v.audio_languages || '').split(',').map(function (c) { return c.trim().toUpperCase(); })
+            .filter(Boolean).join('+');
+    }
     function fileSummary(v) {
         return [mediaRes(v.resolution), v.dynamic_range || '', prettyCodec(v.video_codec),
             v.audio_codec ? String(v.audio_codec).toUpperCase() : '',
-            v.atmos ? 'Atmos' : channelsLabel(v.audio_channels), fmtBytes(v.size_bytes),
+            v.atmos ? 'Atmos' : channelsLabel(v.audio_channels), audioLangs(v), fmtBytes(v.size_bytes),
             v.release_source ? prettySource(v.release_source) : ''].filter(Boolean).join(' · ');
     }
 
@@ -1934,6 +1943,42 @@
     // wall the eye skipped entirely.
     var KW_VISIBLE = 10;
 
+    // ── the anime layer (AniList, linked through the anime id map) ──────────
+    function airingIn(epochSec) {
+        var ms = Number(epochSec) * 1000 - Date.now();
+        if (!(ms > 0)) return '';
+        var h = Math.round(ms / 3600000);
+        if (h < 1) return 'within the hour';
+        if (h < 48) return 'in ' + h + ' hour' + (h === 1 ? '' : 's');
+        return 'in ' + Math.round(h / 24) + ' days';
+    }
+    function animeEntryLabel(e) {
+        if (e.format === 'MOVIE') return 'Movie';
+        if (e.tvdb_season === 0) return 'Specials';
+        if (e.tvdb_season) return 'Season ' + e.tvdb_season;
+        return e.title_romaji || 'AniList';
+    }
+    // About rows for an anime: its other names, the studio that animated it,
+    // the next episode's countdown, and each season's AniList page
+    function animeFactRows(anime, title) {
+        if (!anime || !anime.main) return [];
+        var m = anime.main, rows = [];
+        var names = [m.title_romaji, m.title_native].filter(function (n) {
+            return n && String(n).toLowerCase() !== String(title || '').toLowerCase();
+        });
+        if (names.length) rows.push(['Also known as', names.join(' · ')]);
+        if (m.studios && m.studios.length) rows.push(['Animation', m.studios.join(', ')]);
+        var airing = (anime.entries || []).filter(function (e) { return e.next_episode && e.next_airing_at; })[0];
+        var when = airing && airingIn(airing.next_airing_at);
+        if (when) rows.push(['Next episode', 'Episode ' + airing.next_episode + ', ' + when]);
+        var links = (anime.entries || []).filter(function (e) { return e.site_url; }).map(function (e) {
+            return '<a class="vd-anilist-link" href="' + esc(e.site_url) + '" target="_blank" rel="noopener noreferrer">' +
+                esc(animeEntryLabel(e)) + (e.score ? ' <span class="vd-anilist-score">' + e.score + '%</span>' : '') + '</a>';
+        });
+        if (links.length) rows.push(['AniList', links.join(''), 'html']);
+        return rows;
+    }
+
     function renderFacts(facts, keywords, studios) {
         var sec = q('[data-vd-facts-section]'), host = q('[data-vd-facts]'), kwh = q('[data-vd-keywords]');
         facts = facts || {}; keywords = keywords || []; studios = studios || [];
@@ -1945,12 +1990,13 @@
         if (facts.revenue) rows.push(['Box office', '$' + fmtMoney(facts.revenue)]);
         if (facts.original_language) rows.push(['Language', langName(facts.original_language)]);
         if (facts.countries && facts.countries.length) rows.push(['Country', facts.countries.join(', ')]);
+        animeFactRows(data && data.anime, data && data.title).forEach(function (r) { rows.push(r); });
         // where subtitles EXIST (OpenSubtitles backfill) — one fact, not a chip wall
         var subLangs = subLangOrder((data && data.subtitle_langs) || [], (prefs && prefs.subtitle_langs) || ['en']);
         if (subLangs.length) rows.push(['Subtitles exist in', subLangs, 'subs']);
         if (host) {
             host.innerHTML = rows.length ? '<div class="vd-detail-grid">' + rows.map(function (r) {
-                var v = r[2] === 'subs' ? subLangsHTML(r[1]) : esc(r[1]);
+                var v = r[2] === 'subs' ? subLangsHTML(r[1]) : r[2] === 'html' ? r[1] : esc(r[1]);
                 return '<div class="vd-detail-row' + (r[2] === 'subs' ? ' vd-detail-row--subs' : '') + '"><span class="vd-detail-k">' + esc(r[0]) +
                     '</span><span class="vd-detail-v">' + v + '</span></div>';
             }).join('') + '</div>' : '';
@@ -4513,7 +4559,8 @@
     function _openManualSearch(scope, en) {
         if (!window.VideoDownload || !window.VideoDownload.manualSearch || !data) return;
         VideoDownload.manualSearch({ title: data.title, scope: scope, season: selectedSeason, episode: en,
-            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year, poster: _showPoster() });
+            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source,
+            tmdbId: (data.source === 'tmdb' ? data.id : (data.tmdb_id || null)), year: data.year, poster: _showPoster() });
     }
     function manualSearchEpisode(btn) { _openManualSearch('episode', parseInt(btn.getAttribute('data-vd-ep-search'), 10)); }
     function manualSearchSeason() { _openManualSearch('season'); }

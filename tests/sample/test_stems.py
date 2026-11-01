@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 from flask import Blueprint, Flask
+from tests.lib2_seed import file_track
 
 SR = 22050
 
@@ -114,11 +115,9 @@ def client(tmp_path, monkeypatch):
     db = mdb.get_database()
     conn = db._get_connection()
     try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Stems Artist')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'Stems Album')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (1, 1, 1, 'Stems Track', ?)",
-            (str(wav),),
+        conn.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Stems Artist')")
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'Stems Album')")
+        file_track(conn, 1, 1, 'Stems Track', str(wav),
         )
         conn.commit()
     finally:

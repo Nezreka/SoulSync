@@ -88,7 +88,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 59   # v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 61   # v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -164,12 +164,19 @@ _BACKFILL = {
         "show": ("shows", "tvmaze_status", "tvmaze_attempted",
                  "(imdb_id IS NOT NULL OR tvdb_id IS NOT NULL)"),
     },
-    "anilist": {  # anime-only, matched by title (shows only). only animation:
-        # a title search scored Arrow, Angel and The Bear off same-named anime
+    "anilist": {  # anime only (v61): a title the anime id map knows by id, or
+        # an animated show for the strict title-search fallback. never anything
+        # else: a loose title search scored Arrow, Angel and The Bear off
+        # same-named anime
         "show": ("shows", "anilist_status", "anilist_attempted",
-                 "title IS NOT NULL AND title <> '' AND EXISTS (SELECT 1 FROM show_genres sg "
+                 "(EXISTS (SELECT 1 FROM anime_id_map a WHERE a.tvdb_id = shows.tvdb_id "
+                 "AND a.format <> 'MOVIE') "
+                 "OR EXISTS (SELECT 1 FROM anime_id_map a WHERE a.tmdb_tv = shows.tmdb_id) "
+                 "OR (title IS NOT NULL AND title <> '' AND EXISTS (SELECT 1 FROM show_genres sg "
                  "JOIN genres g ON g.id = sg.genre_id WHERE sg.show_id = shows.id "
-                 "AND g.name = 'Animation')"),
+                 "AND g.name = 'Animation')))"),
+        "movie": ("movies", "anilist_status", "anilist_attempted",
+                  "EXISTS (SELECT 1 FROM anime_id_map a WHERE a.tmdb_movie = movies.tmdb_id)"),
     },
     "wikidata": {  # official website lookup by imdb id (movies + shows)
         "movie": ("movies", "wikidata_status", "wikidata_attempted", "imdb_id IS NOT NULL"),
@@ -212,6 +219,16 @@ _COLUMN_MIGRATIONS = [
     ("media_files", "audio_channels", "INTEGER"),
     ("media_files", "dynamic_range", "TEXT"),
     ("media_files", "atmos", "INTEGER"),
+    # v60: the languages in the file, as two-letter codes 'ja,en' (audio
+    # tracks) and its embedded subtitle tracks. NULL = not looked at yet,
+    # '' = looked at, nothing tagged. a server scan rewrites the rows, so
+    # _set_media_file carries a probed value over for the same file.
+    ("media_files", "audio_languages", "TEXT"),
+    ("media_files", "subtitle_languages", "TEXT"),
+    # v61: anime movies get the anilist backfill too (shows had it already)
+    ("movies", "anilist_status", "TEXT"),
+    ("movies", "anilist_attempted", "TEXT"),
+    ("movies", "anilist_score", "INTEGER"),
     ("episodes", "play_count", "INTEGER"),
     ("episodes", "last_viewed_at", "TEXT"),
     ("episodes", "view_offset_ms", "INTEGER"),
@@ -856,6 +873,15 @@ class VideoDatabase:
         """One-time data fixes, gated on the PRAGMA user_version the DB carried
         BEFORE this boot (fresh DBs start at 0 with empty tables, so every step
         is a no-op there)."""
+        if prev_version < 61:
+            # v61: anilist links anime by id through the anime id map now, so it
+            # only ever touches anime. it was off by default only because the
+            # old title search could score a live-action show: on for everyone
+            # once, and every show looked at again by id (the queue only picks
+            # titles the map knows, or animated ones for the strict fallback).
+            conn.execute("INSERT INTO video_settings (key, value) VALUES ('anilist_enabled', '1') "
+                         "ON CONFLICT(key) DO UPDATE SET value = '1'")
+            conn.execute("UPDATE shows SET anilist_status = NULL, anilist_attempted = NULL")
         if prev_version < 41:
             # v41 heal: the details backfill used to swallow failed TMDB calls
             # (429/5xx/timeout) into empty metadata and still mark
@@ -1194,6 +1220,201 @@ class VideoDatabase:
             conn.commit()
         finally:
             conn.close()
+
+    # ── the anime layer (AniList) ────────────────────────────────────────────
+    _ANIME_MAP_COLS = ("anilist_id", "mal_id", "anidb_id", "format", "tvdb_id", "tvdb_season",
+                       "tvdb_offset", "tmdb_tv", "tmdb_season", "tmdb_offset", "tmdb_movie",
+                       "imdb_id")
+
+    def anime_map_count(self) -> int:
+        conn = self._get_connection()
+        try:
+            return int(conn.execute("SELECT COUNT(*) FROM anime_id_map").fetchone()[0])
+        except sqlite3.Error:
+            return 0
+        finally:
+            conn.close()
+
+    def replace_anime_map(self, rows) -> None:
+        """swap the whole id map in one transaction (a fetch is all or nothing)"""
+        cols = self._ANIME_MAP_COLS
+        conn = self._get_connection()
+        try:
+            conn.execute("DELETE FROM anime_id_map")
+            conn.executemany(
+                f"INSERT OR REPLACE INTO anime_id_map ({', '.join(cols)}) "
+                f"VALUES ({', '.join('?' for _ in cols)})",
+                [tuple(r.get(c) for c in cols) for r in rows])
+            conn.commit()
+        finally:
+            conn.close()
+
+    def anime_map_entries(self, kind: str, *, tmdb_id=None, tvdb_id=None, imdb_id=None) -> list:
+        """the AniList entries the id map gives a library title, season order.
+        a show by its tvdb id (the map's own numbering), else its tmdb tv id;
+        a movie by its tmdb id, else its imdb id."""
+        conn = self._get_connection()
+        try:
+            if kind == "movie":
+                where, args = [], []
+                if tmdb_id:
+                    where.append("tmdb_movie = ?")
+                    args.append(int(tmdb_id))
+                if imdb_id:
+                    where.append("(imdb_id = ? AND format = 'MOVIE')")
+                    args.append(str(imdb_id))
+                if not where:
+                    return []
+                sql = f"SELECT * FROM anime_id_map WHERE {' OR '.join(where)} ORDER BY anilist_id"
+            else:
+                if tvdb_id:
+                    sql, args = ("SELECT * FROM anime_id_map WHERE tvdb_id = ? AND format <> 'MOVIE' "
+                                 "ORDER BY COALESCE(tvdb_season, 999), tvdb_offset", [int(tvdb_id)])
+                elif tmdb_id:
+                    sql, args = ("SELECT * FROM anime_id_map WHERE tmdb_tv = ? "
+                                 "ORDER BY COALESCE(tmdb_season, 999), tmdb_offset", [int(tmdb_id)])
+                else:
+                    return []
+            return [dict(r) for r in conn.execute(sql, args).fetchall()]
+        except (sqlite3.Error, ValueError, TypeError):
+            return []
+        finally:
+            conn.close()
+
+    def save_anime_entries(self, kind: str, item_id: int, rows) -> None:
+        """replace one title's AniList entries with what was just fetched"""
+        conn = self._get_connection()
+        try:
+            conn.execute("DELETE FROM video_anime WHERE kind=? AND item_id=?", (kind, int(item_id)))
+            for r in rows or []:
+                conn.execute(
+                    "INSERT OR REPLACE INTO video_anime (kind, item_id, anilist_id, mal_id, "
+                    "tvdb_season, tvdb_offset, tmdb_season, tmdb_offset, format, status, episodes, "
+                    "season_year, score, popularity, site_url, title_romaji, title_english, "
+                    "title_native, synonyms, studios, next_episode, next_airing_at, cover_url, "
+                    "banner_url, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                    "?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                    (kind, int(item_id), r["anilist_id"], r.get("mal_id"),
+                     r.get("tvdb_season"), r.get("tvdb_offset") or 0,
+                     r.get("tmdb_season"), r.get("tmdb_offset") or 0,
+                     r.get("format"), r.get("status"), r.get("episodes"), r.get("season_year"),
+                     r.get("score"), r.get("popularity"), r.get("site_url"),
+                     r.get("title_romaji"), r.get("title_english"), r.get("title_native"),
+                     json.dumps(r.get("synonyms") or []), json.dumps(r.get("studios") or []),
+                     r.get("next_episode"), r.get("next_airing_at"),
+                     r.get("cover_url"), r.get("banner_url")))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def anime_entries(self, kind: str, item_id) -> list:
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM video_anime WHERE kind=? AND item_id=? "
+                "ORDER BY COALESCE(tvdb_season, 999), tvdb_offset, anilist_id",
+                (kind, int(item_id))).fetchall()
+        except (sqlite3.Error, ValueError, TypeError):
+            return []
+        finally:
+            conn.close()
+        out = []
+        for r in rows:
+            d = dict(r)
+            for k in ("synonyms", "studios"):
+                try:
+                    d[k] = json.loads(d.get(k) or "[]")
+                except (TypeError, ValueError):
+                    d[k] = []
+            out.append(d)
+        return out
+
+    def anime_main_entry(self, kind: str, item_id) -> dict | None:
+        """the entry that stands for the whole title: a movie's own, a show's
+        first regular season (else whatever came first)"""
+        rows = self.anime_entries(kind, item_id)
+        regular = [r for r in rows if (r.get("tvdb_season") or 0) >= 1 and r.get("format") != "MOVIE"]
+        return (regular or rows or [None])[0]
+
+    _ANIME_PUBLIC = ("anilist_id", "tvdb_season", "format", "status", "episodes", "season_year",
+                     "score", "site_url", "title_romaji", "title_english", "title_native",
+                     "studios", "next_episode", "next_airing_at")
+
+    def anime_summary(self, kind: str, item_id) -> dict | None:
+        """the anime layer for a detail page: the entry that stands for the
+        title and every season's, or None for a title that isn't anime"""
+        rows = self.anime_entries(kind, item_id)
+        if not rows:
+            return None
+        main = self.anime_main_entry(kind, item_id) or rows[0]
+        slim = lambda r: {k: r.get(k) for k in self._ANIME_PUBLIC}   # noqa: E731
+        return {"main": slim(main), "entries": [slim(r) for r in rows]}
+
+    def anime_airing_due(self, days: int) -> dict | None:
+        """a releasing show whose AniList facts are older than ``days``: the
+        next episode's countdown moves on"""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT s.id, s.title, s.tmdb_id, s.imdb_id, s.year, s.tvdb_id FROM video_anime a "
+                "JOIN shows s ON s.id = a.item_id WHERE a.kind='show' AND a.status='RELEASING' "
+                "AND a.synced_at < datetime('now', ?) ORDER BY a.synced_at LIMIT 1",
+                (f"-{int(days)} days",)).fetchone()
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+        if not row:
+            return None
+        d = dict(row)
+        d["kind"] = "show"
+        return d
+
+    def anime_titles_for(self, kind: str, tmdb_id, season=None) -> list:
+        """the names a release of this anime may carry, for the release search
+        and its title check. a season gets its own AniList entry's names plus
+        the show's base name; synonyms are per season ("JJK2" is season 2's,
+        and must never accept a season-2 release for season 1)."""
+        from core.video.anilist import search_titles
+        if not tmdb_id:
+            return []
+        conn = self._get_connection()
+        try:
+            if kind == "movie":
+                ids = [r[0] for r in conn.execute(
+                    "SELECT id FROM movies WHERE tmdb_id=?", (int(tmdb_id),)).fetchall()]
+                k = "movie"
+            else:
+                ids = [r[0] for r in conn.execute(
+                    "SELECT id FROM shows WHERE tmdb_id=?", (int(tmdb_id),)).fetchall()]
+                k = "show"
+        except (sqlite3.Error, ValueError, TypeError):
+            return []
+        finally:
+            conn.close()
+        rows = []
+        for item_id in ids[:1]:
+            rows = self.anime_entries(k, item_id)
+        if not rows:
+            return []
+        if k == "movie":
+            return search_titles(rows)
+        base = [r for r in rows if r.get("tvdb_season") == 1] or rows[:1]
+        names = search_titles([{"title_romaji": base[0].get("title_romaji"),
+                                "title_english": base[0].get("title_english")}])
+        if season is not None:
+            try:
+                s = int(season)
+            except (TypeError, ValueError):
+                s = None
+            if s is not None:
+                names += search_titles([r for r in rows if r.get("tvdb_season") == s])
+        out, seen = [], set()
+        for n in names:
+            if n.lower() not in seen:
+                seen.add(n.lower())
+                out.append(n)
+        return out
 
     def backfill_breakdown(self, service: str) -> dict:
         kinds = _BACKFILL.get(service, {})
@@ -3906,10 +4127,62 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def clear_finished_video_downloads(self) -> int:
+    # A failed or cancelled row is only a record of a grab that went nowhere;
+    # removing it from the queue touches nothing else (history keeps its own
+    # copy). import_failed is NOT here: that row is the only pointer Manual
+    # import has to a file still sitting in the download area.
+    VIDEO_DOWNLOAD_REMOVABLE_STATUSES = ("failed", "cancelled")
+
+    def remove_video_download(self, dl_id: int) -> bool:
+        """Delete one failed/cancelled row from the queue. False when the row is
+        missing or in any other state -- live, finished, or waiting on import."""
+        statuses = self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES
         conn = self._get_connection()
         try:
-            cur = conn.execute("DELETE FROM video_downloads WHERE status IN ('completed', 'failed', 'cancelled', 'import_failed')")
+            cur = conn.execute(
+                "DELETE FROM video_downloads WHERE id = ? AND status IN (%s)"
+                % ",".join("?" * len(statuses)), (dl_id, *statuses))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def clear_failed_video_downloads(self) -> int:
+        """Delete every failed/cancelled row from the queue."""
+        statuses = self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM video_downloads WHERE status IN (%s)"
+                % ",".join("?" * len(statuses)), statuses)
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def clear_finished_video_downloads(self) -> int:
+        """Delete completed rows only. Failed and cancelled rows stay until
+        Clear failed or Remove from list takes them; import_failed rows stay
+        until Manual import places or dismisses them -- each is the only
+        pointer to a file still sitting in the download area."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM video_downloads WHERE status = 'completed'")
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def clear_everything_video_downloads(self) -> int:
+        """Clear everything: completed, failed and cancelled rows together.
+        import_failed rows still stay -- each is Manual import's only pointer
+        to a file in the download area, and deleting it strands that file."""
+        statuses = ("completed",) + self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM video_downloads WHERE status IN (%s)"
+                % ",".join("?" * len(statuses)), statuses)
             conn.commit()
             return cur.rowcount
         finally:
@@ -4527,23 +4800,96 @@ class VideoDatabase:
             return
         if isinstance(files, dict):
             files = [files]
-        from core.video.mediainfo import canonical_aspect
+        from core.video.mediainfo import canonical_aspect, format_languages
         for file in files:
             if not file:
                 continue
+            path = file.get("relative_path") or file.get("path") or ""
+            audio_langs = format_languages(file.get("audio_languages"))
+            sub_langs = format_languages(file.get("subtitle_languages"))
+            channels = file.get("audio_channels")
+            if audio_langs is None:
+                # the server sent no stream data (plex's listing never does):
+                # what soulsync probed off this file, if it has
+                probed = VideoDatabase._file_probe(conn, path, file.get("size_bytes"))
+                if probed:
+                    audio_langs = probed["audio_languages"]
+                    sub_langs = probed["subtitle_languages"] if sub_langs is None else sub_langs
+                    channels = channels or probed["audio_channels"]
             conn.execute(
                 f"INSERT INTO media_files ({owner_col}, relative_path, size_bytes, resolution, "
                 "video_codec, audio_codec, release_source, quality, runtime_seconds, aspect, "
-                "audio_channels, dynamic_range, atmos) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (owner_id,
-                 file.get("relative_path") or file.get("path") or "",
+                "audio_channels, dynamic_range, atmos, audio_languages, subtitle_languages) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (owner_id, path,
                  file.get("size_bytes"), file.get("resolution"), file.get("video_codec"),
                  file.get("audio_codec"), file.get("release_source"), file.get("quality"),
                  file.get("runtime_seconds"), canonical_aspect(file.get("aspect")),
-                 file.get("audio_channels"), file.get("dynamic_range"),
-                 1 if file.get("atmos") else 0),
+                 channels, file.get("dynamic_range"),
+                 1 if file.get("atmos") else 0, audio_langs, sub_langs),
             )
+
+    @staticmethod
+    def _file_name(path) -> str:
+        """the last path component, whichever separator the server used"""
+        return re.split(r"[\\/]", str(path or ""))[-1]
+
+    @staticmethod
+    def _file_probe(conn, path, size_bytes):
+        """the probe recorded for this file (by name + size), or None"""
+        name = VideoDatabase._file_name(path)
+        if not name or not size_bytes:
+            return None
+        try:
+            row = conn.execute(
+                "SELECT audio_languages, subtitle_languages, audio_channels "
+                "FROM video_file_probes WHERE file_name=? AND size_bytes=?",
+                (name, int(size_bytes))).fetchone()
+        except (sqlite3.Error, ValueError, TypeError):
+            return None
+        if not row:
+            return None
+        return {"audio_languages": row[0], "subtitle_languages": row[1],
+                "audio_channels": row[2]}
+
+    def record_file_probe(self, path, size_bytes, info) -> bool:
+        """keep what ffprobe read off a file (languages, channels), and fill it
+        into the library rows for that file now. never raises."""
+        name = self._file_name(path)
+        if not name or not size_bytes or not isinstance(info, dict):
+            return False
+        from core.video.mediainfo import format_languages
+        audio = format_languages(info.get("audio_languages") or [])
+        subs = format_languages(info.get("subtitle_languages") or [])
+        channels = info.get("audio_channels") or None
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO video_file_probes (file_name, size_bytes, audio_languages, "
+                "subtitle_languages, audio_channels, probed_at) "
+                "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(file_name, size_bytes) DO UPDATE SET "
+                "audio_languages=excluded.audio_languages, "
+                "subtitle_languages=excluded.subtitle_languages, "
+                "audio_channels=COALESCE(excluded.audio_channels, video_file_probes.audio_channels), "
+                "probed_at=CURRENT_TIMESTAMP",
+                (name, int(size_bytes), audio, subs, channels))
+            # the library rows for this file, on whatever path the server sees it
+            for row in conn.execute(
+                    "SELECT id, relative_path FROM media_files WHERE size_bytes=?",
+                    (int(size_bytes),)).fetchall():
+                if self._file_name(row[1]) == name:
+                    conn.execute(
+                        "UPDATE media_files SET audio_languages=?, subtitle_languages=?, "
+                        "audio_channels=COALESCE(audio_channels, ?) WHERE id=?",
+                        (audio, subs, channels, row[0]))
+            conn.commit()
+            return True
+        except (sqlite3.Error, ValueError, TypeError) as e:
+            logger.debug("record_file_probe failed for %s: %s", name, e)
+            return False
+        finally:
+            conn.close()
 
     @staticmethod
     def _parse_locked(raw) -> set:
@@ -6660,6 +7006,7 @@ class VideoDatabase:
             "trakt_rating": show["trakt_rating"], "trakt_votes": show["trakt_votes"],
             "tvmaze_rating": show["tvmaze_rating"],
             "anilist_score": show["anilist_score"],
+            "anime": self.anime_summary("show", show["id"]),
             "wikidata_url": show["wikidata_url"],
             "genres": genres, "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
@@ -7642,7 +7989,7 @@ class VideoDatabase:
             rows = conn.execute(
                 "SELECT m.id AS movie_id, m.tmdb_id, m.imdb_id, m.title, m.year, m.runtime_minutes, "
                 "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
-                "f.video_codec, f.audio_codec, f.release_source, f.runtime_seconds "
+                "f.video_codec, f.audio_languages, f.subtitle_languages, f.audio_codec, f.release_source, f.runtime_seconds "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                 "WHERE m.has_file=1 ORDER BY m.title COLLATE NOCASE, f.size_bytes DESC").fetchall()
             return [dict(r) for r in rows]
@@ -7664,7 +8011,7 @@ class VideoDatabase:
                 # without waiting for a deep scan (musicagine).
                 "COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER)) AS show_year, "
                 "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
-                "f.video_codec, f.release_source "
+                "f.video_codec, f.audio_languages, f.subtitle_languages, f.release_source "
                 "FROM episodes e JOIN shows s ON s.id = e.show_id "
                 "JOIN media_files f ON f.episode_id = e.id "
                 "WHERE e.has_file=1 "
@@ -7892,6 +8239,57 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def media_file_paths(self, prefix: str | None = None, limit: int | None = None) -> list:
+        """the server paths of library files, every one or those on one drive
+        (``prefix``, forward or back slashes), for the drive map"""
+        conn = self._get_connection()
+        try:
+            if prefix:
+                p = str(prefix).replace("\\", "/").rstrip("/")
+                sql = ("SELECT relative_path FROM media_files WHERE "
+                       "REPLACE(relative_path, '\\', '/') = ? OR REPLACE(relative_path, '\\', '/') LIKE ? ESCAPE '!' "
+                       "ORDER BY id")
+                like = p.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "/%"
+                args = [p, like]
+            else:
+                sql, args = "SELECT relative_path FROM media_files", []
+            if limit:
+                sql += " LIMIT ?"
+                args.append(int(limit))
+            return [r[0] for r in conn.execute(sql, args).fetchall() if r[0]]
+        finally:
+            conn.close()
+
+    def media_files_unprobed(self, limit: int = 300) -> list:
+        """owned movie/episode files soulsync hasn't read the languages of yet
+        (audio_languages NULL), biggest first so a run covers the most
+        watched-looking files. the media info job's source."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT f.id AS file_id, f.relative_path, f.size_bytes, "
+                "COALESCE(m.title, s.title) AS title, e.season_number AS season, "
+                "e.episode_number AS episode "
+                "FROM media_files f "
+                "LEFT JOIN movies m ON m.id = f.movie_id "
+                "LEFT JOIN episodes e ON e.id = f.episode_id "
+                "LEFT JOIN shows s ON s.id = e.show_id "
+                "WHERE f.audio_languages IS NULL AND f.video_id IS NULL "
+                "AND f.size_bytes > 0 "
+                "ORDER BY f.size_bytes DESC LIMIT ?", (int(limit),)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def media_files_unprobed_count(self) -> int:
+        conn = self._get_connection()
+        try:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM media_files WHERE audio_languages IS NULL "
+                "AND video_id IS NULL AND size_bytes > 0").fetchone()[0])
+        finally:
+            conn.close()
+
     def repair_library_files(self) -> list:
         """Every owned movie/episode file with the fields the naming templates
         need — the naming-conformance job's source."""
@@ -7902,7 +8300,7 @@ class VideoDatabase:
                 "m.title, m.year, m.tmdb_id, m.imdb_id, NULL AS tvdb_id, "
                 "NULL AS season, NULL AS episode, "
                 "NULL AS episode_title, NULL AS series, "
-                "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec "
+                "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec, f.audio_languages, f.subtitle_languages "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                 "WHERE m.has_file = 1")]
             eps = [dict(r) for r in conn.execute(
@@ -7914,7 +8312,7 @@ class VideoDatabase:
                 "s.tmdb_id, s.imdb_id, s.tvdb_id, "
                 "e.season_number AS season, e.episode_number AS episode, "
                 "e.title AS episode_title, s.title AS series, "
-                "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec "
+                "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec, f.audio_languages, f.subtitle_languages "
                 "FROM episodes e JOIN shows s ON e.show_id = s.id "
                 "JOIN media_files f ON f.episode_id = e.id "
                 "WHERE e.has_file = 1")]
@@ -7924,7 +8322,7 @@ class VideoDatabase:
 
     _TITLE_FILE_COLS = (
         "f.id AS file_id, f.relative_path, f.size_bytes, f.quality, f.resolution, "
-        "f.video_codec, f.audio_codec, f.audio_channels, f.dynamic_range, f.atmos, "
+        "f.video_codec, f.audio_languages, f.subtitle_languages, f.audio_codec, f.audio_channels, f.dynamic_range, f.atmos, "
         "f.release_source, f.runtime_seconds, f.added_at, f.aspect")
 
     def library_title_files(self, kind: str, item_id) -> list:
@@ -9172,6 +9570,24 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def wishlist_export_items(self, profile_id: int = 1, kinds=None) -> list:
+        """Every wanted row of a profile's video wishlist for an export, oldest
+        first and grouped the way the page reads (a show's episodes together).
+        ``kinds`` limits it to some of movie / episode / video."""
+        sql = ("SELECT kind, tmdb_id, title, year, release_date, season_number, episode_number, "
+               "episode_title, air_date, status, date_added FROM video_wishlist WHERE profile_id = ?")
+        params: list = [int(profile_id)]
+        if kinds:
+            sql += f" AND kind IN ({','.join('?' * len(kinds))})"
+            params.extend(kinds)
+        sql += (" ORDER BY CASE kind WHEN 'movie' THEN 0 WHEN 'episode' THEN 1 ELSE 2 END, "
+                "title COLLATE NOCASE, season_number, episode_number, date_added")
+        conn = self._get_connection()
+        try:
+            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+        finally:
+            conn.close()
+
     def wishlist_counts(self, profile_id: int = 1) -> dict:
         """{'movie': n, 'show': n, 'episode': n, 'total': movies+episodes}."""
         conn = self._get_connection()
@@ -9461,6 +9877,26 @@ class VideoDatabase:
         except (sqlite3.Error, TypeError, ValueError):
             logger.exception("delete_named_quality_profile failed")
             return False
+        finally:
+            conn.close()
+
+    def search_ids_for(self, kind: str, *, library_id=None, tmdb_id=None) -> dict:
+        """The library row a search names, by library id or tmdb id: its own id
+        and the tmdb/imdb (and for a show tvdb) ids the indexers can search by.
+        Empty when the title isn't in the library."""
+        tbl, cols = (("movies", "id, tmdb_id, imdb_id") if kind == "movie"
+                     else ("shows", "id, tmdb_id, imdb_id, tvdb_id"))
+        if not library_id and not tmdb_id:
+            return {}
+        conn = self._get_connection()
+        try:
+            key, value = ("id", int(library_id)) if library_id else ("tmdb_id", int(tmdb_id))
+            row = conn.execute(f"SELECT {cols} FROM {tbl} WHERE {key}=? LIMIT 1",  # noqa: S608 - fixed names
+                               (value,)).fetchone()
+            return {k: row[k] for k in row.keys() if row[k] not in (None, "")} if row else {}
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.debug("search_ids_for failed for %s", kind, exc_info=True)
+            return {}
         finally:
             conn.close()
 
@@ -11345,7 +11781,7 @@ class VideoDatabase:
             credits = self._credits_for(conn, "movie_id", movie_id)
             files = conn.execute(
                 "SELECT resolution, quality, video_codec, audio_codec, release_source, size_bytes, "
-                "audio_channels, dynamic_range, atmos "
+                "audio_channels, dynamic_range, atmos, audio_languages "
                 "FROM media_files WHERE movie_id=? ORDER BY size_bytes DESC",
                 (movie_id,)).fetchall()
         finally:
@@ -11379,6 +11815,7 @@ class VideoDatabase:
             "subtitle_langs": _subtitle_langs_list(m["subtitle_langs"]),
             "owned": bool(m["has_file"]), "monitored": bool(m["monitored"]),
             "file": (dict(files[0]) if files else None),       # best version (compat)
+            "anime": self.anime_summary("movie", m["id"]),
             "files": [dict(x) for x in files],                 # all versions/editions
         }
 

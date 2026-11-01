@@ -13,36 +13,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 
-# api/__init__.py eagerly imports flask_limiter. Tests only need the auth
-# module, so stub flask_limiter before importing the api package.
-def _install_flask_limiter_stub():
-    if "flask_limiter" in sys.modules:
-        return
-    stub = types.ModuleType("flask_limiter")
-
-    class _Limiter:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def limit(self, *args, **kwargs):
-            def decorator(target):
-                return target
-            return decorator
-
-        def init_app(self, app):
-            pass
-
-    stub.Limiter = _Limiter
-    sys.modules["flask_limiter"] = stub
-
-    util_stub = types.ModuleType("flask_limiter.util")
-    util_stub.get_remote_address = lambda: "127.0.0.1"
-    sys.modules["flask_limiter.util"] = util_stub
-
-
-_install_flask_limiter_stub()
-
-from api import auth  # noqa: E402
+from api import auth
 
 
 @pytest.fixture(autouse=True)

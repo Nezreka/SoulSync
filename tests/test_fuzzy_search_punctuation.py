@@ -34,8 +34,10 @@ import types
 
 import pytest
 
+from core.library2.schema import ensure_library_v2_schema
 from core.text.normalize import normalize_for_comparison
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
 
 try:
     from unidecode import unidecode as _ud
@@ -45,28 +47,36 @@ except ImportError:                                   # pragma: no cover
 
 
 def _library(titles):
-    """A minimal library with the same unidecode_lower the real connection registers."""
+    """A minimal lib2 catalogue with the same unidecode_lower the real connection
+    registers. Track 1 (the reported track) is Taylor Swift/Midnights; every
+    other track is Various/Other — the fuzzy search joins through the album's
+    ``primary_artist_id``, not a per-track artist column."""
     db = sqlite3.connect(':memory:')
     db.row_factory = sqlite3.Row
     db.create_function("unidecode_lower", 1, lambda x: _ud(x).lower() if x else "")
-    db.create_function("norm_text", 1, lambda x: normalize_for_comparison(x) if x else "")
-    db.executescript("""
-        CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT, name_norm TEXT);
-        CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT, thumb_url TEXT, title_norm TEXT);
-        CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id INT, artist_id INT,
-            title TEXT, track_number INT, duration INT, file_path TEXT, bitrate INT,
-            created_at TEXT, updated_at TEXT, server_source TEXT, track_artist TEXT,
-            title_norm TEXT, track_artist_norm TEXT);
-        INSERT INTO artists (id, name) VALUES (1,'Taylor Swift'),(2,'Various');
-        INSERT INTO albums (id, title, thumb_url) VALUES (1,'Midnights',''),(2,'Other','');
-    """)
+    ensure_library_v2_schema(db)
+    taylor = seed_artist(db, server_id='ar-taylor', name='Taylor Swift')
+    various = seed_artist(db, server_id='ar-various', name='Various')
+    midnights = seed_album(db, server_id='al-midnights', title='Midnights', artist_id=taylor)
+    other = seed_album(db, server_id='al-other', title='Other', artist_id=various)
     for i, title in enumerate(titles, start=1):
-        db.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, server_source) "
-            "VALUES (?,?,?,?,'jellyfin')",
-            (i, 1 if i == 1 else 2, 1 if i == 1 else 2, title),
+        is_first = i == 1
+        seed_track(
+            db, server_id=f'tr-{i}', title=title,
+            album_id=midnights if is_first else other,
+            artist_id=taylor if is_first else various,
+            server_source='jellyfin', file_path=f'/music/{i}.flac',
         )
+    db.commit()
     return db
+
+
+def _with_fold_index(stub):
+    """the fuzzy pass reads its word matches from database/fold_index, keyed
+    by the database's path; each test library is its own"""
+    stub.database_path = f"test-library-{id(stub)}"
+    stub._fold_fuzzy_ids = lambda cursor, terms: MusicDatabase._fold_fuzzy_ids(stub, cursor, terms)
+    return stub
 
 
 def _search(db, title, artist='', limit=15):
@@ -81,6 +91,7 @@ def _search(db, title, artist='', limit=15):
         # the admin's view: every library (#1199)
         _current_scope_sql=lambda column='owner_profile_id': ("1=1", []),
     )
+    _with_fold_index(stub)
     rows = MusicDatabase._search_tracks_fuzzy_rows(
         stub, db.cursor(), title, artist, limit, None)
     return [r['title'] for r in rows]
@@ -191,24 +202,18 @@ def test_trimming_never_removes_a_term_that_used_to_match():
 # "Emerson, Lake & Palmer", "Blood, Sweat & Tears".
 
 def _library_by_artist(pairs):
+    """Each artist gets its own album, so the search join (through the album's
+    ``primary_artist_id``) resolves to the right one per track."""
     db = sqlite3.connect(':memory:')
     db.row_factory = sqlite3.Row
     db.create_function("unidecode_lower", 1, lambda x: _ud(x).lower() if x else "")
-    db.create_function("norm_text", 1, lambda x: normalize_for_comparison(x) if x else "")
-    db.executescript("""
-        CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT, name_norm TEXT);
-        CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT, thumb_url TEXT, title_norm TEXT);
-        CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id INT, artist_id INT,
-            title TEXT, track_number INT, duration INT, file_path TEXT, bitrate INT,
-            created_at TEXT, updated_at TEXT, server_source TEXT, track_artist TEXT,
-            title_norm TEXT, track_artist_norm TEXT);
-        INSERT INTO albums (id, title, thumb_url) VALUES (1,'A','');
-    """)
+    ensure_library_v2_schema(db)
     for i, (artist, title) in enumerate(pairs, start=1):
-        db.execute("INSERT INTO artists (id, name) VALUES (?,?)", (i, artist))
-        db.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, server_source) "
-            "VALUES (?,1,?,?,'jellyfin')", (i, i, title))
+        artist_id = seed_artist(db, server_id=f'ar-{i}', name=artist)
+        album_id = seed_album(db, server_id=f'al-{i}', title='A', artist_id=artist_id)
+        seed_track(db, server_id=f'tr-{i}', title=title, album_id=album_id,
+                  artist_id=artist_id, server_source='jellyfin', file_path=f'/music/{i}.flac')
+    db.commit()
     return db
 
 
@@ -230,6 +235,7 @@ def test_a_comma_in_a_band_name_does_not_bury_it():
         # the admin's view: every library (#1199)
         _current_scope_sql=lambda column='owner_profile_id': ("1=1", []),
     )
+    _with_fold_index(stub)
     rows = MusicDatabase._search_tracks_fuzzy_rows(
         stub, db.cursor(), '', "Crosby, Stills & Nash", 15, None)
     assert [r['artist_name'] for r in rows][0] == "Crosby Stills & Nash"

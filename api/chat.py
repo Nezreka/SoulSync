@@ -332,24 +332,38 @@ def _gif_fetch(url: str, params: dict) -> dict:
     return r.json()
 
 
+def _library_like(text) -> str:
+    """A ``LIKE ... ESCAPE '\\'`` needle for a typed search box.
+
+    Accents fold (``unidecode_lower`` on the column side), and the LIKE
+    metacharacters are escaped: in a search box ``%`` and ``_`` are letters
+    someone typed, not a request to match everything.
+    """
+    from core.text.normalize import normalize_for_comparison
+    folded = normalize_for_comparison(str(text or ''))
+    escaped = folded.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    return f"%{escaped}%"
+
+
 def _resolve_track_path(db, track_id):
-    """A library track's on-disk path. The DB stores the path as the MEDIA
-    SERVER sees it (e.g. Plex's ``/mnt/musicBackup/...``), which the SoulSync
-    process usually can't open directly — so we hand it to the shared library
+    """A library track's on-disk path. The path lives on the track's primary
+    FILE row (ADR-03), not on the track, and it is stored as the MEDIA SERVER
+    sees it (e.g. Plex's ``/mnt/musicBackup/...``), which the SoulSync process
+    usually can't open directly — so we hand it to the shared library
     resolver, the same one the repair/import flows use. It maps the stored
     path onto SoulSync's actual mounts via ``library.music_paths`` +
     transfer/download roots (suffix-matching). None when unreachable."""
     conn = None
     try:
+        from core.library2.track_files import primary_file_row
         conn = db._get_connection()
-        row = conn.execute("SELECT file_path FROM tracks WHERE id = ?",
-                           (str(track_id),)).fetchone()
+        row = primary_file_row(conn, int(track_id))
     except Exception:
         return None
     finally:
         if conn:
             conn.close()
-    fp = row["file_path"] if row else None
+    fp = row["path"] if row else None
     if not fp:
         return None
     try:
@@ -1064,22 +1078,35 @@ def create_blueprint() -> Blueprint:
             return jsonify({"tracks": []})
         conn = None
         try:
+            from core.library2.track_files import primary_order
             conn = db._get_connection()
-            like = "%" + query.replace("%", "\\%") + "%"
             rows = conn.execute(
-                """SELECT t.id, t.title, t.file_path, t.file_size,
-                          COALESCE(t.track_artist, ar.name, '') AS artist,
+                f"""SELECT t.id, t.title, tf.path, tf.size,
+                          COALESCE(credited.name, album_artist.name, '') AS artist,
                           COALESCE(al.title, '') AS album
-                   FROM tracks t
-                   LEFT JOIN artists ar ON ar.id = t.artist_id
-                   LEFT JOIN albums al ON al.id = t.album_id
-                   WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                     AND (t.title LIKE ? OR ar.name LIKE ? OR t.track_artist LIKE ?)
+                   FROM lib2_tracks t
+                   JOIN lib2_albums al ON al.id = t.album_id
+                   JOIN lib2_track_files tf ON tf.id = (
+                        SELECT f.id FROM lib2_track_files f
+                         WHERE f.track_id = t.id
+                           AND COALESCE(f.file_state, 'active') <> 'deleted'
+                           AND COALESCE(f.path, '') <> ''
+                         ORDER BY {primary_order('f')} LIMIT 1)
+                   LEFT JOIN lib2_artists album_artist
+                          ON album_artist.id = al.primary_artist_id
+                   LEFT JOIN lib2_artists credited ON credited.id = (
+                        SELECT ta.artist_id FROM lib2_track_artists ta
+                         WHERE ta.track_id = t.id
+                         ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
+                                  ta.position, ta.artist_id LIMIT 1)
+                   WHERE unidecode_lower(t.title) LIKE :like ESCAPE '\\'
+                      OR unidecode_lower(COALESCE(credited.name, '')) LIKE :like ESCAPE '\\'
+                      OR unidecode_lower(COALESCE(album_artist.name, '')) LIKE :like ESCAPE '\\'
                    ORDER BY t.title LIMIT 20""",
-                (like, like, like)).fetchall()
+                {"like": _library_like(query)}).fetchall()
             return jsonify({"tracks": [
                 {"id": r["id"], "title": r["title"], "artist": r["artist"],
-                 "album": r["album"], "size": r["file_size"]}
+                 "album": r["album"], "size": r["size"]}
                 for r in rows]})
         except Exception as e:
             logger.debug("chat: library search failed: %s", e)
@@ -1121,6 +1148,27 @@ def create_blueprint() -> Blueprint:
 
         conn = None
         try:
+            # Library v2: a track's file is its (scoped) primary file row, its
+            # artist the first track credit, else the album's artist. Only rows
+            # with a live file can be shared.
+            from core.library2.sql_util import owned_sql, scoped_primary_file_join
+            track_select = f"""SELECT t.id, t.title, t.track_number, t.duration,
+                                     tf.path AS file_path, tf.size AS file_size, tf.bitrate,
+                                     COALESCE(credited.name, ar.name, '') as artist,
+                                     COALESCE(al.title, '') as album,
+                                     al.image_url as album_thumb_url,
+                                     ar.image_url as artist_thumb_url
+                              FROM lib2_tracks t
+                              JOIN lib2_albums al ON al.id = t.album_id
+                              JOIN lib2_track_files tf ON {scoped_primary_file_join('t', 'tf')}
+                              LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                              LEFT JOIN lib2_artists credited ON credited.id = (
+                                   SELECT ta.artist_id FROM lib2_track_artists ta
+                                    WHERE ta.track_id = t.id
+                                    ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
+                                             ta.position, ta.artist_id LIMIT 1)
+                              WHERE COALESCE(tf.file_state, 'active') = 'active'
+                                AND tf.path IS NOT NULL AND tf.path != ''"""
             conn = db._get_connection()
             album_row = None
             tracks_rows = []
@@ -1132,11 +1180,12 @@ def create_blueprint() -> Blueprint:
                     like_alb = "%" + alb_query.replace("%", "\\%") + "%"
                     like_art = "%" + artist.replace("%", "\\%") + "%" if artist else "%"
                     album_row = conn.execute(
-                        """SELECT al.id, al.title, al.year, COALESCE(ar.name, '') as artist,
-                                  al.thumb_url, ar.thumb_url as artist_thumb_url
-                           FROM albums al
-                           LEFT JOIN artists ar ON ar.id = al.artist_id
+                        f"""SELECT al.id, al.title, al.year, COALESCE(ar.name, '') as artist,
+                                  al.image_url AS thumb_url, ar.image_url as artist_thumb_url
+                           FROM lib2_albums al
+                           LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
                            WHERE al.title LIKE ? AND (ar.name LIKE ? OR ? LIKE ('%' || ar.name || '%') OR ? = '%')
+                             AND {owned_sql('album', 'al')}
                            ORDER BY CASE WHEN LOWER(al.title) = LOWER(?) THEN 0 ELSE 1 END,
                                     al.id LIMIT 1""",
                         (like_alb, like_art, artist if artist else "%", like_art, alb_query)
@@ -1145,11 +1194,11 @@ def create_blueprint() -> Blueprint:
                     # Fall back to album title if artist naming has slight discrepancy
                     if not album_row and artist:
                         album_row = conn.execute(
-                            """SELECT al.id, al.title, al.year, COALESCE(ar.name, '') as artist,
-                                      al.thumb_url, ar.thumb_url as artist_thumb_url
-                               FROM albums al
-                               LEFT JOIN artists ar ON ar.id = al.artist_id
-                               WHERE al.title LIKE ?
+                            f"""SELECT al.id, al.title, al.year, COALESCE(ar.name, '') as artist,
+                                      al.image_url AS thumb_url, ar.image_url as artist_thumb_url
+                               FROM lib2_albums al
+                               LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                               WHERE al.title LIKE ? AND {owned_sql('album', 'al')}
                                ORDER BY CASE WHEN LOWER(al.title) = LOWER(?) THEN 0 ELSE 1 END,
                                         al.id LIMIT 1""",
                             (like_alb, alb_query)
@@ -1157,16 +1206,8 @@ def create_blueprint() -> Blueprint:
 
                 if album_row:
                     tracks_rows = conn.execute(
-                        """SELECT t.id, t.title, t.track_number, t.duration, t.file_path,
-                                  t.file_size, t.bitrate,
-                                  COALESCE(t.track_artist, ar.name, '') as artist,
-                                  al.title as album,
-                                  al.thumb_url as album_thumb_url,
-                                  ar.thumb_url as artist_thumb_url
-                           FROM tracks t
-                           JOIN albums al ON al.id = t.album_id
-                           LEFT JOIN artists ar ON ar.id = t.artist_id
-                           WHERE t.album_id = ? AND t.file_path IS NOT NULL AND t.file_path != ''
+                        track_select + """
+                             AND t.album_id = ?
                            ORDER BY t.track_number, t.id""",
                         (album_row["id"],)
                     ).fetchall()
@@ -1177,17 +1218,8 @@ def create_blueprint() -> Blueprint:
                 like_trk = "%" + track_query.replace("%", "\\%") + "%"
                 like_art = "%" + artist.replace("%", "\\%") + "%" if artist else "%"
                 tracks_rows = conn.execute(
-                    """SELECT t.id, t.title, t.track_number, t.duration, t.file_path,
-                              t.file_size, t.bitrate,
-                              COALESCE(t.track_artist, ar.name, '') as artist,
-                              COALESCE(al.title, '') as album,
-                              al.thumb_url as album_thumb_url,
-                              ar.thumb_url as artist_thumb_url
-                       FROM tracks t
-                       LEFT JOIN artists ar ON ar.id = t.artist_id
-                       LEFT JOIN albums al ON al.id = t.album_id
-                       WHERE t.title LIKE ? AND (ar.name LIKE ? OR t.track_artist LIKE ? OR ? LIKE ('%' || ar.name || '%') OR ? = '%')
-                         AND t.file_path IS NOT NULL AND t.file_path != ''
+                    track_select + """
+                         AND t.title LIKE ? AND (ar.name LIKE ? OR credited.name LIKE ? OR ? LIKE ('%' || ar.name || '%') OR ? = '%')
                        ORDER BY CASE WHEN LOWER(t.title) = LOWER(?) THEN 0 ELSE 1 END,
                                 t.id LIMIT ?""",
                     (like_trk, like_art, like_art, artist if artist else "%", like_art, track_query,
@@ -1197,16 +1229,8 @@ def create_blueprint() -> Blueprint:
                 # Fallback to track title alone if artist string differs
                 if not tracks_rows and track_query and artist:
                     tracks_rows = conn.execute(
-                        """SELECT t.id, t.title, t.track_number, t.duration, t.file_path,
-                                  t.file_size, t.bitrate,
-                                  COALESCE(t.track_artist, ar.name, '') as artist,
-                                  COALESCE(al.title, '') as album,
-                                  al.thumb_url as album_thumb_url,
-                                  ar.thumb_url as artist_thumb_url
-                           FROM tracks t
-                           LEFT JOIN artists ar ON ar.id = t.artist_id
-                           LEFT JOIN albums al ON al.id = t.album_id
-                           WHERE t.title LIKE ? AND t.file_path IS NOT NULL AND t.file_path != ''
+                        track_select + """
+                             AND t.title LIKE ?
                            ORDER BY CASE WHEN LOWER(t.title) = LOWER(?) THEN 0 ELSE 1 END,
                                     t.id LIMIT ?""",
                         (like_trk, track_query, 1 if req_type == "track" else 50)
@@ -1892,21 +1916,41 @@ def create_blueprint() -> Blueprint:
                 logger.debug("chat radio: similar-artists failed", exc_info=True)
 
         # 3) the local similar-artist graph the watchlist scan already built.
-        # It's keyed by the user's OWN artist ids, so join through artists to
-        # match on the playing artist's name (only hits when they own them).
+        # It only hits for artists the user owns, so the playing artist is
+        # looked up in the library by name — folded, because the seed is a
+        # YouTube title and its spelling is not the library's.
+        #
+        # `similar_artists.source_artist_id` is a PROVIDER id (whichever id the
+        # scan ran with — see `similar_artists_worker.pick_source_artist_id`),
+        # so the library's job here is to hand over the artist's provider ids.
+        # Spotify and MusicBrainz sit in their own columns, every other
+        # provider inside `external_ids`.
         if artist:
             conn = None
             try:
+                from core.library2.provider_ids import parse_external_ids
+                from core.text.normalize import normalize_for_comparison
                 conn = _db()._get_connection()
-                cur = conn.cursor()
-                cur.execute(
-                    "SELECT sa.similar_artist_name FROM similar_artists sa "
-                    "JOIN artists a ON a.id = sa.source_artist_id "
-                    "WHERE LOWER(a.name) = LOWER(?) "
-                    "ORDER BY sa.similarity_rank LIMIT 30",
-                    (artist,),
-                )
-                for row in cur.fetchall():
+                source_ids = []
+                for row in conn.execute(
+                    "SELECT spotify_id, musicbrainz_id, external_ids "
+                    "FROM lib2_artists WHERE unidecode_lower(name) = ?",
+                    (normalize_for_comparison(artist),),
+                ).fetchall():
+                    known = parse_external_ids(row["external_ids"])
+                    for value in (row["spotify_id"], known.get("itunes"),
+                                  known.get("deezer"), row["musicbrainz_id"]):
+                        text = str(value or "").strip()
+                        if text and text not in source_ids:
+                            source_ids.append(text)
+                marks = ",".join("?" for _ in source_ids)
+                rows = conn.execute(
+                    "SELECT similar_artist_name FROM similar_artists "
+                    f"WHERE source_artist_id IN ({marks}) "
+                    "ORDER BY similarity_rank LIMIT 30",
+                    source_ids,
+                ).fetchall() if source_ids else []
+                for row in rows:
                     ca = str(row[0] or "")
                     if _fresh(ca):
                         return jsonify({"query": ca, "why": "similar to %s" % artist})

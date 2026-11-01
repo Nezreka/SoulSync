@@ -197,6 +197,121 @@ def test_sab_parse_queue_slot_converts_mb_to_bytes() -> None:
     assert status.eta == 60
 
 
+@pytest.mark.parametrize('sab_status,waiting', [
+    ('Queued', True),
+    ('Idle', True),
+    ('Grabbing', False),
+    ('Propagating', False),
+    ('Fetching', False),
+    ('Downloading', False),
+    ('Paused', False),
+])
+def test_sab_parse_queue_slot_marks_jobs_waiting_their_turn(sab_status, waiting) -> None:
+    """Queued/Idle and Grabbing/Propagating all map to state 'queued'; only
+    the first two mean the job is waiting behind others."""
+    adapter = _sab_with_config()
+    status = adapter._parse_queue_slot({
+        'nzo_id': 'SABnzbd_nzo_2', 'filename': 'Show.S01E01.nzb',
+        'status': sab_status, 'percentage': '0', 'mb': '100', 'mbleft': '100',
+    })
+    assert status.waiting_in_queue is waiting
+
+
+# -- waiting its turn, read from the queue ORDER (live SAB, 31 Oct 2026) --
+# A live SAB 4.x reported every slot as 'Downloading', the ones waiting behind
+# the active job at 0% included, and a lookup by nzo_ids renumbers the one slot
+# it returns to index 0. These fakes return exactly those shapes.
+
+import core.usenet_clients.sabnzbd as sab_module
+
+
+@pytest.fixture()
+def fresh_queue_cache():
+    cache = getattr(sab_module, '_queue_order_cache', None)
+    if cache is not None:
+        cache.clear()
+    yield
+    if cache is not None:
+        cache.clear()
+
+
+def _live_sab(slots, calls=None):
+    """An adapter whose _call_sync answers like the live SAB: ``slots`` is the
+    full queue as (nzo_id, status, percentage), in SAB's order."""
+    adapter = _sab_with_config()
+
+    def fake(mode, **kw):
+        if calls is not None:
+            calls.append((mode, kw.get('nzo_ids')))
+        if mode == 'queue' and kw.get('nzo_ids'):
+            return {'queue': {'slots': [
+                {'index': 0, 'nzo_id': n, 'status': st, 'percentage': pct,
+                 'mb': '1000', 'mbleft': str(1000 - 10 * int(pct)), 'filename': n}
+                for n, st, pct in slots if n == kw['nzo_ids']]}}
+        if mode == 'queue':
+            return {'queue': {'slots': [
+                {'index': i, 'nzo_id': n, 'status': st, 'percentage': pct}
+                for i, (n, st, pct) in enumerate(slots)]}}
+        if mode == 'history':
+            return {'history': {'slots': []}}
+        return None
+
+    adapter._call_sync = fake
+    return adapter
+
+
+LIVE = [('ahs', 'Downloading', '50'), ('mon9', 'Downloading', '0'),
+        ('mon10', 'Downloading', '0')]
+
+
+def test_sab_job_behind_the_active_one_is_waiting_even_when_sab_says_downloading(fresh_queue_cache):
+    status = _live_sab(LIVE)._get_status_sync('mon10')
+    assert status.state == 'downloading'
+    assert status.waiting_in_queue is True
+
+
+def test_sab_head_of_the_queue_is_never_waiting(fresh_queue_cache):
+    status = _live_sab([('head', 'Downloading', '0'), ('next', 'Downloading', '0')])._get_status_sync('head')
+    assert status.waiting_in_queue is False
+
+
+def test_sab_a_job_that_has_started_stays_on_the_clock(fresh_queue_cache):
+    calls = []
+    status = _live_sab(LIVE, calls)._get_status_sync('ahs')
+    assert status.waiting_in_queue is False
+    assert ('queue', None) not in calls          # no full-queue read for it
+
+
+def test_sab_paused_jobs_ahead_do_not_make_a_job_wait(fresh_queue_cache):
+    status = _live_sab([('p', 'Paused', '0'), ('me', 'Downloading', '0')])._get_status_sync('me')
+    assert status.waiting_in_queue is False
+
+
+def test_sab_a_paused_job_is_not_waiting(fresh_queue_cache):
+    status = _live_sab([('a', 'Downloading', '10'), ('me', 'Paused', '0')])._get_status_sync('me')
+    assert status.waiting_in_queue is False
+
+
+def test_sab_unreadable_full_queue_keeps_the_clock_running(fresh_queue_cache):
+    adapter = _live_sab(LIVE)
+    real = adapter._call_sync
+    adapter._call_sync = lambda mode, **kw: None if (mode == 'queue' and not kw) else real(mode, **kw)
+    assert adapter._get_status_sync('mon10').waiting_in_queue is False
+
+
+def test_sab_full_queue_is_read_once_per_poll_cycle(fresh_queue_cache):
+    calls = []
+    for job in ('mon9', 'mon10'):
+        assert _live_sab(LIVE, calls)._get_status_sync(job).waiting_in_queue is True
+    assert calls.count(('queue', None)) == 1
+
+
+def test_usenet_status_defaults_to_not_waiting() -> None:
+    status = UsenetStatus(id='1', name='n', state='queued', progress=0.0,
+                          size=0, downloaded=0, download_speed=0)
+    assert status.waiting_in_queue is False
+
+
 def test_sab_parse_history_slot_marks_failures() -> None:
     adapter = _sab_with_config()
     failed = adapter._parse_history_slot({

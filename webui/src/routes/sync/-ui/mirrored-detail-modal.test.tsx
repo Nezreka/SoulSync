@@ -443,3 +443,22 @@ describe('the made-over hero', () => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
 });
+
+describe('MirroredDetailModal — open editor', () => {
+  const data = { name: 'Road Trip', source: 'spotify', tracks: [] };
+
+  it('a mirror opens its server copy in the editor', async () => {
+    const onOpenEditor = vi.fn(async () => {});
+    renderModal(data, { onOpenEditor });
+    fireEvent.click(screen.getByRole('button', { name: 'Open editor' }));
+    expect(onOpenEditor).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Open editor' })).not.toBeDisabled(),
+    );
+  });
+
+  it('no editor without the action (a user playlist edits itself)', () => {
+    renderModal(data);
+    expect(screen.queryByRole('button', { name: 'Open editor' })).toBeNull();
+  });
+});

@@ -305,6 +305,7 @@ def _sync_single_mirrored_playlist(
                 _track_entry['track_number'] = md['track_number']
             if md.get('disc_number'):
                 _track_entry['disc_number'] = md['disc_number']
+            _track_entry.update({key: md[key] for key in ('source', 'provider', 'provider_ids', 'external_ids') if md.get(key)})
             tracks_json.append(_track_entry)
         else:
             # NOT discovered — try to include using available metadata so
@@ -449,7 +450,19 @@ def _sync_single_mirrored_playlist(
         if unchanged:
             from core.sync.library_presence import matched_tracks_still_present
             library_lost = not matched_tracks_still_present(db, tracks)
-        if unchanged and not library_lost:
+        # nor is it enough when the server playlist was deleted: the skip left
+        # it gone until a mode change broke the skip (#1930). only a server that
+        # says it's gone counts, one that can't say keeps the skip.
+        server_gone = False
+        if unchanged and not library_lost and getattr(deps, 'server_playlist_exists', None):
+            from core.playlists.sync_names import sync_name_for
+            try:
+                _gone_name = sync_name_for(
+                    db, deps.config_manager.get_active_media_server(), pl) or pl.get('name')
+            except Exception:
+                _gone_name = pl.get('name')
+            server_gone = deps.server_playlist_exists(_gone_name, pl.get('profile_id')) is False
+        if unchanged and not library_lost and not server_gone:
             # Exact same tracks, all matched last time — nothing to DOWNLOAD.
             # The run still happened, so it still gets recorded: skipping the
             # bookkeeping too is what left the dashboard card with no run to
@@ -489,6 +502,12 @@ def _sync_single_mirrored_playlist(
             deps.update_progress(
                 auto_id,
                 log_line='A track from the last sync is no longer in the library, running sync',
+                log_type='info',
+            )
+        elif server_gone:
+            deps.update_progress(
+                auto_id,
+                log_line='The playlist is no longer on the server, running sync',
                 log_type='info',
             )
         elif mirror_changed:

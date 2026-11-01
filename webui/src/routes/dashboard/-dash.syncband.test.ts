@@ -62,8 +62,8 @@ describe('syncBandRows', () => {
       ['manual', 'Random Album'],
     ]);
     expect(rows[0].last?.id).toBe(901);
-    // The run's matched count IS the row's completeness number.
-    expect(rows[0].coverage).toEqual({ inLibrary: 47, total: 50, pct: 94 });
+    // Current library membership supplies completeness, history supplies the run.
+    expect(rows[0].coverage).toEqual({ inLibrary: 41, total: 50, pct: 82 });
     // No playlist art → the claimed run's thumb backs the row.
     expect(rows[0].thumbUrl).toBe('/thumbs/dw.jpg');
     expect(rows[1].sourceLabel).toBe('Wishlist');
@@ -76,6 +76,20 @@ describe('syncBandRows', () => {
     expect(rows[0].last).toBeNull();
     // Never-run schedules fall back to the db owned join.
     expect(rows[0].coverage).toEqual({ inLibrary: 41, total: 50, pct: 82 });
+  });
+
+  it('does not turn a failed zero-match run into an entirely missing playlist', () => {
+    const rows = syncBandRows(
+      [sched({ name: 'Liked Songs', coverage: { inLibrary: 85, total: 109, pct: 78 } })],
+      [view({ name: 'Liked Songs', found: 0, total: 109, pct: 0 })],
+    );
+    expect(rows[0].coverage).toEqual({ inLibrary: 85, total: 109, pct: 78 });
+    expect(rows[0].last?.found).toBe(0);
+  });
+
+  it('uses historical matches when current library coverage is unavailable', () => {
+    const rows = syncBandRows([sched({ coverage: null })], [view({})]);
+    expect(rows[0].coverage).toEqual({ inLibrary: 47, total: 50, pct: 94 });
   });
 
   it('running leads, then newest run first across kinds, never-run schedules last', () => {
@@ -117,5 +131,51 @@ describe('syncBandRows', () => {
     expect(rows[0].last?.id).toBe(901);
     expect(rows[1].last?.id).toBe(900);
     expect(rows.every((r) => r.kind === 'scheduled')).toBe(true);
+  });
+
+  it('counts each current mirror once, including unscheduled playlists, without old snapshots', () => {
+    const rows = syncBandRows(
+      [sched({}), sched({ automationId: 202 })],
+      [view({}), view({ id: 901, name: 'Old weekly snapshot', total: 50 })],
+      [
+        {
+          id: 7,
+          name: 'Discover Weekly',
+          source: 'spotify',
+          total_count: 50,
+          in_library_count: 41,
+        },
+        { id: 8, name: 'Feelings', source: 'spotify', total_count: 414, in_library_count: 65 },
+      ],
+    );
+    expect(rows.map((r) => r.name)).toEqual(['Discover Weekly', 'Feelings']);
+    expect(rows.map((r) => r.coverage)).toEqual([
+      { inLibrary: 41, total: 50, pct: 82 },
+      { inLibrary: 65, total: 414, pct: 16 },
+    ]);
+    expect(rows[1].mirrorId).toBe(8);
+    expect(rows[1].last).toBeNull();
+  });
+
+  it('uses current mirror coverage for a manual sync and follows its ID across renames', () => {
+    const rows = syncBandRows(
+      [],
+      [view({ name: 'Old name', playlistId: 'auto_mirror_7', found: 0, pct: 0 })],
+      [{ id: 7, name: 'New name', total_count: 50, in_library_count: 41 }],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe('New name');
+    expect(rows[0].coverage).toEqual({ inLibrary: 41, total: 50, pct: 82 });
+    expect(rows[0].last?.id).toBe(900);
+  });
+
+  it('retains the latest run by mirror ID when a scheduled playlist was renamed', () => {
+    const rows = syncBandRows(
+      [sched({ name: 'New name' })],
+      [view({ name: 'Old name', playlistId: 'auto_mirror_7' })],
+      [{ id: 7, name: 'New name', total_count: 50, in_library_count: 41 }],
+    );
+    expect(rows[0].schedule?.automationId).toBe(101);
+    expect(rows[0].last?.id).toBe(900);
   });
 });

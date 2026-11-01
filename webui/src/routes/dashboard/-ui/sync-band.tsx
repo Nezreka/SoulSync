@@ -81,11 +81,18 @@ function useSyncBand() {
   const [fadingIds, setFadingIds] = useState<Set<number | string>>(new Set());
   const [liveSyncs, setLiveSyncs] = useState<Record<string, LiveSync>>({});
   const mountedRef = useRef(true);
+  // one load at a time. while a sync runs the band reloads every 4s, and on a
+  // busy server one load took longer than that, so they stacked up and added
+  // to the load the sync was already under
+  const scheduleInFlight = useRef(false);
+  const historyInFlight = useRef(false);
 
   const loadSchedule = useCallback(async () => {
     // Same app-locked guard as the history cycle — every endpoint here is
     // auth-gated, and a locked tab shouldn't probe any of them.
     if (document.body.classList.contains('app-locked')) return;
+    if (scheduleInFlight.current) return;
+    scheduleInFlight.current = true;
     try {
       const [playlistsRes, automationsRes, historyRes] = await Promise.all([
         fetch('/api/mirrored-playlists'),
@@ -108,13 +115,22 @@ function useSyncBand() {
       setSeamPhase('ready');
     } catch {
       if (mountedRef.current) setSeamPhase('error');
+    } finally {
+      scheduleInFlight.current = false;
     }
   }, []);
 
   const loadHistory = useCallback(async () => {
     // The vanilla guard: don't poll the auth-gated endpoint while locked.
     if (document.body.classList.contains('app-locked')) return;
-    const result = await fetchDashboardSyncHistory();
+    if (historyInFlight.current) return;
+    historyInFlight.current = true;
+    let result: Awaited<ReturnType<typeof fetchDashboardSyncHistory>>;
+    try {
+      result = await fetchDashboardSyncHistory();
+    } finally {
+      historyInFlight.current = false;
+    }
     if (result.status === 'unauthorized') {
       if (result.loginRequired && window.showLoginScreen) window.showLoginScreen();
       else window.showLaunchPinScreen?.();
@@ -150,6 +166,10 @@ function useSyncBand() {
 
   const scheduleRows = useMemo(() => (seam ? autoSyncCardRows(seam, nowMs) : []), [seam, nowMs]);
   const rows = useMemo(() => syncBandRows(scheduleRows, entries ?? []), [scheduleRows, entries]);
+  const playlistRows = useMemo(
+    () => (seam ? syncBandRows(scheduleRows, entries ?? [], seam.playlists) : rows),
+    [seam, scheduleRows, entries, rows],
+  );
 
   const liveForRow = useCallback(
     (row: SyncBandRow): LiveSync | null => {
@@ -157,7 +177,11 @@ function useSyncBand() {
         row.last?.playlistId,
         row.last?.id != null ? `history_${row.last.id}` : null,
         row.last?.id != null ? `resync_${row.last.id}` : null,
-        row.schedule ? `auto_mirror_${row.schedule.key}` : null,
+        row.mirrorId != null
+          ? `auto_mirror_${row.mirrorId}`
+          : row.schedule
+            ? `auto_mirror_${row.schedule.key}`
+            : null,
       ].filter(Boolean) as string[];
       for (const id of ids) {
         const live = liveSyncs[id];
@@ -235,14 +259,15 @@ function useSyncBand() {
   const runNow = useCallback(
     async (row: SyncBandRow, skipWishlist: boolean) => {
       const sched = row.schedule;
-      if (!sched) return;
-      setBusyId(sched.automationId);
+      const mirrorId = row.mirrorId ?? sched?.key;
+      if (mirrorId == null) return;
+      setBusyId(sched?.automationId ?? `mirror-${mirrorId}`);
       try {
         // The board's run path — the ONLY one that registers the pipeline
         // progress state the board modal and this band's running UI read.
         // skipWishlist is an explicit per-click choice (#1455): true = sync
         // only, false = sync and queue missing tracks for download.
-        const res = await fetch(`/api/mirrored-playlists/${sched.key}/pipeline/run`, {
+        const res = await fetch(`/api/mirrored-playlists/${mirrorId}/pipeline/run`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ skip_wishlist: skipWishlist }),
@@ -378,6 +403,7 @@ function useSyncBand() {
     seamPhase,
     entries,
     rows,
+    playlistRows,
     busyId,
     fadingIds,
     runNow,
@@ -513,7 +539,7 @@ export function Row({
             <span
               className="syncband-owned-bar"
               title={
-                row.last
+                row.last && !row.schedule?.coverage
                   ? `${row.coverage.inLibrary} of ${row.coverage.total} tracks matched at the last sync`
                   : `${row.coverage.inLibrary} of ${row.coverage.total} tracks in your library`
               }
@@ -698,7 +724,7 @@ export function SyncBand() {
  *  schedule's board key IS the mirrored playlist id. */
 export function rowOpener(row: SyncBandRow): (() => void) | null {
   const lastId = row.last?.id;
-  const playlistId = row.schedule ? Number(row.schedule.key) : NaN;
+  const playlistId = Number(row.mirrorId ?? row.schedule?.key);
   const openPlaylist = Number.isFinite(playlistId) && playlistId > 0;
   // The run detail is the better answer when there is one: it shows what that
   // sync actually did. The playlist is the fallback, not the preference.
@@ -801,8 +827,17 @@ function useRailSort(): [RailSort, (s: RailSort) => void] {
  * run now, listen, on hover), same board behind Manage.
  */
 export function SyncRail() {
-  const { seamPhase, entries, rows, busyId, runNow, syncAgain, listen, loadAll, liveForRow } =
-    useSyncBand();
+  const {
+    seamPhase,
+    entries,
+    playlistRows: rows,
+    busyId,
+    runNow,
+    syncAgain,
+    listen,
+    loadAll,
+    liveForRow,
+  } = useSyncBand();
   const [showAll, setShowAll] = useState(false);
   const [sort, setSort] = useRailSort();
   const loaded = seamPhase !== 'loading' || entries !== null;
@@ -873,6 +908,7 @@ export function SyncRail() {
               const busy =
                 busyId !== null &&
                 (busyId === row.schedule?.automationId ||
+                  (row.mirrorId != null && busyId === `mirror-${row.mirrorId}`) ||
                   (row.last?.id !== undefined && busyId === `resync-${row.last.id}`));
               return (
                 <div
@@ -919,7 +955,7 @@ export function SyncRail() {
                         ▶
                       </button>
                     ) : null}
-                    {row.schedule ? (
+                    {row.schedule || row.mirrorId != null ? (
                       <>
                         <button
                           type="button"

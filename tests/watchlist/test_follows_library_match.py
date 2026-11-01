@@ -22,16 +22,16 @@ WRONG = "5S5TmGWWg0cKOu3Dv6cQO0"
 def cur():
     conn = sqlite3.connect(":memory:")
     c = conn.cursor()
-    c.execute("""CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT,
-        spotify_artist_id TEXT, itunes_artist_id TEXT, deezer_id TEXT, discogs_id TEXT,
-        musicbrainz_id TEXT, amazon_id TEXT)""")
+    # Library v2: the catalogue artist's ids are lib2_artists columns + external_ids
+    c.execute("""CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT,
+        spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT)""")
     c.execute("""CREATE TABLE watchlist_artists (id INTEGER PRIMARY KEY, artist_name TEXT,
         spotify_artist_id TEXT, itunes_artist_id TEXT, deezer_artist_id TEXT,
         discogs_artist_id TEXT, musicbrainz_artist_id TEXT, amazon_artist_id TEXT,
         profile_id INTEGER DEFAULT 1, updated_at TIMESTAMP,
         UNIQUE(profile_id, spotify_artist_id))""")
-    c.execute("INSERT INTO artists (id, name, spotify_artist_id, deezer_id) VALUES (1, '1905', ?, '42')",
-              (WRONG,))
+    c.execute("INSERT INTO lib2_artists (id, name, spotify_id, external_ids) "
+              "VALUES (1, '1905', ?, '{\"deezer\": \"42\"}')", (WRONG,))
     yield c
     conn.close()
 
@@ -117,7 +117,7 @@ def test_already_pointing_there_is_a_no_op(cur):
 
 
 def test_an_unmatched_library_artist_finds_nothing(cur):
-    cur.execute("INSERT INTO artists (id, name) VALUES (2, '1905')")
+    cur.execute("INSERT INTO lib2_artists (id, name) VALUES (2, '1905')")
     watch(cur, "1905", spotify_artist_id=WRONG)
     assert library_artist_ids(cur, 2) == {}
     out = follow_library_artist_match(cur, before={}, service="spotify", new_id=RIGHT, profile_id=1)

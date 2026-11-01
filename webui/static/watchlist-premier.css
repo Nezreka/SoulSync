@@ -1218,6 +1218,23 @@
   text-overflow: ellipsis;
 }
 
+/* the name opens the artist's library entry when the library holds them */
+.wap-name-link {
+    all: unset;
+    cursor: pointer;
+}
+
+.wap-name-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+}
+
+.wap-name-link:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.6);
+    outline-offset: 2px;
+    border-radius: var(--radius-control);
+}
+
 .wap-sub {
   font-size: 12px;
   color: var(--wl-text-secondary);

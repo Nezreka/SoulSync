@@ -92,6 +92,36 @@ const LANGS: Record<string, string> = {
   id: 'Indonesian',
 };
 
+/** a language code as a name: 'ja' -> 'Japanese', unknown codes in capitals */
+export function languageName(code: string): string {
+  return LANGS[code.toLowerCase()] ?? code.toUpperCase();
+}
+
+/** "Japanese, English": a file's audio tracks, or '' when none are tagged */
+export function audioLanguagesLabel(codes: string[] | null | undefined): string {
+  return (codes ?? []).map(languageName).join(', ');
+}
+
+/**
+ * every subtitle a file has: the files beside it and the tracks inside it,
+ * each language once, an embedded one marked as such. null when neither is
+ * known yet, so nothing claims "no subtitles" before anyone looked.
+ */
+export function subtitleLabels(
+  files: SubtitleTrack[] | null | undefined,
+  embedded: string[] | null | undefined,
+): string[] | null {
+  if (files == null && embedded == null) return null;
+  const out = (files ?? []).map(subtitleLabel);
+  // the folder wasn't looked at: an empty list would claim there are none
+  if (files == null && !(embedded ?? []).length) return null;
+  const beside = new Set((files ?? []).map((t) => t.language.toLowerCase()));
+  for (const code of embedded ?? []) {
+    if (!beside.has(code.toLowerCase())) out.push(`${languageName(code)} (in file)`);
+  }
+  return out;
+}
+
 export function subtitleLabel(t: SubtitleTrack): string {
   const base = LANGS[t.language.toLowerCase()] ?? t.language.toUpperCase();
   const flags = [t.forced ? 'forced' : '', t.hi ? 'SDH' : ''].filter(Boolean);

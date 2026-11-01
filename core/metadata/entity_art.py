@@ -115,7 +115,7 @@ def fill_artist_photos(cursor, artists: List[Dict[str, Any]]) -> int:
         from core.metadata import normalize_image_url
         for chunk in _chunks(still, 900):
             cursor.execute(
-                f"SELECT name, thumb_url FROM artists WHERE thumb_url IS NOT NULL AND thumb_url != '' "
+                f"SELECT name, image_url FROM lib2_artists WHERE image_url IS NOT NULL AND image_url != '' "
                 f"AND name COLLATE NOCASE IN ({','.join('?' * len(chunk))})",
                 list(chunk))
             for name, thumb in cursor.fetchall():

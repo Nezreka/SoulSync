@@ -11,6 +11,9 @@ from typing import Any, Callable, TypeVar
 
 _T = TypeVar("_T")
 
+# how long a lost wake-up can delay an await (see _run); not a poll interval
+_FALLBACK_POLL_SECONDS = 0.05
+
 _SLOW_IO_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=16,
     thread_name_prefix="soulsync-slow-io",
@@ -28,17 +31,47 @@ async def _run(
     *args: Any,
     **kwargs: Any,
 ) -> _T:
-    # wrap_future, not a poll loop: the loop is woken by the worker's own
-    # completion callback instead of 20 times a second per in-flight call,
-    # and there is no 50 ms latency floor on a fast worker. Not
-    # loop.run_in_executor(None, ...) — that installs a loop-OWNED default
-    # executor, which is exactly what these shared pools exist to avoid.
-    # Executor threads do not inherit ContextVars. Copy request-local source
-    # quality intent (and any future request context) explicitly.
+    # Two things have to hold at once here.
+    #
+    # OURS: Python 3.14.6 can lose the cross-thread selector wake-up used by
+    # asyncio.wrap_future(), most visibly when the worker future completes with
+    # an exception: the concurrent future is done but the awaiting task sleeps
+    # forever. So completion is observed on the owner loop. A 1 ms interval is
+    # bounded and remains far below the old 50 ms polling floor. We still use
+    # our process-wide pools rather than a loop-owned default executor, and
+    # cancellation attempts to remove work that has not started.
+    #
+    # UPSTREAM (ported, not dropped): executor threads do not inherit
+    # ContextVars, so request-local source-quality intent was lost on every
+    # blocking call. Copy the context explicitly and run the work inside it.
+    # That fix is orthogonal to how completion is observed, so it survives the
+    # workaround above.
+    #
+    # The worker's done-callback wakes us at once; the timed check is only the
+    # fallback for a lost 3.14.6 wake-up. A 1 ms poll alone cost a Windows
+    # timer tick (~15 ms) per await and woke the shared loop 1000x a second.
     context = contextvars.copy_context()
-    return await asyncio.wrap_future(
-        executor.submit(context.run, func, *args, **kwargs)
-    )
+    future = executor.submit(context.run, func, *args, **kwargs)
+    loop = asyncio.get_running_loop()
+    done = asyncio.Event()
+
+    def _wake(_finished):
+        try:
+            loop.call_soon_threadsafe(done.set)
+        except RuntimeError:  # loop closed; nobody is waiting any more
+            pass
+
+    future.add_done_callback(_wake)
+    try:
+        while not future.done():
+            try:
+                await asyncio.wait_for(done.wait(), _FALLBACK_POLL_SECONDS)
+            except asyncio.TimeoutError:
+                pass
+        return future.result()
+    except asyncio.CancelledError:
+        future.cancel()
+        raise
 
 
 async def run_blocking(func: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:

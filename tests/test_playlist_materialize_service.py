@@ -125,7 +125,8 @@ def test_materialize_from_batch_all_owned(tmp_path: Path):
     summary = materialize_playlist_from_batch(batch, {}, cfg)
     assert summary is not None and summary.linked + summary.copied == 2
     pdir = Path(summary.playlist_dir)
-    assert pdir == tmp_path / "Playlists" / "Smack That"
+    assert pdir.parent == tmp_path / "Playlists"
+    assert pdir.name.startswith("profile-1-spotify-")
     for name, orig in [("A.mp3", owned[0]), ("B.mp3", owned[1])]:
         entry = pdir / name
         assert entry.is_file()
@@ -170,7 +171,7 @@ def test_reconcile_organize_batch_rebuilds_from_library(tmp_path: Path):
     assert len(results) == 1
     name, s = results[0]
     assert name == "Mix" and s.linked + s.copied == 1        # A owned; Gone not in library → skipped
-    assert (tmp_path / "Playlists" / "Mix" / "A.mp3").exists()
+    assert (Path(s.playlist_dir) / "A.mp3").exists()
 
 
 def test_reconcile_batch_playlist_rebuilds_even_if_row_flag_off(tmp_path: Path):
@@ -185,7 +186,7 @@ def test_reconcile_batch_playlist_rebuilds_even_if_row_flag_off(tmp_path: Path):
     cfg = _Cfg(str(tmp_path / "Playlists"))
     results = reconcile_batch_playlists(db, batch, {}, cfg)
     assert len(results) == 1 and results[0][0] == "Off"
-    assert (tmp_path / "Playlists" / "Off" / "B.mp3").exists()
+    assert (Path(results[0][1].playlist_dir) / "B.mp3").exists()
 
 
 def test_reconcile_wishlist_track_rebuilds_its_playlist(tmp_path: Path):
@@ -200,7 +201,7 @@ def test_reconcile_wishlist_track_rebuilds_its_playlist(tmp_path: Path):
     cfg = _Cfg(str(tmp_path / "Playlists"))
     results = reconcile_batch_playlists(db, batch, tasks, cfg)
     assert len(results) == 1 and results[0][0] == "Mix"
-    assert (tmp_path / "Playlists" / "Mix" / "A.mp3").exists()   # Mix rebuilt from the library
+    assert (Path(results[0][1].playlist_dir) / "A.mp3").exists()   # Mix rebuilt from the library
 
 
 def test_reconcile_skips_non_organized_provenance(tmp_path: Path):
@@ -231,24 +232,27 @@ def test_mirror_cleanup_prunes_removed_track(tmp_path: Path):
         f.write_bytes(b"audio")
 
     class _DB:
+        members = ["A", "Gone"]
+
         def get_mirrored_playlist(self, pid):
             return {"id": 1, "name": "Mix", "organize_by_playlist": True} if pid == 1 else None
 
         def get_mirrored_playlist_tracks(self, pid):
-            return [{"track_name": "A", "artist_name": "x"}]   # 'Gone' was removed upstream
+            return [{"track_name": title, "artist_name": "x"} for title in self.members]
 
         def check_track_exists(self, title, artist, confidence_threshold=0.8,
                                server_source=None, album=None, candidate_tracks=None):
             fp = {"A": str(a), "Gone": str(gone)}.get(title)
             return (_Track(fp), 1.0) if fp else (None, 0.0)
 
-    from core.playlists.materialize import rebuild_playlist_folder
-    rebuild_playlist_folder(str(tmp_path / "Playlists"), "Mix", [str(a), str(gone)], "symlink")
-    assert (tmp_path / "Playlists" / "Mix" / "Gone.mp3").exists()   # both present before
-
-    summary = rebuild_mirrored_playlist_if_organized(_DB(), _Cfg(str(tmp_path / "Playlists")), 1, profile_id=1)
+    db = _DB()
+    cfg = _Cfg(str(tmp_path / "Playlists"))
+    initial = rebuild_mirrored_playlist_if_organized(db, cfg, 1, profile_id=1)
+    assert (Path(initial.playlist_dir) / "Gone.mp3").exists()   # both present before
+    db.members = ["A"]   # 'Gone' was removed upstream
+    summary = rebuild_mirrored_playlist_if_organized(db, cfg, 1, profile_id=1)
     assert summary is not None
-    pdir = tmp_path / "Playlists" / "Mix"
+    pdir = Path(summary.playlist_dir)
     assert (pdir / "A.mp3").exists()
     assert not (pdir / "Gone.mp3").exists()                        # pruned on mirror update
 
@@ -273,7 +277,7 @@ def test_rebuild_from_db_only_organized_and_owned(tmp_path: Path):
     assert len(results) == 1                         # only Mix (organize on)
     name, s = results[0]
     assert name == "Mix" and s.linked + s.copied == 1           # only A owned; Gone skipped
-    assert (tmp_path / "Playlists" / "Mix" / "A.mp3").exists()
+    assert (Path(s.playlist_dir) / "A.mp3").exists()
     assert not (tmp_path / "Playlists" / "Off").exists()
 
 
@@ -288,7 +292,7 @@ def test_playlist_item_template_renames_entries(tmp_path: Path):
     cfg = _Cfg(str(tmp_path / "Playlists"), mode="copy", item_template="$position - $title")
     results = rebuild_organized_playlists_from_db(db, cfg, profile_id=1)
     assert results[0][0] == "Mix"
-    mix = tmp_path / "Playlists" / "Mix"
+    mix = Path(results[0][1].playlist_dir)
     assert sorted(p.name for p in mix.iterdir()) == ["01 - A.flac"]   # templated, NOT "07 - A.flac"
 
 
@@ -299,6 +303,6 @@ def test_empty_playlist_item_template_keeps_library_filename(tmp_path: Path):
     a.write_bytes(b"audio")
     db = _RebuildDB({"A": str(a)})
     cfg = _Cfg(str(tmp_path / "Playlists"), mode="copy")   # item_template="" (default)
-    rebuild_organized_playlists_from_db(db, cfg, profile_id=1)
-    mix = tmp_path / "Playlists" / "Mix"
+    results = rebuild_organized_playlists_from_db(db, cfg, profile_id=1)
+    mix = Path(results[0][1].playlist_dir)
     assert sorted(p.name for p in mix.iterdir()) == ["07 - A.flac"]   # unchanged

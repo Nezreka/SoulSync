@@ -656,7 +656,7 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
             "mdblist_api_key": "",
             "subdl_api_key": "", "subsource_api_key": "",
             "ryd_enabled": True, "sponsorblock_enabled": True, "dearrow_enabled": True,
-            "tvmaze_enabled": True, "anilist_enabled": False, "wikidata_enabled": True,
+            "tvmaze_enabled": True, "anilist_enabled": True, "wikidata_enabled": True,
             "billboard_autoplay": True, "watch_region": "US"}
         client.post("/api/video/enrichment/config",
                     json={"tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om",
@@ -670,7 +670,7 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
             "mdblist_api_key": "",
             "subdl_api_key": "sdl", "subsource_api_key": "sso",
             "ryd_enabled": False, "sponsorblock_enabled": True, "dearrow_enabled": True,
-            "tvmaze_enabled": True, "anilist_enabled": False, "wikidata_enabled": True,
+            "tvmaze_enabled": True, "anilist_enabled": True, "wikidata_enabled": True,
             "billboard_autoplay": False, "watch_region": "GB"}
         assert db.get_setting("tmdb_api_key") == "abc" and db.get_setting("omdb_api_key") == "om"
         assert client.get("/api/video/prefs").get_json() == {
@@ -2116,3 +2116,20 @@ def test_acquisition_state_does_not_count_specials_or_unaired_as_missing(tmp_pat
         assert body["specials_missing"] == 1 and body["upcoming"] == 1
     finally:
         videoapi._video_db = None
+
+
+def test_only_the_admins_watched_click_goes_to_the_server(tmp_path, monkeypatch):
+    """#1941: the server account is the admin's. A member's watched click stays
+    local; it would otherwise land in the admin's plex history."""
+    from core.video import metadata as med
+    calls = []
+
+    def fake_set_watched(db, kind, item_id, watched, source=None, push=True):
+        calls.append(push)
+        return {"ok": True, "watched": watched, "pushed": False}
+    monkeypatch.setattr(med, "set_watched", fake_set_watched)
+    for is_admin in (False, True):
+        c = _client_as(tmp_path, is_admin=is_admin)
+        r = c.post("/api/video/detail/movie/1/watched", json={"watched": True})
+        assert r.status_code == 200
+    assert calls == [False, True]

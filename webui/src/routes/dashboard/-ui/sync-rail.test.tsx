@@ -362,4 +362,46 @@ describe('the split sync buttons (#1455)', () => {
     await vi.waitFor(() => expect(posts).toHaveLength(2));
     expect(posts[1].body).toEqual({ skip_wishlist: false });
   });
+
+  it('syncs an unscheduled mirror without a history entry through its pipeline', async () => {
+    // a mirror with no Auto-Sync automation and no pipeline history
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+        const u = String(url);
+        if (u.endsWith('/pipeline/run')) {
+          posts.push({ url: u, body: JSON.parse(String((init as { body?: string })?.body)) });
+          return { ok: true, json: async () => ({}) };
+        }
+        if (u === '/api/mirrored-playlists')
+          return {
+            ok: true,
+            json: async () => [
+              {
+                id: 8,
+                name: 'Feelings',
+                source: 'spotify',
+                total_count: 414,
+                in_library_count: 65,
+              },
+            ],
+          };
+        if (u === '/api/automations') return { ok: true, json: async () => [] };
+        if (u.startsWith('/api/sync/history'))
+          return { ok: true, json: async () => ({ entries: [] }) };
+        return { ok: true, json: async () => ({}) };
+      }),
+    );
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<SyncRail />);
+    });
+    await vi.waitFor(() => expect(view.container.querySelector('.dash-sync-act')).not.toBeNull());
+    fireEvent.click(view.container.querySelector('.dash-sync-act')!);
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({
+      url: '/api/mirrored-playlists/8/pipeline/run',
+      body: { skip_wishlist: true },
+    });
+  });
 });

@@ -527,3 +527,60 @@ def test_checklist_asks_slskd_and_remembers_a_yes(monkeypatch):
     assert item()["done"] is True           # remembered, not asked
     assert asked == ["http://s:5030", "http://s:5030"]
     assert "slskd_shares" in cfg.values["setup.checklist_done"]
+
+
+# ---- music assistant -----------------------------------------------------
+
+def _ma_http(sources=True, token_ok=True):
+    """a music assistant: /info answers anyone, /api wants the token"""
+    info = _Resp(200, {"server_version": "2.10.6", "name": "Den MA"})
+    providers = [{"instance_id": "filesystem_local--1", "domain": "filesystem_local", "name": "Local files"}] if sources else []
+
+    class Http(_Http):
+        def post(self, url, **kw):
+            self.calls.append(("post", url, kw))
+            if not token_ok or kw.get("headers", {}).get("Authorization") != "Bearer tok":
+                return _Resp(401, text="Authentication required")
+            command = (kw.get("json") or {}).get("command")
+            if command == "auth/me":
+                return _Resp(200, {"message_id": "x", "result": {"username": "rob"}})
+            if command == "providers":
+                return _Resp(200, {"message_id": "x", "result": providers})
+            if command == "config/providers/get_value":
+                return _Resp(200, {"message_id": "x", "result": "/media/music"})
+            return _Resp(400, text="bad command")
+
+    return Http({"/info": info})
+
+
+def test_music_assistant_probe_reads_version_user_and_sources(no_config_writes):
+    http = _ma_http()
+    res = Prober(http).music_assistant({"base_url": "http://h:8095/", "token": "tok"})
+    assert res["ok"] and res["detail"] == {"server_name": "Den MA", "version": "2.10.6", "sources": 1}
+    assert any(c[0] == "post" and c[2]["json"]["command"] == "auth/me" for c in http.calls)
+
+
+def test_music_assistant_probe_refuses_a_bad_token_and_notes_a_missing_source(no_config_writes):
+    bad = Prober(_ma_http(token_ok=False)).music_assistant({"base_url": "http://h:8095", "token": "tok"})
+    assert not bad["ok"] and "token" in bad["message"]
+    none = Prober(_ma_http()).music_assistant({"base_url": "http://h:8095", "token": ""})
+    assert not none["ok"] and "token" in none["message"]
+    empty = Prober(_ma_http(sources=False)).music_assistant({"base_url": "http://h:8095", "token": "tok"})
+    assert empty["ok"] and empty["detail"]["sources"] == 0 and "no Local files" in empty["message"]
+    gone = Prober(_Http({})).music_assistant({"base_url": "http://gone:8095", "token": "tok"})
+    assert gone == {"ok": False, "message": "Can't reach Music Assistant at http://gone:8095", "detail": {}}
+
+
+def test_music_assistant_libraries_are_its_file_sources_with_their_folders():
+    libs = Prober(_ma_http()).libraries("music_assistant", {"base_url": "http://h:8095", "token": "tok"})
+    assert libs == {"music": [{"id": "filesystem_local--1", "title": "Local files", "count": None,
+                               "locations": ["/media/music"]}], "movies": [], "tv": []}
+
+
+def test_music_assistant_is_discovered_on_8095_by_its_info_endpoint():
+    get = _fake_get({"http://localhost:8095/info": _Resp(200, text='{"server_version": "2.10.6"}')})
+    found = discovery.discover(["music_assistant"], docker=False, local_ip="192.168.1.5",
+                               resolves=lambda n: False, get=get)
+    assert found == {"music_assistant": "http://localhost:8095"}
+    from core.onboarding import probes as probes_module
+    assert "music_assistant" in probes_module.SERVICES and "music_assistant" in discovery.SERVICES

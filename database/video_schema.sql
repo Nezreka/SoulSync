@@ -414,12 +414,86 @@ CREATE TABLE IF NOT EXISTS media_files (
     audio_channels INTEGER,          -- 2 | 6 (5.1) | 8 (7.1)
     dynamic_range  TEXT,             -- HDR10 | HDR10+ | DV | HLG (NULL = SDR)
     atmos          INTEGER,          -- Dolby Atmos audio present
+    audio_languages    TEXT,         -- 'ja,en' audio track languages (NULL = not probed, '' = none tagged)
+    subtitle_languages TEXT,         -- embedded subtitle tracks, same shape
     added_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK ((movie_id IS NOT NULL) + (episode_id IS NOT NULL) + (video_id IS NOT NULL) = 1)
 );
 CREATE INDEX IF NOT EXISTS idx_media_files_movie   ON media_files(movie_id);
 CREATE INDEX IF NOT EXISTS idx_media_files_episode ON media_files(episode_id);
 CREATE INDEX IF NOT EXISTS idx_media_files_video   ON media_files(video_id);
+CREATE INDEX IF NOT EXISTS idx_media_files_size    ON media_files(size_bytes);
+
+-- What soulsync itself read off a video file with ffprobe (v60): its audio and
+-- embedded subtitle languages. Keyed by file name + size, which match the same
+-- file whatever path the media server or this machine sees it under. A server
+-- scan rewrites media_files, so this is where a probe outlives it: the scan
+-- fills the languages in from here when the server didn't send them (plex
+-- sends no stream data in a library listing).
+CREATE TABLE IF NOT EXISTS video_file_probes (
+    file_name          TEXT NOT NULL,
+    size_bytes         INTEGER NOT NULL,
+    audio_languages    TEXT NOT NULL DEFAULT '',
+    subtitle_languages TEXT NOT NULL DEFAULT '',
+    audio_channels     INTEGER,
+    probed_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (file_name, size_bytes)
+);
+
+-- The anime id map (v61): Fribb's anime-lists, which pairs AniList/MAL/AniDB
+-- ids with TVDB/TMDB ids and says which season + episode offset each AniList
+-- entry covers. Refreshed weekly by the AniList worker (core/video/anime_map).
+CREATE TABLE IF NOT EXISTS anime_id_map (
+    anilist_id   INTEGER PRIMARY KEY,
+    mal_id       INTEGER,
+    anidb_id     INTEGER,
+    format       TEXT,              -- TV | MOVIE | OVA | ONA | SPECIAL | TV_SHORT | MUSIC
+    tvdb_id      INTEGER,
+    tvdb_season  INTEGER,           -- 0 = specials
+    tvdb_offset  INTEGER NOT NULL DEFAULT 0,
+    tmdb_tv      INTEGER,
+    tmdb_season  INTEGER,
+    tmdb_offset  INTEGER NOT NULL DEFAULT 0,
+    tmdb_movie   INTEGER,
+    imdb_id      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_anime_map_tvdb  ON anime_id_map(tvdb_id);
+CREATE INDEX IF NOT EXISTS idx_anime_map_tmdb  ON anime_id_map(tmdb_tv);
+CREATE INDEX IF NOT EXISTS idx_anime_map_movie ON anime_id_map(tmdb_movie);
+
+-- What AniList says about a library title (v61), one row per AniList entry:
+-- a show has one per season or cour, a movie one. TMDB/TVDB stay the identity;
+-- this is the anime layer on top (titles for release search, score, studio,
+-- the next episode's countdown).
+CREATE TABLE IF NOT EXISTS video_anime (
+    kind           TEXT NOT NULL CHECK (kind IN ('movie', 'show')),
+    item_id        INTEGER NOT NULL,
+    anilist_id     INTEGER NOT NULL,
+    mal_id         INTEGER,
+    tvdb_season    INTEGER,
+    tvdb_offset    INTEGER NOT NULL DEFAULT 0,
+    tmdb_season    INTEGER,
+    tmdb_offset    INTEGER NOT NULL DEFAULT 0,
+    format         TEXT,
+    status         TEXT,              -- FINISHED | RELEASING | NOT_YET_RELEASED | ...
+    episodes       INTEGER,
+    season_year    INTEGER,
+    score          INTEGER,           -- averageScore 1-100
+    popularity     INTEGER,
+    site_url       TEXT,
+    title_romaji   TEXT,
+    title_english  TEXT,
+    title_native   TEXT,
+    synonyms       TEXT NOT NULL DEFAULT '[]',
+    studios        TEXT NOT NULL DEFAULT '[]',
+    next_episode   INTEGER,
+    next_airing_at INTEGER,           -- epoch seconds
+    cover_url      TEXT,
+    banner_url     TEXT,
+    synced_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, item_id, anilist_id)
+);
+CREATE INDEX IF NOT EXISTS idx_video_anime_airing ON video_anime(status, synced_at);
 
 -- ── Downloads (active queue + history) ──────────────────────────────────────
 -- One target per row: a movie, a single episode, a whole season (pack), or a

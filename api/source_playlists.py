@@ -5429,7 +5429,7 @@ def _run_sync_task(
     sync_mode=None,
     skip_wishlist_add=False,
     organize_by_playlist=False,
-    user_initiated=False,
+    user_initiated=None,
     is_request_list=False,
     auto_remove_fulfilled=False,
     **kwargs,

@@ -27,6 +27,19 @@ def _int(val, default):
         return default
 
 
+def _forget_worker_enabled():
+    """The backfill workers cache their on/off flag; a save shows at once."""
+    try:
+        from core.video.enrichment.engine import peek_video_enrichment_engine
+        eng = peek_video_enrichment_engine()
+        for worker in (getattr(eng, "workers", None) or {}).values():
+            forget = getattr(worker, "forget_enabled", None)
+            if forget:
+                forget()
+    except Exception:
+        logger.debug("video enrichment: could not refresh worker toggles", exc_info=True)
+
+
 def register_routes(bp):
     def engine():
         from core.video.enrichment.engine import get_video_enrichment_engine
@@ -140,6 +153,7 @@ def register_routes(bp):
                      "tvmaze_enabled", "anilist_enabled", "wikidata_enabled"):
             if flag in body:
                 db.set_setting(flag, "1" if body.get(flag) else "0")
+        _forget_worker_enabled()
         if "billboard_autoplay" in body:
             db.set_setting("billboard_autoplay", "1" if body.get("billboard_autoplay") else "0")
         if "watch_region" in body:

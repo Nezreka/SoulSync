@@ -29,6 +29,11 @@ export interface FindingGroup {
   severity_max: string;
   last_seen?: string | null;
   job_ids?: string[];
+  /** Pending rows in this group that would overwrite a value someone set by
+   *  hand. Counted server-side: "apply all" and "apply all except my own
+   *  edits" are two different requests, and the choice has to be made before
+   *  the click — not after walking every finding's diff. */
+  manual_conflicts?: number;
 }
 
 /** One row of `GET /api/repair/finding-types`. The backend owns this: the
@@ -76,12 +81,15 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   missing_lyrics: 'Tracks with no lyrics saved.',
   missing_replaygain: 'No loudness tags, so playback volume jumps between tracks.',
   replaygain_retag: 'Loudness tags written before your current target level.',
+  zero_length_mp4: "AAC that shows 0:00 and won't seek. Fixing keeps audio and tags.",
   untagged_download: 'Downloads with no title, artist or album tag.',
   empty_folder: 'Folders left behind with no audio inside.',
   expired_download: 'Finished downloads older than your retention window.',
   metadata_gap: 'Missing genres, years or IDs that enrichment can fill in.',
   bpm_backfill: 'Tracks missing BPM that Deezer or local analysis can fill in.',
   duplicate_tracks: 'The same track stored more than once.',
+  native_duplicate_releases: 'Choose the surviving release. Provider editions and files stay.',
+  native_duplicate_tracks: 'Review copies. Keep Best preserves protected files.',
   single_album_redundant: 'Singles you also own inside the full album.',
   mbid_mismatch: 'Track MusicBrainz IDs disagree with the tags on disk.',
   album_mbid_mismatch: 'Album MusicBrainz IDs disagree with the tags on disk.',
@@ -93,6 +101,9 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   unknown_artist: 'Tracks filed under an unidentified or blank artist.',
   acoustid_mismatch: 'The audio fingerprint says this is a different track.',
   quality_upgrade: 'Files below the bitrate or format your profile asks for.',
+  quality_upgrade_review: 'Below the quality target. Applying monitors and queues the track.',
+  quality_format_not_targeted: 'Formats outside your profile. Review the profile before replacing.',
+  quality_unknown: 'Audio quality could not be measured. Inspect before replacing.',
   missing_discography_track: 'Releases by your artists that are not in the library.',
   library_retag: "Files whose tags are behind the library's metadata.",
   short_preview_track: '30-second preview clips saved in place of full tracks.',
@@ -101,7 +112,7 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   genre_cleanup: 'Genre tags that are junk, duplicated or wrongly cased.',
   comma_artist_split: 'One artist row holding several comma-separated names.',
   suspect_album_tag: 'Tracks probably filed under the wrong album due to bad tags.',
-  fake_lossless: 'FLAC upscaled from a lossy source. Review only.',
+  fake_lossless: 'FLAC upscaled from a lossy source; applying re-downloads it.',
   album_needs_enrichment: 'Albums still waiting on a metadata enrichment pass.',
   album_release_year_mismatch: 'Album and track release years disagree with the original release.',
 };

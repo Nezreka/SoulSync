@@ -44,6 +44,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+import time
 import weakref
 from collections import OrderedDict
 from typing import Any, Callable, List, Optional
@@ -68,6 +69,10 @@ _idle: "OrderedDict[str, List[_Slot]]" = OrderedDict()
 # next one: insert_or_update_media_track drops busy_timeout to 10s, the planner
 # stats refresh sets analysis_limit
 _RESET_PRAGMAS = ("busy_timeout", "analysis_limit")
+
+# every proxy handed out and not yet given back, so the lock watchdog can name
+# the thread sitting on an open write transaction instead of dumping every stack
+_checked_out: "weakref.WeakSet[PooledConnection]" = weakref.WeakSet()
 
 # plain counters for diagnostics and tests; not locked on purpose, approximate is fine
 stats = {"hits": 0, "misses": 0, "discarded": 0, "kept_by_cursor": 0, "overflow_closed": 0}
@@ -111,16 +116,89 @@ def _close_quietly(raw: sqlite3.Connection) -> None:
         pass
 
 
+# A statement slower than this is logged with its SQL and the code that ran
+# it, once per statement per SLOW_SQL_REPEAT_SECONDS. Most SQL is built inside
+# functions, where no static sweep can plan it; this finds the slow ones as
+# they run (Oct 31 2026: a 126s query on a loop had sat in a worker unseen).
+SLOW_SQL_SECONDS = 1.0
+SLOW_SQL_REPEAT_SECONDS = 600.0
+_slow_sql_seen: dict = {}
+_slow_sql_lock = threading.Lock()
+
+
+def _note_slow(sql: Any, elapsed: float) -> None:
+    if elapsed < SLOW_SQL_SECONDS:
+        return
+    text = " ".join(str(sql or "").split())
+    key = text[:300]
+    now = time.monotonic()
+    with _slow_sql_lock:
+        last = _slow_sql_seen.get(key)
+        if last is not None and now - last < SLOW_SQL_REPEAT_SECONDS:
+            return
+        _slow_sql_seen[key] = now
+        if len(_slow_sql_seen) > 2000:
+            _slow_sql_seen.clear()
+    try:
+        import traceback
+        here = __file__.replace("\\", "/").rsplit("/", 1)[-1]
+        caller = next((f for f in reversed(traceback.extract_stack()[:-2])
+                       if not f.filename.replace("\\", "/").endswith(here)), None)
+        where = (f"{caller.filename.replace(chr(92), '/').rsplit('SoulSync/', 1)[-1]}:"
+                 f"{caller.lineno} {caller.name}") if caller else "?"
+        from utils.logging_config import get_logger
+        get_logger("slow_sql").warning("slow query %.1fs at %s: %s", elapsed, where, text[:600])
+    except Exception:  # noqa: BLE001, S110 - a diagnostic never breaks a query
+        pass
+
+
+class _TimedCursor(sqlite3.Cursor):
+    """A cursor that reports statements slower than SLOW_SQL_SECONDS. Two
+    clock reads a call; the SQL is only formatted for a slow one."""
+
+    def execute(self, *args: Any, **kwargs: Any) -> "_TimedCursor":
+        started = time.monotonic()
+        try:
+            return super().execute(*args, **kwargs)
+        finally:
+            self._sql = args[0] if args else kwargs.get("sql")
+            self._exec_s = time.monotonic() - started
+            _note_slow(self._sql, self._exec_s)
+
+    def executemany(self, *args: Any, **kwargs: Any) -> "_TimedCursor":
+        started = time.monotonic()
+        try:
+            return super().executemany(*args, **kwargs)
+        finally:
+            _note_slow(args[0] if args else kwargs.get("sql"), time.monotonic() - started)
+
+    def fetchall(self) -> list:
+        started = time.monotonic()
+        try:
+            return super().fetchall()
+        finally:
+            spent = time.monotonic() - started
+            # the work of a big SELECT can land here rather than in execute
+            if spent >= SLOW_SQL_SECONDS:
+                _note_slow(getattr(self, "_sql", "?"), spent + getattr(self, "_exec_s", 0.0))
+
+
 class PooledConnection:
     """What ``_get_connection`` returns. Looks like a sqlite3.Connection to callers."""
 
-    __slots__ = ("_slot", "_path", "_cursors", "_released", "__weakref__")
+    __slots__ = ("_slot", "_path", "_cursors", "_released", "_owner", "_since", "__weakref__")
 
     def __init__(self, slot: _Slot, path: str):
         object.__setattr__(self, "_slot", slot)
         object.__setattr__(self, "_path", path)
         object.__setattr__(self, "_cursors", [])
         object.__setattr__(self, "_released", False)
+        object.__setattr__(self, "_owner", threading.current_thread().name)
+        object.__setattr__(self, "_since", time.monotonic())
+        try:
+            _checked_out.add(self)
+        except TypeError:  # pragma: no cover - a WeakSet always takes a slotted proxy
+            pass
 
     # -- delegation ----------------------------------------------------------
     def _raw(self) -> sqlite3.Connection:
@@ -141,13 +219,15 @@ class PooledConnection:
         return cur
 
     def cursor(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
+        if not args and "factory" not in kwargs:
+            args = (_TimedCursor,)
         return self._track(self._raw().cursor(*args, **kwargs))
 
     def execute(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
-        return self._track(self._raw().execute(*args, **kwargs))
+        return self._track(self._raw().cursor(_TimedCursor)).execute(*args, **kwargs)
 
     def executemany(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
-        return self._track(self._raw().executemany(*args, **kwargs))
+        return self._track(self._raw().cursor(_TimedCursor)).executemany(*args, **kwargs)
 
     def executescript(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
         return self._track(self._raw().executescript(*args, **kwargs))
@@ -273,6 +353,25 @@ def acquire(path: Any, opener: Callable[[bool], sqlite3.Connection]):
     stats["misses"] += 1
     raw = opener(False)
     return PooledConnection(_Slot(raw, ident), p)
+
+
+def open_transactions(min_age: float = 0.0) -> List[dict]:
+    """checked-out connections with a transaction open, oldest first: the
+    thread that took the connection, how long ago, and the file. a write
+    transaction here is what every other writer is queued behind."""
+    now = time.monotonic()
+    found = []
+    for proxy in list(_checked_out):
+        try:
+            if proxy._released or not proxy._slot.raw.in_transaction:
+                continue
+        except Exception:  # noqa: BLE001, S112 - a closed or moving connection is not a holder
+            continue
+        age = now - proxy._since
+        if age >= min_age:
+            found.append({"thread": proxy._owner, "age_s": round(age, 1),
+                          "path": os.path.basename(proxy._path)})
+    return sorted(found, key=lambda h: -h["age_s"])
 
 
 def discard(path: Any) -> None:

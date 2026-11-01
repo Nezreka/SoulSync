@@ -14,8 +14,10 @@
  * its display_name, so the names agree by construction.
  */
 
-import type { AutoSyncCardRow } from './-dash.autosync';
+import type { AutoSyncCardRow, AutoSyncSeamPlaylist } from './-dash.autosync';
 import type { SyncCardView } from './-dash.library';
+
+import { AUTOSYNC_SOURCE_LOGOS, coverageFor, sourceLabel } from './-dash.autosync';
 
 export interface SyncBandRow {
   rowKey: string;
@@ -23,16 +25,14 @@ export interface SyncBandRow {
   name: string;
   /** Schedule side — null on manual rows. */
   schedule: AutoSyncCardRow | null;
+  /** Current mirror identity, including playlists without a schedule or run. */
+  mirrorId?: number | string;
   /** The newest sync-history run for this playlist — null when a scheduled
    *  playlist has no recorded runs yet. */
   last: SyncCardView | null;
-  /** ONE completeness number per row (Boulder: matched-vs-owned side by
-   *  side read as two contradictory answers to the same question). The
-   *  last run's matched count wins when a run exists — the sync engine's
-   *  full fuzzy matcher against the real server, timestamped by the ago
-   *  chip — and the db owned join only backs never-run schedules (it lags
-   *  fresh downloads until the next library scan and undercounts sources
-   *  whose ids aren't Spotify's). */
+  /** Current playlist membership supplies library coverage. Historical
+   *  matches only back rows without current coverage; a failed or old run
+   *  cannot override what the library owns now. */
   coverage: { inLibrary: number; total: number; pct: number } | null;
   /** Art preference: the mirrored playlist's own cover, else the run's thumb. */
   thumbUrl: string | null;
@@ -43,10 +43,11 @@ export interface SyncBandRow {
 }
 
 function coverageOf(last: SyncCardView | null, schedule: AutoSyncCardRow | null) {
+  if (schedule?.coverage) return schedule.coverage;
   if (last && last.total > 0) {
     return { inLibrary: last.found, total: last.total, pct: last.pct };
   }
-  return schedule?.coverage ?? null;
+  return null;
 }
 
 const norm = (s: string) => s.trim().toLowerCase();
@@ -54,6 +55,7 @@ const norm = (s: string) => s.trim().toLowerCase();
 export function syncBandRows(
   scheduleRows: AutoSyncCardRow[],
   historyViews: SyncCardView[],
+  mirrorPlaylists?: AutoSyncSeamPlaylist[],
 ): SyncBandRow[] {
   const used = new Set<number>();
   // rowKey -> the claimed history index. History arrives newest-first, so
@@ -112,12 +114,52 @@ export function syncBandRows(
     });
   });
 
+  // The health rail represents current mirrors, once each. The history band
+  // keeps its broader list when no mirror roster is supplied.
+  const visibleRows: SyncBandRow[] = mirrorPlaylists
+    ? mirrorPlaylists.map((playlist) => {
+        const name = String(
+          playlist.display_name ||
+            playlist.custom_name ||
+            playlist.name ||
+            `Playlist #${playlist.id}`,
+        );
+        const id = String(playlist.id);
+        const scheduled = rows.find((row) => String(row.schedule?.key) === id);
+        let historyIndex = historyViews.findIndex(
+          (view) =>
+            view.playlistId === `auto_mirror_${id}` ||
+            (playlist.source_playlist_id != null &&
+              view.playlistId === playlist.source_playlist_id),
+        );
+        if (historyIndex < 0)
+          historyIndex = historyViews.findIndex((view) => norm(view.name) === norm(name));
+        const last = historyIndex >= 0 ? historyViews[historyIndex] : (scheduled?.last ?? null);
+        const rowKey = scheduled?.rowKey ?? `p-${id}`;
+        if (historyIndex >= 0) recency.set(rowKey, historyIndex);
+        const sourceKey = playlist.source || '';
+        return {
+          rowKey,
+          kind: scheduled ? 'scheduled' : 'manual',
+          schedule: scheduled?.schedule ?? null,
+          last,
+          name,
+          mirrorId: playlist.id,
+          coverage: coverageFor(playlist),
+          thumbUrl: playlist.image_url || last?.thumbUrl || null,
+          logo: AUTOSYNC_SOURCE_LOGOS[sourceKey] || null,
+          sourceKey,
+          sourceLabel: sourceLabel(sourceKey),
+        };
+      })
+    : rows;
+
   // Running rows lead; then EVERYTHING by newest run first (Boulder: the
   // newest syncs belong at the top) — scheduled and manual interleaved by
   // their claimed history index; schedules that never ran trail in the
   // board's urgency order. A stable sort keeps within-group order intact.
   const rank = (r: SyncBandRow) => (r.schedule?.running ? -1 : (recency.get(r.rowKey) ?? Infinity));
-  return rows
+  return visibleRows
     .map((r, i) => ({ r, i }))
     .sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i)
     .map(({ r }) => r);

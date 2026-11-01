@@ -64,7 +64,7 @@ def test_stamps_owned_and_missing_the_way_a_sync_does(monkeypatch):
     db = _DB([_row(1, "Mr. Brightside", "The Killers"), _row(2, "Rare Cut", "Nobody")])
     _patch(monkeypatch, owned={"Mr. Brightside": 501})
     out = library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1,
-                                            source="deezer", active_server="navidrome")
+                                            source="deezer")
     assert out == {"checked": 2, "found": 1, "remaining": 0}
     one, two = _extra(db, 1), _extra(db, 2)
     assert one["in_library"] is True and one["library_track_id"] == 501
@@ -80,7 +80,7 @@ def test_already_checked_rows_are_left_to_the_sync(monkeypatch):
     db = _DB([_row(1, "A", "X", synced), _row(2, "B", "Y", {"in_library": True}), _row(3, "C", "Z")])
     asked = _patch(monkeypatch, owned={})
     out = library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1,
-                                            source="deezer", active_server=None)
+                                            source="deezer")
     assert out["checked"] == 1 and db.writes == [3]
     assert [a[0] for a in asked] == ["C"]
     assert _extra(db, 1)["library_checked_at"] == 123   # untouched
@@ -92,7 +92,7 @@ def test_asks_by_the_identified_match_not_the_source_title(monkeypatch):
     db = _DB([_row(1, "gives you hell (clean)", "AAR", extra)])
     asked = _patch(monkeypatch, owned={"Gives You Hell": 9})
     library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1,
-                                      source="deezer", active_server=None)
+                                      source="deezer")
     assert asked == [("Gives You Hell", ("The All-American Rejects",))]
     assert _extra(db, 1)["in_library"] is True
 
@@ -103,7 +103,7 @@ def test_a_wing_it_stub_is_not_a_match_to_ask_by(monkeypatch):
     db = _DB([_row(1, "Real Title", "Real Artist", extra)])
     asked = _patch(monkeypatch, owned={})
     library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1,
-                                      source="deezer", active_server=None)
+                                      source="deezer")
     assert asked == [("Real Title", ("Real Artist",))]
 
 
@@ -111,19 +111,60 @@ def test_a_saved_manual_match_counts_as_owned(monkeypatch):
     db = _DB([_row(1, "Picked By Hand", "Someone")])
     asked = _patch(monkeypatch, owned={}, manual={"Picked By Hand"})
     library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1,
-                                      source="deezer", active_server=None)
+                                      source="deezer")
     assert asked == []
     assert _extra(db, 1)["in_library"] is True and _extra(db, 1)["library_track_id"] == 77
+
+
+def test_library_check_uses_the_active_server_like_playlist_sync(monkeypatch):
+    db = _DB([_row(1, "Native only", "Artist")])
+    seen = {}
+
+    def fake_match(db_, query, **kwargs):
+        seen.update(kwargs)
+        return False, 0.0, None
+
+    monkeypatch.setattr(master, "match_track_in_library", fake_match)
+    monkeypatch.setattr(master, "live_manual_match", lambda *a, **k: None)
+    monkeypatch.setattr("core.settings.config_manager.get_active_media_server", lambda: "navidrome")
+
+    library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1, source="deezer")
+
+    assert seen["server_source"] == "navidrome"
+    assert seen["include_downloads"] is False
+
+
+def test_mirror_check_resolves_linked_artists_with_a_real_database(tmp_path, monkeypatch):
+    from database.music_database import MusicDatabase
+    from tests import lib2_seed
+
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    with db._get_connection() as conn:
+        canonical = lib2_seed.artist(conn, "Sawano Hiroyuki")
+        lib2_seed.track(conn, "澤野弘之", "Attack on Titan OST", "Eye-Water", track_number=1)
+        conn.execute("UPDATE lib2_artists SET canonical_artist_id = ? WHERE name = ?",
+                     (canonical, "澤野弘之"))
+        conn.commit()
+    pk = db.mirror_playlist(
+        source="deezer", source_playlist_id="aot", name="AOT",
+        tracks=[{"track_name": "Eye-Water", "artist_name": "Sawano Hiroyuki",
+                 "source_track_id": "dz-aot"}], profile_id=1)
+    monkeypatch.setattr("core.settings.config_manager.get_active_media_server", lambda: None)
+
+    library_check.check_mirror_tracks(
+        db, db.get_mirrored_playlist_tracks(pk), profile_id=1, source="deezer")
+
+    assert track_status(db.get_mirrored_playlist_tracks(pk)[0], set()) == IN_LIBRARY
 
 
 def test_a_big_playlist_is_checked_a_slice_at_a_time(monkeypatch):
     db = _DB([_row(i, f"T{i}", "A") for i in range(1, 8)])
     _patch(monkeypatch, owned={})
     out = library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1,
-                                            source="deezer", active_server=None, limit=3)
+                                            source="deezer", limit=3)
     assert out == {"checked": 3, "found": 0, "remaining": 4}
     rest = library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1,
-                                             source="deezer", active_server=None, limit=10)
+                                             source="deezer", limit=10)
     assert rest["checked"] == 4 and rest["remaining"] == 0
     assert all(track_status(r, set()) != UNCHECKED for r in db.rows.values())
 
@@ -139,7 +180,7 @@ def test_one_failing_lookup_does_not_stop_the_rest(monkeypatch):
     monkeypatch.setattr(master, "match_track_in_library", fake_match)
     monkeypatch.setattr(master, "live_manual_match", lambda *a, **k: None)
     out = library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1,
-                                            source="deezer", active_server=None)
+                                            source="deezer")
     # the failed row stays unchecked rather than being stamped missing
     assert out["checked"] == 1 and db.writes == [2]
     assert track_status(db.rows[1], set()) == UNCHECKED
@@ -195,7 +236,7 @@ def test_a_slow_library_stops_at_the_time_budget_and_still_moves(monkeypatch):
     clock = itertools.count(0, 10)   # every monotonic() read is 10s later
     monkeypatch.setattr(library_check.time, "monotonic", lambda: next(clock))
     out = library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1,
-                                            source="deezer", active_server=None, time_budget=15)
+                                            source="deezer", time_budget=15)
     # the first row always runs, so a slow library still makes progress
     assert 1 <= out["checked"] < 5
     assert out["checked"] + out["remaining"] == 5
@@ -228,7 +269,7 @@ def test_the_stamp_says_it_came_from_the_check(monkeypatch):
     db = _DB([_row(1, "X", "A")])
     _patch(monkeypatch, owned={})
     library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1,
-                                      source="deezer", active_server=None)
+                                      source="deezer")
     assert _extra(db, 1)["library_checked_via"] == "check"
 
 

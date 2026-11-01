@@ -39,6 +39,7 @@ const listProps = {
     onCancel: () => {},
     onRetry: () => {},
     onBlock: () => {},
+    onRemove: () => {},
     onToggle: () => {},
   } as VdlCardActions,
   onCancelGroup: () => {},

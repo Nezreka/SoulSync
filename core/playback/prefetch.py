@@ -9,6 +9,7 @@ existing verified download/import pipeline without creating a second matcher.
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any, Iterable
 
 
@@ -46,6 +47,15 @@ def _album_name(track: dict[str, Any]) -> str:
 
 def track_identity(track: dict[str, Any]) -> str:
     """Return a stable, non-secret key for one musical recording request."""
+    if track.get('lib2_track_id') is not None:
+        # A recording in a different library/profile/edition is a different
+        # acquisition; reusing its task can import into the wrong owner.
+        raw = json.dumps({key: track.get(key) for key in (
+            'lib2_track_id', 'lib2_album_id', 'release_edition_id',
+            'profile_id', 'library_owner_id', 'quality_profile_id',
+            'source', 'source_track_id', '_source_album_id',
+        )}, sort_keys=True)
+        return hashlib.sha256(raw.encode('utf-8')).hexdigest()
     source = _text(track.get("source") or track.get("metadata_source")).casefold()
     source_id = _text(
         track.get("source_track_id")
@@ -106,9 +116,12 @@ def normalize_prefetch_track(track: dict[str, Any]) -> dict[str, Any]:
             "id": source_id or identity,
             "name": title,
             "title": title,
-            "artists": [{"name": name} for name in artists],
+            "artists": (track['artists'] if track.get('lib2_track_id') is not None
+                        and isinstance(track.get('artists'), list)
+                        else [{"name": name} for name in artists]),
             "artist": artists[0],
-            "album": _album_name(track),
+            "album": (track['album'] if track.get('lib2_track_id') is not None
+                      and isinstance(track.get('album'), dict) else _album_name(track)),
             "duration_ms": duration_ms,
             "_playback_queue_key": identity,
             "_queue_request_id": _text(track.get("_queue_request_id")) or identity,

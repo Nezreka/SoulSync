@@ -181,6 +181,7 @@ export function SoulsyncDiscoveryTab() {
                         glyph="✨"
                         status={importer.statusOf(SSD_SOURCE, rid)}
                         onAction={() => void importer.importOrOpen(ssdImportSpec(r, onBuilt))}
+                        onEdit={importer.editorFor(SSD_SOURCE, rid, recordName(r))}
                       />
                     );
                   })}

@@ -341,7 +341,7 @@ def test_library_entry_never_records_the_placeholder_album(tmp_path, monkeypatch
     se.record_soulsync_library_entry(context, {"name": "Dawn McCarthy"}, {"album_name": ""})
 
     with db._get_connection() as conn:
-        rows = conn.execute("SELECT title FROM albums").fetchall()
+        rows = conn.execute("SELECT title FROM lib2_albums").fetchall()  # lib2 port
     assert rows, "no album row written"
     assert all(r[0] != "Unknown Album" for r in rows)
     assert rows[0][0] == "Kentucky"

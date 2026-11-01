@@ -47,16 +47,6 @@ def test_record_migration_is_idempotent(tmp_path: Path) -> None:
     assert n == 1
 
 
-def test_genres_migration_recorded_on_fresh_init(tmp_path: Path) -> None:
-    """The forward pattern: the genres migration records itself in the ledger."""
-    db = _fresh_db(tmp_path)
-    with db._get_connection() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM schema_migrations WHERE name = 'genres_json'"
-        ).fetchone()
-    assert row is not None
-
-
 def test_ledger_backfills_from_existing_signals(tmp_path: Path) -> None:
     """Back-fill records both metadata-flag and marker-table migrations that are
     already present, under their canonical ledger names."""

@@ -662,14 +662,25 @@ describe('the page header', () => {
     expect(document.getElementById('artist-detail-back-btn')).not.toBeNull();
   });
 
-  it('goes back through history when there is history to go back to', async () => {
+  it('returns to the recorded source route without walking browser history', async () => {
+    (
+      window as {
+        artistDetailLabelStack?: Array<{
+          type: 'page';
+          pageId: string;
+          href: string;
+        }>;
+      }
+    ).artistDetailLabelStack = [{ type: 'page', pageId: 'search', href: '/search?q=Portishead' }];
     const length = vi.spyOn(window.history, 'length', 'get').mockReturnValue(3);
-    const { router } = renderPage();
+    const { router, history } = renderPage();
     await screen.findByText('Aphex Twin');
     const back = vi.spyOn(router.history, 'back');
 
     fireEvent.click(document.getElementById('artist-detail-back-btn') as HTMLElement);
-    expect(back).toHaveBeenCalled();
+    expect(back).not.toHaveBeenCalled();
+    await waitFor(() => expect(history.location.pathname).toBe('/search'));
+    expect(history.location.search).toBe('?q=Portishead');
     back.mockRestore();
     length.mockRestore();
     // Let the remaining in-flight request settle inside act(), so its state

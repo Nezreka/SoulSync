@@ -100,6 +100,10 @@ Each group has a **Retry** button that clears the backoff on just those tracks. 
 
 The **Cleanup Wishlist** action removes duplicates (the same track added multiple times) and items you already own in your library. It lives in the **⋯** menu next to Download Wishlist, with **Ignored** and **Clear All**.
 
+## Export
+
+**⋯ → Export…** saves the wishlist as **CSV** or **JSON**: everything, **Albums & EPs** only or **Singles** only, previewed before you copy or download it. One row per wanted track with its title, artists, album, release date, length, ISRC, Spotify id, when it was added and the playlist that wanted it.
+
 > [!NOTE]
 > Each wishlist item tracks its source (watchlist scan, playlist sync, manual), retry attempts, and the last error message. There is no status column — a wishlist row is deleted once its download completes.
 

@@ -133,6 +133,14 @@ _rate_limit_ban_ended_at = 0  # When the last ban expired naturally (for post-ba
 _rate_limit_hit_count = 0    # How many times we've been rate limited recently (for escalation)
 _rate_limit_first_hit = 0    # Timestamp of the first hit in the current escalation window
 
+# Spotify refuses every official call with a 403 when the dev app's owner has
+# no Premium, while the token still refreshes fine, so the client kept
+# believing it was connected and paid a failed call (and an error line) on
+# every request before falling back. Spotify says the block lifts "in a few
+# hours" once the subscription changes, so the official API rests that long.
+_PREMIUM_WALL_SECONDS = 6 * 3600
+_premium_wall_until = 0
+
 # Threshold: if Retry-After exceeds this, activate global ban instead of sleeping
 _LONG_RATE_LIMIT_THRESHOLD = 60  # seconds
 
@@ -308,9 +316,31 @@ def _clear_rate_limit():
         logger.debug("publish_spotify_status clear rate limit: %s", e)
 
 
+def _premium_wall_active() -> bool:
+    """Whether the official API is resting after a premium-required 403."""
+    return time.time() < _premium_wall_until
+
+
+def _set_premium_wall(endpoint_name: str) -> None:
+    global _premium_wall_until
+    with _rate_limit_lock:
+        already = _premium_wall_active()
+        _premium_wall_until = time.time() + _PREMIUM_WALL_SECONDS
+    if not already:
+        logger.warning(
+            "Spotify's official API refuses this app (on %s): the app owner's Spotify account "
+            "needs an active Premium subscription. Using Spotify Free and the other sources "
+            "for the next %d hours instead of failing every request.",
+            endpoint_name, _PREMIUM_WALL_SECONDS // 3600)
+
+
 def _detect_and_set_rate_limit(exception, endpoint_name="unknown"):
     """Check if a Spotify exception is a 429 rate limit and activate global ban if so.
-    Returns True if rate limit was detected."""
+    Returns True if rate limit was detected. A premium-required 403 rests the
+    official API too (see _PREMIUM_WALL_SECONDS); it is not a rate limit."""
+    if _is_premium_required_error(exception):
+        _set_premium_wall(endpoint_name)
+        return False
     error_str = str(exception)
     # SpotifyException exposes the HTTP status; use text only for statusless errors.
     status = http_error_status(exception)
@@ -676,23 +706,29 @@ class SpotifyClient:
 
     @property
     def _fallback_source(self) -> str:
-        """Get configured primary metadata source for internal fallback routing."""
+        """The source ``_fallback`` really is. Callers label fallback results
+        with it, so it never says 'spotify': with the primary source stored as
+        'spotify' the fallback is iTunes, and that label put numeric iTunes ids
+        into Spotify slots."""
         try:
-            return config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
+            configured = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
         except Exception:
             return 'deezer'
+        if configured == 'deezer':
+            return 'deezer'
+        # Discogs only with a token configured
+        if configured == 'discogs' and config_manager.get('discogs.token', ''):
+            return 'discogs'
+        return 'itunes'
 
     @property
     def _fallback(self):
         """Get the active fallback metadata client based on settings"""
-        if self._fallback_source == 'deezer':
+        source = self._fallback_source
+        if source == 'deezer':
             return self._deezer
-        if self._fallback_source == 'discogs':
-            # Only use Discogs if token is configured
-            token = config_manager.get('discogs.token', '')
-            if token:
-                return self._discogs
-            return self._itunes  # Fall back to iTunes if no Discogs token
+        if source == 'discogs':
+            return self._discogs
         return self._itunes
 
     def _free_selected(self) -> bool:
@@ -879,6 +915,11 @@ class SpotifyClient:
                 )
             except Exception as e:
                 logger.debug("publish_spotify_status no-client: %s", e)
+            return False
+
+        # Official API refusing this app (premium wall): same as a ban for
+        # every caller, Spotify Free serves instead of a failed call first
+        if _premium_wall_active():
             return False
 
         # If globally rate limited, report as NOT authenticated so callers

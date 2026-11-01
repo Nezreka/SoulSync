@@ -751,6 +751,7 @@ const INVERT_SERVICE_MARKS = new Set(['tidal', 'qobuz', 'discogs', 'tvdb']);
 const SERVICE_GLYPHS = {
     omdb: '\u2605',             // star - ratings, as on the dashboard
     fanart: '\u{1F3A8}',        // palette - artwork
+    'artist-fanart': '\u{1F3A8}', // the same source, for artist artwork
     opensubtitles: '\u{1F4AC}', // speech bubble - subtitles
     trakt: '\u2605',            // star - audience rating
     nokey: '\u{1F4FA}',         // tv - community data (TVmaze)
@@ -765,8 +766,8 @@ const SERVICE_GROUPS = {
           ids: ['musicbrainz', 'spotify', 'itunes', 'deezer', 'discogs', 'tidal', 'qobuz', 'hydrabase'] },
         { label: 'Scrobbling', hint: 'listening history and recommendations',
           ids: ['lastfm', 'listenbrainz'] },
-        { label: 'Extras', hint: 'lyrics, concerts, fingerprint checks and cover art',
-          ids: ['genius', 'concerts', 'acoustid', 'pollinations'] },
+        { label: 'Extras', hint: 'lyrics, concerts, fingerprint checks, cover art and artist artwork',
+          ids: ['genius', 'concerts', 'acoustid', 'pollinations', 'artist-fanart'] },
     ],
     video: [
         { label: 'Metadata', hint: 'movies, shows and episodes',
@@ -3241,6 +3242,13 @@ async function loadSettingsData() {
         loadNavidromePlaylistLogin();
         loadMediaServerNames();
 
+        // Populate Music Assistant settings
+        const maUrl = document.getElementById('music_assistant-url');
+        const maToken = document.getElementById('music_assistant-token');
+        if (maUrl) maUrl.value = settings.music_assistant?.base_url || '';
+        if (maToken) maToken.value = settings.music_assistant?.token || '';
+        if (maUrl && maUrl.value && maToken && maToken.value) loadMusicAssistantSources(true);
+
         // Set active server and toggle visibility
         const activeServer = settings.active_media_server || 'plex';
         // Remember the persisted music server so a save from the VIDEO side keeps
@@ -3316,6 +3324,9 @@ async function loadSettingsData() {
         document.getElementById('genius-access-token').value = settings.genius?.access_token || '';
         const _pollinationsKey = document.getElementById('pollinations-api-key');
         if (_pollinationsKey) _pollinationsKey.value = settings.pollinations?.api_key || '';
+        // the music card's own id: the video side's fanart.tv card owns 'fanart-api-key'
+        const _fanartKey = document.getElementById('artist-fanart-api-key');
+        if (_fanartKey) _fanartKey.value = settings.fanart?.api_key || '';
 
         // Populate iTunes settings
         document.getElementById('itunes-country').value = settings.itunes?.country || 'US';
@@ -3762,6 +3773,10 @@ async function loadSettingsData() {
         // #1449: write artist.nfo into new artist folders (default off)
         const _nfoEl = document.getElementById('write-artist-nfo');
         if (_nfoEl) _nfoEl.checked = settings.library?.write_artist_nfo === true;
+
+        // Library v2: re-download files deleted outside SoulSync (default on)
+        const _redlEl = document.getElementById('redownload-externally-deleted');
+        if (_redlEl) _redlEl.checked = settings.library?.redownload_externally_deleted !== false;
 
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
@@ -4380,7 +4395,7 @@ async function clearPlexConfiguration() {
 // The media server names, in UI order. Refreshed from GET /api/media-servers
 // (the per-server descriptor) when the settings page loads; this list is
 // what the page knew before the endpoint existed and stays the fallback.
-let _mediaServerNames = ['plex', 'jellyfin', 'navidrome', 'soulsync'];
+let _mediaServerNames = ['plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulsync'];
 
 async function loadMediaServerNames() {
     try {
@@ -4607,7 +4622,7 @@ function populateQualityProfileUI(profile) {
     if (upgradePolicySelect) {
         upgradePolicySelect.value = ['until_cutoff', 'until_top'].includes(profile.upgrade_policy)
             ? 'until_cutoff'
-            : 'acceptable';
+            : profile.upgrade_policy === 'acceptable' ? 'acceptable' : 'none';
     }
     renderUpgradeCutoffOptions(profile.upgrade_cutoff_index);
 
@@ -4641,7 +4656,7 @@ function renderUpgradeCutoffOptions(selectedIndex = null) {
 }
 
 function onUpgradePolicyChange() {
-    const policy = document.getElementById('quality-upgrade-policy')?.value || 'acceptable';
+    const policy = document.getElementById('quality-upgrade-policy')?.value || 'none';
     const cutoffGroup = document.getElementById('quality-upgrade-cutoff-group');
     if (cutoffGroup) cutoffGroup.style.display = policy === 'until_cutoff' ? '' : 'none';
     renderUpgradeCutoffOptions();
@@ -4847,6 +4862,8 @@ async function applyQualityPreset(presetName) {
                 ...preset,
                 search_mode: uiState.search_mode,
                 rank_candidates_by_quality: uiState.rank_candidates_by_quality,
+                upgrade_policy: uiState.upgrade_policy,
+                upgrade_cutoff_index: uiState.upgrade_cutoff_index,
                 release_import_mode: uiState.release_import_mode,
             };
             currentQualityProfile = merged;
@@ -4951,7 +4968,9 @@ function collectQualityProfileFromUI() {
         search_mode: document.getElementById('quality-search-mode')?.value === 'best_quality' ? 'best_quality' : 'priority',
         rank_candidates_by_quality: document.getElementById('quality-rank-candidates')?.checked ?? false,
         release_import_mode: document.getElementById('quality-release-import-mode')?.value === 'album_tracks' ? 'album_tracks' : 'requested_tracks',
-        upgrade_policy: document.getElementById('quality-upgrade-policy')?.value === 'until_cutoff' ? 'until_cutoff' : 'acceptable',
+        upgrade_policy: ['none', 'acceptable', 'until_cutoff'].includes(
+            document.getElementById('quality-upgrade-policy')?.value)
+            ? document.getElementById('quality-upgrade-policy').value : 'none',
         upgrade_cutoff_index: parseInt(document.getElementById('quality-upgrade-cutoff')?.value || '0', 10) || 0,
         ranked_targets,
     };
@@ -5081,10 +5100,14 @@ function qpProfileSummary(profile) {
             ? `retain ${codec} only (acquisition remembered)`
             : `lossless + ${codec} companion`);
     }
-    if (['until_cutoff', 'until_top'].includes(profile.upgrade_policy)) {
+    if (profile.upgrade_policy === 'acceptable') {
+        parts.push('upgrade until any accepted target');
+    } else if (['until_cutoff', 'until_top'].includes(profile.upgrade_policy)) {
         const cutoffIndex = Math.min(Math.max(parseInt(profile.upgrade_cutoff_index || '0', 10) || 0, 0), Math.max(targets.length - 1, 0));
         const cutoff = targets[cutoffIndex]?.label || 'top target';
         parts.push(`upgrade until ${cutoff}`);
+    } else {
+        parts.push('upgrades off');
     }
     return parts.join(' · ');
 }
@@ -6786,6 +6809,11 @@ async function saveSettings(quiet = false) {
             api_key: document.getElementById('jellyfin-api-key').value,
             api_timeout: parseInt(document.getElementById('jellyfin-timeout').value) || 30
         },
+        music_assistant: {
+            base_url: _cfgStr('music_assistant-url', { trim: true }),
+            token: _cfgStr('music_assistant-token', { trim: true }),
+            source_instance: _cfgStr('music_assistant-source')
+        },
         navidrome: {
             base_url: document.getElementById('navidrome-url').value,
             username: document.getElementById('navidrome-username').value,
@@ -6836,6 +6864,11 @@ async function saveSettings(quiet = false) {
             scrobble_enabled: document.getElementById('lastfm-scrobble-enabled').checked,
             embed_tags: document.getElementById('embed-lastfm').checked,
             tags: _collectServiceTags('lastfm')
+        },
+        fanart: {
+            // _cfgStr: undefined when the field is absent, so a save there
+            // doesn't wipe the stored key
+            api_key: _cfgStr('artist-fanart-api-key', { trim: true }),
         },
         pollinations: {
             // _cfgStr: undefined when the field is absent (video side), so a
@@ -7073,7 +7106,8 @@ async function saveSettings(quiet = false) {
             audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
             audiobooks_additional_paths: collectAudiobookExtraPaths(),
             reorganize_preserve_casing: _cfgBool('reorganize-preserve-casing'),
-            write_artist_nfo: _cfgBool('write-artist-nfo')
+            write_artist_nfo: _cfgBool('write-artist-nfo'),
+            redownload_externally_deleted: _cfgBool('redownload-externally-deleted')
         },
         podcasts: {
             download_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
@@ -7699,6 +7733,69 @@ async function autoDetectJellyfin() {
         showToast('Failed to auto-detect Jellyfin server', 'error');
     } finally {
         hideLoadingOverlay();
+    }
+}
+
+async function autoDetectMusicAssistant() {
+    try {
+        const response = await fetch('/api/detect-media-server', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server_type: 'music_assistant' })
+        });
+        const result = await response.json();
+        if (result.success && result.found_url) {
+            document.getElementById('music_assistant-url').value = result.found_url;
+            showToast(`Music Assistant found at ${result.found_url}`, 'success');
+        } else {
+            showToast(result.error || 'No Music Assistant server found', 'error');
+        }
+    } catch (e) {
+        showToast('Auto-detect failed: ' + e.message, 'error');
+    }
+}
+
+async function loadMusicAssistantSources(quiet = false) {
+    const container = document.getElementById('music_assistant-source-selector-container');
+    const selector = document.getElementById('music_assistant-source');
+    if (!container || !selector) return;
+    try {
+        const response = await fetch('/api/music-assistant/sources');
+        const result = await response.json();
+        if (!result.success) {
+            container.style.display = 'none';
+            if (!quiet) showToast(result.error || 'Could not load Music Assistant sources', 'error');
+            return;
+        }
+        selector.innerHTML = '';
+        for (const s of result.sources || []) {
+            const opt = document.createElement('option');
+            opt.value = s.key;
+            opt.textContent = `${s.title} (${s.domain})`;
+            if (s.key === result.selected) opt.selected = true;
+            selector.appendChild(opt);
+        }
+        container.style.display = (result.sources || []).length ? '' : 'none';
+        if (!quiet && !(result.sources || []).length) showToast('Music Assistant has no Local files or SMB source', 'warning');
+    } catch (e) {
+        container.style.display = 'none';
+        if (!quiet) showToast('Could not load Music Assistant sources: ' + e.message, 'error');
+    }
+}
+
+async function selectMusicAssistantSource() {
+    const selector = document.getElementById('music_assistant-source');
+    if (!selector || !selector.value) return;
+    try {
+        const response = await fetch('/api/music-assistant/select-source', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instance_id: selector.value })
+        });
+        const result = await response.json();
+        showToast(result.success ? `Music source set to ${selector.selectedOptions[0]?.textContent || selector.value}` : (result.error || 'Could not set the source'), result.success ? 'success' : 'error');
+    } catch (e) {
+        showToast('Could not set the source: ' + e.message, 'error');
     }
 }
 
@@ -9383,7 +9480,16 @@ async function loadImageCacheStatus() {
         if (!data.success) return;
         const entries = document.getElementById('imgcache-entries');
         const size = document.getElementById('imgcache-size');
-        if (entries) entries.textContent = (data.entries || 0).toLocaleString();
+        if (entries) {
+            // A "pending" row is a registered URL nothing ever loaded. When it
+            // dominates the count, the URLs being handed out are changing
+            // between renders (a media-server auth salt used to rotate on every
+            // call), and the entry count alone hides that completely.
+            const pending = data.pending || 0;
+            entries.textContent = pending
+                ? `${(data.entries || 0).toLocaleString()} (${pending.toLocaleString()} pending)`
+                : (data.entries || 0).toLocaleString();
+        }
         if (size) {
             size.textContent = data.max_bytes
                 ? `${_imgCacheBytes(data.bytes)} of ${_imgCacheBytes(data.max_bytes)}`

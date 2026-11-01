@@ -13,7 +13,6 @@ import type {
   WatchlistArtistConfigResponse,
   WatchlistMetadataSource,
 } from '../-watchlist.types';
-import type { LibraryAlbum } from '../../library/-library.types';
 
 import {
   removeWatchlistArtist,
@@ -30,8 +29,8 @@ import {
   formatRelativeScanTime,
   formatSince,
 } from '../-watchlist.helpers';
-import { loadAlbumTracks } from '../../library/-library.api';
-import { albumQueueTrack } from '../../library/-library.helpers';
+import { fetchLibraryV2Album } from '../../library/-library-v2.api';
+import { albumQueueRows } from '../../library/-library-v2.play';
 import { hideOnError } from './hide-on-error';
 import { WatchlistLinkedProviders } from './watchlist-linked-providers';
 
@@ -320,27 +319,23 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
   const releases = payload?.recent_releases ?? [];
   const library = payload?.library ?? null;
   const listening = payload?.listening ?? null;
-  // the library page's own album play: every queued row has a file
+  // the Library v2 album play the library page and the dashboard use: every
+  // queued row has a file
   const playLibraryAlbum = async (album: WatchlistArtistLibrary['recent_albums'][number]) => {
     if (!library) return;
-    const owned: LibraryAlbum = {
-      id: album.id,
-      title: album.title,
-      year: album.year,
-      thumb_url: album.thumb_url || null,
-      artist_id: library.artist_id,
-      artist_name: name,
-    };
     try {
-      const tracks = await loadAlbumTracks(album.id);
+      const tracks = albumQueueRows(await fetchLibraryV2Album(Number(album.id)), name)
+        .filter((row) => row.is_library)
+        .map((row) => ({
+          ...row,
+          playback_status: 'ready',
+          image_url: row.image_url || album.thumb_url || null,
+        }));
       if (!tracks.length) {
         window.showToast?.(`No playable tracks in ${album.title}`, 'info');
         return;
       }
-      await window.playTrackList?.(
-        tracks.map((track) => albumQueueTrack(track, owned)),
-        album.title,
-      );
+      await window.playTrackList?.(tracks, album.title);
     } catch {
       window.showToast?.(`Could not play ${album.title}`, 'error');
     }
@@ -351,6 +346,15 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
     void window.navigateToPage?.('artist-detail', {
       artistId: library.artist_id,
       artistName: name,
+    });
+  };
+  // an artist the library holds opens there (its discovery view for the
+  // discography), in the header this profile picked for outside arrivals.
+  // no onClose: it rewrites the watchlist url and would win over this
+  const openInLibrary = (discography: boolean) => {
+    if (!library) return;
+    void navigate({
+      href: `/library?artist=${library.artist_id}${discography ? '&releases=all' : ''}`,
     });
   };
   const metaTags = [artist?.style, artist?.mood, artist?.label].filter((value): value is string =>
@@ -370,7 +374,18 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
   const headText = (
     <div className="wap-head-text">
       <h2 className="wap-name" title={name}>
-        {name || 'Loading…'}
+        {library && name ? (
+          <button
+            type="button"
+            className="wap-name-link"
+            title={`Open ${name} in the library`}
+            onClick={() => openInLibrary(false)}
+          >
+            {name}
+          </button>
+        ) : (
+          name || 'Loading…'
+        )}
       </h2>
       <span className="wap-sub">
         {config ? (
@@ -637,19 +652,22 @@ export function WatchlistArtistPanel({ profileId, artistId, initialTab, onClose 
             <button
               type="button"
               className="wl-chip wl-chip--cta wap-discog"
-              disabled={!discography}
+              disabled={!discography && !library}
               title={
-                payload && !discography
+                payload && !discography && !library
                   ? 'This artist is only matched on disabled metadata sources. ' +
                     'Match it to your active source under Sources.'
                   : undefined
               }
               onClick={() => {
+                if (library) return openInLibrary(true);
                 if (!discography) return;
                 onClose();
                 void navigate({
                   to: '/artist-detail/$source/$id',
                   params: { source: discography.source, id: discography.id },
+                  // the name lets the library find an artist without this id
+                  search: { name },
                 });
               }}
             >

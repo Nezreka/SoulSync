@@ -29,13 +29,19 @@ COLUMNS: Dict[str, tuple] = {
 
 
 def library_artist_ids(cursor, artist_id: Any) -> Dict[str, str]:
-    """The library artist's current id for every source the watchlist tracks."""
-    cols = ', '.join(lib for lib, _ in COLUMNS.values())
-    cursor.execute(f"SELECT {cols} FROM artists WHERE id = ?", (artist_id,))
+    """The library artist's current id for every source the watchlist tracks.
+
+    Library v2: the catalogue artist is a ``lib2_artists`` row; its ids live in
+    the promoted columns plus ``external_ids``, read by the same helper the
+    artist settings use."""
+    from core.library2.artist_settings import _artist_provider_ids
+    cursor.execute("SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_artists WHERE id = ?",
+                   (artist_id,))
     row = cursor.fetchone()
     if not row:
         return {}
-    return {svc: str(row[i]) for i, svc in enumerate(COLUMNS) if row[i]}
+    ids = _artist_provider_ids(dict(zip(('spotify_id', 'musicbrainz_id', 'external_ids'), row, strict=True)))
+    return {svc: ids[svc] for svc in COLUMNS if ids.get(svc)}
 
 
 def follow_library_artist_match(cursor, *, before: Dict[str, str], service: str,

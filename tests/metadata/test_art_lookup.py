@@ -407,3 +407,77 @@ def test_resolve_release_group_mbid_none_and_guarded():
     def _boom(m):
         raise RuntimeError("x")
     assert art_lookup._resolve_release_group_mbid("rel-1", get_release=_boom) is None
+
+
+# ---------------------------------------------------------------------------
+# Artist-photo candidates (deep-dive A9)
+# ---------------------------------------------------------------------------
+
+
+def test_artist_name_matches_tolerates_case_and_extra_tokens():
+    assert art_lookup._artist_name_matches("Drake", "drake") is True
+    assert art_lookup._artist_name_matches("The Weeknd", "Weeknd") is True
+    assert art_lookup._artist_name_matches("Drake", "Drake feat. Future") is True
+
+
+def test_artist_name_matches_rejects_different_artist():
+    assert art_lookup._artist_name_matches("Drake", "Kendrick Lamar") is False
+
+
+def test_best_artist_match_skips_non_matching_dataclass_and_dict_results():
+    results = [
+        SimpleNamespace(name="Someone Else"),
+        SimpleNamespace(name="Drake"),
+        {"name": "Drake Bell"},
+    ]
+    match = art_lookup._best_artist_match("Drake", results)
+    assert match is results[1]
+
+
+def test_best_artist_match_none_when_nothing_matches():
+    assert art_lookup._best_artist_match("Drake", [SimpleNamespace(name="Nobody")]) is None
+    assert art_lookup._best_artist_match("Drake", []) is None
+
+
+def test_source_artist_image_uses_first_matching_result(monkeypatch):
+    client = MagicMock()
+    client.search_artists.return_value = [SimpleNamespace(name="Drake", image_url="http://sp/drake.jpg")]
+    monkeypatch.setattr(
+        "core.metadata.registry.get_client_for_source", lambda source: client)
+
+    assert art_lookup._source_artist_image("spotify", "Drake") == "http://sp/drake.jpg"
+
+
+def test_source_artist_image_none_without_a_client(monkeypatch):
+    monkeypatch.setattr("core.metadata.registry.get_deezer_client", lambda: None)
+    assert art_lookup._source_artist_image("deezer", "Drake") is None
+
+
+def test_source_artist_image_unknown_source_returns_none():
+    assert art_lookup._source_artist_image("bandcamp", "Drake") is None
+
+
+def test_gather_artist_image_candidates_dedupes_and_skips_missing():
+    singles = {"spotify": "http://sp/drake.jpg", "deezer": "http://dz/drake.jpg",
+               "itunes": None, "discogs": "http://sp/drake.jpg"}  # discogs dups spotify's url
+    out = art_lookup.gather_artist_image_candidates(
+        "Drake", lookup=lambda source, name: singles.get(source))
+    assert {c["url"] for c in out} == {"http://sp/drake.jpg", "http://dz/drake.jpg"}
+    assert len(out) == 2
+
+
+def test_gather_artist_image_candidates_guards_a_failing_source():
+    def _lookup(source, name):
+        if source == "itunes":
+            raise RuntimeError("boom")
+        return f"http://{source}/{name}.jpg"
+
+    out = art_lookup.gather_artist_image_candidates("Drake", lookup=_lookup)
+    sources = {c["source"] for c in out}
+    assert "itunes" not in sources
+    assert "deezer" in sources
+
+
+def test_gather_artist_image_candidates_empty_name_returns_nothing():
+    assert art_lookup.gather_artist_image_candidates("") == []
+    assert art_lookup.gather_artist_image_candidates(None) == []

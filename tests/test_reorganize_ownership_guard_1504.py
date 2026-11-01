@@ -17,6 +17,7 @@ os.environ['DATABASE_PATH'] = os.path.join(_TMP, 'reorg-guard.db')
 os.environ['SOULSYNC_TEST_DB_READY'] = '1'
 
 web_server = pytest.importorskip('web_server')
+import core.library2.reorganize_bridge as bridge
 import core.library_reorganize as lr
 import core.reorganize_queue as rq
 
@@ -31,17 +32,21 @@ def profiles():
     db = web_server.get_database()
     sam = db.create_profile(name=f'sam_reorg_{os.urandom(3).hex()}')
     alex = db.create_profile(name=f'alex_reorg_{os.urandom(3).hex()}')
-    # a real album row so the enqueue endpoint gets past its 404 check
-    # (neither artists.id nor albums.id auto-increments — set both explicitly)
-    artist_pk = f'guard_artist_{os.urandom(4).hex()}'
-    album_pk = f'guard_album_{os.urandom(4).hex()}'
+    # a real album row so the enqueue endpoint gets past its 404 check.
+    # Ours: a Library v2 album -- the catalogue the endpoint reads.
     conn = sqlite3.connect(os.environ['DATABASE_PATH'])
     try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (?, 'Guard Artist')", (artist_pk,))
+        artist_pk = conn.execute(
+            "INSERT INTO lib2_artists (name) VALUES ('Guard Artist')").lastrowid
+        album_pk = conn.execute(
+            "INSERT INTO lib2_albums (primary_artist_id, title) VALUES (?, 'Guard Album')",
+            (artist_pk,)).lastrowid
+        track_pk = conn.execute(
+            "INSERT INTO lib2_tracks (album_id, title) VALUES (?, 'Guard Track')",
+            (album_pk,)).lastrowid
         conn.execute(
-            "INSERT INTO albums (id, title, artist_id, owner_profile_id) VALUES (?, 'Guard Album', ?, ?)",
-            (album_pk, artist_pk, sam),
-        )
+            "INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+            (track_pk, f'/guard/{os.urandom(4).hex()}.flac'))
         conn.commit()
     finally:
         conn.close()
@@ -61,9 +66,9 @@ class _StubQueue:
 @pytest.fixture
 def guarded(monkeypatch, profiles):
     sam, _alex, _album_id = profiles
-    # the album belongs to sam; skip the real metadata planning
+    # the album belongs to sam; skip the real catalogue planning
     monkeypatch.setattr(lr, 'resolve_album_profile_id', lambda *a, **k: sam)
-    monkeypatch.setattr(lr, 'preview_album_reorganize', lambda **k: {'status': 'ok'})
+    monkeypatch.setattr(bridge, 'catalogue_preview_fn', lambda **k: {'status': 'ok'})
     monkeypatch.setattr(rq, 'get_queue', lambda: _StubQueue())
 
 
@@ -107,3 +112,23 @@ def test_apply_allows_admin_for_any_album(client, guarded, profiles):
     _login(client, 1)
     r = client.post(f'/api/library/album/{album_id}/reorganize', json={})
     assert r.status_code == 200 and r.get_json()['success'], r.data
+
+
+def test_admin_preview_plans_in_the_owners_library(client, monkeypatch, profiles):
+    """The catalogue planner picks files by the library scope. An admin
+    previewing a profile's album has to see that library's files, the ones the
+    queued run moves, not the shared library's."""
+    from core.library_scope import current_library_scope
+    sam, _alex, album_id = profiles
+    seen = {}
+
+    def preview(**_kwargs):
+        seen['scope'] = current_library_scope()
+        return {'success': True, 'status': 'planned', 'tracks': []}
+
+    monkeypatch.setattr(lr, 'resolve_album_profile_id', lambda *a, **k: sam)
+    monkeypatch.setattr(bridge, 'catalogue_preview_fn', preview)
+    _login(client, 1)
+    r = client.post(f'/api/library/album/{album_id}/reorganize/preview', json={})
+    assert r.status_code == 200, r.data
+    assert seen['scope'] == sam

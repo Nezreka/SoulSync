@@ -411,84 +411,78 @@ def test_regression_old_fields_unchanged_track():
 
 
 # ── Route tests against a real (temp) database ───────────────
+#
+# Library v2 port: the catalogue ids are integers (1, 42, 77, 99). Provider ids
+# live in external_ids, the Discogs/Bandcamp payload in the enrichment buckets,
+# attempts in lib2_provider_attempts, hand-set fields in the overrides (lib2's
+# locks). A non-numeric id is simply not a catalogue id: a 404, never a 400.
+
+import json  # noqa: E402
 
 
 def _seed(db):
     conn = db._get_connection()
     cur = conn.cursor()
     cur.execute(
-        """INSERT INTO artists (id, name, genres, server_source, soul_id,
-               soul_id_path, aliases, discogs_id, discogs_bio, discogs_members,
-               discogs_urls, discogs_match_status, discogs_last_attempted,
-               amazon_id, amazon_match_status, amazon_last_attempted,
-               jiosaavn_id, jiosaavn_match_status, jiosaavn_last_attempted,
-               art_locked, genres_locked)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        ("ar1::soulsync", "The Testers", '["Rock"]', "plex", "soul-ar1",
-         "canonical", '["The Testers UK", "Testers"]', "111",
-         "A band from nowhere.", '["Ann A", "Bob B"]',
-         '["https://discogs.example/artist/111"]', "matched",
-         "2026-01-02 03:04:05", "amz-ar", "matched", "2026-01-03 00:00:00",
-         "jio-ar", "not_found", "2026-01-04 00:00:00", 1, 0),
+        """INSERT INTO lib2_artists (id, name, genres, server_source, soul_id, soul_id_path,
+               aliases, art_locked, external_ids, enrichment)
+           VALUES (1, 'The Testers', '["Rock"]', 'plex', 'soul-ar1', 'canonical', ?, 1, ?, ?)""",
+        ('["The Testers UK", "Testers"]',
+         json.dumps({"discogs": "111", "amazon": "amz-ar", "jiosaavn": "jio-ar"}),
+         json.dumps({"discogs": {"bio": "A band from nowhere.", "members": ["Ann A", "Bob B"],
+                                 "urls": ["https://discogs.example/artist/111"]}})),
     )
+    cur.execute("INSERT INTO lib2_artists (id, name, server_source) VALUES (42, 'Numeric Artist', 'plex')")
     cur.execute(
-        """INSERT INTO artists (id, name, server_source)
-           VALUES (?, ?, ?)""",
-        ("42", "Numeric Artist", "plex"),
+        """INSERT INTO lib2_albums (id, primary_artist_id, title, year, release_date, track_count,
+               expected_track_count, server_source, external_ids, enrichment, canonical_source,
+               canonical_album_id, canonical_score, canonical_resolved_at, canonical_locked,
+               canonical_track_count, art_locked)
+           VALUES (1, 1, 'First Record', 1999, '1999-05-04', 2, 12, 'plex', ?, ?,
+                   'discogs', '222', 0.93, '2026-02-01 00:00:00', 1, 12, 0)""",
+        (json.dumps({"discogs": "222", "amazon": "amz-al", "jiosaavn": "jio-al",
+                     "bandcamp": "https://testers.bandcamp.com/album/first-record"}),
+         json.dumps({"discogs": {"genres": ["Rock", "Pop"], "styles": ["Indie Rock"],
+                                 "label": "Test Label", "catno": "TL-001", "country": "US",
+                                 "rating": 4.5, "rating_count": 37},
+                     "bandcamp": {"id": "bc-al", "tags": ["indie", "rock"], "label": "BC Label"}})),
     )
+    cur.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, server_source)"
+                " VALUES (77, 42, 'Numeric Album', 'plex')")
     cur.execute(
-        """INSERT INTO albums (id, artist_id, title, year, release_date,
-               track_count, api_track_count, server_source, discogs_id,
-               discogs_genres, discogs_styles, discogs_label, discogs_catno,
-               discogs_country, discogs_rating, discogs_rating_count,
-               discogs_match_status, discogs_last_attempted, amazon_id,
-               amazon_match_status, amazon_last_attempted, jiosaavn_id,
-               jiosaavn_match_status, jiosaavn_last_attempted, bandcamp_id,
-               bandcamp_url, bandcamp_tags, bandcamp_label,
-               bandcamp_match_status, bandcamp_last_attempted,
-               canonical_source, canonical_album_id, canonical_score,
-               canonical_resolved_at, canonical_locked, canonical_track_count,
-               art_locked, genres_locked, metadata_locked)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        ("al1::soulsync", "ar1::soulsync", "First Record", 1999, "1999-05-04",
-         2, 12, "plex", "222", '["Rock", "Pop"]', '["Indie Rock"]',
-         "Test Label", "TL-001", "US", 4.5, 37, "matched",
-         "2026-01-05 00:00:00", "amz-al", "matched", "2026-01-06 00:00:00",
-         "jio-al", "matched", "2026-01-07 00:00:00", "bc-al",
-         "https://testers.bandcamp.com/album/first-record",
-         '["indie", "rock"]', "BC Label", "matched", "2026-01-08 00:00:00",
-         "discogs", "222", 0.93, "2026-02-01 00:00:00", 1, 12, 0, 1, 0),
+        """INSERT INTO lib2_tracks (id, album_id, title, track_artist, track_number, disc_number,
+               duration, server_source, recording_disambiguation, external_ids, enrichment)
+           VALUES (1, 1, 'Song One', 'The Testers feat. Guest', 1, 2, 123000, 'plex', 'live', ?, ?)""",
+        (json.dumps({"amazon": "amz-tr", "jiosaavn": "jio-tr",
+                     "bandcamp": "https://testers.bandcamp.com/track/song-one"}),
+         json.dumps({"bandcamp": {"id": "bc-tr", "tags": ["indie"], "label": "BC Label"}})),
     )
-    cur.execute(
-        """INSERT INTO albums (id, artist_id, title, server_source)
-           VALUES (?, ?, ?, ?)""",
-        ("77", "42", "Numeric Album", "plex"),
-    )
-    cur.execute(
-        """INSERT INTO tracks (id, album_id, artist_id, title, track_artist,
-               track_number, disc_number, duration, year, file_path,
-               server_path, file_size, server_source,
-               recording_disambiguation, amazon_id, amazon_match_status,
-               amazon_last_attempted, jiosaavn_id, jiosaavn_match_status,
-               jiosaavn_last_attempted, bandcamp_id, bandcamp_url,
-               bandcamp_tags, bandcamp_label, bandcamp_match_status,
-               bandcamp_last_attempted, metadata_locked)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                   ?, ?, ?, ?, ?, ?, ?, ?)""",
-        ("tr1::soulsync", "al1::soulsync", "ar1::soulsync", "Song One",
-         "The Testers feat. Guest", 1, 2, 123000, 1999,
-         "/Media/Music/song-one.flac", "/music/song-one.flac", 12345678,
-         "plex", "live", "amz-tr", "matched", "2026-01-09 00:00:00",
-         "jio-tr", "matched", "2026-01-10 00:00:00", "bc-tr",
-         "https://testers.bandcamp.com/track/song-one", '["indie"]',
-         "BC Label", "matched", "2026-01-11 00:00:00", 1),
-    )
-    cur.execute(
-        """INSERT INTO tracks (id, album_id, artist_id, title, server_source)
-           VALUES (?, ?, ?, ?, ?)""",
-        ("99", "77", "42", "Numeric Song", "plex"),
-    )
+    cur.execute("INSERT INTO lib2_track_files (track_id, path, size, is_primary, file_state)"
+                " VALUES (1, '/Media/Music/song-one.flac', 12345678, 1, 'active')")
+    cur.execute("INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source,"
+                " server_id, server_path) VALUES ('track', 1, 'plex', 'k1', '/music/song-one.flac')")
+    cur.execute("INSERT INTO lib2_tracks (id, album_id, title, server_source)"
+                " VALUES (99, 77, 'Numeric Song', 'plex')")
+    cur.executemany(
+        "INSERT INTO lib2_provider_attempts (entity_type, entity_id, service, status,"
+        " last_attempted_at) VALUES (?, ?, ?, ?, ?)",
+        [("artist", 1, "discogs", "matched", "2026-01-02 03:04:05"),
+         ("artist", 1, "amazon", "matched", "2026-01-03 00:00:00"),
+         ("artist", 1, "jiosaavn", "not_found", "2026-01-04 00:00:00"),
+         ("album", 1, "discogs", "matched", "2026-01-05 00:00:00"),
+         ("album", 1, "bandcamp", "matched", "2026-01-08 00:00:00"),
+         ("track", 1, "bandcamp", "matched", "2026-01-11 00:00:00")])
+    # hand-set fields: genres on the album, the title on the track
+    cur.execute("INSERT INTO lib2_metadata_overrides (entity_type, entity_id, field_name,"
+                " value_json) VALUES ('release_group', 1, 'genres', '[\"Rock\"]')")
+    cur.execute("INSERT INTO lib2_metadata_overrides (entity_type, entity_id, field_name,"
+                " value_json) VALUES ('track', 1, 'title', '\"Song One\"')")
+    # migrated rows remember the id they had before the upgrade, which is the
+    # id every v1 client saved: opaque on a standalone install, numeric on plex
+    for table, column, rows in (("lib2_artists", "legacy_artist_id", ((1, "ar1::soulsync"), (42, "42"))),
+                                ("lib2_albums", "legacy_album_id", ((1, "al1::soulsync"), (77, "77"))),
+                                ("lib2_tracks", "legacy_track_id", ((1, "tr1::soulsync"), (99, "99")))):
+        cur.executemany(f"UPDATE {table} SET {column}=? WHERE id=?", [(old, new) for new, old in rows])
     conn.commit()
     conn.close()
 
@@ -502,6 +496,7 @@ def db(tmp_path):
 def client(db, monkeypatch):
     _seed(db)
     monkeypatch.setattr(library_mod, "get_database", lambda: db)
+    monkeypatch.setattr("core.settings.config_manager.get_active_media_server", lambda: "plex")
     app = Flask(__name__)
     bp = Blueprint("v1", __name__, url_prefix="/api/v1")
     with patch.object(library_mod, "require_api_key", lambda f: f):
@@ -510,18 +505,21 @@ def client(db, monkeypatch):
     return app.test_client()
 
 
-def test_artist_detail_accepts_opaque_id(client):
+def test_artist_detail_carries_the_enriched_fields(client):
     resp = client.get("/api/v1/library/artists/ar1::soulsync")
     assert resp.status_code == 200, resp.get_json()
     data = resp.get_json()["data"]
     assert data["artist"]["discogs_bio"] == "A band from nowhere."
     assert data["artist"]["aliases"] == ["The Testers UK", "Testers"]
     assert data["artist"]["art_locked"] is True
+    assert data["artist"]["genres_locked"] is False
+    assert data["artist"]["discogs_id"] == "111"
+    assert data["artist"]["jiosaavn_match_status"] == "not_found"
     assert [a["id"] for a in data["albums"]] == ["al1::soulsync"]
     assert data["albums"][0]["release_date"] == "1999-05-04"
 
 
-def test_artist_albums_accepts_opaque_id(client):
+def test_artist_albums_carry_the_enriched_fields(client):
     resp = client.get("/api/v1/library/artists/ar1::soulsync/albums")
     assert resp.status_code == 200, resp.get_json()
     albums = resp.get_json()["data"]["albums"]
@@ -530,32 +528,44 @@ def test_artist_albums_accepts_opaque_id(client):
     assert albums[0]["bandcamp_tags"] == ["indie", "rock"]
 
 
-def test_album_detail_accepts_opaque_id(client):
+def test_album_detail_carries_the_enriched_fields(client):
     resp = client.get("/api/v1/library/albums/al1::soulsync")
     assert resp.status_code == 200, resp.get_json()
     data = resp.get_json()["data"]
-    assert data["album"]["discogs_rating"] == 4.5
-    assert data["album"]["canonical_locked"] is True
+    album = data["album"]
+    assert album["discogs_rating"] == 4.5
+    assert album["discogs_genres"] == ["Rock", "Pop"]
+    assert album["canonical_locked"] is True
+    assert album["api_track_count"] == 12 and album["track_count"] == 2
+    assert album["bandcamp_id"] == "bc-al"
+    assert album["bandcamp_url"] == "https://testers.bandcamp.com/album/first-record"
+    assert album["bandcamp_last_attempted"] == "2026-01-08 00:00:00"
+    # the hand-set genres are lib2's lock
+    assert album["genres_locked"] is True and album["metadata_locked"] is True
     assert [t["id"] for t in data["tracks"]] == ["tr1::soulsync"]
     assert data["tracks"][0]["server_path"] == "/music/song-one.flac"
 
 
-def test_album_tracks_accepts_opaque_id(client):
+def test_album_tracks_carry_the_file_facts(client):
     resp = client.get("/api/v1/library/albums/al1::soulsync/tracks")
     assert resp.status_code == 200, resp.get_json()
     tracks = resp.get_json()["data"]["tracks"]
     assert len(tracks) == 1
     assert tracks[0]["recording_disambiguation"] == "live"
     assert tracks[0]["file_size"] == 12345678
+    assert tracks[0]["year"] == 1999
 
 
-def test_track_detail_accepts_opaque_id(client):
+def test_track_detail_carries_the_enriched_fields(client):
     resp = client.get("/api/v1/library/tracks/tr1::soulsync")
     assert resp.status_code == 200, resp.get_json()
     track = resp.get_json()["data"]["track"]
     assert track["track_artist"] == "The Testers feat. Guest"
     assert track["disc_number"] == 2
     assert track["metadata_locked"] is True
+    assert track["amazon_id"] == "amz-tr"
+    assert track["bandcamp_id"] == "bc-tr"
+    assert track["bandcamp_url"] == "https://testers.bandcamp.com/track/song-one"
 
 
 def test_numeric_string_ids_still_work(client):
@@ -573,7 +583,7 @@ def test_unknown_opaque_id_is_404_not_400(client):
     assert resp.status_code == 404
 
 
-def test_albums_artist_id_filter_accepts_opaque_id(client):
+def test_albums_artist_id_filter_takes_a_string_id(client):
     resp = client.get("/api/v1/library/albums?artist_id=ar1::soulsync")
     assert resp.status_code == 200, resp.get_json()
     albums = resp.get_json()["data"]["albums"]
@@ -612,6 +622,8 @@ def test_artist_list_carries_new_fields(client):
     ("track", "jiosaavn", "jio-tr", "tr1::soulsync"),
     ("album", "bandcamp", "bc-al", "al1::soulsync"),
     ("track", "bandcamp", "bc-tr", "tr1::soulsync"),
+    # the stored bandcamp provider id is the url; it finds the row too
+    ("album", "bandcamp", "https://testers.bandcamp.com/album/first-record", "al1::soulsync"),
 ])
 def test_lookup_new_providers(client, entity, provider, ext_id, expect_id):
     resp = client.get(
@@ -647,3 +659,51 @@ def test_albums_artist_id_empty_means_no_filter(client):
         assert resp.status_code == 200, resp.get_json()
         ids = {a["id"] for a in resp.get_json()["data"]["albums"]}
         assert ids == {"al1::soulsync", "77"}
+
+
+# ── ids across the upgrade ────────────────────────────────────
+#
+# a client that saved an id before the upgrade keeps getting the same row
+# under the same id. rows born after it answer under their server's id, or
+# lib2:<n> when no server knows them yet.
+
+
+def test_ids_are_strings_as_they_always_were(client):
+    artists = client.get("/api/v1/library/artists").get_json()["data"]["artists"]
+    assert all(isinstance(a["id"], str) for a in artists)
+    track = client.get("/api/v1/library/tracks/99").get_json()["data"]["track"]
+    assert track["id"] == "99" and track["album_id"] == "77" and track["artist_id"] == "42"
+
+
+def test_the_lib2_form_names_the_catalogue_row(client):
+    resp = client.get("/api/v1/library/artists/lib2:1")
+    assert resp.status_code == 200
+    assert resp.get_json()["data"]["artist"]["id"] == "ar1::soulsync"
+
+
+def test_a_row_born_after_the_upgrade_answers_under_its_server_id(db, client):
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_artists (id, name) VALUES (500, 'New Band')")
+    conn.execute("INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source,"
+                 " server_id) VALUES ('artist', 500, 'plex', 'rk-500')")
+    conn.execute("INSERT INTO lib2_artists (id, name) VALUES (501, 'Not On A Server')")
+    conn.commit()
+    conn.close()
+    from unittest.mock import patch
+    with patch("core.library2.v1_ids._active_server", lambda: "plex"):
+        by_server = client.get("/api/v1/library/artists/rk-500")
+        assert by_server.status_code == 200
+        assert by_server.get_json()["data"]["artist"]["id"] == "rk-500"
+        native = client.get("/api/v1/library/artists/lib2:501")
+        assert native.get_json()["data"]["artist"]["id"] == "lib2:501"
+
+
+def test_an_old_id_two_rows_answer_to_is_refused_not_guessed(db, client):
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_artists (id, name, legacy_artist_id) VALUES (600, 'Twin A', 'dup')")
+    conn.execute("INSERT INTO lib2_artists (id, name, legacy_artist_id) VALUES (601, 'Twin B', 'dup')")
+    conn.commit()
+    conn.close()
+    resp = client.get("/api/v1/library/artists/dup")
+    assert resp.status_code == 409
+    assert resp.get_json()["error"]["code"] == "AMBIGUOUS_ID"

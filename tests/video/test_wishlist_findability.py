@@ -31,7 +31,7 @@ DARK_MATTER = {"show_tmdb_id": 196322, "show_title": "Dark Matter (2024)", "seas
 @pytest.fixture(autouse=True)
 def _no_alias_lookup(monkeypatch):
     # aliases come from tmdb and the db; these tests are about the gates
-    monkeypatch.setattr(wl, "_acceptable_titles", lambda primary, kind, tmdb_id: [primary] if primary else [])
+    monkeypatch.setattr(wl, "_acceptable_titles", lambda primary, kind, tmdb_id, season=None: [primary] if primary else [])
 
 
 # -- the year ------------------------------------------------------------------

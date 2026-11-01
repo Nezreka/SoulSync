@@ -126,9 +126,9 @@ class AutomationDeps:
     # Triggers a "Run Now" of a library-maintenance repair job by id (e.g.
     # 'quality_upgrade'). Returns truthy if the job was queued. Replaces the old
     # standalone quality-scanner executor/state (the scanner is now a repair job).
-    # (job_id, *, respect_enabled=False) -> bool. respect_enabled is for
-    # automations: a job switched off in Tools must stay off for a background
-    # trigger, only a Run Now click overrides it (#1207).
+    # (job_id, scope=None, respect_enabled=False) -> bool. respect_enabled is
+    # for automations: a job switched off in Tools must stay off for a
+    # background trigger, only a Run Now click overrides it (#1207).
     run_repair_job_now: Callable[..., Any]
 
     # --- Download orchestrator + queue accessors ---
@@ -177,14 +177,7 @@ class AutomationDeps:
     # findings (the "Apply Quality Upgrades" action). None when the repair
     # worker isn't running, and in fixtures that don't exercise it.
     bulk_fix_repair_findings: Optional[Callable[..., Any]] = None
-
-    # Opt-in automatic album completion. Optional so existing automation
-    # constructors remain compatible; handlers skip when unavailable.
-    # get_repair_findings(**filters) -> paginated repair findings
-    get_repair_findings: Optional[Callable[..., Any]] = None
-    # queue_album_completion(**album_details) -> {'status': 'queued' | 'skipped'}
-    queue_album_completion: Optional[Callable[..., Any]] = None
-    get_current_album_pin: Optional[Callable[..., Any]] = None
-    fetch_canonical_release: Optional[Callable[..., Any]] = None
-    # album_completion_cooling_down(source, release_id) -> bool, read-only peek
-    album_completion_cooling_down: Optional[Callable[..., Any]] = None
+    # (playlist_name, profile_id) -> True / False, or None when the server
+    # can't say. an unchanged playlist still syncs when its server playlist
+    # is gone (#1930). None in fixtures that don't exercise it.
+    server_playlist_exists: Optional[Callable[..., Optional[bool]]] = None

@@ -224,8 +224,26 @@ def _write(
         raise RuntimeError('could not save the playlist')
 
 
+def unused_name(db: Any, profile_id: int, name: str) -> str:
+    """``name``, or ``name (2)``, ``(3)``... when the profile already has a
+    playlist called that. copying the same playlist twice made two playlists
+    with one name, and nothing told them apart (#1927)."""
+    from core.playlists.naming import effective_mirrored_name
+    taken = {
+        str(effective_mirrored_name(p) or '').strip().casefold()
+        for p in (db.get_mirrored_playlists(profile_id=int(profile_id)) or [])
+        if is_user_playlist(p)
+    }
+    if name.casefold() not in taken:
+        return name
+    n = 2
+    while f"{name} ({n})".casefold() in taken:
+        n += 1
+    return f"{name} ({n})"
+
+
 def create_playlist(db: Any, profile_id: int, name: Any, is_request_list: bool = False) -> int:
-    cleaned = clean_name(name)
+    cleaned = unused_name(db, profile_id, clean_name(name))
     playlist_id = db.mirror_playlist(
         source=USER_PLAYLIST_SOURCE,
         source_playlist_id=uuid.uuid4().hex,
@@ -417,6 +435,7 @@ def copy_mirror(db: Any, mirror: Dict[str, Any], profile_id: int, name: Any = No
     # not load as a cover, and the collage covers it anyway
     image = image if isinstance(image, str) and image.startswith(('http://', 'https://')) else None
     with _edit_lock:
+        new_name = unused_name(db, int(profile_id), new_name)
         new_id = create_playlist(db, int(profile_id), new_name)
         new_playlist = db.get_mirrored_playlist(new_id, profile_id=int(profile_id))
         if not new_playlist:

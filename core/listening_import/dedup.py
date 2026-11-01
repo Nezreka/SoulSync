@@ -107,10 +107,12 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
         # Serialize lookup + matching + writes across both importer workers.
         conn.execute("BEGIN IMMEDIATE")
         ensure_import_events_table(conn)
+        history_columns = {
+            r[1] for r in conn.execute("PRAGMA table_info(listening_history)").fetchall()}
+        has_lib2_link = "lib2_track_id" in history_columns
         # the account column comes with a migration; a table without it just
         # doesn't record who played
-        has_account = any(c[1] == "server_account_id"
-                          for c in conn.execute("PRAGMA table_info(listening_history)").fetchall())
+        has_account = "server_account_id" in history_columns
         low = min(key[2] for key in incoming) - CROSS_SOURCE_TOLERANCE_SECONDS
         high = max(key[2] for key in incoming) + CROSS_SOURCE_TOLERANCE_SECONDS
         # Clean only this window on connections without foreign-key enforcement.
@@ -199,6 +201,11 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
             if event.get("db_track_id") is not None:
                 conn.execute("UPDATE listening_history SET db_track_id = COALESCE(db_track_id, ?) WHERE id = ?",
                              (event["db_track_id"], history_id))
+            # Library v2: the catalogue link is its own column (db_track_id is
+            # the media server's id), and it fills the same way.
+            if has_lib2_link and event.get("lib2_track_id") is not None:
+                conn.execute("UPDATE listening_history SET lib2_track_id = COALESCE(lib2_track_id, ?) WHERE id = ?",
+                             (event["lib2_track_id"], history_id))
             # An attested play (server/import) matched onto a row that isn't
             # scrobble-eligible yet (e.g. a web-player 10s log the user's own
             # Last.fm client also scrobbled): the attestation upgrades it.

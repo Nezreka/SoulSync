@@ -1345,6 +1345,7 @@ class NavidromeClient(MediaServerBase):
                     leaf_count=playlist_data.get('songCount', 0),
                     tracks=[],  # Will be populated when needed
                     owner=playlist_data.get('owner'),
+                    readonly=bool(playlist_data.get('readonly')),
                 )
                 playlists.append(playlist_info)
 

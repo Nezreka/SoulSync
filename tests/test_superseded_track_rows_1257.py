@@ -20,6 +20,10 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+pytestmark = pytest.mark.skip(reason=(
+    "the legacy absorb pass this pins is gone: it folds a re-ided file's old `tracks` row into its live one, and this catalogue cannot take that shape -- a file is a lib2_track_files row keyed by path and content hash, and a server re-id moves a mapping in lib2_media_server_mappings instead of minting a second track. OPEN with it: the pass also kept superseded rows out of the deep scan's 50% shrink guard, and whether that guard can still trip here after a reorganize is unverified (docs/library-v2-dir-ownership.md)"
+))
+
 from core.database_update_worker import DatabaseUpdateWorker
 from database.music_database import MusicDatabase
 

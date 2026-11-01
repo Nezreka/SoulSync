@@ -62,14 +62,24 @@ def db(tmp_path):
 
 
 def _seed(db, rows):
+    """Catalogue artists as the jellyfin scan leaves them.
+
+    The sweep is keyed on the SERVER's id, which on the v2 catalogue lives in
+    lib2_media_server_mappings (with server_source/server_id on the row as the
+    compatibility projection), not on the primary key.
+    """
+    from tests.support.catalogue_seed import seed_artist
+
     conn = db._get_connection()
     try:
         for artist_id, thumb, locked in rows:
+            row_id = seed_artist(conn, server_id=artist_id, name=f'Artist {artist_id}',
+                                 server_source='jellyfin', image_url=thumb)
+            conn.execute("UPDATE lib2_artists SET art_locked=? WHERE id=?", (locked, row_id))
             conn.execute(
-                "INSERT OR REPLACE INTO artists (id, name, thumb_url, server_source, art_locked) "
-                "VALUES (?,?,?,?,?)",
-                (artist_id, f'Artist {artist_id}', thumb, 'jellyfin', locked),
-            )
+                "INSERT OR REPLACE INTO lib2_media_server_mappings"
+                "(entity_type, entity_id, server_source, server_id)"
+                " VALUES('artist', ?, 'jellyfin', ?)", (row_id, artist_id))
         conn.commit()
     finally:
         conn.close()
@@ -78,7 +88,8 @@ def _seed(db, rows):
 def _thumbs(db):
     conn = db._get_connection()
     try:
-        return {r['id']: r['thumb_url'] for r in conn.execute("SELECT id, thumb_url FROM artists")}
+        return {r['server_id']: r['image_url']
+                for r in conn.execute("SELECT server_id, image_url FROM lib2_artists")}
     finally:
         conn.close()
 

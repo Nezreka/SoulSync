@@ -1,31 +1,34 @@
-"""Applying a Quality Upgrade after a full database refresh.
+"""Applying a preserved Quality Upgrade finding after a full database refresh.
 
 Reported on Discord: "the upgrade detector found plenty to upgrade, but when
 I select any file to upgrade I get No Matched track in finding."
 
 EVERY finding failing is the tell. A full refresh calls clear_server_data,
-which DELETEs every track for the server and re-inserts it, so each row comes
-back with a NEW autoincrement id. Every finding written before that refresh
-then points at an id that no longer exists — and the resolver returned None on
-a missing row, so the whole batch became unusable at once.
+which DELETEs every legacy track row and re-inserts it, so each row comes back
+with a NEW autoincrement id. Every finding written before that refresh then
+points at an id that no longer exists — and the resolver returned None on a
+missing row, so the whole batch became unusable at once. Two bugs stacked,
+because the per-field fallbacks that were supposed to cover this read
+`expected_title` / `expected_artist` — names the download/quarantine flow uses
+and the upgrade job never writes — so they could never fire either.
 
-The finding's own details carry the title, artist and album, so the redownload
-can be built without the row. Two bugs stacked, because the per-field
-fallbacks that were supposed to cover this read `expected_title` /
-`expected_artist` — names the download/quarantine flow uses and NO repair job
-writes — so they could never fire either.
+Ported onto Library v2. The native scan (`lib2_upgrade_scan`) raises
+`quality_below_cutoff` findings whose subject is `lib2:<id>`, and those ids
+survive a refresh, so the orphaning cause is gone for anything scanned today.
+What remains is the migrated pre-V2 `quality_upgrade` findings sitting in
+users' databases: their legacy subject may well be dead, and the only thing
+left to build a redownload from is the finding's own details. That is what
+`_legacy_quality_track_data` does and what these tests cover.
 """
 
 from __future__ import annotations
-
-import sqlite3
 
 import pytest
 
 from core.repair_worker import RepairWorker
 
 
-# What core/repair_jobs/quality_upgrade.py actually stores on a finding.
+# What the pre-V2 core/repair_jobs/quality_upgrade.py stored on a finding.
 FINDING_DETAILS = {
     'track_id': 4242,
     'track_title': 'Comfortably Numb',
@@ -40,51 +43,13 @@ FINDING_DETAILS = {
 
 @pytest.fixture()
 def worker():
-    conn = sqlite3.connect(':memory:')
-    conn.row_factory = sqlite3.Row
-    conn.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
-    conn.execute("""CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT,
-                     spotify_album_id TEXT, record_type TEXT, track_count INTEGER,
-                     year INTEGER, thumb_url TEXT)""")
-    conn.execute("""CREATE TABLE tracks (id INTEGER PRIMARY KEY, title TEXT,
-                     track_number INTEGER, duration INTEGER, spotify_track_id TEXT,
-                     itunes_track_id TEXT, deezer_id TEXT, artist_id INTEGER,
-                     album_id INTEGER)""")
-    conn.commit()
-
-    class _KeepOpen:
-        """The resolver closes the connection in a finally block; an in-memory
-        DB dies with it. sqlite3.Connection.close is read-only, so the no-op
-        goes on a proxy rather than the connection."""
-
-        def __init__(self, real):
-            self._real = real
-
-        def __getattr__(self, name):
-            return getattr(self._real, name)
-
-        def close(self):
-            pass
-
     w = RepairWorker.__new__(RepairWorker)
 
     class _DB:
-        def _get_connection(self):
-            return _KeepOpen(conn)
+        pass
 
     w.db = _DB()
-    w._raw_conn = conn
     return w
-
-
-def _seed_track(worker, track_id=4242):
-    conn = worker._raw_conn
-    conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Pink Floyd')")
-    conn.execute("INSERT INTO albums (id, title, record_type, track_count, year) "
-                 "VALUES (77, 'The Wall', 'album', 26, 1979)")
-    conn.execute("INSERT INTO tracks (id, title, track_number, duration, artist_id, album_id) "
-                 "VALUES (?, 'Comfortably Numb', 6, 382000, 1, 77)", (track_id,))
-    conn.commit()
 
 
 # ── the reported failure ─────────────────────────────────────────────────────
@@ -92,7 +57,7 @@ def _seed_track(worker, track_id=4242):
 def test_an_orphaned_finding_still_resolves_from_its_details(worker):
     """The bug. No track row (the refresh renumbered everything), but the
     finding knows perfectly well what the track was."""
-    data = worker._track_identity_for_redownload('4242', FINDING_DETAILS)
+    data = worker._legacy_quality_track_data('4242', FINDING_DETAILS)
 
     assert data is not None, 'returned None — this is the reported failure'
     assert data['name'] == 'Comfortably Numb'
@@ -101,27 +66,24 @@ def test_an_orphaned_finding_still_resolves_from_its_details(worker):
 
 
 def test_the_wishlist_id_is_stable_without_a_row(worker):
-    data = worker._track_identity_for_redownload('4242', FINDING_DETAILS)
+    data = worker._legacy_quality_track_data('4242', FINDING_DETAILS)
 
     assert data['id'] == 'redownload_4242'
 
 
-def test_a_present_row_is_still_preferred(worker):
-    """The row is ground truth when it exists — details must not override it."""
-    _seed_track(worker)
+def test_a_stored_source_id_is_preferred_over_the_fallback(worker):
+    """A finding that carried a real track id must queue under it, or the
+    wishlist cannot dedupe it against the same track from another route."""
+    data = worker._legacy_quality_track_data(
+        '4242', dict(FINDING_DETAILS, spotify_track_id='abc123'))
 
-    data = worker._track_identity_for_redownload('4242', dict(FINDING_DETAILS,
-                                                              track_title='Stale Title'))
-
-    assert data['name'] == 'Comfortably Numb'
-    assert data['duration_ms'] == 382000
-    assert data['track_number'] == 6
+    assert data['id'] == 'abc123'
+    assert data['uri'] == 'spotify:track:abc123'
 
 
-def test_the_row_fills_album_fields_the_details_lack(worker):
-    _seed_track(worker)
-
-    data = worker._track_identity_for_redownload('4242', FINDING_DETAILS)
+def test_album_context_the_details_carry_is_kept(worker):
+    data = worker._legacy_quality_track_data(
+        '4242', dict(FINDING_DETAILS, year=1979, track_count=26))
 
     assert data['album']['total_tracks'] == 26
     assert data['album']['release_date'] == '1979'
@@ -130,19 +92,18 @@ def test_the_row_fills_album_fields_the_details_lack(worker):
 # ── the dead-fallback half ───────────────────────────────────────────────────
 
 def test_it_reads_the_keys_the_job_actually_writes(worker):
-    """`track_title`/`artist` are what quality_upgrade.py stores. The resolver
-    used to look for `expected_title`/`expected_artist`, which no repair job
-    writes, so the fallback was unreachable code."""
-    data = worker._track_identity_for_redownload(
-        '9', {'track_title': 'Song', 'artist': 'Band'})
+    """`track_title`/`artist` are what quality_upgrade.py stored. The resolver
+    used to look for `expected_title`/`expected_artist`, which that job never
+    wrote, so the fallback was unreachable code."""
+    data = worker._legacy_quality_track_data('9', {'track_title': 'Song', 'artist': 'Band'})
 
     assert data['name'] == 'Song'
     assert data['artists'][0]['name'] == 'Band'
 
 
 def test_the_older_expected_names_are_still_honoured(worker):
-    """Kept so a producer using the download-flow vocabulary keeps working."""
-    data = worker._track_identity_for_redownload(
+    """The flag-only Quality Check scanner used this vocabulary."""
+    data = worker._legacy_quality_track_data(
         '9', {'expected_title': 'Song', 'expected_artist': 'Band'})
 
     assert data['name'] == 'Song'
@@ -154,15 +115,15 @@ def test_the_older_expected_names_are_still_honoured(worker):
 def test_a_finding_with_nothing_usable_is_refused(worker):
     """"Unknown - Unknown" on the wishlist would search for nothing forever.
     Better to fail loudly than to queue a row that can never be satisfied."""
-    assert worker._track_identity_for_redownload('9', {}) is None
+    assert worker._legacy_quality_track_data('9', {}) is None
 
 
 def test_a_title_with_no_artist_is_refused(worker):
-    assert worker._track_identity_for_redownload('9', {'track_title': 'Song'}) is None
+    assert worker._legacy_quality_track_data('9', {'track_title': 'Song'}) is None
 
 
 def test_an_artist_with_no_title_is_refused(worker):
-    assert worker._track_identity_for_redownload('9', {'artist': 'Band'}) is None
+    assert worker._legacy_quality_track_data('9', {'artist': 'Band'}) is None
 
 
 # ── end to end: what the user actually clicks ────────────────────────────────
@@ -181,30 +142,39 @@ def test_clicking_upgrade_on_an_orphaned_finding_now_succeeds(worker):
 
     worker.db.add_to_wishlist = _add_to_wishlist
 
-    result = worker._fix_quality_upgrade('track', '4242', '/music/x.mp3', FINDING_DETAILS)
+    result = worker._fix_legacy_quality_upgrade('track', '4242', '/music/x.mp3',
+                                                FINDING_DETAILS)
 
     assert result['success'] is True, result.get('error')
     assert captured['track']['name'] == 'Comfortably Numb'
     assert captured['track']['artists'][0]['name'] == 'Pink Floyd'
+    # The profile the old finding was raised against still gates the download.
+    assert captured['kwargs']['quality_profile_id'] == 1
 
 
-def test_the_reported_error_no_longer_fires_for_an_orphaned_finding(worker):
-    """Verbatim the message from the report."""
-    worker.db.add_to_wishlist = lambda **kwargs: True
+def test_a_pre_searched_match_still_wins(worker):
+    """Most migrated findings DO carry a matched replacement; the details
+    fallback must not push it aside."""
+    captured = {}
+    worker.db.add_to_wishlist = lambda spotify_track_data=None, **kw: (
+        captured.update(track=spotify_track_data) or True)
 
-    result = worker._fix_quality_upgrade('track', '4242', '/music/x.mp3', FINDING_DETAILS)
+    result = worker._fix_legacy_quality_upgrade(
+        'track', '4242', '/music/x.mp3',
+        dict(FINDING_DETAILS, matched_track_data={'id': 'matched', 'name': 'Matched Version'}))
 
-    assert result.get('error') != 'No matched track in finding'
+    assert result['success'] is True, result.get('error')
+    assert captured['track']['name'] == 'Matched Version'
 
 
 def test_a_finding_with_nothing_usable_still_reports_honestly(worker):
-    """The error must survive for the case it was actually written for."""
+    """The refusal must survive for the case it was actually written for."""
     worker.db.add_to_wishlist = lambda **kwargs: True
 
-    result = worker._fix_quality_upgrade('track', '9', '/music/x.mp3', {})
+    result = worker._fix_legacy_quality_upgrade('track', '9', '/music/x.mp3', {})
 
     assert result['success'] is False
-    assert result['error'] == 'No matched track in finding'
+    assert 'no reusable track payload' in result['error']
 
 
 # ── the scanner's unmatched-file findings ────────────────────────────────────
@@ -212,11 +182,9 @@ def test_a_finding_with_nothing_usable_still_reports_honestly(worker):
 # Reported independently by Lil-Uzi-Chimp: "Quality Check tool fails every
 # time — No matched track in finding", via bulk fix.
 #
-# The Quality Check scanner records entity_id=None for any file it could not
-# match to a library track row (entity_type='file'). The call site was gated
-# on `entity_id`, so the resolver was never reached for those findings even
-# though their details carry the title and artist. That gate is why it failed
-# EVERY time rather than occasionally.
+# The pre-V2 Quality Check scanner recorded entity_id=None for any file it
+# could not match to a library track row (entity_type='file'). Those findings
+# still exist in migrated databases, and their details are all there is.
 
 SCANNER_DETAILS = {
     'quality_issue': 'below_target',
@@ -232,11 +200,12 @@ SCANNER_DETAILS = {
 
 
 def test_an_unmatched_file_finding_resolves_from_its_details(worker):
-    data = worker._track_identity_for_redownload(None, SCANNER_DETAILS)
+    data = worker._legacy_quality_track_data(None, SCANNER_DETAILS)
 
     assert data is not None, 'entity_id=None must not mean unresolvable'
     assert data['name'] == 'Money'
     assert data['artists'][0]['name'] == 'Pink Floyd'
+    assert data['track_number'] == 6
 
 
 def test_clicking_upgrade_on_an_unmatched_file_succeeds(worker):
@@ -245,7 +214,8 @@ def test_clicking_upgrade_on_an_unmatched_file_succeeds(worker):
     worker.db.add_to_wishlist = lambda spotify_track_data=None, **kw: (
         captured.update(track=spotify_track_data) or True)
 
-    result = worker._fix_quality_upgrade('file', None, '/music/money.mp3', SCANNER_DETAILS)
+    result = worker._fix_legacy_quality_upgrade('file', None, '/music/money.mp3',
+                                                SCANNER_DETAILS)
 
     assert result['success'] is True, result.get('error')
     assert captured['track']['name'] == 'Money'
@@ -254,8 +224,8 @@ def test_clicking_upgrade_on_an_unmatched_file_succeeds(worker):
 def test_two_unmatched_files_do_not_share_a_wishlist_id(worker):
     """A literal "redownload_None" for every unmatched file would collide, and
     the second would be deduped away and silently never downloaded."""
-    a = worker._track_identity_for_redownload(None, SCANNER_DETAILS)
-    b = worker._track_identity_for_redownload(
+    a = worker._legacy_quality_track_data(None, SCANNER_DETAILS)
+    b = worker._legacy_quality_track_data(
         None, dict(SCANNER_DETAILS, expected_title='Time', file_path='/music/time.mp3'))
 
     assert a['id'] != b['id']
@@ -264,7 +234,7 @@ def test_two_unmatched_files_do_not_share_a_wishlist_id(worker):
 
 def test_the_same_unmatched_file_keeps_the_same_id(worker):
     """Stable across runs, or a re-scan would queue a duplicate."""
-    first = worker._track_identity_for_redownload(None, SCANNER_DETAILS)
-    second = worker._track_identity_for_redownload(None, dict(SCANNER_DETAILS))
+    first = worker._legacy_quality_track_data(None, SCANNER_DETAILS)
+    second = worker._legacy_quality_track_data(None, dict(SCANNER_DETAILS))
 
     assert first['id'] == second['id']

@@ -38,8 +38,10 @@ interface Envelope<T> {
   error: string | null;
 }
 
+type StudioTrackRow = Omit<StudioTrack, 'id'> & { id: string | number };
+
 interface TrackSearchResponse {
-  tracks: StudioTrack[];
+  tracks: StudioTrackRow[];
 }
 
 interface AnalysisPayload {
@@ -82,9 +84,9 @@ export function studioTrackSearchQueryOptions(query: string) {
  * queryFn above is the single choke point both the search and the browse
  * view flow through, so every StudioTrack in the app carries seconds.
  */
-function toStudioTrack(row: StudioTrack): StudioTrack {
+function toStudioTrack(row: StudioTrackRow): StudioTrack {
   const ms = row.duration;
-  return { ...row, duration: typeof ms === 'number' ? ms / 1000 : ms };
+  return { ...row, id: String(row.id), duration: typeof ms === 'number' ? ms / 1000 : ms };
 }
 
 function normalizeKey(raw: unknown): SampleKey | null {

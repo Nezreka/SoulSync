@@ -75,23 +75,33 @@ def db(tmp_path):
     from database.music_database import MusicDatabase
 
     db = MusicDatabase(str(tmp_path / 'm.db'))
+    # Library v2: the catalogue row, with the media server's id ('lib-9')
+    # on it -- every sync match path answers with that server id
+    from tests.lib2_seed import track
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('a1', 'Iron & Wine', 'navidrome')")
-        conn.execute("INSERT INTO albums (id, title, artist_id, server_source) "
-                     "VALUES ('al1', 'Give Up (Deluxe)', 'a1', 'navidrome')")
         # titled nothing like the source, so only the manual match can find it
-        conn.execute("INSERT INTO tracks (id, title, artist_id, album_id, file_path, server_source) "
-                     "VALUES ('lib-9', 'Track 09', 'a1', 'al1', '/m/09.flac', 'navidrome')")
+        db.catalogue_id = track(conn, 'Iron & Wine', 'Give Up (Deluxe)', 'Track 09',
+                                path='/m/09.flac', server_source='navidrome', server_id='lib-9')
         conn.commit()
     return db
 
 
 def _durable_match(db):
-    """the durable half of Find & Add (survives a rescan)."""
+    """the durable half of Find & Add (survives a rescan), saved the way a
+    match from before the catalogue was: under the server's own id."""
     from core.library import manual_library_match as mlm
     assert mlm.save_match(db, 1, 'spotify', PLAYLIST_ID, 'lib-9', source_title='Such Great Heights',
                           source_artist='Iron & Wine', server_source='navidrome',
                           library_file_path='/m/09.flac')
+
+
+def _durable_catalogue_match(db):
+    """Find & Add on Library v2 saves the CATALOGUE id; the sync still has
+    to answer with the server's id, like every other match path."""
+    from core.library import manual_library_match as mlm
+    assert mlm.save_match(db, 1, 'spotify', PLAYLIST_ID, str(db.catalogue_id),
+                          source_title='Such Great Heights', source_artist='Iron & Wine',
+                          server_source='navidrome', library_file_path='/m/09.flac')
 
 
 def _cache_match(db):
@@ -146,7 +156,8 @@ def _media_server(db, track):
 
 
 @pytest.mark.parametrize('matcher', [_db_only, _media_server], ids=['db_only', 'media_server'])
-@pytest.mark.parametrize('save', [_durable_match, _cache_match], ids=['durable', 'cache'])
+@pytest.mark.parametrize('save', [_durable_match, _durable_catalogue_match, _cache_match],
+                         ids=['durable', 'durable-catalogue', 'cache'])
 def test_a_find_and_add_match_applies_to_a_wing_it_track(db, matcher, save):
     save(db)
     match, conf = matcher(db, _track())

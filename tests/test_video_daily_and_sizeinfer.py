@@ -116,7 +116,7 @@ def test_a_daily_series_leads_with_the_air_date():
 
 def test_search_context_carries_the_air_date(monkeypatch):
     import core.automation.handlers.video_process_wishlist as mod
-    monkeypatch.setattr(mod, "_acceptable_titles", lambda p, k, t: [p])
+    monkeypatch.setattr(mod, "_acceptable_titles", lambda p, k, t, s=None: [p])
     ctx = mod.search_context({"show_title": "The Daily Show", "season_number": 31,
                               "episode_number": 85, "air_date": "2026-07-08",
                               "show_tmdb_id": 2224}, "episode")

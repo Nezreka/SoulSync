@@ -5,12 +5,14 @@
  * the search is the search page's own (/api/enhanced-search, every source).
  * before you type it shows your recent plays, the songs you're most likely to
  * be reaching for. a row the playlist already has says so instead of offering
- * a second copy.
+ * a second copy. the cover plays a sample first, so you can hear it before
+ * adding it (#1933).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { thumb } from '@/platform/artwork-thumb';
+import { streamSearchTrack } from '@/routes/search/-search.actions';
 import { fetchEnhancedSearch } from '@/routes/search/-search.api';
 
 import type { SongCandidate } from './add-songs';
@@ -44,13 +46,33 @@ function SongRow({
   const done = state === 'added' || state === 'in';
   return (
     <div className={`as-row${done ? ' as-row--done' : ''}`}>
-      {song.image_url ? (
-        <img className="as-art" src={thumb(song.image_url, 'card')} alt="" loading="lazy" />
-      ) : (
-        <span className="as-art as-art--blank" aria-hidden="true">
-          ♪
+      <button
+        type="button"
+        className="as-cover"
+        aria-label={`Play a sample of ${song.track_name}`}
+        title="Play a sample"
+        onClick={() =>
+          void streamSearchTrack({
+            name: song.track_name,
+            artist: song.artist_name,
+            album: song.album_name || undefined,
+            duration_ms: song.duration_ms || undefined,
+          })
+        }
+      >
+        {song.image_url ? (
+          <img className="as-art" src={thumb(song.image_url, 'card')} alt="" loading="lazy" />
+        ) : (
+          <span className="as-art as-art--blank" aria-hidden="true">
+            ♪
+          </span>
+        )}
+        <span className="as-play" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16">
+            <path d="M8 5.5v13l11-6.5z" fill="currentColor" />
+          </svg>
         </span>
-      )}
+      </button>
       <span className="as-text">
         <span className="as-title">{song.track_name}</span>
         <span className="as-sub">

@@ -52,46 +52,49 @@ def test_sources_stay_in_sync_with_album_id_columns():
 # ---------------------------------------------------------------------------
 
 def _insert_album(db, album_id):
+    from tests.support.catalogue_seed import seed_album, seed_artist
     conn = db._get_connection()
-    conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar1', 'Artist')")
-    conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (?, 'ar1', 'Album')", (album_id,))
+    artist = seed_artist(conn, server_id='ar1', name='Artist')
+    catalogue_id = seed_album(conn, server_id=album_id, title='Album',
+                              artist_id=artist)
     conn.commit()
     conn.close()
+    return catalogue_id
 
 
 @pytest.fixture
 def db(tmp_path: Path) -> MusicDatabase:
     d = MusicDatabase(database_path=str(tmp_path / "ml.db"))
-    _insert_album(d, 'al1')
+    d.pinned_album_id = _insert_album(d, 'al1')
     return d
 
 
 def test_manual_lock_set_and_read(db):
-    assert db.set_album_canonical('al1', 'spotify', 'REG', 1.0, locked=True) is True
-    c = db.get_album_canonical('al1')
+    assert db.set_album_canonical(db.pinned_album_id, 'spotify', 'REG', 1.0, locked=True) is True
+    c = db.get_album_canonical(db.pinned_album_id)
     assert c['source'] == 'spotify' and c['album_id'] == 'REG' and c['locked'] is True
 
 
 def test_auto_cannot_overwrite_manual_lock(db):
-    db.set_album_canonical('al1', 'spotify', 'REG', 1.0, locked=True)
+    db.set_album_canonical(db.pinned_album_id, 'spotify', 'REG', 1.0, locked=True)
     # The auto resolve job tries to re-pin the deluxe — must be refused.
-    assert db.set_album_canonical('al1', 'spotify', 'DELUXE', 0.9, locked=False) is False
-    c = db.get_album_canonical('al1')
+    assert db.set_album_canonical(db.pinned_album_id, 'spotify', 'DELUXE', 0.9, locked=False) is False
+    c = db.get_album_canonical(db.pinned_album_id)
     assert c['album_id'] == 'REG' and c['locked'] is True  # unchanged
 
 
 def test_new_manual_match_overrides_existing_pin(db):
-    db.set_album_canonical('al1', 'spotify', 'OLD', 0.8, locked=False)  # auto pin
+    db.set_album_canonical(db.pinned_album_id, 'spotify', 'OLD', 0.8, locked=False)  # auto pin
     # User manually picks a different edition — manual always wins.
-    assert db.set_album_canonical('al1', 'itunes', 'NEW', 1.0, locked=True) is True
-    c = db.get_album_canonical('al1')
+    assert db.set_album_canonical(db.pinned_album_id, 'itunes', 'NEW', 1.0, locked=True) is True
+    c = db.get_album_canonical(db.pinned_album_id)
     assert c['source'] == 'itunes' and c['album_id'] == 'NEW' and c['locked'] is True
 
 
 def test_auto_overwrites_auto(db):
-    db.set_album_canonical('al1', 'spotify', 'A', 0.8, locked=False)
-    assert db.set_album_canonical('al1', 'spotify', 'B', 0.9, locked=False) is True
-    assert db.get_album_canonical('al1')['album_id'] == 'B'
+    db.set_album_canonical(db.pinned_album_id, 'spotify', 'A', 0.8, locked=False)
+    assert db.set_album_canonical(db.pinned_album_id, 'spotify', 'B', 0.9, locked=False) is True
+    assert db.get_album_canonical(db.pinned_album_id)['album_id'] == 'B'
 
 
 def test_unresolved_album_returns_none(db):

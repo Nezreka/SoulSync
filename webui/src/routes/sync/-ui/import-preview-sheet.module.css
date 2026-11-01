@@ -1,0 +1,246 @@
+/* a source playlist's songs before it's imported (#1934). same surface as
+   the cover art sheet: raised card on a dark scrim. */
+
+.overlay {
+  position: fixed;
+  z-index: var(--z-dialog-backdrop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--black-a75);
+  inset: 0;
+  animation: fadeIn 0.16s ease-out;
+}
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 40px);
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-xl);
+  background: var(--bg-raised);
+  box-shadow: 0 30px 80px var(--black-a60);
+  color: var(--text-bright);
+  overflow: hidden;
+}
+
+.head {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--white-a07);
+}
+
+.art {
+  display: grid;
+  overflow: hidden;
+  width: 72px;
+  height: 72px;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-control);
+  background: var(--white-a05);
+  font-size: 24px;
+  place-items: center;
+}
+
+.art > * {
+  width: 100%;
+  height: 100%;
+}
+
+.art img {
+  object-fit: cover;
+}
+
+.titles {
+  min-width: 0;
+}
+
+.titles h3 {
+  overflow: hidden;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titles p {
+  margin: 4px 0 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--white-a05);
+  color: var(--text-2);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.close:hover,
+.close:focus-visible {
+  background: var(--white-a10);
+  color: var(--text-1);
+}
+
+.body {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+}
+
+.state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0;
+  padding: 40px 20px;
+  color: var(--text-3);
+  font-size: 13.5px;
+}
+
+.list {
+  margin: 0;
+  padding: 6px 8px;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: var(--radius-control);
+}
+
+.row:hover {
+  background: var(--white-a04);
+}
+
+.num {
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.track {
+  display: grid;
+  min-width: 0;
+}
+
+.trackName,
+.trackSub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trackName {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.trackSub {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.time {
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--white-a07);
+}
+
+.primary,
+.secondary {
+  padding: 9px 18px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.primary {
+  border: 1px solid rgba(var(--accent-rgb), 0.6);
+  background: rgba(var(--accent-rgb), 0.85);
+  color: var(--text-1);
+}
+
+.primary:hover,
+.primary:focus-visible {
+  background: rgb(var(--accent-rgb));
+}
+
+.secondary {
+  border: 1px solid var(--white-a14);
+  background: var(--white-a05);
+  color: var(--text-1);
+}
+
+.secondary:hover,
+.secondary:focus-visible {
+  background: var(--white-a10);
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--white-a14);
+  border-top-color: rgb(var(--accent-rgb));
+  border-radius: var(--radius-circle);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .sheet {
+    width: 100%;
+    max-height: 85vh;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay,
+  .spinner {
+    animation: none;
+  }
+}

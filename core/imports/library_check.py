@@ -65,32 +65,10 @@ def _album_title_of_track(db: Any, track_row: Dict[str, Any]) -> str:
     """The library album title for a track row, "" when unresolvable.
 
     Used for release scoping: a recording-level DB hit (ISRC/MBID) is only
-    skippable when it belongs to the SAME release being imported. Never
-    raises — unresolvable means "unknown", and unknown fails open.
+    skippable when it belongs to the SAME release being imported. The
+    Library-v2 lookup already carries its album's title; unknown fails open.
     """
-    try:
-        album_id = track_row.get("album_id")
-        if album_id is None:
-            return ""
-        conn = db._get_connection()
-        try:
-            row = conn.execute(
-                "SELECT title FROM albums WHERE id = ?", (album_id,)
-            ).fetchone()
-        finally:
-            try:
-                conn.close()
-            except Exception:  # noqa: S110
-                pass
-        if row is None:
-            return ""
-        try:
-            title = row["title"]
-        except (TypeError, KeyError, IndexError):
-            title = row[0] if row else ""
-        return str(title or "").strip()
-    except Exception:  # noqa: BLE001
-        return ""
+    return str(track_row.get("album_title") or "").strip()
 
 
 def _same_release(incoming_album_name: str, library_album_title: str) -> bool:
@@ -146,6 +124,7 @@ def check_track_library_status(
     album_name: str = "",
     quality_profile: Optional[Dict[str, Any]] = None,
     quiet: bool = False,
+    profile_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Decide whether an incoming file's paired track needs importing.
 
@@ -154,7 +133,9 @@ def check_track_library_status(
     describe how the file was paired to the track, ``album_name`` the
     incoming release title (for release scoping), ``quality_profile`` the
     resolved quality profile (for the replacement arbiter), ``quiet``
-    drops per-track logging to debug (annotation pass).
+    drops per-track logging to debug (annotation pass). ``profile_id`` is who
+    imports: only a copy in the library the file would land in counts as
+    owned, so another library's copy never skips it.
 
     Returns ``{"decision", "reason", "match_type", "confidence",
     "library_path"}``. ``library_path`` is the existing file when one was
@@ -216,7 +197,10 @@ def check_track_library_status(
         )
 
     try:
-        row = find_library_track_by_external_id(db, external_ids=ids)
+        from core.library_scope import owner_for_new_file, scope_for_owner
+        row = find_library_track_by_external_id(
+            db, external_ids=ids,
+            library_scope=scope_for_owner(owner_for_new_file(profile_id)))
     except Exception as exc:                                # noqa: BLE001
         logger.debug("[Library Check] DB lookup failed: %s", exc)
         return _decide(DECISION_UNCERTAIN, "library lookup failed — proceeding")

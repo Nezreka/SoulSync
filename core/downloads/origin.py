@@ -27,6 +27,26 @@ ORIGIN_WATCHLIST = "watchlist"
 ORIGIN_PLAYLIST = "playlist"
 VALID_ORIGINS = (ORIGIN_WATCHLIST, ORIGIN_PLAYLIST)
 
+# an album or a song picked by hand downloads under a made-up playlist id (the
+# search page, an artist page, a pasted link). a cancel or a failed track goes
+# back to the wishlist carrying that id and the album's name as its "playlist",
+# and the retry then counted as a playlist download (#1932).
+HAND_PICKED_ID_PREFIXES = (
+    'enhanced_search_', 'gsearch_', 'artist_album_', 'discover_album_',
+    'seasonal_album_', 'library_redownload_', 'top_tracks_', 'itunes_link_',
+)
+_PLACEHOLDER_NAMES = ('', 'unknown playlist')
+
+
+def is_hand_picked(playlist_id: Any, playlist_name: Any = None, is_album_download: Any = False) -> bool:
+    """Whether a batch (or the wishlist row it left behind) was a download
+    someone picked by hand rather than a playlist."""
+    if is_album_download:
+        return True
+    if str(playlist_id or '').startswith(HAND_PICKED_ID_PREFIXES):
+        return True
+    return playlist_name is not None and str(playlist_name).strip().casefold() in _PLACEHOLDER_NAMES
+
 
 def _parse_source_info(raw: Any) -> Dict[str, Any]:
     if isinstance(raw, dict):
@@ -59,7 +79,8 @@ def derive_download_origin(context: Dict[str, Any]) -> Tuple[Optional[str], str]
         # 2. Wishlist provenance riding in source_info.
         if si.get("watchlist_artist_name"):
             return ORIGIN_WATCHLIST, str(si["watchlist_artist_name"])
-        if si.get("playlist_name"):
+        if si.get("playlist_name") and not is_hand_picked(
+                si.get("playlist_id"), si.get("playlist_name"), si.get("is_album_download")):
             return ORIGIN_PLAYLIST, str(si["playlist_name"])
 
         # 3. Playlist-folder-mode thread.

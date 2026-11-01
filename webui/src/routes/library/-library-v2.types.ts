@@ -1,0 +1,846 @@
+import { z } from 'zod';
+
+// Single route `/library` with the current view driven by search params:
+//   - artist set -> artist detail (albums expand inline)
+//   - album set  -> directly addressable album detail
+//   - neither    -> artist overview
+// Keeping it to one route (vs nested file routes) keeps the TanStack route tree
+// small and avoids codegen surprises while still giving the full drill-down UX.
+export const LIBRARY_V2_SORTS = ['name', 'added', 'albums', 'tracks'] as const;
+export const LIBRARY_V2_SONG_SORTS = ['title', 'artist', 'album', 'year', 'recent'] as const;
+export type LibraryV2SongSort = (typeof LIBRARY_V2_SONG_SORTS)[number];
+export type LibraryV2Sort = (typeof LIBRARY_V2_SORTS)[number];
+
+/** The album browse's orders (upstream's album view, A07). */
+export const LIBRARY_V2_ALBUM_SORTS = ['title', 'year_desc', 'year_asc', 'added'] as const;
+export type LibraryV2AlbumSort = (typeof LIBRARY_V2_ALBUM_SORTS)[number];
+
+export const LIBRARY_V2_MONITOR_FILTERS = ['all', 'monitored', 'unmonitored'] as const;
+export type LibraryV2MonitorFilter = (typeof LIBRARY_V2_MONITOR_FILTERS)[number];
+
+/** §64 I2: library-wide Missing (no owned file) vs. Cutoff Unmet (owned file
+ *  below the resolved quality profile's target) lists. */
+export const LIBRARY_V2_WANTED_KINDS = ['missing', 'cutoff_unmet'] as const;
+export type LibraryV2WantedKind = (typeof LIBRARY_V2_WANTED_KINDS)[number];
+
+/** TanStack JSON-parses search-param values, so an all-digits artist name
+ *  ("311", "702") arrives as a NUMBER and a bare `z.string()` would kill the
+ *  whole route — the same trap the legacy `/artist-detail` route documents. */
+const coercedString = z.preprocess(
+  (v) => (typeof v === 'string' || typeof v === 'number' ? String(v) : undefined),
+  z.string(),
+);
+
+const libraryV2SearchObject = z.object({
+  section: z.enum(['artists', 'albums', 'songs', 'wanted']).default('artists').catch('artists'),
+  // Same trap as `discover`/`discoverName` below, and it bit here too: a filter
+  // of "123" or "702" arrives as a NUMBER, a bare z.string() rejects it and
+  // `.catch('')` silently swallows the filter — the URL said one thing and the
+  // list showed everything.
+  q: coercedString.default('').catch(''),
+  sort: z.enum(LIBRARY_V2_SORTS).default('name').catch('name'),
+  albumSort: z.enum(LIBRARY_V2_ALBUM_SORTS).default('title').catch('title'),
+  /** Songs (upstream #1906): sort, "Duplicates" and the lossless / could-be-better toggles. */
+  songSort: z.enum(LIBRARY_V2_SONG_SORTS).default('title').catch('title'),
+  /** only songs held more than once; an old bookmark's ?dupes=1 counts too */
+  dupes: z
+    .preprocess((v) => v === true || v === 1 || v === '1' || v === 'true', z.boolean())
+    .default(false)
+    .catch(false),
+  /** 'upgradable' (could be better; artists and songs) or 'lossless' (songs) */
+  quality: z.enum(['', 'lossless', 'upgradable']).default('').catch(''),
+  view: z.enum(['table', 'cards', 'discovery']).default('cards').catch('cards'),
+  monitored: z.enum(LIBRARY_V2_MONITOR_FILTERS).default('all').catch('all'),
+  page: z.coerce.number().int().positive().default(1).catch(1),
+  artist: z.coerce.number().int().positive().optional().catch(undefined),
+  album: z.coerce.number().int().positive().optional().catch(undefined),
+  /** Compatibility with old links; videos now appear within Discovery. */
+  artistView: z.enum(['releases', 'videos']).default('releases').catch('releases'),
+  /** External entry hides management tools until the user chooses My Library. */
+  immersive: z.boolean().default(false).catch(false),
+  /** Show owned releases or the full provider discography. */
+  releases: z.enum(['library', 'all']).optional().catch(undefined),
+  wantedKind: z.enum(LIBRARY_V2_WANTED_KINDS).default('missing').catch('missing'),
+  /** Qualified provider identity for read-only browsing before a native row exists. */
+  discover: coercedString.optional().catch(undefined),
+  /** The artist's display name — some sources (Bandcamp) have no id lookup at
+   *  all, so the name has to travel in the URL. */
+  discoverName: coercedString.optional().catch(undefined),
+  /** Legacy provider-album focus, carried through to the provider detail page. */
+  discoverAlbum: coercedString.optional().catch(undefined),
+  /** ldp-03: `All Releases` renders as the V2 table or as the legacy card grid. */
+  releaseView: z.enum(['table', 'cards']).optional().catch(undefined),
+  /** ldp-05: compact V2 artist header vs. the rich legacy hero. */
+  header: z.enum(['compact', 'rich']).optional().catch(undefined),
+  /** the old page's alphabet bar: 'all', a-z or '#' */
+  letter: z
+    .preprocess(
+      (v) => (typeof v === 'string' || typeof v === 'number' ? String(v).toLowerCase() : 'all'),
+      z.string(),
+    )
+    .default('all')
+    .catch('all'),
+  /** has / has no provider id: 'spotify' or '!spotify'; '' is everything */
+  source: coercedString.default('').catch(''),
+});
+
+/**
+ * Bookmarks from the old library page: `view` named the grid (artists,
+ * albums, songs) and `sort`/`watchlist` used that page's values. Map them
+ * onto this page's params so an old link opens the same view.
+ */
+export function mapLegacyLibrarySearch(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const input = raw as Record<string, unknown>;
+  const view = input.view;
+  if (view !== 'artists' && view !== 'albums' && view !== 'songs') return raw;
+  const out: Record<string, unknown> = { ...input };
+  delete out.view;
+  const section = typeof input.section === 'string' ? input.section : view;
+  out.section = section;
+  const sort = typeof input.sort === 'string' ? input.sort : '';
+  delete out.sort;
+  if (section === 'songs') {
+    // the old page called newest-first year_desc; this one calls it year
+    if (sort === 'year_desc') out.songSort = 'year';
+    else if (['artist', 'album', 'recent'].includes(sort)) out.songSort = sort;
+  } else if (section === 'albums') {
+    if (sort === 'recent') out.albumSort = 'added';
+    else if (sort === 'year_desc' || sort === 'year_asc') out.albumSort = sort;
+  } else if (sort === 'recent') {
+    out.sort = 'added';
+  }
+  if (input.watchlist === 'watched') out.monitored = 'monitored';
+  else if (input.watchlist === 'unwatched') out.monitored = 'unmonitored';
+  delete out.watchlist;
+  return out;
+}
+
+/** Discovery is an entry intent; explicit display choices remain authoritative. */
+// the cast keeps the object's input type for links and navigate(); the
+// preprocess only rewrites old bookmark params before they are read
+const libraryV2SearchWithLegacy = z.preprocess(
+  mapLegacyLibrarySearch,
+  libraryV2SearchObject,
+) as unknown as typeof libraryV2SearchObject;
+
+export const libraryV2SearchSchema = libraryV2SearchWithLegacy.transform((value) => ({
+  ...value,
+  releases:
+    value.releases ?? (value.view === 'discovery' ? ('all' as const) : ('library' as const)),
+  // the discovery tab opens on the cards view. table is an explicit choice.
+  releaseView: value.releaseView ?? ('cards' as const),
+}));
+
+export type LibraryV2Search = z.infer<typeof libraryV2SearchSchema>;
+
+/** 'library' = imported from files; 'discography' = provider-only release.
+ *  `(string & {})` keeps unknown future server values assignable without
+ *  collapsing the union (would trip no-redundant-type-constituents). */
+export type LibraryV2AlbumOrigin = 'library' | 'discography' | (string & {});
+
+/** `until_top` is the persisted compatibility alias for `until_cutoff` with
+ *  `upgrade_cutoff_index = 0`; it remains a first-class API read value. */
+export type LibraryV2UpgradePolicy =
+  | 'none'
+  | 'acceptable'
+  | 'until_cutoff'
+  | 'until_top'
+  | (string & {});
+export type LibraryV2QualityProfileSource = 'track' | 'album' | 'artist' | 'global' | (string & {});
+
+export interface LibraryV2Pagination {
+  page: number;
+  limit: number;
+  total_count: number;
+  total_pages: number;
+  has_prev: boolean;
+  has_next: boolean;
+}
+
+/** Enhance Quality: one file its quality profile would still upgrade,
+ *  monitored or not. `target` is what an upgrade has to reach. */
+export interface LibraryV2EnhanceTrack {
+  track_id: number;
+  title: string;
+  album_id: number;
+  album_title: string;
+  album_year?: number | null;
+  album_type?: string | null;
+  /** soulsync's artwork endpoint for the release */
+  album_image_url?: string;
+  /** the provider's cover, painted while a cold local one builds */
+  album_remote_image_url?: string | null;
+  disc_number: number | null;
+  track_number: number | null;
+  current: string | null;
+  profile: string;
+  target: string | null;
+  monitored: boolean;
+}
+
+/** §64 I2: one row of a global Wanted View. `file`/`meets_profile` are only
+ *  present for `kind=cutoff_unmet` rows. */
+export interface LibraryV2WantedRow {
+  track_id: number;
+  title: string;
+  track_number: number | null;
+  disc_number: number | null;
+  monitored: boolean;
+  album: { id: number; title: string; album_type: string };
+  artist: { id: number; name: string };
+  meets_profile?: boolean | null;
+  file?: {
+    format: string | null;
+    bitrate: number | null;
+    sample_rate: number | null;
+    bit_depth: number | null;
+    quality_tier: string | null;
+  };
+}
+
+export interface LibraryV2ArtistSummary {
+  id: number;
+  name: string;
+  image_url: string | null;
+  remote_image_url?: string | null;
+  genres: string[];
+  monitored: boolean;
+  monitor_new_items: string;
+  quality_profile_id: number;
+  quality_profile_source?: LibraryV2QualityProfileSource;
+  quality_profile_source_id?: number | null;
+  quality_profile_explicit?: boolean;
+  added_at: string | null;
+  album_count: number;
+  single_count: number;
+  track_count: number;
+  tracks_present: number;
+  tracks_missing: number;
+  /** I8: sum of each present track's primary file size, in bytes. */
+  total_size_bytes: number;
+  /** Media servers that positively mapped this imported catalogue artist. */
+  media_server_sources?: string[];
+  user_overrides: Record<string, unknown>;
+  /** provider ids for the card's badges (`spotify`, `deezer`, ...) */
+  provider_ids?: Record<string, string>;
+  /** tracks below their quality profile; only with include=upgradable */
+  upgradable_count?: number;
+}
+
+/** One row of the album browse (`GET /api/library/v2/albums`). */
+export interface LibraryV2AlbumListItem {
+  id: number;
+  title: string;
+  album_type: string | null;
+  year: number | null;
+  image_url: string | null;
+  remote_image_url?: string | null;
+  added_at: string | null;
+  monitored: boolean;
+  artist_id: number | null;
+  artist_name: string | null;
+  track_count: number;
+  tracks_present: number;
+  tracks_missing: number;
+  /** provider ids for the card's badges */
+  provider_ids?: Record<string, string>;
+}
+
+export interface LibraryV2AlbumSummary {
+  id: number;
+  title: string;
+  album_type: string;
+  release_date: string | null;
+  year: number | null;
+  image_url: string | null;
+  /** ldp-07: the provider CDN cover the catalogue already stores. Painted
+   *  immediately while a cold local build is pending, and the *only* url for
+   *  a pure discography row (which is deliberately never cached locally). */
+  remote_image_url?: string | null;
+  monitored: boolean;
+  quality_profile_id: number;
+  quality_profile_source?: LibraryV2QualityProfileSource;
+  quality_profile_source_id?: number | null;
+  quality_profile_explicit?: boolean;
+  origin: LibraryV2AlbumOrigin;
+  /** Tracks on this release the user has explicitly made wanted. Keeps a
+   *  bookmarked single track visible under "My Library" (guide §5). */
+  monitored_tracks?: number;
+  spotify_id: string | null;
+  /** the release card's musicbrainz link. */
+  musicbrainz_id?: string | null;
+  /** the release's ids by provider: a release you don't have opens the
+   *  download modal from the one matching the artist's source */
+  provider_ids?: Record<string, string>;
+  /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
+  explicit: boolean | null;
+  label: string | null;
+  style: string | null;
+  mood: string | null;
+  track_count: number;
+  tracks_present: number;
+  tracks_missing: number;
+  /** I8: sum of each present track's primary file size, in bytes. */
+  total_size_bytes: number;
+  user_overrides: Record<string, unknown>;
+}
+
+export interface LibraryV2ArtistDetail {
+  id: number;
+  name: string;
+  image_url: string | null;
+  remote_image_url?: string | null;
+  /** ldp-05: qualified provider ids (guide §2.5) so the rich header can ask
+   *  the shared top-tracks endpoint about this artist. */
+  provider_ids?: Partial<Record<string, string>>;
+  /** Independent recognition mappings; never Library ownership. */
+  media_server_sources?: string[];
+  summary: string | null;
+  /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
+  style: string | null;
+  mood: string | null;
+  label: string | null;
+  genres: string[];
+  monitored: boolean;
+  monitor_new_items: string;
+  quality_profile: LibraryV2QualityProfile | null;
+  quality_profile_source?: LibraryV2QualityProfileSource;
+  quality_profile_source_id?: number | null;
+  quality_profile_explicit?: boolean;
+  albums: LibraryV2AlbumSummary[];
+  eps: LibraryV2AlbumSummary[];
+  singles: LibraryV2AlbumSummary[];
+  /** releases by other artists this one is credited on (guest spots) */
+  appears_on?: LibraryV2AlbumSummary[];
+  /** the artist's own tracks on those releases that are here, and on how
+   *  many releases */
+  guest_track_count?: number;
+  guest_release_count?: number;
+  /** the artist list's rule: files, or a watch or wish of its own. One
+   *  outside it is browsed, its discography read from the provider. */
+  in_library?: boolean;
+  album_count: number;
+  single_count: number;
+  /** Provider-only releases currently persisted for this artist. */
+  discography_count: number;
+  /** UTC "YYYY-MM-DD HH:MM:SS" of the last provider discography walk, or null. */
+  discography_synced_at?: string | null;
+  /** I8: sum of every album/EP/single's total_size_bytes, in bytes. */
+  total_size_bytes: number;
+  user_overrides: Record<string, unknown>;
+}
+
+/** §52.3: one settings surface backed by the existing admin Watchlist row. */
+export interface LibraryV2ArtistSettings {
+  artist_id: number;
+  watchlist_row_id: number;
+  watchlist_name: string;
+  watchlist_image_url: string | null;
+  provider_ids: Partial<
+    Record<'spotify' | 'itunes' | 'deezer' | 'discogs' | 'amazon' | 'musicbrainz', string | null>
+  >;
+  monitor_new_items: 'all' | 'new' | 'none';
+  include_albums: boolean;
+  include_eps: boolean;
+  include_singles: boolean;
+  include_live: boolean;
+  include_remixes: boolean;
+  include_acoustic: boolean;
+  include_compilations: boolean;
+  include_instrumentals: boolean;
+  include_other_artists: boolean;
+  auto_download: boolean;
+  lookback_days: number | null;
+  preferred_metadata_source: string | null;
+}
+
+/** One member of an artist's §40 alias group (docs/library-v2.md §24) — the
+ *  same real artist under a different, unlinked provider identity. */
+export interface LibraryV2ArtistAliasMember {
+  id: number;
+  name: string;
+  image_url: string | null;
+}
+
+export interface LibraryV2TrackArtist {
+  id: number;
+  name: string;
+  role: string;
+}
+
+/** Where a track's audio actually lives when the position itself holds no
+ *  file: the same recording on another release (docs §49.6c). */
+export interface LibraryV2LinkedFrom {
+  track_id: number;
+  album_id: number;
+  album_title: string | null;
+  album_type: string | null;
+  file_id: number;
+  path: string;
+}
+
+export interface LibraryV2TrackFile {
+  check_findings?: { id: number; title: string; last_error?: string | null }[];
+  /** lib2_track_files row id — used to scope ADR-05 file-delete to a caller
+   *  selection (B6 bulk delete from the track table). */
+  file_id: number;
+  path: string;
+  /** `path` with the configured library root removed — what the table shows.
+   *  `path` stays the value that is copied, opened and deleted. Absent on a
+   *  payload from an older backend, so read it with a fallback. */
+  display_path?: string | null;
+  /** Playlists this file was saved for — one version per playlist copy. */
+  playlists?: string[];
+  format: string | null;
+  bitrate: number | null;
+  sample_rate: number | null;
+  bit_depth: number | null;
+  size: number | null;
+  quality_tier: string;
+  import_status: string | null;
+  verification_status: string | null;
+  /** Deep-dive A7/C4: raw AcoustID outcome ('pass'|'skip'|null) — narrower
+   *  than verification_status, populated by the autolink import callback. */
+  acoustid_status?: string | null;
+  /** Compact pipeline detail with no dedicated column (AcoustID reason,
+   *  quality-profile fallback applied). Always an object, `{}` when empty. */
+  pipeline_result?: LibraryV2PipelineResult;
+  source: string | null;
+  file_state: string | null;
+  is_primary?: boolean;
+  primary_manual?: boolean;
+  file_role?: 'master' | 'derivative' | 'alternate';
+  derived_from_file_id?: number | null;
+  acquired_quality_json?: string | null;
+  retention_json?: string | null;
+  has_replaygain?: boolean;
+  has_lyrics?: boolean;
+}
+
+/** Deep-dive A7/C4: what `autolink.py` stashes per file beyond the dedicated
+ *  status columns — all keys optional, present only when they apply. */
+export interface LibraryV2PipelineResult {
+  acoustid_message?: string;
+  version_mismatch_fallback?: string;
+  quality_fallback?: string[];
+}
+
+/** §73/I6: live download-queue status for a track row — active-only, absent
+ *  once terminal (completed/failed/etc. are covered by the existing
+ *  quality/verification badges, not this overlay). */
+export type LibraryV2QueueStatusKind = 'queued' | 'searching' | 'downloading' | 'processing';
+
+export interface LibraryV2QueueStatusEntry {
+  status: LibraryV2QueueStatusKind;
+  progress_pct: number;
+}
+
+/** Per-album roll-up of the entries above. The bucket counts are what let a row say "3 queued"
+ *  instead of claiming three tracks are downloading when they are only waiting; `progress_pct` is the
+ *  mean across every active track, so queued siblings hold the bar down rather than being ignored. */
+export interface LibraryV2QueueStatusAlbum extends Record<LibraryV2QueueStatusKind, number> {
+  /** Tracks in any non-terminal bucket — the sum of the four counts. */
+  active: number;
+  progress_pct: number;
+}
+
+export interface LibraryV2QueueStatusResponse {
+  tracks: Record<number, LibraryV2QueueStatusEntry>;
+  /** album_id -> that album's live roll-up. */
+  albums: Record<number, LibraryV2QueueStatusAlbum>;
+}
+
+/** One provider's match state for an entity (legacy Enhanced-View match chips). */
+export interface LibraryV2MatchService {
+  service: string;
+  label: string;
+  /** 'matched' | 'not_found' | 'pending' (kept as string for forward-compat). */
+  status: string;
+  external_id: string | null;
+  last_attempted: string | null;
+  /** The legacy row id — media servers may use numeric or opaque TEXT ids. */
+  legacy_entity_id: number | string | null;
+  /** Always present on current servers; enables matching lib2-native rows
+   * that have no legacy back-reference. */
+  library_v2_entity_id?: number | null;
+  /** Is this provider configured/usable on this instance right now (A8)?
+   *  Always ``true`` when the server has no availability signal (older
+   *  cached response shape). */
+  available?: boolean;
+  /** How the current provider id was chosen. Pre-feature rows are `legacy`
+   * because automatic vs manual cannot be reconstructed safely. */
+  match_origin?: 'automatic' | 'manual' | 'legacy' | null;
+  matched_at?: string | null;
+}
+
+/** One candidate cover-art image for the art picker (docs §49). */
+export interface LibraryV2ArtCandidate {
+  url: string;
+  source: string;
+  type?: string;
+  front?: boolean;
+}
+
+/** One per-track row of a reorganize preview plan. */
+export interface LibraryV2ReorganizeTrackPreview {
+  track_id: number | null;
+  title: string;
+  track_number: number | null;
+  disc_number: number | null;
+  current_path: string | null;
+  new_path: string | null;
+  current_path_abs?: string | null;
+  new_path_abs?: string | null;
+  file_exists: boolean;
+  unchanged: boolean;
+  collision: boolean;
+  matched: boolean;
+  reason: string | null;
+}
+
+/** `POST .../reorganize/preview` response (docs §50). */
+export interface LibraryV2ReorganizePreview {
+  success: boolean;
+  /** 'planned' | 'no_source_id' — a failed 'no_album'/'no_tracks' surfaces as a thrown error instead. */
+  status: string;
+  source: string | null;
+  album: string;
+  artist: string;
+  transfer_dir: string;
+  tracks: LibraryV2ReorganizeTrackPreview[];
+}
+
+/** One item in the (legacy, shared) reorganize queue — polled by the lib2
+ *  Reorganize modals so a queued/running move has a face (deep-dive G7). */
+export interface LibraryV2ReorganizeQueueItem {
+  queueId: string;
+  albumId: string;
+  albumTitle: string;
+  artistName: string;
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  resultStatus: string | null;
+  currentTrack: string | null;
+  progressTotal: number;
+  progressProcessed: number;
+  finishedAt: number | null;
+}
+
+/** `GET /api/library/reorganize/queue` snapshot (docs G7). */
+export interface LibraryV2ReorganizeQueueSnapshot {
+  active: LibraryV2ReorganizeQueueItem | null;
+  queued: LibraryV2ReorganizeQueueItem[];
+  recent: LibraryV2ReorganizeQueueItem[];
+}
+
+/** One row from the legacy `track_downloads` provenance table (Source Info popover). */
+export interface LibraryV2TrackDownload {
+  id: number;
+  source_service: string | null;
+  source_username: string | null;
+  source_filename: string | null;
+  source_size: number | null;
+  audio_quality: string | null;
+  bitrate: number | null;
+  sample_rate: number | null;
+  bit_depth: number | null;
+  status: string | null;
+  track_title: string | null;
+  track_artist: string | null;
+  created_at: string | null;
+}
+
+/** One `lib2_manual_skips` audit row — a user-approved check override
+ *  (e.g. AcoustID or quality skipped) bound to this track's file. */
+export interface LibraryV2ManualSkip {
+  id: number;
+  skipped_checks: string[];
+  reason: string | null;
+  acknowledged: boolean;
+  created_at: string | null;
+}
+
+/** Live embedded tags read straight from the file via mutagen (§18.1),
+ *  backing the Track Detail modal's Tags + Lyrics tabs. `tags` is a flat
+ *  lowercase-key → string map (matches `core.library.file_tags`). */
+export interface LibraryV2FileTags {
+  available: boolean;
+  reason?: string;
+  format?: string;
+  bitrate?: number;
+  duration?: number;
+  has_picture?: boolean;
+  tags?: Record<string, string>;
+}
+
+export interface LibraryV2Track {
+  /** null for a "missing" placeholder row (an expected track we don't have yet). */
+  id: number | null;
+  lib2_track_id?: number | null;
+  legacy_track_id?: string | number | null;
+  server_track_id?: string | number | null;
+  title: string | null;
+  track_number: number | null;
+  disc_number: number | null;
+  duration: number | null;
+  bpm: number | null;
+  /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
+  explicit: boolean | null;
+  style: string | null;
+  mood: string | null;
+  isrc: string | null;
+  monitored: boolean;
+  quality_profile_id: number;
+  quality_profile_source?: LibraryV2QualityProfileSource;
+  quality_profile_source_id?: number | null;
+  quality_profile_explicit?: boolean;
+  canonical_track_id: number | null;
+  artists: LibraryV2TrackArtist[];
+  file: LibraryV2TrackFile | null;
+  /** Number of retained physical versions for this recording. */
+  file_count?: number;
+  /** `linked` = the audio is on disk, but under another release that carries
+   *  the same recording; `linked_from` names it. */
+  file_status: 'present' | 'missing_suspected' | 'missing' | 'duplicate_single' | 'linked';
+  linked_from?: LibraryV2LinkedFrom | null;
+  metadata_gaps: string[];
+  /** LV2-TAG-STATUS-01: whether metadata_gaps reflects a real read of this
+   *  file's tags. Absent (older cached responses / test fixtures) is treated
+   *  as 'scanned' for backward compatibility. */
+  metadata_scan_status?: 'scanned' | 'pending' | 'unreadable';
+  metadata_validation?: { status: string; checks: Record<string, string>; checked_at?: string };
+  metadata_findings?: {
+    id: number;
+    title: string;
+    finding_type: string;
+    last_error?: string | null;
+  }[];
+  /** Plex/Jellyfin/Navidrome instances that recognised this imported track. */
+  media_server_sources?: string[];
+  is_missing?: boolean;
+  /** Quality vs the album's profile (null when missing or not measurable). */
+  meets_profile?: boolean | null;
+  upgrade_candidate?: boolean | null;
+  quality_issue?: 'satisfied' | 'below_cutoff' | 'format_not_targeted' | 'unknown' | null;
+  /** Field-level admin corrections applied over provider metadata. */
+  user_overrides?: Record<string, unknown>;
+}
+
+export interface LibraryV2AlbumDetail {
+  id: number;
+  title: string;
+  album_type: string;
+  release_date: string | null;
+  year: number | null;
+  image_url: string | null;
+  genres: string[];
+  /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
+  explicit: boolean | null;
+  label: string | null;
+  style: string | null;
+  mood: string | null;
+  monitored: boolean;
+  origin: LibraryV2AlbumOrigin;
+  quality_profile: LibraryV2QualityProfile | null;
+  quality_profile_source?: LibraryV2QualityProfileSource;
+  quality_profile_source_id?: number | null;
+  quality_profile_explicit?: boolean;
+  primary_artist: { id: number; name: string } | null;
+  tracks: LibraryV2Track[];
+  track_count: number;
+  tracks_present: number;
+  tracks_missing: number;
+  /** I8: sum of each present track's primary file size, in bytes. */
+  total_size_bytes: number;
+  upgrades_available?: number;
+  /** Provider tracklist build state. `pending` means the server is fetching
+   *  it off the request thread and the track list below is still partial. */
+  tracklist_sync?: {
+    status: 'idle' | 'pending' | 'failed' | 'ready' | (string & {});
+    error: string | null;
+  };
+  user_overrides: Record<string, unknown>;
+}
+
+export interface LibraryV2RankedTarget {
+  label?: string;
+  format?: string;
+  bit_depth?: number;
+  min_sample_rate?: number;
+  min_bitrate?: number;
+}
+
+export interface LibraryV2QualityProfile {
+  id: number;
+  name: string;
+  description: string | null;
+  upgrade_policy: LibraryV2UpgradePolicy;
+  /** For `until_cutoff`: target that counts as done. `until_top` always uses 0. */
+  upgrade_cutoff_index: number;
+  ranked_targets: LibraryV2RankedTarget[];
+  repair_job_id: string;
+  repair_settings: Record<string, unknown>;
+  is_default: boolean;
+}
+
+export interface LibraryV2ImportState {
+  running: boolean;
+  stage: string | null;
+  current: number;
+  total: number;
+  stats: Record<string, number> | null;
+  error: string | null;
+  finished_at: number | null;
+  artwork_cache: LibraryV2ArtworkCacheState;
+  /** Persisted migration state, unlike the fields above which only describe an
+   * import this browser session started. An installation that upgrades has its
+   * library migrated by a background worker, so this is the only thing that
+   * can explain a still-empty page to the user. */
+  bootstrap?: LibraryV2BootstrapState;
+  /** The upgrade's finishing work (credits, tracklists, tags) that runs after
+   * it, behind a library that already works. */
+  preparation?: LibraryV2PreparationState;
+}
+
+export interface LibraryV2PreparationState {
+  active: boolean;
+  stage: string | null;
+  current: number;
+  total: number;
+}
+
+export type LibraryV2BootstrapStatus =
+  | 'pending'
+  | 'running'
+  | 'done'
+  | 'failed'
+  | 'waiting_for_source';
+
+export interface LibraryV2BootstrapState {
+  status: LibraryV2BootstrapStatus;
+  attempts: number;
+  stage: string | null;
+  current: number;
+  total: number;
+  last_error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  heartbeat_at: string | null;
+}
+
+export interface LibraryV2ArtworkCacheState {
+  running: boolean;
+  current: number;
+  total: number;
+  stats: Record<string, number> | null;
+  error: string | null;
+  started_at: number | null;
+  finished_at: number | null;
+}
+
+export interface LibraryV2JobState {
+  job_id: string | null;
+  running: boolean;
+  kind: string | null;
+  current: number;
+  total: number;
+  result: Record<string, number | string | null> | null;
+  error: string | null;
+  started_at: number | null;
+  finished_at: number | null;
+  jobs?: LibraryV2JobState[];
+}
+
+export interface LibraryV2DiscographyStats {
+  added: number;
+  enriched: number;
+  removed: number;
+  total: number;
+  source: string | null;
+}
+
+/** B5: track-table columns participating in the configurable order. Title is
+ *  always visible; the remaining entries can also be toggled. The compact
+ *  checkbox/bookmark/# utility columns and Actions stay fixed. */
+export interface LibraryV2TrackTableColumns {
+  title: boolean;
+  disc: boolean;
+  artists: boolean;
+  duration: boolean;
+  bpm: boolean;
+  match: boolean;
+  /** Independent recognition by one or more connected media servers. */
+  media_server: boolean;
+  quality: boolean;
+  /** Assigned track/album/artist/app quality profile. */
+  profile: boolean;
+  features: boolean;
+  metadata: boolean;
+  /** iss28-01: effective Check summary, backed by AcoustID + verification provenance. */
+  acoustid: boolean;
+  /** UI-03: size of the primary physical file on disk. */
+  file_size: boolean;
+  file_path: boolean;
+  /** H1: row play button, reuses the Legacy player via the shell bridge. */
+  play: boolean;
+}
+
+/** Round 5 (deep-dive D6): which optional artist-overview table columns are
+ *  shown. Only meaningful in table view — the card grid has its own fixed
+ *  layout. Mon./Artist/Albums/Singles/Tracks/Missing are always shown. */
+export interface LibraryV2ArtistTableColumns {
+  quality_profile: boolean;
+  genres: boolean;
+  added: boolean;
+  /** I8: disk-space roll-up column. */
+  size: boolean;
+}
+
+export interface LibraryV2UiPreferences {
+  track_table: {
+    columns: LibraryV2TrackTableColumns;
+    column_order: (keyof LibraryV2TrackTableColumns)[];
+    /** UI-03/iss28-02: relative column weights; absent keys use defaults. */
+    column_widths: Record<string, number | null>;
+    show_all_match_providers: boolean;
+    visible_match_providers: Record<string, boolean>;
+    quality_show_format: boolean;
+    quality_show_resolution: boolean;
+    quality_show_bitrate: boolean;
+    /** The title opens the track editor; no pencil in Actions. */
+    edit_via_title: boolean;
+  };
+  artist_table: {
+    columns: LibraryV2ArtistTableColumns;
+    column_order: (keyof LibraryV2ArtistTableColumns)[];
+  };
+  /** Which artist toolbar buttons this profile sees (Tools always shows). */
+  artist_toolbar?: Partial<Record<ArtistToolbarButton, boolean>>;
+  /** Which header an artist opens with, from the library and from anywhere else. */
+  artist_page?: {
+    header?: LibraryV2ArtistPageHeader;
+    header_elsewhere?: LibraryV2ArtistPageHeader;
+    /** What the My Library view shows below the releases (all by default). */
+    library_sections?: Partial<Record<LibraryViewSection, boolean>>;
+    /** Add to playlist in the track table's Actions column. */
+    add_to_playlist?: boolean;
+  };
+}
+
+export type LibraryV2ArtistPageHeader = 'rich' | 'compact';
+
+export const LIBRARY_VIEW_SECTIONS = {
+  similar_artists: 'Similar Artists',
+  concerts: 'Concerts',
+} as const;
+export type LibraryViewSection = keyof typeof LIBRARY_VIEW_SECTIONS;
+
+export const ARTIST_TOOLBAR_BUTTONS = {
+  automatic_search: 'Automatic Search',
+  interactive_search: 'Interactive Search',
+  enhance_quality: 'Enhance Quality',
+  refresh_scan: 'Refresh & Scan',
+  history: 'History',
+  artist_settings: 'Artist Settings',
+} as const;
+export type ArtistToolbarButton = keyof typeof ARTIST_TOOLBAR_BUTTONS;

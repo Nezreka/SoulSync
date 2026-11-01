@@ -50,7 +50,7 @@ export interface ArtistInfoModalProps {
   info: ArtistInfo | null;
   phase: 'loading' | 'error' | 'ready';
   logos: SourceLogos;
-  buildDetailPath: (id: string, source: string | null) => string;
+  buildDetailPath: (id: string, source: string | null, name?: string | null) => string;
   onClose: () => void;
   /** The caller owns the request, the toasts, and the pool/card sync. */
   onToggleWatchlist: () => void;
@@ -159,7 +159,13 @@ export function ArtistInfoModal({
               </button>
               <a
                 className="btn btn--sm btn--secondary ya-header-btn ya-viewall-btn"
-                href={buildDetailPath(pool.active_source_id ?? '', pool.active_source || null)}
+                // the name lets the library find an artist whose provider id
+                // it doesn't hold, so a library artist opens in the library
+                href={buildDetailPath(
+                  pool.active_source_id ?? '',
+                  pool.active_source || null,
+                  pool.artist_name ?? null,
+                )}
                 style={{ textDecoration: 'none', color: 'inherit' }}
                 onClick={onViewDiscography}
               >

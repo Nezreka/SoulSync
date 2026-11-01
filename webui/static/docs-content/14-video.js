@@ -15,7 +15,7 @@ registerDocsSection({
             body: `
 SoulSync's **Video** side is a self-hosted movies & TV manager that lives inside the same app as the music side but runs as an **isolated application** — its own database, its own pages, its own API. Think of it as a Sonarr + Radarr + overlay/collection manager built into SoulSync.
 
-It connects to **Plex** or **Jellyfin** to read your movie and TV libraries, enriches every title from **TMDB**, **TVDB**, **OMDb**, **fanart.tv**, **Trakt**, **TVMaze** and **OpenSubtitles**, and can search, grab, organize, and upgrade downloads to fill the gaps in your collection.
+It connects to **Plex** or **Jellyfin** to read your movie and TV libraries, enriches every title from **TMDB**, **TVDB**, **OMDb**, **fanart.tv**, **Trakt**, **TVMaze**, **AniList** (anime) and **OpenSubtitles**, and can search, grab, organize, and upgrade downloads to fill the gaps in your collection.
 
 ::: cards
 ### 🎬 Movies & TV
@@ -102,6 +102,16 @@ The video side keeps its own library paths, migrated from the legacy single vide
 The engine routes each finished download to the library path matching its type.
 
 In Docker, Movies, TV and YouTube start on \`/media/movies\`, \`/media/tv\` and \`/media/youtube\` when the container has those mapped (the default compose file does), the way Music starts on \`/app/Transfer\`. Like the Music folders, each is locked: hit **Unlock** to change one. A folder you've cleared or set yourself is never reset.
+
+## Your library's folders
+
+Plex and Jellyfin report every file at the path *they* see it under, like \`/mnt/easystore3/PLEX/MOVIES/...\`. Settings > Folders > Video > **Your library's folders** lists every folder your libraries read (asked from the server itself), each marked Movies or TV with how many files are in it.
+
+- The folders SoulSync already reaches, like your Movies and TV output folders, are recognised from their files and ticked. You never type them twice.
+- For the rest, type where SoulSync reaches each one. It checks a sample of that folder's real files right away (**48 of 50 sample files found**).
+- A reached folder is a full library folder of its kind: every file in it is found, renamed to your templates, recycled on delete (into that drive's own recycle bin) and has its languages read. New downloads still go to your output folders.
+- **Folders your server doesn't list** (in the same section) is for a collection SoulSync should manage that your server doesn't read.
+- A folder left blank works the way it always did.
 
 ## 4K libraries
 
@@ -404,7 +414,7 @@ Movies and shows can come from either Plex or Jellyfin and render the same way.
 
 The hero keeps one main action: **Play / Resume** on your server when you own it, otherwise **Get**. Trailer and the follow toggle (watchlist for an airing show, wishlist for a movie you don't own) sit beside it, and everything else is in one **More** menu, grouped into **Get**, **Library** (edit details, change poster, sync with server, mark watched, files and match) and **Open on** (IMDb, TMDB, TVDB, Letterboxd, official site). An episode's **⋯** menu marks just that episode watched or unwatched, and the season's **⋯** marks the whole season; both sync to your server like the show-wide toggle.
 
-The synopsis shows three lines; **More** opens the rest in place. Every score in the ratings row opens its own site (IMDb, Rotten Tomatoes, Metacritic, Trakt, TVmaze). Below the tabs, cast comes first, then the collection and **More Like This**, videos and photos, then one **About** section with the facts (release, runtime, rating, network, budget, language, the languages subtitles exist in, with the ones you grab listed first), the studios, and keywords. **Where to Watch** shows one tile per service. The side-scrolling rows have arrows when you hover them.
+The synopsis shows three lines; **More** opens the rest in place. Every score in the ratings row opens its own site (IMDb, Rotten Tomatoes, Metacritic, Trakt, TVmaze, AniList). Below the tabs, cast comes first, then the collection and **More Like This**, videos and photos, then one **About** section with the facts (release, runtime, rating, network, budget, language, the languages subtitles exist in, with the ones you grab listed first), the studios, and keywords. An anime also gets its other names (romaji and Japanese), the studio that animated it, the next episode's countdown while it airs, and a link to each season on AniList. **Where to Watch** shows one tile per service. The side-scrolling rows have arrows when you hover them.
 
 A show's numbers count like you'd read them: **Specials** and episodes that haven't aired yet are never "missing", so a show with every aired episode reads **Complete**. Specials sit after the real seasons.
 
@@ -577,6 +587,10 @@ Everything is grouped by what's holding it up, worst first:
 A show or channel sits in the group of its worst episode. **⚠ Failing** narrows the page to the stuck ones.
 
 Click a poster or orb and a panel opens beside it (a drawer on a tablet, a bottom sheet on a phone). It says in plain words why the title is stuck, and lists every season and episode with **Search**, a **⋯** menu for **Pick a release** and **Retry with all sources**, and remove. Click an episode to open its synopsis, guest cast and **what the last search found** — every release each source returned and the rule that turned it down.
+
+## Export
+
+**⋯ → Export…** saves the wishlist as **CSV** or **JSON**: everything, **Movies** only or **TV shows** only, previewed before you copy or download it. One row per wanted movie, episode or YouTube video, with its type, title, year, season and episode, air date, TMDB id, status and when it was added.
 `
         },
         {
@@ -1324,7 +1338,8 @@ Base path: \`/api/video\`. Download *triggers* require \`can_download\`; config 
 | GET | \`/downloads/active\`, \`/downloads/status\`, \`/downloads/history\` | Live queue & history | video |
 | POST | \`/downloads/search\`, \`/downloads/evaluate\` | Find & rank releases | video |
 | POST | \`/downloads/grab\`, \`/downloads/grab-pack\`, \`/downloads/retry\` | Queue a grab / retry | can_download |
-| POST | \`/downloads/cancel\`, \`/downloads/clear\` | Cancel / clear queue items | video |
+| POST | \`/downloads/cancel\`, \`/downloads/clear\` | Cancel / clear queue items (\`{scope: "failed"}\` clears only failed + cancelled; \`{scope: "everything"}\` clears completed + failed + cancelled; import failures always stay for Manual import) | video |
+| POST | \`/downloads/remove\` | Take one failed or cancelled row off the list, no retry | video |
 | GET/POST | \`/downloads/quality\`, \`/downloads/quality/profiles\`, \`/downloads/quality/formats\` | Quality profiles & custom formats | admin (write) |
 | GET/POST | \`/downloads/config\`, \`/downloads/config/import-lists\` | Download & import-list config | admin (write) |
 | GET/POST/DELETE | \`/downloads/blocklist\` | Release blocklist | video (GET open); admin (writes) |

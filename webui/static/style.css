@@ -23274,6 +23274,27 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 600;
     color: var(--text-primary);
     letter-spacing: -0.005em;
+    /* the whole name, wrapped: "You Make Me ..." six times told you nothing */
+    white-space: normal;
+    text-overflow: clip;
+    line-height: 1.35;
+}
+.download-missing-modal-content .download-tracks-table .track-name-text {
+    overflow-wrap: anywhere;
+}
+
+/* column widths: the name gets whatever the fixed columns leave */
+.download-missing-modal-content .download-tracks-table .dmt-col-select { width: 44px; }
+.download-missing-modal-content .download-tracks-table .dmt-col-num { width: 48px; }
+.download-missing-modal-content .download-tracks-table .dmt-col-artist { width: 18%; }
+.download-missing-modal-content .download-tracks-table .dmt-col-duration { width: 78px; }
+.download-missing-modal-content .download-tracks-table .dmt-col-status { width: 150px; }
+.download-missing-modal-content .download-tracks-table .dmt-col-actions { width: 112px; }
+
+/* a phone can't fit the fixed columns and a readable name: scroll sideways */
+@media (max-width: 768px) {
+    .download-missing-modal-content .download-tracks-table-container { overflow-x: auto; }
+    .download-missing-modal-content .download-tracks-table { min-width: 720px; }
 }
 
 /* Artist — dim, centered */
@@ -23331,6 +23352,18 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: #60a5fa;
     text-shadow: 0 0 12px rgba(96, 165, 250, 0.35);
     animation: dms-status-pulse 1.5s ease-in-out infinite;
+}
+/* Library v2: a track the user already wants, known as soon as the dialog
+   opens. Drawn with Library v2's bookmark, filled, where the others have a dot. */
+.download-missing-modal-content .download-tracks-table .match-monitored {
+    color: rgb(var(--accent-rgb));
+}
+.download-missing-modal-content .download-tracks-table .match-monitored .match-bookmark {
+    width: 11px;
+    height: 11px;
+    margin-right: 6px;
+    vertical-align: -1px;
+    fill: currentColor;
 }
 .download-missing-modal-content .download-tracks-table .download-searching {
     color: #60a5fa;
@@ -34810,7 +34843,7 @@ div.artist-hero-badge {
     }
 }
 @media (max-width: 640px) {
-    
+
     .discover-hub-row,
     .discovery-zone {
         margin-left: 0;
@@ -41873,6 +41906,134 @@ body.downloads-disabled .discog-download-btn[data-request-action] {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+/* Library switcher (#1199): which library an admin is working in. Drawn by
+   webui/src/shell/library-switch.ts only when there is more than one. */
+.library-switch {
+    position: relative;
+    margin-top: 6px;
+}
+.library-switch-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.28);
+    background: rgba(var(--accent-rgb), 0.08);
+    color: rgba(255, 255, 255, 0.88);
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.library-switch-trigger:hover,
+.library-switch-trigger[aria-expanded="true"] {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.5);
+}
+.library-switch-trigger:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.8);
+    outline-offset: 1px;
+}
+html[data-library-scope="own"] .library-switch-trigger {
+    border-color: rgba(250, 204, 21, 0.45);
+    background: rgba(250, 204, 21, 0.1);
+}
+.library-switch-icon {
+    display: flex;
+    color: rgb(var(--accent-light-rgb));
+    flex-shrink: 0;
+}
+html[data-library-scope="own"] .library-switch-icon { color: rgb(250, 204, 21); }
+.library-switch-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.15;
+}
+.library-switch-caption {
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+}
+.library-switch-name {
+    font-size: 12px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.library-switch-chevron {
+    margin-left: auto;
+    display: flex;
+    color: rgba(255, 255, 255, 0.5);
+}
+.library-switch-menu {
+    /* on <body>, placed under the trigger by library-switch.ts */
+    position: fixed;
+    max-height: min(70vh, 480px);
+    overflow-y: auto;
+    min-width: 260px;
+    max-width: 340px;
+    z-index: 1200;
+    padding: 6px;
+    border-radius: 10px;
+    background: #16181d;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+.library-switch-option {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    text-align: left;
+    cursor: pointer;
+}
+.library-switch-option:hover { background: rgba(255, 255, 255, 0.06); }
+.library-switch-option.is-current { background: rgba(var(--accent-rgb), 0.12); }
+.library-switch-option-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 2px;
+}
+.library-switch-option-name { font-size: 13px; font-weight: 600; }
+.library-switch-option-meta {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.library-switch-option-meta code {
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 10.5px;
+}
+.library-switch-option-check {
+    margin-left: auto;
+    display: flex;
+    color: rgb(var(--accent-light-rgb));
+    width: 14px;
+}
+.library-switch-foot {
+    margin-top: 4px;
+    padding: 8px 10px 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+}
+.library-switch-foot strong { color: rgba(255, 255, 255, 0.85); font-weight: 600; }
+html[data-sidebar="collapsed"] .library-switch-text,
+html[data-sidebar="collapsed"] .library-switch-chevron { display: none; }
+html[data-sidebar="collapsed"] .library-switch-trigger { justify-content: center; }
 
 /* Personal Settings Trigger (gear icon) */
 .personal-settings-trigger {
@@ -49405,8 +49566,28 @@ tr.tag-diff-same {
     margin-bottom: 5px;
     transition: filter var(--dur-fast) ease;
 }
-.artist-appears-on-album:hover .artist-appears-on-album-art {
+.artist-appears-on-album-play {
+    display: block;
+    width: 100%;
+    padding: 0;
+    background: none;
+    border: 0;
+    cursor: pointer;
+}
+.artist-appears-on-album-play:not(:disabled):hover .artist-appears-on-album-art {
     filter: brightness(1.1);
+}
+.artist-appears-on-link {
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.artist-appears-on-link:hover {
+    text-decoration: underline;
 }
 .artist-appears-on-list {
     list-style: none;
@@ -49431,7 +49612,14 @@ tr.tag-diff-same {
     cursor: pointer;
     transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
-.artist-appears-on-row:hover {
+.artist-appears-on-row:disabled,
+.artist-appears-on-album-play:disabled {
+    cursor: default;
+}
+.artist-appears-on-row:disabled .artist-appears-on-time {
+    color: rgb(var(--accent-rgb));
+}
+.artist-appears-on-row:not(:disabled):hover {
     background: var(--white-a07);
     border-color: var(--white-a10);
 }
@@ -55739,7 +55927,8 @@ tr.tag-diff-same {
 .server-search-overlay.visible { opacity: 1; }
 
 .server-search-popover {
-    width: 580px;
+    /* wide enough for classical titles; long ones wrap below, never cut */
+    width: 760px;
     max-width: 95vw;
     max-height: 80vh;
     background: rgba(20, 20, 28, 0.98);
@@ -55918,19 +56107,26 @@ tr.tag-diff-same {
 .server-search-result-title {
     font-size: 13px;
     font-weight: 600;
+    line-height: 1.35;
     color: var(--white-a90);
-    white-space: nowrap;
+    /* two lines, not one: "Op. 8: I." and "Op. 8: VII." differed only in the cut-off part */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 
 .server-search-result-meta {
     font-size: 11px;
+    line-height: 1.35;
     color: var(--white-a35);
     margin-top: 2px;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 
 .server-search-result-details {
@@ -60076,6 +60272,12 @@ body.max-performance #page-particles-canvas {
     overflow: hidden; text-overflow: ellipsis; }
 .wl-list-track-album { color: rgba(255,255,255,0.42); font-size: 11.5px; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
+/* A wishlist row that is a QUALITY UPGRADE of a file already on disk, not a
+   missing track. Without it, a profile change that queues hundreds of owned
+   tracks reads as the wishlist duplicating the library. */
+.wl-list-upgrade { display: inline-block; margin-right: 6px; padding: 0 5px;
+    border-radius: 4px; background: rgba(96,165,250,0.14); color: #93c5fd;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.02em; vertical-align: 1px; }
 .wl-list-tries { font-size: 11.5px; color: var(--white-a40); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .wl-list-tries--failing { color: #fbbf24; font-weight: 600; }
 .wl-list-tries--ok { color: #6ee7a8; font-weight: 600; }
@@ -65620,6 +65822,12 @@ body.em-scroll-lock { overflow: hidden; }
     --row-state-fg: #fbbf24;
 }
 
+.track-match-status.match-monitored {
+    --row-state-border: rgba(var(--accent-rgb), 0.35);
+    --row-state-bg: rgba(var(--accent-rgb), 0.1);
+    --row-state-fg: rgb(var(--accent-rgb));
+}
+
 .track-match-status.match-checking {
     --row-state-fg: var(--white-a50);
 }
@@ -66388,12 +66596,33 @@ select.ma-input { appearance: auto; }
 .ma-import-text { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: rgba(var(--text-bright-rgb), 0.5); }
 .ma-pct { font-variant-numeric: tabular-nums; color: rgba(var(--text-bright-rgb), 0.75); }
 
+/* scrobbling your own plays (Phonk_Ben_67): one line under its service row */
+.ma-scrobble {
+    padding: 0 18px 16px 72px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    font-size: 12.5px; color: rgba(var(--text-bright-rgb), 0.62);
+}
+.ma-scrobble b { color: rgba(var(--text-bright-rgb), 0.88); font-weight: 600; }
+.ma-scrobble .ma-btn { height: 30px; padding: 0 12px; font-size: 12.5px; }
+.ma-switch { position: relative; width: 36px; height: 20px; flex: none; }
+.ma-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.ma-switch span {
+    position: absolute; inset: 0; border-radius: var(--radius-pill); background: var(--white-a12);
+    pointer-events: none; transition: background var(--dur-fast) ease;
+}
+.ma-switch span::after {
+    content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+    background: rgb(var(--text-bright-rgb)); transition: transform var(--dur-fast) ease;
+}
+.ma-switch input:checked + span { background: rgb(var(--accent-rgb)); }
+.ma-switch input:checked + span::after { transform: translateX(16px); }
+.ma-switch input:focus-visible + span { outline: 2px solid rgba(var(--accent-light-rgb), 0.8); outline-offset: 2px; }
+
 .ma-foot { margin: 0; padding: 0 4px 26px; font-size: 12px; line-height: 1.5; color: rgba(var(--text-bright-rgb), 0.45); }
 
 @media (max-width: 520px) {
     .ma-head { padding: 22px 20px 18px; }
     .ma-body { padding: 0 16px 4px; }
-    .ma-panel, .ma-import { padding-left: 18px; }
+    .ma-panel, .ma-import, .ma-scrobble { padding-left: 18px; }
     .ma-row-main { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -75457,6 +75686,34 @@ body.src-modal-open { overflow: hidden; }
 @media (max-width: 600px) {
     #settings-page .video-4k-path { margin-left: 0; }
 }
+/* the drive map: each server drive, where soulsync reaches it, its check */
+#settings-page .video-drive-map { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 12px; }
+#settings-page .video-drive-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+    gap: 4px 12px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--white-a08);
+    border-radius: 10px;
+    background: var(--white-a03);
+}
+#settings-page .video-drive-server { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#settings-page .video-drive-server code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#settings-page .video-drive-count { color: var(--text-secondary); font-size: 12px; }
+#settings-page .video-drive-status { grid-column: 2; color: var(--text-secondary); font-size: 12px; }
+#settings-page .video-drive-status.is-ok { color: var(--success); }
+#settings-page .video-drive-status.is-bad { color: var(--danger-light); }
+#settings-page .video-drive-row.is-auto { background: transparent; }
+#settings-page .video-drive-known {
+    overflow: hidden; color: var(--text-secondary); font-size: 13px;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+#settings-page .video-extra-heading { margin: 18px 0 4px; font-size: 14px; }
+@media (max-width: 600px) {
+    #settings-page .video-drive-row { grid-template-columns: minmax(0, 1fr); }
+    #settings-page .video-drive-status { grid-column: 1; }
+}
 
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -76377,7 +76634,7 @@ body.src-modal-open { overflow: hidden; }
     display: flex;
     flex-direction: column;
     /* leaves the playlist itself a few rows of room underneath */
-    max-height: min(40vh, 400px);
+    max-height: min(62vh, 620px);
     margin: 14px 16px 4px;
     padding: 18px 18px 10px;
     border: 1px solid rgba(var(--accent-rgb), 0.22);
@@ -76464,6 +76721,35 @@ body.src-modal-open { overflow: hidden; }
     object-fit: cover;
     background: var(--white-a06);
     box-shadow: 0 4px 12px var(--black-a35);
+}
+/* the cover plays a sample (#1933) */
+.as-cover {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    cursor: pointer;
+}
+.as-cover > .as-art { display: block; }
+.as-play {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+    background: var(--black-a55);
+    color: var(--text-1);
+    opacity: 0;
+    transition: opacity var(--dur-fast) ease;
+}
+.as-row:hover .as-play,
+.as-cover:focus-visible .as-play { opacity: 1; }
+.as-cover:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: 2px; }
+@media (hover: none) {
+    .as-play { opacity: 0.85; background: var(--black-a35); }
 }
 .as-art--blank {
     display: grid;
@@ -77111,3 +77397,34 @@ body.src-modal-open { overflow: hidden; }
     transform: translateX(14px);
     background: rgb(var(--accent-light-rgb));
 }
+
+/* adding songs (#1933): the header steps back so the search gets the room */
+.mm-hero.mm-hero--adding { padding: 16px 34px 10px; }
+.mm-hero--adding .mm-hero-content { gap: 18px; align-items: center; }
+.mm-hero--adding .mm-cover { width: 76px; height: 76px; box-shadow: 0 8px 20px var(--black-a45); }
+.mm-hero--adding .mm-title { font-size: 24px; }
+.mm-hero--adding .mm-desc,
+.mm-hero--adding .mm-desc-edit,
+.mm-hero--adding .mm-eyebrow { display: none; }
+
+/* adopt: a server playlist made outside soulsync, offered to My Playlists */
+.server-no-source-banner:has(.server-adopt-btn) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+.server-adopt-btn {
+    flex: none;
+    padding: 7px 14px;
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    border-radius: var(--radius-pill);
+    background: rgba(var(--accent-rgb), 0.16);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 650;
+    cursor: pointer;
+    transition: background var(--dur-fast) ease;
+}
+.server-adopt-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.28); }
+.server-adopt-btn:disabled { opacity: 0.6; cursor: default; }

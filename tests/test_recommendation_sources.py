@@ -3,8 +3,9 @@
 The similar-artists worker stores rows keyed by a polymorphic
 ``source_artist_id`` (one of the user's artists' spotify / itunes / deezer /
 musicbrainz ids). The "because you have X, Y, Z" explanation has to resolve
-that id back to a display name by matching it against every provider-id column
-on BOTH the library (`artists`) and `watchlist_artists` tables.
+that id back to a display name by matching it against every provider id on BOTH
+the catalogue (dedicated columns plus the `external_ids` bucket) and the
+`watchlist_artists` table (one suffixed column per provider).
 
 These tests build a real schema via MusicDatabase(tmp) and insert rows directly
 so the SQL join is exercised end to end.
@@ -23,8 +24,8 @@ def _seed(path):
     conn = sqlite3.connect(path)
     cur = conn.cursor()
     # Library artists, each matched on a DIFFERENT provider id column
-    cur.execute("INSERT INTO artists (name, spotify_artist_id) VALUES ('Radiohead', 'sp_radiohead')")
-    cur.execute("INSERT INTO artists (name, musicbrainz_id) VALUES ('Portishead', 'mb_portishead')")
+    cur.execute("INSERT INTO lib2_artists (name, spotify_id) VALUES ('Radiohead', 'sp_radiohead')")
+    cur.execute("INSERT INTO lib2_artists (name, musicbrainz_id) VALUES ('Portishead', 'mb_portishead')")
     # A watchlist-only artist (not in library), matched on deezer id
     cur.execute(
         "INSERT INTO watchlist_artists (artist_name, deezer_artist_id, profile_id) "
@@ -85,7 +86,7 @@ def test_max_per_caps_sources(tmp_path):
     cur = conn.cursor()
     # Five library artists all listing the same recommendation
     for i in range(5):
-        cur.execute("INSERT INTO artists (name, spotify_artist_id) VALUES (?, ?)",
+        cur.execute("INSERT INTO lib2_artists (name, spotify_id) VALUES (?, ?)",
                     (f"Artist{i}", f"sp_{i}"))
         cur.execute(
             "INSERT INTO similar_artists (source_artist_id, similar_artist_name, profile_id) "
@@ -105,7 +106,7 @@ def test_profile_scoping(tmp_path):
     MusicDatabase(path)
     conn = sqlite3.connect(path)
     cur = conn.cursor()
-    cur.execute("INSERT INTO artists (name, spotify_artist_id) VALUES ('Mine', 'sp_mine')")
+    cur.execute("INSERT INTO lib2_artists (name, spotify_id) VALUES ('Mine', 'sp_mine')")
     # similar row belongs to profile 2, not 1
     cur.execute(
         "INSERT INTO similar_artists (source_artist_id, similar_artist_name, profile_id) "
@@ -117,3 +118,24 @@ def test_profile_scoping(tmp_path):
     db = MusicDatabase(path)
     assert db.get_recommendation_sources(["Rec X"], profile_id=1) == {}
     assert db.get_recommendation_sources(["Rec X"], profile_id=2) == {"Rec X": ["Mine"]}
+
+
+def test_external_ids_resolve_and_the_library_names_a_shared_id(tmp_path):
+    """the deezer / itunes ids live in external_ids; an id both a library and
+    a watchlist artist carry is named by the library artist, as the join did."""
+    path = str(tmp_path / "m.db")
+    MusicDatabase(path)
+    conn = sqlite3.connect(path)
+    conn.execute("INSERT INTO lib2_artists (name, external_ids) VALUES ('Air', '{\"deezer\": \"dz_air\"}')")
+    conn.execute("INSERT INTO lib2_artists (name, external_ids) VALUES ('Moby', '{\"itunes\": 4242}')")
+    conn.execute("INSERT INTO watchlist_artists (artist_name, deezer_artist_id, profile_id) "
+                 "VALUES ('Air (watched)', 'dz_air', 1)")
+    for sid, rec in (('dz_air', 'Zero 7'), ('4242', 'Fatboy Slim')):
+        conn.execute("INSERT INTO similar_artists (source_artist_id, similar_artist_name, profile_id) "
+                     "VALUES (?, ?, 1)", (sid, rec))
+    conn.commit()
+    conn.close()
+
+    out = MusicDatabase(path).get_recommendation_sources(["Zero 7", "Fatboy Slim"])
+
+    assert out == {"Zero 7": ["Air"], "Fatboy Slim": ["Moby"]}

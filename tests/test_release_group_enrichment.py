@@ -11,6 +11,9 @@ contract:
   also set, so a retag can never keep the old edition's group;
 * wishlist rows are matched in the background by their album + artist,
   and the group is served on the wishlist API.
+
+Ported to Library v2: an album is a ``lib2_albums`` row whose release id is
+``musicbrainz_id``; the group keeps upstream's column name there.
 """
 
 from __future__ import annotations
@@ -41,21 +44,28 @@ def worker(db):
 
 
 def _album(db, release_id=None, status=None):
+    # lib2 port: an owned album whose artist and track are already enriched,
+    # so the album is the only thing in the queue
+    from core.library2.provider_attempts import record_attempt
+    from tests.lib2_seed import track
+
     with db._get_connection() as conn:
-        # the artist is already enriched, so the album is next in the queue
-        conn.execute("INSERT OR IGNORE INTO artists (id, name, musicbrainz_match_status) "
-                     "VALUES (1, 'The Testers', 'matched')")
-        conn.execute(
-            "INSERT INTO albums (id, artist_id, title, musicbrainz_release_id, musicbrainz_match_status) "
-            "VALUES (10, 1, 'Album A', ?, ?)", (release_id, status))
+        track_id = track(conn, "The Testers", "Album A", "Song", album_cols={"musicbrainz_id": release_id})
+        album_id, artist_id = conn.execute(
+            "SELECT id, primary_artist_id FROM lib2_albums WHERE title = 'Album A'").fetchone()
+        done = [("artist", artist_id, "matched"), ("track", track_id, "not_found")]
+        for entity_type, entity_id, outcome in done + ([("album", album_id, status)] if status else []):
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service="musicbrainz", status=outcome)
         conn.commit()
+        return album_id
 
 
 def _album_row(db):
     with db._get_connection() as conn:
         return dict(conn.execute(
-            "SELECT musicbrainz_release_id, musicbrainz_release_group_id, "
-            "musicbrainz_release_group_attempted FROM albums WHERE id = 10").fetchone())
+            "SELECT musicbrainz_id AS musicbrainz_release_id, musicbrainz_release_group_id, "
+            "musicbrainz_release_group_attempted FROM lib2_albums WHERE title = 'Album A'").fetchone())
 
 
 def _wishlist(db, track_data):
@@ -96,10 +106,10 @@ def test_match_release_reads_the_group_off_the_search_hit(db, worker):
 
 
 def test_an_album_with_a_release_id_gets_its_group_backfilled(db, worker):
-    _album(db, release_id=REL, status="matched")
+    album_id = _album(db, release_id=REL, status="matched")
     worker.mb_service.mb_client.get_release.return_value = {"id": REL, "release-group": {"id": RG}}
     item = worker._get_next_item()
-    assert (item["type"], str(item["id"]), item["release_id"]) == ("album_group", "10", REL)
+    assert (item["type"], item["id"], item["release_id"]) == ("album_group", album_id, REL)
     worker._process_item(item)
     worker.mb_service.mb_client.get_release.assert_called_once_with(REL, includes=["release-groups"])
     assert _album_row(db)["musicbrainz_release_group_id"] == RG
@@ -117,23 +127,23 @@ def test_a_failed_backfill_waits_instead_of_looping(db, worker):
 
 
 def test_a_new_release_id_clears_the_old_group(db, worker):
-    _album(db, release_id=REL, status="matched")
-    worker.mb_service.update_album_release_group(10, RG)
+    album_id = _album(db, release_id=REL, status="matched")
+    worker.mb_service.update_album_release_group(album_id, RG)
     with db._get_connection() as conn:
-        conn.execute("UPDATE albums SET musicbrainz_release_id = ? WHERE id = 10", (REL_OTHER,))
+        conn.execute("UPDATE lib2_albums SET musicbrainz_id = ? WHERE id = ?", (REL_OTHER, album_id))
         conn.commit()
     row = _album_row(db)
     assert row["musicbrainz_release_group_id"] is None
     assert row["musicbrainz_release_group_attempted"] is None  # back in the backfill queue
     # ...but an UPDATE that sets both keeps the group it set.
-    worker.mb_service.update_album_mbid(10, REL, "matched", release_group_mbid=RG)
+    worker.mb_service.update_album_mbid(album_id, REL, "matched", release_group_mbid=RG)
     assert _album_row(db)["musicbrainz_release_group_id"] == RG
 
 
 def test_re_marking_an_existing_id_keeps_the_group(db, worker):
-    _album(db, release_id=REL, status="matched")
-    worker.mb_service.update_album_release_group(10, RG)
-    worker.mb_service.update_album_mbid(10, REL, "matched")
+    album_id = _album(db, release_id=REL, status="matched")
+    worker.mb_service.update_album_release_group(album_id, RG)
+    worker.mb_service.update_album_mbid(album_id, REL, "matched")
     assert _album_row(db)["musicbrainz_release_group_id"] == RG
 
 
@@ -178,8 +188,6 @@ def test_wishlist_album_query_shapes():
 
 
 def test_the_album_api_serves_the_group(db, worker):
-    _album(db, release_id=REL, status="matched")
-    worker.mb_service.update_album_release_group(10, RG)
-    with db._get_connection() as conn:
-        row = dict(conn.execute("SELECT * FROM albums WHERE id = 10").fetchone())
-    assert serialize_album(row)["musicbrainz_release_group_id"] == RG
+    album_id = _album(db, release_id=REL, status="matched")
+    worker.mb_service.update_album_release_group(album_id, RG)
+    assert serialize_album(db.api_get_album(album_id))["musicbrainz_release_group_id"] == RG
