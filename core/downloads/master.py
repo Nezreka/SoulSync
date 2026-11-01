@@ -210,7 +210,32 @@ def release_year_of(album_context) -> Optional[str]:
     return year if year.isdigit() else None
 
 
-def album_tracks_map_for(db, album_context, artist_context, active_server) -> dict:
+def _with_alias_names(db, names) -> list:
+    """the names, then every other name their artist rows are linked under
+    (§40 artist aliases): a kanji and a romaji row of one composer are one
+    artist, and the library may hold the release under the other one."""
+    from core.library2.artist_aliases import resolve_alias_group
+    from core.library2.importer import normalize_name
+    names = [n for n in dict.fromkeys(names) if n]
+    try:
+        conn = db._get_connection()
+        try:
+            for name in list(names):
+                for (artist_id,) in conn.execute("SELECT id FROM lib2_artists WHERE name_key = ?",
+                                                 (normalize_name(name),)).fetchall():
+                    group = resolve_alias_group(conn, artist_id)
+                    if len(group) > 1:
+                        names.extend(r[0] for r in conn.execute(
+                            f"SELECT name FROM lib2_artists WHERE id IN ({','.join('?' * len(group))})",
+                            group))
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("alias names for %s skipped: %s", names, e)
+    return [n for n in dict.fromkeys(names) if n]
+
+
+def album_tracks_map_for(db, album_context, artist_context) -> dict:
     """Album fast path: find the album in the db and map its lowercased track
     titles to their rows, so tracks match inside the one album instead of N
     global searches. Empty when the album isn't in the library."""
@@ -223,13 +248,15 @@ def album_tracks_map_for(db, album_context, artist_context, active_server) -> di
     if not album_name or not artist_name:
         return album_tracks_map
     try:
-        db_album, album_confidence = db.check_album_exists_with_editions(
-            title=album_name, artist=artist_name,
-            confidence_threshold=0.7,
-            expected_track_count=total_tracks if total_tracks > 0 else None,
-            server_source=active_server,
-            expected_year=release_year_of(album_context),
-        )
+        for name in _with_alias_names(db, [artist_name]):
+            db_album, album_confidence = db.check_album_exists_with_editions(
+                title=album_name, artist=name,
+                confidence_threshold=0.7,
+                expected_track_count=total_tracks if total_tracks > 0 else None,
+                expected_year=release_year_of(album_context),
+            )
+            if db_album and album_confidence >= 0.7:
+                break
         if db_album and album_confidence >= 0.7:
             db_album_tracks = db.get_tracks_by_album(db_album.id)
             for t in db_album_tracks:
@@ -278,15 +305,20 @@ def _artist_name_of(artist) -> str:
 
 
 def match_track_in_library(db, track_data, *, album_tracks_map, album_context,
-                           expected_year, album_only, active_server):
+                           expected_year, album_only):
     """Is this track already in the library? -> (found, confidence, db_track).
 
     the one ownership answer the download analysis gives, lifted out so the
     album modal can show it before anything is downloaded. album_only is the
     allow-duplicates rule for album downloads: only a copy in THIS album counts.
+
+    owned means a live file in this library (the lookups add that clause
+    themselves), not a row the active media server mapped: scoping to the
+    server called an album SoulSync imported but the server had not scanned
+    missing, the modal said so and Begin Analysis fetched it again.
     """
     track_name = track_data.get('name', '')
-    artists = track_data.get('artists', [])
+    artists = _with_alias_names(db, [_artist_name_of(a) for a in track_data.get('artists') or []])
     if album_tracks_map:
         # Album-scoped matching: check against known album tracks first
         track_name_lower = track_name.lower().strip()
@@ -326,7 +358,7 @@ def match_track_in_library(db, track_data, *, album_tracks_map, album_context,
         for artist in artists:
             db_track, track_confidence = db.check_track_exists(
                 track_name, _artist_name_of(artist), confidence_threshold=0.7,
-                server_source=active_server, album=fallback_album, include_downloads=True,
+                album=fallback_album, include_downloads=True,
             )
             if db_track and track_confidence >= 0.7:
                 # Re-release gate (5BILLION round 3): the hit came from the
@@ -346,43 +378,68 @@ def match_track_in_library(db, track_data, *, album_tracks_map, album_context,
     for artist in artists:
         db_track, track_confidence = db.check_track_exists(
             track_name, _artist_name_of(artist), confidence_threshold=0.7,
-            server_source=active_server, include_downloads=True,
+            include_downloads=True,
         )
         if db_track and track_confidence >= 0.7:
             return True, track_confidence, db_track
     return False, 0.0, None
 
 
+def _wishlist_keys(db, profile_id) -> set:
+    """the profile's wishlist as presence keys, empty when it can't be read:
+    the mark is a hint, never a reason to fail the preview."""
+    from core.wishlist.presence import load_wishlist_keys
+    try:
+        conn = db._get_connection()
+        try:
+            return load_wishlist_keys(conn.cursor(), profile_id)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("preview: wishlist keys skipped: %s", e)
+        return set()
+
+
+def _wished(keys, track_data, artist_context) -> bool:
+    """on the wishlist under one of the track's credits or the album artist."""
+    from core.wishlist.presence import presence_key
+    names = [_artist_name_of(a) for a in track_data.get('artists') or []]
+    names.append((artist_context or {}).get('name') or '')
+    return any(presence_key(track_data.get('name', ''), name) in keys for name in names if name)
+
+
 def preview_ownership(db, tracks_json, *, album_context, artist_context, is_album,
-                      profile_id, source, active_server, allow_duplicates) -> list:
+                      profile_id, source, allow_duplicates) -> list:
     """What Begin Analysis would say is owned, without starting anything.
 
     same order of questions as the analysis (saved manual match, then the
-    library), read-only: no batch, no wishlist removal, no downloads. the
-    album modal shows it the moment it opens.
+    library), read-only: no batch, no wishlist removal, no downloads. every
+    download dialog shows it the moment it opens, and a missing track the
+    user already wants says so (in_wishlist).
     """
     album_tracks_map = (
-        album_tracks_map_for(db, album_context, artist_context, active_server)
+        album_tracks_map_for(db, album_context, artist_context)
         if is_album else {}
     )
     expected_year = release_year_of(album_context)
+    wished = _wishlist_keys(db, profile_id)
     results = []
     for i, track_data in enumerate(tracks_json or []):
         if not isinstance(track_data, dict):
             continue
         track_index = track_data.get('_original_index', i)
         if live_manual_match(db, profile_id, track_data, source):
-            results.append({'track_index': track_index, 'found': True, 'confidence': 1.0})
-            continue
-        found, confidence, _ = match_track_in_library(
-            db, track_data,
-            album_tracks_map=album_tracks_map,
-            album_context=album_context,
-            expected_year=expected_year,
-            album_only=allow_duplicates and is_album,
-            active_server=active_server,
-        )
-        results.append({'track_index': track_index, 'found': found, 'confidence': confidence})
+            found, confidence = True, 1.0
+        else:
+            found, confidence, _ = match_track_in_library(
+                db, track_data,
+                album_tracks_map=album_tracks_map,
+                album_context=album_context,
+                expected_year=expected_year,
+                album_only=allow_duplicates and is_album,
+            )
+        results.append({'track_index': track_index, 'found': found, 'confidence': confidence,
+                        'in_wishlist': not found and _wished(wished, track_data, artist_context)})
     return results
 
 
@@ -671,7 +728,6 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
 
         from database.music_database import MusicDatabase
         db = MusicDatabase()
-        active_server = deps.config_manager.get_active_media_server()
         analysis_results = []
 
         # Get force download flag and album context from batch
@@ -809,7 +865,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         album_tracks_map = {}
         if batch_is_album and not force_download_all:
             album_tracks_map = album_tracks_map_for(
-                db, batch_album_context, batch_artist_context, active_server)
+                db, batch_album_context, batch_artist_context)
 
         for i, track_data in enumerate(tracks_json):
             # Use original table index if provided (for partial track selection),
@@ -878,7 +934,6 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     album_context=batch_album_context,
                     expected_year=batch_expected_year,
                     album_only=allow_duplicates and batch_is_album,
-                    active_server=active_server,
                 )
 
             analysis_results.append({

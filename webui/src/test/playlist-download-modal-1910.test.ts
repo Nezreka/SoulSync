@@ -14,15 +14,20 @@ import { extractFunction } from './vanilla-extract';
 
 const DOWNLOADS = readFileSync(resolve(process.cwd(), 'static/downloads.js'), 'utf8');
 const SERVICES = readFileSync(resolve(process.cwd(), 'static/sync-services.js'), 'utf8');
+const SPOTIFY = readFileSync(resolve(process.cwd(), 'static/sync-spotify.js'), 'utf8');
 const WISHLIST = readFileSync(resolve(process.cwd(), 'static/wishlist-tools.js'), 'utf8');
 
 describe('the playlist openers ask the library on open', () => {
   it('both the youtube-style and the generic opener run the preview', () => {
+    // through applyProgressiveTrackRendering, which asks it once per dialog
     expect(extractFunction('openDownloadMissingModalForYouTube', DOWNLOADS)).toContain(
-      'previewModalOwnership(virtualPlaylistId)',
+      'applyProgressiveTrackRendering(virtualPlaylistId',
     );
     expect(extractFunction('openDownloadMissingModalForTidal', SERVICES)).toContain(
-      'previewModalOwnership(virtualPlaylistId)',
+      'applyProgressiveTrackRendering(virtualPlaylistId',
+    );
+    expect(extractFunction('applyProgressiveTrackRendering', SPOTIFY)).toContain(
+      'previewModalOwnership(playlistId)',
     );
   });
 

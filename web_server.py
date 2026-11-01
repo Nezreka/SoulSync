@@ -18580,7 +18580,6 @@ def playlist_ownership_preview(playlist_id):
             is_album=is_album,
             profile_id=get_current_profile_id() or 1,
             source=_downloads_history.detect_sync_source(playlist_id),
-            active_server=config_manager.get_active_media_server(),
             allow_duplicates=config_manager.get('wishlist.allow_duplicate_tracks', True),
         )
         return jsonify({"success": True, "results": results})

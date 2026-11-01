@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import '@/shell/download-modal-library';
+
 import { extractFunction } from './vanilla-extract';
 
 /**
@@ -13,6 +15,7 @@ import { extractFunction } from './vanilla-extract';
 
 const JS = readFileSync(resolve(process.cwd(), 'static/downloads.js'), 'utf8');
 const HELPERS = readFileSync(resolve(process.cwd(), 'static/shared-helpers.js'), 'utf8');
+const SPOTIFY = readFileSync(resolve(process.cwd(), 'static/sync-spotify.js'), 'utf8');
 
 type Proc = { status: string; tracks: unknown[]; album?: unknown; artist?: unknown };
 type Preview = (id: string) => Promise<void>;
@@ -73,6 +76,22 @@ describe('the album modal ownership preview', () => {
     expect(text(`analysis-progress-text-${ID}`)).toBe('2 in your library, 1 missing');
   });
 
+  it('keeps the wishlist mark on a missing track the user already wants', async () => {
+    modal(ID, 2);
+    respond({
+      success: true,
+      results: [
+        { track_index: 0, found: false, in_wishlist: true },
+        { track_index: 1, found: true, in_wishlist: false },
+      ],
+    });
+    await load({ [ID]: { status: 'idle', tracks: [{}, {}] } })(ID);
+    expect(text(`match-${ID}-0`)).toBe('On Wishlist');
+    expect(document.getElementById(`match-${ID}-0`)?.className).toContain('match-monitored');
+    expect(text(`match-${ID}-1`)).toBe('✅ Found');
+    expect(text(`stat-missing-${ID}`)).toBe('1');
+  });
+
   it('sends the album context so the album fast path runs', async () => {
     modal(ID, 1);
     const fetchMock = respond({ success: true, results: [] });
@@ -104,8 +123,12 @@ describe('the album modal ownership preview', () => {
     expect(text(`match-${ID}-0`)).toBe('🔍 Pending');
   });
 
-  it('runs when the artist album modal opens', () => {
+  it('runs once for every dialog, from the hook each opener calls', () => {
+    expect(extractFunction('applyProgressiveTrackRendering', SPOTIFY)).toContain(
+      'previewModalOwnership(playlistId)',
+    );
     const open = extractFunction('openDownloadMissingModalForArtistAlbum', HELPERS);
-    expect(open).toContain('previewModalOwnership(virtualPlaylistId)');
+    expect(open).toContain('applyProgressiveTrackRendering(virtualPlaylistId');
+    expect(open).not.toContain('previewModalOwnership(');
   });
 });

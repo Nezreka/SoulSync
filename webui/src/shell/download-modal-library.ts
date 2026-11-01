@@ -1,59 +1,20 @@
 /**
  * What Library v2 adds to the shared download dialog.
  *
- * The dialog (Search, Discover, the artist page, playlists) used to show every
- * track as "Pending" until "Begin Analysis" had run, so it could not say what
- * the library already has. It now asks as soon as it opens: the same fast,
- * Library-v2 backed check the search results use, which reads owned files and
- * the wishlist in one pass. A track the user already wants shows as
- * on the Wishlist. "Begin Analysis" still does its own, deeper matching and
- * overwrites these cells as it goes.
+ * The dialog's library status is the ownership preview (previewModalOwnership
+ * in downloads.js): one read of Library v2 when it opens, the same answer
+ * Begin Analysis gives. A missing track the user already wants carries
+ * `in_wishlist`, and `markWishlistedTrack` draws it the way the library does.
  *
  * Its "Add to Wishlist" button (the same in the Add to Wishlist dialog) hands the tracks it added to `monitorAddedTracks`, which
  * starts their download at once instead of waiting for the next wishlist run,
  * and monitors the album itself when every one of its tracks was picked.
  *
  * Both are reached through window from the classic scripts: one line in
- * `applyProgressiveTrackRendering` (every variant of the dialog calls it once
- * its rows exist) and one in each add handler in wishlist-tools.js.
+ * `updateTrackAnalysisResults` and one in each add handler in wishlist-tools.js.
  */
 
-interface ModalTrack {
-  name?: string;
-  title?: string;
-  track_name?: string;
-  artists?: Array<string | { name?: string | null } | null> | string | null;
-  artist?: string | null;
-  artist_name?: string | null;
-}
-
-interface PresenceRow {
-  in_library?: boolean;
-  in_wishlist?: boolean;
-}
-
 export type MonitoredDownloadOutcome = 'started' | 'busy' | 'failed' | 'nothing';
-
-/** One request answers this many rows; a long playlist is asked in chunks. */
-const CHUNK = 200;
-
-function trackTitle(track: ModalTrack): string {
-  return String(track.name || track.title || track.track_name || '').trim();
-}
-
-/** The primary credit: the check keys on title plus first artist. */
-function trackArtist(track: ModalTrack): string {
-  const { artists } = track;
-  if (Array.isArray(artists)) {
-    for (const entry of artists) {
-      const name = typeof entry === 'string' ? entry : entry?.name;
-      if (name && name.trim()) return name.trim();
-    }
-  } else if (typeof artists === 'string' && artists.trim()) {
-    return artists.trim();
-  }
-  return String(track.artist_name || track.artist || '').trim();
-}
 
 /** the wishlist heart and its sparkle, as the library draws them (list-icons.tsx) */
 const WISHLIST_PATHS = [
@@ -75,96 +36,11 @@ function bookmarkIcon(): SVGSVGElement {
   return svg;
 }
 
-function statusFor(row: PresenceRow | undefined): {
-  text: string;
-  cls: string;
-  bookmark?: boolean;
-} {
-  if (row?.in_library) return { text: '✅ In library', cls: 'match-found' };
-  if (row?.in_wishlist) return { text: 'On Wishlist', cls: 'match-monitored', bookmark: true };
-  return { text: '❌ Missing', cls: 'match-missing' };
-}
-
-async function presence(rows: Array<{ name: string; artist: string }>): Promise<PresenceRow[]> {
-  const response = await fetch('/api/enhanced-search/library-check', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ albums: [], tracks: rows }),
-  });
-  if (!response.ok) throw new Error(`library check answered ${response.status}`);
-  const data = (await response.json()) as { tracks?: PresenceRow[] };
-  return Array.isArray(data.tracks) ? data.tracks : [];
-}
-
-/** What the dialog registers in `activeDownloadProcesses` before its rows render. */
-interface ModalProcess {
-  tracks?: ModalTrack[] | null;
-  /** The album artist, on the album dialogs only. */
-  artist?: { name?: string | null } | null;
-}
-
-/**
- * Fill the dialog's "Library Status" column and its Found / Missing counters.
- *
- * Each track is asked under its own first artist and, on an album dialog,
- * under the album artist too: a guest's song on someone's compilation is
- * filed under the album artist in the library. Only cells still showing
- * "Pending" are touched, so an analysis that already answered wins. Never
- * throws: a failed check leaves the dialog as it was.
- */
-export async function hydrateDownloadModalLibraryStatus(
-  playlistId: string,
-  process: ModalProcess | null | undefined,
-): Promise<void> {
-  const tracks = process?.tracks;
-  if (!playlistId || !Array.isArray(tracks) || tracks.length === 0) return;
-  const albumArtist = String(process?.artist?.name || '').trim();
-  const queries: Array<{ index: number; name: string; artist: string }> = [];
-  tracks.forEach((track, index) => {
-    const name = trackTitle(track);
-    if (!name) return;
-    const artist = trackArtist(track);
-    queries.push({ index, name, artist });
-    if (albumArtist && albumArtist.toLowerCase() !== artist.toLowerCase()) {
-      queries.push({ index, name, artist: albumArtist });
-    }
-  });
-  const answers = new Map<number, PresenceRow>();
-  try {
-    for (let start = 0; start < queries.length; start += CHUNK) {
-      const chunk = queries.slice(start, start + CHUNK);
-      const rows = await presence(chunk.map(({ name, artist }) => ({ name, artist })));
-      rows.forEach((row, offset) => {
-        const { index } = chunk[offset]!;
-        const seen = answers.get(index);
-        answers.set(index, {
-          in_library: Boolean(seen?.in_library || row?.in_library),
-          in_wishlist: Boolean(seen?.in_wishlist || row?.in_wishlist),
-        });
-      });
-    }
-  } catch (error) {
-    console.debug('download dialog library status skipped:', error);
-    return;
-  }
-  let found = 0;
-  answers.forEach((answer, index) => {
-    if (answer.in_library) found += 1;
-    const cell = document.getElementById(`match-${playlistId}-${index}`);
-    if (!cell || !cell.classList.contains('match-checking')) return;
-    const status = statusFor(answer);
-    cell.textContent = status.text;
-    if (status.bookmark) cell.prepend(bookmarkIcon());
-    cell.className = `track-match-status ${status.cls}`;
-  });
-  // The counters belong to the analysis once it has reported; before that
-  // they read "-".
-  const foundStat = document.getElementById(`stat-found-${playlistId}`);
-  const missingStat = document.getElementById(`stat-missing-${playlistId}`);
-  if (foundStat && foundStat.textContent?.trim() === '-') foundStat.textContent = String(found);
-  if (missingStat && missingStat.textContent?.trim() === '-') {
-    missingStat.textContent = String(answers.size - found);
-  }
+/** A missing row the user already wants: "On Wishlist" with the library's heart. */
+export function markWishlistedTrack(cell: HTMLElement): void {
+  cell.textContent = 'On Wishlist';
+  cell.prepend(bookmarkIcon());
+  cell.className = 'track-match-status match-monitored';
 }
 
 /**
@@ -252,14 +128,14 @@ export async function monitorAddedTracks(
 
 declare global {
   interface Window {
-    hydrateDownloadModalLibraryStatus?: typeof hydrateDownloadModalLibraryStatus;
+    markWishlistedTrack?: typeof markWishlistedTrack;
     startMonitoredDownloads?: typeof startMonitoredDownloads;
     monitorAddedTracks?: typeof monitorAddedTracks;
   }
 }
 
 Object.assign(window, {
-  hydrateDownloadModalLibraryStatus,
+  markWishlistedTrack,
   startMonitoredDownloads,
   monitorAddedTracks,
 });

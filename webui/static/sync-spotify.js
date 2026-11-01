@@ -1048,8 +1048,9 @@ const TRACK_RENDER_BATCH_SIZE = 100;
 
 function applyProgressiveTrackRendering(playlistId, totalTrackCount) {
     // Every download dialog calls this once its rows exist: ask the library
-    // what it already has now, not only after Begin Analysis (shell/download-modal-library.ts).
-    window.hydrateDownloadModalLibraryStatus?.(playlistId, activeDownloadProcesses[playlistId]);
+    // what it already has now, not only after Begin Analysis. One read, the
+    // answer the analysis gives (previewModalOwnership in downloads.js, #1910).
+    if (typeof previewModalOwnership === 'function') void previewModalOwnership(playlistId);
     if (totalTrackCount <= TRACK_RENDER_BATCH_SIZE) return;
 
     const modal = document.getElementById(`download-missing-modal-${playlistId}`);

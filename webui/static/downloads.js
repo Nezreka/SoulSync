@@ -620,9 +620,6 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
     modal.style.display = 'flex';
     hideLoadingOverlay();
-    // owned/missing per track straight away, not a column of 'pending' until
-    // Begin Analysis (#1910)
-    void previewModalOwnership(virtualPlaylistId);
 }
 
 async function closeDownloadMissingModal(playlistId) {
@@ -2040,6 +2037,11 @@ function updateTrackAnalysisResults(playlistId, results) {
     for (const result of results) {
         const matchElement = document.getElementById(`match-${playlistId}-${result.track_index}`);
         if (matchElement) {
+            // the preview marks a missing track the user already wants
+            if (!result.found && result.in_wishlist && window.markWishlistedTrack) {
+                window.markWishlistedTrack(matchElement);
+                continue;
+            }
             matchElement.textContent = result.found ? '✅ Found' : '❌ Missing';
             matchElement.className = `track-match-status ${result.found ? 'match-found' : 'match-missing'}`;
         }
