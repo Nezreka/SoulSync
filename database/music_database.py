@@ -27,6 +27,8 @@ logger = get_logger("music_database")
 # the most ids a fold_index match is put back through sql as; a needle that
 # broad (one or two letters) keeps the plain LIKE
 _FOLD_IN_MAX = 2000
+# a title-only search hands back more rows; still well under sqlite's 32766 binds
+_FOLD_TITLE_IN_MAX = 20000
 
 _LIVE_FILE = ("COALESCE(f.file_state, 'active') = 'active' "
               "AND f.path IS NOT NULL AND TRIM(f.path) <> ''")
@@ -3532,6 +3534,10 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_spotify_track ON discovery_pool (spotify_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_itunes_track ON discovery_pool (itunes_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_artist ON discovery_pool (spotify_artist_id)")
+            # art lookups by case-folded name (seasonal vibes, one per artist):
+            # each scanned the pool's 222k rows, 850ms a miss
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_artist_name_lower "
+                           "ON discovery_pool (LOWER(artist_name))")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_itunes_artist ON discovery_pool (itunes_artist_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_deezer_track ON discovery_pool (deezer_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_deezer_artist ON discovery_pool (deezer_artist_id)")
@@ -11577,8 +11583,26 @@ class MusicDatabase:
             params.extend(scope[1])
 
         if title:
-            where_conditions.append("unidecode_lower(tracks.title) LIKE ?")
-            params.append(f"%{self._normalize_for_comparison(title)}%")
+            needle = self._normalize_for_comparison(title)
+            ids = None
+            if not scope and not artist:
+                # nothing narrows a title-only search, so the fold ran over
+                # every track (1.3-3.3s). the folded titles are kept in memory;
+                # a needle too broad for an id list keeps the plain LIKE
+                from database import fold_index
+                ids = fold_index.matching_ids(
+                    cursor.connection, str(self.database_path), fold_index.TRACK_TITLES,
+                    needle, limit=_FOLD_TITLE_IN_MAX + 1)
+                if not ids:
+                    return []
+                if len(ids) > _FOLD_TITLE_IN_MAX:
+                    ids = None
+            if ids is not None:
+                where_conditions.append(f"tracks.id IN ({','.join('?' for _ in ids)})")
+                params.extend(ids)
+            else:
+                where_conditions.append("unidecode_lower(tracks.title) LIKE ?")
+                params.append(f"%{needle}%")
 
         if artist and not scope:
             norm_artist = f"%{self._normalize_for_comparison(artist)}%"
@@ -11689,6 +11713,23 @@ class MusicDatabase:
                 terms.append(trimmed)
         return terms
 
+    def _fold_fuzzy_ids(self, cursor, terms):
+        """(track ids, album-artist ids) whose title / credit / artist name
+        contains any of ``terms``, the fuzzy pass's word-or match, or None when
+        a term is too broad to hand SQL as an id list."""
+        from database import fold_index
+        db_key = str(self.database_path)
+        tracks, artists = set(), set()
+        for term in terms:
+            for spec, into, cap in ((fold_index.TRACK_TITLES, tracks, _FOLD_TITLE_IN_MAX),
+                                    (fold_index.TRACK_CREDITS, tracks, _FOLD_TITLE_IN_MAX),
+                                    (fold_index.ARTIST_NAMES, artists, _FOLD_IN_MAX)):
+                ids = fold_index.matching_ids(cursor.connection, db_key, spec, term, limit=cap + 1)
+                into.update(ids)
+                if len(ids) > cap or len(into) > cap:
+                    return None
+        return sorted(tracks), sorted(artists)
+
     def _search_tracks_fuzzy_rows(self, cursor, title: str, artist: str, limit: int,
                                   server_source: Optional[str] = None, scope=None):
         """Broadest fuzzy search returning raw rows (shared by DatabaseTrack and dict-returning callers).
@@ -11717,9 +11758,28 @@ class MusicDatabase:
                 like_conditions.append("unidecode_lower(tracks.title) LIKE ?")
                 params.append(f"%{term}%")
         else:
-            for term in search_terms[:5]:
-                like_conditions.append("(unidecode_lower(tracks.title) LIKE ? OR unidecode_lower(artists.name) LIKE ? OR unidecode_lower(COALESCE(tracks.track_artist, '')) LIKE ?)")
-                params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
+            # every word against title, album artist and track credit, as id
+            # sets from the folded text kept in memory (database/fold_index):
+            # three python folds per track per word scanned the whole
+            # library (~2s a miss). a word too broad for id lists keeps the
+            # LIKE form
+            folded = self._fold_fuzzy_ids(cursor, search_terms[:5])
+            if folded is None:
+                for term in search_terms[:5]:
+                    like_conditions.append("(unidecode_lower(tracks.title) LIKE ? OR unidecode_lower(artists.name) LIKE ? OR unidecode_lower(COALESCE(tracks.track_artist, '')) LIKE ?)")
+                    params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
+            else:
+                track_ids, artist_ids = folded
+                if not track_ids and not artist_ids:
+                    return []
+                parts = []
+                if track_ids:
+                    parts.append(f"tracks.id IN ({','.join('?' for _ in track_ids)})")
+                    params.extend(track_ids)
+                if artist_ids:
+                    parts.append(f"artists.id IN ({','.join('?' for _ in artist_ids)})")
+                    params.extend(artist_ids)
+                like_conditions.append(" OR ".join(parts))
 
         if not like_conditions:
             return []

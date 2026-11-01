@@ -52,6 +52,8 @@ _FOLDS = {"fold": lambda v: fold(v), "key": _key}
 ALBUM_TITLES = ("lib2_albums", "id", "title", "", "fold")
 ARTIST_NAMES = ("lib2_artists", "id", "name", "", "fold")
 TRACK_CREDITS = ("lib2_tracks", "id", "track_artist", "track_artist IS NOT NULL", "fold")
+# a title-only library search (no artist to narrow it): 312k titles
+TRACK_TITLES = ("lib2_tracks", "id", "title", "", "fold")
 # "ACDC" for "AC/DC": artists by their punctuation-free key, asked by equality
 ARTIST_KEYS = ("lib2_artists", "id", "name", "", "key")
 
@@ -195,4 +197,4 @@ def clear() -> None:
 
 
 __all__ = ["ALBUM_TITLES", "ARTIST_KEYS", "ARTIST_NAMES", "CHECK_SECONDS", "REFRESH_SECONDS",
-           "TRACK_CREDITS", "clear", "fold", "ids_with_key", "matching_ids"]
+           "TRACK_CREDITS", "TRACK_TITLES", "clear", "fold", "ids_with_key", "matching_ids"]
