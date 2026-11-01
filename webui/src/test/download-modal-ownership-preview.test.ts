@@ -170,7 +170,7 @@ describe('the album modal ownership preview', () => {
 
     expect(preview).not.toHaveBeenCalled();
     expect(text(`analysis-progress-text-${ID}`)).toBe(
-      'Restored after reload — analysis is running',
+      'Restored after reload, analysis is running',
     );
   });
 });

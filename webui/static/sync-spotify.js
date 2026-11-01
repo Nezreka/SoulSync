@@ -1064,7 +1064,7 @@ function applyProgressiveTrackRendering(playlistId, totalTrackCount) {
     // answer the analysis gives (previewModalOwnership in downloads.js, #1910).
     if (rehydratingDownloadProcessIds.has(playlistId)) {
         const progressText = document.getElementById(`analysis-progress-text-${playlistId}`);
-        if (progressText) progressText.textContent = 'Restored after reload — analysis is running';
+        if (progressText) progressText.textContent = 'Restored after reload, analysis is running';
     } else if (typeof previewModalOwnership === 'function') {
         void previewModalOwnership(playlistId);
     }
