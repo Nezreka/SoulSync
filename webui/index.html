@@ -2678,6 +2678,32 @@
                                             </div>
                                         </div>
 
+                                        <!-- fanart.tv (optional; HD artist photos and backgrounds, #1957) -->
+                                        <div class="api-service-frame stg-service" data-service="artist-fanart">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: rgb(var(--accent-rgb));"></span>
+                                                <h4 class="service-title">fanart.tv</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>API Key (optional):</label>
+                                                    <input type="password" id="artist-fanart-api-key"
+                                                        placeholder="fanart.tv personal API key" autocomplete="off">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-help">HD artist photos and the wide background Plex and Jellyfin show behind an artist page, used by <b>Update media server metadata</b> on the Tools page.
+                                                        Without a key SoulSync still tries TheAudioDB and Deezer.</div>
+                                                    <div class="callback-help">A free key from <a
+                                                            href="https://fanart.tv/get-an-api-key/" target="_blank" rel="noopener noreferrer"
+                                                            style="color: rgb(var(--accent-rgb));">fanart.tv</a>. The video side's fanart.tv key is used when this is empty.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('fanart')">Test Connection</button>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         <!-- MusicBrainz server (optional; public API requires no credentials) -->
                                         <div class="api-service-frame stg-service" id="musicbrainz-server-settings"
                                             data-service="musicbrainz">

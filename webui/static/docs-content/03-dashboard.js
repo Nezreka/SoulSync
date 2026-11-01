@@ -687,8 +687,11 @@ A "Filter tracks…" search box and ← Back navigation round it out; closing th
             body: `
 The **\<Server\> Metadata Updater** card (e.g. "Plex Metadata Updater") is shown for **Plex and Jellyfin only** — hidden for anything else. It re-checks your library's artists against all connected enrichment services and pushes the results to your media server:
 
-- Plex: "Download and upload high-quality artist images from Spotify to your Plex server for artists without photos."
-- Jellyfin: "Download and upload high-quality artist images from Spotify to your Jellyfin server for artists without photos."
+- **Artist photo**: a big square photo for artists without one. fanart.tv first, then TheAudioDB, then Deezer, with Spotify's 640px photo as the last resort.
+- **Artist background**: the wide picture Plexamp and the Plex web app (and Jellyfin's backdrop) show behind an artist page, for artists without one. From fanart.tv, then TheAudioDB.
+- Genres from your library, and on Plex, album art.
+
+Pictures are tied to the artist by its MusicBrainz or Deezer id (TheAudioDB by name only on an exact match), so a namesake's photo never lands on the wrong artist, and art the server already has is never replaced. fanart.tv needs a free key: **Settings → Connections → fanart.tv** (the video side's fanart.tv key is used when that's empty). Spotify is optional.
 
 ## Controls
 

@@ -751,6 +751,7 @@ const INVERT_SERVICE_MARKS = new Set(['tidal', 'qobuz', 'discogs', 'tvdb']);
 const SERVICE_GLYPHS = {
     omdb: '\u2605',             // star - ratings, as on the dashboard
     fanart: '\u{1F3A8}',        // palette - artwork
+    'artist-fanart': '\u{1F3A8}', // the same source, for artist artwork
     opensubtitles: '\u{1F4AC}', // speech bubble - subtitles
     trakt: '\u2605',            // star - audience rating
     nokey: '\u{1F4FA}',         // tv - community data (TVmaze)
@@ -765,8 +766,8 @@ const SERVICE_GROUPS = {
           ids: ['musicbrainz', 'spotify', 'itunes', 'deezer', 'discogs', 'tidal', 'qobuz', 'hydrabase'] },
         { label: 'Scrobbling', hint: 'listening history and recommendations',
           ids: ['lastfm', 'listenbrainz'] },
-        { label: 'Extras', hint: 'lyrics, concerts, fingerprint checks and cover art',
-          ids: ['genius', 'concerts', 'acoustid', 'pollinations'] },
+        { label: 'Extras', hint: 'lyrics, concerts, fingerprint checks, cover art and artist artwork',
+          ids: ['genius', 'concerts', 'acoustid', 'pollinations', 'artist-fanart'] },
     ],
     video: [
         { label: 'Metadata', hint: 'movies, shows and episodes',
@@ -3323,6 +3324,9 @@ async function loadSettingsData() {
         document.getElementById('genius-access-token').value = settings.genius?.access_token || '';
         const _pollinationsKey = document.getElementById('pollinations-api-key');
         if (_pollinationsKey) _pollinationsKey.value = settings.pollinations?.api_key || '';
+        // the music card's own id: the video side's fanart.tv card owns 'fanart-api-key'
+        const _fanartKey = document.getElementById('artist-fanart-api-key');
+        if (_fanartKey) _fanartKey.value = settings.fanart?.api_key || '';
 
         // Populate iTunes settings
         document.getElementById('itunes-country').value = settings.itunes?.country || 'US';
@@ -6860,6 +6864,11 @@ async function saveSettings(quiet = false) {
             scrobble_enabled: document.getElementById('lastfm-scrobble-enabled').checked,
             embed_tags: document.getElementById('embed-lastfm').checked,
             tags: _collectServiceTags('lastfm')
+        },
+        fanart: {
+            // _cfgStr: undefined when the field is absent, so a save there
+            // doesn't wipe the stored key
+            api_key: _cfgStr('artist-fanart-api-key', { trim: true }),
         },
         pollinations: {
             // _cfgStr: undefined when the field is absent (video side), so a

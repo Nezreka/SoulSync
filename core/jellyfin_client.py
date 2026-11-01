@@ -2190,6 +2190,37 @@ class JellyfinClient(MediaServerBase):
         # Genre updates not supported via Jellyfin API - silently skip
         return True
     
+    def update_artist_background(self, artist, image_data: bytes):
+        """Set the artist's backdrop, the wide picture behind the artist page
+        (#1957). Same upload as the primary image, another image type."""
+        try:
+            artist_id = artist.ratingKey
+            if not artist_id:
+                return False
+            import requests
+            from base64 import b64encode
+            url = f"{self.base_url}/Items/{artist_id}/Images/Backdrop/0"
+            headers = {
+                'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(),
+                'Content-Type': 'image/jpeg'
+            }
+            response = requests.post(url, data=b64encode(image_data), headers=headers, timeout=30)
+            response.raise_for_status()
+            logger.info(f"Updated backdrop for {artist.title}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating backdrop for {getattr(artist, 'title', '?')}: {e}")
+            return False
+
+    @staticmethod
+    def artist_has_background(artist) -> bool:
+        """True unless jellyfin says the artist has no backdrop. an item that
+        doesn't say (no BackdropImageTags) counts as having one: never
+        overwrite on a guess."""
+        raw = getattr(artist, 'raw', None) or {}
+        tags = raw.get('BackdropImageTags') if isinstance(raw, dict) else None
+        return not (isinstance(tags, list) and not tags)
+
     def update_artist_poster(self, artist, image_data: bytes):
         """Update artist poster image using Jellyfin API"""
         try:

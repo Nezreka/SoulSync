@@ -217,7 +217,7 @@ def find_artists_by_name(conn, name: str, *, limit: int = 5) -> List[Dict[str, A
         return []
     rows = conn.execute(
         """
-        SELECT id, name, genres, spotify_id, external_ids
+        SELECT id, name, genres, spotify_id, musicbrainz_id, external_ids
           FROM lib2_artists
          WHERE canonical_artist_id IS NULL AND name LIKE :pattern
          ORDER BY LENGTH(name), name
@@ -238,6 +238,9 @@ def find_artists_by_name(conn, name: str, *, limit: int = 5) -> List[Dict[str, A
             "name": effective["name"],
             "genres": _json_list(effective["genres"]),
             "spotify_id": _artist_provider_ids(row).get("spotify"),
+            # the ids that tie artwork to this artist (#1957)
+            "musicbrainz_id": _artist_provider_ids(row).get("musicbrainz"),
+            "deezer_id": _artist_provider_ids(row).get("deezer"),
         })
     return found
 

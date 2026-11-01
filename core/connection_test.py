@@ -368,6 +368,9 @@ def run_service_test(service, test_config):
                     return False, "Invalid Genius access token."
             except Exception as e:
                 return False, f"Genius connection error: {str(e)}"
+        elif service == "fanart":
+            from core.metadata.artist_artwork import check_fanart_key
+            return check_fanart_key(config_manager.get('fanart.api_key', ''))
         elif service == "pollinations":
             from core.playlists.cover_art import check_key
             return check_key(config_manager.get('pollinations.api_key', ''))

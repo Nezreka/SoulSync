@@ -122,6 +122,7 @@ class ConfigManager:
         'lastfm.session_key',
         'genius.access_token',
         'pollinations.api_key',
+        'fanart.api_key',
         # Deezer OAuth
         'deezer.app_id',
         'deezer.app_secret',
@@ -803,6 +804,11 @@ class ConfigManager:
             # optional. cover art works without it (one image every 45s with
             # their logo); a key from enter.pollinations.ai lifts both
             "pollinations": {
+                "api_key": ""
+            },
+            # optional. HD artist photos and backgrounds for Plex/Jellyfin
+            # (#1957); a free personal key from fanart.tv
+            "fanart": {
                 "api_key": ""
             },
             # Two providers answering two different questions: Ticketmaster for

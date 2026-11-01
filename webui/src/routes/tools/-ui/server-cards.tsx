@@ -302,9 +302,9 @@ export function MediaScanCard() {
 // ── Metadata Updater (Plex + Jellyfin) ───────────────────────────────────────
 
 const JELLYFIN_DESCRIPTION =
-  'Download and upload high-quality artist images from Spotify to your Jellyfin server for artists without photos.';
+  'HD artist photos and backgrounds from fanart.tv, TheAudioDB and Deezer, plus genres, for Jellyfin artists missing them.';
 const PLEX_DESCRIPTION =
-  'Download and upload high-quality artist images from Spotify to your Plex server for artists without photos.';
+  'HD artist photos and backgrounds from fanart.tv, TheAudioDB and Deezer, plus genres and album art, for Plex artists missing them.';
 const DEFAULT_DESCRIPTION = 'Updates artist photos, genres, and album art from Spotify.';
 
 export function MetadataUpdaterCard() {

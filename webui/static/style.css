@@ -66611,7 +66611,7 @@ select.ma-input { appearance: auto; }
 }
 .ma-switch span::after {
     content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
-    background: #fff; transition: transform var(--dur-fast) ease;
+    background: rgb(var(--text-bright-rgb)); transition: transform var(--dur-fast) ease;
 }
 .ma-switch input:checked + span { background: rgb(var(--accent-rgb)); }
 .ma-switch input:checked + span::after { transform: translateX(16px); }
