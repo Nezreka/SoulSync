@@ -80,7 +80,7 @@ def library_ids(db: Any, title: str, artist: str) -> Dict[str, str]:
                 (title, artist_key, artist_key),
             ).fetchall()
         for row in rows:
-            for service, value in zip(LIBRARY_ID_COLUMNS, row):
+            for service, value in zip(LIBRARY_ID_COLUMNS, row, strict=True):
                 if value and service not in found:
                     found[service] = str(value)
     except Exception as e:  # noqa: BLE001 - no ids just means identify searches
