@@ -236,13 +236,22 @@ PENDING_ARTISTS_SQL = f"""
     FROM lib2_artists
     WHERE {_PENDING % {'alias': ''}}
       AND name IS NOT NULL AND name != ''
-      AND EXISTS (
-          SELECT 1 FROM lib2_tracks t
-          JOIN lib2_track_files f ON f.track_id=t.id
-          JOIN lib2_albums al ON al.id=t.album_id
-          LEFT JOIN lib2_track_artists ta ON ta.track_id=t.id AND ta.artist_id=lib2_artists.id
-          WHERE f.file_state='active' AND TRIM(f.path)<>''
-            AND (al.primary_artist_id=lib2_artists.id OR ta.artist_id IS NOT NULL)
+      AND (
+          -- an album artist with a file, or a track credit with a file: two
+          -- indexed lookups. one EXISTS with the OR inside scanned every
+          -- track file per candidate (126s a batch, finding nothing, on a
+          -- loop: the worker sat at 80% of a core, Oct 31 2026)
+          EXISTS (
+              SELECT 1 FROM lib2_albums al
+              JOIN lib2_tracks t ON t.album_id=al.id
+              JOIN lib2_track_files f ON f.track_id=t.id
+              WHERE al.primary_artist_id=lib2_artists.id
+                AND f.file_state='active' AND TRIM(f.path)<>'')
+          OR EXISTS (
+              SELECT 1 FROM lib2_track_artists ta
+              JOIN lib2_track_files f ON f.track_id=ta.track_id
+              WHERE ta.artist_id=lib2_artists.id
+                AND f.file_state='active' AND TRIM(f.path)<>'')
       )
 """
 
