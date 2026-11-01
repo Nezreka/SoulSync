@@ -1073,6 +1073,12 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
       pushIf(rows, d.artist, 'Artist');
       return <DetailGrid rows={rows} />;
 
+    case 'zero_length_mp4':
+      pushIf(rows, d.track_title, 'Track');
+      pushIf(rows, d.artist, 'Artist');
+      pushIf(rows, d.file_path, 'File', 'path');
+      return <DetailGrid rows={rows} />;
+
     case 'untagged_download':
       pushIf(rows, d.track_title, 'Track');
       pushIf(rows, d.artist, 'Artist');

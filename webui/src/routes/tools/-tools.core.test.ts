@@ -202,10 +202,10 @@ describe('finding labels', () => {
     expect(FINDING_FIXABLE_TYPES.quality_upgrade_review).toBe('Monitor & Upgrade');
     expect(FINDING_FIXABLE_TYPES.quality_format_not_targeted).toBe('Leave As-is');
     expect(FINDING_FIXABLE_TYPES.quality_unknown).toBe('Leave As-is');
-    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(30);
-    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(29);
-    // 16 music + obsolete + the 10 video fix actions + the scan retirement
-    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(28);
+    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(31);
+    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(30);
+    // 17 music + obsolete + the 10 video fix actions + the scan retirement
+    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(29);
   });
 
   it('labels known finding types', () => {

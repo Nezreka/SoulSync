@@ -76,9 +76,20 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     glow: '244, 114, 182',
     tagline: 'Whether the audio is what it claims to be, and good enough',
     description:
-      'Finds files that fail to decode, FLAC made from a lossy source and 30-second preview clips saved as full tracks.',
-    jobIds: ['audio_corruption_detector', 'fake_lossless_detector', 'short_preview_track'],
-    findingTypes: ['corrupt_audio', 'fake_lossless', 'quality_upgrade', 'short_preview_track'],
+      'Finds files that fail to decode, FLAC made from a lossy source, 30-second preview clips saved as full tracks and AAC that shows 0:00.',
+    jobIds: [
+      'audio_corruption_detector',
+      'fake_lossless_detector',
+      'short_preview_track',
+      'streamed_aac_repair',
+    ],
+    findingTypes: [
+      'corrupt_audio',
+      'fake_lossless',
+      'quality_upgrade',
+      'short_preview_track',
+      'zero_length_mp4',
+    ],
   },
   {
     id: 'metadata',

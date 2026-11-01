@@ -243,6 +243,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Lossy Converter | Finds lossless files with no lossy copy alongside and converts them with ffmpeg using your configured codec/bitrate |
 | Lyrics Filler | Finds tracks with no \`.lrc\` sidecar, checks LRClib so instrumentals are never flagged, then fetches synced lyrics — writes the \`.lrc\` and embeds them |
 | ReplayGain Filler | Finds tracks with no ReplayGain loudness tag, analyzes them, and writes the tags |
+| Zero-Length AAC Fixer | Finds AAC files that play but show 0:00 and can't seek (Tidal AAC saved by older versions), and fixes them in place: the audio is copied, not re-encoded, and every tag is kept. Fix All does the whole library; rescan your media server after |
 | Preview Clip Cleanup | Detects ~30s preview clips (some sources deliver samples instead of full songs), compares against the expected length from the metadata source, and re-fetches the full track |
 
 Library v2 handles catalogue identity, duplicate review, release completeness, and wanted quality upgrades directly. The retired Duplicate Detector, Album Completeness, Quality Upgrade Finder, Quality Check, Single/Album Dedup, and Fix Unknown Artists jobs are not offered. Missing and upgrade-eligible monitored tracks reach the Wishlist through **Monitoring List Reconcile**; there is no **Apply Quality Upgrades** automation action.

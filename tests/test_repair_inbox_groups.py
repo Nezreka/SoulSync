@@ -201,7 +201,7 @@ _BLURBS = Path(__file__).resolve().parents[1] / 'webui/src/routes/tools/-tools.g
 def _client_blurb_slugs() -> set:
     source = _BLURBS.read_text(encoding='utf-8')
     body = source.split('FINDING_TYPE_BLURBS: Record<string, string> = {', 1)[1].split('\n};', 1)[0]
-    return set(re.findall(r'^\s{2}([a-z_]+):', body, re.MULTILINE))
+    return set(re.findall(r'^\s{2}([a-z0-9_]+):', body, re.MULTILINE))
 
 
 def test_every_finding_type_has_a_client_blurb():

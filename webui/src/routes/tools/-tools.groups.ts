@@ -81,6 +81,7 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   missing_lyrics: 'Tracks with no lyrics saved.',
   missing_replaygain: 'No loudness tags, so playback volume jumps between tracks.',
   replaygain_retag: 'Loudness tags written before your current target level.',
+  zero_length_mp4: "AAC that shows 0:00 and won't seek. Fixing keeps audio and tags.",
   untagged_download: 'Downloads with no title, artist or album tag.',
   empty_folder: 'Folders left behind with no audio inside.',
   expired_download: 'Finished downloads older than your retention window.',

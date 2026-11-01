@@ -126,6 +126,7 @@ FINDING_TYPE_META = {
     'missing_lyrics':           {'label': 'Missing Lyrics', 'verb': 'Apply Lyrics'},
     'missing_replaygain':       {'label': 'Missing ReplayGain', 'verb': 'Apply RG'},
     'replaygain_retag':         {'label': 'ReplayGain Retag', 'verb': 'Apply RG'},
+    'zero_length_mp4':          {'label': 'Shows 0:00', 'verb': 'Fix length'},
     'untagged_download':        {'label': 'Untagged Downloads', 'verb': 'Write Tags'},
     'empty_folder':             {'label': 'Empty Folders', 'verb': 'Delete Folder'},
     'expired_download':         {'label': 'Expired Downloads', 'verb': 'Delete'},
@@ -212,6 +213,7 @@ JOB_CATEGORIES = {
     'quality_profile_audit': 'Audio quality',
     'short_preview_track': 'Audio quality',
     'replaygain_filler': 'Audio quality',
+    'streamed_aac_repair': 'Audio quality',
     # What is written on and about the tracks.
     'untagged_downloads': 'Tags & metadata',
     'track_number_repair': 'Tags & metadata',
@@ -2825,6 +2827,7 @@ class RepairWorker:
             'album_mbid_mismatch': self._fix_album_mbid_mismatch,
             'missing_replaygain': self._fix_missing_replaygain,
             'replaygain_retag': self._fix_missing_replaygain,   # #1060 — same analyze+write
+            'zero_length_mp4': self._fix_zero_length_mp4,
             'untagged_download': self._fix_untagged_download,
             'expired_download': self._fix_expired_download,
             'empty_folder': self._fix_empty_folder,
@@ -5192,6 +5195,30 @@ class RepairWorker:
             self._refresh_lib2_tag_cache(details, resolved)
         return {'success': True, 'action': 'applied_replaygain',
                 'message': f'Wrote ReplayGain ({gain_db:+.2f} dB)'}
+
+    def _fix_zero_length_mp4(self, entity_type, entity_id, file_path, details):
+        """Remux an AAC file that reads no length into a plain MP4 and put its
+        tags back (Skowl). The audio is copied, not re-encoded."""
+        raw_path = details.get('file_path') or file_path
+        if not raw_path:
+            return {'success': False, 'error': 'No file path in finding'}
+        resolved, native_track_id = self._resolve_finding_path(entity_id, raw_path)
+        if not os.path.isfile(resolved):
+            return {'success': False, 'stale': True,
+                    'error': f'File not found on disk: {os.path.basename(raw_path)}'}
+        from core.downloads.mp4_remux import reads_zero_length, repair_streamed_mp4
+        from core.repair_jobs.streamed_aac_repair import ffmpeg_path
+        if not reads_zero_length(resolved):
+            return {'success': True, 'action': 'fixed_length', 'message': 'Already reads its length'}
+        ffmpeg = ffmpeg_path()
+        if not ffmpeg:
+            return {'success': False, 'error': 'ffmpeg not available, cannot fix the file'}
+        if not repair_streamed_mp4(resolved, ffmpeg):
+            return {'success': False, 'error': 'Could not fix the file, it was left as it was'}
+        if native_track_id is not None:
+            self._refresh_lib2_tag_cache(details, resolved)
+        return {'success': True, 'action': 'fixed_length',
+                'message': 'Fixed the length, tags kept'}
 
     def _fix_untagged_download(self, entity_type, entity_id, file_path, details):
         """write title/artist/album back from the download record. only the
