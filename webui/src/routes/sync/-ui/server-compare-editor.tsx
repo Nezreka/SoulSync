@@ -71,7 +71,7 @@ type CompareFilter = (typeof FILTERS)[number];
 
 /* ── Rows ─────────────────────────────────────────────────────────────────── */
 
-function SourceRow({
+export function SourceRow({
   track,
   index,
   hidden,
@@ -131,7 +131,7 @@ function SourceRow({
   );
 }
 
-function ServerRow({
+export function ServerRow({
   track,
   index,
   hidden,
@@ -141,6 +141,7 @@ function ServerRow({
   onUnmatch,
   onRemove,
   onFindAndAdd,
+  presync = false,
 }: {
   track: CompareTrack;
   index: number;
@@ -149,8 +150,11 @@ function ServerRow({
   onSelect: () => void;
   onSwap: (index: number) => void;
   onUnmatch: (index: number) => void;
-  onRemove: (index: number, serverTrackId: string) => void;
+  /** no remove before a sync: there is no server playlist to remove from */
+  onRemove?: (index: number, serverTrackId: string) => void;
   onFindAndAdd: (index: number) => void;
+  /** the pre-sync editor (#1958): the right side is your library, not a server playlist */
+  presync?: boolean;
 }) {
   const svr = track.server_track;
   // 564-577: missing on the server — the whole slot is the Find & add button.
@@ -179,13 +183,17 @@ function ServerRow({
               <path d="m21 21-4.35-4.35" />
             </svg>
           </div>
-          <span className="empty-slot-label">Find &amp; add</span>
-          <span className="empty-slot-hint">{compareMissingHint(track)}</span>
+          <span className="empty-slot-label">
+            {presync ? 'Pick from your library' : 'Find & add'}
+          </span>
+          <span className="empty-slot-hint">
+            {presync ? 'Not in your library, the sync downloads it' : compareMissingHint(track)}
+          </span>
           {/* #1128: a durable manual match exists but its library track isn't in
               this playlist yet, so it can't pair here. Say so — otherwise this
               row is indistinguishable from one that was never matched and the
               user re-matches the same track forever. The real sync DOES use it. */}
-          {track.has_manual_match ? (
+          {track.has_manual_match && !presync ? (
             <span
               className="empty-slot-matched-note"
               title="Your manual match is saved and will be used on the next sync — this track just isn't in the server playlist yet."
@@ -234,7 +242,9 @@ function ServerRow({
           <button
             type="button"
             className="server-track-swap-btn"
-            title="Swap for different version"
+            title={
+              presync ? 'Sync a different version from your library' : 'Swap for different version'
+            }
             onClick={(event) => {
               event.stopPropagation();
               onSwap(index);
@@ -258,8 +268,12 @@ function ServerRow({
           <button
             type="button"
             className="server-track-unmatch-btn"
-            title="Remove match (keep in playlist)"
-            aria-label="Remove match (keep in playlist)"
+            title={
+              presync ? 'Not this one, download it instead' : 'Remove match (keep in playlist)'
+            }
+            aria-label={
+              presync ? 'Not this one, download it instead' : 'Remove match (keep in playlist)'
+            }
             onClick={(event) => {
               event.stopPropagation();
               onUnmatch(index);
@@ -278,27 +292,29 @@ function ServerRow({
             </svg>
           </button>
         )}
-        <button
-          type="button"
-          className="server-track-remove-btn"
-          title="Remove from playlist"
-          onClick={(event) => {
-            event.stopPropagation();
-            onRemove(index, svr.id ?? '');
-          }}
-        >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
+        {onRemove && (
+          <button
+            type="button"
+            className="server-track-remove-btn"
+            title="Remove from playlist"
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove(index, svr.id ?? '');
+            }}
           >
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+            >
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </div>
       <div className="server-track-status-dot" />
     </div>

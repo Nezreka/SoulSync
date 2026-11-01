@@ -464,6 +464,76 @@ export async function fetchComparePlaylist(
   return (await (await fetch(url)).json()) as CompareResponse;
 }
 
+/* ── The pre-sync match editor (#1958) ────────────────────────────────────── */
+
+/**
+ * A mirrored playlist that has not synced has no server playlist to compare
+ * with. What it has is the library track each song will sync as, so the editor
+ * shows that and lets the user change it before the first sync. Same row shape
+ * as the compare editor so the rows render the same.
+ */
+export interface PresyncTrack extends CompareTrack {
+  mirror_track_id: number;
+}
+
+export interface PresyncResponse {
+  success?: boolean;
+  error?: string;
+  server_type?: string;
+  source_track_count?: number;
+  server_track_count?: number;
+  /** songs the background library check has not reached yet */
+  unchecked?: number;
+  tracks?: PresyncTrack[];
+}
+
+export async function fetchPresyncMatches(mirrorId: number): Promise<PresyncResponse> {
+  return (await (
+    await fetch(`/api/mirrored-playlists/${mirrorId}/presync`)
+  ).json()) as PresyncResponse;
+}
+
+/** One slice of the background library check, so the editor opens checked. */
+export async function checkMirrorLibrarySlice(
+  mirrorId: number,
+): Promise<{ success?: boolean; remaining?: number; error?: string }> {
+  const response = await fetch(`/api/mirrored-playlists/${mirrorId}/check-library`, {
+    method: 'POST',
+  });
+  return (await response.json()) as { success?: boolean; remaining?: number; error?: string };
+}
+
+export async function setPresyncMatch(
+  mirrorId: number,
+  mirrorTrackId: number,
+  trackId: string,
+  trackTitle: string,
+): Promise<ServerMutationResponse> {
+  const response = await fetch(`/api/mirrored-playlists/${mirrorId}/presync/match`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mirror_track_id: mirrorTrackId,
+      track_id: trackId,
+      track_title: trackTitle,
+    }),
+  });
+  return (await response.json()) as ServerMutationResponse;
+}
+
+export async function presyncUnmatch(
+  mirrorId: number,
+  mirrorTrackId: number,
+  trackId: string,
+): Promise<ServerMutationResponse> {
+  const response = await fetch(`/api/mirrored-playlists/${mirrorId}/presync/unmatch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mirror_track_id: mirrorTrackId, track_id: trackId }),
+  });
+  return (await response.json()) as ServerMutationResponse;
+}
+
 /* ── Search / Replace / Remove (746-1020) ─────────────────────────────────── */
 
 export type ServerSearchMode = 'replace' | 'add';

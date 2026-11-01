@@ -18352,6 +18352,57 @@ def server_playlist_delete(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _library_thumb_resolver(active_server):
+    """album art a library row stores, as a url the browser can load. shared by
+    the track search and the pre-sync match editor."""
+    # Build thumb URL resolver for this server. Only Plex was ever
+    # handled here — Jellyfin rows store /Items/<id>/Images/Primary and
+    # Navidrome rows /rest/getCoverArt?id=<id>, both server-relative
+    # paths the BROWSER can't use: relative they hit SoulSync's SPA
+    # catch-all (200, index.html), absolutized they hit Jellyfin
+    # unauthenticated (200, EMPTY body — #1159's signature). That's why
+    # the Add Track / Swap Track modals still had no art after the
+    # compare-view fix (#1164). Route both through the same token-safe
+    # proxies the compare view uses.
+    _art_prefix = ''
+    _art_suffix = ''
+    if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').server:
+        _ab = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
+        _at = getattr(media_server_engine.client('plex').server, '_token', '') or ''
+        if not _ab:
+            _pc = config_manager.get_plex_config()
+            _ab = (_pc.get('base_url', '') or '').rstrip('/')
+            _at = _at or _pc.get('token', '')
+        _art_prefix = _ab
+        _art_suffix = f"?X-Plex-Token={_at}" if _at else ''
+
+    _jf_item_re = re.compile(r'/Items/([^/?#]+)/Images/Primary')
+    _nd_cover_re = re.compile(r'getCoverArt\?(?:[^#]*?[?&])?id=([^&#]+)')
+
+    def _resolve_search_thumb(url):
+        if not url:
+            return ''
+        if active_server == 'jellyfin':
+            m = _jf_item_re.search(url)
+            if m:
+                return f"/api/server-activity/image?path=jf:{m.group(1)}"
+            # external art (enrichment CDN) passes through; a relative
+            # path we can't parse renders as no-art, not as index.html
+            return url if url.startswith('http') else ''
+        if active_server == 'navidrome':
+            m = _nd_cover_re.search(url)
+            if m:
+                return f"/api/navidrome/cover/{m.group(1)}"
+            return url if url.startswith('http') else ''
+        if url.startswith('http'):
+            return url
+        if url.startswith('/') and _art_prefix:
+            return f"{_art_prefix}{url}{_art_suffix}"
+        return url
+
+    return _resolve_search_thumb
+
+
 @app.route('/api/library/search-tracks', methods=['GET'])
 def library_search_tracks():
     """Search SoulSync's local database for tracks (for manual match correction)."""
@@ -18368,50 +18419,7 @@ def library_search_tracks():
         active_server = config_manager.get_active_media_server()
         database = get_database()
 
-        # Build thumb URL resolver for this server. Only Plex was ever
-        # handled here — Jellyfin rows store /Items/<id>/Images/Primary and
-        # Navidrome rows /rest/getCoverArt?id=<id>, both server-relative
-        # paths the BROWSER can't use: relative they hit SoulSync's SPA
-        # catch-all (200, index.html), absolutized they hit Jellyfin
-        # unauthenticated (200, EMPTY body — #1159's signature). That's why
-        # the Add Track / Swap Track modals still had no art after the
-        # compare-view fix (#1164). Route both through the same token-safe
-        # proxies the compare view uses.
-        _art_prefix = ''
-        _art_suffix = ''
-        if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').server:
-            _ab = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
-            _at = getattr(media_server_engine.client('plex').server, '_token', '') or ''
-            if not _ab:
-                _pc = config_manager.get_plex_config()
-                _ab = (_pc.get('base_url', '') or '').rstrip('/')
-                _at = _at or _pc.get('token', '')
-            _art_prefix = _ab
-            _art_suffix = f"?X-Plex-Token={_at}" if _at else ''
-
-        _jf_item_re = re.compile(r'/Items/([^/?#]+)/Images/Primary')
-        _nd_cover_re = re.compile(r'getCoverArt\?(?:[^#]*?[?&])?id=([^&#]+)')
-
-        def _resolve_search_thumb(url):
-            if not url:
-                return ''
-            if active_server == 'jellyfin':
-                m = _jf_item_re.search(url)
-                if m:
-                    return f"/api/server-activity/image?path=jf:{m.group(1)}"
-                # external art (enrichment CDN) passes through; a relative
-                # path we can't parse renders as no-art, not as index.html
-                return url if url.startswith('http') else ''
-            if active_server == 'navidrome':
-                m = _nd_cover_re.search(url)
-                if m:
-                    return f"/api/navidrome/cover/{m.group(1)}"
-                return url if url.startswith('http') else ''
-            if url.startswith('http'):
-                return url
-            if url.startswith('/') and _art_prefix:
-                return f"{_art_prefix}{url}{_art_suffix}"
-            return url
+        _resolve_search_thumb = _library_thumb_resolver(active_server)
 
         results = database.search_tracks(title=query, artist='', limit=limit,
                                          server_source=active_server, rank_artist=artist_hint)
@@ -18436,6 +18444,200 @@ def library_search_tracks():
         return jsonify({"success": True, "tracks": tracks})
     except Exception as e:
         logger.error(f"Error searching library tracks: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── Pre-sync match editor (#1958) ─────────────────────────────────────────────
+# a mirrored playlist that hasn't synced has no server playlist for the compare
+# editor to open. what it does have is which library track each song will sync
+# as: the background library check (#1910) stamps it on every mirror track, and
+# a manual match overrides it. this is that view, and changing a pick stores
+# the same durable match the server editor stores, so the first sync uses it.
+
+def _presync_track_rows(database, active_server, ids):
+    """{id: {id, title, artist, thumb, duration}} for the library tracks the
+    mirror rows point at. the active server's track id first (what the check
+    stamps and the sync matches by), the catalogue id for a manual match that
+    named one."""
+    ids = [str(i) for i in dict.fromkeys(ids) if i]
+    out = {}
+    if not ids:
+        return out
+    thumb = _library_thumb_resolver(active_server)
+    select = ("SELECT {key} AS key, t.title, COALESCE(t.track_artist, a.name) AS artist, "
+              "al.image_url AS thumb, t.duration FROM lib2_tracks t "
+              "JOIN lib2_albums al ON al.id = t.album_id "
+              "JOIN lib2_artists a ON a.id = al.primary_artist_id ")
+    conn = database._get_connection()
+    try:
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            ph = ','.join('?' * len(chunk))
+            queries = (
+                (select.format(key="m.server_id") + "JOIN lib2_media_server_mappings m "
+                 f"ON m.entity_id = t.id WHERE m.entity_type = 'track' AND m.server_source = ? "
+                 f"AND m.server_id IN ({ph})", [active_server, *chunk]),
+                (select.format(key="t.server_id") + f"WHERE t.server_source = ? AND t.server_id IN ({ph})",
+                 [active_server, *chunk]),
+            )
+            for sql, params in queries:
+                for row in conn.execute(sql, params).fetchall():
+                    out.setdefault(str(row['key']), row)
+        rest = [i for i in ids if i not in out and i.isdigit()]
+        for i in range(0, len(rest), 400):
+            chunk = rest[i:i + 400]
+            ph = ','.join('?' * len(chunk))
+            for row in conn.execute(select.format(key="t.id") + f"WHERE t.id IN ({ph})",
+                                    [int(x) for x in chunk]).fetchall():
+                out.setdefault(str(row['key']), row)
+    finally:
+        conn.close()
+    return {key: {'id': key, 'title': row['title'] or '', 'artist': row['artist'] or '',
+                  'thumb': thumb(row['thumb'] or ''),
+                  'duration': row['duration'] or 0}
+            for key, row in out.items()}
+
+
+def _presync_mirror(playlist_id):
+    """(database, playlist) for a mirror this profile may edit, or a refusal."""
+    from api.mirrored_playlists import _owned_mirrored_playlist
+    database = get_database()
+    playlist = _owned_mirrored_playlist(database, playlist_id)
+    if not playlist:
+        return database, None, (jsonify({"success": False, "error": "Playlist not found"}), 404)
+    return database, playlist, None
+
+
+def _presync_extra(row):
+    try:
+        extra = row.get('extra_data')
+        extra = json.loads(extra) if isinstance(extra, str) and extra else (extra or {})
+        return extra if isinstance(extra, dict) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/presync', methods=['GET'])
+def mirrored_presync_matches(playlist_id):
+    """every song of a mirror next to the library track it will sync as."""
+    try:
+        database, playlist, refusal = _presync_mirror(playlist_id)
+        if refusal:
+            return refusal
+        active_server = config_manager.get_active_media_server()
+        rows = database.get_mirrored_playlist_tracks(playlist_id)
+        extras = [_presync_extra(r) for r in rows]
+        profile_id = int(playlist.get('profile_id') or get_current_profile_id() or 1)
+        manual = {}
+        try:
+            manual = database.find_manual_library_matches_bulk(
+                profile_id, [r.get('source_track_id') for r in rows], active_server) or {}
+        except Exception as e:
+            logger.debug(f"[PreSync] manual matches unavailable: {e}")
+        library = _presync_track_rows(
+            database, active_server,
+            [e.get('library_track_id') for e in extras if e.get('in_library')])
+        tracks = []
+        unchecked = 0
+        for row, extra in zip(rows, extras, strict=True):
+            if not extra.get('library_checked_at'):
+                unchecked += 1
+            lib = library.get(str(extra.get('library_track_id') or '')) if extra.get('in_library') else None
+            tracks.append({
+                'mirror_track_id': row.get('id'),
+                'match_status': 'matched' if lib else 'missing',
+                'has_manual_match': bool(manual.get(str(row.get('source_track_id') or ''))),
+                'source_track': {
+                    'position': row.get('position'),
+                    'name': row.get('track_name') or '',
+                    'artist': row.get('artist_name') or '',
+                    'image_url': row.get('image_url') or '',
+                    'duration_ms': row.get('duration_ms') or 0,
+                    'source_track_id': row.get('source_track_id') or '',
+                    'source': playlist.get('source') or '',
+                },
+                'server_track': lib,
+            })
+        return jsonify({
+            'success': True,
+            'server_type': active_server,
+            'source_track_count': len(tracks),
+            'server_track_count': sum(1 for t in tracks if t['server_track']),
+            'unchecked': unchecked,
+            'tracks': tracks,
+        })
+    except Exception as e:
+        logger.error(f"[PreSync] loading matches for mirror {playlist_id} failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _presync_row(database, playlist_id, mirror_track_id):
+    for row in database.get_mirrored_playlist_tracks(playlist_id):
+        if str(row.get('id')) == str(mirror_track_id):
+            return row
+    return None
+
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/presync/match', methods=['POST'])
+def mirrored_presync_set_match(playlist_id):
+    """pick the library track one song of a mirror syncs as. stored the way the
+    server editor stores a swap (a user-confirmed match the sync honours), and
+    the song's library stamp follows so every view says the same thing."""
+    try:
+        data = request.get_json(silent=True) or {}
+        track_id = str(data.get('track_id') or '').strip()
+        if not track_id:
+            return jsonify({"success": False, "error": "track_id required"}), 400
+        database, playlist, refusal = _presync_mirror(playlist_id)
+        if refusal:
+            return refusal
+        row = _presync_row(database, playlist_id, data.get('mirror_track_id'))
+        if not row:
+            return jsonify({"success": False, "error": "That song isn't in this playlist"}), 404
+        source_track_id = str(row.get('source_track_id') or '').strip()
+        if not source_track_id:
+            return jsonify({"success": False,
+                            "error": "This song has no source id to remember the match by"}), 400
+        active_server = config_manager.get_active_media_server()
+        _persist_find_and_add_match(
+            source_track_id, active_server, track_id, data.get('track_title', ''),
+            row.get('track_name') or '', row.get('artist_name') or '',
+            source=playlist.get('source') or 'spotify')
+        database.update_mirrored_track_extra_data(row['id'], {
+            'in_library': True, 'library_track_id': track_id,
+            'library_checked_at': int(time.time()), 'library_checked_via': 'manual'})
+        return jsonify({"success": True, "message": "Match saved, the next sync uses it"})
+    except Exception as e:
+        logger.error(f"[PreSync] saving a match on mirror {playlist_id} failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/presync/unmatch', methods=['POST'])
+def mirrored_presync_unmatch(playlist_id):
+    """this library track is the wrong one: never match the two again, and the
+    song goes back to missing so the sync downloads it."""
+    try:
+        data = request.get_json(silent=True) or {}
+        database, playlist, refusal = _presync_mirror(playlist_id)
+        if refusal:
+            return refusal
+        row = _presync_row(database, playlist_id, data.get('mirror_track_id'))
+        if not row:
+            return jsonify({"success": False, "error": "That song isn't in this playlist"}), 404
+        track_id = str(_presync_extra(row).get('library_track_id') or data.get('track_id') or '')
+        source_track_id = str(row.get('source_track_id') or '').strip()
+        active_server = config_manager.get_active_media_server()
+        if source_track_id and track_id:
+            from core.sync.match_overrides import reject_match
+            if not reject_match(database, get_current_profile_id(), active_server,
+                                source_track_id, track_id):
+                return jsonify({"success": False, "error": "Could not save the unmatch"}), 500
+        database.update_mirrored_track_extra_data(row['id'], {
+            'in_library': False, 'library_track_id': None,
+            'library_checked_at': int(time.time()), 'library_checked_via': 'manual'})
+        return jsonify({"success": True, "message": "Match removed"})
+    except Exception as e:
+        logger.error(f"[PreSync] unmatching on mirror {playlist_id} failed: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 

@@ -214,6 +214,8 @@ Open a playlist and the line under its title says where its tracks are: **in lib
 
 The **Server** tab lists the playlists on your media server. Open one to compare it with the SoulSync playlist that syncs to it: matched, missing and extra tracks side by side, with Find & Add, swap, unmatch, reorder and M3U export.
 
+**Open editor** is also on a mirrored playlist and on its card in the source tab it came from. For a playlist that hasn't synced yet there is no server playlist to edit, so the editor shows each song next to the library track it will sync as instead. Swap any of them for another version you have (the extended mix over the radio edit), pick one for a song it didn't find, or mark one as *not this one* so the sync downloads it. Your picks are used when you sync.
+
 - **Adopt into My Playlists**: a playlist made on the server instead of in SoulSync offers to be adopted. It becomes one of your playlists under the same name, each track stays paired with the server track it came from (so a sync never drops one it can't match), and syncing it updates that same server playlist
 - Smart playlists, and any playlist the server won't let you edit, are never offered for adoption. The server builds those, so they stay as they are
 

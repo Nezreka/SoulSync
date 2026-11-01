@@ -43,6 +43,7 @@ import { BeatportTab } from './beatport-tab';
 import { ImportFileTab } from './import-file-tab';
 import { LastfmSyncTab } from './lastfm-sync-tab';
 import { ListenBrainzSyncTab } from './lb-sync-tab';
+import { MirrorMatchEditor } from './mirror-match-editor';
 import { MirroredTab } from './mirrored-tab';
 import { ServerCompareEditor } from './server-compare-editor';
 import { ServerPlaylistList } from './server-playlist-list';
@@ -75,6 +76,8 @@ export function SyncPage() {
   const [activityOpen, setActivityOpen] = useState(false);
   const [activityTab, setActivityTab] = useState<ActivityTab>('syncs');
   const [compare, setCompare] = useState<CompareView | null>(null);
+  /** a mirror not on the server yet: its pre-sync match editor (#1958) */
+  const [presync, setPresync] = useState<MirroredMatch | null>(null);
 
   /**
    * The shell's tab opener, filled on its mount. Only the import tab needs it,
@@ -167,14 +170,20 @@ export function SyncPage() {
       return false;
     }
     if (found.status === 'not-synced') {
-      const title = found.mirror?.display_name || found.mirror?.name || name || 'This playlist';
-      window.showToast?.(
-        `${title} isn't on your server yet. Sync & download puts it there, then you can edit it`,
-        'info',
-      );
-      return false;
+      // nothing on the server to edit yet, but which library track each song
+      // will sync as can be checked and changed now (#1958)
+      if (!found.mirror) {
+        const title = name || 'This playlist';
+        window.showToast?.(`${title} isn't on your server yet`, 'info');
+        return false;
+      }
+      setCompare(null);
+      setPresync(found.mirror);
+      openTab.current?.('server');
+      return true;
     }
     if (found.serverType) recordServerLink(found.mirror.id, found.playlist.id, found.serverType);
+    setPresync(null);
     setCompare({ playlist: found.playlist, mirrored: found.mirror });
     openTab.current?.('server');
     return true;
@@ -285,7 +294,9 @@ export function SyncPage() {
   }, [page]);
 
   const panels: Partial<Record<SyncTabId, React.ReactNode>> = {
-    server: compare ? (
+    server: presync ? (
+      <MirrorMatchEditor key={presync.id} mirrored={presync} onBack={() => setPresync(null)} />
+    ) : compare ? (
       <ServerCompareEditor
         // it reads its playlist once; a different one opened from elsewhere is a new editor
         key={compare.playlist.id}
@@ -296,7 +307,10 @@ export function SyncPage() {
       />
     ) : (
       <ServerPlaylistList
-        onOpenCompare={(playlist, mirrored) => setCompare({ playlist, mirrored })}
+        onOpenCompare={(playlist, mirrored) => {
+          setPresync(null);
+          setCompare({ playlist, mirrored });
+        }}
       />
     ),
     // the source tabs find playlists and import them (use-importer); the
