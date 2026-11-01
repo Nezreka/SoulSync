@@ -6511,6 +6511,14 @@ class MusicDatabase:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_listening_dedup_pile "
             "ON listening_history (track_id, played_at, server_source, profile_id)"
         )
+        # a profile's plays in a window, per track (for-you mixes, stats): the
+        # planner took the lib2_track index for the GROUP BY and read every
+        # play, ~1s a window; this covers the whole query (1-24ms). here, after
+        # profile_id exists: a new database adds it in this step
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_listening_profile_played_track "
+            "ON listening_history (profile_id, played_at, lib2_track_id)"
+        )
         # which media-server account played it (plex's history says). a play
         # is filed in the pile of the profile linked to that account, and a
         # later link or unlink re-files it, so the account has to be kept
