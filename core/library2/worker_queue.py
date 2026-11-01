@@ -156,6 +156,7 @@ _NEW_IDLE_RECHECK = 30.0
 def invalidate_pending_cache():
     """Identity preparation can release existing rows without inserting one."""
     _NEW_IDLE.clear()
+    _NEW_CURSOR.clear()
 
 
 def _new_fingerprint(conn, entity_type: str, service: str) -> tuple:
@@ -171,15 +172,25 @@ def _params(entity_type: str, service: str, retry_after_days: int) -> Dict[str, 
             "window": f"-{max(0, int(retry_after_days))} days"}
 
 
+#: Where the "never attempted" walk got to, per (database, service, type).
+#: The walk is in id order, so every id below the cursor was attempted the
+#: last time round; starting from 0 each fetch re-walked all of them (~1s a
+#: fetch on 311k tracks once most were done). Reaching the end starts once
+#: more from 0, so an older row that only just became owned is still found.
+_NEW_CURSOR: Dict[tuple, int] = {}
+
+
 def _fetch(conn, entity_type: str, service: str, retry_after_days: int,
            retry_statuses: tuple = _RETRYABLE,
            require_provider_id: bool = False,
-           phase: str = "new") -> Optional[Any]:
+           phase: str = "new", after: int = 0) -> Optional[Any]:
     key = str(service).strip().lower()
-    return conn.execute(
-        _pending_sql(entity_type, retry_statuses, require_provider_id, key,
-                     phase) + " LIMIT 1",
-        _params(entity_type, key, retry_after_days)).fetchone()
+    sql = _pending_sql(entity_type, retry_statuses, require_provider_id, key, phase)
+    params = _params(entity_type, key, retry_after_days)
+    if phase == "new" and after:
+        sql = sql.replace("ORDER BY e.id", "AND e.id >= :after ORDER BY e.id", 1)
+        params["after"] = int(after)
+    return conn.execute(sql + " LIMIT 1", params).fetchone()
 
 
 def next_pending(
@@ -236,8 +247,16 @@ def next_pending(
                 fingerprint = _new_fingerprint(conn, entity_type, key)
                 if age is not None and age < _NEW_IDLE_TTL and seen[0] == fingerprint:
                     continue
+            after = _NEW_CURSOR.get(memo, 0) if memo else 0
             row = _fetch(conn, entity_type, service, retry_after_days,
-                         retry_statuses, require_provider_id, phase)
+                         retry_statuses, require_provider_id, phase, after)
+            if row is None and after:
+                # the end of the walk: once more from the start
+                row = _fetch(conn, entity_type, service, retry_after_days,
+                             retry_statuses, require_provider_id, phase, 0)
+            if memo:
+                # inclusive: an item the worker didn't get to is offered again
+                _NEW_CURSOR[memo] = int(row["id"]) if row is not None else 0
             if row is None:
                 if memo:
                     _NEW_IDLE[memo] = (fingerprint, time.monotonic())
