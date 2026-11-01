@@ -196,6 +196,15 @@ def _looks_like_json_decode_error(exc: Exception) -> bool:
     )
 
 
+def _ffmpeg_path():
+    """ffmpeg on PATH, else the bundled one in tools/, else None."""
+    ff = shutil.which('ffmpeg')
+    if ff:
+        return ff
+    cand = Path(__file__).parent.parent / 'tools' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
+    return str(cand) if cand.exists() else None
+
+
 class TidalDownloadClient(DownloadSourcePlugin):
     """
     Tidal download client using tidalapi.
@@ -1143,6 +1152,9 @@ class TidalDownloadClient(DownloadSourcePlugin):
                     intermediate_path.unlink(missing_ok=True)
                     final_size = out_path.stat().st_size if out_path.exists() else 0
                 else:
+                    # streamed AAC reads 0:00 and won't seek until it's a plain MP4
+                    from core.downloads.mp4_remux import remux_to_plain_mp4
+                    remux_to_plain_mp4(intermediate_path, _ffmpeg_path())
                     final_size = intermediate_path.stat().st_size if intermediate_path.exists() else 0
 
                 if final_size < MIN_AUDIO_SIZE:
