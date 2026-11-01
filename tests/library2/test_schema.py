@@ -29,6 +29,8 @@ _EXPECTED_TABLES = {
     "lib2_song_search", "lib2_song_search_data", "lib2_song_search_idx",
     "lib2_song_search_content", "lib2_song_search_docsize", "lib2_song_search_config",
     "lib2_song_search_dirty", "lib2_song_search_state",
+    # the artist grid's membership counter (core.library2.member_version)
+    "lib2_member_state",
 }
 
 

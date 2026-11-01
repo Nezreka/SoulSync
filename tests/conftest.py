@@ -1093,6 +1093,9 @@ def _fresh_fold_index():
     from core.library2 import worker_queue
     saved_ttl, worker_queue.PROGRESS_SNAPSHOT_TTL = worker_queue.PROGRESS_SNAPSHOT_TTL, 0.0
     worker_queue._reset_progress_snapshots()
+    # library membership ids are kept per file between requests; test files are reused
+    from core.library2 import member_version
+    member_version.clear()
     yield
     fold_index.CHECK_SECONDS = saved
     worker_queue.PROGRESS_SNAPSHOT_TTL = saved_ttl

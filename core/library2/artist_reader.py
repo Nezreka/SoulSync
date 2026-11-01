@@ -404,10 +404,19 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
     # the count and the page each walked it: half a second to a second apiece
     # on a big library. it's worked out once per request into a temp table
     # both of them read.
+    # The ids themselves are kept between requests (core.library2.member_version)
+    # until a table they come from changes: ~1s a page and a scroll, now a
+    # counter read and an id insert.
     conn.execute("DROP TABLE IF EXISTS temp.lib2_artist_page_members")
     conn.execute("CREATE TEMP TABLE lib2_artist_page_members (id INTEGER PRIMARY KEY)")
-    conn.execute("INSERT OR IGNORE INTO temp.lib2_artist_page_members "
-                 f"{library_artist_ids_sql()}")
+    from core.library2.member_version import cached_member_ids
+    member_sql = library_artist_ids_sql()
+    member_ids = cached_member_ids(conn, member_sql)
+    if member_ids is None:
+        conn.execute(f"INSERT OR IGNORE INTO temp.lib2_artist_page_members {member_sql}")
+    else:
+        conn.executemany("INSERT OR IGNORE INTO temp.lib2_artist_page_members (id) VALUES (?)",
+                         ((i,) for i in member_ids))
     clauses, params = ["a.canonical_artist_id IS NULL",
                        "a.id IN (SELECT id FROM temp.lib2_artist_page_members)"], {}
     # ...and, once directories exist, only the ones this library may see: a

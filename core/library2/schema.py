@@ -1436,6 +1436,8 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
     # only; the index fill runs in the background on first use.
     from core.library2.song_search import ensure_schema as ensure_song_search_schema
     ensure_song_search_schema(cursor)
+    from core.library2.member_version import ensure_schema as ensure_member_version_schema
+    ensure_member_version_schema(cursor)
     # what each file that imported without a match most likely is
     from core.library2.unmatched_identify import ensure_unmatched_match_schema
     ensure_unmatched_match_schema(cursor)
