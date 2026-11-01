@@ -299,6 +299,45 @@ describe('Library V2 artist detail — All Releases views', () => {
     },
   );
 
+  it('opens an artist linked without a header in the one this profile picked for the library', async () => {
+    inLibrary();
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: {},
+            artist_page: { header: 'compact', header_elsewhere: 'rich' },
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Dummy' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 1, name: 'Portishead' },
+            tracks: [],
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/albums/1/queue-status', () =>
+        HttpResponse.json({ success: true, tracks: {}, albums: {} }),
+      ),
+    );
+    // from an album page the route leaves the header alone: the page picks it
+    const { router } = renderArtist('/library?album=1');
+    await screen.findByRole('button', { name: '← Library' });
+    await act(() => router.navigate({ href: '/library?artist=1' }));
+    expect(await screen.findByRole('button', { name: /^Rich header/ })).toBeInTheDocument();
+    expect(router.state.location.search).not.toHaveProperty('header');
+  });
+
   it('says a release on the wishlist keeps upgrading to its quality profile', async () => {
     // being on the wishlist is monitoring: it is what quality upgrades act on,
     // and taking it off stops both

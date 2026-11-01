@@ -7858,6 +7858,24 @@ function ArtistViewSkeleton() {
   );
 }
 
+/** ldp-05: one switch, in both header shapes, on every artist page. The rich
+ *  hero is the default; compact is the opt-in for a denser page. */
+function HeaderToggle({ mode }: { mode: LibraryV2ArtistPageHeader }) {
+  const navigate = useNavigate();
+  return (
+    <IconActionButton
+      icon={mode === 'rich' ? 'collapse' : 'expand'}
+      title={mode === 'rich' ? 'Compact header' : 'Rich header — bio, listeners, plays and top tracks'}
+      onClick={() =>
+        void navigate({
+          replace: true,
+          search: (p) => ({ ...p, header: mode === 'rich' ? 'compact' : 'rich' }),
+        })
+      }
+    />
+  );
+}
+
 /** `deezer:1518490` from ?discover= */
 function providerArtist(discover: string | undefined) {
   const split = (discover ?? '').indexOf(':');
@@ -7891,8 +7909,8 @@ function ProviderArtistView({
   const artistName = String(info?.name || name || '');
   const back = useArtistBack(artistName || undefined);
   // reached from search or discover: the header this profile picked for
-  // arrivals from elsewhere decides whether the backdrop video plays, and
-  // nothing plays (or is looked up) before that is known
+  // arrivals from elsewhere, compact or the rich hero with its video, bio and
+  // stats. nothing rich is shown (or looked up) before that is known
   const prefs = useQuery(libraryV2UiPreferencesQueryOptions());
   const heroHeader =
     search.header ??
@@ -7920,7 +7938,7 @@ function ProviderArtistView({
         spotifyId: source === 'spotify' ? providerId : undefined,
         deezerId: source === 'deezer' ? providerId : undefined,
       }),
-    enabled: Boolean(artistName),
+    enabled: Boolean(artistName) && heroHeader === 'rich',
     staleTime: 30 * 60_000,
   });
   // only once the page has rendered: the name is known from the URL before
@@ -7981,25 +7999,62 @@ function ProviderArtistView({
           <ArtistViewSkeleton />
         ) : (
           <>
-            <LegacyArtistHero
-              video={heroHeader === 'rich'}
-              name={artistName}
-              imageUrl={String(info?.image_url || '')}
-              genres={(info?.genres ?? []).map(String)}
-              bio={heroStats.data?.bio || (info?.lastfm_bio as string | undefined) || null}
-              listeners={heroStats.data?.listeners ?? null}
-              playcount={heroStats.data?.playcount ?? null}
-              followers={heroStats.data?.followers ?? null}
-              sections={buckets.map(({ title, bucket }) => ({
-                label: title,
-                owned: discography.releasesFor(bucket).filter((r) => r.owned).length,
-                total: discography.releasesFor(bucket).length,
-              }))}
-              providerId={providerId}
-              source={source}
-              eyebrow="Not in your library"
-              actions={<ProviderArtistActions payload={payload} watchlist={watchlist} />}
-            />
+            {heroHeader === 'rich' ? (
+              <LegacyArtistHero
+                titleActions={<HeaderToggle mode="rich" />}
+                name={artistName}
+                imageUrl={String(info?.image_url || '')}
+                genres={(info?.genres ?? []).map(String)}
+                bio={heroStats.data?.bio || (info?.lastfm_bio as string | undefined) || null}
+                listeners={heroStats.data?.listeners ?? null}
+                playcount={heroStats.data?.playcount ?? null}
+                followers={heroStats.data?.followers ?? null}
+                sections={buckets.map(({ title, bucket }) => ({
+                  label: title,
+                  owned: discography.releasesFor(bucket).filter((r) => r.owned).length,
+                  total: discography.releasesFor(bucket).length,
+                }))}
+                providerId={providerId}
+                source={source}
+                eyebrow="Not in your library"
+                actions={<ProviderArtistActions payload={payload} watchlist={watchlist} />}
+              />
+            ) : (
+              <header className={styles.detailHeader}>
+                {info?.image_url ? (
+                  <div
+                    className={styles.heroBackdrop}
+                    style={{
+                      backgroundImage: `url("${String(info.image_url).replace(/"/g, '%22')}")`,
+                    }}
+                    aria-hidden="true"
+                  />
+                ) : null}
+                <Artwork
+                  src={String(info?.image_url || '')}
+                  alt={artistName}
+                  className={styles.detailThumb}
+                />
+                <div className={styles.detailMeta}>
+                  <p className={styles.heroEyebrow}>
+                    <span className={styles.heroEyebrowDot} aria-hidden="true" />
+                    Not in your library
+                  </p>
+                  <div className={styles.detailTitleRow}>
+                    <h1 className={styles.title} title={artistName}>
+                      {artistName}
+                    </h1>
+                    <HeaderToggle mode="compact" />
+                  </div>
+                  {info?.genres?.length ? (
+                    <p className={styles.genres}>{info.genres.map(String).join(', ')}</p>
+                  ) : null}
+                  <div className={styles.detailLabels}>
+                    <ProviderArtistActions payload={payload} watchlist={watchlist} />
+                  </div>
+                </div>
+              </header>
+            )}
 
             <div className={styles.releasesBar}>
               <div className={styles.releasesToggle}>
@@ -8198,7 +8253,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   // is are view settings, carried in the URL next to `releases` and `view`
   // like every other Library V2 view setting.
   const releaseView = search.releaseView;
-  const headerMode = search.header ?? 'rich';
+  // a header the url names stays; any other way in from inside the library
+  // (a link that names none) opens in the one this profile picked for it.
+  // nothing rich, and so no lookup, before that is known
+  const viewPrefs = useQuery(libraryV2UiPreferencesQueryOptions());
+  const headerMode =
+    search.header ??
+    (viewPrefs.isPending ? 'compact' : (viewPrefs.data?.artist_page?.header ?? 'rich'));
   // the toolbar picks up a small name tag once the hero scrolls away
   const artistTopRef = useRef<HTMLDivElement>(null);
   const heroSentinelRef = useRef<HTMLDivElement>(null);
@@ -8245,7 +8306,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const openArtist = useOpenArtist();
   // My Library shows what View Settings leaves on, Discovery all of it. A
   // section waits for the preferences, it was loaded and then taken away
-  const viewPrefs = useQuery(libraryV2UiPreferencesQueryOptions());
   const showSection = (key: LibraryViewSection) =>
     releasesMode === 'all' ||
     (!viewPrefs.isPending && viewPrefs.data?.artist_page?.library_sections?.[key] !== false);
@@ -8497,27 +8557,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     </>
   ) : null;
 
-  /** ldp-05: one switch, in both header shapes. The rich hero is the default
-   *  everywhere; compact is the opt-in for a denser page. */
-  const headerToggle = (
-    <IconActionButton
-      icon={headerMode === 'rich' ? 'collapse' : 'expand'}
-      title={
-        headerMode === 'rich'
-          ? 'Compact header'
-          : 'Rich header — bio, listeners, plays and top tracks'
-      }
-      onClick={() =>
-        void navigate({
-          replace: true,
-          search: (p) => ({
-            ...p,
-            header: headerMode === 'rich' ? 'compact' : 'rich',
-          }),
-        })
-      }
-    />
-  );
+  const headerToggle = <HeaderToggle mode={headerMode} />;
 
   return (
     <div ref={artistTopRef} className={`${styles.page} ${styles.detailView}`}>

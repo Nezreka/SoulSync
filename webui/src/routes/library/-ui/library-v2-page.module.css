@@ -7067,6 +7067,33 @@ textarea.searchInput {
   stroke-width: 1.8;
 }
 
+/* the same buttons in a compact header (an artist the library doesn't hold) */
+.detailHeader .heroSecondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--white-a18);
+  border-radius: var(--radius-pill);
+  background: var(--white-a10);
+  color: var(--text-1);
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.detailHeader .heroSecondary:hover:not(:disabled) {
+  background: var(--white-a20);
+  border-color: var(--white-a30);
+}
+
+.detailHeader .heroSecondary svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 1.8;
+}
+
 .premierHero :global(.artist-hero-actions) .toolPrimary {
   padding: 0 26px;
   border-color: transparent;
