@@ -3975,9 +3975,13 @@ button.statusWarn:disabled {
   cursor: default;
 }
 
-.enrichDropdownIcon {
-  font-size: 13px;
+.enrichDropdownDot {
+  width: 8px;
+  height: 8px;
+  margin: 0 3px;
+  border-radius: 50%;
   flex-shrink: 0;
+  background: var(--white-a40);
 }
 
 .enrichDropdownLabel {
@@ -4954,14 +4958,15 @@ textarea.searchInput {
   overflow-y: auto;
 }
 
-.artistToolsPanel .enrichDropdownSubmenu {
+.artistToolsPanel .enrichDropdownMenu {
   position: static;
   min-width: 0;
   margin: 0 8px 6px;
   box-shadow: none;
 }
 
-.overflowMenuItem svg {
+.overflowMenuItem svg,
+.enrichDropdownItem svg {
   width: 15px;
   height: 15px;
   flex-shrink: 0;
@@ -8363,8 +8368,23 @@ textarea.searchInput {
 
 /* ── menus: tools and the release overflow ─────────────────────────────── */
 
+/* Tools → Enrich: the provider list beside the panel (ArtistToolsMenu) */
+.toolsFlyout {
+  position: absolute;
+  z-index: 201;
+}
+
+.toolsFlyout .enrichDropdownMenu {
+  position: static;
+}
+
 .overflowMenu {
   top: calc(100% + 8px);
+}
+
+/* Enrich's provider list is a menu like the others */
+.overflowMenu,
+.enrichDropdownMenu {
   min-width: 220px;
   padding: 6px;
   border: 1px solid var(--white-a10);
@@ -8377,7 +8397,8 @@ textarea.searchInput {
   animation: menuIn var(--dur-quick) var(--ease-emphasized);
 }
 
-.overflowMenuItem {
+.overflowMenuItem,
+.enrichDropdownItem {
   gap: 10px;
   min-height: 36px;
   padding: 0 12px;
@@ -8386,7 +8407,9 @@ textarea.searchInput {
   font-size: 13px;
 }
 
-.overflowMenuItem:hover:not(:disabled) {
+.overflowMenuItem:hover:not(:disabled),
+.overflowMenuItem[aria-expanded='true'],
+.enrichDropdownItem:hover:not(:disabled) {
   background: var(--white-a08);
 }
 
@@ -8412,7 +8435,8 @@ textarea.searchInput {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .overflowMenu {
+  .overflowMenu,
+  .enrichDropdownMenu {
     animation: none;
   }
 }

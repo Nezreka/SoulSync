@@ -1273,21 +1273,21 @@ function MatchArtistReleaseContext({
 }
 
 /** The metadata providers this page names, in display order: the chip
- *  abbreviation, the Enrich menu icon and the enrichment ring colour. */
-const PROVIDERS: { key: string; label: string; abbr?: string; icon: string; color?: string }[] = [
-  { key: 'spotify', label: 'Spotify', abbr: 'SP', icon: '🟢', color: '#1db954' },
-  { key: 'musicbrainz', label: 'MusicBrainz', abbr: 'MB', icon: '🟠', color: '#ba55d3' },
-  { key: 'deezer', label: 'Deezer', abbr: 'Dz', icon: '🟣', color: '#a238ff' },
-  { key: 'itunes', label: 'iTunes', abbr: 'iT', icon: '🔴', color: '#fc3c44' },
-  { key: 'audiodb', label: 'AudioDB', abbr: 'ADB', icon: '🔵', color: '#1a9fff' },
-  { key: 'discogs', label: 'Discogs', icon: '🟤', color: '#D4A574' },
-  { key: 'lastfm', label: 'Last.fm', abbr: 'LFM', icon: '⚪', color: '#d51007' },
-  { key: 'genius', label: 'Genius', abbr: 'Gen', icon: '🟡', color: '#ffff64' },
-  { key: 'tidal', label: 'Tidal', icon: '⬛', color: '#00ffff' },
-  { key: 'qobuz', label: 'Qobuz', icon: '🔷', color: '#4285f4' },
-  { key: 'amazon', label: 'Amazon', abbr: 'Amz', icon: '🛒' },
-  { key: 'jiosaavn', label: 'JioSaavn', abbr: 'JS', icon: '🎵' },
-  { key: 'bandcamp', label: 'Bandcamp', abbr: 'BC', icon: '🔹', color: '#1da0c3' },
+ *  abbreviation and the colour of the enrichment ring and the Enrich menu dot. */
+const PROVIDERS: { key: string; label: string; abbr?: string; color?: string }[] = [
+  { key: 'spotify', label: 'Spotify', abbr: 'SP', color: '#1db954' },
+  { key: 'musicbrainz', label: 'MusicBrainz', abbr: 'MB', color: '#ba55d3' },
+  { key: 'deezer', label: 'Deezer', abbr: 'Dz', color: '#a238ff' },
+  { key: 'itunes', label: 'iTunes', abbr: 'iT', color: '#fc3c44' },
+  { key: 'audiodb', label: 'AudioDB', abbr: 'ADB', color: '#1a9fff' },
+  { key: 'discogs', label: 'Discogs', color: '#D4A574' },
+  { key: 'lastfm', label: 'Last.fm', abbr: 'LFM', color: '#d51007' },
+  { key: 'genius', label: 'Genius', abbr: 'Gen', color: '#ffff64' },
+  { key: 'tidal', label: 'Tidal', color: '#00ffff' },
+  { key: 'qobuz', label: 'Qobuz', color: '#4285f4' },
+  { key: 'amazon', label: 'Amazon', abbr: 'Amz' },
+  { key: 'jiosaavn', label: 'JioSaavn', abbr: 'JS' },
+  { key: 'bandcamp', label: 'Bandcamp', abbr: 'BC', color: '#1da0c3' },
 ];
 const PROVIDER_BY_KEY = new Map(PROVIDERS.map((p) => [p.key, p]));
 
@@ -1841,7 +1841,7 @@ function EnrichDropdown({
           onClose();
         }}
       >
-        <span className={styles.enrichDropdownIcon}>✨</span>
+        <SvgIcon name="refresh" />
         <span className={styles.enrichDropdownLabel}>Enrich with all</span>
       </button>
       <div className={styles.enrichDivider} />
@@ -1858,7 +1858,10 @@ function EnrichDropdown({
             onClose();
           }}
         >
-          <span className={styles.enrichDropdownIcon}>{s.icon}</span>
+          <span
+            className={styles.enrichDropdownDot}
+            style={s.color ? { background: s.color } : undefined}
+          />
           <span className={styles.enrichDropdownLabel}>{s.label}</span>
         </button>
       ))}
@@ -6594,6 +6597,34 @@ function ArtistToolsMenu({
   const [showSubmenu, setShowSubmenu] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
+  // Enrich unfolds to the left of the panel, a submenu like any other; the
+  // panel scrolls, so inside it the list could only open in place. Where the
+  // screen has no room on the left (a phone) it still does
+  const panelRef = useRef<HTMLDivElement>(null);
+  const enrichRef = useRef<HTMLButtonElement>(null);
+  const flyoutRef = useRef<HTMLDivElement>(null);
+  const [flyoutAt, setFlyoutAt] = useState<CSSProperties | 'inline' | null>(null);
+  useLayoutEffect(() => {
+    const [wrap, panel, button, flyout] = [wrapRef, panelRef, enrichRef, flyoutRef].map((ref) =>
+      ref.current?.getBoundingClientRect(),
+    );
+    if (!showSubmenu || !wrap || !panel || !button || !flyout) return setFlyoutAt(null);
+    if (panel.left - flyout.width - 6 < 8) return setFlyoutAt('inline');
+    const top = Math.max(8, Math.min(button.top - 7, window.innerHeight - 8 - flyout.height));
+    setFlyoutAt({ top: top - wrap.top, right: wrap.right - panel.left + 6 });
+  }, [showSubmenu]);
+  const enrich = (
+    <EnrichDropdown
+      entity="artists"
+      entityId={artistId}
+      entityName={artistName}
+      wrapperRef={wrapRef}
+      onClose={() => {
+        setOpen(false);
+        setShowSubmenu(false);
+      }}
+    />
+  );
   useEffect(() => {
     if (!open) return;
     function onDocClick(e: MouseEvent) {
@@ -6645,7 +6676,10 @@ function ArtistToolsMenu({
         className={styles.toolButton}
         aria-expanded={open}
         aria-controls="artist-tools-panel"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setOpen((v) => !v);
+          setShowSubmenu(false);
+        }}
       >
         <SvgIcon name="organize" />
         <span>Tools</span>
@@ -6654,7 +6688,9 @@ function ArtistToolsMenu({
       {open ? (
         <div
           id="artist-tools-panel"
+          ref={panelRef}
           className={`${styles.overflowMenu} ${styles.artistToolsPanel} ${styles.alignRight}`}
+          onScroll={() => setShowSubmenu(false)}
         >
           <div className={styles.toolMenuHeading}>Files</div>
           {item('Manage Tracks', 'tracks', onManageTracks, false)}
@@ -6675,6 +6711,7 @@ function ArtistToolsMenu({
           )}
           <div className={styles.submenuContainer}>
             <button
+              ref={enrichRef}
               type="button"
               className={styles.overflowMenuItem}
               disabled={!canWrite}
@@ -6682,22 +6719,10 @@ function ArtistToolsMenu({
               onClick={() => setShowSubmenu((v) => !v)}
             >
               <SvgIcon name="refresh" />
-              Enrich… <span className={styles.submenuChevron}>›</span>
+              Enrich…{' '}
+              <span className={styles.submenuChevron}>{flyoutAt === 'inline' ? '⌄' : '‹'}</span>
             </button>
-            {showSubmenu ? (
-              <EnrichDropdown
-                entity="artists"
-                entityId={artistId}
-                entityName={artistName}
-                wrapperRef={wrapRef}
-                align="right"
-                submenu
-                onClose={() => {
-                  setOpen(false);
-                  setShowSubmenu(false);
-                }}
-              />
-            ) : null}
+            {showSubmenu && flyoutAt === 'inline' ? enrich : null}
           </div>
           <div className={styles.toolMenuHeading}>Maintenance</div>
           {item('Library Health & Repair', 'settings', onMaintenance)}
@@ -6714,6 +6739,15 @@ function ArtistToolsMenu({
           {item('View Settings…', 'settings', onViewSettings, false)}
           <div className={styles.toolMenuDivider} />
           {item('Delete Artist…', 'delete', onDelete, true, true)}
+        </div>
+      ) : null}
+      {open && showSubmenu && flyoutAt !== 'inline' ? (
+        <div
+          ref={flyoutRef}
+          className={styles.toolsFlyout}
+          style={flyoutAt ?? { visibility: 'hidden' }}
+        >
+          {enrich}
         </div>
       ) : null}
       {showExport ? (
