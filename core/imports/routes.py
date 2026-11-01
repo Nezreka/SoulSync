@@ -813,6 +813,59 @@ def _scanning_history_rows(worker: Any, staging_path: str,
     return kept, problems
 
 
+# The worker's walk of staging, kept with the records scan it belongs to. It
+# lists every folder and reads the tags of loose files; done on every poll, a
+# bulk staging load took longer than the poll interval, polls piled up behind
+# each other and the page timed out (#1955). It is rebuilt off the request
+# thread whenever the records change, and a poll in between gets the last
+# walk. An import (the scan generation moving) never serves the old walk.
+_INBOX_WALK_GRACE_SECONDS = 3.0
+_inbox_walk_lock = threading.Lock()
+_inbox_walk_cache: Dict[str, Any] = {"path": None, "generation": None, "records": None,
+                                      "candidates": None, "problems": None}
+_inbox_walk_jobs: Dict[str, threading.Thread] = {}
+
+
+def _inbox_walk(worker: Any, staging_path: str, records: Any, generation: int):
+    """``(candidates, problems)`` for the inbox, or None while the first walk
+    since the last import is still running (the caller answers "scanning")."""
+    cache = _inbox_walk_cache
+    with _inbox_walk_lock:
+        current = cache["path"] == staging_path and cache["generation"] == generation
+        if current and cache["records"] is records:
+            return cache["candidates"], cache["problems"]
+        job = _inbox_walk_jobs.get(staging_path)
+        if job is None or not job.is_alive():
+            job = threading.Thread(target=_run_inbox_walk, name="inbox-walk", daemon=True,
+                                   args=(worker, staging_path, records, generation))
+            _inbox_walk_jobs[staging_path] = job
+            job.start()
+    # a folder of normal size finishes inside the grace, so the reply is the
+    # folder as it is now; a huge one past it gets the last walk (or, right
+    # after an import, the scanning reply) instead of holding the request
+    job.join(timeout=_INBOX_WALK_GRACE_SECONDS)
+    with _inbox_walk_lock:
+        if cache["path"] == staging_path and cache["generation"] == generation:
+            return cache["candidates"], cache["problems"]
+    return None
+
+
+def _run_inbox_walk(worker: Any, staging_path: str, records: Any, generation: int) -> None:
+    try:
+        if worker is None:
+            from core.auto_import_worker import AutoImportWorker
+            worker = AutoImportWorker.__new__(AutoImportWorker)
+        candidates, problems = worker.enumerate_candidates(staging_path)
+    except Exception as exc:  # noqa: BLE001 - the next poll tries again
+        module_logger.error("Import inbox walk failed: %s", exc)
+        return
+    with _inbox_walk_lock:
+        if _staging_scan_generation["value"] == generation:
+            _inbox_walk_cache.update({"path": staging_path, "generation": generation,
+                                      "records": records, "candidates": candidates,
+                                      "problems": problems})
+
+
 def _scanning_inbox_payload(scanning: Dict[str, Any], staging_path: str,
                             worker: Any) -> Dict[str, Any]:
     """What the inbox can honestly say while the staging scan is still running (#1671).
@@ -923,13 +976,17 @@ def inbox(runtime: ImportRouteRuntime, worker: Any) -> tuple[Dict[str, Any], int
         from core.imports.inbox import build_inbox, summarize
 
         problems = list(_staging_scan_problems)
-        candidates: list = []
         history: list = []
         status: Dict[str, Any] = {}
+        walked = _inbox_walk(worker, staging_path, records, build_generation)
+        if walked is None:
+            return _scanning_inbox_payload(
+                {"success": True, "scanning": True, "staging_path": staging_path,
+                 "progress": {"scanned": 0, "total": 0}}, staging_path, worker), 200
+        candidates, walk_problems = walked
+        seen = {(p["path"], p["error"]) for p in problems}
+        problems.extend(p for p in walk_problems if (p["path"], p["error"]) not in seen)
         if worker is not None:
-            candidates, walk_problems = worker.enumerate_candidates(staging_path)
-            seen = {(p["path"], p["error"]) for p in problems}
-            problems.extend(p for p in walk_problems if (p["path"], p["error"]) not in seen)
             history = worker.get_results(limit=200)
             status = worker.get_status()
             # #1289: a stale terminal row (e.g. 'partial') older than the
@@ -938,11 +995,6 @@ def inbox(runtime: ImportRouteRuntime, worker: Any) -> tuple[Dict[str, Any], int
             # of retryable 'failed'. Backfill per-candidate lookups for any
             # candidate the window missed.
             history = _backfill_stale_history(worker, candidates, history)
-        else:
-            from core.auto_import_worker import AutoImportWorker
-            bare = AutoImportWorker.__new__(AutoImportWorker)
-            candidates, walk_problems = bare.enumerate_candidates(staging_path)
-            problems.extend(walk_problems)
 
         rows = build_inbox(candidates, records, history, status.get("active_imports") or [],
                            staging_root=staging_path)

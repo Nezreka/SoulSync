@@ -1855,6 +1855,10 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_aih_status ON auto_import_history (status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_aih_folder_hash ON auto_import_history (folder_hash)")
+            # the inbox looks each new folder up by path on every poll (#1955):
+            # without this every lookup read the whole history
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_aih_folder_path "
+                           "ON auto_import_history (folder_path, created_at)")
 
             # Re-identify hints (#889) — a user-designated, single-use answer to "which
             # release does this track belong to". Written when the user picks a release in
