@@ -195,6 +195,7 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 - **Listening stats**: plays, time, top artists / albums / tracks, genres, when you listen, streaks, and how much of what you own you actually play.
 - **Your Year**: a full-screen, Wrapped-style story of your year, ending in a card studio that exports shareable images using your real album art.
 - **Scrobbling** to Last.fm and ListenBrainz from Plex, Jellyfin or Navidrome.
+- **Per-profile**: a profile with its own Plex account, Jellyfin user, ListenBrainz or Last.fm gets its own stats and recommendations, and can scrobble its plays to its own ListenBrainz or Last.fm.
 - **History import** from Last.fm, ListenBrainz and Maloja. Each profile can connect its own account and gets its own stats and recommendations.
 
 ## Player & radio

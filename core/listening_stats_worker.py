@@ -547,125 +547,125 @@ class ListeningStatsWorker:
     def _scrobble_new_events(self):
         """Scrobble unscrobbled listening events to ListenBrainz and Last.fm.
 
-        shared pile only. these are the admin's accounts, and a profile's own
-        pile is someone else's listening (#1293). its listenbrainz rows are
-        already marked scrobbled for listenbrainz but not last.fm, so without
-        the filter they'd go straight onto the admin's last.fm.
+        each pile goes to its own accounts. the shared pile goes to the
+        admin's (Settings); a profile's own pile goes to the accounts that
+        profile connected for scrobbling, from when it turned that on
+        (Phonk_Ben_67). a profile's pile never reaches the admin's accounts:
+        it is someone else's listening (#1293).
 
         only scrobble_eligible rows go out: media-server and import rows are
         eligible on insert (the source attests the play), while web-player
         rows become eligible only once the player reports the Last.fm
         threshold was reached. a 10s web-player log is a "play" for stats,
         not a scrobble."""
-        conn = None
         try:
-            # ListenBrainz scrobbling
-            if self.config_manager.get('listenbrainz.scrobble_enabled', False):
-                lb_token = self.config_manager.get('listenbrainz.token', '')
-                if lb_token:
-                    conn = self.db._get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute(f"""
-                        SELECT id, title, artist, album, played_at
-                        FROM listening_history
-                        WHERE scrobbled_listenbrainz = 0
-                          AND scrobble_eligible = 1
-                          AND {SHARED_SCOPE}
-                        ORDER BY played_at ASC
-                        LIMIT 500
-                    """)
-                    rows = cursor.fetchall()
-                    conn.close()
-                    conn = None
-
-                    if rows:
-                        try:
-                            from core.listenbrainz_client import ListenBrainzClient
-                            lb_client = ListenBrainzClient(token=lb_token)
-                            if lb_client.is_authenticated():
-                                listens = [{
-                                    'artist': r[2] or '',
-                                    'track': r[1] or '',
-                                    'album': r[3] or '',
-                                    # stored utc; the clients read a bare time as local
-                                    'timestamp': _play_epoch(r[4]),
-                                } for r in rows if _play_epoch(r[4])]
-
-                                if lb_client.submit_listens(listens):
-                                    # Mark as scrobbled
-                                    ids = [r[0] for r in rows]
-                                    conn = self.db._get_connection()
-                                    cursor = conn.cursor()
-                                    placeholders = ','.join(['?'] * len(ids))
-                                    cursor.execute(f"UPDATE listening_history SET scrobbled_listenbrainz = 1 WHERE id IN ({placeholders})", ids)
-                                    conn.commit()
-                                    conn.close()
-                                    conn = None
-                                    logger.info(f"Scrobbled {len(ids)} events to ListenBrainz")
-                        except Exception as e:
-                            logger.debug(f"ListenBrainz scrobble failed: {e}")
-
-            # Last.fm scrobbling
+            lb_token = (self.config_manager.get('listenbrainz.token', '')
+                        if self.config_manager.get('listenbrainz.scrobble_enabled', False) else '')
+            lastfm = None
             if self.config_manager.get('lastfm.scrobble_enabled', False):
-                api_key = self.config_manager.get('lastfm.api_key', '')
-                api_secret = self.config_manager.get('lastfm.api_secret', '')
                 session_key = self.config_manager.get('lastfm.session_key', '')
-                if api_key and api_secret and session_key:
-                    conn = self.db._get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute(f"""
-                        SELECT id, title, artist, album, played_at
-                        FROM listening_history
-                        WHERE scrobbled_lastfm = 0
-                          AND scrobble_eligible = 1
-                          AND {SHARED_SCOPE}
-                        ORDER BY played_at ASC
-                        LIMIT 200
-                    """)
-                    rows = cursor.fetchall()
-                    conn.close()
-                    conn = None
-
-                    if rows:
-                        try:
-                            from core.lastfm_client import LastFMClient
-                            lfm_client = LastFMClient(api_key=api_key, api_secret=api_secret, session_key=session_key)
-
-                            # Process in batches of 50 (Last.fm limit)
-                            all_scrobbled_ids = []
-                            for i in range(0, len(rows), 50):
-                                batch = rows[i:i + 50]
-                                tracks = [{
-                                    'artist': r[2] or '',
-                                    'track': r[1] or '',
-                                    'album': r[3] or '',
-                                    # stored utc; the clients read a bare time as local
-                                    'timestamp': _play_epoch(r[4]),
-                                } for r in batch if _play_epoch(r[4])]
-
-                                if lfm_client.scrobble_tracks(tracks):
-                                    all_scrobbled_ids.extend(r[0] for r in batch)
-
-                            if all_scrobbled_ids:
-                                conn = self.db._get_connection()
-                                cursor = conn.cursor()
-                                placeholders = ','.join(['?'] * len(all_scrobbled_ids))
-                                cursor.execute(f"UPDATE listening_history SET scrobbled_lastfm = 1 WHERE id IN ({placeholders})", all_scrobbled_ids)
-                                conn.commit()
-                                conn.close()
-                                conn = None
-                                logger.info(f"Scrobbled {len(all_scrobbled_ids)} events to Last.fm")
-                        except Exception as e:
-                            logger.debug(f"Last.fm scrobble failed: {e}")
-
+                if session_key:
+                    lastfm = session_key
+            self._scrobble_pile(SHARED_SCOPE, lb_token=lb_token or None, lb_base_url=None,
+                                lastfm_session=lastfm, label='shared')
         except Exception as e:
             logger.error(f"Scrobble error: {e}")
+        try:
+            profiles = self.db.profiles_scrobbling()
+        except Exception as e:  # noqa: BLE001 - the shared pile already went out
+            logger.debug(f"Listing scrobbling profiles failed: {e}")
+            profiles = []
+        from core.listening_scope import listening_owner
+        for prof in profiles:
+            pid = prof['profile_id']
+            # only a profile reading its own pile has plays that are its own
+            if listening_owner(self.db, pid) != pid:
+                continue
+            try:
+                self._scrobble_pile(
+                    owner_clause(pid), lb_token=prof.get('listenbrainz_token'),
+                    lb_base_url=prof.get('listenbrainz_base_url'),
+                    lb_since=prof.get('listenbrainz_since'),
+                    lastfm_session=prof.get('lastfm_session'), lastfm_since=prof.get('lastfm_since'),
+                    label=f'profile {pid}')
+            except Exception as e:  # noqa: BLE001 - one profile failing leaves the rest
+                logger.error(f"Scrobble error for profile {pid}: {e}")
+
+    def _unscrobbled(self, flag, scope, since, limit):
+        conn = self.db._get_connection()
+        try:
+            sql = (f"SELECT id, title, artist, album, played_at FROM listening_history "
+                   f"WHERE {flag} = 0 AND scrobble_eligible = 1 AND {scope}")
+            params = []
+            if since:
+                sql += " AND played_at >= ?"
+                params.append(since)
+            sql += " ORDER BY played_at ASC LIMIT ?"
+            params.append(limit)
+            return conn.execute(sql, params).fetchall()
         finally:
-            if conn:
+            conn.close()
+
+    def _mark_scrobbled(self, flag, ids):
+        if not ids:
+            return
+        conn = self.db._get_connection()
+        try:
+            placeholders = ','.join(['?'] * len(ids))
+            conn.execute(f"UPDATE listening_history SET {flag} = 1 WHERE id IN ({placeholders})", list(ids))
+            conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _as_listens(rows):
+        return [{
+            'artist': r[2] or '',
+            'track': r[1] or '',
+            'album': r[3] or '',
+            # stored utc; the clients read a bare time as local
+            'timestamp': _play_epoch(r[4]),
+        } for r in rows if _play_epoch(r[4])]
+
+    def _scrobble_pile(self, scope, *, lb_token=None, lb_base_url=None, lb_since=None,
+                       lastfm_session=None, lastfm_since=None, label=''):
+        """one pile's unscrobbled plays to the given accounts (either may be None)."""
+        if lb_token:
+            rows = self._unscrobbled('scrobbled_listenbrainz', scope, lb_since, 500)
+            if rows:
                 try:
-                    conn.close()
-                except Exception:  # noqa: S110 — finally-block cleanup, logger may be torn down
-                    pass
+                    from core.listenbrainz_client import ListenBrainzClient
+                    # a profile on its own listenbrainz server names it; the admin's comes from config
+                    lb_client = (ListenBrainzClient(token=lb_token, base_url=lb_base_url) if lb_base_url
+                                 else ListenBrainzClient(token=lb_token))
+                    if lb_client.is_authenticated() and lb_client.submit_listens(self._as_listens(rows)):
+                        self._mark_scrobbled('scrobbled_listenbrainz', [r[0] for r in rows])
+                        logger.info(f"Scrobbled {len(rows)} events to ListenBrainz ({label})")
+                except Exception as e:
+                    logger.debug(f"ListenBrainz scrobble failed ({label}): {e}")
+
+        if lastfm_session:
+            api_key = self.config_manager.get('lastfm.api_key', '')
+            api_secret = self.config_manager.get('lastfm.api_secret', '')
+            if not (api_key and api_secret):
+                return
+            rows = self._unscrobbled('scrobbled_lastfm', scope, lastfm_since, 200)
+            if rows:
+                try:
+                    from core.lastfm_client import LastFMClient
+                    lfm_client = LastFMClient(api_key=api_key, api_secret=api_secret,
+                                              session_key=lastfm_session)
+                    done = []
+                    # Process in batches of 50 (Last.fm limit)
+                    for i in range(0, len(rows), 50):
+                        batch = rows[i:i + 50]
+                        if lfm_client.scrobble_tracks(self._as_listens(batch)):
+                            done.extend(r[0] for r in batch)
+                    self._mark_scrobbled('scrobbled_lastfm', done)
+                    if done:
+                        logger.info(f"Scrobbled {len(done)} events to Last.fm ({label})")
+                except Exception as e:
+                    logger.debug(f"Last.fm scrobble failed ({label}): {e}")
 
     def _resolve_db_track_id(self, title, artist):
         """Try to match a server track to a local DB track by title+artist."""

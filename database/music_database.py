@@ -1522,6 +1522,7 @@ class MusicDatabase:
             self._add_profile_service_credentials(cursor)
             self._add_profile_navidrome_login(cursor)
             self._add_profile_lastfm_username(cursor)
+            self._add_profile_scrobbling(cursor)
             self._add_profile_plex_home_user(cursor)
             self._add_profile_oidc_identity(cursor)
             self._add_profile_controls(cursor)
@@ -5565,7 +5566,7 @@ class MusicDatabase:
                 cursor.execute("""
                     UPDATE profiles
                     SET listenbrainz_token = NULL, listenbrainz_base_url = NULL, listenbrainz_username = NULL,
-                        updated_at = CURRENT_TIMESTAMP
+                        listenbrainz_scrobble_since = NULL, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 """, (profile_id,))
                 conn.commit()
@@ -5694,6 +5695,110 @@ class MusicDatabase:
             cursor.execute("ALTER TABLE profiles ADD COLUMN lastfm_username TEXT DEFAULT NULL")
         except sqlite3.OperationalError:
             pass  # Column already exists
+
+    def _add_profile_scrobbling(self, cursor):
+        """a profile scrobbling its own plays to its own accounts
+        (Phonk_Ben_67). last.fm needs a session from signing in (fernet
+        token, like the other secrets); listenbrainz reuses the token the
+        profile already saved. the *_since time is when the profile turned it
+        on: only plays from then on go out, so turning it on never pushes a
+        whole history someone may already have there. NULL = off."""
+        for sql in (
+            "ALTER TABLE profiles ADD COLUMN lastfm_session TEXT DEFAULT NULL",
+            "ALTER TABLE profiles ADD COLUMN lastfm_session_user TEXT DEFAULT NULL",
+            "ALTER TABLE profiles ADD COLUMN lastfm_scrobble_since TEXT DEFAULT NULL",
+            "ALTER TABLE profiles ADD COLUMN listenbrainz_scrobble_since TEXT DEFAULT NULL",
+        ):
+            try:
+                cursor.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+    @staticmethod
+    def _utc_now_text() -> str:
+        return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
+    def set_profile_lastfm_session(self, profile_id: int, session_key: Optional[str],
+                                   user: Optional[str] = None) -> bool:
+        """save a profile's own last.fm scrobbling session (scrobbling from
+        now on), or with no key sign it out."""
+        try:
+            from core.settings import config_manager
+            token = config_manager._encrypt_value(session_key) if session_key else None
+            if session_key and not token:
+                return False
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET lastfm_session = ?, lastfm_session_user = ?, "
+                    "lastfm_scrobble_since = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (token, (user or None) if token else None,
+                     self._utc_now_text() if token else None, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving Last.fm session for profile {profile_id}: {e}")
+            return False
+
+    def set_profile_listenbrainz_scrobble(self, profile_id: int, enabled: bool) -> bool:
+        """turn scrobbling to the profile's own listenbrainz on (from now) or off."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET listenbrainz_scrobble_since = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND (? = 0 OR (listenbrainz_token IS NOT NULL AND listenbrainz_token != ''))",
+                    (self._utc_now_text() if enabled else None, profile_id, 1 if enabled else 0))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting ListenBrainz scrobbling for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_scrobbling(self, profile_id: int) -> Dict[str, Any]:
+        """what a profile scrobbles its own plays to, for My Accounts."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT lastfm_session, lastfm_session_user, listenbrainz_scrobble_since "
+                    "FROM profiles WHERE id = ?", (profile_id,)).fetchone()
+        except Exception as e:
+            logger.error(f"Error reading scrobbling for profile {profile_id}: {e}")
+            row = None
+        return {
+            'lastfm': {'connected': bool(row and row[0]), 'user': (row[1] or '') if row else ''},
+            'listenbrainz': {'enabled': bool(row and row[2])},
+        }
+
+    def profiles_scrobbling(self) -> List[Dict[str, Any]]:
+        """every profile (never the admin) scrobbling its own plays somewhere:
+        {profile_id, lastfm_session, lastfm_since, listenbrainz_token,
+        listenbrainz_base_url, listenbrainz_since}, secrets decrypted."""
+        from core.settings import config_manager
+        out = []
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT id, lastfm_session, lastfm_scrobble_since, listenbrainz_token, "
+                    "listenbrainz_base_url, listenbrainz_scrobble_since FROM profiles "
+                    "WHERE id != 1 AND ((lastfm_session IS NOT NULL AND lastfm_session != '') "
+                    "OR (listenbrainz_scrobble_since IS NOT NULL AND listenbrainz_token IS NOT NULL "
+                    "AND listenbrainz_token != ''))").fetchall()
+        except Exception as e:
+            logger.error(f"Error listing scrobbling profiles: {e}")
+            return out
+        for pid, fm, fm_since, lb, lb_base, lb_since in rows:
+            session = config_manager._decrypt_value(fm) if fm else None
+            token = config_manager._decrypt_value(lb) if (lb and lb_since) else None
+            out.append({
+                'profile_id': int(pid),
+                'lastfm_session': session if isinstance(session, str) and session else None,
+                'lastfm_since': fm_since,
+                'listenbrainz_token': token if isinstance(token, str) and token else None,
+                'listenbrainz_base_url': lb_base or None,
+                'listenbrainz_since': lb_since,
+            })
+        return out
 
     def set_profile_lastfm(self, profile_id: int, username: Optional[str]) -> bool:
         """save (or with an empty name clear) a profile's own last.fm username."""
