@@ -122,3 +122,49 @@ def test_the_watchdog_reports_busy_threads_once_per_window():
 def test_a_sliver_of_a_window_is_never_reported():
     # the first tick after start: 0.2s of start-up cpu read as 2000% of a core
     assert db_lock_watchdog.format_busy_threads({1: 0.0}, {1: 5.0}, 0.2) is None
+
+
+def test_a_slow_query_is_logged_with_its_caller_once(tmp_path, monkeypatch):
+    import sqlite3 as _sq
+    from database import connection_pool as cp
+    path = str(tmp_path / "slow.db")
+    seed = _sq.connect(path)
+    seed.execute("CREATE TABLE t (x)")
+    seed.executemany("INSERT INTO t VALUES (?)", [(i,) for i in range(2000)])
+    seed.commit()
+    seed.close()
+    lines = []
+    monkeypatch.setattr(cp, "SLOW_SQL_SECONDS", 0.0)
+    cp._slow_sql_seen.clear()
+    import utils.logging_config as lc
+    real = lc.get_logger
+
+    class _Catch:
+        def warning(self, fmt, *args):
+            lines.append(fmt % args)
+    monkeypatch.setattr(lc, "get_logger", lambda name: _Catch() if name == "slow_sql" else real(name))
+    conn = cp.acquire(path, lambda same: _sq.connect(path, check_same_thread=same))
+    try:
+        rows = conn.execute("SELECT count(*) FROM t").fetchall()
+        conn.cursor().execute("SELECT count(*) FROM t").fetchall()
+    finally:
+        conn.close()
+    assert rows == [(2000,)]
+    assert len(lines) == 1, "the same statement is logged once per window"
+    assert "test_lock_holder_report.py" in lines[0] and "SELECT count(*) FROM t" in lines[0]
+
+
+def test_a_fast_query_logs_nothing(tmp_path, monkeypatch):
+    import sqlite3 as _sq
+    from database import connection_pool as cp
+    path = str(tmp_path / "fast.db")
+    lines = []
+    import utils.logging_config as lc
+    real = lc.get_logger
+    monkeypatch.setattr(lc, "get_logger", lambda name: type("C", (), {"warning": lambda s, *a: lines.append(a)})() if name == "slow_sql" else real(name))
+    conn = cp.acquire(path, lambda same: _sq.connect(path, check_same_thread=same))
+    try:
+        conn.execute("SELECT 1").fetchall()
+    finally:
+        conn.close()
+    assert lines == []

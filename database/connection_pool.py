@@ -116,6 +116,73 @@ def _close_quietly(raw: sqlite3.Connection) -> None:
         pass
 
 
+# A statement slower than this is logged with its SQL and the code that ran
+# it, once per statement per SLOW_SQL_REPEAT_SECONDS. Most SQL is built inside
+# functions, where no static sweep can plan it; this finds the slow ones as
+# they run (Oct 31 2026: a 126s query on a loop had sat in a worker unseen).
+SLOW_SQL_SECONDS = 1.0
+SLOW_SQL_REPEAT_SECONDS = 600.0
+_slow_sql_seen: dict = {}
+_slow_sql_lock = threading.Lock()
+
+
+def _note_slow(sql: Any, elapsed: float) -> None:
+    if elapsed < SLOW_SQL_SECONDS:
+        return
+    text = " ".join(str(sql or "").split())
+    key = text[:300]
+    now = time.monotonic()
+    with _slow_sql_lock:
+        last = _slow_sql_seen.get(key)
+        if last is not None and now - last < SLOW_SQL_REPEAT_SECONDS:
+            return
+        _slow_sql_seen[key] = now
+        if len(_slow_sql_seen) > 2000:
+            _slow_sql_seen.clear()
+    try:
+        import traceback
+        here = __file__.replace("\\", "/").rsplit("/", 1)[-1]
+        caller = next((f for f in reversed(traceback.extract_stack()[:-2])
+                       if not f.filename.replace("\\", "/").endswith(here)), None)
+        where = (f"{caller.filename.replace(chr(92), '/').rsplit('SoulSync/', 1)[-1]}:"
+                 f"{caller.lineno} {caller.name}") if caller else "?"
+        from utils.logging_config import get_logger
+        get_logger("slow_sql").warning("slow query %.1fs at %s: %s", elapsed, where, text[:600])
+    except Exception:  # noqa: BLE001, S110 - a diagnostic never breaks a query
+        pass
+
+
+class _TimedCursor(sqlite3.Cursor):
+    """A cursor that reports statements slower than SLOW_SQL_SECONDS. Two
+    clock reads a call; the SQL is only formatted for a slow one."""
+
+    def execute(self, *args: Any, **kwargs: Any) -> "_TimedCursor":
+        started = time.monotonic()
+        try:
+            return super().execute(*args, **kwargs)
+        finally:
+            self._sql = args[0] if args else kwargs.get("sql")
+            self._exec_s = time.monotonic() - started
+            _note_slow(self._sql, self._exec_s)
+
+    def executemany(self, *args: Any, **kwargs: Any) -> "_TimedCursor":
+        started = time.monotonic()
+        try:
+            return super().executemany(*args, **kwargs)
+        finally:
+            _note_slow(args[0] if args else kwargs.get("sql"), time.monotonic() - started)
+
+    def fetchall(self) -> list:
+        started = time.monotonic()
+        try:
+            return super().fetchall()
+        finally:
+            spent = time.monotonic() - started
+            # the work of a big SELECT can land here rather than in execute
+            if spent >= SLOW_SQL_SECONDS:
+                _note_slow(getattr(self, "_sql", "?"), spent + getattr(self, "_exec_s", 0.0))
+
+
 class PooledConnection:
     """What ``_get_connection`` returns. Looks like a sqlite3.Connection to callers."""
 
@@ -152,13 +219,15 @@ class PooledConnection:
         return cur
 
     def cursor(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
+        if not args and "factory" not in kwargs:
+            args = (_TimedCursor,)
         return self._track(self._raw().cursor(*args, **kwargs))
 
     def execute(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
-        return self._track(self._raw().execute(*args, **kwargs))
+        return self._track(self._raw().cursor(_TimedCursor)).execute(*args, **kwargs)
 
     def executemany(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
-        return self._track(self._raw().executemany(*args, **kwargs))
+        return self._track(self._raw().cursor(_TimedCursor)).executemany(*args, **kwargs)
 
     def executescript(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
         return self._track(self._raw().executescript(*args, **kwargs))
