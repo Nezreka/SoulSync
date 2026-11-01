@@ -199,6 +199,24 @@ def provider_id_sql(source: Any, *, alias: str = "") -> Optional[str]:
     return f"json_extract({prefix}external_ids, '$.{provider}')"
 
 
+def indexed_provider_id_sql(source: Any, *, alias: str = "") -> Optional[str]:
+    """``provider_id_sql`` for an equality lookup: the same id, in the exact
+    form the external_ids expression indexes are built on. The bare
+    ``json_extract`` there matches no index, so ``... = ?`` parsed the JSON of
+    every track: 2.2s per wishlist add on a 312k-track library (Oct 31 2026),
+    and a JSON *number* never equalled the bound text id at all."""
+    provider = normalize_provider_name(source)
+    if not provider:
+        return None
+    prefix = f"{alias}." if alias else ""
+    column = _DEDICATED_ID_COLUMNS.get(provider)
+    if column:
+        return f"{prefix}{column}"
+    if not provider.isalnum():
+        return provider_id_sql(source, alias=alias)
+    return external_id_sql(f"{prefix}external_ids", provider)
+
+
 def external_provider_identity_sql(alias: str = "") -> str:
     """A SQL predicate: does this row carry a provider id in ``external_ids``?
 

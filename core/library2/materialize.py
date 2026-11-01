@@ -128,7 +128,7 @@ def materialize_wishlist_row(conn, row_id: int, *, profile_id: int = 1) -> Optio
     if not isinstance(data, dict):
         raise ValueError('Wishlist track payload is not an object')
     from core.library2.importer import _wishlist_provider
-    from core.library2.provider_ids import provider_id_sql
+    from core.library2.provider_ids import indexed_provider_id_sql
     data.setdefault('id', str(row['spotify_track_id']).split('::', 1)[0])
     data['source'] = _wishlist_provider(data, info)
     native_id = _int_or_none(info.get('lib2_track_id'))
@@ -141,9 +141,10 @@ def materialize_wishlist_row(conn, row_id: int, *, profile_id: int = 1) -> Optio
     if track is None:
         album = data.get('album') or {}
         album_id = album.get('id') if isinstance(album, dict) else None
+        # the indexed form: the bare json_extract scanned every track (2.2s a wishlist add)
         matches = conn.execute(f"SELECT t.* FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id "
-                               f"WHERE {provider_id_sql(data['source'], alias='t')}=?" +
-                               (f" AND {provider_id_sql(data['source'], alias='al')}=?" if album_id else ''),
+                               f"WHERE {indexed_provider_id_sql(data['source'], alias='t')}=?" +
+                               (f" AND {indexed_provider_id_sql(data['source'], alias='al')}=?" if album_id else ''),
                                (str(data['id']), str(album_id)) if album_id else (str(data['id']),)).fetchall()
         if len(matches) > 1:
             raise ValueError('Wishlist identity matches multiple Library tracks; select the release edition')
