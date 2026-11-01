@@ -43,7 +43,9 @@ def register_routes(bp):
         from core.video.sources import resolve_video_server
         try:
             db = get_video_db()
-            rows = db.continue_watching(server_source=resolve_video_server(), limit=20)
+            from core.video.watch_scope import current_watcher
+            rows = db.continue_watching(server_source=resolve_video_server(), limit=20,
+                                        watcher=current_watcher().rows)
             from .kids import filter_mixed_library_items, video_cap
             # a show row's id is the episode, the rating is on show_id
             rows = filter_mixed_library_items(db, rows, video_cap(), show_id_key="show_id")

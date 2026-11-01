@@ -1093,3 +1093,21 @@ CREATE TABLE IF NOT EXISTS video_airing_offers (
     offered_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (profile_id, tmdb_id, season_number, episode_number)
 );
+
+-- ── per-profile watch state (#1941) ──
+-- the server scan reads watch state through the server account, so the
+-- play_count / last_viewed_at / view_offset_ms columns on movies and episodes
+-- are the server owner's. a profile linked to its own media-server account
+-- keeps its own copy here, filled with that account's token, so members see
+-- their own resume points and watched marks instead of the owner's. a profile
+-- with no linked account has no rows and no watch state. server neutral: plex
+-- fills it today, jellyfin can fill it the same way.
+CREATE TABLE IF NOT EXISTS video_watch_state (
+    profile_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,              -- movie | episode
+    item_id INTEGER NOT NULL,        -- movies.id | episodes.id
+    play_count INTEGER NOT NULL DEFAULT 0,
+    last_viewed_at TEXT,
+    view_offset_ms INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (profile_id, kind, item_id)
+);

@@ -1768,7 +1768,14 @@ def oidc_disconnect():
 def unlink_plex_home_user():
     """back to the app account for this profile."""
     try:
-        get_database().set_profile_plex_home_user(get_current_profile_id(), None, None, None)
+        pid = get_current_profile_id()
+        get_database().set_profile_plex_home_user(pid, None, None, None)
+        # its video watch state came from that account; it goes with it (#1941)
+        try:
+            from api.video import get_video_db
+            get_video_db().clear_profile_watch_state(pid)
+        except Exception:   # noqa: BLE001 - never blocks the unlink
+            logger.debug("clearing video watch state for profile %s failed", pid, exc_info=True)
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

@@ -17,6 +17,7 @@ import re
 import time
 import threading
 import hashlib
+from datetime import datetime
 from typing import Any, Dict
 
 from utils.logging_config import get_logger
@@ -880,6 +881,41 @@ class PlexVideoSource:
         except Exception as e:   # noqa: BLE001
             logger.exception("Plex: set_watched failed for %s", server_id)
             return {"ok": False, "error": str(e)}
+
+    # Floor for a full watch-state read: lastViewedAt is set by playing (even
+    # partly) and by marking played, so "viewed since 2000" is every title the
+    # token's user has touched.
+    _WATCH_FLOOR = datetime(2000, 1, 1)
+
+    def iter_watch_state(self, since=None, media_type="all"):
+        """The watch state of the movies and episodes THIS connection's user has
+        touched, in the mapped libraries: {kind, server_id, play_count,
+        last_viewed_at, view_offset_ms}. ``since`` limits it to titles viewed
+        after then (an incremental read); None reads all of them. Used with a
+        member's own token (core.video.member_watch, #1941). Errors raise, so
+        a partial read is never taken for the whole set."""
+        floor = since or self._WATCH_FLOOR
+        media_type = normalize_media_type(media_type)
+        if media_type in ("all", "movie"):
+            for section in self._scan_sections("movie", self._movies_lib):
+                for m in section.search(filters={"lastViewedAt>>": floor},
+                                        sort="lastViewedAt:desc"):
+                    yield self._watch_row("movie", m)
+        if media_type in ("all", "show"):
+            for section in self._scan_sections("show", self._tv_lib):
+                for ep in section.search(libtype="episode",
+                                         filters={"lastViewedAt>>": floor},
+                                         sort="lastViewedAt:desc"):
+                    yield self._watch_row("episode", ep)
+
+    @staticmethod
+    def _watch_row(kind, item) -> dict:
+        """the same three fields _movie / _episode read, for one item."""
+        offset = int(getattr(item, "viewOffset", 0) or 0)
+        return {"kind": kind, "server_id": str(item.ratingKey),
+                "play_count": int(getattr(item, "viewCount", 0) or 0),
+                "last_viewed_at": _iso_dt(getattr(item, "lastViewedAt", None)),
+                "view_offset_ms": offset}
 
     # ── Collections (SoulSync-managed) ────────────────────────────────────────
     def _collection_section(self, kind: str):

@@ -307,6 +307,20 @@ class VideoLibraryScanner:
                 removed_s = (self.db.prune_missing("shows", server, seen_shows)
                              if do_prune and seen_shows else 0)
 
+            # Profiles linked to their own Plex account get their own watch state
+            # (#1941): the scan above read the server account's. Same libraries,
+            # same window: an incremental reads what was viewed since the last
+            # scan, anything else reads it all.
+            if server == "plex":
+                self._set(phase="reading members' watch state")
+                try:
+                    from core.video.member_watch import sync_member_watch_state
+                    sync_member_watch_state(self.db, source,
+                                            since=since if incremental else None,
+                                            media_type=media_type)
+                except Exception:   # noqa: BLE001 - never fails the scan itself
+                    logger.exception("video scan: member watch state pass failed")
+
             # Record the scan baseline (its START time, so a change made mid-scan is
             # caught next run) — the next incremental deltas from here. Only when the
             # whole library was read (all media types), so a movie-only scan can't

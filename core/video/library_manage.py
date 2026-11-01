@@ -196,12 +196,14 @@ def _recycle_on(db) -> bool:
         return True
 
 
-def movie_library(db, movie_id: int, *, disk: Optional[_Disk] = None) -> Optional[Dict[str, Any]]:
-    """the whole tab for one movie (every file gets the disk checks)."""
+def movie_library(db, movie_id: int, *, disk: Optional[_Disk] = None,
+                  watcher=None) -> Optional[Dict[str, Any]]:
+    """the whole tab for one movie (every file gets the disk checks).
+    ``watcher``: whose watch state the summary shows (core.video.watch_scope)."""
     ident = db.title_identity("movie", movie_id)
     if not ident:
         return None
-    detail = db.movie_detail(movie_id) or {}
+    detail = db.movie_detail(movie_id, watcher=watcher) or {}
     disk = disk or _Disk(db)
     files = [disk.describe(r) for r in db.library_title_files("movie", movie_id)]
     best = _best(files)
@@ -254,14 +256,16 @@ def _show_folders(paths: List[str]) -> List[Dict[str, Any]]:
 
 
 def show_library(db, show_id: int, *, season: Optional[int] = None,
-                 disk: Optional[_Disk] = None, today: Optional[str] = None) -> Optional[Dict[str, Any]]:
+                 disk: Optional[_Disk] = None, today: Optional[str] = None,
+                 watcher=None) -> Optional[Dict[str, Any]]:
     """the tab for one show. every season comes back with its counts, size and
-    quality mix; only ``season`` (when given) gets the disk checks per file."""
+    quality mix; only ``season`` (when given) gets the disk checks per file.
+    ``watcher``: whose watch state the episodes show (core.video.watch_scope)."""
     ident = db.title_identity("show", show_id)
     if not ident:
         return None
     today = today or date.today().isoformat()
-    detail_meta = db.show_library_meta(show_id) or {}
+    detail_meta = db.show_library_meta(show_id, watcher=watcher) or {}
     rows = db.library_title_files("show", show_id)
     disk_ids = {r["file_id"] for r in rows if season is not None and r.get("season") == season}
     if disk_ids:
@@ -273,7 +277,7 @@ def show_library(db, show_id: int, *, season: Optional[int] = None,
     for r in rows:
         files_by_ep.setdefault(r["item_id"], []).append(by_file[r["file_id"]])
     seasons: Dict[int, Dict[str, Any]] = {}
-    for ep in db.library_show_episodes(show_id):
+    for ep in db.library_show_episodes(show_id, watcher=watcher):
         sn = ep.get("season_number")
         s = seasons.setdefault(sn, {"season_number": sn, "owned": 0, "total": 0, "missing": 0,
                                     "upcoming": 0, "size_bytes": 0, "monitored": True,

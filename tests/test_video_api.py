@@ -2118,18 +2118,99 @@ def test_acquisition_state_does_not_count_specials_or_unaired_as_missing(tmp_pat
         videoapi._video_db = None
 
 
-def test_only_the_admins_watched_click_goes_to_the_server(tmp_path, monkeypatch):
-    """#1941: the server account is the admin's. A member's watched click stays
-    local; it would otherwise land in the admin's plex history."""
+def _client_with_profile(tmp_path, *, profile_id, is_admin):
+    """_client_as, plus the signed-in profile id web_server stamps on g."""
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    app = Flask(__name__)
+
+    @app.before_request
+    def _stamp_g():
+        from flask import g
+        g.profile_id = profile_id
+        g.is_admin = is_admin
+        g.can_download = True
+
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    return app.test_client()
+
+
+def test_a_watched_click_is_marked_for_whoever_clicked_it(tmp_path, monkeypatch):
+    """#1941: the server owner's click marks the shared state through the server
+    account; a profile linked to its own Plex account marks its own rows on its
+    own account; a profile with no linked account has no watch state to mark."""
     from core.video import metadata as med
+    from core.video import watch_scope
     calls = []
 
-    def fake_set_watched(db, kind, item_id, watched, source=None, push=True):
-        calls.append(push)
+    def fake_set_watched(db, kind, item_id, watched, source=None, push=True,
+                         watcher=None, member_token=None):
+        calls.append((watcher, member_token))
         return {"ok": True, "watched": watched, "pushed": False}
     monkeypatch.setattr(med, "set_watched", fake_set_watched)
-    for is_admin in (False, True):
-        c = _client_as(tmp_path, is_admin=is_admin)
-        r = c.post("/api/video/detail/movie/1/watched", json={"watched": True})
-        assert r.status_code == 200
-    assert calls == [False, True]
+    links = {7: {"id": "u7", "title": "Member", "token": "tok-7"}}
+    monkeypatch.setattr(watch_scope, "_plex_link", lambda pid: links.get(pid))
+    try:
+        owner = _client_with_profile(tmp_path, profile_id=1, is_admin=True)
+        assert owner.post("/api/video/detail/movie/1/watched",
+                          json={"watched": True}).status_code == 200
+        linked = _client_with_profile(tmp_path, profile_id=7, is_admin=False)
+        assert linked.post("/api/video/detail/movie/1/watched",
+                           json={"watched": True}).status_code == 200
+        unlinked = _client_with_profile(tmp_path, profile_id=8, is_admin=False)
+        r = unlinked.post("/api/video/detail/movie/1/watched", json={"watched": True})
+        assert r.status_code == 409 and "Connect your Plex" in r.get_json()["error"]
+        assert calls == [(None, None), (7, "tok-7")]
+    finally:
+        import api.video as videoapi
+        videoapi._video_db = None
+
+
+def test_continue_watching_is_the_signed_in_profiles_own(tmp_path, monkeypatch):
+    """#1941: the resume row reads the owner's state for the owner, a linked
+    member's own rows for that member, and nothing for an unlinked member."""
+    from core.video import watch_scope
+    monkeypatch.setattr(watch_scope, "_plex_link",
+                        lambda pid: {"id": "u7", "title": "M", "token": "t"} if pid == 7 else None)
+    try:
+        owner = _client_with_profile(tmp_path, profile_id=1, is_admin=True)
+        import api.video as videoapi
+        db = videoapi._video_db
+        a = db.upsert_movie("plex", {"server_id": "m1", "title": "Owner's", "runtime_minutes": 100,
+                                     "view_offset_ms": 30 * 60000,
+                                     "last_viewed_at": "2026-10-01 10:00:00",
+                                     "file": {"relative_path": "a.mkv"}})
+        b = db.upsert_movie("plex", {"server_id": "m2", "title": "Member's", "runtime_minutes": 100,
+                                     "file": {"relative_path": "b.mkv"}})
+        db.save_profile_watch_state(7, [("movie", b, 0, "2026-10-02 10:00:00", 40 * 60000)])
+
+        def titles(client):
+            r = client.get("/api/video/dashboard/continue-watching")
+            return [it["title"] for it in r.get_json()["items"]]
+        assert titles(owner) == ["Owner's"]
+        assert titles(_client_with_profile(tmp_path, profile_id=7, is_admin=False)) == ["Member's"]
+        assert titles(_client_with_profile(tmp_path, profile_id=8, is_admin=False)) == []
+        assert a != b
+    finally:
+        import api.video as videoapi
+        videoapi._video_db = None
+
+
+def test_detail_pages_say_whether_the_profile_can_mark_watched(tmp_path, monkeypatch):
+    """#1941: a profile with no watch state of its own gets no watched toggle;
+    the detail payload tells the page so."""
+    from core.video import watch_scope
+    monkeypatch.setattr(watch_scope, "_plex_link",
+                        lambda pid: {"id": "u7", "title": "M", "token": "t"} if pid == 7 else None)
+    try:
+        owner = _client_with_profile(tmp_path, profile_id=1, is_admin=True)
+        import api.video as videoapi
+        mid = videoapi._video_db.upsert_movie(
+            "plex", {"server_id": "m1", "title": "A", "file": {"relative_path": "a.mkv"}})
+        for pid, admin, can in ((1, True, True), (7, False, True), (8, False, False)):
+            c = owner if pid == 1 else _client_with_profile(tmp_path, profile_id=pid, is_admin=admin)
+            assert c.get(f"/api/video/detail/movie/{mid}").get_json()["can_mark_watched"] is can
+    finally:
+        import api.video as videoapi
+        videoapi._video_db = None

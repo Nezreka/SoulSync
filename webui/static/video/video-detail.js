@@ -1080,7 +1080,10 @@
         }
         // Watched toggle (the /watched API): local state + markPlayed/markUnplayed
         // pushed to the server. Library rows only.
+        // A profile with no watch state of its own (no linked Plex account) has
+        // nothing to mark, so it gets no toggle (#1941).
         if (ownLibItem && (d.kind === 'movie' || d.kind === 'show') && libRow &&
+                d.can_mark_watched !== false &&
                 (d.owned || d.episode_owned || d.watched)) {
             libMore += moreItem('watched-toggle', d.watched ? '↺' : '✓', d.watched ? 'Mark unwatched' : 'Mark watched',
                 d.watched ? 'Mark unwatched (clears played state on your server too)'

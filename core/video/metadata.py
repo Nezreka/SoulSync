@@ -74,16 +74,27 @@ def release_lock(db, kind: str, item_id: int, field: str, source=_UNSET) -> dict
 
 
 def set_watched(db, kind: str, item_id: int, watched: bool, source=_UNSET,
-                push: bool = True) -> dict:
+                push: bool = True, watcher=None, member_token=None) -> dict:
     """Played/unplayed toggle: local state + server markPlayed/markUnplayed.
-    push=False keeps it local (a member's click must not land in the admin's
-    plex history, #1941)."""
-    if not db.set_watch_state(kind, item_id, watched):
+    push=False keeps it local.
+
+    ``watcher`` a profile id: the toggle is that profile's own (#1941). It
+    lands in its own rows, and is played on its OWN server account through
+    ``member_token``, never the shared server account; without a token it
+    stays local. Marking it on the account keeps the next scan, which reads
+    that account, from undoing the click."""
+    if not db.set_watch_state(kind, item_id, watched, watcher=watcher):
         return {"ok": False, "error": "item not found"}
     target = db.poster_set_target(kind, item_id) if push else None
     pushed = False
     if target and target.get("server_id"):
-        src = _resolve_source(source)
+        if watcher is not None:
+            src = None
+            if member_token:
+                from core.video.member_watch import member_source
+                src = member_source(member_token, db=db)
+        else:
+            src = _resolve_source(source)
         if src is not None and getattr(src, "server_name", None) == target.get("server_source") \
                 and hasattr(src, "set_watched"):
             pushed = bool(src.set_watched(target["server_id"], watched, kind=kind).get("ok"))

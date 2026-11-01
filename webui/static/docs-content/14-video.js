@@ -462,6 +462,8 @@ SoulSync ingests per-episode and per-movie **watch state** from your server:
 - Powers a **Next Up** call-to-action on show pages
 - Lets you toggle **watched / unwatched** right on the page
 
+**Whose watch state.** The scan reads watch state through the server's own account, so it is the server owner's. Each profile linked to its own Plex account (Connect with Plex, or a linked Plex Home user) gets its own: after every Plex scan SoulSync reads that account's watched and in-progress titles with its own token, and that profile's rail, Next Up, watched checks and library filters follow it. Its watched toggle marks the title played on its own Plex account. A profile with no linked account has no watch state, and no watched toggle. The admin with no linked account sees the server owner's.
+
 The **acquisition history** on the [Your library tab](#vdet-library) shows grabs, imports, and upgrades over time — useful for answering "when did this land, and from where?"
 `
         },
@@ -1358,7 +1360,7 @@ Base path: \`/api/video\`. Download *triggers* require \`can_download\`; config 
 | DELETE | \`/requests/{id}\` | Withdraw your own request (admins: any) | video |
 | POST | \`/scan/request\`, \`/scan/server\`, \`/scan/stop\` | Trigger / stop a library scan | video |
 | POST | \`/monitor\`, \`/bulk/start\` | Monitor toggle & bulk jobs | admin |
-| PUT/POST | \`/detail/{kind}/{id}/metadata\`, \`/lock\`, \`/quality-profile\`, \`/series-type\`, \`/watched\` | Edit / lock / configure a title (watched is open) | admin (watched: video) |
+| PUT/POST | \`/detail/{kind}/{id}/metadata\`, \`/lock\`, \`/quality-profile\`, \`/series-type\`, \`/watched\` | Edit / lock / configure a title (watched is open; it marks the caller's own watch state, 409 when the profile has no linked account) | admin (watched: video) |
 `
         },
         {
