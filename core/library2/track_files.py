@@ -459,6 +459,20 @@ def retire_replaced_files(
     return retired
 
 
+def _update_files(cursor, set_sql: str, select_ids_sql: str) -> int:
+    """Run an every-start repair as a read, then write only the rows it found.
+    A set-based UPDATE holds the write lock for its whole scan even when it
+    changes nothing (1.3s on a 300k-file library, every start)."""
+    ids = [row[0] for row in cursor.execute(select_ids_sql).fetchall() if row[0] is not None]
+    changed = 0
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        cursor.execute(f"UPDATE lib2_track_files SET {set_sql} "
+                       f"WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+        changed += cursor.rowcount
+    return changed
+
+
 def backfill_primary_flags(cursor) -> int:
     """Repair/seed the one-primary-per-track invariant. Idempotent.
 
@@ -467,15 +481,15 @@ def backfill_primary_flags(cursor) -> int:
     (``track_id IS NULL``) never carry the flag. Returns rows changed.
     """
     changed = 0
-    cursor.execute(
-        "UPDATE lib2_track_files SET is_primary=0, primary_manual=0 "
+    changed += _update_files(
+        cursor, "is_primary=0, primary_manual=0",
+        "SELECT id FROM lib2_track_files "
         "WHERE track_id IS NULL AND (is_primary=1 OR primary_manual=1)")
-    changed += cursor.rowcount
     # A manual choice is meaningful only while that file is usable.  Keep at
     # most one historical manual flag per track (the newest explicit row wins
     # if an older buggy version managed to create several).
-    cursor.execute("""
-        UPDATE lib2_track_files SET primary_manual=0
+    changed += _update_files(cursor, "primary_manual=0", """
+        SELECT id FROM lib2_track_files
          WHERE primary_manual=1
            AND (COALESCE(file_state,'active')<>'active'
                 OR id NOT IN (
@@ -484,11 +498,10 @@ def backfill_primary_flags(cursor) -> int:
                        AND COALESCE(m.file_state,'active')='active'
                      GROUP BY m.track_id))
     """)
-    changed += cursor.rowcount
     # Older triggers could leave a deleted/missing row primary after a fresh
     # active import arrived.  Active files always own the operative flag.
-    cursor.execute("""
-        UPDATE lib2_track_files AS stale SET is_primary=0
+    changed += _update_files(cursor, "is_primary=0", """
+        SELECT stale.id FROM lib2_track_files AS stale
          WHERE stale.is_primary=1
            AND COALESCE(stale.file_state,'active')<>'active'
            AND EXISTS (
@@ -497,12 +510,11 @@ def backfill_primary_flags(cursor) -> int:
                   AND COALESCE(active.file_state,'active')='active'
            )
     """)
-    changed += cursor.rowcount
     # Keep only the desired primary: a valid manual selection first, otherwise
     # the documented quality ordering.  This also replaces stale but singular
     # automatic primaries when a better retained file arrived later.
-    cursor.execute(f"""
-        UPDATE lib2_track_files SET is_primary=0
+    changed += _update_files(cursor, "is_primary=0", f"""
+        SELECT id FROM lib2_track_files
          WHERE is_primary=1 AND track_id IS NOT NULL
            AND id <> (SELECT f.id FROM lib2_track_files f
                        WHERE f.track_id=lib2_track_files.track_id
@@ -512,11 +524,8 @@ def backfill_primary_flags(cursor) -> int:
                            THEN 0 ELSE 1 END,
                            {quality_order('f')} LIMIT 1)
     """)
-    changed += cursor.rowcount
     # Elect a primary where none exists.
-    cursor.execute(f"""
-        UPDATE lib2_track_files SET is_primary=1
-         WHERE id IN (
+    changed += _update_files(cursor, "is_primary=1", f"""
                SELECT (SELECT f.id FROM lib2_track_files f
                         WHERE f.track_id = t.track_id
                         ORDER BY CASE
@@ -528,9 +537,8 @@ def backfill_primary_flags(cursor) -> int:
                         WHERE track_id IS NOT NULL) t
                 WHERE NOT EXISTS (
                       SELECT 1 FROM lib2_track_files p
-                       WHERE p.track_id = t.track_id AND p.is_primary=1))
+                       WHERE p.track_id = t.track_id AND p.is_primary=1)
     """)
-    changed += cursor.rowcount
     return changed
 
 

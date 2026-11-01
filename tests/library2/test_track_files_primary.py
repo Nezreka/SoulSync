@@ -84,6 +84,23 @@ def test_backfill_demotes_extra_primaries(imported_conn):
     assert not _is_primary(conn, mp3)
 
 
+def test_a_converged_backfill_writes_nothing(imported_conn):
+    """every start ran four set-based updates, holding the write lock for the
+    whole scan even when nothing changed"""
+    conn = imported_conn
+    track = _seed_track(conn)
+    _add_file(conn, track, "/m/d.mp3", fmt="mp3")
+    _add_file(conn, track, "/m/d.flac", fmt="flac", bit_depth=16)
+    backfill_primary_flags(conn.cursor())
+    conn.commit()
+
+    writes = []
+    conn.set_trace_callback(lambda sql: writes.append(sql) if sql.lstrip().upper().startswith("UPDATE") else None)
+    assert backfill_primary_flags(conn.cursor()) == 0
+    conn.set_trace_callback(None)
+    assert writes == []
+
+
 def test_backfill_repairs_deleted_primary_over_active_file(imported_conn):
     conn = imported_conn
     track = _seed_track(conn)
