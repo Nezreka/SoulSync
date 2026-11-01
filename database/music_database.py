@@ -20622,7 +20622,9 @@ class MusicDatabase:
 
     def read_sync_match_cache(self, spotify_track_id: str, server_source: str) -> Optional[Dict]:
         """Read a cached sync match. Returns {server_track_id, server_track_title, confidence} or None.
-        Also bumps last_used_at and use_count on hit."""
+
+        A read only: it used to bump last_used_at/use_count, which nothing
+        reads, and took the write lock once per already-matched playlist track."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -20632,12 +20634,6 @@ class MusicDatabase:
             """, (spotify_track_id, server_source))
             row = cursor.fetchone()
             if row:
-                cursor.execute("""
-                    UPDATE sync_match_cache
-                    SET last_used_at = CURRENT_TIMESTAMP, use_count = use_count + 1
-                    WHERE spotify_track_id = ? AND server_source = ?
-                """, (spotify_track_id, server_source))
-                conn.commit()
                 return {
                     'server_track_id': row['server_track_id'],
                     'server_track_title': row['server_track_title'],
@@ -20653,8 +20649,8 @@ class MusicDatabase:
         single commit, instead of a fresh connection, SELECT and per-hit
         UPDATE+COMMIT for every track (#1005 — the compare view resolved overrides
         per source track, so a 1500-track playlist paid ~15s of connection/fsync
-        churn before rendering). Returns {spotify_track_id: row-dict}; bumps
-        last_used_at/use_count for the hits like the per-row method."""
+        churn before rendering). Returns {spotify_track_id: row-dict}. A read
+        only, like the per-row method."""
         ids = [str(i) for i in (spotify_track_ids or []) if i]
         out: Dict[str, Dict] = {}
         if not ids:
@@ -20678,14 +20674,6 @@ class MusicDatabase:
                             'server_track_title': row['server_track_title'],
                             'confidence': row['confidence'],
                         }
-                    if hits:
-                        hit_ids = [str(r['spotify_track_id']) for r in hits]
-                        ph2 = ",".join("?" * len(hit_ids))
-                        cursor.execute(f"""
-                            UPDATE sync_match_cache
-                            SET last_used_at = CURRENT_TIMESTAMP, use_count = use_count + 1
-                            WHERE server_source = ? AND spotify_track_id IN ({ph2})
-                        """, [server_source, *hit_ids])
             return out
         except Exception as e:
             logger.error(f"Error bulk-reading sync match cache: {e}")

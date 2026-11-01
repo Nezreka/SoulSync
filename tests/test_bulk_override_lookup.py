@@ -44,7 +44,7 @@ def _seed_track(db, tid, path):
         return track_id
 
 
-def test_bulk_read_matches_per_row_and_bumps_use_count(db):
+def test_bulk_read_matches_per_row_and_writes_nothing(db):
     _cache(db, "s1", "v1")
     _cache(db, "s2", "v2")
 
@@ -58,8 +58,11 @@ def test_bulk_read_matches_per_row_and_bumps_use_count(db):
     out = db.read_sync_match_cache_bulk(["s1", "s2", "s3"], "navidrome")
     assert out["s1"]["server_track_id"] == "v1" and out["s2"]["server_track_id"] == "v2"
     assert "s3" not in out
-    # per-row semantics preserved: hits bump use_count by one
-    assert _count("s1") == before + 1
+    # a read only, like the per-row read: the usage bump nothing read took the
+    # write lock once per already-matched playlist track
+    assert _count("s1") == before
+    assert db.read_sync_match_cache("s1", "navidrome")["server_track_id"] == "v1"
+    assert _count("s1") == before
     # wrong server → no rows
     assert db.read_sync_match_cache_bulk(["s1"], "plex") == {}
 
