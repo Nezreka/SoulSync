@@ -12,120 +12,12 @@ from __future__ import annotations
 
 import os
 
-import pytest
 
 import core.library_reorganize as lr
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reorganize import LibraryReorganizeJob
 from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
-
-
-def _patch_fetch(monkeypatch, tracklists):
-    def get_album(source, aid):
-        return {"name": f"{source}:{aid}"} if tracklists.get((source, aid)) else None
-
-    def get_tracks(source, aid):
-        return tracklists.get((source, aid))
-
-    monkeypatch.setattr(lr, "get_album_for_source", get_album)
-    monkeypatch.setattr(lr, "get_album_tracks_for_source", get_tracks)
-    monkeypatch.setattr(lr, "_normalize_album_tracks", lambda items: items or [])
-    monkeypatch.setattr(lr, "get_source_priority", lambda primary: ["spotify", "itunes", "deezer"])
-
-
-# ── _resolve_source: the placed release ─────────────────────────────────
-
-
-def test_placed_release_beats_a_later_auto_pin(monkeypatch):
-    _patch_fetch(monkeypatch, {
-        ("itunes", "it1"): [{"name": "x"}],
-        ("musicbrainz", "mb1"): [{"name": "y"}],
-    })
-    album = {
-        "itunes_album_id": "it1",
-        "canonical_source": "musicbrainz", "canonical_album_id": "mb1",
-        "reorganize_source": "itunes", "reorganize_album_id": "it1",
-    }
-    resolved = {}
-    source, _, _ = lr._resolve_source(album, "itunes", resolved=resolved)
-    assert source == "itunes"
-    assert resolved == {"source": "itunes", "album_id": "it1"}
-
-
-def test_locked_pin_beats_the_placed_release(monkeypatch):
-    _patch_fetch(monkeypatch, {
-        ("itunes", "it1"): [{"name": "x"}],
-        ("musicbrainz", "mb1"): [{"name": "y"}],
-    })
-    album = {
-        "canonical_source": "musicbrainz", "canonical_album_id": "mb1", "canonical_locked": 1,
-        "reorganize_source": "itunes", "reorganize_album_id": "it1",
-    }
-    source, _, _ = lr._resolve_source(album, "itunes")
-    assert source == "musicbrainz"
-
-
-def test_placed_release_not_answering_skips_instead_of_walking(monkeypatch):
-    # spotify would answer, but the album was placed from itunes: planning it
-    # from spotify is exactly the rename the issue reported.
-    _patch_fetch(monkeypatch, {("spotify", "sp1"): [{"name": "x"}]})
-    album = {
-        "spotify_album_id": "sp1", "itunes_album_id": "it1",
-        "reorganize_source": "itunes", "reorganize_album_id": "it1",
-    }
-    resolved = {}
-    source, _, _ = lr._resolve_source(album, "spotify", resolved=resolved)
-    assert source is None
-    assert resolved.get("unavailable") is True
-
-
-def test_placed_release_raising_skips_too(monkeypatch):
-    _patch_fetch(monkeypatch, {("spotify", "sp1"): [{"name": "x"}]})
-
-    def boom(source, aid):
-        if source == "itunes":
-            raise RuntimeError("429")
-        return {"name": "x"}
-
-    monkeypatch.setattr(lr, "get_album_for_source", boom)
-    album = {
-        "spotify_album_id": "sp1",
-        "reorganize_source": "itunes", "reorganize_album_id": "it1",
-    }
-    resolved = {}
-    assert lr._resolve_source(album, "spotify", resolved=resolved)[0] is None
-    assert resolved.get("unavailable") is True
-
-
-def test_unplaced_album_still_walks_and_reports_its_release(monkeypatch):
-    _patch_fetch(monkeypatch, {("itunes", "it1"): [{"name": "x"}]})
-    album = {"spotify_album_id": "sp1", "itunes_album_id": "it1"}
-    resolved = {}
-    source, _, _ = lr._resolve_source(album, "spotify", resolved=resolved)
-    assert source == "itunes"
-    assert resolved == {"source": "itunes", "album_id": "it1"}
-
-
-def test_planner_reports_source_unavailable(monkeypatch):
-    _patch_fetch(monkeypatch, {("spotify", "sp1"): [{"name": "x"}]})
-    album = {
-        "spotify_album_id": "sp1", "title": "A",
-        "reorganize_source": "itunes", "reorganize_album_id": "it1",
-    }
-    plan = lr.plan_album_reorganize(album, [{"id": 1, "title": "t"}], primary_source="spotify")
-    assert plan["status"] == "source_unavailable"
-
-
-def test_planner_carries_the_release_id(monkeypatch):
-    _patch_fetch(monkeypatch, {
-        ("itunes", "it1"): [{"name": "t", "track_number": 1, "disc_number": 1}],
-    })
-    album = {"itunes_album_id": "it1", "title": "A"}
-    plan = lr.plan_album_reorganize(album, [{"id": 1, "title": "t", "track_number": 1}],
-                                    primary_source="itunes")
-    assert plan["status"] == "planned"
-    assert plan["source_album_id"] == "it1"
 
 
 # ── placement on a real database ────────────────────────────────────────
@@ -182,22 +74,6 @@ def test_mark_placed_closes_only_that_albums_findings(tmp_path):
     _finding(db, "lib2:2")
     assert lr.mark_album_placed(db, 100, "itunes", "it1", "fp1") is True
     assert _statuses(db) == {"lib2:1": "resolved", "lib2:2": "pending"}
-
-
-def test_settled_needs_same_naming_and_no_other_locked_pin():
-    row = {"reorganize_source": "itunes", "reorganize_album_id": "it1", "reorganize_fp": "fp1"}
-    assert lr.album_placement_settled(row, "fp1") is True
-    assert lr.album_placement_settled(row, "fp2") is False      # user changed naming
-    assert lr.album_placement_settled({}, "fp1") is False       # never placed
-    locked_other = {**row, "canonical_locked": 1,
-                    "canonical_source": "musicbrainz", "canonical_album_id": "mb1"}
-    assert lr.album_placement_settled(locked_other, "fp1") is False
-    locked_same = {**row, "canonical_locked": 1,
-                   "canonical_source": "itunes", "canonical_album_id": "it1"}
-    assert lr.album_placement_settled(locked_same, "fp1") is True
-    auto_other = {**row, "canonical_locked": 0,
-                  "canonical_source": "musicbrainz", "canonical_album_id": "mb1"}
-    assert lr.album_placement_settled(auto_other, "fp1") is True
 
 
 def test_fingerprint_follows_the_naming_settings(monkeypatch):

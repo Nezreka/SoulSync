@@ -2,18 +2,13 @@
 
 Covers:
 - resolve_album_profile_id(): file location wins over DB, DB fallback, shared default
-- _finalize_track(): cross-library move guard refuses the move
-- reorganize_album(): profile_id flows through to the post-process context
+- reorganize_album_rename_only(): the cross-library move guard refuses the move
 """
 from __future__ import annotations
 
-import os
 import sqlite3
-import tempfile
-from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
 
 import core.library_reorganize as reorg
 
@@ -85,85 +80,50 @@ def test_resolve_album_profile_id_shared_default():
     assert pid is None
 
 
-def test_finalize_track_refuses_cross_library_move(tmp_path):
+def _move_one(tmp_path, src, dst, library_of):
+    """Run the mover over a one-track plan from ``src`` to ``dst``."""
+    updated = {}
+
+    def preview_fn(**_kwargs):
+        return {"success": True, "status": "planned", "tracks": [{
+            "track_id": "t1", "title": "Track", "matched": True,
+            "current_path_abs": str(src), "new_path_abs": str(dst),
+        }]}
+
+    with patch("core.imports.paths.library_containing", side_effect=library_of):
+        summary = reorg.reorganize_album_rename_only(
+            album_id="1", db=_FakeDB(), transfer_dir=str(tmp_path),
+            resolve_file_path_fn=lambda p: p, build_final_path_fn=lambda *a, **k: (None, True),
+            update_track_path_fn=lambda tid, p: updated.update({tid: p}),
+            preview_fn=preview_fn,
+        )
+    return summary, updated
+
+
+def test_the_mover_refuses_a_cross_library_move(tmp_path):
     src = tmp_path / "user1" / "track.flac"
     src.parent.mkdir(parents=True)
     src.write_bytes(b"audio")
     dst = tmp_path / "shared" / "track.flac"
-    dst.parent.mkdir(parents=True)
-    dst.write_bytes(b"processed")
 
-    ctx = SimpleNamespace(
-        update_track_path_fn=None,
-        state_lock=__import__("threading").Lock(),
-        src_dirs_touched=set(),
-        dst_dirs_touched=set(),
-        summary={"errors": [], "moved": 0, "skipped": 0, "failed": 0},
-        emit=lambda **k: None,
-        record_error=lambda tid, title, msg, kind="skipped": ctx.summary["errors"].append(msg),
-    )
+    summary, updated = _move_one(
+        tmp_path, src, dst,
+        lambda p: "/app/libraries/user1" if "user1" in str(p) else None)
 
-    with patch(
-        "core.imports.paths.library_containing",
-        side_effect=lambda p: "/app/libraries/user1" if "user1" in str(p) else None,
-    ):
-        ok = reorg._finalize_track(ctx, "t1", str(src), str(dst))
-
-    assert ok is False
-    # original untouched, stray new file removed
-    assert src.exists()
-    assert not dst.exists()
-    assert any("cross-library" in e for e in ctx.summary["errors"])
+    assert summary["failed"] == 1 and summary["moved"] == 0
+    assert any("cross-library" in e["error"] for e in summary["errors"])
+    assert src.exists() and not dst.exists()
+    assert updated == {}
 
 
-def test_finalize_track_allows_same_library_move(tmp_path):
+def test_the_mover_moves_within_one_library(tmp_path):
     src = tmp_path / "user1" / "track.flac"
     src.parent.mkdir(parents=True)
     src.write_bytes(b"audio")
     dst = tmp_path / "user1" / "renamed.flac"
-    dst.write_bytes(b"processed")
 
-    updated = {}
+    summary, updated = _move_one(tmp_path, src, dst, lambda p: "/app/libraries/user1")
 
-    ctx = SimpleNamespace(
-        update_track_path_fn=lambda tid, p: updated.update({tid: p}),
-        state_lock=__import__("threading").Lock(),
-        src_dirs_touched=set(),
-        dst_dirs_touched=set(),
-        summary={"errors": [], "moved": 0, "skipped": 0, "failed": 0},
-        emit=lambda **k: None,
-        record_error=lambda tid, title, msg, kind="skipped": ctx.summary["errors"].append(msg),
-    )
-
-    with patch(
-        "core.imports.paths.library_containing",
-        return_value="/app/libraries/user1",
-    ):
-        ok = reorg._finalize_track(ctx, "t1", str(src), str(dst))
-
-    assert ok is True
+    assert summary["moved"] == 1 and summary["errors"] == []
+    assert dst.exists() and not src.exists()
     assert updated == {"t1": str(dst)}
-    assert not src.exists()  # original removed after successful move
-
-
-def test_finalize_track_allows_shared_to_shared(tmp_path):
-    src = tmp_path / "a.flac"
-    src.write_bytes(b"audio")
-    dst = tmp_path / "b.flac"
-    dst.write_bytes(b"processed")
-
-    ctx = SimpleNamespace(
-        update_track_path_fn=lambda tid, p: None,
-        state_lock=__import__("threading").Lock(),
-        src_dirs_touched=set(),
-        dst_dirs_touched=set(),
-        summary={"errors": [], "moved": 0, "skipped": 0, "failed": 0},
-        emit=lambda **k: None,
-        record_error=lambda tid, title, msg, kind="skipped": ctx.summary["errors"].append(msg),
-    )
-
-    with patch("core.imports.paths.library_containing", return_value=None):
-        ok = reorg._finalize_track(ctx, "t1", str(src), str(dst))
-
-    assert ok is True
-    assert ctx.summary["errors"] == []

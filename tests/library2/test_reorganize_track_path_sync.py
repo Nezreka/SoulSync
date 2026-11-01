@@ -117,10 +117,8 @@ def test_native_path_update_repoints_same_stem_file_versions(
     runner = build_runner(
         get_database=lambda: imported_legacy_db,
         resolve_file_path_fn=lambda p: p,
-        post_process_fn=lambda *a, **k: None,
         cleanup_empty_directories_fn=lambda *a, **k: None,
         is_shutting_down_fn=lambda: False,
-        get_download_path=lambda: str(tmp_path),
         get_transfer_path=lambda: str(tmp_path / 'transfer'),
         get_config_manager=lambda: _EnabledConfig(),
         build_final_path_fn=lambda *a, **k: (None, True),
@@ -172,10 +170,8 @@ def test_update_track_path_without_lib2_schema_fails_closed(monkeypatch, tmp_pat
     runner = build_runner(
         get_database=lambda: _Shim(),
         resolve_file_path_fn=lambda p: p,
-        post_process_fn=lambda *a, **k: None,
         cleanup_empty_directories_fn=lambda *a, **k: None,
         is_shutting_down_fn=lambda: False,
-        get_download_path=lambda: str(tmp_path),
         get_transfer_path=lambda: str(tmp_path / 'transfer'),
         build_final_path_fn=lambda *a, **k: (None, True),
     )

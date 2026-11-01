@@ -10151,62 +10151,22 @@ def get_reconcile_embedded_ids_status():
 #
 # Reorganize requests flow through ``core.reorganize_queue`` — a FIFO
 # queue with a single background worker. The endpoints here are thin
-# enqueue / snapshot / cancel wrappers; the heavy lifting is in
-# :mod:`core.library_reorganize`.
-
-
-@app.route('/api/library/reorganize/sources', methods=['GET'])
-def reorganize_sources_global():
-    """List metadata sources the user has authed on this instance.
-    Used by the bulk "Reorganize All" modal where per-album ID coverage
-    varies. No network calls."""
-    try:
-        from core.library_reorganize import authed_sources
-        return jsonify({"success": True, "sources": authed_sources()})
-    except Exception as e:
-        logger.error(f"Reorganize sources (global) error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/library/album/<album_id>/reorganize/sources', methods=['GET'])
-def reorganize_album_sources(album_id):
-    """List metadata sources the user can pick for this album's
-    reorganize — every entry has both a stored album ID on the local
-    row AND an authenticated client. No network calls."""
-    try:
-        from core.library_reorganize import available_sources_for_album, load_album_and_tracks
-        album_data, _tracks = load_album_and_tracks(get_database(), album_id)
-        if album_data is None:
-            return jsonify({"success": False, "error": "Album not found"}), 404
-        return jsonify({"success": True, "sources": available_sources_for_album(album_data)})
-    except Exception as e:
-        logger.error(f"Reorganize sources error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+# enqueue / snapshot / cancel wrappers. Every plan comes from the
+# catalogue (:mod:`core.library2.reorganize_plan`), for the preview as
+# for the move, so no source or metadata mode is asked for.
 
 
 @app.route('/api/library/album/<album_id>/reorganize/preview', methods=['POST'])
 def reorganize_album_preview(album_id):
     """Preview file reorganization for an album — returns current vs
-    proposed paths without moving anything. Implementation lives in
-    :mod:`core.library_reorganize` and shares the planning logic with
-    the apply endpoint, so the preview is guaranteed to match what
-    apply would actually produce.
-
-    Optional body params:
-        source: when provided, only that metadata source is queried
-            (no fallback chain).
-        mode: 'api' (default — query metadata source) or 'tags' (read
-            embedded file tags as the source of truth, issue #592)."""
+    proposed paths without moving anything. It plans with the same
+    catalogue planner the queue runner moves with, so the preview is
+    what apply produces."""
     try:
-        from core.library_reorganize import preview_album_reorganize, resolve_album_profile_id
+        from core.library_reorganize import resolve_album_profile_id
+        from core.library2.reorganize_bridge import catalogue_preview_fn
+        from core.library_scope import library_scope, scope_for_owner
         from core.imports.paths import library_root_for_profile
-        data = request.get_json() or {}
-        chosen_source = data.get('source') or None
-        metadata_source = data.get('mode') or config_manager.get(
-            'library.reorganize_metadata_source', 'api'
-        ) or 'api'
-        if metadata_source not in ('api', 'tags'):
-            metadata_source = 'api'
         db = get_database()
         # #1504: resolve the owning profile so preview destinations are
         # computed against the right library root, not the shared folder.
@@ -10221,17 +10181,16 @@ def reorganize_album_preview(album_id):
             or config_root_path(
                 config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer')
         )
-        result = preview_album_reorganize(
-            album_id=album_id,
-            db=db,
-            transfer_dir=transfer_dir,
-            resolve_file_path_fn=_resolve_library_file_path,
-            build_final_path_fn=_build_final_path_for_track,
-            primary_source=chosen_source,
-            strict_source=bool(chosen_source),
-            metadata_source=metadata_source,
-            profile_id=profile_id,
-        )
+        # The planner picks files by the library scope; plan in the owner's
+        # library, the way the runner moves within it.
+        with library_scope(scope_for_owner(profile_id)):
+            result = catalogue_preview_fn(
+                album_id=album_id,
+                db=db,
+                transfer_dir=transfer_dir,
+                resolve_file_path_fn=_resolve_library_file_path,
+                build_final_path_fn=_build_final_path_for_track,
+            )
         if result.get('status') == 'no_album':
             return jsonify({"success": False, "error": "Album not found"}), 404
         if result.get('status') == 'no_tracks':
@@ -10247,27 +10206,9 @@ def reorganize_album_files(album_id):
     """Enqueue an album for reorganize. Returns immediately — the
     queue worker processes items FIFO. Repeat clicks for an album
     that's already queued or running are deduped (returns
-    ``{queued: false, reason: 'already_queued'}``).
-
-    Body params:
-        source (optional): per-album source pick (Spotify / iTunes /
-            Deezer / Discogs / Hydrabase). When omitted, the
-            orchestrator uses the configured primary with fallback.
-        mode (optional): 'api' (default — query metadata source) or
-            'tags' (read embedded file tags as the source of truth,
-            issue #592). When omitted, falls back to the
-            ``library.reorganize_metadata_source`` config setting,
-            then to 'api'.
-    """
+    ``{queued: false, reason: 'already_queued'}``)."""
     try:
         from core.reorganize_queue import get_queue
-        data = request.get_json() or {}
-        chosen_source = data.get('source') or None
-        metadata_source = data.get('mode') or config_manager.get(
-            'library.reorganize_metadata_source', 'api'
-        ) or 'api'
-        if metadata_source not in ('api', 'tags'):
-            metadata_source = 'api'
 
         # Capture display fields at enqueue time so the status panel
         # can render them without a DB lookup later.
@@ -10289,11 +10230,6 @@ def reorganize_album_files(album_id):
             album_title=meta['album_title'],
             artist_id=meta['artist_id'],
             artist_name=meta['artist_name'],
-            source=chosen_source,
-            metadata_source=metadata_source,
-            # Rename-only (#875): just move files to the current naming scheme — skip
-            # the copy + post-processing (re-tag / quality / AcoustID) of the full flow.
-            rename_only=bool(data.get('rename_only')),
         )
         return jsonify({"success": True, **result})
     except Exception as e:
@@ -10305,35 +10241,15 @@ def reorganize_album_files(album_id):
 def reorganize_all_artist_albums(artist_id):
     """Enqueue every album for an artist. Replaces the old frontend
     bulk-loop. Each album becomes its own queue item, processed FIFO.
-    Albums already queued or running are deduped silently.
-
-    Body params:
-        source (optional): same pick applied to every album. Per-album
-            overrides aren't supported here — use the per-album modal
-            for that.
-        mode (optional): 'api' or 'tags' applied to every album, same
-            shape as the per-album endpoint.
-    """
+    Albums already queued or running are deduped silently."""
     try:
         from core.reorganize_queue import get_queue
-        data = request.get_json() or {}
-        chosen_source = data.get('source') or None
-        metadata_source = data.get('mode') or config_manager.get(
-            'library.reorganize_metadata_source', 'api'
-        ) or 'api'
-        if metadata_source not in ('api', 'tags'):
-            metadata_source = 'api'
 
         albums = get_database().get_artist_albums_for_reorganize(artist_id)
         if not albums:
             return jsonify({"success": False, "error": "No albums found for this artist"}), 404
 
-        # Apply the user's chosen source + mode to every album, then
-        # hand off to the queue's bulk-enqueue helper which owns the
-        # loop+tally.
-        for album in albums:
-            album['source'] = chosen_source
-            album['metadata_source'] = metadata_source
+        # The queue's bulk-enqueue helper owns the loop+tally.
         result = get_queue().enqueue_many(albums)
 
         return jsonify({
@@ -10401,22 +10317,18 @@ try:
     _get_reorganize_queue().set_runner(_build_reorganize_runner(
         get_database=get_database,
         resolve_file_path_fn=lambda p: _resolve_library_file_path(p),
-        post_process_fn=lambda *a, **kw: _post_process_matched_download(*a, **kw),
         cleanup_empty_directories_fn=lambda *a, **kw: _cleanup_empty_directories(*a, **kw),
         is_shutting_down_fn=lambda: bool(IS_SHUTTING_DOWN),
-        # Canonical absolute roots: the reorganize destination is written into
+        # Canonical absolute root: the reorganize destination is written into
         # the catalogue, so a relative './Transfer' would store a path whose
         # meaning depends on the process CWD (and never matches the realpath'd
         # form the repair scanners see for the same file).
-        get_download_path=lambda: config_root_path(
-            config_manager.get('soulseek.download_path', './downloads'), './downloads'
-        ),
         get_transfer_path=lambda: config_root_path(
             config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer'
         ),
         get_config_manager=lambda: config_manager,
-        # Rename-only mode (#875) computes destinations via the same path builder the
-        # preview uses, so apply matches exactly what the user saw.
+        # The mover computes destinations via the same path builder the preview
+        # uses, so apply matches exactly what the user saw (#875).
         build_final_path_fn=lambda *a, **kw: _build_final_path_for_track(*a, **kw),
     ))
 except Exception as _runner_init_err:

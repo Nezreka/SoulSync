@@ -65,7 +65,7 @@ def _resolve_file_path_fn(config_manager: Any):
 
 def album_reorganize_sources(db: Any, lib2_album_id: int) -> List[Dict[str, str]]:
     """Sources this album's stored provider IDs support, for the per-album
-    source picker (mirrors legacy ``GET .../album/<id>/reorganize/sources``)."""
+    source picker."""
     from core.library_reorganize import available_sources_for_album, load_album_and_tracks
 
     album_data, _tracks = load_album_and_tracks(db, lib2_album_id)
