@@ -568,3 +568,42 @@ def test_repair_leaves_a_row_whose_file_is_gone_everywhere(tmp_path):
 
     assert repair_staged_path_records(db) == {}
     assert _ledger_path(db) == staged
+
+
+# --- the staging route carries no batch_id in its context -------------------
+
+def _wrapper_sees_stash(monkeypatch, *, context, batch_id, flag):
+    """Run the verification wrapper with a stub inner pipeline and return the
+    batch id the inner pipeline would have read for the stage redirect."""
+    import types
+    seen = {}
+
+    def _inner(context_key, ctx, file_path, runtime, metadata_runtime=None):
+        seen["stash"] = ctx.get("_atomic_publish_batch_id")
+        ctx["_upgrade_rejected"] = True  # short-circuit the wrapper's tail
+
+    monkeypatch.setattr(pl, "config_manager", _Cfg({"album_downloads.atomic_publish": flag}))
+    monkeypatch.setattr(pl, "post_process_matched_download", _inner)
+    runtime = types.SimpleNamespace(on_download_completed=lambda *a, **kw: None,
+                                    automation_engine=None, web_scan_manager=None,
+                                    repair_worker=None)
+    pl.post_process_matched_download_with_verification(
+        "staging_T", context, "/fake/source.mp3", "T", batch_id, runtime)
+    return seen.get("stash")
+
+
+def test_staging_route_stashes_the_wrapper_batch_id(monkeypatch):
+    # try_staging_match builds its context without batch_id, so the wrapper's
+    # own argument is the only place the batch is named. Tracks claimed from an
+    # album-bundle staging folder used to skip the stage redirect and land in
+    # the live library one by one.
+    assert _wrapper_sees_stash(monkeypatch, context={}, batch_id="B", flag=True) == "B"
+
+
+def test_context_batch_id_still_wins_over_the_argument(monkeypatch):
+    assert _wrapper_sees_stash(monkeypatch, context={"batch_id": "CTX"},
+                               batch_id="ARG", flag=True) == "CTX"
+
+
+def test_flag_off_stashes_nothing_on_the_staging_route(monkeypatch):
+    assert _wrapper_sees_stash(monkeypatch, context={}, batch_id="B", flag=False) is None
