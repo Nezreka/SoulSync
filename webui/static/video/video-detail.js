@@ -4559,7 +4559,8 @@
     function _openManualSearch(scope, en) {
         if (!window.VideoDownload || !window.VideoDownload.manualSearch || !data) return;
         VideoDownload.manualSearch({ title: data.title, scope: scope, season: selectedSeason, episode: en,
-            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year, poster: _showPoster() });
+            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source,
+            tmdbId: (data.source === 'tmdb' ? data.id : (data.tmdb_id || null)), year: data.year, poster: _showPoster() });
     }
     function manualSearchEpisode(btn) { _openManualSearch('episode', parseInt(btn.getAttribute('data-vd-ep-search'), 10)); }
     function manualSearchSeason() { _openManualSearch('season'); }

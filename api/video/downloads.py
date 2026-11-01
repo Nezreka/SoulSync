@@ -143,6 +143,59 @@ def _parse_text(hit) -> str:
     return title
 
 
+def _title_keys(src) -> tuple:
+    """(library id, tmdb id) a search body names its title by. media_id is a
+    library id when media_source says library, else a tmdb id (the old
+    default)."""
+    media_source = str(src.get("media_source") or "tmdb").lower()
+    media_id = src.get("media_id")
+    library_id = media_id if media_source == "library" else None
+    tmdb = src.get("tmdb_id") or (media_id if media_source == "tmdb" else None)
+    return library_id, tmdb
+
+
+def _profile_for_request(db, src):
+    """The quality profile a get-modal search/grab should be judged under:
+    the title's own assignment (resolved from its library id or tmdb_id,
+    whichever the client sends) → else the Default profile (P2, per-title
+    profiles). A show page's episode search names its show by library id;
+    reading only tmdb ids judged every episode by the Default."""
+    from core.video.quality_profile import profile_by_id
+    pid = src.get("quality_profile_id")
+    if pid in (None, "", 0, "0"):
+        scope = str(src.get("scope") or src.get("kind") or "movie").lower()
+        kind = "movie" if scope == "movie" else "show"
+        library_id, tmdb = _title_keys(src)
+        if library_id or tmdb:
+            try:
+                pid = db.quality_profile_id_for(
+                    kind, tmdb_id=int(tmdb) if tmdb else None,
+                    library_id=int(library_id) if library_id else None)
+            except (TypeError, ValueError):
+                pid = None
+    return profile_by_id(db, pid), pid
+
+
+def _with_title_identity(db, src) -> dict:
+    """The search body with its title's own tmdb/imdb/tvdb ids filled in from
+    the library, so a manual search asks the indexers the way the wishlist
+    search does (structured, by id) instead of by title text alone, which
+    missed releases the indexers had. Ids the client sent win."""
+    body = dict(src or {})
+    scope = str(body.get("scope") or body.get("kind") or "movie").lower()
+    library_id, tmdb = _title_keys(body)
+    try:
+        ident = db.search_ids_for("movie" if scope == "movie" else "show",
+                                  library_id=int(library_id) if library_id else None,
+                                  tmdb_id=int(tmdb) if tmdb else None)
+    except (TypeError, ValueError):
+        ident = {}
+    for key in ("tmdb_id", "imdb_id", "tvdb_id"):
+        if not body.get(key) and ident.get(key):
+            body[key] = ident[key]
+    return body
+
+
 def _external_ids(body) -> dict:
     """The tvdb/imdb/tmdb ids a manual search may carry, as prowlarr_search kwargs.
 
@@ -903,23 +956,6 @@ def register_routes(bp):
         profile = load(get_video_db())
         return jsonify(evaluate_owned(body.get("file"), profile))
 
-    def _profile_for_request(db, src):
-        """The quality profile a get-modal search/grab should be judged under:
-        the title's own assignment (resolved from tmdb_id when the client sends
-        it) → else the Default profile (P2, per-title profiles)."""
-        from core.video.quality_profile import profile_by_id
-        pid = src.get("quality_profile_id")
-        if pid in (None, "", 0, "0"):
-            tmdb = src.get("tmdb_id") or src.get("media_id")
-            scope = str(src.get("scope") or src.get("kind") or "movie").lower()
-            kind = "movie" if scope == "movie" else "show"
-            if tmdb and str(src.get("media_source") or "tmdb") == "tmdb":
-                try:
-                    pid = db.quality_profile_id_for(kind, tmdb_id=int(tmdb))
-                except (TypeError, ValueError):
-                    pid = None
-        return profile_by_id(db, pid), pid
-
     @bp.route("/downloads/fresh-releases", methods=["GET"])
     def video_downloads_fresh_releases():
         """The stored Fresh Releases board for Search -> Fresh Releases.
@@ -1028,7 +1064,7 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.mock_search import mock_search
 
-        body = request.get_json(silent=True) or {}
+        body = _with_title_identity(get_video_db(), request.get_json(silent=True) or {})
         scope = str(body.get("scope") or "movie").lower()
         title = body.get("title") or ""
         source = str(body.get("source") or "").lower()
@@ -1082,7 +1118,7 @@ def register_routes(bp):
         like the music side) — fixes 'no results' from waiting too briefly."""
         from . import get_video_db
         from core.video.mock_search import mock_search
-        body = request.get_json(silent=True) or {}
+        body = _with_title_identity(get_video_db(), request.get_json(silent=True) or {})
         scope = str(body.get("scope") or "movie").lower()
         title = body.get("title") or ""
         source = str(body.get("source") or "").lower()

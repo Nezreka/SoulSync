@@ -193,7 +193,9 @@
     function render(container, opts) {
         if (!container) return;
         opts = opts || {};
-        if (opts.kind === 'show') { renderShow(container, opts); return; }
+        // a show reads its title off container._dl: an earlier movie's _opts left on a
+        // reused modal would name that movie in this show's searches and grabs
+        if (opts.kind === 'show') { container._opts = null; renderShow(container, opts); return; }
         container._opts = opts;
         container.innerHTML = contentHTML();
         if (!container._vdlWired) { container._vdlWired = true; container.addEventListener('click', onClick); }
@@ -382,8 +384,25 @@
 
     // Start a search; for Soulseek, stream results in (poll like the music side —
     // results trickle in over ~30s, so a single short wait misses them).
+    // the title this panel searches for, so the server judges results by ITS
+    // quality profile and asks the indexers by its ids (the wishlist search's
+    // way). episode, season and series searches sent neither, so they were
+    // judged by the Default profile on a title-only search.
+    function withIdentity(container, resultsEl, params) {
+        if (params.media_id != null || params.tmdb_id != null) return params;
+        var host = resultsEl.closest('[data-vgm-dl-content]');
+        var o = (host && host._opts) || (container && (container._opts || container._dl)) || {};
+        var extra = {};
+        var id = o.id || o.mediaId;
+        if (id) { extra.media_id = id; extra.media_source = o.source || o.mediaSource || 'library'; }
+        var tmdb = o.tmdbId || o.tvId;
+        if (tmdb) extra.tmdb_id = tmdb;
+        return Object.keys(extra).length ? Object.assign({}, params, extra) : params;
+    }
+
     function searchInto(container, resultsEl, params, triggerRows, onDone) {
         if (!resultsEl) return;
+        params = withIdentity(container, resultsEl, params);
         triggerRows = (triggerRows || []).filter(Boolean);
         if (resultsEl._poll) { clearTimeout(resultsEl._poll); resultsEl._poll = null; }
         resultsEl._rows = null;   // drop any prior search's rows so Auto can't grab a stale hit
@@ -415,7 +434,10 @@
             var qs = '?id=' + encodeURIComponent(id) + '&scope=' + encodeURIComponent(params.scope || 'movie') +
                 '&title=' + encodeURIComponent(params.title || '') +
                 (params.season != null ? '&season=' + params.season : '') +
-                (params.episode != null ? '&episode=' + params.episode : '');
+                (params.episode != null ? '&episode=' + params.episode : '') +
+                (params.media_id != null ? '&media_id=' + encodeURIComponent(params.media_id) +
+                    '&media_source=' + encodeURIComponent(params.media_source || '') : '') +
+                (params.tmdb_id != null ? '&tmdb_id=' + encodeURIComponent(params.tmdb_id) : '');
             getJSON('/api/video/downloads/search/poll' + qs).then(function (d) {
                 if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
                 var rows = (d && d.results) || [];
@@ -1310,7 +1332,7 @@
         var body = ov.querySelector('[data-vms-body]');
         // buildGrabPayload reads media context off the nearest [data-vgm-dl-content]._opts
         body._opts = { id: opts.mediaId, mediaId: opts.mediaId, source: opts.mediaSource,
-            mediaSource: opts.mediaSource, year: opts.year, poster: opts.poster };
+            mediaSource: opts.mediaSource, tmdbId: opts.tmdbId || null, year: opts.year, poster: opts.poster };
 
         ov.addEventListener('click', function (e) {
             if (e.target === ov || e.target.closest('[data-vms-close]')) { _closeManual(ov); return; }

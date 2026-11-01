@@ -9862,6 +9862,26 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def search_ids_for(self, kind: str, *, library_id=None, tmdb_id=None) -> dict:
+        """The library row a search names, by library id or tmdb id: its own id
+        and the tmdb/imdb (and for a show tvdb) ids the indexers can search by.
+        Empty when the title isn't in the library."""
+        tbl, cols = (("movies", "id, tmdb_id, imdb_id") if kind == "movie"
+                     else ("shows", "id, tmdb_id, imdb_id, tvdb_id"))
+        if not library_id and not tmdb_id:
+            return {}
+        conn = self._get_connection()
+        try:
+            key, value = ("id", int(library_id)) if library_id else ("tmdb_id", int(tmdb_id))
+            row = conn.execute(f"SELECT {cols} FROM {tbl} WHERE {key}=? LIMIT 1",  # noqa: S608 - fixed names
+                               (value,)).fetchone()
+            return {k: row[k] for k in row.keys() if row[k] not in (None, "")} if row else {}
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.debug("search_ids_for failed for %s", kind, exc_info=True)
+            return {}
+        finally:
+            conn.close()
+
     def quality_profile_id_for(self, kind: str, *, tmdb_id=None, library_id=None):
         """The per-title quality-profile id for a movie/show (P2), or None for
         the Default. Library row wins; a wishlist row's assignment covers
