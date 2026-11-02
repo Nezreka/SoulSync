@@ -1915,6 +1915,36 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({"success": True, "artist_id": artist_id,
                         "album_id": album_id, "monitored": True})
 
+    @_route("/api/library/v2/discovery/album-status")
+    def lib2_discovery_album_status():
+        """Which of these provider releases are on this profile's Wishlist.
+
+        The release card's Add to Wishlist was write-only: the tick lived in
+        component state and was gone on reload. A release counts once its
+        album carries this profile's monitor rule -- what the add writes,
+        and true before its tracklist has even resolved."""
+        ids = [i.strip() for i in request.args.getlist("id") if i.strip()][:500]
+        source = str(request.args.get("source") or "").strip().lower()
+        from core.library2.provider_ids import indexed_provider_id_sql
+        column = indexed_provider_id_sql(source, alias="al") if source else None
+        if not ids or not column:
+            return jsonify({"success": True, "statuses": {}})
+        with closing(_conn()) as conn:
+            rows = conn.execute(
+                f"""SELECT {column} AS provider_id, al.id AS album_id,
+                           EXISTS (SELECT 1 FROM lib2_monitor_rules r
+                                    WHERE r.entity_type = 'album' AND r.entity_id = al.id
+                                      AND r.profile_id = ? AND r.monitored = 1) AS wished
+                      FROM lib2_albums al
+                     WHERE {column} IN (SELECT value FROM json_each(?))""",
+                (_intent_profile(), json.dumps(ids))).fetchall()
+        statuses: Dict[str, Any] = {}
+        for row in rows:
+            key = str(row["provider_id"])
+            if key and (key not in statuses or row["wished"]):
+                statuses[key] = {"album_id": int(row["album_id"]), "wished": bool(row["wished"])}
+        return jsonify({"success": True, "statuses": statuses})
+
     @_route("/api/library/v2/discovery/track-status")
     def lib2_discovery_track_status():
         """Which of these provider track titles already exist and are wanted.

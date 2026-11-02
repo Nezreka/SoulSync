@@ -643,6 +643,22 @@ export async function fetchLibraryV2DiscoveryTrackStatus(input: {
   return payload.statuses ?? {};
 }
 
+/** Which of these provider releases are on this profile's Wishlist, keyed by
+ *  provider album id. Without it a release card's tick was gone on reload. */
+export async function fetchLibraryV2DiscoveryAlbumStatus(input: {
+  source: string;
+  ids: string[];
+}): Promise<Record<string, { album_id: number; wished: boolean }>> {
+  if (!input.ids.length || !input.source) return {};
+  const params = new URLSearchParams({ source: input.source });
+  for (const id of input.ids) params.append('id', id);
+  const payload = await readJson<{
+    success: boolean;
+    statuses?: Record<string, { album_id: number; wished: boolean }>;
+  }>(apiClient.get('library/v2/discovery/album-status', { searchParams: params }));
+  return payload.statuses ?? {};
+}
+
 /** Atomically materialize and monitor one provider track. */
 export async function monitorLibraryV2DiscoveryTrack(input: {
   source: string;

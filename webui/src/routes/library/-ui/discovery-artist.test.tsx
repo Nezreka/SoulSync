@@ -29,6 +29,7 @@ describe('an artist the catalogue does not hold', () => {
   let resolveResponse: number | null;
   let materializeCalls: unknown[];
   let monitoredAlbums: unknown[];
+  let wishedAlbums: Record<string, { album_id: number; wished: boolean }>;
 
   beforeEach(() => {
     window.artistDetailLabelStack = [];
@@ -42,7 +43,11 @@ describe('an artist the catalogue does not hold', () => {
     resolveResponse = null;
     materializeCalls = [];
     monitoredAlbums = [];
+    wishedAlbums = {};
     server.use(
+      http.get('/api/library/v2/discovery/album-status', () =>
+        HttpResponse.json({ success: true, statuses: wishedAlbums }),
+      ),
       http.get('/api/library/v2/enabled', () =>
         HttpResponse.json({ success: true, enabled: true, can_write: true }),
       ),
@@ -216,6 +221,16 @@ describe('an artist the catalogue does not hold', () => {
     // The bookmark is not a click on the card.
     expect(window.openDownloadMissingModalForArtistAlbum).not.toHaveBeenCalled();
     expect(materializeCalls).toHaveLength(0);
+  });
+
+  it('shows a release already on the Wishlist as wishlisted after a reload', async () => {
+    // the tick used to live in component state only, so it was gone on reload
+    wishedAlbums = { a1: { album_id: 77, wished: true } };
+    renderAt(ARTIST_URL);
+    await screen.findByText('Music Has the Right to Children');
+
+    expect(await screen.findByRole('button', { name: 'On your Wishlist' })).toBeDisabled();
+    expect(monitoredAlbums).toHaveLength(0);
   });
 
   it('opens a release in the shared download dialog, with its tracks', async () => {

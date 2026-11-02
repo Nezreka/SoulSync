@@ -384,6 +384,21 @@ export type GrabOutcome =
  *  test exhaustively. `sinceMs` filters to events from THIS grab, not an
  *  earlier one for the same track/album (a 10s slack absorbs client/server
  *  clock skew and request latency). */
+
+/** The SoulSync yes/no modal; the browser's own prompt only when the shell
+ *  that provides it isn't loaded (a bare test page). */
+function askToConfirm(options: {
+  title: string;
+  message: string;
+  confirmText: string;
+  destructive?: boolean;
+}): Promise<boolean> {
+  if (typeof window.showConfirmDialog === 'function') {
+    return window.showConfirmDialog({ cancelText: 'Cancel', ...options });
+  }
+  return Promise.resolve(window.confirm(options.message));
+}
+
 export function classifyGrabOutcome(
   history: LibraryV2HistoryEntry[],
   sinceMs: number,
@@ -778,9 +793,12 @@ export function InteractiveSearchModal({
       const checks = acoustidCheck
         ? 'AcoustID still checks the file after the download.'
         : 'AcoustID is off for this window, so nothing will catch a wrong song.';
-      const confirmed = window.confirm(
-        `"${resultTitle(r)}" was filtered out (${why}). ${checks} Download it anyway?`,
-      );
+      const confirmed = await askToConfirm({
+        title: 'Download a filtered result?',
+        message: `"${resultTitle(r)}" was filtered out (${why}). ${checks} Download it anyway?`,
+        confirmText: 'Download anyway',
+        destructive: true,
+      });
       if (!confirmed) return;
     }
     // §52.12.4: candidates outside the quality profile are shown (ProfileBadge)
@@ -791,11 +809,15 @@ export function InteractiveSearchModal({
       const rank = profileTargetRank(r, effectiveProfile.ranked_targets);
       const belowProfile = rank === effectiveProfile.ranked_targets.length;
       if (belowProfile) {
-        const confirmed = window.confirm(
-          `"${resultTitle(r)}" is below "${effectiveProfile.name}"'s quality profile. ` +
+        const confirmed = await askToConfirm({
+          title: 'Below the quality profile',
+          message:
+            `"${resultTitle(r)}" is below "${effectiveProfile.name}"'s quality profile. ` +
             'Quality check is off, so this will force-download it anyway. This override ' +
             'is recorded. Continue?',
-        );
+          confirmText: 'Force download',
+          destructive: true,
+        });
         if (!confirmed) return;
       }
     }

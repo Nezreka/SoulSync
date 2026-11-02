@@ -3460,6 +3460,29 @@ def test_discovery_album_monitor_materializes_only_after_explicit_action(
         1, "discography", 9)
 
 
+def test_discovery_album_status_survives_a_reload(api, monkeypatch):
+    """the release card's Add to Wishlist tick lived in component state, so
+    it was gone on reload. the status read answers from the monitor rule."""
+    client, _db, _ids = api
+    monkeypatch.setattr("core.library2.completeness.resolve_tracklist",
+                        lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("core.library2.discography.expand_artist_discography",
+                        lambda *_args, **_kwargs: {})
+    client.post("/api/library/v2/discovery/album", json={
+        "source": "deezer", "artist_source": "deezer", "artist_provider_id": "dz-fresh",
+        "artist_name": "Fresh Artist", "album_provider_id": "301",
+        "album_name": "Fresh Album", "album_type": "album", "track_count": 9,
+    })
+
+    body = client.get("/api/library/v2/discovery/album-status",
+                      query_string=[("source", "deezer"), ("id", "301"), ("id", "999")]).get_json()
+
+    assert body["statuses"]["301"]["wished"] is True
+    assert "999" not in body["statuses"]
+    assert client.get("/api/library/v2/discovery/album-status",
+                      query_string=[("id", "301")]).get_json()["statuses"] == {}
+
+
 def test_discovery_never_writes_a_legacy_id_into_a_provider_column(api):
     """`library` ids are opaque legacy keys, not provider identities."""
     client, db, ids = api

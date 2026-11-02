@@ -778,7 +778,11 @@ describe('library v2 interactive grab', () => {
       }),
     );
 
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    // the SoulSync modal, never the browser's prompt
+    const browserConfirm = vi.spyOn(window, 'confirm');
+    const answer = { value: false };
+    const confirmDialog = vi.fn(async () => answer.value);
+    window.showConfirmDialog = confirmDialog as never;
     const queryClient = createTestQueryClient();
     render(
       <QueryClientProvider client={queryClient}>
@@ -791,20 +795,29 @@ describe('library v2 interactive grab', () => {
       </QueryClientProvider>,
     );
 
-    await screen.findByText('Bad');
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Quality check' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    try {
+      await screen.findByText('Bad');
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Quality check' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Download' }));
 
-    // Declined the Force confirmation — nothing dispatched.
-    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
-    expect(confirmSpy.mock.calls[0]?.[0]).toMatch(/below.*profile/i);
-    expect(downloadCalls).toBe(0);
+      // Declined the Force confirmation — nothing dispatched.
+      await waitFor(() => expect(confirmDialog).toHaveBeenCalled());
+      const options = (
+        confirmDialog.mock.calls[0] as unknown as [{ message: string; confirmText: string }]
+      )[0];
+      expect(options.message).toMatch(/below.*profile/i);
+      expect(options.confirmText).toBe('Force download');
+      expect(downloadCalls).toBe(0);
 
-    confirmSpy.mockReturnValue(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+      answer.value = true;
+      fireEvent.click(screen.getByRole('button', { name: 'Download' }));
 
-    await waitFor(() => expect(downloadCalls).toBe(1));
-    confirmSpy.mockRestore();
+      await waitFor(() => expect(downloadCalls).toBe(1));
+      expect(browserConfirm).not.toHaveBeenCalled();
+    } finally {
+      delete window.showConfirmDialog;
+      browserConfirm.mockRestore();
+    }
   });
 
   it('shows the selected client download progress after dispatch', async () => {

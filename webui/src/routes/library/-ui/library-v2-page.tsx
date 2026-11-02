@@ -7128,7 +7128,9 @@ function TopTracksSidebar({
   // ids. Bookmarking one of those invented an album named after the track
   // that matched nothing, so its tracklist could never resolve. Those rows
   // stay display-only here too.
-  const bookmarkable = topTracks.data?.kind === 'provider';
+  // and only for a profile that may wish: the add answers 403 otherwise
+  const canWish = useLibraryV2CanWish();
+  const bookmarkable = topTracks.data?.kind === 'provider' && canWish;
   // Identify against the provider that actually answered, not against the id
   // namespace the artist row happens to carry.
   const trackSource = topTracks.data?.source || source;
@@ -11783,6 +11785,8 @@ export function TrackMetadataGapsCell({
   onOpenTags: () => void;
 }) {
   const queryClient = useQueryClient();
+  // the repair writes the file: a profile without write access only reads the gaps
+  const canWrite = useLibraryV2CanWrite();
   const mutation = useMutation({
     mutationFn: async () => {
       // iss27-02: unlike the plain write-tags button, a tag-gap click first
@@ -11863,9 +11867,11 @@ export function TrackMetadataGapsCell({
   }
   const hint = mutation.isError
     ? mutationErrorMessage(mutation.error, 'Write tags failed')
-    : checks?.edition === 'unknown'
-      ? 'Select the release in Re-identify before repairing track numbers.'
-      : 'Click to repair the stored metadata findings and verify the file again.';
+    : !canWrite
+      ? 'Click to inspect the file tags.'
+      : checks?.edition === 'unknown'
+        ? 'Select the release in Re-identify before repairing track numbers.'
+        : 'Click to repair the stored metadata findings and verify the file again.';
   return (
     <Tooltip.Root>
       <Tooltip.Trigger
@@ -11875,7 +11881,7 @@ export function TrackMetadataGapsCell({
         disabled={mutation.isPending || !track.id}
         onClick={(e) => {
           e.stopPropagation();
-          if (checks?.edition === 'unknown') onOpenTags();
+          if (!canWrite || checks?.edition === 'unknown') onOpenTags();
           else mutation.mutate();
         }}
       >
@@ -13444,6 +13450,8 @@ function TrackTagsPanel({
   fileId?: number;
 }) {
   const queryClient = useQueryClient();
+  // tags are read by everyone, written by a profile that may change the library
+  const canWrite = useLibraryV2CanWrite();
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState<string>('');
   const [isAdding, setIsAdding] = useState(false);
@@ -13493,6 +13501,7 @@ function TrackTagsPanel({
   const buckets = groupFileTags(tags);
 
   const handleStartEdit = (key: string, value: string) => {
+    if (!canWrite) return;
     setEditingKey(key);
     setEditingValue(value);
     setError(null);
@@ -13562,16 +13571,20 @@ function TrackTagsPanel({
             return (
               <div
                 key={key}
-                className={`${styles.fileTagRow} ${styles.tagRowClickable}`}
-                title="Click to edit tag"
-                onClick={() => handleStartEdit(key, value)}
+                className={
+                  canWrite ? `${styles.fileTagRow} ${styles.tagRowClickable}` : styles.fileTagRow
+                }
+                title={canWrite ? 'Click to edit tag' : undefined}
+                onClick={canWrite ? () => handleStartEdit(key, value) : undefined}
               >
                 <span className={styles.fileTagKey}>{fileTagLabel(key)}</span>
                 <span className={styles.fileTagValue}>
                   {value}
-                  <span className={styles.editIndicator}>
-                    <SvgIcon name="edit" />
-                  </span>
+                  {canWrite ? (
+                    <span className={styles.editIndicator}>
+                      <SvgIcon name="edit" />
+                    </span>
+                  ) : null}
                 </span>
               </div>
             );
@@ -13670,7 +13683,7 @@ function TrackTagsPanel({
             </button>
           </div>
         </div>
-      ) : (
+      ) : !canWrite ? null : (
         <div className={styles.tagAddBtnContainer}>
           <button
             type="button"
@@ -13927,6 +13940,7 @@ function TrackFileDeleteButton({
           icon="delete"
           tone="danger"
           title="Delete this version — from the library, or from disk too"
+          requiresWrite
           onClick={() => setConfirming(true)}
         />
       ) : (

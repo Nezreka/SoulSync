@@ -4,6 +4,7 @@ import { createContext, type ReactNode, useContext, useMemo, useState } from 're
 import type { DiscographyRelease } from '../../artist-detail/-artist-detail.types';
 
 import {
+  fetchLibraryV2DiscoveryAlbumStatus,
   LIBRARY_V2_QUERY_KEY,
   libraryV2EnabledQueryOptions,
   monitorLibraryV2DiscoveryAlbum,
@@ -34,6 +35,8 @@ interface ArtistPageLibrary {
   artistName: string;
   /** The source that produced the discography, which owns the release ids. */
   discographySource: string;
+  /** `source:providerId` of every release already on this profile's Wishlist. */
+  wished: ReadonlySet<string>;
 }
 
 interface ArtistPageRelease {
@@ -47,6 +50,7 @@ interface ArtistPageRelease {
 }
 
 const ArtistPageLibraryContext = createContext<ArtistPageLibrary | null>(null);
+const EMPTY_SET: ReadonlySet<string> = new Set();
 
 /** `null` unless the card sits on the artist page under the provider. */
 function useArtistPageLibrary(): ArtistPageLibrary | null {
@@ -89,9 +93,49 @@ export function ArtistPageLibraryProvider({
   const normalizedSource = source.toLowerCase();
   const discographySource = detail.data?.discography?.source || normalizedSource;
 
+  // one status read for the whole page, per source that owns release ids
+  const idsBySource = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    const discography = detail.data?.discography;
+    for (const bucket of [discography?.albums, discography?.eps, discography?.singles]) {
+      for (const release of bucket ?? []) {
+        const target = describeRelease(release, discographySource);
+        if (target) (out[target.source] ??= []).push(target.providerId);
+      }
+    }
+    return out;
+  }, [detail.data?.discography, discographySource]);
+  const enabled = useQuery(libraryV2EnabledQueryOptions());
+  const statusSources = Object.keys(idsBySource).sort();
+  const status = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'discovery-album-status', idsBySource],
+    queryFn: async () => {
+      const wished = new Set<string>();
+      for (const src of statusSources) {
+        const statuses = await fetchLibraryV2DiscoveryAlbumStatus({
+          source: src,
+          ids: idsBySource[src] ?? [],
+        });
+        for (const [providerId, entry] of Object.entries(statuses)) {
+          if (entry.wished) wished.add(`${src}:${providerId}`);
+        }
+      }
+      return wished;
+    },
+    enabled: enabled.data?.enabled === true && statusSources.length > 0,
+    staleTime: 30_000,
+  });
+  const wished = status.data;
+
   const value = useMemo<ArtistPageLibrary>(
-    () => ({ source: normalizedSource, id, artistName, discographySource }),
-    [normalizedSource, id, artistName, discographySource],
+    () => ({
+      source: normalizedSource,
+      id,
+      artistName,
+      discographySource,
+      wished: wished ?? EMPTY_SET,
+    }),
+    [normalizedSource, id, artistName, discographySource, wished],
   );
 
   return (
@@ -120,7 +164,8 @@ function MonitorButton({
   if (!target) return null;
 
   const canWish = enabled.data?.enabled === true && enabled.data.canWish;
-  const monitored = state === 'done';
+  // on the Wishlist already (an add from before this visit), or added just now
+  const monitored = state === 'done' || library.wished.has(`${target.source}:${target.providerId}`);
   const busy = state === 'busy';
 
   async function monitor() {

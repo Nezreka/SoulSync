@@ -76,17 +76,21 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     glow: '244, 114, 182',
     tagline: 'Whether the audio is what it claims to be, and good enough',
     description:
-      'Finds files that fail to decode, FLAC made from a lossy source, 30-second preview clips saved as full tracks and AAC that shows 0:00.',
+      'Finds files that fail to decode, FLAC made from a lossy source, 30-second preview clips saved as full tracks, AAC that shows 0:00, and files below their quality profile.',
     jobIds: [
       'audio_corruption_detector',
       'fake_lossless_detector',
       'short_preview_track',
       'streamed_aac_repair',
+      'quality_profile_audit',
     ],
     findingTypes: [
       'corrupt_audio',
       'fake_lossless',
       'quality_upgrade',
+      'quality_upgrade_review',
+      'quality_format_not_targeted',
+      'quality_unknown',
       'short_preview_track',
       'zero_length_mp4',
     ],
@@ -139,9 +143,21 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     glow: '56, 189, 248',
     tagline: 'Find unlinked files, missing paths, and empty folders',
     description:
-      'Finds orphan audio files, stale library paths, and empty folders. Review recording duplicates from the Library page.',
-    jobIds: ['orphan_file_detector', 'dead_file_cleaner', 'empty_folder_cleaner'],
-    findingTypes: ['duplicate_tracks', 'orphan_file', 'dead_file', 'empty_folder'],
+      'Finds duplicate copies of a song, orphan audio files, stale library paths, and empty folders.',
+    jobIds: [
+      'native_duplicate_detector',
+      'orphan_file_detector',
+      'dead_file_cleaner',
+      'empty_folder_cleaner',
+    ],
+    findingTypes: [
+      'native_duplicate_tracks',
+      'native_duplicate_releases',
+      'duplicate_tracks',
+      'orphan_file',
+      'dead_file',
+      'empty_folder',
+    ],
   },
 ] as const;
 
