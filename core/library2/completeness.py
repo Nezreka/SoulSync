@@ -813,6 +813,14 @@ def resolve_tracklist(config_manager, conn, album_id: int, *,
             )
             conn.commit()
         except Exception as e:  # noqa: BLE001
+            # undo the half: without this the caller's connection kept the
+            # partial track rows and the write lock, and its next commit (an
+            # auto-monitor marking the album ready) made them stick with no
+            # tracklist or snapshot behind them
+            try:
+                conn.rollback()
+            except Exception as rollback_error:  # noqa: BLE001
+                logger.debug("tracklist rollback failed (%s): %s", album_id, rollback_error)
             logger.debug("tracklist cache write failed (%s): %s", album_id, e)
         return tracks
     return None
