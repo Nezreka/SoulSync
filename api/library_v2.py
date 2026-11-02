@@ -2579,7 +2579,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         ReplayGain endpoint next to it."""
         from core.library2.lyrics import fetch_track_lyrics
         with closing(_conn()) as conn:
-            result = fetch_track_lyrics(conn, track_id, config_manager=config_manager)
+            result = fetch_track_lyrics(conn, track_id, config_manager=config_manager,
+                                        max_wait_seconds=10)
         if not result["fetched"]:
             return _fail(result["error"] or "Fetch failed")
         return jsonify({"success": True, **result})

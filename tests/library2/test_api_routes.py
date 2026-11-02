@@ -476,7 +476,7 @@ def test_track_replaygain_analyzes_synchronously(api, monkeypatch):
     monkeypatch.setattr("core.replaygain.is_ffmpeg_available", lambda: True)
     monkeypatch.setattr(
         "core.library2.replaygain.analyze_track_replaygain",
-        lambda conn, track_id, config_manager=None: {
+        lambda conn, track_id, config_manager=None, **_kw: {
             "analyzed": True, "track_gain_db": 2.5, "error": None,
         },
     )
@@ -489,7 +489,7 @@ def test_fetch_lyrics_endpoint_writes_synchronously(api, monkeypatch):
     client, _db, ids = api
     monkeypatch.setattr(
         "core.library2.lyrics.fetch_track_lyrics",
-        lambda conn, track_id, config_manager=None: {"fetched": True, "error": None},
+        lambda conn, track_id, config_manager=None, **_kw: {"fetched": True, "error": None},
     )
     response = client.post(f"/api/library/v2/tracks/{ids['album_track']}/fetch-lyrics")
     assert response.status_code == 200
@@ -500,7 +500,7 @@ def test_fetch_lyrics_endpoint_surfaces_unavailable_error(api, monkeypatch):
     client, _db, ids = api
     monkeypatch.setattr(
         "core.library2.lyrics.fetch_track_lyrics",
-        lambda conn, track_id, config_manager=None: {
+        lambda conn, track_id, config_manager=None, **_kw: {
             "fetched": False, "error": "No lyrics available for this track",
         },
     )
