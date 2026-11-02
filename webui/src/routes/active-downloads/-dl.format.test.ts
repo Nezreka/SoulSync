@@ -60,10 +60,18 @@ describe('parseStamp', () => {
 
 describe('dayLabel', () => {
   it('says Today and Yesterday', () => {
-    const now = Date.now();
+    const now = new Date(2026, 9, 14, 15, 0).getTime();
     expect(dayLabel(now - 1000, now)).toBe('Today');
-    expect(dayLabel(now - 86_400_000, now)).toBe('Yesterday');
+    expect(dayLabel(new Date(2026, 9, 13, 23, 0).getTime(), now)).toBe('Yesterday');
+    expect(dayLabel(new Date(2026, 9, 13, 0, 30).getTime(), now)).toBe('Yesterday');
     expect(dayLabel(null, now)).toBe('Earlier');
+  });
+
+  it('goes by the calendar day, not 24 hours back', () => {
+    // late on a day, whatever its length: yesterday is the day before
+    const now = new Date(2026, 10, 1, 23, 37).getTime();
+    expect(dayLabel(new Date(2026, 10, 1, 0, 30).getTime(), now)).toBe('Today');
+    expect(dayLabel(new Date(2026, 9, 31, 23, 50).getTime(), now)).toBe('Yesterday');
   });
 });
 

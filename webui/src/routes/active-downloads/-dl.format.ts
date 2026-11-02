@@ -56,7 +56,11 @@ export function dayLabel(ms: number | null, now: number): string {
   if (ms === null) return 'Earlier';
   const key = dayKey(ms);
   if (key === dayKey(now)) return 'Today';
-  if (key === dayKey(now - 86_400_000)) return 'Yesterday';
+  // the calendar day before, not 24 hours back: a 25 hour day (dst ending)
+  // put 24 hours ago on today, a 23 hour one two days back
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (key === dayKey(yesterday.getTime())) return 'Yesterday';
   const d = new Date(ms);
   if (d.getFullYear() === new Date(now).getFullYear()) {
     return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });

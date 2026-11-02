@@ -44,11 +44,11 @@ def db(db_path: Path, monkeypatch):
     """Real MusicDatabase against a tmp SQLite file so the schema
     migration runs end-to-end (validates the ALTER TABLE additions)."""
     monkeypatch.setenv('DATABASE_PATH', str(db_path))
-    # MusicDatabase is heavy; isolate to a fresh import each test so
-    # other tests don't get our env-var pollution.
-    import importlib
+    # no importlib.reload here: DATABASE_PATH is read per call, and a reload
+    # swaps the MusicDatabase class out from under every later test, so its
+    # class-level caches (the stats and db-info counts) stop being the ones
+    # those tests clear and check
     import database.music_database as music_db_module
-    importlib.reload(music_db_module)
     db = music_db_module.MusicDatabase(str(db_path))
     yield db
 
