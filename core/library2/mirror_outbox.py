@@ -382,6 +382,20 @@ def _entity_key(op: str, data: Dict[str, Any]) -> Optional[tuple]:
     return None
 
 
+def _row_key(row) -> Optional[tuple]:
+    """``_entity_key`` for one outbox row, per profile: one profile's newer op
+    must never cancel another profile's wish or watch on the same entity (an
+    admin's remove dropped a member's pending add)."""
+    key = _entity_key(row["op"], json.loads(row["payload"] or "{}"))
+    if key is None:
+        return None
+    try:
+        profile = int(row["profile_id"] or 1)
+    except (IndexError, KeyError, TypeError, ValueError):
+        profile = 1
+    return key + (profile,)
+
+
 def _superseded_ids(conn, rows: List[Dict[str, Any]]) -> set:
     """Pending rows that a LATER row for the same entity already overrides.
 
@@ -397,7 +411,7 @@ def _superseded_ids(conn, rows: List[Dict[str, Any]]) -> set:
     families: set[str] = set()
     for row in rows:
         try:
-            key = _entity_key(row["op"], json.loads(row["payload"] or "{}"))
+            key = _row_key(row)
         except (TypeError, ValueError):
             key = None
         if key is None:
@@ -414,12 +428,12 @@ def _superseded_ids(conn, rows: List[Dict[str, Any]]) -> set:
     ops = sorted({op for family in families for op in _SIBLING_OPS[family]})
     marks = ",".join("?" for _ in ops)
     for candidate in conn.execute(
-        f"""SELECT id, op, payload FROM lib2_mirror_outbox
+        f"""SELECT id, op, payload, profile_id FROM lib2_mirror_outbox
              WHERE id > ? AND op IN ({marks}) ORDER BY id""",
         (lowest_pending, *ops),
     ):
         try:
-            key = _entity_key(candidate["op"], json.loads(candidate["payload"] or "{}"))
+            key = _row_key(candidate)
         except (TypeError, ValueError):
             continue
         if key is None:
@@ -547,7 +561,7 @@ def outbox_status(conn) -> Dict[str, Any]:
 def retry_failed(conn) -> int:
     """Flip current failed rows back to pending; retire obsolete ones first."""
     failed = [dict(row) for row in conn.execute(
-        "SELECT id, op, payload FROM lib2_mirror_outbox "
+        "SELECT id, op, payload, profile_id FROM lib2_mirror_outbox "
         "WHERE status='failed' ORDER BY id")]
     obsolete = _superseded_ids(conn, failed)
     if obsolete:
@@ -600,11 +614,11 @@ def _ids_superseding_stuck_rows(conn) -> set:
     """
     stuck: Dict[tuple, int] = {}
     for row in conn.execute(
-        "SELECT id, op, payload FROM lib2_mirror_outbox "
+        "SELECT id, op, payload, profile_id FROM lib2_mirror_outbox "
         "WHERE status IN ('pending','failed')"
     ):
         try:
-            key = _entity_key(row["op"], json.loads(row["payload"] or "{}"))
+            key = _row_key(row)
         except (TypeError, ValueError):
             continue
         if key is None:
@@ -615,11 +629,11 @@ def _ids_superseding_stuck_rows(conn) -> set:
 
     protected: set = set()
     for row in conn.execute(
-        "SELECT id, op, payload FROM lib2_mirror_outbox WHERE id > ?",
+        "SELECT id, op, payload, profile_id FROM lib2_mirror_outbox WHERE id > ?",
         (min(stuck.values()),),
     ):
         try:
-            key = _entity_key(row["op"], json.loads(row["payload"] or "{}"))
+            key = _row_key(row)
         except (TypeError, ValueError):
             continue
         if key is not None and key in stuck and int(row["id"]) > stuck[key]:
