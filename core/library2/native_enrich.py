@@ -1541,17 +1541,26 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
         if has_id:
             identified.setdefault(key, int(aid))
 
+    # every combined-looking credit that owns no album. One with an id or a
+    # legacy id only qualifies for the anchored split below: a credit carrying
+    # the album's own artist as one of its parts is a list whatever id it
+    # picked up ("Øneheart, Malek" on Øneheart's album got a provider id by
+    # name, and 258 of 289 left-over ghosts on a big library looked like that,
+    # each a fileless "artist" in the Library list)
     ghosts = conn.execute(
-        f"SELECT a.id, a.name, a.monitored FROM lib2_artists a "
-        f"WHERE a.canonical_artist_id IS NULL AND a.legacy_artist_id IS NULL AND NOT {_IDENTIFIED_SQL} "
+        f"SELECT a.id, a.name, a.monitored, "
+        f"(a.legacy_artist_id IS NOT NULL OR {_IDENTIFIED_SQL}) AS settled "
+        "FROM lib2_artists a "
+        "WHERE a.canonical_artist_id IS NULL "
         "AND NOT EXISTS (SELECT 1 FROM lib2_albums al WHERE al.primary_artist_id=a.id) "
         "ORDER BY a.id").fetchall()
+    ghosts = [g for g in ghosts if not g[3] or len(split_artist_credits(g[1] or "")) >= 2]
     stats = {"considered": len(ghosts), "merged": 0, "split": 0, "left": 0, "created": 0}
     total = len(ghosts)
-    for index, (gid, name, monitored) in enumerate(ghosts, start=1):
+    for index, (gid, name, monitored, settled) in enumerate(ghosts, start=1):
         gid = int(gid)
         key = normalize_name(name or "")
-        target = identified.get(key)
+        target = None if settled else identified.get(key)
         if target and target != gid:
             _rehome_and_delete_combined(conn, gid, target, [target])
             stats["merged"] += 1
@@ -1564,8 +1573,9 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
                 "JOIN lib2_albums al ON al.id=t.album_id "
                 "JOIN lib2_artists pa ON pa.id=al.primary_artist_id "
                 "WHERE ta.artist_id=?", (gid,))}
+            anchored = any(k in anchors for k in keys)
             if len(pieces) < 2 or not (
-                    any(k in anchors for k in keys) or all(k in identified for k in keys)):
+                    anchored or (not settled and all(k in identified for k in keys))):
                 stats["left"] += 1
             else:
                 components: List[int] = []

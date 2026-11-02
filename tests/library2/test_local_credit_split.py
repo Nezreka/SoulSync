@@ -153,3 +153,29 @@ def test_the_automatic_online_pass_only_takes_what_the_workers_cannot(conn):
     automatic = {r["id"] for r in _pending_unmapped_artists(conn, None, combined_only=True)}
     assert {single, combined} <= everything
     assert automatic == {combined}
+
+
+def test_an_anchored_ghost_splits_even_with_an_id_it_picked_up_by_name(conn):
+    """"Øneheart, Malek" on Øneheart's own album got a provider id from a name
+    match, and the split skipped anything identified, so it stayed a fileless
+    "artist" in the Library list (258 of 289 left-over ghosts on a big
+    library). A credit carrying the album's own artist as a part is a list
+    whatever id it has."""
+    album_artist = _artist(conn, "Øneheart", spotify="sp-oneheart")
+    ghost = _artist(conn, "Øneheart, Malek", spotify="sp-wrong-match")
+    track = _credited_track(conn, album_artist, ghost)
+    stats = split_combined_credits_locally(conn)
+    assert stats["split"] == 1
+    assert conn.execute("SELECT COUNT(*) FROM lib2_artists WHERE id=?", (ghost,)).fetchone()[0] == 0
+    names = {r[0] for r in conn.execute(
+        "SELECT a.name FROM lib2_track_artists ta JOIN lib2_artists a ON a.id=ta.artist_id "
+        "WHERE ta.track_id=?", (track,))}
+    assert names == {"Øneheart", "Malek"}
+
+
+def test_an_identified_band_name_with_no_anchor_is_left_alone(conn):
+    band = _artist(conn, "Earth, Wind & Fire", spotify="sp-ewf")
+    other = _artist(conn, "Various Artists")
+    _credited_track(conn, other, band)
+    split_combined_credits_locally(conn)
+    assert conn.execute("SELECT name FROM lib2_artists WHERE id=?", (band,)).fetchone()[0] == "Earth, Wind & Fire"
