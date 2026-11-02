@@ -66,7 +66,8 @@ def job_folder(save_path: Any, job_name: Any, *,
     """The job's own folder from what the client reported for it, or None.
 
     ``save_path`` is the client's final path for the job (a folder, or for a
-    single-file job the file itself, whose folder is its parent). ``resolve``
+    single-file job the file itself, whose folder is its parent -- also once
+    the importer has taken that file and only its leftovers remain). ``resolve``
     maps the client's path to this process's mount. None unless the folder is
     named after the job (see ``matches_job_name``), is a real folder (not a
     link), and is neither a protected root nor a folder that holds one -- so a
@@ -79,8 +80,8 @@ def job_folder(save_path: Any, job_name: Any, *,
         if not path:
             return None
         path = os.path.abspath(str(path))
-        if os.path.isfile(path) and not os.path.islink(path):
-            path = os.path.dirname(path)
+        if (os.path.isfile(path) and not os.path.islink(path)) or not os.path.lexists(path):
+            path = os.path.dirname(path)     # the file, or where it was
         if not os.path.isdir(path) or os.path.islink(path):
             return None
         if not matches_job_name(os.path.basename(path), job_name):
@@ -100,6 +101,18 @@ def job_folder(save_path: Any, job_name: Any, *,
         return path
     except (OSError, TypeError, ValueError):
         return None
+
+
+def _reported_path_gone(save_path: Any, resolve: Optional[Callable[[str], str]]) -> bool:
+    """True when the client named a final path and nothing is there any more
+    (the importer took the file and removed the folder it left empty)."""
+    if not save_path:
+        return False
+    try:
+        path = resolve(str(save_path)) if resolve else str(save_path)
+        return bool(path) and not os.path.lexists(os.path.abspath(str(path)))
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 def _delete_job_folder(path: str, what: str, logger) -> bool:
@@ -134,6 +147,7 @@ def remove_imported_job(job_id: Any, mode: Any, *, run: Callable[[Any], Any],
     logger = get_logger("usenet.remove_completed")
     what = "%s (%s)" % (label, job_id) if label else str(job_id)
     folder = None
+    gone = False                 # the client named a path that no longer exists
     try:
         if adapter is None:
             from core.usenet_clients import get_active_adapter
@@ -146,9 +160,10 @@ def remove_imported_job(job_id: Any, mode: Any, *, run: Callable[[Any], Any],
             except Exception:  # noqa: BLE001 - no report means no folder to delete
                 status = None
             if status is not None:
-                folder = job_folder(getattr(status, "save_path", None),
-                                    getattr(status, "name", None),
+                reported = getattr(status, "save_path", None)
+                folder = job_folder(reported, getattr(status, "name", None),
                                     resolve=resolve, protected=protected)
+                gone = folder is None and _reported_path_gone(reported, resolve)
         removed = bool(run(adapter.remove(str(job_id), delete_files=(mode == FILES))))
     except Exception:  # noqa: BLE001 - external client boundary; the import already landed
         logger.warning("usenet: couldn't remove imported job %s from the client", what,
@@ -160,7 +175,10 @@ def remove_imported_job(job_id: Any, mode: Any, *, run: Callable[[Any], Any],
     logger.info("usenet: removed imported job %s from the client (%s)", what,
                 "and its leftover files" if mode == FILES else "history only")
     if mode == FILES:
-        if folder is None:
+        if folder is None and gone:
+            # the importer already took the file and removed the emptied folder
+            logger.info("usenet: nothing left of the folder of imported job %s", what)
+        elif folder is None:
             logger.info("usenet: kept the folder of imported job %s -- the client's report "
                         "did not name a folder of its own", what)
         elif os.path.isdir(folder):

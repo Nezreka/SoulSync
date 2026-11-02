@@ -208,6 +208,44 @@ def test_files_keeps_a_folder_it_cannot_prove_is_the_jobs(tmp_path):
     assert job.exists()
 
 
+def test_a_single_file_job_whose_file_was_taken_still_finds_its_folder(tmp_path):
+    # sab reports the finished FILE; the importer took it and left an nfo behind
+    job = _job(tmp_path, files=("some.show.nfo",))
+    taken = job / "some.show.s01e01.mkv"
+    assert rc.job_folder(str(taken), job.name) == str(job)
+    a = _Reporting(job.name, str(taken))
+    assert rc.remove_imported_job("nzo_1", "files", run=_run, adapter=a) is True
+    assert not job.exists() and job.parent.exists()
+    # a taken file straight in the category folder never widens to the category
+    category = job.parent
+    assert rc.job_folder(str(category / "loose.mkv"), "loose") is None
+
+
+def test_a_folder_already_gone_is_logged_as_nothing_left(tmp_path, caplog):
+    import logging
+    job = _job(tmp_path)
+    reported = str(job / "some.show.s01e01.mkv")
+    import shutil
+    shutil.rmtree(job)                   # the importer's own cleanup got there first
+    with caplog.at_level(logging.INFO):
+        assert rc.remove_imported_job("nzo_1", "files", run=_run,
+                                      adapter=_Reporting(job.name, reported)) is True
+        assert rc.remove_imported_job("nzo_2", "files", run=_run,
+                                      adapter=_Reporting(job.name, str(job))) is True
+    text = caplog.text
+    assert text.count("nothing left of the folder of imported job") == 2
+    assert "kept the folder" not in text
+
+
+def test_a_folder_it_cannot_prove_is_still_logged_as_kept(tmp_path, caplog):
+    import logging
+    job = _job(tmp_path)
+    with caplog.at_level(logging.INFO):
+        rc.remove_imported_job("nzo_1", "files", run=_run,
+                               adapter=_Reporting("Other.Release", str(job)))
+    assert "kept the folder of imported job" in caplog.text and job.exists()
+
+
 def test_files_without_a_report_still_removes_the_job(tmp_path):
     job = _job(tmp_path)
     a = _Adapter()                       # no get_status at all
@@ -392,6 +430,22 @@ def test_a_tick_with_files_deletes_what_the_import_left_in_the_job_folder(tmp_pa
     monitor._tick(db)
     assert row["status"] == "completed" and adapter.calls == [("SABnzbd_nzo_7", True)]
     assert not job.exists() and job.parent.exists()
+
+
+def test_a_tick_with_files_cleans_a_single_file_job_reported_by_its_file(tmp_path, monkeypatch):
+    def organizer(dl, src):
+        return {"status": "completed", "progress": 100.0, "dest_path": "/lib/x.mkv",
+                "_cleanup_source": src}
+    db, row, order, adapter = _tick_setup(tmp_path, monkeypatch, organizer, "files")
+    job = tmp_path / "complete" / "soulsync" / "Some.Show.S01E01.1080p.WEB-DL"
+    (job / "some.show.nfo").write_bytes(b"nfo")
+    video = job / "some.show.s01e01.1080p.mkv"
+
+    async def status(job_id):
+        return _St(name=job.name, save_path=str(video), state="completed")
+    adapter.get_status = status
+    monitor._tick(db)
+    assert row["status"] == "completed" and not job.exists()
 
 
 def test_a_tick_with_history_keeps_the_leftovers(tmp_path, monkeypatch):
