@@ -132,3 +132,15 @@ def test_admin_preview_plans_in_the_owners_library(client, monkeypatch, profiles
     r = client.post(f'/api/library/album/{album_id}/reorganize/preview', json={})
     assert r.status_code == 200, r.data
     assert seen['scope'] == sam
+
+def test_preview_404s_for_an_unknown_album(client, profiles):
+    """An album the catalogue does not know is a 404 on the legacy route too.
+
+    The preview plans with the catalogue planner now, so an unknown id must
+    come back as the same 404 the library-v2 route gives, not as a 200 holding
+    an empty plan (asked for on #1968)."""
+    _sam, _alex, _album_id = profiles
+    _login(client, 1)  # admin: the #1504 guard is not what this test covers
+    r = client.post('/api/library/album/999999/reorganize/preview', json={})
+    assert r.status_code == 404, r.data
+    assert r.get_json()['success'] is False
