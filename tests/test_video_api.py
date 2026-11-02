@@ -2140,6 +2140,8 @@ def test_a_watched_click_is_marked_for_whoever_clicked_it(tmp_path, monkeypatch)
     """#1941: the server owner's click marks the shared state through the server
     account; a profile linked to its own Plex account marks its own rows on its
     own account; a profile with no linked account has no watch state to mark."""
+    from core.video import watch_scope as _ws
+    monkeypatch.setattr(_ws, "_video_server", lambda: "plex")  # per-profile state is Plex's
     from core.video import metadata as med
     from core.video import watch_scope
     calls = []
@@ -2170,6 +2172,8 @@ def test_a_watched_click_is_marked_for_whoever_clicked_it(tmp_path, monkeypatch)
 def test_continue_watching_is_the_signed_in_profiles_own(tmp_path, monkeypatch):
     """#1941: the resume row reads the owner's state for the owner, a linked
     member's own rows for that member, and nothing for an unlinked member."""
+    from core.video import watch_scope as _ws
+    monkeypatch.setattr(_ws, "_video_server", lambda: "plex")  # per-profile state is Plex's
     from core.video import watch_scope
     monkeypatch.setattr(watch_scope, "_plex_link",
                         lambda pid: {"id": "u7", "title": "M", "token": "t"} if pid == 7 else None)
@@ -2200,6 +2204,8 @@ def test_continue_watching_is_the_signed_in_profiles_own(tmp_path, monkeypatch):
 def test_detail_pages_say_whether_the_profile_can_mark_watched(tmp_path, monkeypatch):
     """#1941: a profile with no watch state of its own gets no watched toggle;
     the detail payload tells the page so."""
+    from core.video import watch_scope as _ws
+    monkeypatch.setattr(_ws, "_video_server", lambda: "plex")  # per-profile state is Plex's
     from core.video import watch_scope
     monkeypatch.setattr(watch_scope, "_plex_link",
                         lambda pid: {"id": "u7", "title": "M", "token": "t"} if pid == 7 else None)

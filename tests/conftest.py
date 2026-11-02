@@ -1082,6 +1082,14 @@ def shared_state():
 
 
 @pytest.fixture(autouse=True)
+def _quality_profile_refresh_inline(monkeypatch):
+    """the Quality page's wishlist refresh runs on a thread in the app; in
+    tests it runs inline, so nothing touches a test's db after it ends."""
+    from core.library2 import wishlist_mirror
+    monkeypatch.setattr(wishlist_mirror, "RUN_INLINE", True)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_fold_index():
     """the folded-text index (database/fold_index) lives per database path for
     the process. tests reseed the same path, so each one starts with it empty."""

@@ -417,9 +417,22 @@ def server_track_names(track_obj: Any) -> Dict[str, Any]:
     }
 
 
-def _library_folders_visible(roots: Dict[str, int]) -> bool:
-    """Whether this process can see any of the library folders at all. When
-    it can't, the media server lives somewhere SoulSync has no view of."""
+def _library_folders_visible(roots: Dict[str, int], path: Optional[str] = None) -> bool:
+    """Whether this process can see where ``path`` would live. When it can't,
+    the media server is somewhere SoulSync has no view of.
+
+    It asks about this file, not about the folders in general: the shared
+    transfer folder is always a root and always exists, so "can I see any
+    root" was true on every install and a remote server's new albums never
+    reached the library. A file whose own folder is here (Navidrome still
+    listing a file you just removed), or that sits under a folder SoulSync can
+    see, is local; anything else is the server's."""
+    if path:
+        folder = os.path.dirname(str(path))
+        if folder and os.path.isdir(folder):
+            return True
+        text = str(path)
+        return any(text.startswith(prefix) and os.path.isdir(prefix) for prefix in roots)
     return any(os.path.isdir(prefix) for prefix in roots)
 
 
@@ -453,7 +466,7 @@ def adopt_scanned_file(cursor, path: Optional[str], server_path: Optional[str],
                       "track_number": tags.get("track_number"),
                       "disc_number": tags.get("disc_number")} if artist and tags.get("title") else {}
     elif (server_info and server_info.get("name") and server_info.get("artist")
-          and not _library_folders_visible(roots)):
+          and not _library_folders_visible(roots, path)):
         # the media server is on another machine: SoulSync can't open its
         # files, so the server's word is the identity, the way the upgrade
         # imported every song it already knew. a local library that just

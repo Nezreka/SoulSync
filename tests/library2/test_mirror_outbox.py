@@ -303,6 +303,23 @@ def test_retry_does_not_rearm_a_failed_op_superseded_by_a_later_success(db):
     ).fetchone()[0] == "superseded"
 
 
+def test_another_profiles_op_on_the_same_track_supersedes_nothing(db):
+    """the supersede key had no profile: profile 3's failed add for T was
+    marked superseded by profile 1's later remove of T, so T never reached
+    profile 3's wishlist."""
+    flaky, conn = db
+    track = flaky.ids["track"]
+    member = MO.enqueue_tracks(conn, [track], True, profile_id=3)[0]
+    conn.execute("UPDATE lib2_mirror_outbox SET status='failed' WHERE id=?", (member,))
+    admin = MO.enqueue_tracks(conn, [track], False, profile_id=1)[0]
+    conn.execute("UPDATE lib2_mirror_outbox SET status='done' WHERE id=?", (admin,))
+
+    assert MO.retry_failed(conn) == 1
+    assert conn.execute(
+        "SELECT status FROM lib2_mirror_outbox WHERE id=?", (member,)
+    ).fetchone()[0] == "pending"
+
+
 def test_artist_watchlist_add_pushes_explicit_catalog_profile(db):
     """Split-doc contract: the native Watchlist add takes one explicit
     quality_profile_id (branch-split/LIBRARY_OVERHAUL.md "Library v2

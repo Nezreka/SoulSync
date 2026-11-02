@@ -1206,3 +1206,22 @@ def test_a_scoped_run_never_prunes_memory_outside_its_scope(tmp_path, monkeypatc
     keys = sorted(r[0] for r in conn.execute("SELECT key FROM repair_empty_lookups"))
     conn.close()
     assert keys == ["lib2:1", "lib2:2"]
+
+
+def test_a_failed_enumeration_does_not_prune_memory(tmp_path, monkeypatch):
+    """3.6.1 stopped when the subjects couldn't be read; the v2 port went on
+    with no rows, the run looked complete, and the prune forgot every
+    remembered empty LRCLib answer."""
+    a = tmp_path / "a.flac"; a.write_bytes(b"x")
+    db = _real_db(tmp_path, [(1, "Remembered", str(a), 200000)])
+    client = _probe_client({'Remembered': 'absent'})
+    monkeypatch.setattr("core.lyrics_client.lyrics_client", client)
+    MissingLyricsJob().scan(_real_ctx(db, [], remember_empty_lookups=True))
+    import core.library2.maintenance_subjects as subjects
+    monkeypatch.setattr(subjects, "active_file_subjects",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("database is locked")))
+    MissingLyricsJob().scan(_real_ctx(db, [], remember_empty_lookups=True))
+    conn = db._get_connection()
+    keys = [r[0] for r in conn.execute("SELECT key FROM repair_empty_lookups")]
+    conn.close()
+    assert keys == ["lib2:1"]

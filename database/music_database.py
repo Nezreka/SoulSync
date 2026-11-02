@@ -2452,6 +2452,17 @@ class MusicDatabase:
             if keys:
                 cursor.executemany("DELETE FROM manual_metadata_files WHERE path_key = ?",
                                    [(k,) for k in keys])
+            # the stand-down hand-tagging recorded for every service: 'manual'
+            # counts as settled, so without this no enrichment worker ever
+            # looked at the album again (3.6.1 reset the manual match statuses)
+            try:
+                cursor.execute(
+                    "DELETE FROM lib2_provider_attempts WHERE status = 'manual' AND ("
+                    "(entity_type = 'album' AND entity_id = ?) OR "
+                    "(entity_type = 'track' AND entity_id IN (SELECT id FROM lib2_tracks WHERE album_id = ?)))",
+                    (album_id, album_id))
+            except Exception as exc:  # noqa: BLE001 - no attempts table yet, nothing to clear
+                logger.debug("manual attempts not cleared for album %s: %s", album_id, exc)
             conn.commit()
             return True
         finally:
@@ -10802,6 +10813,20 @@ class MusicDatabase:
         """Insert or update track from Plex track object - DEPRECATED: Use insert_or_update_media_track instead"""
         return self.insert_or_update_media_track(plex_track, album_id, artist_id, server_source='plex')
     
+    def _log_scanned_import(self, track_obj, file_path, server_source) -> None:
+        """Library History's import: a song that reached the server outside
+        SoulSync and the scan just took into the library, as 3.6.1 logged for
+        every new track a scan found. SoulSync's own downloads log their own."""
+        try:
+            from core.library2.media_server_sync import server_track_names
+            names = server_track_names(track_obj)
+            self.add_library_history_entry(
+                event_type='import', title=names.get('name') or '',
+                artist_name=names.get('artist'), album_name=names.get('album'),
+                server_source=server_source, file_path=file_path)
+        except Exception as exc:  # noqa: BLE001 - history never fails a scan
+            logger.debug("history logging: %s", exc)
+
     def insert_or_update_media_track(self, track_obj, album_id: str, artist_id: str, server_source: str = 'plex'):
         """Map a server song ID/technical facts onto an imported track.
 
@@ -10916,6 +10941,7 @@ class MusicDatabase:
                     if len(candidates) != 1:
                         if adopt_scanned_file(cursor, file_path, server_path, server_source,
                                               server_info=server_track_names(track_obj)):
+                            self._log_scanned_import(track_obj, file_path, server_source)
                             return self.insert_or_update_media_track(
                                 track_obj, album_id, artist_id, server_source)
                         logger.warning(
@@ -10992,6 +11018,7 @@ class MusicDatabase:
                 if catalogue_track_id is None:
                     if adopt_scanned_file(cursor, file_path, server_path, server_source,
                                           server_info=server_track_names(track_obj)):
+                        self._log_scanned_import(track_obj, file_path, server_source)
                         return self.insert_or_update_media_track(
                             track_obj, album_id, artist_id, server_source)
                     logger.info("Media track %s skipped: no active imported file row", title)
@@ -22772,8 +22799,8 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT * FROM lib2_albums WHERE primary_artist_id = ? "
-                "ORDER BY year, title",
+                "SELECT al.* FROM lib2_albums al WHERE al.primary_artist_id = ? "
+                f"AND {_owned_sql('album', 'al')} ORDER BY al.year, al.title",
                 (artist_id,),
             )
             return self._api_project_lib2(conn, 'album', cursor.fetchall())
@@ -22795,9 +22822,9 @@ class MusicDatabase:
                 LEFT JOIN lib2_track_files f
                        ON f.track_id = t.id AND f.is_primary = 1
                       AND COALESCE(f.file_state, 'active') <> 'deleted'
-                WHERE t.album_id = ?
+                WHERE t.album_id = ? AND {owned}
                 ORDER BY t.track_number, t.title
-            """, (album_id,))
+            """.format(owned=_owned_sql("track", "t")), (album_id,))
             return self._api_project_lib2(conn, 'track', cursor.fetchall())
         except Exception as e:
             logger.error(f"API: Error getting tracks for album {album_id}: {e}")
@@ -22921,10 +22948,11 @@ class MusicDatabase:
         if table not in ("artists", "albums"):
             return []
         catalogue_table = "lib2_artists" if table == "artists" else "lib2_albums"
+        owned = _owned_sql("artist" if table == "artists" else "album", "g")
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute(f"SELECT genres FROM {catalogue_table}")
+            cursor.execute(f"SELECT g.genres FROM {catalogue_table} g WHERE {owned}")
             genre_counts: Dict[str, int] = {}
             for row in cursor.fetchall():
                 raw = row["genres"]
@@ -24583,8 +24611,11 @@ class MusicDatabase:
                     ORDER BY COALESCE(e.added_at, e.updated_at) DESC LIMIT ?
                 """, (limit,))
                 return self._api_project_lib2(conn, 'track', cursor.fetchall())
+            # what came INTO the library: a discography fetch adds release rows
+            # with added_at = now, and those are no one's recent additions
+            owned = _owned_sql(entity_type.rstrip('s'), "e")
             cursor.execute(
-                f"SELECT e.* FROM {table} e{f' WHERE {visible}' if visible else ''}"
+                f"SELECT e.* FROM {table} e WHERE {owned}{f' AND {visible}' if visible else ''}"
                 " ORDER BY e.added_at DESC LIMIT ?", (limit,))
             return self._api_project_lib2(conn, entity_type.rstrip('s'), cursor.fetchall())
         except Exception as e:
@@ -24767,7 +24798,10 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            where_parts = []
+            # the albums you have, in the caller's library: lib2_albums also
+            # holds discography and wishlist releases, and 3.6.1's list was
+            # the owned library by construction, scoped to the caller
+            where_parts = [_owned_sql("album", "al")]
             params: list = []
 
             if search:

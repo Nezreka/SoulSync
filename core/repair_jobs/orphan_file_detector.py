@@ -218,7 +218,15 @@ class OrphanFileDetectorJob(RepairJob):
                            ON primary_artist.id=al.primary_artist_id
                     LEFT JOIN lib2_track_artists ta ON ta.track_id=t.id
                     LEFT JOIN lib2_artists credit ON credit.id=ta.artist_id
-                        WHERE t.title IS NOT NULL AND t.title<>''"""
+                        WHERE t.title IS NOT NULL AND t.title<>''
+                          -- tracks with a file: lib2_tracks also holds wanted
+                          -- and discography rows that have none, and a loose
+                          -- file matching one of those (a download that never
+                          -- imported) is exactly the orphan to report. 3.6.1's
+                          -- tracks table was owned files only
+                          AND EXISTS (SELECT 1 FROM lib2_track_files f
+                                       WHERE f.track_id=t.id
+                                         AND COALESCE(f.file_state,'active')<>'deleted')"""
                 ).fetchall()
             finally:
                 conn.close()

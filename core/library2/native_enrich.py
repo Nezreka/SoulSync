@@ -576,10 +576,23 @@ def default_artwork_fetcher(name: str, source_ids: Dict[str, str]) -> Optional[s
     return result.url if result is not None else None
 
 
+# the row's own name and length: a background enrich only fills them in when
+# the row has none, a Full Retag (the user asking for the provider's values)
+# replaces them
+_IDENTITY_COLUMNS = {"title": "COALESCE(title,'')=''", "duration": "COALESCE(duration,0)=0"}
+
+
 def _apply_descriptive_metadata(
     conn: Any, entity_type: str, entity_id: int, metadata: Any,
+    *, fill_identity_only: bool = False,
 ) -> Optional[str]:
-    """Persist only normalized, non-null provider fields onto one native row."""
+    """Persist only normalized, non-null provider fields onto one native row.
+
+    ``fill_identity_only``: title and duration only fill an empty row. 3.6.1's
+    enrichment workers never renamed a track or an album, and with the title
+    written on every enrich the provider's spelling replaced the file's ("Come
+    Together" became "Come Together - Remastered 2009") and could flip between
+    providers run to run."""
 
     columns = {
         "artist": {
@@ -612,6 +625,9 @@ def _apply_descriptive_metadata(
             assignments.append(
                 "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url ELSE ? END"
             )
+        elif fill_identity_only and column in _IDENTITY_COLUMNS:
+            assignments.append(
+                f"{column}=CASE WHEN {_IDENTITY_COLUMNS[column]} THEN ? ELSE {column} END")
         else:
             assignments.append(f"{column}=?")
         values.append(value)
@@ -848,7 +864,8 @@ def enrich_native_entity_for_service(
     conn.commit()
 
     metadata = refresh_native_entity_metadata(conn, canonical, int(entity_id),
-                                              {actual_source: provider_id})
+                                              {actual_source: provider_id},
+                                              fill_identity_only=True)
     metadata_image = getattr(metadata, 'image_url', None)
     image_url = metadata_image or str(hit.get("image") or "").strip() or None
     if canonical == "artist":
@@ -1524,17 +1541,26 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
         if has_id:
             identified.setdefault(key, int(aid))
 
+    # every combined-looking credit that owns no album. One with an id or a
+    # legacy id only qualifies for the anchored split below: a credit carrying
+    # the album's own artist as one of its parts is a list whatever id it
+    # picked up ("Øneheart, Malek" on Øneheart's album got a provider id by
+    # name, and 258 of 289 left-over ghosts on a big library looked like that,
+    # each a fileless "artist" in the Library list)
     ghosts = conn.execute(
-        f"SELECT a.id, a.name, a.monitored FROM lib2_artists a "
-        f"WHERE a.canonical_artist_id IS NULL AND a.legacy_artist_id IS NULL AND NOT {_IDENTIFIED_SQL} "
+        f"SELECT a.id, a.name, a.monitored, "
+        f"(a.legacy_artist_id IS NOT NULL OR {_IDENTIFIED_SQL}) AS settled "
+        "FROM lib2_artists a "
+        "WHERE a.canonical_artist_id IS NULL "
         "AND NOT EXISTS (SELECT 1 FROM lib2_albums al WHERE al.primary_artist_id=a.id) "
         "ORDER BY a.id").fetchall()
+    ghosts = [g for g in ghosts if not g[3] or len(split_artist_credits(g[1] or "")) >= 2]
     stats = {"considered": len(ghosts), "merged": 0, "split": 0, "left": 0, "created": 0}
     total = len(ghosts)
-    for index, (gid, name, monitored) in enumerate(ghosts, start=1):
+    for index, (gid, name, monitored, settled) in enumerate(ghosts, start=1):
         gid = int(gid)
         key = normalize_name(name or "")
-        target = identified.get(key)
+        target = None if settled else identified.get(key)
         if target and target != gid:
             _rehome_and_delete_combined(conn, gid, target, [target])
             stats["merged"] += 1
@@ -1547,8 +1573,9 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
                 "JOIN lib2_albums al ON al.id=t.album_id "
                 "JOIN lib2_artists pa ON pa.id=al.primary_artist_id "
                 "WHERE ta.artist_id=?", (gid,))}
+            anchored = any(k in anchors for k in keys)
             if len(pieces) < 2 or not (
-                    any(k in anchors for k in keys) or all(k in identified for k in keys)):
+                    anchored or (not settled and all(k in identified for k in keys))):
                 stats["left"] += 1
             else:
                 components: List[int] = []
@@ -1817,11 +1844,13 @@ __all__ = [
 ]
 
 
-def refresh_native_entity_metadata(conn, entity_type, entity_id, source_ids):
+def refresh_native_entity_metadata(conn, entity_type, entity_id, source_ids,
+                                   *, fill_identity_only: bool = False):
     """The common exact-ID provider refresh used by Enrich and Full Retag.
 
     Identity resolution stays with the existing match engine. Refreshing facts
-    never searches for or substitutes a different edition.
+    never searches for or substitutes a different edition. Enrich passes
+    ``fill_identity_only`` (see _apply_descriptive_metadata).
     """
     from dataclasses import asdict, replace
     from core.library2.provider_adapters import fetch_descriptive_metadata
@@ -1835,7 +1864,8 @@ def refresh_native_entity_metadata(conn, entity_type, entity_id, source_ids):
         old = conn.execute('SELECT release_date FROM lib2_albums WHERE id=?', (entity_id,)).fetchone()[0]
         from core.metadata.source import _more_precise_date
         metadata = replace(metadata, release_date=_more_precise_date(old, metadata.release_date))
-    _apply_descriptive_metadata(conn, entity_type, entity_id, metadata)
+    _apply_descriptive_metadata(conn, entity_type, entity_id, metadata,
+                                fill_identity_only=fill_identity_only)
     if entity_type == 'track' and metadata.isrc:
         conn.execute("UPDATE lib2_tracks SET isrc=COALESCE(NULLIF(isrc,''), ?) WHERE id=?", (metadata.isrc, entity_id))
     if entity_type == 'album':

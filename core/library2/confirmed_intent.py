@@ -91,8 +91,14 @@ def _intent_fields(
         or album_context.get("name")
         or album_context.get("title")
     )
-    if not artist_name or not track_title or not album_title:
+    if not artist_name or not track_title:
         return None
+    # a search hit with no album (a global search track result often has
+    # none) is a single of its own name, the way such a download files. it
+    # used to refuse the whole request with a 400; 3.6.1 downloaded it
+    albumless = not album_title
+    if albumless:
+        album_title = track_title
 
     source = _text(
         track.get("source")
@@ -104,7 +110,7 @@ def _intent_fields(
     total_tracks = album.get("total_tracks") or album_context.get("total_tracks")
     album_type = _text(
         album.get("album_type") or album_context.get("album_type")
-    ).lower() or ("single" if total_tracks in (1, "1") else "album")
+    ).lower() or ("single" if albumless or total_tracks in (1, "1") else "album")
 
     return {
         "artist_name": artist_name,
@@ -160,7 +166,7 @@ def materialize_confirmed_search_tracks(
         )
         if fields is None:
             raise ValueError(
-                f"track {index + 1} requires artist, album and track metadata"
+                f"track {index + 1} requires artist and track metadata"
             )
         result = materialize_track_intent(
             conn,

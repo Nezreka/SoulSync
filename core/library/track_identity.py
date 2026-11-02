@@ -28,16 +28,22 @@ from utils.logging_config import get_logger
 logger = get_logger("library.track_identity")
 
 
-# Maps the source vocabulary to its native Library-v2 SQL expression.
+# Maps the source vocabulary to its native Library-v2 SQL expression. The
+# json ones come from provider_ids.external_id_sql, the same text the
+# idx_lib2_tracks_ext_* expression indexes are built from: SQLite only uses an
+# expression index when the text matches, and one unindexed arm turns the whole
+# OR into a scan of lib2_tracks, on every watchlist and import ownership check.
+from core.library2.provider_ids import external_id_sql as _ext_sql
+
 EXTERNAL_ID_COLUMNS: Dict[str, str] = {
     'spotify_id': 't.spotify_id',
-    'itunes_id': "json_extract(t.external_ids,'$.itunes')",
-    'deezer_id': "json_extract(t.external_ids,'$.deezer')",
-    'tidal_id': "json_extract(t.external_ids,'$.tidal')",
-    'qobuz_id': "json_extract(t.external_ids,'$.qobuz')",
+    'itunes_id': _ext_sql('t.external_ids', 'itunes'),
+    'deezer_id': _ext_sql('t.external_ids', 'deezer'),
+    'tidal_id': _ext_sql('t.external_ids', 'tidal'),
+    'qobuz_id': _ext_sql('t.external_ids', 'qobuz'),
     'mbid': 't.musicbrainz_id',
-    'audiodb_id': "json_extract(t.external_ids,'$.audiodb')",
-    'jiosaavn_id': "json_extract(t.external_ids,'$.jiosaavn')",
+    'audiodb_id': _ext_sql('t.external_ids', 'audiodb'),
+    'jiosaavn_id': _ext_sql('t.external_ids', 'jiosaavn'),
     'soul_id': 't.soul_id',
     'isrc': 't.isrc',
 }

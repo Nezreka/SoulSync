@@ -16,6 +16,10 @@ import uuid
 from contextlib import closing
 from typing import Any, Callable, Dict, List, Optional
 
+from utils.logging_config import get_logger
+
+logger = get_logger("library2.file_delete")
+
 
 FILE_DELETE_OPERATIONS_DDL = """
 CREATE TABLE IF NOT EXISTS lib2_file_delete_operations (
@@ -139,6 +143,39 @@ def _library_roots(
         if (include_missing or os.path.isdir(resolved)) and resolved not in roots:
             roots.append(resolved)
     return roots
+
+
+_AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".mp4", ".aac", ".ogg", ".opus", ".wav",
+               ".aiff", ".aif", ".alac", ".ape", ".wv", ".wma", ".dsf", ".dff"}
+
+
+def _clean_after_delete(path: str, unlink: Callable[[str], None], roots: List[str]) -> None:
+    """What 3.6.1's delete took with the file: its .lrc / .txt lyrics, and the
+    album folder once nothing is left in it. A sidecar shared with another
+    copy of the song (a FLAC and an MP3 with one stem) stays while that copy
+    does, and a library root is never removed."""
+    folder, name = os.path.split(path)
+    stem = os.path.splitext(name)[0]
+    try:
+        siblings = os.listdir(folder)
+    except OSError:
+        return
+    if not any(os.path.splitext(other)[0] == stem and os.path.splitext(other)[1].lower() in _AUDIO_EXTS
+               for other in siblings):
+        for ext in (".lrc", ".txt"):
+            sidecar = os.path.join(folder, stem + ext)
+            if os.path.isfile(sidecar):
+                try:
+                    unlink(sidecar)
+                except Exception as exc:  # noqa: BLE001 - a sidecar never fails the delete
+                    logger.debug("sidecar %s left in place: %s", sidecar, exc)
+    real_folder = os.path.realpath(folder)
+    if real_folder in {os.path.realpath(root) for root in roots}:
+        return
+    try:
+        os.rmdir(folder)  # only when empty: rmdir refuses anything else
+    except OSError:
+        pass
 
 
 def _containing_root(path: str, roots: List[str]) -> Optional[str]:
@@ -708,6 +745,10 @@ def _execute_delete_items(
             )
             conn.commit()
         deleted.append(item["path"])
+        try:
+            _clean_after_delete(item["path"], unlink, _library_roots(config_manager))
+        except Exception as exc:  # noqa: BLE001 - cleanup never fails a delete
+            logger.debug("post-delete cleanup skipped for %s: %s", item["path"], exc)
 
     return {"deleted": deleted, "failed": failed}
 

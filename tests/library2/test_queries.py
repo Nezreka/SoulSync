@@ -91,8 +91,10 @@ def test_metadata_scan_status_no_file_is_pending():
 def test_list_artists_stats(imported_conn):
     artists, total = Q.list_artists(imported_conn)
     by_name = {a["name"]: a for a in artists}
-    # Drake (legacy) + Wizkid (featured) both surface.
-    assert total == 2
+    # the Artists index lists album artists, as 3.6.1's did: Drake. Wizkid is
+    # only featured on Drake's album, so he has a page (in the library) but
+    # no index entry; on a big library guests outnumbered album artists 4:1
+    assert total == 1
     drake = by_name["Drake"]
     assert drake["album_count"] == 1
     assert drake["single_count"] == 1
@@ -103,9 +105,9 @@ def test_list_artists_stats(imported_conn):
     assert drake["track_count"] == 2
     assert drake["tracks_present"] == 2
     assert drake["tracks_missing"] == 0
-    # Wizkid shows the one track it's credited on (multi-artist via junction).
-    assert by_name["Wizkid"]["track_count"] == 1
-    assert by_name["Wizkid"]["album_count"] == 1
+    assert "Wizkid" not in by_name
+    wizkid = imported_conn.execute("SELECT id FROM lib2_artists WHERE name='Wizkid'").fetchone()[0]
+    assert Q.get_artist(imported_conn, wizkid)["in_library"] is True
     # I8: disk-space roll-up — both of Drake's present files (5000 bytes each
     # per the legacy seed), Hotline Bling has no file so contributes nothing.
     assert drake["total_size_bytes"] == 10000
@@ -133,7 +135,9 @@ def test_list_artists_takes_a_guest_on_a_wanted_track_but_not_on_an_unwanted_one
     imported_conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (hotline,))
     imported_conn.execute("DELETE FROM lib2_wanted_tracks WHERE track_id=?", (hotline,))
 
-    assert {"Drake", "Wizkid", "Rihanna"} <= listed()
+    # in the library (its page, search), but the Artists index lists album
+    # artists only: a guest is not one
+    assert "Rihanna" not in listed()
     assert Q.get_artist(imported_conn, guest)["in_library"] is True
 
 
@@ -178,7 +182,7 @@ def test_list_artists_materializes_requested_page_before_catalog_rollups(
         if "page_artists AS MATERIALIZED" in statement
     )
     assert len(artists) == 1
-    assert total == 2
+    assert total == 1
     assert rollup_sql.index("page_artists AS MATERIALIZED") < rollup_sql.index(
         "artist_albums AS"
     )
@@ -485,11 +489,8 @@ def test_featured_artist_read_model_repairs_pre_fix_missing_album_junction(impor
         "DELETE FROM lib2_album_artists WHERE artist_id=?", (wizkid_id,)
     )
 
-    artists, _total = Q.list_artists(imported_conn)
-    wizkid = next(artist for artist in artists if artist["id"] == wizkid_id)
     data = Q.get_artist(imported_conn, wizkid_id)
 
-    assert wizkid["album_count"] == 1
     assert [album["title"] for album in data["appears_on"]] == ["Views"]
 
 
@@ -513,7 +514,7 @@ def test_list_artists_hides_alias_member_rows(imported_conn):
     assert "Drake" in names
     assert "Drake (Alias)" not in names
     assert alias_id not in {a["id"] for a in artists}
-    assert total == 2  # Drake + Wizkid, same as before linking — alias not counted twice
+    assert total == 1  # Drake, same as before linking — alias not counted twice
 
 
 def test_list_artists_search_and_totals_include_alias_members(imported_conn):
@@ -1173,7 +1174,7 @@ def test_list_artists_can_skip_the_disk_space_rollup(imported_conn):
     assert "artist_size" not in rollup_sql
 
     by_name = {a["name"]: a for a in artists}
-    assert total == 2
+    assert total == 1
     # Everything the collapsed list actually renders is unchanged.
     assert by_name["Drake"]["album_count"] == 1
     assert by_name["Drake"]["single_count"] == 1
@@ -1235,3 +1236,14 @@ def test_a_guest_spot_is_an_appearance_and_a_collaboration_is_their_own(imported
     host_view = Q.get_artist(imported_conn, host)
     assert {a["title"] for a in host_view["albums"]} >= {"Hosted", "Together"}
 
+
+
+def test_a_joint_albums_second_primary_artist_is_listed(imported_conn):
+    """the index lists release artists: the album's primary artist, and a
+    primary album artist on a joint album too. Only featured guests drop out."""
+    views = imported_conn.execute("SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
+    partner = imported_conn.execute("INSERT INTO lib2_artists(name) VALUES('Future')").lastrowid
+    imported_conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'primary')",
+                          (views, partner))
+    names = {a["name"] for a in Q.list_artists(imported_conn)[0]}
+    assert {"Drake", "Future"} <= names and "Wizkid" not in names

@@ -476,7 +476,7 @@ def test_track_replaygain_analyzes_synchronously(api, monkeypatch):
     monkeypatch.setattr("core.replaygain.is_ffmpeg_available", lambda: True)
     monkeypatch.setattr(
         "core.library2.replaygain.analyze_track_replaygain",
-        lambda conn, track_id, config_manager=None: {
+        lambda conn, track_id, config_manager=None, **_kw: {
             "analyzed": True, "track_gain_db": 2.5, "error": None,
         },
     )
@@ -489,7 +489,7 @@ def test_fetch_lyrics_endpoint_writes_synchronously(api, monkeypatch):
     client, _db, ids = api
     monkeypatch.setattr(
         "core.library2.lyrics.fetch_track_lyrics",
-        lambda conn, track_id, config_manager=None: {"fetched": True, "error": None},
+        lambda conn, track_id, config_manager=None, **_kw: {"fetched": True, "error": None},
     )
     response = client.post(f"/api/library/v2/tracks/{ids['album_track']}/fetch-lyrics")
     assert response.status_code == 200
@@ -500,7 +500,7 @@ def test_fetch_lyrics_endpoint_surfaces_unavailable_error(api, monkeypatch):
     client, _db, ids = api
     monkeypatch.setattr(
         "core.library2.lyrics.fetch_track_lyrics",
-        lambda conn, track_id, config_manager=None: {
+        lambda conn, track_id, config_manager=None, **_kw: {
             "fetched": False, "error": "No lyrics available for this track",
         },
     )
@@ -4619,6 +4619,47 @@ def test_the_old_track_delete_route_can_delete_the_file(api, tmp_path, monkeypat
     assert not path.exists()
     # restorable, the way the v2 page's delete is
     assert list((tmp_path / "Transfer" / ".deleted").rglob(path.name))
+
+
+def test_the_old_album_delete_route_reports_what_it_removed(api, tmp_path, monkeypatch):
+    """the artist page's album delete toast reads tracks_deleted / files_deleted
+    / files_failed, as the 3.6.1 route answered: it always said (0 tracks)."""
+    client, db, ids = api
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "song.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        album_id = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?",
+                                (ids["album_track"],)).fetchone()[0]
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?",
+                     (str(path), ids["album_track"]))
+        conn.commit()
+    monkeypatch.setattr("core.library2.file_delete._library_roots", lambda _config=None: [str(root)])
+    body = client.delete(f"/api/library/album/{album_id}?delete_files=true").get_json()
+    assert body["success"] is True
+    assert body["tracks_deleted"] >= 1 and body["files_deleted"] >= 1
+    assert body["files_failed"] == 0
+
+
+def test_the_old_track_delete_route_blacklists_when_asked(api, tmp_path, monkeypatch):
+    """?blacklist=true keeps the file's name from coming back, as in 3.6.1."""
+    client, db, ids = api
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "rejected.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?",
+                     (str(path), ids["album_track"]))
+        conn.commit()
+    monkeypatch.setattr("core.library2.file_delete._library_roots", lambda _config=None: [str(root)])
+    blocked = []
+    monkeypatch.setattr(db, "add_to_blacklist", lambda **kw: blocked.append(kw) or True, raising=False)
+    body = client.delete(
+        f"/api/library/track/{ids['album_track']}?delete_file=true&blacklist=true").get_json()
+    assert body["success"] is True and body["blacklisted"] is True
+    assert [b["blocked_filename"] for b in blocked] == ["rejected.flac"]
 
 
 def test_the_old_track_delete_route_answers_404_for_an_unknown_track(api):

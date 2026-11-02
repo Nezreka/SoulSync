@@ -30,10 +30,12 @@ logger = get_logger("video_watch_scope")
 class Watcher:
     """``rows``: the profile id whose own rows to read, or None for the shared
     columns. ``token``: the linked account's server token (only for marking
-    watched on that account). ``can_mark``: whether a watched click is allowed."""
+    watched on that account). ``can_mark``: whether a watched click is allowed.
+    ``push``: whether that click goes to the server account."""
     rows: Optional[int]
     token: Optional[str] = None
     can_mark: bool = True
+    push: bool = True
 
 
 SHARED = Watcher(rows=None)
@@ -45,15 +47,40 @@ def _plex_link(profile_id: int) -> Optional[dict]:
     return plex_link(profile_id)
 
 
+def _video_server() -> Optional[str]:
+    """'plex' / 'jellyfin' / None for the video side. Unreadable: 'plex', the
+    per-profile behaviour."""
+    try:
+        from api.video import get_video_db
+        from core.video.sources import resolve_video_server
+        return resolve_video_server(get_video_db())
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("video server unreadable for the watch scope: %s", exc)
+        return "plex"
+
+
+# a member on a server whose watch state SoulSync can't read per user yet:
+# the shared state, as before #1941, and a click that stays in SoulSync
+_SHARED_LOCAL = Watcher(rows=None, push=False)
+
+
 def watcher_for(profile_id, is_admin: bool) -> Watcher:
     """the watch state a profile reads and writes (see the module docstring).
-    no profile at all (a background job, a test) reads the shared columns."""
+    no profile at all (a background job, a test) reads the shared columns.
+
+    only a Plex video server fills a profile's own rows (member_watch reads
+    each linked account after a Plex scan). on Jellyfin, or no server, the
+    shared state stays what every profile reads, the way it was before #1941:
+    a member's click is kept in SoulSync and never marks the owner's
+    account, instead of every member losing watch state altogether."""
     if profile_id is None:
         return SHARED
     try:
         pid = int(profile_id)
     except (TypeError, ValueError):
         return SHARED
+    if _video_server() != "plex":
+        return SHARED if is_admin else _SHARED_LOCAL
     link = _plex_link(pid)
     if link and link.get("token"):
         return Watcher(rows=pid, token=link["token"])

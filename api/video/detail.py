@@ -225,7 +225,7 @@ def register_routes(bp):
             return jsonify({"error": "Connect your Plex account to keep your own "
                                      "watched list."}), 409
         watched = bool((request.get_json(silent=True) or {}).get("watched"))
-        res = med.set_watched(get_video_db(), kind, item_id, watched,
+        res = med.set_watched(get_video_db(), kind, item_id, watched, push=watcher.push,
                               watcher=watcher.rows, member_token=watcher.token)
         if not res.get("ok"):
             return jsonify({"error": res.get("error", "not found")}), 404

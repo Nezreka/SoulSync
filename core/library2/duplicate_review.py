@@ -98,12 +98,21 @@ def _playlist_context(playlist_membership, server_source):
 
 
 def _load_files(database, config_manager, *, scope=None, playlist_membership=None,
-                server_source=None) -> list[dict]:
-    """Read native subjects and protection facts, without mutating the catalogue."""
+                server_source=None, only_file_ids=None) -> list[dict]:
+    """Read native subjects and protection facts, without mutating the catalogue.
+
+    ``only_file_ids`` (Keep Best on one group): just those subjects, and of
+    the library-wide references only the rows that could be the same physical
+    file as one of them (same name, or same size: a hardlink always is). The
+    whole library walk -- a stat and a resolve per file row, twice per apply --
+    is the scan's job, not one finding's."""
     from core.library2.paths import resolve_lib2_path
     from core.library2.importer import split_artist_credits
 
     subjects = scoped_file_subjects(SimpleNamespace(scope=scope), active_file_subjects(database, config_manager))
+    if only_file_ids is not None:
+        wanted = {int(i) for i in only_file_ids}
+        subjects = [s for s in subjects if int(s["file_id"]) in wanted]
     if not subjects:
         return []
     membership, source = _playlist_context(playlist_membership, server_source)
@@ -115,8 +124,19 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
         # All owners participate in reference protection, including files
         # outside this scan's allowlist or library scope.
         references = [dict(r) for r in conn.execute(
-            "SELECT id,track_id,path,owner_profile_id FROM lib2_track_files "
+            "SELECT id,track_id,path,owner_profile_id,size FROM lib2_track_files "
             "WHERE COALESCE(file_state,'active')<>'deleted'")]
+        if only_file_ids is not None:
+            names = {os.path.basename(str(s["path"] or "").replace("\\", "/")) for s in subjects}
+            sizes = {r["size"] for r in references if r["id"] in wanted and r["size"]}
+            for subject in subjects:  # the group's own files, measured: a few stats
+                try:
+                    sizes.add(os.path.getsize(str(subject["path"])))
+                except OSError:
+                    pass
+            references = [r for r in references
+                          if r["id"] in wanted or not r["size"] or r["size"] in sizes
+                          or os.path.basename(str(r["path"] or "").replace("\\", "/")) in names]
         overrides = {(r[0], int(r[1])) for r in conn.execute(
             "SELECT entity_type,entity_id FROM lib2_metadata_overrides")}
         pins = {int(r[0]) for r in conn.execute("SELECT id FROM lib2_albums WHERE canonical_locked=1")}
@@ -384,7 +404,8 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
         playlist_membership, server_source = _playlist_context(playlist_membership, server_source)
         load = lambda: {f["file_id"]: f for f in _load_files(  # noqa: E731
             database, config_manager, scope=review.get("scope"),
-            playlist_membership=playlist_membership, server_source=server_source)}
+            playlist_membership=playlist_membership, server_source=server_source,
+            only_file_ids=ids)}
         by_id = load()
         files = [by_id[fid] for fid in ids]
         if not playlist_membership:

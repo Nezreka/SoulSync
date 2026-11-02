@@ -1978,6 +1978,9 @@ function updateArtistDownloadsSection() {
     downloadsUpdateTimeout = setTimeout(() => {
         showArtistDownloadsSection();
         showBeatportDownloadsSection();
+        // the Library page's bubbles follow live too, as in 3.6.1 (the
+        // React page only drew them once, on mount)
+        showLibraryDownloadsSection();
         updateDashboardDownloads();
     }, 300); // 300ms debounce
 }

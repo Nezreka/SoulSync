@@ -199,7 +199,7 @@ describe('finding labels', () => {
     expect(FINDING_TYPE_LABELS.quality_upgrade_review).toBe('Quality Upgrade Review');
     expect(FINDING_TYPE_LABELS.quality_format_not_targeted).toBe('Format Not in Profile');
     expect(FINDING_TYPE_LABELS.quality_unknown).toBe('Quality Unknown');
-    expect(FINDING_FIXABLE_TYPES.quality_upgrade_review).toBe('Monitor & Upgrade');
+    expect(FINDING_FIXABLE_TYPES.quality_upgrade_review).toBe('Wishlist & Upgrade');
     expect(FINDING_FIXABLE_TYPES.quality_format_not_targeted).toBe('Leave As-is');
     expect(FINDING_FIXABLE_TYPES.quality_unknown).toBe('Leave As-is');
     expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(31);

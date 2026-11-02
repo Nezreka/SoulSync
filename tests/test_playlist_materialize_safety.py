@@ -185,7 +185,9 @@ def test_batch_source_ref_uses_same_identity_as_later_mirror(tmp_path):
     first = materialize_playlist_from_batch(batch, {}, cfg)
     second = rebuild_mirrored_playlist_if_organized(db, cfg, 1, profile_id=2)
     assert first.playlist_dir == second.playlist_dir
-    assert not (tmp_path / "Playlists" / "Favorites").exists()
+    # one folder for the batch and the later mirror rebuild, named after the
+    # playlist as in 3.6.1 (the stable identity is in the manifest)
+    assert Path(first.playlist_dir).name == "Favorites"
 
 
 def test_managed_artifact_reused_as_a_source_cannot_be_pruned(tmp_path):

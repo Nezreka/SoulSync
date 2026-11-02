@@ -604,13 +604,15 @@ class QobuzWorker:
             _filtered = filter_genres([genre_name], _cfg)
             if _filtered:
                 backfill['genres'] = json.dumps(_filtered)
-        # `duration` and `copyright` have no album-level column in lib2 (tracks
-        # carry both; albums never did). Keeping them in the payload loses nothing
-        # and invents no column.
+        # lib2_albums.duration (ms) fills while empty, as 3.6.1 filled
+        # albums.duration; copyright has no album column and stays in the payload
         duration = data.get('duration')
+        duration_ms = (int(duration * 1000)
+                       if isinstance(duration, (int, float)) and duration > 0 else None)
+        if duration_ms:
+            backfill['duration'] = duration_ms
         payload = {
-            'duration_ms': int(duration * 1000)
-            if isinstance(duration, (int, float)) and duration > 0 else None,
+            'duration_ms': duration_ms,
             'copyright': self._text(data.get('copyright')),
         }
         self._write('album', album_id, search_data.get('id'),

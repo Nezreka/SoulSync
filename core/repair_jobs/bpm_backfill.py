@@ -118,7 +118,11 @@ class BpmBackfillJob(RepairJob):
             logger.error("Error fetching tracks missing BPM: %s", e, exc_info=True)
             result.errors += 1
             return result
-        cursor = _gap_cursor(context, _BPM_CURSOR_KEY)
+        # a scoped run (one artist) works its own tracks and leaves the
+        # library-wide cursor alone: moving it to the artist's last track id
+        # made the next library-wide run skip everything below that id
+        scoped = bool(getattr(context, 'scope', None))
+        cursor = 0 if scoped else _gap_cursor(context, _BPM_CURSOR_KEY)
         tracks = [s for s in missing if int(s['track_id']) > cursor][:_BPM_BATCH]
         if not tracks:
             tracks = missing[:_BPM_BATCH]
@@ -291,7 +295,7 @@ class BpmBackfillJob(RepairJob):
 
         if context.update_progress:
             context.update_progress(total, total)
-        if tracks:
+        if tracks and not scoped:
             _gap_cursor(context, _BPM_CURSOR_KEY, int(tracks[-1]['track_id']))
 
         if unreachable:

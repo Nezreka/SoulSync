@@ -175,6 +175,48 @@ def resolve_track_identity(subject: Dict[str, Any], resolved_path: Optional[str]
     return None
 
 
+def move_refiled_track(roots_context: Any, track_id: Any, config_manager: Any = None) -> str:
+    """dev's Fix Unknown Artists "reorganize files": the re-filed track moves
+    into its artist/album folder. Library Reorganize does the move. Only a
+    file inside SoulSync's own folders moves (the transfer folder, an own
+    library); a media server's library file stays where the server keeps it.
+    ``roots_context`` carries ``db`` and ``transfer_folder`` (the worker or a
+    job's context)."""
+    if not track_id:
+        return 'skipped'
+    from core.library2.paths import resolve_lib2_path
+    from core.repair_jobs.base import all_library_roots
+    db = roots_context.db
+    with closing(db._get_connection()) as conn:
+        row = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (int(track_id),)).fetchone()
+        paths = [r[0] for r in conn.execute(
+            "SELECT path FROM lib2_track_files WHERE track_id=?"
+            " AND COALESCE(file_state,'active')='active'", (int(track_id),))]
+    if not row or not paths:
+        return 'skipped'
+
+    def _key(path):
+        return os.path.normcase(os.path.realpath(path))
+
+    roots = [_key(r) for r in all_library_roots(roots_context) if r]
+    inside = False
+    for path in paths:
+        resolved = resolve_lib2_path(path, config_manager=config_manager) or path
+        here = _key(resolved)
+        if any(here == root or here.startswith(root.rstrip(os.sep) + os.sep) for root in roots):
+            inside = True
+            break
+    if not inside:
+        return 'kept_in_place'
+    try:
+        from core.library2.reorganize_bridge import enqueue_album_reorganize
+        enqueue_album_reorganize(db, int(row[0]))
+    except Exception as exc:  # noqa: BLE001 - the re-file stands; the move is a follow-up
+        logger.warning("Unknown Artist: reorganize for album %s not queued: %s", row[0], exc)
+        return 'not_queued'
+    return 'queued'
+
+
 def apply_unknown_artist_fix(db: Any, track_id: int, details: Dict[str, Any], *,
                              fix_tags: bool = True, config_manager: Any = None) -> Dict[str, Any]:
     """Re-file one placeholder track's files onto the identified artist,
@@ -387,6 +429,11 @@ class UnknownArtistRecoveryJob(RepairJob):
                     config_manager=context.config_manager)
                 if outcome.get('success'):
                     result.auto_fixed += 1
+                    # the scheduled auto-fix moves the file too, like the
+                    # approve path and 3.6.1's live mode did
+                    if settings.get('reorganize_files', True):
+                        move_refiled_track(context, int(subject['track_id']),
+                                           config_manager=context.config_manager)
                 else:
                     result.errors += 1
             if context.update_progress and (index + 1) % 10 == 0:
@@ -397,6 +444,6 @@ class UnknownArtistRecoveryJob(RepairJob):
 
 
 __all__ = [
-    "UnknownArtistRecoveryJob", "apply_unknown_artist_fix", "fold_artist_name",
+    "UnknownArtistRecoveryJob", "apply_unknown_artist_fix", "fold_artist_name", "move_refiled_track",
     "is_unknown_artist_name", "resolve_track_identity",
 ]

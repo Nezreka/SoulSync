@@ -149,7 +149,7 @@ FINDING_TYPE_META = {
     'suspect_album_tag':        {'label': 'Suspect Album Tags', 'verb': 'Re-identify'},
     'acoustid_mismatch':        {'label': 'AcoustID Mismatch', 'verb': 'Re-tag'},
     'quality_upgrade':          {'label': 'Quality Upgrades', 'verb': 'Upgrade'},
-    'quality_upgrade_review':   {'label': 'Quality Upgrade Review', 'verb': 'Monitor & Upgrade'},
+    'quality_upgrade_review':   {'label': 'Quality Upgrade Review', 'verb': 'Wishlist & Upgrade'},
     'quality_format_not_targeted': {'label': 'Format Not in Profile', 'verb': 'Leave As-is'},
     'quality_unknown':          {'label': 'Quality Unknown', 'verb': 'Leave As-is'},
     'missing_discography_track':{'label': 'Missing Discography', 'verb': 'Add to Wishlist'},
@@ -1687,21 +1687,39 @@ class RepairWorker:
                 # One release pair is one decision; its catalogue rows change
                 # in the background and must not undo a dismissal.
                 fingerprint_payload = {'pair_key': enriched_details['pair_key']}
+            # "a new file may surface a dismissed finding again": a new file
+            # is a new inode (an import moves a replacement into place). size
+            # and mtime change on every in-place tag write, so with them a
+            # ReplayGain, lyrics or BPM pass on the same file brought every
+            # dismissed finding back. the size/mtime form is still accepted
+            # below for rows dismissed before this
+            legacy_payload = None
             if file_path and os.path.isfile(file_path):
                 try:
                     stat = os.stat(file_path)
-                    fingerprint_payload["_file_stat"] = {
+                    legacy_payload = dict(fingerprint_payload)
+                    legacy_payload["_file_stat"] = {
                         "size": stat.st_size,
                         "mtime_ns": stat.st_mtime_ns,
                     }
+                    fingerprint_payload["_file_stat"] = {
+                        "ino": stat.st_ino,
+                        "dev": stat.st_dev,
+                    }
                 except OSError:
                     pass
-            dedup_fingerprint = hashlib.sha256(
-                json.dumps(
-                    fingerprint_payload, sort_keys=True, separators=(',', ':'),
-                    default=str,
-                ).encode('utf-8')
-            ).hexdigest()
+
+            def _fingerprint(payload):
+                return hashlib.sha256(
+                    json.dumps(
+                        payload, sort_keys=True, separators=(',', ':'),
+                        default=str,
+                    ).encode('utf-8')
+                ).hexdigest()
+            dedup_fingerprint = _fingerprint(fingerprint_payload)
+            same_fingerprints = {dedup_fingerprint}
+            if legacy_payload is not None:
+                same_fingerprints.add(_fingerprint(legacy_payload))
             enriched_details = dict(enriched_details)
             enriched_details["_dedup_fingerprint"] = dedup_fingerprint
 
@@ -1774,14 +1792,14 @@ class RepairWorker:
                     # sides are fingerprinted, only the exact dismissed
                     # snapshot is suppressed; a new file/target may surface.
                     if (not old_fingerprint
-                            or old_fingerprint == dedup_fingerprint):
+                            or old_fingerprint in same_fingerprints):
                         return False
                     continue
                 # A replaced file or changed target is new information and may
                 # surface immediately. An unchanged (or pre-fingerprint)
                 # resolved finding observes dev's recurrence grace, then may
                 # become pending again if the problem truly returned.
-                if (not old_fingerprint or old_fingerprint == dedup_fingerprint) \
+                if (not old_fingerprint or old_fingerprint in same_fingerprints) \
                         and self._within_recurrence_grace(resolved_at):
                     return False
 
@@ -3405,9 +3423,80 @@ class RepairWorker:
             'is_local': False,
         }
 
+    def _delete_quality_finding_file(self, entity_id, file_path):
+        """A quality finding's Delete: the low-quality file goes, through the
+        same journaled delete as the library page (into the deleted-files
+        folder, restorable), and its library row with it. 3.6.1 deleted it;
+        the v2 port quietly wishlisted the track instead."""
+        from core.library2.file_delete import (
+            FileDeleteError, delete_entity_files, preview_entity_files)
+        from contextlib import closing
+        from core.library.deleted_quarantine import quarantine_mover
+        track_id = _lib2_id(entity_id)
+        with closing(self.db._get_connection()) as conn:
+            if track_id is None and file_path:
+                row = conn.execute(
+                    "SELECT track_id FROM lib2_track_files WHERE path=? "
+                    "AND COALESCE(file_state,'active')<>'deleted' LIMIT 1", (file_path,)).fetchone()
+                track_id = int(row[0]) if row else None
+            if track_id is None:
+                return {'success': False, 'error': 'The file is no longer in the library'}
+            album = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)).fetchone()
+            files = [int(r[0]) for r in conn.execute(
+                "SELECT id FROM lib2_track_files WHERE track_id=? AND COALESCE(file_state,'active')<>'deleted' "
+                "AND (? IS NULL OR path=?)", (track_id, file_path, file_path))]
+        if not album or not files:
+            return {'success': False, 'error': 'The file is no longer in the library'}
+        try:
+            preview = preview_entity_files(self.db, entity='albums', entity_id=int(album[0]), file_ids=files)
+            if not preview.get('deletable_count'):
+                reasons = {f.get('reason') for f in preview.get('files') or [] if f.get('reason')}
+                return {'success': False, 'error': 'The file could not be deleted safely'
+                        + (f" ({', '.join(sorted(reasons))})" if reasons else '')}
+            delete_entity_files(
+                self.db, entity='albums', entity_id=int(album[0]),
+                preview_token=preview.get('preview_token'), file_ids=files, actor='user',
+                unlink=quarantine_mover(self.transfer_folder, 'quality_delete'), mode='quarantine')
+        except FileDeleteError as exc:
+            return {'success': False, 'error': str(exc)}
+        return {'success': True, 'action': 'deleted_file',
+                'message': f'Deleted low-quality file: {os.path.basename(file_path or "")}'}
+
+    @staticmethod
+    def _owner_profile(details, track_data=None):
+        """#1504: the library's owner, whose wishlist the track goes on."""
+        for source in (details or {}, track_data or {}):
+            try:
+                value = int(source.get('owner_profile_id') or 0)
+            except (TypeError, ValueError, AttributeError):
+                value = 0
+            if value > 0:
+                return value
+        return 1
+
+    def _wishlist_add(self, **kwargs):
+        """add_to_wishlist_detailed when the database has it (it tells a track
+        that was already queued from a refusal), else the plain add."""
+        detailed = getattr(self.db, 'add_to_wishlist_detailed', None)
+        if callable(detailed):
+            return detailed(**kwargs)
+        return {'status': 'created'} if self.db.add_to_wishlist(**kwargs) else {'status': 'rejected'}
+
+    def _wishlist_outcome_result(self, outcome):
+        """3.6.1 answered success for a track that was already queued."""
+        status = (outcome or {}).get('status')
+        if status == 'created':
+            return {'success': True, 'action': 'added_to_wishlist'}
+        if (outcome or {}).get('applied') or status in ('updated', 'satisfied', 'skipped'):
+            return {'success': True, 'action': 'already_wishlisted'}
+        return {'success': False, 'error': (outcome or {}).get('reason') or 'Track could not be added'}
+
     def _fix_legacy_quality_upgrade(self, entity_type, entity_id, file_path, details):
-        """Approve a preserved pre-V2 quality finding without deleting its file."""
+        """Approve a preserved pre-V2 quality finding: queue the better copy,
+        or (Delete) remove the low-quality file."""
         action = str(details.get('_fix_action') or '')
+        if action == 'delete':
+            return self._delete_quality_finding_file(entity_id, file_path)
         if (not action or action.startswith('scheduled_quality_upgrade:')) and details.get('quality_issue') in ('format_not_in_profile', 'format_not_targeted'):
             return {'success': True, 'action': 'ignored', 'message': 'Format not targeted by profile; file left as-is'}
         track_data = (details.get('matched_track_data') or details.get('track_data')
@@ -3418,7 +3507,7 @@ class RepairWorker:
                 'error': 'Legacy quality finding has no reusable track payload; rerun the native review scan',
             }
         try:
-            added = self.db.add_to_wishlist(
+            outcome = self._wishlist_add(
                 spotify_track_data=track_data,
                 failure_reason='Quality upgrade (migrated review finding)',
                 source_type='repair',
@@ -3428,10 +3517,9 @@ class RepairWorker:
                     'original_file_path': file_path,
                 },
                 quality_profile_id=details.get('quality_profile_id'),
+                profile_id=self._owner_profile(details, track_data),
             )
-            if not added:
-                return {'success': False, 'error': 'Track is already queued or could not be added'}
-            return {'success': True, 'action': 'added_to_wishlist'}
+            return self._wishlist_outcome_result(outcome)
         except Exception as exc:
             return {'success': False, 'error': str(exc)}
 
@@ -3441,7 +3529,7 @@ class RepairWorker:
         if not track_data:
             return {'success': False, 'error': 'Legacy discography finding has no track payload'}
         try:
-            added = self.db.add_to_wishlist(
+            outcome = self._wishlist_add(
                 spotify_track_data=track_data,
                 failure_reason='Discography backfill (migrated review finding)',
                 source_type='repair',
@@ -3450,10 +3538,9 @@ class RepairWorker:
                     'legacy_job': 'discography_backfill',
                     'artist': details.get('artist_name', ''),
                 },
+                profile_id=self._owner_profile(details, track_data),
             )
-            if not added:
-                return {'success': False, 'error': 'Track is already queued or could not be added'}
-            return {'success': True, 'action': 'added_to_wishlist'}
+            return self._wishlist_outcome_result(outcome)
         except Exception as exc:
             return {'success': False, 'error': str(exc)}
 
@@ -5802,44 +5889,10 @@ class RepairWorker:
         return result
 
     def _move_refiled_track(self, track_id) -> str:
-        """dev's Fix Unknown Artists "reorganize files": the re-filed track moves
-        into its artist/album folder. Library Reorganize does the move. Only a
-        file inside SoulSync's own folders moves (the transfer folder, an own
-        library); a media server's library file stays where the server keeps
-        it (upstream test_repair_worker_unknown_artist_path)."""
-        if not track_id:
-            return 'skipped'
-        from contextlib import closing
-        from core.library2.paths import resolve_lib2_path
-        from core.repair_jobs.base import all_library_roots
-        with closing(self.db._get_connection()) as conn:
-            row = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (int(track_id),)).fetchone()
-            paths = [r[0] for r in conn.execute(
-                "SELECT path FROM lib2_track_files WHERE track_id=?"
-                " AND COALESCE(file_state,'active')='active'", (int(track_id),))]
-        if not row or not paths:
-            return 'skipped'
-
-        def _key(path):
-            return os.path.normcase(os.path.realpath(path))
-
-        roots = [_key(r) for r in all_library_roots(self) if r]
-        inside = False
-        for path in paths:
-            resolved = resolve_lib2_path(path, config_manager=self._config_manager) or path
-            here = _key(resolved)
-            if any(here == root or here.startswith(root.rstrip(os.sep) + os.sep) for root in roots):
-                inside = True
-                break
-        if not inside:
-            return 'kept_in_place'
-        try:
-            from core.library2.reorganize_bridge import enqueue_album_reorganize
-            enqueue_album_reorganize(self.db, int(row[0]))
-        except Exception as exc:  # noqa: BLE001 - the re-file stands; the move is a follow-up
-            logger.warning("Unknown Artist: reorganize for album %s not queued: %s", row[0], exc)
-            return 'not_queued'
-        return 'queued'
+        """The approve path's "reorganize files" (upstream
+        test_repair_worker_unknown_artist_path); the scheduled auto-fix shares it."""
+        from core.repair_jobs.unknown_artist_recovery import move_refiled_track
+        return move_refiled_track(self, track_id, config_manager=self._config_manager)
 
     def _fix_album_release_year_mismatch(self, entity_type, entity_id, file_path, details):
         """Align album and track release years to canonical release dates and rename folder."""

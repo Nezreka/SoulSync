@@ -49,3 +49,29 @@ def test_verification_sync_is_noop_without_library_v2_schema(tmp_path):
         assert mark_file_verification_status(
             conn, ["/music/song.flac"], "human_verified"
         ) == 0
+
+
+def test_the_mapped_path_fallback_only_resolves_rows_with_the_files_name(monkeypatch):
+    """Approve on a mapped-path setup ran the resolver (a stat and a suffix
+    walk) on every file row: 300k network stats per click. it narrows to rows
+    ending in the file's name first, and still finds the mapped row."""
+    import sqlite3
+    from core.library2 import paths, verification
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE lib2_track_files (id INTEGER PRIMARY KEY, path TEXT, "
+                 "verification_status TEXT, updated_at TEXT)")
+    conn.execute("INSERT INTO lib2_track_files (path) VALUES ('/data/media/Artist/Album/01 - Song.flac')")
+    conn.executemany("INSERT INTO lib2_track_files (path) VALUES (?)",
+                     [(f"/data/media/Other/{i}.flac",) for i in range(200)])
+    asked = []
+
+    def resolve(raw, config_manager=None):
+        asked.append(raw)
+        return raw.replace("/data/media", "/music")
+    monkeypatch.setattr(paths, "resolve_lib2_path", resolve)
+    updated = verification.mark_file_verification_status(
+        conn, ["/music/Artist/Album/01 - Song.flac"], "verified")
+    assert updated == 1
+    assert asked == ["/data/media/Artist/Album/01 - Song.flac"]

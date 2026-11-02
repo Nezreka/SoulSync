@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.archive_pipeline import collect_audio_after_extraction
+from core.async_utils import run_blocking
 from core.download_plugins.album_bundle import (
     TransientMissCounter,
     copy_audio_files_atomically,
@@ -394,7 +395,10 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         results = await prowlarr_track_search(
             self._prowlarr, query, "usenet", timeout=timeout,
         )
-        return self._project_results(results)
+        # off the shared loop: projecting writes two candidate-store rows per
+        # release (a SQLite transaction each), and ~100 releases of that on
+        # the loop thread stalled every page and worker waiting on it
+        return await run_blocking(self._project_results, results)
 
     def _project_results(
         self, results: List[ProwlarrSearchResult], *, release_evidence=None

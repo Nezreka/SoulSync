@@ -437,7 +437,7 @@ ACTIONS: list[dict] = [
     {"type": "update_discovery_pool", "label": "Update Discovery", "icon": "compass",
      "description": "Refresh discovery pool with new tracks", "available": True},
     {"type": "start_quality_scan", "label": "Run Quality Scan", "icon": "bar-chart",
-     "description": "Reconcile monitored missing tracks and quality upgrade candidates into the Wishlist", "available": True},
+     "description": "Reconcile wishlisted missing tracks and quality upgrade candidates into the Wishlist", "available": True},
     # Library Maintenance from an automation (music twin of video_run_repair_job).
     # The job list is filled from the repair-job registry in blocks_for_scope.
     {"type": "run_repair_job", "label": "Run Maintenance Job", "icon": "tool",
@@ -450,7 +450,7 @@ ACTIONS: list[dict] = [
     # Native audit proposals now support this action without restoring the
     # retired Quality Upgrade Finder or another automatic wishlist writer.
     {"type": "apply_quality_upgrades", "label": "Apply Quality Upgrades", "icon": "arrow-up-circle",
-     "description": "Apply current Quality Profile Audit proposals for already-monitored tracks whose live profile requests upgrades until cutoff. Unmonitored tracks stay for manual review. Enable or run the audit in Library Maintenance first.",
+     "description": "Apply current Quality Profile Audit proposals for tracks already on the Wishlist whose live profile requests upgrades until cutoff. Tracks not on the Wishlist stay for manual review. Enable or run the audit in Library Maintenance first.",
      "available": True,
      "config_fields": [{"key": "limit", "label": "Most per run", "type": "number", "default": 100}]},
     {"type": "check_deezer_signin", "label": "Check Deezer Sign-in", "icon": "key",
@@ -476,7 +476,7 @@ ACTIONS: list[dict] = [
     {"type": "run_script", "label": "Run Script", "icon": "terminal", "scope": "both",
      "description": "Execute a script from the scripts folder", "available": True},
     {"type": "complete_incomplete_albums", "label": "Complete Incomplete Albums", "icon": "disc",
-     "description": "Monitor missing tracks in owned albums. The existing Wanted/Wishlist pipeline handles downloads. Requires Album Completeness to be enabled in Tools.",
+     "description": "Wishlist the missing tracks of albums you own. The existing Wishlist pipeline handles downloads. Requires Album Completeness to be enabled in Tools.",
      "available": True, "scope": "music",
      "config_fields": [
          {"key": "max_albums", "type": "number", "label": "Maximum albums per run", "default": 3},

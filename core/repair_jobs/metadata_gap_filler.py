@@ -105,6 +105,11 @@ class MetadataGapFillerJob(RepairJob):
                         getter = getattr(client, "get_track_details", None) if client else None
                         if not callable(getter):
                             continue
+                        # 3.6.1 paced these at half a second: up to a batch
+                        # of back-to-back detail calls is how a Spotify
+                        # rate-limit ban starts
+                        if context.sleep_or_stop(0.5):
+                            return result
                         try:
                             payload = getter(provider_id, allow_fallback=False)
                         except TypeError:

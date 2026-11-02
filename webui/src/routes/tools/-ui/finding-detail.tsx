@@ -454,8 +454,8 @@ function CatalogueDuplicateReview({
   return (
     <>
       <p>
-        Select the release group to keep. Both provider editions, all audio files and monitoring are
-        retained under that release.
+        Select the release group to keep. Both provider editions, all audio files and Wishlist
+        entries are retained under that release.
       </p>
       {list<string>(details.blocked_reasons).map((reason) => (
         <p key={reason}>{reason}</p>

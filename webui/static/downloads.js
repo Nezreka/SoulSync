@@ -1296,7 +1296,7 @@ async function cleanupWishlistOverview() {
 async function clearEntireWishlist() {
     console.log('🗑️ clearEntireWishlist() called');
 
-    if (!await showConfirmDialog({ title: 'Clear Wishlist', message: 'Remove all wishlist entries and stop monitoring their tracks? Artists without files or monitoring will disappear from Library. Existing files are kept. A manual Sync & Download can request these tracks again.', confirmText: 'Clear All', destructive: true })) {
+    if (!await showConfirmDialog({ title: 'Clear Wishlist', message: 'Remove all wishlist entries? Artists without files or a watchlist entry will disappear from Library. Existing files are kept. A manual Sync & Download can request these tracks again.', confirmText: 'Clear All', destructive: true })) {
         console.log('User cancelled confirmation');
         return;
     }

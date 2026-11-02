@@ -78,8 +78,8 @@ def save_quality_profile():
         success = db.set_quality_profile(data)
 
         if success:
-            from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
-            refresh_quality_profile_wishlist(db, db.get_quality_profile()["id"])
+            from core.library2.wishlist_mirror import schedule_quality_profile_refresh
+            schedule_quality_profile_refresh(db, db.get_quality_profile()["id"])
             add_activity_item("", "Quality Profile Updated", f"Preset: {data.get('preset', 'custom')}", "Now")
             return jsonify({"success": True, "message": "Quality profile saved successfully"})
         else:
@@ -132,8 +132,8 @@ def apply_quality_preset(preset_name):
         success = db.set_quality_profile(preset)
 
         if success:
-            from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
-            refresh_quality_profile_wishlist(db, db.get_quality_profile()["id"])
+            from core.library2.wishlist_mirror import schedule_quality_profile_refresh
+            schedule_quality_profile_refresh(db, db.get_quality_profile()["id"])
             add_activity_item("", "Quality Preset Applied", f"Switched to '{preset_name}' preset", "Now")
             return jsonify({
                 "success": True,
@@ -167,8 +167,8 @@ def reset_quality_preset(preset_name):
         success = db.set_quality_profile(preset)
 
         if success:
-            from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
-            refresh_quality_profile_wishlist(db, db.get_quality_profile()["id"])
+            from core.library2.wishlist_mirror import schedule_quality_profile_refresh
+            schedule_quality_profile_refresh(db, db.get_quality_profile()["id"])
             add_activity_item("", "Quality Preset Reset", f"Reset '{preset_name}' to defaults", "Now")
             return jsonify({
                 "success": True,
@@ -268,8 +268,8 @@ def apply_custom_quality_profile(profile_id):
         if profile is None:
             return jsonify({"success": False, "error": "Profile not found"}), 404
 
-        from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
-        refresh_quality_profile_wishlist(db, profile_id)
+        from core.library2.wishlist_mirror import schedule_quality_profile_refresh
+        schedule_quality_profile_refresh(db, profile_id)
         add_activity_item("", "Quality Profile Applied", f"Now using '{profile.get('preset', 'custom')}'", "Now")
         return jsonify({"success": True, "profile": profile})
     except Exception as e:
@@ -304,8 +304,8 @@ def update_custom_quality_profile(profile_id):
             db.apply_quality_profile_to_settings(profile_id)
             profiles = db.list_quality_profiles()
 
-        from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
-        refresh_quality_profile_wishlist(db, profile_id)
+        from core.library2.wishlist_mirror import schedule_quality_profile_refresh
+        schedule_quality_profile_refresh(db, profile_id)
         add_activity_item("", "Quality Profile Updated", f"Updated saved profile {profile_id}", "Now")
         return jsonify({"success": True, "profiles": profiles})
     except Exception as e:
@@ -328,8 +328,8 @@ def rename_custom_quality_profile(profile_id):
         if not ok:
             status = 404 if reason == "Profile not found" else 400
             return jsonify({"success": False, "error": reason}), status
-        from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
-        refresh_quality_profile_wishlist(db, profile_id)
+        from core.library2.wishlist_mirror import schedule_quality_profile_refresh
+        schedule_quality_profile_refresh(db, profile_id)
         return jsonify({"success": True, "profiles": db.list_quality_profiles()})
     except Exception as e:
         logger.error(f"Error renaming quality profile: {e}")
@@ -349,8 +349,8 @@ def delete_custom_quality_profile(profile_id):
         if not ok:
             return jsonify({"success": False, "error": reason}), 400
         profiles = db.list_quality_profiles()
-        from core.library2.wishlist_mirror import refresh_quality_profile_wishlist
-        refresh_quality_profile_wishlist(
+        from core.library2.wishlist_mirror import schedule_quality_profile_refresh
+        schedule_quality_profile_refresh(
             db, next(p["id"] for p in profiles if p.get("is_default")))
         return jsonify({"success": True, "profiles": profiles})
     except Exception as e:

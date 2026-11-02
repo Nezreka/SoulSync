@@ -8,6 +8,9 @@ from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.dead_files")
 
+# files per rescan call: Stop / Pause are honoured between them
+_CHUNK = 500
+
 
 @register_job
 class DeadFileCleanerJob(RepairJob):
@@ -43,8 +46,22 @@ class DeadFileCleanerJob(RepairJob):
             if not before:
                 return result
             file_ids = [int(subject["file_id"]) for subject in before]
-            scan = rescan_files(context.db, file_ids=file_ids)
-            result.scanned = int(scan.get("scanned") or 0)
+            # in chunks, so Stop and Pause work and the run shows progress, as
+            # 3.6.1's did: one rescan_files call over the whole library ran to
+            # the end with neither, however long it took
+            total_files = len(file_ids)
+            if context.report_progress:
+                context.report_progress(phase=f'Checking {total_files} files...', total=total_files)
+            for start in range(0, total_files, _CHUNK):
+                if context.check_stop() or context.wait_if_paused():
+                    return result
+                scan = rescan_files(context.db, file_ids=file_ids[start:start + _CHUNK])
+                result.scanned += int(scan.get("scanned") or 0)
+                done = min(start + _CHUNK, total_files)
+                if context.update_progress:
+                    context.update_progress(done, total_files)
+                if context.report_progress:
+                    context.report_progress(scanned=done, total=total_files)
             after = scoped_file_subjects(context, active_file_subjects(
                 context.db, context.config_manager, include_missing=True,
             ))
