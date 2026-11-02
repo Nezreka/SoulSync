@@ -47,7 +47,11 @@ def test_legacy_quality_configs_are_left_inert():
     assert worker.enabled is True
 
 
-def test_discography_config_and_manual_ids_have_safe_compatibility():
+def test_discography_backfill_is_its_own_job_again():
+    """3.6.1's Discography Backfill is back under its own id: its saved config
+    stays its own and is not folded into the watchlist refresh."""
+    from core.repair_jobs import RETIRED_JOB_IDS, get_all_jobs
+
     config = _Config({
         "repair.jobs.discography_backfill": {
             "enabled": True,
@@ -57,10 +61,9 @@ def test_discography_config_and_manual_ids_have_safe_compatibility():
     })
     RepairWorker(database=None).set_config_manager(config)
 
-    migrated = config.values["repair.jobs.monitored_discography_refresh"]
-    assert migrated["enabled"] is True
-    assert migrated["interval_hours"] == 12
-    assert migrated["settings"]["mode"] == "review"
-    assert migrated["settings"]["include_singles"] is False
-    assert JOB_ID_MIGRATIONS["discography_backfill"] == "monitored_discography_refresh"
-    assert "discography_backfill" in PRESERVED_RETIRED_FINDING_IDS
+    assert "repair.jobs.monitored_discography_refresh" not in config.values
+    assert config.values["repair.jobs.discography_backfill"]["enabled"] is True
+    assert "discography_backfill" not in JOB_ID_MIGRATIONS
+    assert "discography_backfill" not in RETIRED_JOB_IDS
+    assert "discography_backfill" not in PRESERVED_RETIRED_FINDING_IDS
+    assert "discography_backfill" in get_all_jobs()

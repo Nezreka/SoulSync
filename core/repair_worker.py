@@ -234,6 +234,7 @@ JOB_CATEGORIES = {
     'missing_lyrics': 'Artwork & lyrics',
     # Filling gaps in what you own, rather than repairing what you have.
     'monitored_discography_refresh': 'Collection gaps',
+    'discography_backfill': 'Collection gaps',
     'album_catalogue_backfill': 'Collection gaps',
     'album_completeness': 'Collection gaps',
     'album_edition_review': 'Tags & metadata',
@@ -602,46 +603,6 @@ class RepairWorker:
             self.enabled = config_manager.get('repair.master_enabled', True)
             self._migrate_legacy_job_configs(config_manager)
 
-    @staticmethod
-    def _merge_migrated_configs(configs: List[dict], existing: Optional[dict],
-                                *, force_review: bool = False) -> dict:
-        """Merge old job configs without silently weakening automation.
-
-        Activation is the union of the old jobs, the shortest positive
-        interval wins, and settings merge in the caller's stable priority
-        order. Explicit fields already stored under the new id always win.
-        """
-        valid = [dict(cfg) for cfg in configs if isinstance(cfg, dict)]
-        current = dict(existing) if isinstance(existing, dict) else {}
-        merged: dict = {}
-        if valid:
-            merged['enabled'] = any(bool(cfg.get('enabled', False)) for cfg in valid)
-            intervals = []
-            for cfg in valid:
-                try:
-                    value = float(cfg.get('interval_hours'))
-                    if value > 0:
-                        intervals.append(value)
-                except (TypeError, ValueError):
-                    pass
-            if intervals:
-                shortest = min(intervals)
-                merged['interval_hours'] = int(shortest) if shortest.is_integer() else shortest
-        settings: dict = {}
-        for cfg in valid:
-            if isinstance(cfg.get('settings'), dict):
-                settings.update(cfg['settings'])
-        if isinstance(current.get('settings'), dict):
-            settings.update(current['settings'])
-        if force_review and 'mode' not in (current.get('settings') or {}):
-            settings['mode'] = 'review'
-        if settings:
-            merged['settings'] = settings
-        for key in ('enabled', 'interval_hours'):
-            if key in current:
-                merged[key] = current[key]
-        return merged
-
     def _migrate_legacy_job_configs(self, config_manager) -> None:
         """Migrate stable pre-V2 repair identities once, without deleting them."""
         # The quality-upgrade lineage (quality_upgrade → quality_upgrade_scanner
@@ -650,23 +611,13 @@ class RepairWorker:
         # is nothing to migrate those saved configs INTO, and folding them into
         # an unrelated job would let a long-disabled quality scanner switch it
         # off. They are left in place, inert.
-        disc_old = config_manager.get('repair.jobs.discography_backfill', None)
-        disc_new = config_manager.get('repair.jobs.monitored_discography_refresh', None)
-        if isinstance(disc_old, dict):
-            # The old job was review-first. Preserve that contract explicitly;
-            # the native job's review mode creates album-level findings and
-            # only materializes/wishlists after approval.
-            merged = self._merge_migrated_configs(
-                [disc_old], disc_new, force_review=True)
-            settings = merged.setdefault('settings', {})
-            settings.setdefault('migration_source', 'discography_backfill')
-            config_manager.set('repair.jobs.monitored_discography_refresh', merged)
+        # Discography Backfill is a live job again under its own id, so its
+        # saved config stays its own and is not folded into the watchlist
+        # refresh any more.
 
         # P3 implementation-prefix renames are lossless one-to-one copies.
         from core.repair_jobs import JOB_ID_MIGRATIONS
         for old_id, new_id in JOB_ID_MIGRATIONS.items():
-            if old_id == 'discography_backfill':
-                continue
             old_cfg = config_manager.get(f'repair.jobs.{old_id}', None)
             new_cfg = config_manager.get(f'repair.jobs.{new_id}', None)
             if new_cfg is None and isinstance(old_cfg, dict):
@@ -3524,18 +3475,17 @@ class RepairWorker:
             return {'success': False, 'error': str(exc)}
 
     def _fix_legacy_discography_track(self, entity_type, entity_id, file_path, details):
-        """Approve a preserved pre-V2 discography finding."""
+        """Approve a Discography Backfill finding: wishlist the missing track."""
         track_data = details.get('track_data')
         if not track_data:
             return {'success': False, 'error': 'Legacy discography finding has no track payload'}
         try:
             outcome = self._wishlist_add(
                 spotify_track_data=track_data,
-                failure_reason='Discography backfill (migrated review finding)',
+                failure_reason='Discography backfill — missing from library',
                 source_type='repair',
                 source_info={
-                    'job': 'monitored_discography_refresh',
-                    'legacy_job': 'discography_backfill',
+                    'job': 'discography_backfill',
                     'artist': details.get('artist_name', ''),
                 },
                 profile_id=self._owner_profile(details, track_data),
