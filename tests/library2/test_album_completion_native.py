@@ -244,3 +244,44 @@ def test_the_automation_still_acts_directly_as_shipped(catalogue):
     result = run(db, as_shipped=True, scope={'max_albums': 3})
 
     assert result.auto_fixed == 1 and rules(db) == [(gap, 1, 1)]
+
+
+def _same_recording(conn, track_id, other_id):
+    """put two positions on one recording, the way a single and its album share one"""
+    rec = conn.execute("INSERT INTO lib2_recordings(title) VALUES('Missing')").lastrowid
+    for tid in (track_id, other_id):
+        album = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (tid,)).fetchone()[0]
+        edition = conn.execute('INSERT INTO lib2_release_editions(release_group_id,is_default) VALUES(?,0)',
+                               (album,)).lastrowid
+        conn.execute('INSERT INTO lib2_release_tracks(release_edition_id,recording_id,track_id) VALUES(?,?,?)',
+                     (edition, rec, tid))
+
+
+def test_a_song_owned_on_its_single_is_not_filled(catalogue):
+    """Fill Album must not download a second copy of a song you have on the single."""
+    db, _, _, missing, _ = catalogue
+    with db._get_connection() as conn:
+        single = lib2_seed.track(conn, 'Artist', 'Missing - Single', 'Missing', track_number=1)
+        conn.execute("UPDATE lib2_albums SET album_type='single' WHERE id=(SELECT album_id FROM lib2_tracks WHERE id=?)",
+                     (single,))
+        _same_recording(conn, missing, single)
+        conn.commit()
+    result = run(db)
+    assert result.errors == 0
+    assert (missing, 1, 1) not in rules(db)
+
+
+def test_a_single_does_not_count_toward_the_owned_floor(catalogue):
+    """owning the single drops the song from the fill, it doesn't make an album
+    you barely have look collected"""
+    db, aid, _, missing, _ = catalogue
+    with db._get_connection() as conn:
+        third = lib2_seed.track(conn, 'Artist', 'Album', 'Third', owned=False, track_number=3, disc_number=1, monitored=0)
+        single = lib2_seed.track(conn, 'Artist', 'Missing - Single', 'Missing', track_number=1)
+        _same_recording(conn, missing, single)
+        conn.commit()
+    run(db, settings={'min_owned_tracks': 2})
+    assert rules(db) == []
+    run(db, settings={'min_owned_tracks': 1})
+    assert rules(db) == [(third, 1, 1)]
+

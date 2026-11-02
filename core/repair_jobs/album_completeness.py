@@ -58,6 +58,8 @@ class AlbumCompletenessJob(RepairJob):
         from core.library2.monitor_rules import PROVENANCE_USER, record_rules
         from core.library2.mirror_outbox import drain, enqueue_projected_tracks
         from core.library2.wanted import recompute_wanted
+        from core.library2.recording_links import owned_by_recording_sql
+        from core.library_scope import library_scope
 
         result = JobResult()
         settings = dict(self.default_settings)
@@ -106,6 +108,8 @@ class AlbumCompletenessJob(RepairJob):
                     primary = conn.execute('SELECT primary_artist_id FROM lib2_albums WHERE id=?',
                                            (album_id,)).fetchone()[0]
                     own = resolve_alias_group(conn, primary) if primary is not None else []
+                    with library_scope('shared' if owner is None else int(owner)):
+                        owned_elsewhere_sql = owned_by_recording_sql(conn, 't')
                     tracks = conn.execute(
                         'SELECT t.id,t.title,'
                         'EXISTS(SELECT 1 FROM lib2_track_artists ta WHERE ta.track_id=t.id) AND NOT EXISTS('
@@ -115,7 +119,10 @@ class AlbumCompletenessJob(RepairJob):
                         'WHERE f.track_id=t.id AND f.owner_profile_id IS ? '
                         "AND COALESCE(f.file_state,'active') NOT IN ('missing_confirmed','deleted') "
                         "AND COALESCE(f.import_status,'imported')='imported' "
-                        "AND TRIM(COALESCE(f.path,''))<>'') AS owned "
+                        "AND TRIM(COALESCE(f.path,''))<>'') AS owned, "
+                        # the song on disk under another release (its single):
+                        # filling it would copy a song you already have
+                        f"{owned_elsewhere_sql} AS owned_elsewhere "
                         'FROM lib2_tracks t WHERE t.album_id=? AND (? IS NULL OR EXISTS('
                         'SELECT 1 FROM lib2_release_tracks rt WHERE rt.track_id=t.id '
                         'AND rt.release_edition_id=?))',
@@ -130,6 +137,7 @@ class AlbumCompletenessJob(RepairJob):
                         result.skipped += 1
                         continue
                     missing = [int(t['id']) for t in tracks if not t['owned']
+                               and not t['owned_elsewhere']
                                and (target or not t['other_artist'])
                                and str(t['title'] or '').strip()
                                and not re.fullmatch(r'Track\s+\d+', t['title'], re.I)]

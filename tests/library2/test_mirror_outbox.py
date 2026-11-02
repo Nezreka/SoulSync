@@ -612,3 +612,32 @@ def test_a_missing_track_someone_asked_for_still_queues(db, reason):
     flaky, conn = _missing_slot(db, reason)
     MO.enqueue_tracks(conn, [flaky.ids["track"]], True, profile_id=1)
     assert _ops(conn) == ["wishlist_add"]
+
+
+def test_a_song_owned_on_another_release_is_not_queued(db):
+    """the album track whose song you have on the single: Missing and the wanted
+    queue already call it owned, and the wishlist must not download it again."""
+    flaky, conn = db
+    cur = conn.cursor()
+    cur.execute("INSERT INTO lib2_albums(primary_artist_id, title, album_type) VALUES(?, 'T', 'single')",
+                (flaky.ids["artist"],))
+    single_album = cur.lastrowid
+    cur.execute("INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'T', 1)",
+                (single_album,))
+    single = cur.lastrowid
+    cur.execute("INSERT INTO lib2_track_files(track_id, path, is_primary) VALUES(?, '/music/A/T/01 T.flac', 1)",
+                (single,))
+    rec = cur.execute("INSERT INTO lib2_recordings(title) VALUES('T')").lastrowid
+    for tid, album in ((flaky.ids["track"], flaky.ids["album"]), (single, single_album)):
+        edition = cur.execute("INSERT INTO lib2_release_editions(release_group_id, is_default) VALUES(?, 1)",
+                              (album,)).lastrowid
+        cur.execute("INSERT INTO lib2_release_tracks(release_edition_id, recording_id, track_id) VALUES(?,?,?)",
+                    (edition, rec, tid))
+    conn.commit()
+
+    MO.enqueue_tracks(conn, [flaky.ids["track"]], True, profile_id=1, user_initiated=True)
+    conn.commit()
+    MO.drain(flaky)
+
+    assert flaky.adds == []
+

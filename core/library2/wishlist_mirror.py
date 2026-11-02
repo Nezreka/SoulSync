@@ -48,6 +48,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     the library the caller works in (#1199): another library's copy neither
     satisfies this one nor gets replaced for it.
     """
+    from core.library2.recording_links import owned_by_recording_sql
     from core.library2.sql_util import owner_clause
     t = conn.execute(
         """SELECT t.id AS track_id, t.spotify_id, t.musicbrainz_id,
@@ -63,9 +64,11 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
                          WHERE tf.track_id = t.id
                            AND tf.path IS NOT NULL AND tf.path <> ''
                            AND COALESCE(tf.file_state,'active')
-                               NOT IN ('missing_confirmed','deleted'){owner}) has_file
+                               NOT IN ('missing_confirmed','deleted'){owner}) has_file,
+                  {owned_elsewhere} AS owned_elsewhere
            FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
-           WHERE t.id = ?""".format(owner=owner_clause(column="tf.owner_profile_id")),
+           WHERE t.id = ?""".format(owner=owner_clause(column="tf.owner_profile_id"),
+                                    owned_elsewhere=owned_by_recording_sql(conn, "t")),
         (track_id,),
     ).fetchone()
     if not t:
@@ -131,7 +134,10 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     original_quality = audio_quality_from_file(file_info)
 
     from core.library2.quality_eval import is_upgrade_policy
-    should_queue = not bool(t["has_file"])
+    # the same song already on disk under another release (the single of an
+    # album track) is owned: Missing and the wanted queue say so, and the
+    # wishlist must not download a second copy of it either
+    should_queue = not bool(t["has_file"]) and not bool(t["owned_elsewhere"])
     quality_evaluation = "not_applicable"
     if t["has_file"] and _hand_tagged(conn, (file_info or {}).get("path")):
         quality_evaluation = "hand_tagged"
