@@ -399,7 +399,7 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
     offset = (page - 1) * limit
     # §40: alias-member rows are folded into their canonical artist's entry
     # (get_artist merges their albums in) and never listed on their own.
-    from core.library2.sql_util import library_artist_ids_sql
+    from core.library2.sql_util import library_index_artist_ids_sql
     # library membership walks every artist (files, monitoring, wanted), and
     # the count and the page each walked it: half a second to a second apiece
     # on a big library. it's worked out once per request into a temp table
@@ -410,7 +410,7 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
     conn.execute("DROP TABLE IF EXISTS temp.lib2_artist_page_members")
     conn.execute("CREATE TEMP TABLE lib2_artist_page_members (id INTEGER PRIMARY KEY)")
     from core.library2.member_version import cached_member_ids
-    member_sql = library_artist_ids_sql()
+    member_sql = library_index_artist_ids_sql()
     member_ids = cached_member_ids(conn, member_sql)
     if member_ids is None:
         conn.execute(f"INSERT OR IGNORE INTO temp.lib2_artist_page_members {member_sql}")

@@ -132,6 +132,17 @@ _OWNED = {
     "album": ("EXISTS (SELECT 1 FROM lib2_tracks owned_t"
               "         JOIN lib2_track_files owned_f ON owned_f.track_id = owned_t.id"
               "        WHERE owned_t.album_id = {alias}.id AND " + _LIVE_FILE + ")"),
+    # a release of their own on disk: the album's primary artist, or a primary
+    # album artist (a split or joint album). Not a featured credit.
+    "release_artist": ("EXISTS (SELECT 1 FROM lib2_albums owned_al"
+                       "         JOIN lib2_tracks owned_t ON owned_t.album_id = owned_al.id"
+                       "         JOIN lib2_track_files owned_f ON owned_f.track_id = owned_t.id"
+                       "        WHERE (owned_al.primary_artist_id = {alias}.id"
+                       "               OR EXISTS (SELECT 1 FROM lib2_album_artists owned_aa"
+                       "                           WHERE owned_aa.album_id = owned_al.id"
+                       "                             AND owned_aa.artist_id = {alias}.id"
+                       "                             AND owned_aa.role = 'primary'))"
+                       "          AND " + _LIVE_FILE + ")"),
     # Either credit counts: the album's primary artist and a featured credit on
     # the track are both in the library.
     "artist": ("(EXISTS (SELECT 1 FROM lib2_tracks owned_t"
@@ -273,6 +284,29 @@ def library_artist_ids_sql() -> str:
     only a catalogue row."""
     return (f"SELECT COALESCE(va.canonical_artist_id,va.id) FROM lib2_artists va "
             f"WHERE {_member_row_sql('va')}")
+
+
+def library_index_artist_ids_sql() -> str:
+    """The artists the Library page lists (and Watch All counts): the ones with
+    a release of their own on disk, a watch, or a wanted release of their own.
+
+    Narrower than library_artist_ids_sql on purpose: that one also takes every
+    artist credited on a track you own or want, which is right for "is this
+    artist in my library" (their page, search) but turned the index into every
+    featured guest -- 23k artists on a library with 6k album artists, and on a
+    728-folder library 2,600. 3.6.1's list was the media server's artists,
+    album artists. Credit-only artists keep their pages (Featured in your
+    library) and stay searchable."""
+    intent = intent_profile_id()
+    wanted = f"COALESCE(w.wanted, {monitored_sql('track', 't')})=1"
+    wanted_join = f"LEFT JOIN lib2_wanted_tracks w ON w.track_id=t.id AND w.profile_id={intent}"
+    row = (f"({owned_sql('release_artist', 'va')} OR {monitored_sql('artist', 'va')}=1 "
+           f"OR EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t ON t.album_id=al.id "
+           f"{wanted_join} WHERE al.primary_artist_id=va.id AND {wanted}) "
+           f"OR EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_monitor_rules r ON r.entity_type='album' "
+           f"AND r.entity_id=al.id AND r.profile_id={intent} AND r.monitored=1 "
+           f"WHERE al.primary_artist_id=va.id))")
+    return f"SELECT COALESCE(va.canonical_artist_id,va.id) FROM lib2_artists va WHERE {row}"
 
 
 def library_member_sql(alias: str) -> str:
@@ -433,6 +467,6 @@ def scoped_primary_file_join(track_alias: str, file_alias: str, *, scope=_AMBIEN
             f" ORDER BY {primary_order('pf')} LIMIT 1)")
 
 
-__all__ = ["ANY_OWNER", "in_library_sql", "owned_in_library_sql", "intent_profile_id", "library_artist_sql", "library_member_sql", "monitored_sql", "owned_sql",
+__all__ = ["ANY_OWNER", "in_library_sql", "library_index_artist_ids_sql", "owned_in_library_sql", "intent_profile_id", "library_artist_sql", "library_member_sql", "monitored_sql", "owned_sql",
            "owner_clause", "scoped_primary_file_join",
            "scope_visibility_sql", "scoped_monitored", "select_existing_ids"]

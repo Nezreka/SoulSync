@@ -41,6 +41,10 @@ _WATCHED = (
     ("lib2_track_artists", "INSERT"),
     ("lib2_track_artists", "DELETE"),
     ("lib2_track_artists", "UPDATE"),
+    # the Artists index's release-artist arm (library_index_artist_ids_sql)
+    ("lib2_album_artists", "INSERT"),
+    ("lib2_album_artists", "DELETE"),
+    ("lib2_album_artists", "UPDATE"),
     ("lib2_monitor_rules", "INSERT"),
     ("lib2_monitor_rules", "DELETE"),
     ("lib2_monitor_rules", "UPDATE"),
