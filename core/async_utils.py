@@ -22,6 +22,13 @@ _CONTROL_IO_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=8,
     thread_name_prefix="soulsync-control-io",
 )
+# handing a client a new job can be held for minutes (sab answers an add only
+# once it has built the job before it), so adds get their own threads: a burst
+# of held adds must not take the control pool's threads from status polling
+_CLIENT_ADD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4,
+    thread_name_prefix="soulsync-client-add",
+)
 
 
 async def _run(
@@ -84,12 +91,17 @@ async def run_control(func: Callable[..., _T], /, *args: Any, **kwargs: Any) -> 
     return await _run(_CONTROL_IO_EXECUTOR, func, *args, **kwargs)
 
 
+async def run_client_add(func: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:
+    """Hand a download client a new job, on threads of its own (see above)."""
+    return await _run(_CLIENT_ADD_EXECUTOR, func, *args, **kwargs)
+
+
 def _shutdown() -> None:
-    for executor in (_SLOW_IO_EXECUTOR, _CONTROL_IO_EXECUTOR):
+    for executor in (_SLOW_IO_EXECUTOR, _CONTROL_IO_EXECUTOR, _CLIENT_ADD_EXECUTOR):
         executor.shutdown(wait=False, cancel_futures=True)
 
 
 atexit.register(_shutdown)
 
 
-__all__ = ["run_blocking", "run_control"]
+__all__ = ["run_blocking", "run_client_add", "run_control"]

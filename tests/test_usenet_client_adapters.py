@@ -1006,3 +1006,18 @@ def test_nzbget_remove_rejects_non_numeric_id() -> None:
     with patch.object(adapter, '_rpc_sync') as mock_rpc:
         assert adapter._remove_sync('not-a-number', delete_files=False) is False
     mock_rpc.assert_not_called()
+
+
+def test_sab_add_runs_on_its_own_threads_not_the_control_pool() -> None:
+    # a held add waits up to ADD_TIMEOUT; on the control pool a burst of them
+    # would leave no threads for every client's status polling
+    import threading
+    adapter = _sab_with_config()
+    seen = []
+
+    def _get(*_a, **_k):
+        seen.append(threading.current_thread().name)
+        return _mock_response(200, {'status': True, 'nzo_ids': ['SABnzbd_3']})
+    with patch('core.usenet_clients.sabnzbd.http_requests.get', side_effect=_get):
+        _run(adapter.add_nzb('https://example.com/x.nzb', category='cat'))
+    assert seen and seen[0].startswith('soulsync-client-add')

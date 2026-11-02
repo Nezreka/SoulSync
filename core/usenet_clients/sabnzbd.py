@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import requests as http_requests
 
 from core.settings import config_manager
-from core.async_utils import run_control
+from core.async_utils import run_client_add, run_control
 from core.usenet_clients.base import UsenetStatus
 from utils.logging_config import get_logger
 
@@ -187,7 +187,8 @@ class SABnzbdAdapter:
         category: str = "soulsync",
         save_path: Optional[str] = None,
     ) -> Optional[str]:
-        return await run_control(
+        # its own pool: an add can be held for minutes (ADD_TIMEOUT)
+        return await run_client_add(
             self._add_nzb_sync, url_or_bytes, category, save_path)
 
     def _add_nzb_sync(
