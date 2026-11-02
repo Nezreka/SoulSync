@@ -1215,6 +1215,28 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(artist.querySelector('svg')?.getAttribute('data-list-icon')).toBe('watchlist');
   });
 
+  it('gives a household member their own Watchlist button on a library artist', async () => {
+    // 3.6.1's artist page let every profile watch an artist on its own
+    // watchlist; Library v2's monitored flag is the admin's, so a member saw
+    // no button at all. The member's button asks the per-profile watchlist.
+    const checks: unknown[] = [];
+    server.use(
+      http.get('/api/library/v2/enabled', () =>
+        HttpResponse.json({ success: true, enabled: true, can_write: false, can_wish: false }),
+      ),
+      http.post('/api/watchlist/check', async ({ request }) => {
+        checks.push(await request.json());
+        return HttpResponse.json({ success: true, is_watching: true });
+      }),
+    );
+    renderArtist('/library?artist=1&header=rich');
+
+    expect(
+      await screen.findByRole('button', { name: /Watching/ }, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(checks).toEqual([{ artist_id: 'sp-1' }]);
+  });
+
   it('lets a read-only profile browse the full provider discography without writing', async () => {
     const writes: string[] = [];
     server.use(

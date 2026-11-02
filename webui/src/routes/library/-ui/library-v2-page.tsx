@@ -249,6 +249,7 @@ import { AlbumUpgradeButton } from './owned-album-upgrade';
 import { useArtistBack } from './owned-artist-back';
 import {
   OwnedArtistDiscographyButton,
+  preferredProviderIdentity,
   useReadOnlyProviderDiscography,
 } from './owned-artist-discography';
 import { OwnedArtistHeroExtras } from './owned-artist-hero-extras';
@@ -7683,6 +7684,7 @@ function CatalogueArtistHero({
   facts?: ReactNode;
 }) {
   const matchStatus = useQuery(libraryV2ArtistMatchStatusQueryOptions(artist.id));
+  const canWish = useLibraryV2CanWish();
   const providerIds = artist.provider_ids ?? {};
   const info = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'hero-stats', artist.name],
@@ -7724,7 +7726,19 @@ function CatalogueArtistHero({
       eyebrow={artistEyebrow(artist)}
       titleActions={headerToggle}
       titleLeading={
-        <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} prominent />
+        canWish ? (
+          <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} prominent />
+        ) : (
+          <ProfileWatchlistButton
+            watchlist={(() => {
+              const identity = preferredProviderIdentity(artist.provider_ids);
+              return identity
+                ? { id: identity.id, name: artist.name, source: identity.source }
+                : null;
+            })()}
+            imageUrl={artist.image_url ?? ''}
+          />
+        )
       }
       // ldp-08 stays: the V2 match chips are the metadata-source display, not
       // legacy's panel. The enrichment rings underneath are the part the user
@@ -8167,6 +8181,78 @@ function ProviderArtistView({
 
 /** the provider artist's hero buttons: dev's watchlist button and Download
  *  Discography, the two things there are to do for an artist you don't have */
+/**
+ * A household member's Watchlist button. It writes the member's OWN watchlist
+ * (the per-profile list 3.6.1's artist page used), not Library v2's monitored
+ * flag, which is global and the admin's. Without it a member saw no way to
+ * watch an artist on its page.
+ */
+function ProfileWatchlistButton({
+  watchlist,
+  imageUrl,
+}: {
+  watchlist: { id: string; name: string; source?: string } | null;
+  imageUrl: string;
+}) {
+  const [watching, setWatching] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const watchlistId = watchlist?.id ?? null;
+  useEffect(() => {
+    setWatching(null);
+    if (!watchlistId) return;
+    let cancelled = false;
+    void checkWatchlistRequest(watchlistId).then((state) => {
+      if (!cancelled) setWatching(state);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [watchlistId]);
+  if (!watchlist) return null;
+  const toggle = async () => {
+    if (busy) return;
+    if (!watching) {
+      setAdding(true);
+      return;
+    }
+    setBusy(true);
+    try {
+      const { watching: next, message } = await toggleWatchlistRequest(
+        watchlist.id,
+        watchlist.name,
+        watchlist.source,
+      );
+      setWatching(next);
+      window.showToast?.(message, 'success');
+    } catch (error) {
+      window.showToast?.(`Error: ${(error as Error).message}`, 'error');
+    }
+    setBusy(false);
+  };
+  return (
+    <>
+      <button
+        type="button"
+        className={`${watching ? 'library-artist-watchlist-btn watching' : 'library-artist-watchlist-btn'} ${styles.heroSecondary}`}
+        disabled={busy}
+        onClick={() => void toggle()}
+      >
+        <SvgIcon name="eye" />
+        {busy ? 'Loading…' : watching ? 'Watching' : 'Add to Watchlist'}
+      </button>
+      {adding ? (
+        <WatchlistAddModal
+          artist={{ id: watchlist.id, name: watchlist.name, source: watchlist.source, imageUrl }}
+          onClose={() => setAdding(false)}
+          onWatched={() => setWatching(true)}
+          onDownloadExisting={() => setAdding(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
 function ProviderArtistActions({
   payload,
   watchlist,
@@ -8178,7 +8264,6 @@ function ProviderArtistActions({
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const canWish = useLibraryV2CanWish();
   const watchlistId = watchlist?.id ?? null;
   useEffect(() => {
     setWatching(null);
@@ -8215,7 +8300,7 @@ function ProviderArtistActions({
   };
   return (
     <>
-      {watchlist && canWish ? (
+      {watchlist ? (
         <button
           type="button"
           className={`${watching ? 'library-artist-watchlist-btn watching' : 'library-artist-watchlist-btn'} ${styles.heroSecondary}`}
@@ -8226,7 +8311,7 @@ function ProviderArtistActions({
           {busy ? 'Loading…' : watching ? 'Watching' : 'Add to Watchlist'}
         </button>
       ) : null}
-      {canWish && payload.discography ? (
+      {payload.discography ? (
         <button
           type="button"
           className={`library-artist-download-btn ${styles.heroSecondary}`}
