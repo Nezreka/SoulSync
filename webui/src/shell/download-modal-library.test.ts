@@ -56,20 +56,14 @@ describe('Add to Wishlist downloads what it added right away', () => {
     expect(requests).toHaveLength(0);
   });
 
-  it('says so when the wishlist run is busy or the start fails', async () => {
-    status = 409;
+  it('only queues: no download starts, the wishlist run takes them', async () => {
+    // 3.6.1's Add to Wishlist queued for later; starting the download made it
+    // the same button as Download
     expect(await monitorAddedTracks(2, [{ id: 't1' }, { id: 't2' }])).toBe(
-      'Added 2 tracks to your Wishlist — the running wishlist pass takes them',
-    );
-    status = 500;
-    expect(await monitorAddedTracks(1, [{ id: 't1' }])).toBe(
-      'Added 1 track to your Wishlist — the download could not start, still wanted',
-    );
-    status = 200;
-    expect(await monitorAddedTracks(1, [{ id: 't1' }])).toBe(
-      'Added 1 track to your Wishlist — download started',
+      'Added 2 tracks to your Wishlist',
     );
     expect(await monitorAddedTracks(3, [])).toBe('Added 3 tracks to your Wishlist');
+    expect(requests).toHaveLength(0);
   });
 
   it('monitors the album itself when every track of it was picked', async () => {
@@ -80,15 +74,15 @@ describe('Add to Wishlist downloads what it added right away', () => {
     ];
 
     expect(await monitorAddedTracks(3, rows, true)).toBe(
-      'Added the album to your Wishlist (3 tracks) — download started',
+      'Added the album to your Wishlist (3 tracks)',
     );
     expect(releases).toEqual(['7']);
-    expect(requests).toEqual([{ track_ids: ['t1::a', 't2::a', 't3::a'] }]);
+    expect(requests).toHaveLength(0);
   });
 
   it('leaves the album alone when only some tracks were picked', async () => {
     expect(await monitorAddedTracks(1, [{ id: 't1::a', album: 7 }], false)).toBe(
-      'Added 1 track to your Wishlist — download started',
+      'Added 1 track to your Wishlist',
     );
     expect(releases).toHaveLength(0);
   });

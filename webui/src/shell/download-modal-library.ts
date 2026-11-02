@@ -103,12 +103,15 @@ async function monitorRelease(rows: AddedRow[]): Promise<boolean> {
 }
 
 /**
- * The end of an "Add to Wishlist" click: monitor the release when all of it was
- * picked, start the downloads, and word the toast.
+ * The end of an "Add to Wishlist" click: wishlist the release when all of it
+ * was picked, and word the toast.
+ *
+ * It only queues, as 3.6.1's Add to Wishlist did: the scheduled wishlist pass
+ * downloads them. Starting the download here made the button the same as
+ * Download, with no way to just queue tracks for later.
  *
  * `added` counts the tracks the server accepted, `rows` the ones it actually
- * added (an owned track it skipped has nothing to download). `wholeRelease`
- * says the pick was every track of one album.
+ * added. `wholeRelease` says the pick was every track of one album.
  */
 export async function monitorAddedTracks(
   added: number,
@@ -116,14 +119,9 @@ export async function monitorAddedTracks(
   wholeRelease = false,
 ): Promise<string> {
   const release = wholeRelease && (await monitorRelease(rows));
-  const outcome = await startMonitoredDownloads(rows.map((row) => row.id));
-  const what = release
+  return release
     ? `Added the album to your Wishlist (${added} track${added === 1 ? '' : 's'})`
     : `Added ${added} track${added === 1 ? '' : 's'} to your Wishlist`;
-  if (outcome === 'started') return `${what} — download started`;
-  if (outcome === 'busy') return `${what} — the running wishlist pass takes them`;
-  if (outcome === 'failed') return `${what} — the download could not start, still wanted`;
-  return what;
 }
 
 declare global {

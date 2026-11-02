@@ -626,7 +626,7 @@ const HELPER_CONTENT = {
 
     '[id^="add-to-wishlist-btn"]': {
         title: 'Add to Wishlist',
-        description: 'Adds the selected tracks to your Wishlist and starts downloading them right away. A track that is not found stays wanted and is searched again on the next wishlist run.',
+        description: 'Adds the selected tracks to your Wishlist for later download. Useful when you want to queue tracks but not download them right now. The scheduled wishlist run picks them up.',
         tips: [
             'The Library Status column shows what you already have as soon as the dialog opens',
             'Wishlisted tracks appear in the Wishlist and under Wanted in the Library',
