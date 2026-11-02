@@ -396,8 +396,27 @@ try:
     from core.matching_engine import MusicMatchingEngine
     _matching_engine = MusicMatchingEngine()
 except ImportError:
-    logger.warning("Could not import MusicMatchingEngine, falling back to basic similarity")
+    # core.matching_engine reaches this module through settings and the db,
+    # so a process that imports it first finds it half loaded here. that is
+    # an import order, not a missing engine: _resolve_matching_engine() asks
+    # again on first use, once the cycle has finished loading
     _matching_engine = None
+_matching_engine_unavailable = False
+
+
+def _resolve_matching_engine():
+    """the enhanced matching engine, imported late if the import above lost
+    the cycle. None only when it really can't be imported, and then the
+    basic similarity is used (it scores '(Live)' as the studio song)."""
+    global _matching_engine, _matching_engine_unavailable
+    if _matching_engine is None and not _matching_engine_unavailable:
+        try:
+            from core.matching_engine import MusicMatchingEngine
+            _matching_engine = MusicMatchingEngine()
+        except ImportError:
+            _matching_engine_unavailable = True
+            logger.warning("Could not import MusicMatchingEngine, falling back to basic similarity")
+    return _matching_engine
 
 @dataclass
 class DatabaseArtist:
@@ -12883,8 +12902,9 @@ class MusicDatabase:
                     return 1.0
 
         # Use enhanced similarity from matching engine if available
-        if _matching_engine:
-            return _matching_engine.similarity_score(s1, s2)
+        engine = _resolve_matching_engine()
+        if engine:
+            return engine.similarity_score(s1, s2)
         
         # Simple Levenshtein distance implementation
         len1, len2 = len(s1), len(s2)
@@ -22268,7 +22288,7 @@ class MusicDatabase:
         """
         keys = set()
         try:
-            engine = _matching_engine
+            engine = _resolve_matching_engine()
             if engine is None:
                 # #1452: failing closed here would silently empty the Matched
                 # tab whenever a playlist filter is applied, so log loudly —
