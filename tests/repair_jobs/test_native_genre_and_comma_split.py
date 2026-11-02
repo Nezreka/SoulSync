@@ -95,6 +95,12 @@ def genre_db(tmp_path: Path):
         "VALUES(10, 1, 'Dirty Album', ?, 'alb.jpg')",
         (json.dumps(['favorites', 'Rock']),),
     )
+    # the library is what has files: a song on the album, Clean Artist a guest on it
+    track_id = conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(10, 'Song')").lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id, path, is_primary) VALUES(?, '/m/s.flac', 1)",
+                 (track_id,))
+    conn.executemany("INSERT INTO lib2_track_artists(track_id, artist_id) VALUES(?, ?)",
+                     [(track_id, 1), (track_id, 2)])
     # Legacy-only dirt: invisible to a native scan.
     conn.execute(
         "INSERT INTO artists(id, name, genres) VALUES('LEG1', 'Legacy Only', ?)",

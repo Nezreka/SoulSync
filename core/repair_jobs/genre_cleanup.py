@@ -76,18 +76,25 @@ class GenreCleanupJob(RepairJob):
     # source and the finding identity ever differed.
 
     def _genre_rows(self, context: JobContext) -> list:
+        # what the library holds, like genre_enrichment: watchlist discography
+        # and wishlist rows share these tables, and an alias row is its
+        # canonical artist's
+        from core.library2.sql_util import ANY_OWNER, owned_sql
         conn = context.db._get_connection()
         try:
             rows = list(conn.execute(
-                """SELECT 'artist', ar.id, ar.name, ar.genres, ar.image_url,
+                f"""SELECT 'artist', ar.id, ar.name, ar.genres, ar.image_url,
                           NULL, ar.id, ar.name, ar.image_url
-                     FROM lib2_artists ar"""
+                     FROM lib2_artists ar
+                    WHERE ar.canonical_artist_id IS NULL
+                      AND {owned_sql('artist', 'ar', scope=ANY_OWNER)}"""
             ).fetchall())
             rows.extend(conn.execute(
-                """SELECT 'album', al.id, al.title, al.genres, al.image_url,
+                f"""SELECT 'album', al.id, al.title, al.genres, al.image_url,
                           al.image_url, ar.id, ar.name, ar.image_url
                      FROM lib2_albums al
-                LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id"""
+                LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    WHERE {owned_sql('album', 'al', scope=ANY_OWNER)}"""
             ).fetchall())
             return rows
         finally:
