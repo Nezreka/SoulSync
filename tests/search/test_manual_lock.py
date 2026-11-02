@@ -74,6 +74,20 @@ def test_unlocking_forgets_the_albums_files(tmp_path):
     assert db.manual_path_keys() == set()
 
 
+def test_unlocking_lets_enrichment_look_at_the_album_again(tmp_path):
+    """tagging by hand records a 'manual' attempt for every service, which the
+    workers read as settled; unlocking has to take those back or the album
+    is never rematched (3.6.1 reset its manual match statuses)."""
+    db = _db(tmp_path)
+    album_id = _album_with_file(db, LIVE)
+    db.record_manual_metadata_file(LIVE)
+    with db._get_connection() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lib2_provider_attempts WHERE status='manual'").fetchone()[0] > 0
+    assert db.clear_manual_lock(album_id) is True
+    with db._get_connection() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lib2_provider_attempts WHERE status='manual'").fetchone()[0] == 0
+
+
 def test_unlocking_a_missing_album_says_so(tmp_path):
     assert _db(tmp_path).clear_manual_lock(424242) is False
 

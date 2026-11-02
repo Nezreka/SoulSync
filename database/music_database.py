@@ -2452,6 +2452,17 @@ class MusicDatabase:
             if keys:
                 cursor.executemany("DELETE FROM manual_metadata_files WHERE path_key = ?",
                                    [(k,) for k in keys])
+            # the stand-down hand-tagging recorded for every service: 'manual'
+            # counts as settled, so without this no enrichment worker ever
+            # looked at the album again (3.6.1 reset the manual match statuses)
+            try:
+                cursor.execute(
+                    "DELETE FROM lib2_provider_attempts WHERE status = 'manual' AND ("
+                    "(entity_type = 'album' AND entity_id = ?) OR "
+                    "(entity_type = 'track' AND entity_id IN (SELECT id FROM lib2_tracks WHERE album_id = ?)))",
+                    (album_id, album_id))
+            except Exception as exc:  # noqa: BLE001 - no attempts table yet, nothing to clear
+                logger.debug("manual attempts not cleared for album %s: %s", album_id, exc)
             conn.commit()
             return True
         finally:
