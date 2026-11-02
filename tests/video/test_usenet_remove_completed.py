@@ -10,6 +10,10 @@ left in its folder). It runs only for a ``completed`` row, after the row is
 persisted; failed and import_failed rows keep their job for Manual import, and
 a season pack goes only when every episode it mapped imported and it placed
 every video it held.
+
+``files`` deletes the job's folder itself (SABnzbd's ``del_files`` only deletes
+a FAILED job's files), and only a folder the client's own report proves is the
+job's: named after it or SAB's ``<job>.N``, not a link, not a protected root.
 """
 
 from __future__ import annotations
@@ -102,6 +106,124 @@ def test_no_job_id_or_a_refusal_reports_false():
     assert rc.remove_imported_job("", "files", run=_run, adapter=a) is False
     assert a.calls == []
     assert rc.remove_imported_job("nzo_1", "files", run=_run, adapter=a) is False
+
+
+# ── files: the job's own folder, and nothing else ────────────────────────────
+
+class _Reporting(_Adapter):
+    """An adapter that also reports the job (name + final path), like SAB's
+    history slot. The report is gone once the job is removed."""
+    def __init__(self, name, save_path, result=True):
+        super().__init__(result=result)
+        self.name, self.save_path = name, save_path
+
+    async def get_status(self, job_id):
+        if any(call[0] == job_id for call in self.calls):
+            return None
+        return _St(name=self.name, save_path=self.save_path, state="completed")
+
+
+class _St:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def _job(tmp_path, name="Some.Show.S01E01.1080p.WEB-DL", files=("some.show.nfo",)):
+    job = tmp_path / "complete" / "soulsync" / name
+    job.mkdir(parents=True)
+    for f in files:
+        (job / f).write_bytes(b"x")
+    return job
+
+
+def test_a_job_folder_is_named_after_the_job_or_sabs_repeat_name():
+    assert rc.matches_job_name("Some.Show", "some.show")
+    assert rc.matches_job_name("Some.Show.1", "Some.Show")
+    assert rc.matches_job_name("Some.Show.12", "Some.Show")
+    for folder in ("soulsync", "Some.Show.x", "Some.Show.", "Some.Show.1.2", "Some", ""):
+        assert not rc.matches_job_name(folder, "Some.Show")
+    assert not rc.matches_job_name("Some.Show", "")
+
+
+def test_the_reported_folder_or_a_files_parent_is_the_job_folder(tmp_path):
+    job = _job(tmp_path, files=("ep.mkv",))
+    assert rc.job_folder(str(job), job.name) == str(job)
+    assert rc.job_folder(str(job / "ep.mkv"), job.name) == str(job)
+    repeat = _job(tmp_path, name=job.name + ".1", files=("ep.mkv",))
+    assert rc.job_folder(str(repeat / "ep.mkv"), job.name) == str(repeat)
+
+
+def test_a_category_folder_a_link_or_a_protected_root_is_never_the_job_folder(tmp_path):
+    job = _job(tmp_path, files=("ep.mkv",))
+    category = job.parent
+    (category / "loose.mkv").write_bytes(b"x")
+    # a category without job folders: the file sits straight in the category
+    assert rc.job_folder(str(category / "loose.mkv"), "loose") is None
+    assert rc.job_folder(str(category), job.name) is None
+    link = tmp_path / job.name
+    link.symlink_to(job, target_is_directory=True)
+    assert rc.job_folder(str(link), job.name) is None
+    assert rc.job_folder(str(job), job.name, protected=[str(job)]) is None
+    assert rc.job_folder(str(job), job.name, protected=[str(job / "inner")]) is None
+    assert rc.job_folder(str(job), job.name, protected=[str(category)]) == str(job)
+    assert rc.job_folder(str(tmp_path / "gone"), "gone") is None
+    assert rc.job_folder(None, job.name) is None and rc.job_folder(str(job), "") is None
+
+
+def test_the_reported_path_is_resolved_to_this_mount(tmp_path):
+    job = _job(tmp_path)
+    resolve = lambda p: p.replace("/client/complete", str(job.parent.parent))  # noqa: E731
+    assert rc.job_folder("/client/complete/soulsync/" + job.name, job.name,
+                         resolve=resolve) == str(job)
+
+
+def test_files_deletes_the_job_folder_after_the_client_removed_the_job(tmp_path):
+    job = _job(tmp_path)
+    a = _Reporting(job.name, str(job))
+    assert rc.remove_imported_job("nzo_1", "files", run=_run, adapter=a) is True
+    assert a.calls == [("nzo_1", True)] and not job.exists()
+    assert job.parent.exists()
+
+
+def test_history_and_a_refused_removal_keep_the_folder(tmp_path):
+    job = _job(tmp_path)
+    assert rc.remove_imported_job("nzo_1", "history", run=_run,
+                                  adapter=_Reporting(job.name, str(job))) is True
+    assert job.exists()
+    assert rc.remove_imported_job("nzo_1", "files", run=_run,
+                                  adapter=_Reporting(job.name, str(job), result=False)) is False
+    assert job.exists()
+
+
+def test_files_keeps_a_folder_it_cannot_prove_is_the_jobs(tmp_path):
+    job = _job(tmp_path)
+    # the client reports the category itself, or a name that is not the folder's
+    for name, path in ((job.name, str(job.parent)), ("Other.Release", str(job))):
+        assert rc.remove_imported_job("nzo_1", "files", run=_run,
+                                      adapter=_Reporting(name, path)) is True
+        assert job.exists()
+    assert rc.remove_imported_job("nzo_1", "files", run=_run,
+                                  adapter=_Reporting(job.name, str(job)),
+                                  protected=[str(job)]) is True
+    assert job.exists()
+
+
+def test_files_without_a_report_still_removes_the_job(tmp_path):
+    job = _job(tmp_path)
+    a = _Adapter()                       # no get_status at all
+    assert rc.remove_imported_job("nzo_1", "files", run=_run, adapter=a) is True
+    assert a.calls == [("nzo_1", True)] and job.exists()
+
+
+# ── sab's repeat-name folders count as the job's own ──────────────────────────
+
+def test_a_single_file_job_in_a_repeat_name_folder_has_a_job_dir(tmp_path):
+    from core.video.client_download import _usenet_job_dir
+    job = _job(tmp_path, name="Some.Show.S01E01.1080p.WEB-DL.1", files=("ep.mkv",))
+    dl = {"source": "usenet"}
+    assert _usenet_job_dir(dl, str(job / "ep.mkv"), None,
+                           job_name="Some.Show.S01E01.1080p.WEB-DL") == str(job)
+    assert _usenet_job_dir(dl, str(job / "ep.mkv"), None, job_name="Other") is None
 
 
 # ── which rows qualify ────────────────────────────────────────────────────────
@@ -209,10 +331,6 @@ def test_samples_non_video_and_smaller_duplicates_are_not_unplaced():
 
 # ── end to end through a monitor tick ─────────────────────────────────────────
 
-class _St:
-    def __init__(self, **kw):
-        self.__dict__.update(kw)
-
 
 def _tick_setup(tmp_path, monkeypatch, organizer, setting):
     import core.video.client_download as client
@@ -261,6 +379,35 @@ def test_a_tick_persists_the_import_then_removes_the_job(tmp_path, monkeypatch):
     assert row["status"] == "completed"
     assert order == ["persist", "remove"]
     assert adapter.calls == [("SABnzbd_nzo_7", True)]
+
+
+def test_a_tick_with_files_deletes_what_the_import_left_in_the_job_folder(tmp_path, monkeypatch):
+    def organizer(dl, src):
+        return {"status": "completed", "progress": 100.0, "dest_path": "/lib/x.mkv",
+                "_cleanup_source": src}
+    db, row, order, adapter = _tick_setup(tmp_path, monkeypatch, organizer, "files")
+    job = tmp_path / "complete" / "soulsync" / "Some.Show.S01E01.1080p.WEB-DL"
+    (job / "some.show.nfo").write_bytes(b"nfo")       # what the importer leaves behind
+    adapter.get_status = lambda job_id: _status(job)
+    monitor._tick(db)
+    assert row["status"] == "completed" and adapter.calls == [("SABnzbd_nzo_7", True)]
+    assert not job.exists() and job.parent.exists()
+
+
+def test_a_tick_with_history_keeps_the_leftovers(tmp_path, monkeypatch):
+    def organizer(dl, src):
+        return {"status": "completed", "progress": 100.0, "dest_path": "/lib/x.mkv",
+                "_cleanup_source": src}
+    db, row, order, adapter = _tick_setup(tmp_path, monkeypatch, organizer, "history")
+    job = tmp_path / "complete" / "soulsync" / "Some.Show.S01E01.1080p.WEB-DL"
+    (job / "some.show.nfo").write_bytes(b"nfo")
+    adapter.get_status = lambda job_id: _status(job)
+    monitor._tick(db)
+    assert adapter.calls == [("SABnzbd_nzo_7", False)] and (job / "some.show.nfo").exists()
+
+
+async def _status(job):
+    return _St(name=job.name, save_path=str(job), state="completed")
 
 
 def test_a_tick_keeps_an_import_failed_job(tmp_path, monkeypatch):

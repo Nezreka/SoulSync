@@ -81,10 +81,55 @@ def _remove_completed_mode() -> str:
         return remove_completed.OFF
 
 
+def _music_protected_roots() -> list:
+    """Folders Remove Completed must never delete, nor a folder holding one:
+    the download, transfer and staging folders, the client's usenet folder
+    (as configured and as resolved here) and the music library."""
+    roots = []
+    try:
+        from core.settings import config_manager
+        for key in ('soulseek.download_path', 'soulseek.transfer_path',
+                    'import.staging_path', 'download_source.album_bundle_staging_path'):
+            value = config_manager.get(key, '')
+            if value:
+                roots.append(str(value))
+        client_root = config_manager.get('download_source.usenet_download_path', '')
+        if client_root:
+            roots.append(str(client_root))
+            roots.append(str(resolve_reported_save_path(str(client_root))))
+        for value in config_manager.get('library.music_paths', []) or []:
+            if value:
+                roots.append(str(value))
+    except Exception as e:  # noqa: BLE001 - the job-name check still guards the delete
+        logger.debug("remove completed: couldn't read the protected folders: %s", e)
+    return roots
+
+
+def _remove_job(job_id, mode: str, *, adapter=None, label: str = '') -> bool:
+    from core.downloads import remove_completed
+    return remove_completed.remove_imported_job(
+        job_id, mode, run=run_async,
+        adapter=adapter if adapter is not None else get_active_usenet_adapter(),
+        label=label, resolve=resolve_reported_save_path,
+        protected=_music_protected_roots())
+
+
+def remove_imported_album_job(job_id: str, label: str = '') -> bool:
+    """Remove Completed for an album grab, once its batch has finished with
+    every track imported (the batch decides that; see
+    ``core.downloads.lifecycle``). Best-effort, like the track grab."""
+    from core.downloads import remove_completed
+    mode = _remove_completed_mode()
+    if mode == remove_completed.OFF or not job_id:
+        return False
+    return _remove_job(job_id, mode, label=label)
+
+
 def remove_imported_usenet_job(download_id: str) -> bool:
     """Remove Completed for a single-track grab: once post-processing has
-    copied the matching file out of the job, take the job out of the client
-    per ``usenet_client.remove_completed``. The client job id comes from the
+    imported the requested track (and any other album tracks the profile
+    takes from the release), take the job out of the client per
+    ``usenet_client.remove_completed``. The client job id comes from the
     grab row (written at submit, so it survives a restart). Best-effort: a
     job left in the client is the old behavior, never an error."""
     from core.downloads import remove_completed
@@ -104,9 +149,8 @@ def remove_imported_usenet_job(download_id: str) -> bool:
         conn.close()
     if not grab or str(grab.get('source') or '') != 'usenet':
         return False
-    return remove_completed.remove_imported_job(
-        grab.get('external_job_id'), mode, run=run_async,
-        adapter=get_active_usenet_adapter(), label=str(grab.get('title') or ''))
+    return _remove_job(grab.get('external_job_id'), mode,
+                       label=str(grab.get('title') or ''))
 
 
 def _grabs_conn():
@@ -1196,12 +1240,11 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         logger.info("[Usenet album] Staged %d audio files for '%s'", len(copied), album_name)
         _emit('staged', count=len(copied))
         self._update_grab(grab_id, status=STATUS_COMPLETED, output_path=str(local_path))
-        # Remove Completed: the import works from the staged copies, so the
-        # client's job (and, per the setting, its folder) is done with.
-        from core.downloads import remove_completed
-        remove_completed.remove_imported_job(
-            job_id, _remove_completed_mode(), run=run_async, adapter=adapter,
-            label=picked.title)
         result['success'] = True
         result['files'] = copied
+        # Remove Completed waits for the batch: the job is removed only once
+        # every track imported (core.downloads.lifecycle), so a release whose
+        # import fails keeps its files for a retry or a manual import.
+        result['client_job_id'] = job_id
+        result['client_job_label'] = picked.title
         return result

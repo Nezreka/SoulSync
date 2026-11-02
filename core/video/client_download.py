@@ -145,19 +145,20 @@ def _usenet_job_dir(dl: dict, save, name, job_name=None) -> Optional[str]:
     multi-file job), the shared parent (scoped to ``<save>/<name>``), or -- sab
     for a single-file job -- the finished FILE itself. For a file the job folder
     is its parent, but only when that folder is named after the job
-    (``job_name``, case-insensitive): a category set up without job folders
-    puts the file straight in the category folder, which must never be
-    treated as the job's own. torrents never get one (the client is still
-    seeding). None unless it really is a folder."""
+    (``job_name``, case-insensitive, or sab's ``<job>.N`` for a repeat name):
+    a category set up without job folders puts the file straight in the
+    category folder, which must never be treated as the job's own. torrents
+    never get one (the client is still seeding). None unless it really is a
+    folder."""
     if str(dl.get("source") or "").lower() != "usenet" or not save:
         return None
     path = _scoped_content(save, name) if name else save
     if path and os.path.isdir(path):
         return str(path)
     if path and os.path.isfile(path) and job_name:
+        from core.downloads.remove_completed import matches_job_name
         parent = os.path.dirname(os.path.abspath(str(path)))
-        if os.path.basename(parent).casefold() == str(job_name).strip().casefold() \
-                and os.path.isdir(parent):
+        if matches_job_name(os.path.basename(parent), job_name) and os.path.isdir(parent):
             return parent
     return None
 

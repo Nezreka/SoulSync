@@ -187,9 +187,11 @@ def _remove_completed_usenet(db, dl, upd) -> bool:
                         "%d episode(s) not imported and %d file(s) unplaced", ref,
                         int(upd.get("_pack_failed") or 0), int(upd.get("_pack_unplaced") or 0))
             return False
-        from core.video.client_download import _run
+        from core.video.client_download import _resolve_path, _run
         return remove_completed.remove_imported_job(ref, mode, run=_run,
-                                                    label=str(dl.get("title") or ""))
+                                                    label=str(dl.get("title") or ""),
+                                                    resolve=_resolve_path,
+                                                    protected=_protected_roots())
     except Exception:  # noqa: BLE001 - never let client cleanup break the monitor tick
         logger.warning("video import: remove-completed failed for download %s",
                        dl.get("id"), exc_info=True)

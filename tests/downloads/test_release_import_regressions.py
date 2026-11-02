@@ -350,6 +350,8 @@ def test_failed_extra_is_one_pass_without_new_downloads_or_wishlist(album, monke
         monkeypatch.setattr(pipeline, "safe_move_file", move)
     assert album.expand() == 1
     assert album.calls[-1]["track_info"]["name"] == "Third"
+    # Ours: Remove Completed keeps the client job, the only copy left of Second
+    assert album.context["_album_tracks_incomplete"] is True
     assert not any(key for key in matched_downloads_context if "album-track" in key)
     assert download_tasks == {"requested-task": {"status": "completed"}}
     with album.db._get_connection() as conn:
@@ -362,3 +364,14 @@ def test_failed_extra_is_one_pass_without_new_downloads_or_wishlist(album, monke
         assert ctx["profile_id"] == album.profile and ctx["track_info"]["quality_profile_id"] == album.qp
         assert "task_id" not in ctx and "batch_id" not in ctx
     assert [payload["title"] for event, payload in album.events if event == "track_downloaded"] == ["Third"]
+
+
+def test_an_unavailable_track_list_marks_the_album_incomplete(album, monkeypatch):
+    """Ours: the profile wanted the album's tracks and none could be paired, so
+    Remove Completed must keep the release in the client."""
+    files = [releases.read_release_file(str(path)) for path in album.paths]
+    assert releases.import_album_tracks(
+        "request", album.context, files, files[0], album.settings["soulseek.transfer_path"],
+        lambda *a: None, _copy_release_audio_to_transfer,
+        lookup_album=lambda *a, **k: {"success": False}, is_owned=lambda *a: False) == 0
+    assert album.context["_album_tracks_incomplete"] is True

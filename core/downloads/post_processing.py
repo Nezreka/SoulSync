@@ -292,6 +292,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
         found_file = None
         file_location = None
         release_album = None
+        usenet_job_download_id = None
 
         # CRITICAL FIX: For YouTube downloads, the filename in task is 'id||title' (metadata),
         # but the actual file on disk is the remuxed/transcoded audio (e.g. Title.mp3).
@@ -349,10 +350,10 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                             file_location = 'download'
                             release_album = (release_files, selected)
                             if task.get('username') == 'usenet':
-                                # Remove Completed: this task's file is copied
-                                # out; nothing else reads its job (one job per
-                                # track grab). Torrents keep seeding.
-                                _remove_imported_usenet_job(actual_download_id)
+                                # Remove Completed runs after the import
+                                # below, and only if it (and every other album
+                                # track the profile takes) imported.
+                                usenet_job_download_id = actual_download_id
                     if not found_file:
                         with tasks_lock:
                             if task_id in download_tasks:
@@ -660,6 +661,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                     context.pop('_pipeline_import_succeeded', None)  # this attempt's outcome only
                 # Run the existing post-processing logic with verification
                 deps.post_process_with_verification(context_key, context, found_file, task_id, batch_id)
+                album_tracks_ok = True
                 if release_album and context.get('_pipeline_import_succeeded') and deps.process_release_file:
                     # The requested track is done and its task completed. The
                     # profile may also want the album's other tracks from it.
@@ -668,7 +670,16 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                         import_album_tracks(context_key, context, *release_album, transfer_dir,
                                             deps.process_release_file, _copy_release_audio_to_transfer)
                     except Exception as album_error:  # the completed request must stay completed
+                        album_tracks_ok = False
                         logger.error(f"[Post-Processing] Album tracks import failed: {album_error}")
+                if usenet_job_download_id and context.get('_pipeline_import_succeeded'):
+                    # Remove Completed: the release is done with only when the
+                    # request imported and no album track it offered failed.
+                    if album_tracks_ok and not context.get('_album_tracks_incomplete'):
+                        _remove_imported_usenet_job(usenet_job_download_id)
+                    else:
+                        logger.info("[Post-Processing] Kept usenet job for %s: not every "
+                                    "album track from its release imported", task_id)
             else:
                 # No matched context - just mark as completed since file exists
                 #

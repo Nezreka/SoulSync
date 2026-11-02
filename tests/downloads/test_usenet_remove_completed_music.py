@@ -4,9 +4,11 @@ Music usenet grabs COPY their audio out of the client's folder (album grabs
 into staging, track grabs into transfer) and never looked at the job again, so
 every release stayed in the client's completed folder in full. The setting
 ``usenet_client.remove_completed`` (off / history / files, default off) now
-takes the job out once its audio is copied: right after the staging copy for an
-album grab, and from post-processing for a track grab, which finds the client
-job through the grab row written at submit.
+takes the job out once its audio is IMPORTED: for an album grab when its batch
+finishes with every track imported (the staged copies go with the batch, so the
+client's folder is the only copy left of a track that failed), and for a track
+grab from post-processing once the track imported, finding the client job
+through the grab row written at submit.
 """
 
 from __future__ import annotations
@@ -118,7 +120,7 @@ def test_no_database_means_no_removal(monkeypatch):
     assert usenet.remove_imported_usenet_job('dl-1') is False
 
 
-# ── an album grab, right after its staging copy ───────────────────────────────
+# ── an album grab: the plugin hands the job to its batch ──────────────────────
 
 def _release(indexer=1):
     return ProwlarrClient()._parse_result({
@@ -158,29 +160,158 @@ def _album(monkeypatch, tmp_path, mode, *, audio=True):
     _mode(monkeypatch, mode)
     outcome = plugin.download_album_to_staging('Example Album', 'Example Artist',
                                                str(tmp_path / 'staging'))
-    return outcome, adapter
+    return outcome, adapter, source
 
 
-def test_an_album_grab_is_removed_after_its_staging_copy(monkeypatch, tmp_path):
-    outcome, adapter = _album(monkeypatch, tmp_path, 'files')
+def test_an_album_grab_stays_in_the_client_until_its_batch_finishes(monkeypatch, tmp_path):
+    outcome, adapter, source = _album(monkeypatch, tmp_path, 'files')
     assert outcome['success'] is True
-    assert Path(outcome['files'][0]).read_bytes() == b'fLaC-test-payload'   # staged first
-    assert adapter.removed == [('client-job', True)]
+    assert Path(outcome['files'][0]).read_bytes() == b'fLaC-test-payload'
+    assert adapter.removed == [] and source.exists()
+    assert outcome['client_job_id'] == 'client-job'
+    assert outcome['client_job_label'] == 'Example_Artist-Example_Album-WEB-FLAC-2023-GROUPA'
 
 
-def test_an_album_grab_with_history_keeps_its_files(monkeypatch, tmp_path):
-    outcome, adapter = _album(monkeypatch, tmp_path, 'history')
-    assert outcome['success'] is True and adapter.removed == [('client-job', False)]
+def test_an_album_grab_that_staged_nothing_names_no_job(monkeypatch, tmp_path):
+    outcome, adapter, _ = _album(monkeypatch, tmp_path, 'files', audio=False)
+    assert outcome['success'] is False and 'client_job_id' not in outcome
 
 
-def test_an_album_grab_with_the_setting_off_stays_in_the_client(monkeypatch, tmp_path):
-    outcome, adapter = _album(monkeypatch, tmp_path, 'off')
-    assert outcome['success'] is True and adapter.removed == []
+def test_the_batch_records_the_staged_job(monkeypatch):
+    from core.downloads import album_bundle_dispatch as dispatch
+    fields = {}
+
+    class _State:
+        def update_fields(self, batch_id, update):
+            fields.update(update)
+
+        def mark_failed(self, *a):
+            raise AssertionError('not failed')
+
+    class _Plugin:
+        def download_album_to_staging(self, album, artist, staging, emit, **kw):
+            return {'success': True, 'files': ['a.flac'], 'client_job_id': 'nzo_9',
+                    'client_job_label': 'Release'}
+
+    dispatch.try_dispatch(
+        batch_id='b1', is_album=True, album_context={'name': 'Album'}, artist_context={'name': 'Artist'},
+        config_get=lambda key, default=None: 'usenet' if key == 'download_source.mode' else default,
+        plugin_resolver=lambda mode: _Plugin(), state=_State())
+    assert fields['album_bundle_client_job'] == 'nzo_9'
+    assert fields['album_bundle_client_job_label'] == 'Release'
 
 
-def test_an_album_grab_that_staged_nothing_keeps_its_job(monkeypatch, tmp_path):
-    outcome, adapter = _album(monkeypatch, tmp_path, 'files', audio=False)
-    assert outcome['success'] is False and adapter.removed == []
+# ── an album grab: removed only when its batch imported every track ───────────
+
+def _batch(statuses, *, source='usenet', job='nzo_9'):
+    queue = [f't{i}' for i in range(len(statuses))]
+    snapshot = {tid: {'status': st} for tid, st in zip(queue, statuses)}
+    batch = {'album_bundle_source': source, 'album_bundle_client_job': job,
+             'album_bundle_client_job_label': 'Release', 'queue': queue}
+    return batch, snapshot
+
+
+def _album_job(monkeypatch):
+    handed = []
+    monkeypatch.setattr(usenet, 'remove_imported_album_job',
+                        lambda job_id, label='': handed.append((job_id, label)) or True)
+    return handed
+
+
+def test_a_batch_that_imported_every_track_removes_the_job(monkeypatch):
+    from core.downloads import lifecycle
+    handed = _album_job(monkeypatch)
+    batch, snap = _batch(['completed', 'completed', 'already_owned'])
+    assert lifecycle._remove_completed_album_bundle('b1', batch, snap) is True
+    assert handed == [('nzo_9', 'Release')]
+
+
+@pytest.mark.parametrize('bad', ['failed', 'not_found', 'cancelled', 'post_processing'])
+def test_one_track_not_imported_keeps_the_job(monkeypatch, bad):
+    from core.downloads import lifecycle
+    handed = _album_job(monkeypatch)
+    batch, snap = _batch(['completed', bad, 'completed'])
+    assert lifecycle._remove_completed_album_bundle('b1', batch, snap) is False
+    assert handed == []
+
+
+def test_a_missing_task_another_source_or_no_job_keeps_it(monkeypatch):
+    from core.downloads import lifecycle
+    handed = _album_job(monkeypatch)
+    batch, snap = _batch(['completed', 'completed'])
+    snap.pop('t1')
+    assert lifecycle._remove_completed_album_bundle('b1', batch, snap) is False
+    for kwargs in ({'source': 'torrent'}, {'job': None}):
+        batch, snap = _batch(['completed'], **kwargs)
+        assert lifecycle._remove_completed_album_bundle('b1', batch, snap) is False
+    batch, snap = _batch([])
+    assert lifecycle._remove_completed_album_bundle('b1', batch, snap) is False
+    assert handed == []
+
+
+def test_batch_completion_runs_it_after_the_staging_cleanup(monkeypatch):
+    from core.downloads import lifecycle
+    order = []
+    monkeypatch.setattr(lifecycle, '_cleanup_private_album_bundle_staging',
+                        lambda *a: order.append('staging'))
+    monkeypatch.setattr(lifecycle, '_remove_completed_album_bundle',
+                        lambda batch_id, batch, snap: order.append(('remove', batch_id, snap)))
+    deps = SimpleNamespace(config_manager=SimpleNamespace(get=lambda key, default=None: default))
+    try:
+        lifecycle._run_batch_completion_side_effects(
+            'b1', {'queue': []}, deps, {'tasks_snapshot': {'t0': {'status': 'completed'}}},
+            tag='[t]')
+    except Exception:  # noqa: BLE001 - later side effects need more wiring than this test gives
+        pass
+    assert order[:2] == ['staging', ('remove', 'b1', {'t0': {'status': 'completed'}})]
+
+
+def test_the_album_job_follows_the_setting(monkeypatch):
+    adapter = _Adapter()
+    monkeypatch.setattr(usenet, 'get_active_usenet_adapter', lambda: adapter)
+    monkeypatch.setattr(usenet, 'run_async', asyncio.run)
+    _mode(monkeypatch, 'off')
+    assert usenet.remove_imported_album_job('nzo_9') is False
+    _mode(monkeypatch, 'history')
+    assert usenet.remove_imported_album_job('nzo_9', label='Release') is True
+    assert usenet.remove_imported_album_job('') is False
+    assert adapter.removed == [('nzo_9', False)]
+
+
+# ── files: the music side deletes the job's own folder ────────────────────────
+
+def test_files_deletes_the_reported_job_folder_but_never_a_protected_one(monkeypatch, tmp_path):
+    job = tmp_path / 'complete' / 'Example.Release.1'
+    job.mkdir(parents=True)
+    (job / 'Song.flac').write_bytes(b'x')
+
+    class _Reporting(_Adapter):
+        async def get_status(self, job_id):
+            return SimpleNamespace(name='Example.Release', save_path=str(job), state='completed')
+
+    adapter = _Reporting()
+    monkeypatch.setattr(usenet, 'get_active_usenet_adapter', lambda: adapter)
+    monkeypatch.setattr(usenet, 'run_async', asyncio.run)
+    _mode(monkeypatch, 'files')
+    monkeypatch.setattr(usenet, '_music_protected_roots', lambda: [str(job)])
+    assert usenet.remove_imported_album_job('nzo_9') is True
+    assert job.exists()
+    monkeypatch.setattr(usenet, '_music_protected_roots', lambda: [str(tmp_path / 'complete')])
+    assert usenet.remove_imported_album_job('nzo_9') is True
+    assert not job.exists() and (tmp_path / 'complete').exists()
+
+
+def test_the_protected_roots_come_from_the_settings(monkeypatch):
+    from core.settings import config_manager
+    values = {'soulseek.download_path': '/dl', 'soulseek.transfer_path': '/tr',
+              'import.staging_path': '/st', 'download_source.album_bundle_staging_path': '/ab',
+              'download_source.usenet_download_path': '/client/usenet',
+              'library.music_paths': ['/music', '']}
+    monkeypatch.setattr(config_manager, 'get', lambda key, default=None: values.get(key, default))
+    monkeypatch.setattr(usenet, 'resolve_reported_save_path', lambda p: p.replace('/client', '/here'))
+    roots = usenet._music_protected_roots()
+    for want in ('/dl', '/tr', '/st', '/ab', '/client/usenet', '/here/usenet', '/music'):
+        assert want in roots
 
 
 # ── the settings page ─────────────────────────────────────────────────────────
