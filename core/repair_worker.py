@@ -5025,6 +5025,10 @@ class RepairWorker:
             # permissions or a locked file.
             msg = (f'Updated database thumbnail, but could not write art to '
                    f'{failed} file(s) — check file/folder permissions')
+        elif skipped and art_result.get('embedding_off'):
+            # nothing was looked at: embedding is switched off in settings
+            msg = ('Embedding cover art is off in Settings, so no file was changed. '
+                   'Database thumbnail updated')
         elif skipped:
             # Every file already had embedded art and no new cover.jpg was
             # needed — nothing to do, NOT a failure. This is the case that made
