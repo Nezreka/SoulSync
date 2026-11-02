@@ -9444,52 +9444,134 @@ class MusicDatabase:
         drops the idle ones kept for reuse, see connection_pool.py)"""
         connection_pool.discard(self.database_path)
     
+    # The owned-library counts are served from this cache, refreshed in the
+    # background past the TTL: the queries walk every artist, album and track
+    # through the file-evidence joins (the same cost the db-info cache exists
+    # for — its counts measured 6.4s on a 311k-track library), while
+    # /api/v1/system/stats asks on every extension popup open and the SoulSync
+    # dashboard. The track count carries the caller's library scope, so —
+    # like the db-info cache — entries are keyed by scope and nothing is
+    # cached when the scope cannot be resolved. Only a finished scan clears
+    # the cache early (invalidate_database_info); downloads landing, imports
+    # and deletes ride the TTL, the same bargain the db-info counts make.
+    _STATS_TTL = 300.0
+    _stats_cache: Dict[Any, Any] = {}
+    _stats_refreshing: set = set()
+    _stats_generation = 0
+    # Held around a refresh's generation check + write and around
+    # invalidate_database_info(): without it a thread switch between the
+    # check and the write reopens the race the generation exists to close.
+    # Shared with the db-info cache below, which invalidate also clears.
+    _counts_lock = threading.Lock()
+
     def get_statistics(self) -> Dict[str, int]:
-        """How big the owned library is: artists, releases, tracks.
+        """How big the owned library is: artists, releases, tracks (cached)."""
+        try:
+            from core.library2.sql_util import ANY_OWNER, ambient_scope
+            scope = ambient_scope()
+            scope_key = 'any' if scope is ANY_OWNER else repr(scope)
+        except Exception:  # noqa: BLE001 - no scope, no cache
+            scope = None
+            scope_key = None
+        key = (str(self.database_path), scope_key) if scope_key else None
+        hit = MusicDatabase._stats_cache.get(key) if key else None
+        if hit:
+            if time.monotonic() - hit[0] >= self._STATS_TTL \
+                    and key not in MusicDatabase._stats_refreshing:
+                MusicDatabase._stats_refreshing.add(key)
+                generation = MusicDatabase._stats_generation
+
+                def _refresh():
+                    try:
+                        fresh = self._compute_statistics(scope)
+                        # A scan landing mid-refresh bumps the generation:
+                        # pre-scan counts must not be written back over the
+                        # invalidation that already cleared them. The lock
+                        # makes the check and the write one step.
+                        with MusicDatabase._counts_lock:
+                            if generation == MusicDatabase._stats_generation:
+                                MusicDatabase._stats_cache[key] = (time.monotonic(), dict(fresh))
+                    except Exception:
+                        logger.exception("Error refreshing database statistics")
+                        # Keep serving the stale answer, re-stamped, so a
+                        # failing count retries on the TTL, not on every ask.
+                        with MusicDatabase._counts_lock:
+                            current = MusicDatabase._stats_cache.get(key)
+                            if current:
+                                MusicDatabase._stats_cache[key] = (time.monotonic(), current[1])
+                    finally:
+                        MusicDatabase._stats_refreshing.discard(key)
+                try:
+                    threading.Thread(target=_refresh, daemon=True, name="stats-refresh").start()
+                except Exception:
+                    # A thread that never started must not pin the key in
+                    # the refreshing set, or this entry never refreshes.
+                    logger.exception("Error starting statistics refresh")
+                    MusicDatabase._stats_refreshing.discard(key)
+            return dict(hit[1])
+        generation = MusicDatabase._stats_generation
+        try:
+            stats = self._compute_statistics(scope)
+        except Exception as e:
+            logger.error(f"Error getting database statistics: {e}")
+            return {'artists': 0, 'albums': 0, 'tracks': 0}
+        if key:
+            # A scan may have landed while this computed: serve the answer
+            # (it was just true) but do not cache it over the clear.
+            with MusicDatabase._counts_lock:
+                if generation == MusicDatabase._stats_generation:
+                    MusicDatabase._stats_cache[key] = (time.monotonic(), dict(stats))
+        return stats
+
+    def _compute_statistics(self, scope) -> Dict[str, int]:
+        """The counts themselves, uncached. Raises on error: the caller
+        decides whether an answer is worth caching.
+
+        ``scope`` is the resolved library scope the counts are asked under:
+        the track ownership predicate carries it, so a background refresh
+        recomputes under the scope its cache entry serves — a refresh thread
+        wakes with no ambient scope of its own and would otherwise answer
+        for the whole house.
 
         ``COUNT(DISTINCT name)`` is deliberate and predates v2: two rows for one
         name are one artist to the user. Releases and tracks are the ones the
         user owns — a tracked artist's discography lives in the same tables.
         """
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
 
-                cursor.execute(
-                    "SELECT COUNT(DISTINCT a.name) FROM lib2_artists a "
-                    " WHERE EXISTS (SELECT 1 FROM lib2_albums al "
-                    "                 JOIN lib2_tracks t ON t.album_id=al.id "
-                    "                 JOIN lib2_track_files f ON f.track_id=t.id "
-                    "                WHERE al.primary_artist_id = a.id "
-                    "                  AND f.path IS NOT NULL AND TRIM(f.path)<>'' "
-                    "                  AND COALESCE(f.file_state,'active')='active')"
-                    "    OR EXISTS (SELECT 1 FROM lib2_album_artists aa "
-                    "                 JOIN lib2_albums al ON al.id = aa.album_id "
-                    "                 JOIN lib2_tracks t ON t.album_id=al.id "
-                    "                 JOIN lib2_track_files f ON f.track_id=t.id "
-                    "                WHERE aa.artist_id = a.id "
-                    "                  AND f.path IS NOT NULL AND TRIM(f.path)<>'' "
-                    "                  AND COALESCE(f.file_state,'active')='active')")
-                artist_count = cursor.fetchone()[0]
+            cursor.execute(
+                "SELECT COUNT(DISTINCT a.name) FROM lib2_artists a "
+                " WHERE EXISTS (SELECT 1 FROM lib2_albums al "
+                "                 JOIN lib2_tracks t ON t.album_id=al.id "
+                "                 JOIN lib2_track_files f ON f.track_id=t.id "
+                "                WHERE al.primary_artist_id = a.id "
+                "                  AND f.path IS NOT NULL AND TRIM(f.path)<>'' "
+                "                  AND COALESCE(f.file_state,'active')='active')"
+                "    OR EXISTS (SELECT 1 FROM lib2_album_artists aa "
+                "                 JOIN lib2_albums al ON al.id = aa.album_id "
+                "                 JOIN lib2_tracks t ON t.album_id=al.id "
+                "                 JOIN lib2_track_files f ON f.track_id=t.id "
+                "                WHERE aa.artist_id = a.id "
+                "                  AND f.path IS NOT NULL AND TRIM(f.path)<>'' "
+                "                  AND COALESCE(f.file_state,'active')='active')")
+            artist_count = cursor.fetchone()[0]
 
-                cursor.execute(
-                    "SELECT COUNT(*) FROM lib2_albums al WHERE EXISTS ("
-                    "SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id "
-                    "WHERE t.album_id=al.id AND f.path IS NOT NULL AND TRIM(f.path)<>'' "
-                    "AND COALESCE(f.file_state,'active')='active')")
-                album_count = cursor.fetchone()[0]
+            cursor.execute(
+                "SELECT COUNT(*) FROM lib2_albums al WHERE EXISTS ("
+                "SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id "
+                "WHERE t.album_id=al.id AND f.path IS NOT NULL AND TRIM(f.path)<>'' "
+                "AND COALESCE(f.file_state,'active')='active')")
+            album_count = cursor.fetchone()[0]
 
-                cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t WHERE {_owned_track()}")
-                track_count = cursor.fetchone()[0]
+            cursor.execute(f"SELECT COUNT(*) FROM lib2_tracks t WHERE {_owned_sql('track', 't', scope=scope)}")
+            track_count = cursor.fetchone()[0]
 
-                return {
-                    'artists': artist_count,
-                    'albums': album_count,
-                    'tracks': track_count
-                }
-        except Exception as e:
-            logger.error(f"Error getting database statistics: {e}")
-            return {'artists': 0, 'albums': 0, 'tracks': 0}
+            return {
+                'artists': artist_count,
+                'albums': album_count,
+                'tracks': track_count
+            }
     
     _ANY_OWNER = object()   # "do not filter by library owner"
 
@@ -20264,6 +20346,7 @@ class MusicDatabase:
     _DB_INFO_TTL = 300.0
     _db_info_refreshing: set = set()
     _db_info_cache: Dict[Any, Any] = {}
+    _db_info_generation = 0
 
     def get_database_info_for_server(self, server_source: str = None) -> Dict[str, Any]:
         """Get comprehensive database information filtered by server source"""
@@ -20285,24 +20368,56 @@ class MusicDatabase:
             if time.monotonic() - hit[0] >= self._DB_INFO_TTL \
                     and key not in MusicDatabase._db_info_refreshing:
                 MusicDatabase._db_info_refreshing.add(key)
+                generation = MusicDatabase._db_info_generation
 
                 def _refresh():
                     try:
                         fresh = self._database_info_for_server(server_source)
-                        MusicDatabase._db_info_cache[key] = (time.monotonic(), dict(fresh))
+                        # A scan landing mid-refresh bumps the generation:
+                        # pre-scan counts must not be written back over the
+                        # invalidation that already cleared them. The lock
+                        # makes the check and the write one step.
+                        with MusicDatabase._counts_lock:
+                            if generation == MusicDatabase._db_info_generation:
+                                MusicDatabase._db_info_cache[key] = (time.monotonic(), dict(fresh))
+                    except Exception:
+                        logger.exception("Error refreshing database info")
+                        # Keep serving the stale answer, re-stamped, so a
+                        # failing count retries on the TTL, not on every ask
+                        # (the stats cache's bargain, applied here too).
+                        with MusicDatabase._counts_lock:
+                            current = MusicDatabase._db_info_cache.get(key)
+                            if current:
+                                MusicDatabase._db_info_cache[key] = (time.monotonic(), current[1])
                     finally:
                         MusicDatabase._db_info_refreshing.discard(key)
-                threading.Thread(target=_refresh, daemon=True, name="db-info-refresh").start()
+                try:
+                    threading.Thread(target=_refresh, daemon=True, name="db-info-refresh").start()
+                except Exception:
+                    logger.exception("Error starting database info refresh")
+                    MusicDatabase._db_info_refreshing.discard(key)
             return dict(hit[1])
+        generation = MusicDatabase._db_info_generation
         info = self._database_info_for_server(server_source)
         if scope_key:
-            MusicDatabase._db_info_cache[key] = (time.monotonic(), dict(info))
+            # Same rule as the stats cache: a scan landing mid-compute
+            # keeps this answer out of the cache it just cleared.
+            with MusicDatabase._counts_lock:
+                if generation == MusicDatabase._db_info_generation:
+                    MusicDatabase._db_info_cache[key] = (time.monotonic(), dict(info))
         return info
 
     @classmethod
     def invalidate_database_info(cls) -> None:
-        """Drop the cached dashboard counts: a scan just changed them."""
-        cls._db_info_cache.clear()
+        """Drop the cached dashboard counts: a scan just changed them.
+
+        The generation bumps keep a background refresh that started before
+        the scan from writing its pre-scan counts back over this clear."""
+        with cls._counts_lock:
+            cls._db_info_cache.clear()
+            cls._db_info_generation += 1
+            cls._stats_cache.clear()
+            cls._stats_generation += 1
 
     def _database_info_for_server(self, server_source: str = None) -> Dict[str, Any]:
         try:
