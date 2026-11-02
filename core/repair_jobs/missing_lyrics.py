@@ -320,6 +320,12 @@ class MissingLyricsJob(RepairJob):
         except Exception as e:
             logger.warning("[Lyrics Filler] V2 subject enumeration failed: %s", e)
             result.errors += 1
+            # 3.6.1 stopped here. going on with no rows made the run look
+            # complete, and the prune below then forgot every remembered empty
+            # LRCLib answer, so the next run asked about every track again
+            enumeration_failed = True
+        else:
+            enumeration_failed = False
 
         # Tracks with a PENDING missing_lyrics finding (#1902) are not
         # probed again: the finding is already waiting for review, so a
@@ -623,7 +629,8 @@ class MissingLyricsJob(RepairJob):
             if memory:
                 # the keep-set is this run's rows: only a library-wide pass may
                 # prune, a scoped one would forget everything outside its scope
-                if completed_scan and get_scope_file_paths(context) is None:
+                if (completed_scan and not enumeration_failed
+                        and get_scope_file_paths(context) is None):
                     # Guarded on purpose: a prune failure must never
                     # stop close() from committing this run's entries,
                     # and must never replace the scan's own result.
