@@ -576,10 +576,23 @@ def default_artwork_fetcher(name: str, source_ids: Dict[str, str]) -> Optional[s
     return result.url if result is not None else None
 
 
+# the row's own name and length: a background enrich only fills them in when
+# the row has none, a Full Retag (the user asking for the provider's values)
+# replaces them
+_IDENTITY_COLUMNS = {"title": "COALESCE(title,'')=''", "duration": "COALESCE(duration,0)=0"}
+
+
 def _apply_descriptive_metadata(
     conn: Any, entity_type: str, entity_id: int, metadata: Any,
+    *, fill_identity_only: bool = False,
 ) -> Optional[str]:
-    """Persist only normalized, non-null provider fields onto one native row."""
+    """Persist only normalized, non-null provider fields onto one native row.
+
+    ``fill_identity_only``: title and duration only fill an empty row. 3.6.1's
+    enrichment workers never renamed a track or an album, and with the title
+    written on every enrich the provider's spelling replaced the file's ("Come
+    Together" became "Come Together - Remastered 2009") and could flip between
+    providers run to run."""
 
     columns = {
         "artist": {
@@ -612,6 +625,9 @@ def _apply_descriptive_metadata(
             assignments.append(
                 "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url ELSE ? END"
             )
+        elif fill_identity_only and column in _IDENTITY_COLUMNS:
+            assignments.append(
+                f"{column}=CASE WHEN {_IDENTITY_COLUMNS[column]} THEN ? ELSE {column} END")
         else:
             assignments.append(f"{column}=?")
         values.append(value)
@@ -848,7 +864,8 @@ def enrich_native_entity_for_service(
     conn.commit()
 
     metadata = refresh_native_entity_metadata(conn, canonical, int(entity_id),
-                                              {actual_source: provider_id})
+                                              {actual_source: provider_id},
+                                              fill_identity_only=True)
     metadata_image = getattr(metadata, 'image_url', None)
     image_url = metadata_image or str(hit.get("image") or "").strip() or None
     if canonical == "artist":
@@ -1817,11 +1834,13 @@ __all__ = [
 ]
 
 
-def refresh_native_entity_metadata(conn, entity_type, entity_id, source_ids):
+def refresh_native_entity_metadata(conn, entity_type, entity_id, source_ids,
+                                   *, fill_identity_only: bool = False):
     """The common exact-ID provider refresh used by Enrich and Full Retag.
 
     Identity resolution stays with the existing match engine. Refreshing facts
-    never searches for or substitutes a different edition.
+    never searches for or substitutes a different edition. Enrich passes
+    ``fill_identity_only`` (see _apply_descriptive_metadata).
     """
     from dataclasses import asdict, replace
     from core.library2.provider_adapters import fetch_descriptive_metadata
@@ -1835,7 +1854,8 @@ def refresh_native_entity_metadata(conn, entity_type, entity_id, source_ids):
         old = conn.execute('SELECT release_date FROM lib2_albums WHERE id=?', (entity_id,)).fetchone()[0]
         from core.metadata.source import _more_precise_date
         metadata = replace(metadata, release_date=_more_precise_date(old, metadata.release_date))
-    _apply_descriptive_metadata(conn, entity_type, entity_id, metadata)
+    _apply_descriptive_metadata(conn, entity_type, entity_id, metadata,
+                                fill_identity_only=fill_identity_only)
     if entity_type == 'track' and metadata.isrc:
         conn.execute("UPDATE lib2_tracks SET isrc=COALESCE(NULLIF(isrc,''), ?) WHERE id=?", (metadata.isrc, entity_id))
     if entity_type == 'album':
