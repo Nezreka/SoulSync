@@ -188,6 +188,11 @@ def map_pack(files: Iterable[Any], *, want_season: Any = None, root: Any = None,
     pack folder; the sample/extras check is scoped inside it, because the folders
     ABOVE it are the user's own layout and say nothing about the release.
 
+    A skip that could still be a real episode the pack did not place (no episode
+    number in its name, or another season) also carries ``"unplaced": True``, so
+    a caller deciding whether the pack's folder is finished with can tell it
+    from a sample, an extra or a smaller duplicate.
+
     Two rules earn their place:
 
     * **Largest wins a contested episode.** Packs routinely carry a sample or a
@@ -214,7 +219,8 @@ def map_pack(files: Iterable[Any], *, want_season: Any = None, root: Any = None,
         keys = episode_keys_for(path, want_season=want_season,
                                 air_dates=air_dates, absolute_map=absolute_map)
         if not keys:
-            skipped.append({"path": str(path), "why": "no episode number in the filename"})
+            skipped.append({"path": str(path), "why": "no episode number in the filename",
+                            "unplaced": True})
             continue
 
         if want_season is not None:
@@ -226,7 +232,8 @@ def map_pack(files: Iterable[Any], *, want_season: Any = None, root: Any = None,
                 off = [k for k in keys if k[0] != wanted]
                 if off and len(off) == len(keys):
                     skipped.append({"path": str(path),
-                                    "why": "season %s, but this pack is season %s" % (off[0][0], wanted)})
+                                    "why": "season %s, but this pack is season %s" % (off[0][0], wanted),
+                                    "unplaced": True})
                     continue
                 keys = [k for k in keys if k[0] == wanted]
 
