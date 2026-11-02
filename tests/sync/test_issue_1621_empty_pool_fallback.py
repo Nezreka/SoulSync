@@ -274,6 +274,36 @@ class TestWishlistUnmatchedObservability:
         assert 'Liked Songs' in text
         assert 'pl-123' in text
 
+    def test_tracks_you_already_own_do_not_warn(self, monkeypatch, caplog):
+        """every unmatched track turned out to be owned (a published file the
+        server hasn't scanned yet): nothing is missing, so no 0-of-N warning"""
+        svc = _make_service()
+        wishlist = MagicMock()
+        monkeypatch.setattr('core.wishlist_service.get_wishlist_service', lambda: wishlist)
+        monkeypatch.setattr('core.wishlist.library_match.find_owned_match', lambda *a, **k: True)
+
+        playlist = SimpleNamespace(name='Liked Songs', id='pl-123')
+        with caplog.at_level(logging.WARNING, logger='services.sync_service'):
+            svc._wishlist_unmatched(playlist, _unmatched(2))
+
+        assert not wishlist.add_spotify_track_to_wishlist.called
+        assert not [r for r in caplog.records
+                    if r.levelno == logging.WARNING and '0 of 2' in r.getMessage()]
+
+    def test_auto_wishlist_off_does_not_warn(self, monkeypatch, caplog):
+        """with auto-wishlist off nothing is meant to go on, so 0 of N is the plan"""
+        svc = _make_service()
+        wishlist = MagicMock()
+        monkeypatch.setattr('core.wishlist_service.get_wishlist_service', lambda: wishlist)
+        monkeypatch.setattr('core.wishlist.library_match.find_owned_match', lambda *a, **k: None)
+
+        playlist = SimpleNamespace(name='Liked Songs', id='pl-123')
+        with caplog.at_level(logging.WARNING, logger='services.sync_service'):
+            svc._wishlist_unmatched(playlist, _unmatched(2), add_to_wishlist=False)
+
+        assert not [r for r in caplog.records
+                    if r.levelno == logging.WARNING and '0 of 2' in r.getMessage()]
+
     def test_partial_add_stays_info_only(self, monkeypatch, caplog):
         """The warning fires only on a total 0-of-N shutout, not partial adds."""
         svc = _make_service()
